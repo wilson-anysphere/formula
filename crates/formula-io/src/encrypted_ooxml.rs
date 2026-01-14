@@ -939,62 +939,95 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
-    fn decrypts_standard_fixture_via_streaming_reader() {
-        use formula_model::{CellRef, CellValue};
+    fn standard_fixtures_decrypt_to_exact_plaintext_via_streaming_reader() {
         use std::io::Read as _;
 
-        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fixtures/encrypted/ooxml/standard.xlsx");
-        let file = std::fs::File::open(&fixture_path).expect("open standard.xlsx fixture");
-        let mut ole = cfb::CompoundFile::open(file).expect("parse OLE");
+        let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/encrypted/ooxml");
 
-        let mut encryption_info = Vec::new();
-        ole.open_stream("EncryptionInfo")
-            .or_else(|_| ole.open_stream("/EncryptionInfo"))
-            .expect("open EncryptionInfo")
-            .read_to_end(&mut encryption_info)
-            .expect("read EncryptionInfo");
+        let cases = [
+            ("standard.xlsx", "plaintext.xlsx", "password"),
+            ("standard-4.2.xlsx", "plaintext.xlsx", "password"),
+            ("standard-unicode.xlsx", "plaintext.xlsx", "pässwörd🔒"),
+            ("standard-large.xlsx", "plaintext-large.xlsx", "password"),
+            ("standard-basic.xlsm", "plaintext-basic.xlsm", "password"),
+        ];
 
-        let mut encrypted_package = Vec::new();
-        ole.open_stream("EncryptedPackage")
-            .or_else(|_| ole.open_stream("/EncryptedPackage"))
-            .expect("open EncryptedPackage")
-            .read_to_end(&mut encrypted_package)
-            .expect("read EncryptedPackage");
+        for (encrypted_name, plaintext_name, password) in cases {
+            let encrypted_path = fixture_dir.join(encrypted_name);
+            let plaintext_path = fixture_dir.join(plaintext_name);
 
-        assert!(
-            encrypted_package.len() >= 8,
-            "EncryptedPackage too short (missing size prefix)"
-        );
-        let plaintext_len = u64::from_le_bytes(
-            encrypted_package[..8]
-                .try_into()
-                .expect("EncryptedPackage size prefix"),
-        );
-        let ciphertext = encrypted_package[8..].to_vec();
+            let file =
+                std::fs::File::open(&encrypted_path).expect("open encrypted OOXML fixture");
+            let mut ole = cfb::CompoundFile::open(file).expect("parse OLE");
 
-        // Build a `Read + Seek` decrypting view over the ciphertext and feed it directly into the
-        // XLSX reader. This exercises the `DecryptedPackageReader` segmented-cache logic plus its
-        // `Seek` implementation (ZIP central directory reads).
-        let reader = decrypted_package_reader(
-            std::io::Cursor::new(ciphertext),
-            plaintext_len,
-            &encryption_info,
-            "password",
-        )
-        .expect("create streaming decrypt reader");
+            let mut encryption_info = Vec::new();
+            ole.open_stream("EncryptionInfo")
+                .or_else(|_| ole.open_stream("/EncryptionInfo"))
+                .expect("open EncryptionInfo")
+                .read_to_end(&mut encryption_info)
+                .expect("read EncryptionInfo");
 
-        let workbook =
-            formula_xlsx::read_workbook_from_reader(reader).expect("read decrypted workbook");
-        let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
-        assert_eq!(
-            sheet.value(CellRef::from_a1("A1").unwrap()),
-            CellValue::Number(1.0)
-        );
-        assert_eq!(
-            sheet.value(CellRef::from_a1("B1").unwrap()),
-            CellValue::String("Hello".to_string())
-        );
+            let mut encrypted_package = Vec::new();
+            ole.open_stream("EncryptedPackage")
+                .or_else(|_| ole.open_stream("/EncryptedPackage"))
+                .expect("open EncryptedPackage")
+                .read_to_end(&mut encrypted_package)
+                .expect("read EncryptedPackage");
+
+            assert!(
+                encrypted_package.len() >= 8,
+                "EncryptedPackage too short (missing size prefix) for {encrypted_name}"
+            );
+            let plaintext_len = u64::from_le_bytes(
+                encrypted_package[..8]
+                    .try_into()
+                    .expect("EncryptedPackage size prefix"),
+            );
+            let ciphertext = encrypted_package[8..].to_vec();
+
+            let expected = std::fs::read(&plaintext_path).expect("read plaintext fixture");
+            assert_eq!(
+                plaintext_len,
+                expected.len() as u64,
+                "{encrypted_name}: EncryptedPackage orig_size does not match {plaintext_name} length"
+            );
+
+            // Sequential read path.
+            let mut reader = decrypted_package_reader(
+                std::io::Cursor::new(ciphertext.clone()),
+                plaintext_len,
+                &encryption_info,
+                password,
+            )
+            .unwrap_or_else(|err| panic!("create streaming decrypt reader for {encrypted_name}: {err:?}"));
+            let mut out = Vec::new();
+            reader
+                .read_to_end(&mut out)
+                .unwrap_or_else(|err| panic!("read decrypted bytes for {encrypted_name}: {err}"));
+            assert_eq!(out, expected, "{encrypted_name}: decrypted bytes mismatch");
+
+            // Random-access path: ensure we can read ZIP metadata via Seek (central directory).
+            let reader = decrypted_package_reader(
+                std::io::Cursor::new(ciphertext),
+                plaintext_len,
+                &encryption_info,
+                password,
+            )
+            .unwrap_or_else(|err| panic!("create streaming decrypt reader for {encrypted_name}: {err:?}"));
+            let mut zip = zip::ZipArchive::new(reader)
+                .unwrap_or_else(|err| panic!("open decrypted ZIP for {encrypted_name}: {err}"));
+            let mut part = zip
+                .by_name("[Content_Types].xml")
+                .unwrap_or_else(|err| panic!("read [Content_Types].xml for {encrypted_name}: {err}"));
+            let mut xml = String::new();
+            part.read_to_string(&mut xml)
+                .unwrap_or_else(|err| panic!("read [Content_Types].xml bytes for {encrypted_name}: {err}"));
+            assert!(
+                xml.contains("<Types"),
+                "{encrypted_name}: expected [Content_Types].xml to contain <Types, got: {xml:?}"
+            );
+        }
     }
 }
 
