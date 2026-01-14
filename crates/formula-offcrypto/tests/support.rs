@@ -29,8 +29,41 @@ const BLK_KEY_VERIFIER_HASH_INPUT: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B
 const BLK_KEY_VERIFIER_HASH_VALUE: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
 const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasswordKeyIvScheme {
+    /// Excel-compatible behavior: use `iv = saltValue[..16]` for verifier/key blobs.
+    SaltValue,
+    /// Compatibility behavior: use `iv = SHA1(saltValue || blockKey)[:16]` for verifier/key blobs.
+    ///
+    /// This is *per-blob* (different for verifier input/value/keyValue).
+    DerivedFromBlockKey,
+}
+
 fn sha1(data: &[u8]) -> [u8; 20] {
     Sha1::digest(data).into()
+}
+
+fn agile_password_key_iv_sha1(
+    salt: &[u8],
+    block_key: &[u8; 8],
+    scheme: PasswordKeyIvScheme,
+) -> [u8; 16] {
+    match scheme {
+        PasswordKeyIvScheme::SaltValue => {
+            let mut iv = [0u8; 16];
+            iv.copy_from_slice(&salt[..16]);
+            iv
+        }
+        PasswordKeyIvScheme::DerivedFromBlockKey => {
+            let mut h = Sha1::new();
+            h.update(salt);
+            h.update(block_key);
+            let digest = h.finalize();
+            let mut iv = [0u8; 16];
+            iv.copy_from_slice(&digest[..16]);
+            iv
+        }
+    }
 }
 
 fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
@@ -234,6 +267,27 @@ pub fn encrypt_agile(
     plaintext_zip: &[u8],
     password: &str,
 ) -> (Vec<u8>, Vec<u8>) {
+    encrypt_agile_with_password_key_iv(plaintext_zip, password, PasswordKeyIvScheme::SaltValue)
+}
+
+/// Like [`encrypt_agile`], but encrypts the password key-encryptor verifier/key blobs using
+/// per-blob derived IVs (`SHA1(saltValue || blockKey)[:16]`) instead of `iv = saltValue`.
+pub fn encrypt_agile_password_key_derived_iv(
+    plaintext_zip: &[u8],
+    password: &str,
+) -> (Vec<u8>, Vec<u8>) {
+    encrypt_agile_with_password_key_iv(
+        plaintext_zip,
+        password,
+        PasswordKeyIvScheme::DerivedFromBlockKey,
+    )
+}
+
+fn encrypt_agile_with_password_key_iv(
+    plaintext_zip: &[u8],
+    password: &str,
+    password_key_iv_scheme: PasswordKeyIvScheme,
+) -> (Vec<u8>, Vec<u8>) {
     // Deterministic parameters (not intended to be secure).
     let spin_count: u32 = 1000;
     let key_bits: usize = 128;
@@ -260,15 +314,19 @@ pub fn encrypt_agile(
     let key_vhi = derive_agile_encryption_key_sha1(&h, &BLK_KEY_VERIFIER_HASH_INPUT, key_bits);
     let key_vhv = derive_agile_encryption_key_sha1(&h, &BLK_KEY_VERIFIER_HASH_VALUE, key_bits);
 
+    let iv_kv = agile_password_key_iv_sha1(&password_salt, &BLK_KEY_ENCRYPTED_KEY_VALUE, password_key_iv_scheme);
+    let iv_vhi = agile_password_key_iv_sha1(&password_salt, &BLK_KEY_VERIFIER_HASH_INPUT, password_key_iv_scheme);
+    let iv_vhv = agile_password_key_iv_sha1(&password_salt, &BLK_KEY_VERIFIER_HASH_VALUE, password_key_iv_scheme);
+
     let encrypted_key_value =
-        aes128_cbc_encrypt_no_padding(&key_kv, &password_salt, &secret_key_plain);
+        aes128_cbc_encrypt_no_padding(&key_kv, &iv_kv, &secret_key_plain);
     let encrypted_verifier_hash_input =
-        aes128_cbc_encrypt_no_padding(&key_vhi, &password_salt, &verifier_hash_input_plain);
+        aes128_cbc_encrypt_no_padding(&key_vhi, &iv_vhi, &verifier_hash_input_plain);
 
     let verifier_hash_value = sha1(&verifier_hash_input_plain);
     let verifier_hash_value_padded = pad16_zero(&verifier_hash_value);
     let encrypted_verifier_hash_value =
-        aes128_cbc_encrypt_no_padding(&key_vhv, &password_salt, &verifier_hash_value_padded);
+        aes128_cbc_encrypt_no_padding(&key_vhv, &iv_vhv, &verifier_hash_value_padded);
 
     // Build XML descriptor (version 4.4). Use attributes to match the crate's parser.
     let password_salt_b64 = BASE64.encode(password_salt);

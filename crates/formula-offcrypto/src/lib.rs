@@ -3517,74 +3517,23 @@ fn decrypt_agile_stream(
         });
     }
 
-    // Derive the iterated password hash once, then use it for both verifier checks and secret key
-    // extraction.
-    let hfinal = derive_iterated_hash_from_password(
-        password,
-        &info.password_salt,
-        info.password_hash_algorithm,
-        info.spin_count,
-        &options.limits,
-        None,
-    )?;
-
-    // Verify password (verifier-hash algorithm).
-    let key1 = derive_encryption_key(
-        &hfinal[..],
-        &BLK_KEY_VERIFIER_HASH_INPUT,
-        info.password_hash_algorithm,
-        info.password_key_bits,
-    )?;
-    let key2 = derive_encryption_key(
-        &hfinal[..],
-        &BLK_KEY_VERIFIER_HASH_VALUE,
-        info.password_hash_algorithm,
-        info.password_key_bits,
-    )?;
-
-    let verifier_hash_input =
-        aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1[..], &info.password_salt)?;
-    let verifier_hash_value_full =
-        aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2[..], &info.password_salt)?;
-
-    let hash_len = hash_output_len(info.password_hash_algorithm);
-    let verifier_hash_value =
-        verifier_hash_value_full
-            .get(..hash_len)
-            .ok_or(OffcryptoError::InvalidEncryptionInfo {
-                context: "decrypted verifierHashValue shorter than hash output",
-            })?;
-
-    agile::verify_password(
-        &verifier_hash_input,
-        verifier_hash_value,
-        info.password_hash_algorithm,
-    )?;
-
-    // Derive the secret key (decrypt encryptedKeyValue).
-    let encryption_key = derive_encryption_key(
-        &hfinal[..],
-        &BLK_KEY_ENCRYPTED_KEY_VALUE,
-        info.password_hash_algorithm,
-        info.password_key_bits,
-    )?;
-    let secret_key_full =
-        aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key[..], &info.password_salt)?;
-
-    // `derive_encryption_key` already rejects `keyBits % 8 != 0`.
-    let key_len = info.password_key_bits / 8;
-    let secret_key = secret_key_full.get(..key_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
-        context: "decrypted keyValue shorter than keyBits",
-    })?;
+    // Derive the secret key (also validates the password via verifier hashes).
+    //
+    // This helper includes compatibility fallback behavior for password key-encryptor IV derivation
+    // (some producers use per-blob derived IVs instead of `iv = saltValue`).
+    let secret_key = agile_secret_key_with_options(info, password, options)?;
 
     if options.verify_integrity {
-        let data_integrity = info.data_integrity.as_ref().ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing <dataIntegrity> element",
-        })?;
-        verify_agile_integrity(info, data_integrity, secret_key, encrypted_package)?;
+        let data_integrity =
+            info.data_integrity
+                .as_ref()
+                .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                    context: "missing <dataIntegrity> element",
+                })?;
+        verify_agile_integrity(info, data_integrity, &secret_key, encrypted_package)?;
     }
 
-    agile_decrypt_package(info, secret_key, encrypted_package)
+    agile_decrypt_package(info, &secret_key, encrypted_package)
 }
 
 fn decrypt_standard_stream(
