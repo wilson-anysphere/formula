@@ -2372,13 +2372,13 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
 
             let edits = edits_by_sheet.entry(sheet_index).or_default();
             for (row, col) in &sheet.dirty_cells {
+                let cell_key = (sheet.id.clone(), *row, *col);
                 let (current_input, current_formula) = match sheet.cells.get(&(*row, *col)) {
                     Some(cell) => (cell.input_value.clone(), cell.formula.clone()),
                     None => (None, None),
                 };
 
-                let baseline_key = (sheet.id.clone(), *row, *col);
-                let baseline = workbook.cell_input_baseline.get(&baseline_key);
+                let baseline = workbook.cell_input_baseline.get(&cell_key);
                 let baseline_had_formula = baseline.map_or(false, |baseline| baseline.1.is_some());
 
                 if let Some((baseline_value, baseline_formula)) = baseline {
