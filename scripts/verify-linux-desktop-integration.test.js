@@ -23,6 +23,7 @@ function writeConfig(dir, { mainBinaryName = "formula-desktop" } = {}) {
     },
   ];
   const conf = {
+    identifier: "app.formula.desktop",
     mainBinaryName,
     bundle: {
       fileAssociations,
@@ -46,6 +47,7 @@ function writeConfigWithAssociations(
 ) {
   const configPath = path.join(dir, "tauri.conf.json");
   const conf = {
+    identifier: "app.formula.desktop",
     mainBinaryName,
     bundle: { fileAssociations },
   };

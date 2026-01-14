@@ -124,6 +124,23 @@ def load_expected_doc_package_name(tauri_config_path: Path) -> str:
     return "formula-desktop"
 
 
+def load_expected_identifier(tauri_config_path: Path) -> str:
+    """
+    Tauri app identifier (reverse-DNS). We use this as the source of truth for the
+    Linux shared-mime-info definition filename we ship for Parquet:
+
+      /usr/share/mime/packages/<identifier>.xml
+    """
+    try:
+        config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ""
+    raw = config.get("identifier")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return ""
+
+
 def verify_compliance_artifacts(package_root: Path, package_name: str) -> None:
     doc_dir = package_root / "usr" / "share" / "doc" / package_name
     missing: list[Path] = []
@@ -142,7 +159,7 @@ def verify_compliance_artifacts(package_root: Path, package_name: str) -> None:
         )
 
 
-def verify_parquet_mime_definition(package_root: Path) -> None:
+def verify_parquet_mime_definition(package_root: Path, identifier: str) -> None:
     """
     Parquet is not consistently defined in shared-mime-info across distros.
 
@@ -162,14 +179,27 @@ def verify_parquet_mime_definition(package_root: Path) -> None:
 
     expected_mime = "application/vnd.apache.parquet"
     expected_glob = "*.parquet"
-    candidates = sorted(mime_packages_dir.glob("*.xml"))
-    if not candidates:
+    identifier = identifier.strip()
+    if not identifier:
         raise SystemExit(
-            "[linux] ERROR: Parquet file association configured but no shared-mime-info XML files were packaged.\n"
-            f"Expected at least one *.xml under: {mime_packages_dir}\n"
-            "Hint: add a MIME definition file and map it into the Linux bundles via tauri.conf.json."
+            "[linux] ERROR: Parquet file association configured but tauri.conf.json identifier is missing.\n"
+            "Hint: `identifier` is required to determine the expected shared-mime-info XML filename "
+            "(/usr/share/mime/packages/<identifier>.xml)."
         )
 
+    expected_xml = mime_packages_dir / f"{identifier}.xml"
+    if not expected_xml.is_file():
+        candidates = sorted(mime_packages_dir.glob("*.xml"))
+        formatted = "\n".join(f"- {p}" for p in candidates) if candidates else "(none)"
+        raise SystemExit(
+            "[linux] ERROR: Parquet file association configured but no shared-mime-info XML files were packaged.\n"
+            f"Expected: {expected_xml}\n"
+            f"Found under {mime_packages_dir}:\n{formatted}\n"
+            "Hint: keep apps/desktop/src-tauri/mime/<identifier>.xml packaged via tauri.conf.json bundle.linux.*.files "
+            "(where <identifier> comes from tauri.conf.json identifier)."
+        )
+
+    candidates = [expected_xml]
     for xml_path in candidates:
         try:
             tree = ET.parse(xml_path)
@@ -189,7 +219,8 @@ def verify_parquet_mime_definition(package_root: Path) -> None:
 
     raise SystemExit(
         "[linux] ERROR: Parquet file association configured but no packaged shared-mime-info definition was found.\n"
-        f"Expected a *.xml under {mime_packages_dir} defining:\n"
+        f"Expected: {expected_xml}\n"
+        f"Expected {expected_xml.name} to define:\n"
         f"  - {expected_mime} with glob {expected_glob}\n"
         "Hint: keep apps/desktop/src-tauri/mime/<identifier>.xml packaged via tauri.conf.json bundle.linux.*.files "
         "(where <identifier> comes from tauri.conf.json identifier)."
@@ -301,6 +332,7 @@ def main() -> int:
     expected_mime_types = load_expected_mime_types(args.tauri_config)
     expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
     default_name = load_expected_doc_package_name(args.tauri_config)
+    expected_identifier = load_expected_identifier(args.tauri_config)
     expected_doc_pkg = args.doc_package_name.strip() or default_name
     expected_main_binary = args.expected_main_binary.strip() or default_name
     if not expected_schemes:
@@ -334,6 +366,8 @@ def main() -> int:
     print(f"[linux] Expected deep link scheme MIME types ({len(expected_scheme_mimes)}): {_format_set(expected_scheme_mimes)}")
     print(f"[linux] Expected doc package name: {expected_doc_pkg!r} (for /usr/share/doc/<package>/)")
     print(f"[linux] Expected main Exec binary: {expected_main_binary!r} (or 'AppRun')")
+    if expected_identifier:
+        print(f"[linux] Expected Tauri identifier: {expected_identifier!r} (for /usr/share/mime/packages/<identifier>.xml)")
     print(f"[linux] Observed MIME types from all .desktop files ({len(observed_mime_types)}): {_format_set(observed_mime_types)}")
 
     app_entries = [
@@ -437,7 +471,7 @@ def main() -> int:
 
     # Parquet file association requires a shared-mime-info definition on many distros.
     if "application/vnd.apache.parquet" in expected_mime_types:
-        verify_parquet_mime_definition(args.package_root)
+        verify_parquet_mime_definition(args.package_root, expected_identifier)
 
     return 0
 
