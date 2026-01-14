@@ -938,6 +938,7 @@ impl Engine {
         runs.sort_by_key(|r| r.start_row);
 
         let sheet_id = self.workbook.ensure_sheet(sheet);
+        let mut sheet_dims_changed = false;
         if let Some(max_row) = runs
             .iter()
             .map(|r| r.end_row_exclusive.saturating_sub(1))
@@ -948,26 +949,53 @@ impl Engine {
                     crate::eval::AddressParseError::RowOutOfRange,
                 ));
             }
-            if self.workbook.grow_sheet_dimensions(sheet_id, CellAddr { row: max_row, col }) {
-                // Formatting metadata can introduce new in-bounds coordinates. Sheet dimensions
-                // affect out-of-bounds `#REF!` semantics, so conservatively refresh compiled results.
-                self.mark_all_compiled_cells_dirty();
-            }
+            sheet_dims_changed =
+                self.workbook
+                    .grow_sheet_dimensions(sheet_id, CellAddr { row: max_row, col });
         } else if self
             .workbook
             .grow_sheet_dimensions(sheet_id, CellAddr { row: 0, col })
         {
-            self.mark_all_compiled_cells_dirty();
+            sheet_dims_changed = true;
         }
 
         let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
             return Ok(());
         };
 
+        // Detect no-op updates to avoid unnecessary recalculation / dirtying.
+        let before = sheet_state.format_runs_by_col.get(&col);
+        let runs_changed = match (before, runs.is_empty()) {
+            (None, true) => false,
+            (Some(_), true) => true,
+            (None, false) => true,
+            (Some(existing), false) => existing != &runs,
+        };
+
+        if !runs_changed && !sheet_dims_changed {
+            return Ok(());
+        }
+
         if runs.is_empty() {
             sheet_state.format_runs_by_col.remove(&col);
         } else {
             sheet_state.format_runs_by_col.insert(col, runs);
+        }
+
+        if sheet_dims_changed {
+            self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+        }
+        if sheet_dims_changed || (!self.calc_settings.full_precision && runs_changed) {
+            // Formatting metadata can introduce new in-bounds coordinates. Sheet dimensions affect
+            // out-of-bounds `#REF!` semantics, so conservatively refresh compiled results.
+            //
+            // In "precision as displayed" mode, formatting can affect stored numeric values at
+            // formula boundaries, so retain conservative full-dirty behavior for any formatting
+            // changes.
+            self.mark_all_compiled_cells_dirty();
+        }
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
         }
         Ok(())
     }

@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use formula_engine::{BytecodeCompileReason, Engine, ErrorKind, Value};
+use formula_engine::{metadata::FormatRun, BytecodeCompileReason, Engine, ErrorKind, Value};
 
 #[test]
 fn bytecode_custom_sheet_dims_whole_row_and_column_refs() {
@@ -37,6 +37,46 @@ fn bytecode_custom_sheet_dims_whole_row_and_column_refs() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(10.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(5.0));
+}
+
+#[test]
+fn col_format_runs_sheet_dim_growth_invalidates_stale_bytecode_programs() {
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 2, 2)
+        .expect("set sheet dimensions");
+
+    // Avoid circular references by keeping the formula out of the referenced column.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROWS(A:A)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formula to compile to bytecode; got: {report:?}"
+    );
+
+    // Grow sheet dimensions by applying formatting runs that extend beyond the current row count.
+    engine
+        .set_col_format_runs(
+            "Sheet1",
+            0,
+            vec![FormatRun {
+                start_row: 0,
+                end_row_exclusive: 4,
+                style_id: 1,
+            }],
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // The formula must observe the updated sheet dimensions (4 rows). This requires bumping
+    // `sheet_dims_generation` so bytecode programs are treated as stale and fall back to AST
+    // evaluation.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
 }
 
 #[test]
