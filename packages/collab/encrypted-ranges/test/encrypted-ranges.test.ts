@@ -211,6 +211,39 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 1 })).toBe(false);
   });
 
+  it("policy helper overlap precedence for legacy map schema prefers lexicographically greatest key", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Map<Y.Map<unknown>>();
+
+    const r1 = new Y.Map<unknown>();
+    r1.set("sheetId", "s1");
+    r1.set("startRow", 0);
+    r1.set("startCol", 0);
+    r1.set("endRow", 0);
+    r1.set("endCol", 0);
+    r1.set("keyId", "k1");
+
+    const r2 = new Y.Map<unknown>();
+    r2.set("sheetId", "s1");
+    r2.set("startRow", 0);
+    r2.set("startCol", 0);
+    r2.set("endRow", 0);
+    r2.set("endCol", 0);
+    r2.set("keyId", "k2");
+
+    doc.transact(() => {
+      ranges.set("a", r1);
+      ranges.set("b", r2);
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k2");
+  });
+
   it("manager can mutate legacy map schema by normalizing to the canonical array schema", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
