@@ -413,8 +413,14 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
   try {
     await waitForTti(child, timeoutMs);
 
-    const rootPid =
-      (await findPidForExecutableLinux(child.pid, binPath, Math.min(2000, timeoutMs))) ?? child.pid;
+    const resolvedPid = await findPidForExecutableLinux(child.pid, binPath, Math.min(2000, timeoutMs));
+    if (!resolvedPid) {
+      if (useXvfb) {
+        throw new Error('Failed to resolve desktop PID under Xvfb wrapper for RSS sampling');
+      }
+      throw new Error('Failed to resolve desktop PID for RSS sampling');
+    }
+    const rootPid = resolvedPid;
 
     if (settleMs > 0) {
       await sleep(settleMs);
