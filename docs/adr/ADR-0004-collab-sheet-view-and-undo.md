@@ -37,6 +37,15 @@ schema:
 - Per-sheet key: `view`
 - Canonical path: `sheets[i].get("view")` / `sheets[].view`
 
+Encoding note:
+
+- For compatibility with snapshots and historical clients, `sheets[].view` may be stored as either a
+  plain JSON object **or** a `Y.Map` (and nested maps like `view.colWidths` / `view.rowHeights` may also
+  be `Y.Map`s).
+- In mixed-module environments (ESM + CJS), a document can contain duck-typed/“foreign” Yjs types whose
+  constructors do not match the app’s `yjs` import; prefer `@formula/collab-yjs-utils` (`getYMap`,
+  `yjsValueToJson`) and binder/session helpers rather than assuming `instanceof` or plain-object shapes.
+
 This `view` object contains (at minimum) the same fields as the desktop
 `DocumentController`’s `SheetViewState`:
 
