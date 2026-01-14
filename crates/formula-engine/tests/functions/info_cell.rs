@@ -431,6 +431,22 @@ fn cell_width_prefers_per_column_override_and_sets_custom_flag() {
 }
 
 #[test]
+fn cell_width_sets_custom_flag_even_when_width_equals_sheet_default() {
+    // Excel's fractional marker (`.1`) indicates whether the width is an explicit per-column
+    // override, *not* whether it differs from the sheet default.
+    let mut sheet = TestSheet::new();
+    sheet.set_default_col_width(Some(20.0));
+
+    // Explicit override equal to the default should still set the custom-width flag.
+    sheet.set_col_width(0, Some(20.0));
+    assert_number(&sheet.eval("=CELL(\"width\",A1)"), 20.1);
+
+    // Clearing the override should revert to the sheet default + `.0`.
+    sheet.set_col_width(0, None);
+    assert_number(&sheet.eval("=CELL(\"width\",A1)"), 20.0);
+}
+
+#[test]
 fn cell_protect_defaults_to_locked() {
     let mut sheet = TestSheet::new();
     // Excel default: all cells are locked.
