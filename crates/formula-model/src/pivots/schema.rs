@@ -683,6 +683,22 @@ mod tests {
         );
         assert_eq!(
             PivotFieldRef::DataModelColumn {
+                table: "A-B".to_string(),
+                column: "C".to_string()
+            }
+            .to_string(),
+            "'A-B'[C]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "1Sales".to_string(),
+                column: "Amount".to_string()
+            }
+            .to_string(),
+            "'1Sales'[Amount]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
                 table: "Dim Product".to_string(),
                 column: "Category".to_string()
             }
