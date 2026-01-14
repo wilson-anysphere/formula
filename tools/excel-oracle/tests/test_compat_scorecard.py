@@ -11,6 +11,17 @@ from pathlib import Path
 
 
 class CompatScorecardTests(unittest.TestCase):
+    def test_default_corpus_summary_discovery_is_depth_bounded(self) -> None:
+        """
+        Perf guardrail: avoid unbounded `os.walk(tools/corpus/out)` scans when falling back to
+        corpus summary discovery.
+        """
+        scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
+        self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
+        src = scorecard_py.read_text(encoding="utf-8")
+        self.assertIn("max_depth = 8", src)
+        self.assertIn("if depth >= max_depth", src)
+
     def test_merges_corpus_and_oracle_metrics(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
         self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")

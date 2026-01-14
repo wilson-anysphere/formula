@@ -408,8 +408,19 @@ def _find_default_corpus_summary(repo_root: Path) -> Path | None:
     if not candidates:
         # Fallback: walk for non-standard layouts, but prune known-large directories.
         skip_dirnames = {".git", "node_modules", "target", "reports", "__pycache__"}
+        # Keep the fallback bounded: corpus output directories can contain very large trees
+        # (e.g. detailed `reports/` output). The summary.json file is expected to live near
+        # the corpus output root (typically one or two levels below tools/corpus/out/), so a
+        # shallow scan is sufficient and avoids surprising slowdowns in CI/local runs.
+        max_depth = 8
         for root, dirs, files in os.walk(out_root):
             dirs[:] = [d for d in dirs if d not in skip_dirnames]
+            try:
+                depth = len(Path(root).relative_to(out_root).parts)
+            except ValueError:
+                depth = max_depth
+            if depth >= max_depth:
+                dirs[:] = []
             if "summary.json" in files:
                 p = Path(root) / "summary.json"
                 if p.is_file():
