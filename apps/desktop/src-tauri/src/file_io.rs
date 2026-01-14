@@ -2730,6 +2730,7 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         if let Some(model_sheet) = out.sheet_mut(sheet_id) {
             model_sheet.visibility = sheet.visibility;
             model_sheet.tab_color = sheet.tab_color.clone();
+            model_sheet.col_properties = sheet.col_properties.clone();
         }
         sheet_id_by_app_id.insert(sheet.id.clone(), sheet_id);
         sheet_id_by_name.insert(sheet.name.clone(), sheet_id);
@@ -4457,6 +4458,39 @@ mod tests {
         let loaded_cell = sheet.get_cell(0, 0);
         assert_eq!(loaded_cell.computed_value, CellScalar::Number(44927.0));
         assert_eq!(loaded_cell.number_format.as_deref(), Some("m/d/yyyy"));
+    }
+
+    #[test]
+    fn app_workbook_to_formula_model_roundtrip_preserves_col_properties() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        workbook.sheets[0].col_properties.insert(
+            0,
+            formula_model::ColProperties {
+                width: Some(20.0),
+                hidden: false,
+                style_id: None,
+            },
+        );
+        workbook.sheets[0].col_properties.insert(
+            1,
+            formula_model::ColProperties {
+                width: None,
+                hidden: true,
+                style_id: None,
+            },
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("col_properties.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let loaded = read_xlsx_blocking(&out_path).expect("read workbook");
+        let sheet = &loaded.sheets[0];
+
+        assert_eq!(sheet.col_properties.get(&0).and_then(|p| p.width), Some(20.0));
+        assert_eq!(sheet.col_properties.get(&1).map(|p| p.hidden), Some(true));
     }
 
     #[test]
