@@ -1989,17 +1989,17 @@ fn consume_rgcb_arrays_in_subexpression(
                 i += 3;
             }
 
-            // PtgName: [nameIndex: u32]
+            // PtgName: [nameIndex: u32][unused: u16]
             0x23 | 0x43 | 0x63 => {
-                if !has_remaining(rgce, i, 4) {
+                if !has_remaining(rgce, i, 6) {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
-                        needed: 4,
+                        needed: 6,
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                i += 4;
+                i += 6;
             }
 
             // PtgRef: [row: u32][col: u16]

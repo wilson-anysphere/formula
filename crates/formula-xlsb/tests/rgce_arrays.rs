@@ -152,3 +152,38 @@ fn decode_ptgarray_inside_memfunc_advances_rgcb_cursor() {
     let text = decode_rgce_with_rgcb(&rgce, &rgcb).expect("decode");
     assert_eq!(text, "{222}");
 }
+
+#[test]
+fn decode_ptgarray_inside_memfunc_with_ptgname_advances_rgcb_cursor() {
+    // Like `decode_ptgarray_inside_memfunc_advances_rgcb_cursor`, but with a `PtgName` token
+    // before the nested `PtgArray`. This ensures the mem-subexpression scanner skips the full
+    // PtgName payload (u32 nameIndex + u16 unused) so we still consume the nested array constant.
+    let ptg_array = [0x20u8, 0, 0, 0, 0, 0, 0, 0]; // PtgArray + 7 unused bytes
+
+    // PtgName: [ptg=0x23][nameIndex: u32][unused: u16]
+    let mut mem_subexpr = vec![0x23];
+    mem_subexpr.extend_from_slice(&123u32.to_le_bytes());
+    mem_subexpr.extend_from_slice(&0u16.to_le_bytes());
+    mem_subexpr.extend_from_slice(&ptg_array);
+
+    // rgce = [PtgMemFunc][cce][subexpr...][PtgArray (visible)]
+    let mut rgce = vec![0x29];
+    rgce.extend_from_slice(&u16::try_from(mem_subexpr.len()).unwrap().to_le_bytes());
+    rgce.extend_from_slice(&mem_subexpr);
+    rgce.extend_from_slice(&ptg_array);
+
+    let mut rgcb = Vec::new();
+    // {111}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&111f64.to_le_bytes());
+    // {222}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&222f64.to_le_bytes());
+
+    let text = decode_rgce_with_rgcb(&rgce, &rgcb).expect("decode");
+    assert_eq!(text, "{222}");
+}
