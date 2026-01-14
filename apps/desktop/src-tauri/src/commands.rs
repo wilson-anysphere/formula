@@ -2621,7 +2621,7 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
     }
 }
 
-/// Inspect an encrypted OOXML workbook (password-protected `.xlsx`) and extract a summary of the
+/// Inspect an encrypted OOXML workbook (password-protected `.xlsx`/`.xlsm`/`.xlsb`) and extract a summary of the
 /// encryption parameters for password prompts.
 ///
 /// Returns:
