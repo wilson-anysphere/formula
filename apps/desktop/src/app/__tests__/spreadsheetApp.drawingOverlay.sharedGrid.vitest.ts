@@ -597,4 +597,34 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("passes shared-grid zoom through to the drawing overlay viewport", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const renderSpy = vi.spyOn((app as any).drawingOverlay, "render");
+      expect(app.getZoom()).toBe(1);
+
+      renderSpy.mockClear();
+      app.setZoom(2);
+
+      expect(renderSpy).toHaveBeenCalled();
+      const viewport = renderSpy.mock.calls.at(-1)?.[1] as any;
+      expect(viewport.zoom).toBe(2);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });

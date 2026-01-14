@@ -6802,9 +6802,10 @@ export class SpreadsheetApp {
   }
 
   private getDrawingHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
+    const zoom = this.getZoom();
     const cached = this.drawingHitTestIndex;
-    if (cached && this.drawingHitTestIndexObjects === objects) return cached;
-    const index = buildHitTestIndex(objects, this.drawingGeom);
+    if (cached && this.drawingHitTestIndexObjects === objects && Math.abs(cached.zoom - zoom) < 1e-6) return cached;
+    const index = buildHitTestIndex(objects, this.drawingGeom, { zoom });
     this.drawingHitTestIndex = index;
     this.drawingHitTestIndexObjects = objects;
     return index;
@@ -9458,6 +9459,7 @@ export class SpreadsheetApp {
       width: layout.cellAreaWidth,
       height: layout.cellAreaHeight,
       dpr: this.dpr,
+      zoom: this.getZoom(),
       headerOffsetX: 0,
       headerOffsetY: 0,
       zoom: this.getZoom(),
@@ -9497,6 +9499,7 @@ export class SpreadsheetApp {
       width: layout.rootWidth,
       height: layout.rootHeight,
       dpr: this.dpr,
+      zoom: this.getZoom(),
       headerOffsetX: layout.headerOffsetX,
       headerOffsetY: layout.headerOffsetY,
       zoom: this.getZoom(),
