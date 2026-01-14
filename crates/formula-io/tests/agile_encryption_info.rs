@@ -57,70 +57,54 @@ fn read_encryption_info_xml(path: &Path) -> String {
         .read_to_end(&mut bytes)
         .expect("read EncryptionInfo stream bytes");
 
-    extract_agile_encryption_info_xml(&bytes)
-        .unwrap_or_else(|err| panic!("failed to extract Agile EncryptionInfo XML from {path:?}: {err}"))
-}
-
-fn opening_tag_containing_attr<'a>(xml: &'a str, attr: &str) -> &'a str {
-    let needle = format!("{attr}=\"");
-    let idx = xml
-        .find(&needle)
-        .unwrap_or_else(|| panic!("expected `{attr}` attribute in `<encryption>` XML"));
-    let tag_start = xml[..idx]
-        .rfind('<')
-        .unwrap_or_else(|| panic!("failed to locate opening tag for `{attr}` attribute"));
-    let tag_end = xml[tag_start..]
-        .find('>')
-        .unwrap_or_else(|| panic!("failed to locate closing `>` for tag containing `{attr}`"));
-    &xml[tag_start..=tag_start + tag_end]
-}
-
-fn parse_attr_value<'a>(tag: &'a str, attr: &str) -> &'a str {
-    let needle = format!("{attr}=\"");
-    let start = tag
-        .find(&needle)
-        .unwrap_or_else(|| panic!("expected `{attr}` attribute in tag: {tag}"));
-    let value_start = start + needle.len();
-    let rest = &tag[value_start..];
-    let end = rest
-        .find('"')
-        .unwrap_or_else(|| panic!("unterminated `{attr}` attribute in tag: {tag}"));
-    &rest[..end]
-}
-
-fn parse_optional_u32_attr(tag: &str, attr: &str) -> Option<u32> {
-    let needle = format!("{attr}=\"");
-    let start = tag.find(&needle)?;
-    let value_start = start + needle.len();
-    let rest = &tag[value_start..];
-    let end = rest.find('"')?;
-    let value = &rest[..end];
-    Some(
-        value
-            .parse::<u32>()
-            .unwrap_or_else(|_| panic!("expected `{attr}` to be an integer, got {value:?}")),
-    )
+    extract_agile_encryption_info_xml(&bytes).unwrap_or_else(|err| {
+        panic!("failed to extract Agile EncryptionInfo XML from {path:?}: {err}")
+    })
 }
 
 fn parse_agile_params_from_xml(xml: &str) -> AgileEncryptionParams {
     // `spinCount` only appears on the password keyEncryptor element, so parse all parameters from
-    // the same opening tag for consistency.
-    let tag = opening_tag_containing_attr(xml, "spinCount");
+    // the same element for consistency.
+    let doc = roxmltree::Document::parse(xml).expect("parse extracted `<encryption>` XML");
+    let node = doc
+        .descendants()
+        .find(|node| node.is_element() && node.attribute("spinCount").is_some())
+        .unwrap_or_else(|| {
+            panic!("expected an element with `spinCount` attribute in extracted `<encryption>` XML")
+        });
 
-    let spin_count: u32 = parse_attr_value(tag, "spinCount")
+    let spin_count: u32 = node
+        .attribute("spinCount")
+        .unwrap()
         .parse()
-        .unwrap_or_else(|_| panic!("expected `spinCount` to be an integer, got {:?}", tag));
-    let key_bits: u32 = parse_attr_value(tag, "keyBits")
+        .unwrap_or_else(|_| {
+            panic!(
+                "expected `spinCount` to be an integer, got {:?}",
+                node.attribute("spinCount")
+            )
+        });
+    let key_bits: u32 = node
+        .attribute("keyBits")
+        .unwrap()
         .parse()
-        .unwrap_or_else(|_| panic!("expected `keyBits` to be an integer, got {:?}", tag));
+        .unwrap_or_else(|_| {
+            panic!(
+                "expected `keyBits` to be an integer, got {:?}",
+                node.attribute("keyBits")
+            )
+        });
 
     AgileEncryptionParams::new(
         spin_count,
-        parse_attr_value(tag, "cipherAlgorithm"),
-        parse_attr_value(tag, "cipherChaining"),
+        node.attribute("cipherAlgorithm").unwrap(),
+        node.attribute("cipherChaining").unwrap(),
         key_bits,
-        parse_attr_value(tag, "hashAlgorithm"),
-        parse_optional_u32_attr(tag, "saltSize"),
+        node.attribute("hashAlgorithm").unwrap(),
+        node.attribute("saltSize").map(|value| {
+            value
+                .parse::<u32>()
+                .unwrap_or_else(|_| panic!("expected `saltSize` to be an integer, got {value:?}"))
+        }),
     )
 }
 
@@ -161,14 +145,20 @@ fn parse_agile_params_from_readme(readme: &str, fixture: &str) -> AgileEncryptio
     };
 
     AgileEncryptionParams::new(
-        cols[1]
-            .parse::<u32>()
-            .unwrap_or_else(|_| panic!("expected README spinCount to be an integer, got {:?}", cols[1])),
+        cols[1].parse::<u32>().unwrap_or_else(|_| {
+            panic!(
+                "expected README spinCount to be an integer, got {:?}",
+                cols[1]
+            )
+        }),
         cols[2],
         cols[3],
-        cols[4]
-            .parse::<u32>()
-            .unwrap_or_else(|_| panic!("expected README keyBits to be an integer, got {:?}", cols[4])),
+        cols[4].parse::<u32>().unwrap_or_else(|_| {
+            panic!(
+                "expected README keyBits to be an integer, got {:?}",
+                cols[4]
+            )
+        }),
         cols[5],
         salt_size,
     )
@@ -178,7 +168,8 @@ fn parse_agile_params_from_readme(readme: &str, fixture: &str) -> AgileEncryptio
 fn agile_encryption_info_params_match_docs_and_ci_bounds() {
     let readme = fixture_path("encrypted/ooxml/README.md");
 
-    let readme_text = std::fs::read_to_string(&readme).expect("read fixtures/encrypted/ooxml/README.md");
+    let readme_text =
+        std::fs::read_to_string(&readme).expect("read fixtures/encrypted/ooxml/README.md");
 
     for (fixture_name, expected) in [
         (
@@ -221,7 +212,8 @@ fn agile_encryption_info_params_match_docs_and_ci_bounds() {
         );
 
         assert_eq!(
-            actual, expected,
+            actual,
+            expected,
             "{fixture_rel} Agile EncryptionInfo parameters drifted.\n\
              Update `{}` and this test's `expected` parameters if the new values are intentional.\n\
              Extracted `<encryption>` XML:\n{xml}\n",
@@ -230,7 +222,8 @@ fn agile_encryption_info_params_match_docs_and_ci_bounds() {
 
         let documented = parse_agile_params_from_readme(&readme_text, fixture_name);
         assert_eq!(
-            documented, expected,
+            documented,
+            expected,
             "`{}` does not match the test's expected parameters for {fixture_rel}. \
              Keep the README in sync with the fixture + test expectations to prevent silent drift.",
             readme.display()
