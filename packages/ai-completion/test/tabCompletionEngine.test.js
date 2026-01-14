@@ -1771,6 +1771,46 @@ test('INFO type_text suggests "osversion" and "system"', async () => {
   }
 });
 
+test('NUMBERVALUE decimal_separator suggests "." and ","', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=NUMBERVALUE("1,23", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=NUMBERVALUE("1,23", "."'),
+    `Expected NUMBERVALUE to suggest decimal_separator=\".\", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=NUMBERVALUE("1,23", ","'),
+    `Expected NUMBERVALUE to suggest decimal_separator=\",\", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test('NUMBERVALUE group_separator suggests ",", ".", and " "', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=NUMBERVALUE("1.234,56", ",", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const sep of ['","', '"."', '" "']) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=NUMBERVALUE("1.234,56", ",", ${sep}`),
+      `Expected NUMBERVALUE to suggest group_separator=${sep}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("MATCH match_type suggests 0, 1, -1", async () => {
   const engine = new TabCompletionEngine();
 

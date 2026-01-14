@@ -1338,6 +1338,19 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: '"totmem"', displayText: '"totmem" (total memory)', confidence: 0.63 },
     ],
   },
+  NUMBERVALUE: {
+    // decimal_separator (in quotes)
+    1: [
+      { replacement: '"."', displayText: '"." (decimal point)', confidence: 0.67 },
+      { replacement: '","', displayText: '"," (decimal comma)', confidence: 0.66 },
+    ],
+    // group_separator (in quotes)
+    2: [
+      { replacement: '","', displayText: '"," (comma)', confidence: 0.66 },
+      { replacement: '"."', displayText: '"." (dot)', confidence: 0.65 },
+      { replacement: '" "', displayText: '" " (space)', confidence: 0.64 },
+    ],
+  },
   "WORKDAY.INTL": {
     // weekend
     2: INTL_WEEKEND_ENUM_1_2_7_11_17,
