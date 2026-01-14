@@ -440,6 +440,14 @@ export interface CollabSessionOptions {
      * periods; lower values cap document growth.
      */
     maxOpRecordsPerUser?: number;
+    /**
+     * Optional age-based pruning window (in milliseconds) for records in the shared
+     * `cellStructuralOps` Yjs log. When set, records older than `Date.now() - maxOpRecordAgeMs`
+     * may be deleted by any client (best-effort).
+     *
+     * Defaults to null/disabled.
+     */
+    maxOpRecordAgeMs?: number | null;
   };
   /**
    * When enabled, the session monitors cell value updates for true conflicts
@@ -996,6 +1004,7 @@ export class CollabSession {
         ignoredOrigins: ignoredConflictOrigins,
         onConflict: options.cellConflicts.onConflict,
         maxOpRecordsPerUser: options.cellConflicts.maxOpRecordsPerUser,
+        maxOpRecordAgeMs: options.cellConflicts.maxOpRecordAgeMs,
       });
     }
 
