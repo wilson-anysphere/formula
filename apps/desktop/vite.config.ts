@@ -272,13 +272,17 @@ export default defineConfig({
       "src/ai/inline-edit/__tests__/**/*.test.ts",
       // Drawing overlay interaction unit tests live under `src/drawings/__tests__` but use the
       // `.test.ts` suffix for historical reasons.
-      // Include these explicitly so they run under the desktop-scoped Vitest config, and so:
-      //   pnpm -C apps/desktop vitest run apps/desktop/src/drawings/__tests__/selectionHandles.test.ts
-      // works reliably (`apps/desktop/scripts/run-vitest.mjs` normalizes repo-rooted paths like
-      // `apps/desktop/src/...` to `src/...` when running via the desktop package script).
-      "src/drawings/__tests__/selectionHandles.test.ts",
-      "src/drawings/__tests__/drawingmlPatch.test.ts",
-      "src/drawings/__tests__/modelAdapters.test.ts",
+      //
+      // Many callers run Vitest from within the desktop package directory but pass repo-rooted paths,
+      // e.g.:
+      //   pnpm -C apps/desktop exec vitest run apps/desktop/src/drawings/__tests__/selectionHandles.test.ts
+      //
+      // `pnpm -C apps/desktop exec …` executes from `apps/desktop/`, so the path above resolves to
+      // `apps/desktop/apps/desktop/src/...`. Keep tiny wrapper entrypoints under that directory and
+      // include them here so both repo-rooted invocations and full-suite runs work consistently.
+      "apps/desktop/src/drawings/__tests__/selectionHandles.test.ts",
+      "apps/desktop/src/drawings/__tests__/drawingmlPatch.test.ts",
+      "apps/desktop/src/drawings/__tests__/modelAdapters.test.ts",
       // Node-only unit tests for the desktop performance harness live under `tests/performance/`.
       // Include these explicitly while still excluding Playwright e2e specs under `tests/e2e/`.
       "tests/performance/**/*.vitest.ts",
