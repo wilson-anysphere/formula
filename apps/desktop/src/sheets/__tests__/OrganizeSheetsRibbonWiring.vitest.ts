@@ -21,7 +21,12 @@ describe("Organize Sheets ribbon wiring", () => {
     expect(registerMatch).not.toBeNull();
     const registerIndex = registerMatch?.index ?? -1;
     expect(registerIndex).toBeGreaterThanOrEqual(0);
-    expect(commands.slice(registerIndex, registerIndex + 800)).toMatch(/\bsheetStructureHandlers\s*\?\.\s*openOrganizeSheets\b/);
+    // Ensure the handler reference is within the same registration block (i.e. before the next command registration),
+    // but avoid brittle fixed-length windows.
+    const nextRegisterIndex = commands.indexOf("registerBuiltinCommand", registerIndex + 1);
+    const blockEnd = nextRegisterIndex >= 0 ? nextRegisterIndex : commands.length;
+    const registrationBlock = commands.slice(registerIndex, blockEnd);
+    expect(registrationBlock).toMatch(/\bsheetStructureHandlers\s*\?\.\s*openOrganizeSheets\b/);
 
     // Ensure `main.ts` passes the handler into registerDesktopCommands (so the command can open the dialog).
     expect(main).toMatch(/\bsheetStructureHandlers\s*:\s*\{[\s\S]{0,800}?\bopenOrganizeSheets\b/);
