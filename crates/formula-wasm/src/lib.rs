@@ -3676,6 +3676,7 @@ impl WasmWorkbook {
         let style_id = style_id.filter(|id| *id != 0);
         self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
     }
+
     #[wasm_bindgen(js_name = "getCalcSettings")]
     pub fn get_calc_settings(&self) -> Result<JsValue, JsValue> {
         let settings = self.inner.engine.calc_settings();

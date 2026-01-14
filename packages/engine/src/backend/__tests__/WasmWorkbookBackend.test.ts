@@ -204,7 +204,7 @@ describe("WasmWorkbookBackend", () => {
         [null, null],
         ["Hello", "Hello"],
       ],
-    ];
+    ] satisfies CellDataCompact[][];
 
     const engineCompact = createMockEngine({
       getRangeCompact: vi.fn(async () => compact),

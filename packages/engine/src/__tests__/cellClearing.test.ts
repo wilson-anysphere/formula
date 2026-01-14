@@ -154,6 +154,10 @@ class WasmBackedWorker implements WorkerLike {
           case "renameSheet":
             result = Boolean(this.workbook?.renameSheet?.(params.oldName, params.newName));
             break;
+          case "setWorkbookFileMetadata":
+            this.workbook?.setWorkbookFileMetadata?.(params.directory, params.filename);
+            result = null;
+            break;
           default:
             throw new Error(`unsupported method: ${req.method}`);
         }
@@ -228,6 +232,48 @@ describeWasm("EngineWorker null clear semantics", () => {
       const exported = JSON.parse(await engine.toJson());
       expect(Object.keys(exported.sheets)).toEqual(["Å"]);
       expect(exported.sheets["Å"].cells.A1).toBe(1);
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("updates CELL(\"address\") and CELL(\"filename\") outputs after a sheet rename", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setWorkbookFileMetadata(null, "Book1.xlsx");
+
+      await engine.setCell("A1", '=CELL("address",Sheet1!A1)', "Sheet2");
+      await engine.setCell("A2", '=CELL("filename",Sheet1!A1)', "Sheet2");
+      await engine.recalculate();
+
+      const beforeAddress = await engine.getCell("A1", "Sheet2");
+      expect(beforeAddress.value).toBe("Sheet1!$A$1");
+
+      const beforeFilename = await engine.getCell("A2", "Sheet2");
+      expect(beforeFilename.value).toBe("[Book1.xlsx]Sheet1");
+
+      expect(await engine.renameSheet("Sheet1", "Budget")).toBe(true);
+      await engine.recalculate();
+
+      const afterAddress = await engine.getCell("A1", "Sheet2");
+      expect(afterAddress.value).toBe("Budget!$A$1");
+
+      const afterFilename = await engine.getCell("A2", "Sheet2");
+      expect(afterFilename.value).toBe("[Book1.xlsx]Budget");
+
+      // Ensure stored formula inputs are also rewritten (toJson/getCell.input should match).
+      const exported = JSON.parse(await engine.toJson());
+      expect(exported.sheets?.Sheet2?.cells?.A1).toContain("Budget!A1");
+      expect(exported.sheets?.Sheet2?.cells?.A2).toContain("Budget!A1");
     } finally {
       engine.terminate();
     }
