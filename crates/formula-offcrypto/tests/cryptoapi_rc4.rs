@@ -188,6 +188,11 @@ fn cryptoapi_rc4_40bit_keys_are_padded_to_16_bytes() {
     assert_eq!(key.len(), 16);
     assert!(key[5..].iter().all(|b| *b == 0));
     assert_eq!(&key[..5], &hex_bytes("6ad7dedf2d")[..]);
+
+    // MS-OFFCRYPTO specifies `keySize=0` MUST be interpreted as 40-bit for RC4.
+    let key0 =
+        cryptoapi::rc4_key_for_block(h.as_slice(), 0, 0, HashAlgorithm::Sha1).expect("keySize=0");
+    assert_eq!(key0.as_slice(), key.as_slice());
 }
 
 #[test]

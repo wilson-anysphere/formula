@@ -144,6 +144,29 @@ fn parse_synthetic_standard_encryption_info() {
 }
 
 #[test]
+fn standard_rc4_keysize_zero_is_interpreted_as_40bit() {
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI;
+    let bytes = build_standard_encryption_info(
+        header_flags,
+        &[],
+        CALG_RC4,
+        CALG_SHA1,
+        0,  // keySize=0 => 40-bit for RC4 (MS-OFFCRYPTO)
+        16, // saltSize
+        20, // verifierHashSize (SHA1)
+        20, // encryptedVerifierHash length for RC4 is exactly verifierHashSize
+    );
+
+    let info = parse_encryption_info(&bytes).expect("parse rc4 keySize=0");
+    let EncryptionInfo::Standard { header, .. } = info else {
+        panic!("expected standard");
+    };
+
+    assert_eq!(header.alg_id, CALG_RC4);
+    assert_eq!(header.key_size_bits, 40);
+}
+
+#[test]
 fn parse_synthetic_standard_encryption_info_accepts_major_2_minor_2() {
     let bytes = build_standard_encryption_info_with_version(
         2,
