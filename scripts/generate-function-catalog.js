@@ -17,6 +17,14 @@ const outputModulePath = path.join(repoRoot, "shared", "functionCatalog.mjs");
 // When the runtime module is `.mjs`, TypeScript expects an ESM-flavored declaration file (`.d.mts`).
 const outputTypesPath = path.join(repoRoot, "shared", "functionCatalog.d.mts");
 
+const baseEnv = { ...process.env };
+// `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+// globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift when
+// this script falls back to invoking `cargo` directly (notably on Windows).
+if (baseEnv.RUSTUP_TOOLCHAIN && existsSync(path.join(repoRoot, "rust-toolchain.toml"))) {
+  delete baseEnv.RUSTUP_TOOLCHAIN;
+}
+
 const defaultGlobalCargoHome = path.resolve(os.homedir(), ".cargo");
 const envCargoHome = process.env.CARGO_HOME;
 const normalizedEnvCargoHome = envCargoHome ? path.resolve(envCargoHome) : null;
@@ -104,7 +112,7 @@ const cargoArgs = useCargoAgent
 
 const raw = await run(cargoCommand, cargoArgs, {
   env: {
-    ...process.env,
+    ...baseEnv,
     CARGO_HOME: cargoHome,
     // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
     // if the caller didn't source `scripts/agent-init.sh`.

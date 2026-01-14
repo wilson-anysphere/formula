@@ -23,6 +23,12 @@ const cargoHome =
     : envCargoHome;
 await mkdir(cargoHome, { recursive: true });
 const childEnv = { ...process.env, CARGO_HOME: cargoHome };
+// `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+// globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift when
+// running cargo (via wasm-pack) from this script.
+if (childEnv.RUSTUP_TOOLCHAIN && existsSync(path.join(repoRoot, "rust-toolchain.toml"))) {
+  delete childEnv.RUSTUP_TOOLCHAIN;
+}
 const cargoBinDir = path.join(cargoHome, "bin");
 await mkdir(cargoBinDir, { recursive: true });
 if (!childEnv.PATH?.split(path.delimiter).includes(cargoBinDir)) {
