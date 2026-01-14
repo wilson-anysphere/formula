@@ -25,13 +25,15 @@ At a high level the extractor:
      future round-trip editing.
 3. Resolves the drawing relationship id (`r:id`) to an `xl/charts/chartN.xml` part.
 4. Reads `xl/charts/_rels/chartN.xml.rels` to discover optional related parts:
-   - **ChartEx part** (`xl/charts/chartExN.xml`) when relationship type/target contains `chartEx`
-     (Excel 2016+ “modern” charts).
-   - **Chart style** (`xl/charts/styleN.xml`) and **chart colors** (`xl/charts/colorsN.xml`) via
-     relationship type or filename heuristics.
+    - **ChartEx part** (`xl/charts/chartExN.xml`) when relationship type/target contains `chartEx`
+      (Excel 2016+ “modern” charts).
+    - **Chart style** (`xl/charts/styleN.xml`) and **chart colors** (`xl/charts/colorsN.xml`) via
+      relationship type or filename heuristics.
+    - The `.rels` XML bytes are stored alongside extracted parts so that callers can follow
+      relationships without retaining the full `XlsxPackage` in memory.
 5. Returns a `formula_xlsx::drawingml::charts::ChartObject` containing:
-   - `parts.chart` (the classic `c:chartSpace` part) plus optional `parts.chart_ex`, `parts.style`,
-     `parts.colors` as raw bytes (`OpcPart`).
+    - `parts.chart` (the classic `c:chartSpace` part) plus optional `parts.chart_ex`, `parts.style`,
+      `parts.colors` as raw bytes (`OpcPart`).
    - `model: Option<ChartModel>` parsed best-effort (see below).
    - `diagnostics` for missing parts / parsing failures while extracting.
 
@@ -95,6 +97,7 @@ From `parse_chart_ex()`:
 
 - Chart OPC parts referenced by the drawing:
   - `xl/charts/chartN.xml` (`ChartParts.chart.bytes`)
+    - and its `.rels` payload (`ChartParts.chart.rels_bytes`) when present
   - `xl/charts/chartExN.xml` + `xl/charts/_rels/chartExN.xml.rels` when present
   - `xl/charts/styleN.xml` / `xl/charts/colorsN.xml` when present
 - Raw `<xdr:graphicFrame>` XML (`ChartObject.drawing_frame_xml`) is extracted exactly as a slice
@@ -383,7 +386,7 @@ pub struct ChartObject {
     pub drawing_part: String,
     pub anchor: Anchor,
     pub drawing_frame_xml: String,
-    pub parts: ChartParts,           // raw OPC parts (chart/chartEx/style/colors)
+    pub parts: ChartParts,           // raw OPC parts (chart/chartEx/style/colors) + `.rels` bytes
     pub model: Option<ChartModel>,   // parsed best-effort (may be None)
     pub diagnostics: Vec<ChartDiagnostic>,
 }
