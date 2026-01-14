@@ -3,10 +3,6 @@ use std::collections::HashSet;
 
 use super::{PivotField, PivotKeyPart, ValueField};
 
-fn default_true() -> bool {
-    true
-}
-
 /// An Excel-style PivotTable *calculated field*.
 ///
 /// In Excel, a calculated field is a named formula that behaves like an extra source column:

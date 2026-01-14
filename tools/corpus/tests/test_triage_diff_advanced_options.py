@@ -29,6 +29,8 @@ class TriageDiffAdvancedOptionsPassthroughTests(unittest.TestCase):
                 diff_ignore={"docProps/core.xml"},
                 diff_ignore_path=("dyDescent", "xr:uid"),
                 diff_ignore_path_in=("xl/worksheets/*.xml:xr:uid",),
+                diff_ignore_path_kind=("attribute_changed:@",),
+                diff_ignore_path_kind_in=("xl/worksheets/*.xml:attribute_changed:@",),
                 diff_limit=1,
                 recalc=False,
                 render_smoke=False,
@@ -48,10 +50,17 @@ class TriageDiffAdvancedOptionsPassthroughTests(unittest.TestCase):
         self.assertIn("--ignore-path-in", cmd_list)
         self.assertIn("xl/worksheets/*.xml:xr:uid", cmd_list)
 
+        # Kind-filtered ignore-path rules.
+        self.assertIn("--ignore-path-kind", cmd_list)
+        self.assertIn("attribute_changed:@", cmd_list)
+
+        # Kind-filtered scoped ignore-path-kind-in rules.
+        self.assertIn("--ignore-path-kind-in", cmd_list)
+        self.assertIn("xl/worksheets/*.xml:attribute_changed:@", cmd_list)
+
         # Strict calcChain policy.
         self.assertIn("--strict-calc-chain", cmd_list)
 
 
 if __name__ == "__main__":
     unittest.main()
-

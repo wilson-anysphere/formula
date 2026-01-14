@@ -67,6 +67,18 @@ struct Args {
     #[arg(long = "ignore-path-in")]
     ignore_paths_in: Vec<String>,
 
+    /// Like `--ignore-path`, but only applies to diffs whose kind matches the provided kind.
+    ///
+    /// Format: `<kind>:<path_substring>`. Repeatable.
+    #[arg(long = "ignore-path-kind")]
+    ignore_paths_kind: Vec<String>,
+
+    /// Like `--ignore-path-in`, but only applies to diffs whose kind matches the provided kind.
+    ///
+    /// Format: `<part_glob>:<kind>:<path_substring>`. Repeatable.
+    #[arg(long = "ignore-path-kind-in")]
+    ignore_paths_kind_in: Vec<String>,
+
     /// Built-in ignore presets for diffing round-tripped output (repeatable).
     #[arg(long = "ignore-preset")]
     ignore_presets: Vec<xlsx_diff::IgnorePreset>,
@@ -403,7 +415,7 @@ fn main() -> Result<()> {
             output
                 .steps
                 .insert("diff".to_string(), StepResult::ok(start, &diff_details));
- 
+
             // Step: recalc (optional)
             if !args.recalc {
                 output.steps.insert(
@@ -439,7 +451,7 @@ fn main() -> Result<()> {
                     }
                 }
             }
- 
+
             // Step: render smoke (optional)
             if !args.render_smoke {
                 output.steps.insert(
@@ -583,9 +595,10 @@ fn main() -> Result<()> {
                     StepResult::skipped("disabled (pass --recalc)"),
                 );
             } else {
-                output
-                    .steps
-                    .insert("recalc".to_string(), StepResult::skipped("unsupported_for_xlsb"));
+                output.steps.insert(
+                    "recalc".to_string(),
+                    StepResult::skipped("unsupported_for_xlsb"),
+                );
             }
             output.result.calculate_ok = None;
 
@@ -595,9 +608,10 @@ fn main() -> Result<()> {
                     StepResult::skipped("disabled (pass --render-smoke)"),
                 );
             } else {
-                output
-                    .steps
-                    .insert("render".to_string(), StepResult::skipped("unsupported_for_xlsb"));
+                output.steps.insert(
+                    "render".to_string(),
+                    StepResult::skipped("unsupported_for_xlsb"),
+                );
             }
             output.result.render_ok = None;
 
@@ -679,13 +693,75 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>
             );
         }
 
-        // Validate the (normalized) glob syntax so callers get deterministic errors.
-        Glob::new(&part_glob)?;
+        // Validate the (normalized) glob syntax so callers get deterministic errors. Patterns
+        // without `*`/`?` are treated as exact matches (so callers can target `[Content_Types].xml`
+        // without needing to escape `[`/`]` for glob syntax).
+        if part_glob.contains('*') || part_glob.contains('?') {
+            Glob::new(&part_glob)?;
+        }
 
         rules.push(xlsx_diff::IgnorePathRule {
             part: Some(part_glob),
             path_substring: substring.replace('\\', "/"),
             kind: None,
+        });
+    }
+
+    for spec in &args.ignore_paths_kind {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some((kind, substring)) = trimmed.split_once(':') else {
+            anyhow::bail!(
+                "invalid --ignore-path-kind '{trimmed}' (expected format: <kind>:<path_substring>)"
+            );
+        };
+        let kind = kind.trim();
+        let substring = substring.trim();
+        if kind.is_empty() || substring.is_empty() {
+            anyhow::bail!(
+                "invalid --ignore-path-kind '{trimmed}' (expected non-empty <kind> and <path_substring>)"
+            );
+        }
+        rules.push(xlsx_diff::IgnorePathRule {
+            part: None,
+            path_substring: substring.replace('\\', "/"),
+            kind: Some(kind.to_string()),
+        });
+    }
+
+    for spec in &args.ignore_paths_kind_in {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut iter = trimmed.splitn(3, ':');
+        let part_glob = iter.next().unwrap_or_default();
+        let kind = iter.next();
+        let substring = iter.next();
+        let (Some(kind), Some(substring)) = (kind, substring) else {
+            anyhow::bail!(
+                "invalid --ignore-path-kind-in '{trimmed}' (expected format: <part_glob>:<kind>:<path_substring>)"
+            );
+        };
+        let part_glob = normalize_ignore_pattern(part_glob);
+        let kind = kind.trim();
+        let substring = substring.trim();
+        if part_glob.is_empty() || kind.is_empty() || substring.is_empty() {
+            anyhow::bail!(
+                "invalid --ignore-path-kind-in '{trimmed}' (expected non-empty <part_glob>, <kind>, and <path_substring>)"
+            );
+        }
+
+        if part_glob.contains('*') || part_glob.contains('?') {
+            Glob::new(&part_glob)?;
+        }
+
+        rules.push(xlsx_diff::IgnorePathRule {
+            part: Some(part_glob),
+            path_substring: substring.replace('\\', "/"),
+            kind: Some(kind.to_string()),
         });
     }
 
@@ -712,9 +788,11 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     let ignore_paths = build_ignore_path_rules(args)?;
     let mut ignore_paths_sorted: Vec<String> = ignore_paths
         .iter()
-        .map(|r| match &r.part {
-            Some(part) => format!("{part}:{}", r.path_substring),
-            None => r.path_substring.clone(),
+        .map(|r| match (&r.part, r.kind.as_deref()) {
+            (Some(part), Some(kind)) => format!("{part}:{kind}:{}", r.path_substring),
+            (Some(part), None) => format!("{part}:{}", r.path_substring),
+            (None, Some(kind)) => format!("{kind}:{}", r.path_substring),
+            (None, None) => r.path_substring.clone(),
         })
         .collect();
     ignore_paths_sorted.sort();
@@ -1467,7 +1545,7 @@ mod tests {
 
     #[test]
     fn diff_part_breakdown_is_populated_and_sorted() {
-        use xlsx_diff::{Difference, DiffReport, Severity};
+        use xlsx_diff::{DiffReport, Difference, Severity};
 
         let report = DiffReport {
             differences: vec![
@@ -1588,7 +1666,8 @@ mod tests {
         fn zip_with_part(name: &str, bytes: &[u8]) -> Vec<u8> {
             let cursor = std::io::Cursor::new(Vec::new());
             let mut zip = ZipWriter::new(cursor);
-            let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+            let options =
+                FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
             zip.start_file(name, options).unwrap();
             zip.write_all(bytes).unwrap();
             let cursor = zip.finish().unwrap();
@@ -1684,7 +1763,8 @@ mod tests {
         fn zip_with_part(name: &str, bytes: &[u8]) -> Vec<u8> {
             let cursor = std::io::Cursor::new(Vec::new());
             let mut zip = ZipWriter::new(cursor);
-            let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+            let options =
+                FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
             zip.start_file(name, options).unwrap();
             zip.write_all(bytes).unwrap();
             let cursor = zip.finish().unwrap();
@@ -1726,7 +1806,10 @@ mod tests {
         };
 
         let details = diff_workbooks(&expected, &actual, &args).unwrap();
-        assert_eq!(details.counts.total, 0, "diffs should be suppressed by ignore-path");
+        assert_eq!(
+            details.counts.total, 0,
+            "diffs should be suppressed by ignore-path"
+        );
         assert!(details.equal);
         assert_eq!(details.ignore_paths, vec!["dyDescent".to_string()]);
     }

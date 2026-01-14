@@ -60,6 +60,18 @@ pub struct Args {
     #[arg(long = "ignore-path-in")]
     ignore_paths_in: Vec<String>,
 
+    /// Like `--ignore-path`, but only applies to diffs whose kind matches the provided kind.
+    ///
+    /// Format: `<kind>:<path_substring>`. Repeatable.
+    #[arg(long = "ignore-path-kind")]
+    ignore_paths_kind: Vec<String>,
+
+    /// Like `--ignore-path-in`, but only applies to diffs whose kind matches the provided kind.
+    ///
+    /// Format: `<part_glob>:<kind>:<path_substring>`. Repeatable.
+    #[arg(long = "ignore-path-kind-in")]
+    ignore_paths_kind_in: Vec<String>,
+
     /// Built-in ignore presets (repeatable).
     ///
     /// Presets are opt-in and only apply when explicitly selected.
@@ -419,6 +431,55 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<IgnorePathRule>> {
             part: Some(part),
             path_substring: pattern.replace('\\', "/"),
             kind: None,
+        });
+    }
+
+    for spec in &args.ignore_paths_kind {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some((kind, pattern)) = trimmed.split_once(':') else {
+            anyhow::bail!(
+                "invalid --ignore-path-kind '{trimmed}' (expected format: <kind>:<path_substring>)"
+            );
+        };
+        let kind = kind.trim();
+        let pattern = pattern.trim();
+        if kind.is_empty() || pattern.is_empty() {
+            continue;
+        }
+        rules.push(IgnorePathRule {
+            part: None,
+            path_substring: pattern.replace('\\', "/"),
+            kind: Some(kind.to_string()),
+        });
+    }
+
+    for spec in &args.ignore_paths_kind_in {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut iter = trimmed.splitn(3, ':');
+        let part = iter.next().unwrap_or_default();
+        let kind = iter.next();
+        let pattern = iter.next();
+        let (Some(kind), Some(pattern)) = (kind, pattern) else {
+            anyhow::bail!(
+                "invalid --ignore-path-kind-in '{trimmed}' (expected format: <part_glob>:<kind>:<path_substring>)"
+            );
+        };
+        let part = normalize_ignore_pattern(part);
+        let kind = kind.trim();
+        let pattern = pattern.trim();
+        if part.is_empty() || kind.is_empty() || pattern.is_empty() {
+            continue;
+        }
+        rules.push(IgnorePathRule {
+            part: Some(part),
+            path_substring: pattern.replace('\\', "/"),
+            kind: Some(kind.to_string()),
         });
     }
 

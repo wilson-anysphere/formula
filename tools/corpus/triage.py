@@ -1212,6 +1212,8 @@ def _run_rust_triage(
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
     diff_ignore_path_in: tuple[str, ...] | list[str] = (),
+    diff_ignore_path_kind: tuple[str, ...] | list[str] = (),
+    diff_ignore_path_kind_in: tuple[str, ...] | list[str] = (),
     diff_ignore_presets: tuple[str, ...] = tuple(),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
@@ -1259,6 +1261,10 @@ def _run_rust_triage(
             cmd.extend(["--ignore-path", pattern])
         for scoped in sorted({p.strip() for p in diff_ignore_path_in if p and p.strip()}):
             cmd.extend(["--ignore-path-in", scoped])
+        for spec in sorted({p.strip() for p in diff_ignore_path_kind if p and p.strip()}):
+            cmd.extend(["--ignore-path-kind", spec])
+        for spec in sorted({p.strip() for p in diff_ignore_path_kind_in if p and p.strip()}):
+            cmd.extend(["--ignore-path-kind-in", spec])
         for preset in diff_ignore_presets:
             if preset:
                 cmd.extend(["--ignore-preset", preset])
@@ -1295,6 +1301,8 @@ def triage_workbook(
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
     diff_ignore_path_in: tuple[str, ...] | list[str] = (),
+    diff_ignore_path_kind: tuple[str, ...] | list[str] = (),
+    diff_ignore_path_kind_in: tuple[str, ...] | list[str] = (),
     diff_ignore_presets: tuple[str, ...] = tuple(),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
@@ -1384,6 +1392,8 @@ def triage_workbook(
             "round_trip_fail_on": round_trip_fail_on,
             "diff_ignore_path": diff_ignore_path,
             "diff_ignore_path_in": diff_ignore_path_in,
+            "diff_ignore_path_kind": diff_ignore_path_kind,
+            "diff_ignore_path_kind_in": diff_ignore_path_kind_in,
             "strict_calc_chain": strict_calc_chain,
         }
         try:
@@ -1544,6 +1554,8 @@ def _triage_one_path(
     diff_ignore_globs: tuple[str, ...] = (),
     diff_ignore_path: tuple[str, ...] = (),
     diff_ignore_path_in: tuple[str, ...] = (),
+    diff_ignore_path_kind: tuple[str, ...] = (),
+    diff_ignore_path_kind_in: tuple[str, ...] = (),
     diff_ignore_presets: tuple[str, ...] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
@@ -1589,6 +1601,8 @@ def _triage_one_path(
             diff_ignore_globs=set(diff_ignore_globs),
             diff_ignore_path=diff_ignore_path,
             diff_ignore_path_in=diff_ignore_path_in,
+            diff_ignore_path_kind=diff_ignore_path_kind,
+            diff_ignore_path_kind_in=diff_ignore_path_kind_in,
             diff_ignore_presets=diff_ignore_presets,
             diff_limit=diff_limit,
             round_trip_fail_on=round_trip_fail_on,
@@ -1674,6 +1688,8 @@ def _triage_paths(
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] = (),
     diff_ignore_path_in: tuple[str, ...] = (),
+    diff_ignore_path_kind: tuple[str, ...] = (),
+    diff_ignore_path_kind_in: tuple[str, ...] = (),
     diff_ignore_presets: tuple[str, ...] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
@@ -1707,6 +1723,12 @@ def _triage_paths(
     diff_ignore_globs_tuple = tuple(sorted({p for p in diff_ignore_globs if p}))
     diff_ignore_path_tuple = tuple(sorted({p for p in diff_ignore_path if p and p.strip()}))
     diff_ignore_path_in_tuple = tuple(sorted({p for p in diff_ignore_path_in if p and p.strip()}))
+    diff_ignore_path_kind_tuple = tuple(
+        sorted({p for p in diff_ignore_path_kind if p and p.strip()})
+    )
+    diff_ignore_path_kind_in_tuple = tuple(
+        sorted({p for p in diff_ignore_path_kind_in if p and p.strip()})
+    )
     diff_ignore_presets_tuple = tuple(sorted({p for p in diff_ignore_presets if p and p.strip()}))
 
     if worker_count == 1 or len(paths) <= 1:
@@ -1718,6 +1740,8 @@ def _triage_paths(
                 diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
                 diff_ignore_path_in=diff_ignore_path_in_tuple,
+                diff_ignore_path_kind=diff_ignore_path_kind_tuple,
+                diff_ignore_path_kind_in=diff_ignore_path_kind_in_tuple,
                 diff_ignore_presets=diff_ignore_presets_tuple,
                 diff_limit=diff_limit,
                 round_trip_fail_on=round_trip_fail_on,
@@ -1756,6 +1780,8 @@ def _triage_paths(
                 diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
                 diff_ignore_path_in=diff_ignore_path_in_tuple,
+                diff_ignore_path_kind=diff_ignore_path_kind_tuple,
+                diff_ignore_path_kind_in=diff_ignore_path_kind_in_tuple,
                 diff_ignore_presets=diff_ignore_presets_tuple,
                 diff_limit=diff_limit,
                 round_trip_fail_on=round_trip_fail_on,
@@ -1900,6 +1926,24 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Pass an xlsx-diff ignore preset through to the diff step (can be repeated).",
     )
     parser.add_argument(
+        "--diff-ignore-path-kind",
+        action="append",
+        default=[],
+        help=(
+            "Like --diff-ignore-path, but only applies to diffs whose kind matches the provided kind "
+            "(can be repeated). Format: <kind>:<path_substring>."
+        ),
+    )
+    parser.add_argument(
+        "--diff-ignore-path-kind-in",
+        action="append",
+        default=[],
+        help=(
+            "Like --diff-ignore-path-in, but only applies to diffs whose kind matches the provided kind "
+            "(can be repeated). Format: <part_glob>:<kind>:<path_substring>."
+        ),
+    )
+    parser.add_argument(
         "--no-default-diff-ignore",
         action="store_true",
         help=(
@@ -1982,14 +2026,28 @@ def main() -> int:
     diff_ignore_path_in_values = sorted(
         {p.strip() for p in (args.diff_ignore_path_in or []) if p and p.strip()}
     )
+    diff_ignore_path_kind_values = sorted(
+        {p.strip() for p in (args.diff_ignore_path_kind or []) if p and p.strip()}
+    )
+    diff_ignore_path_kind_in_values = sorted(
+        {p.strip() for p in (args.diff_ignore_path_kind_in or []) if p and p.strip()}
+    )
     if args.privacy_mode == _PRIVACY_PRIVATE:
         diff_ignore_path_out = [f"sha256={_sha256_text(p)}" for p in diff_ignore_path_values]
         diff_ignore_path_in_out = [
             f"sha256={_sha256_text(p)}" for p in diff_ignore_path_in_values
         ]
+        diff_ignore_path_kind_out = [
+            f"sha256={_sha256_text(p)}" for p in diff_ignore_path_kind_values
+        ]
+        diff_ignore_path_kind_in_out = [
+            f"sha256={_sha256_text(p)}" for p in diff_ignore_path_kind_in_values
+        ]
     else:
         diff_ignore_path_out = diff_ignore_path_values
         diff_ignore_path_in_out = diff_ignore_path_in_values
+        diff_ignore_path_kind_out = diff_ignore_path_kind_values
+        diff_ignore_path_kind_in_out = diff_ignore_path_kind_in_values
 
     rayon_threads_out: int | None = None
     rayon_raw = os.environ.get("RAYON_NUM_THREADS")
@@ -2005,6 +2063,8 @@ def main() -> int:
         diff_ignore_globs=diff_ignore_globs,
         diff_ignore_path=tuple(diff_ignore_path_values),
         diff_ignore_path_in=tuple(diff_ignore_path_in_values),
+        diff_ignore_path_kind=tuple(diff_ignore_path_kind_values),
+        diff_ignore_path_kind_in=tuple(diff_ignore_path_kind_in_values),
         diff_ignore_presets=diff_ignore_presets,
         diff_limit=args.diff_limit,
         round_trip_fail_on=args.round_trip_fail_on,
@@ -2066,6 +2126,8 @@ def main() -> int:
         "diff_ignore": sorted(diff_ignore),
         "diff_ignore_path": diff_ignore_path_out,
         "diff_ignore_path_in": diff_ignore_path_in_out,
+        "diff_ignore_path_kind": diff_ignore_path_kind_out,
+        "diff_ignore_path_kind_in": diff_ignore_path_kind_in_out,
         "no_default_diff_ignore": args.no_default_diff_ignore,
         "strict_calc_chain": bool(args.strict_calc_chain),
         "rayon_num_threads": rayon_threads_out,

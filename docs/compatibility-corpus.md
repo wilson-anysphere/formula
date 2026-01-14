@@ -251,6 +251,20 @@ python -m tools.corpus.triage ... --diff-ignore-preset excel-volatile-ids
 
 This is intentionally **opt-in** so default corpus triage remains strict.
 
+```bash
+# Ignore only diffs of a specific kind (repeatable).
+# Format: <kind>:<path_substring>
+python -m tools.corpus.triage ... \
+  --diff-ignore-path-kind "attribute_changed:@"
+```
+
+```bash
+# Scope a kind-filtered ignore rule to matching parts (repeatable).
+# Format: <part_glob>:<kind>:<path_substring>
+python -m tools.corpus.triage ... \
+  --diff-ignore-path-kind-in "xl/worksheets/*.xml:attribute_changed:@"
+```
+
 To ignore a family of parts by pattern (repeatable), pass `--diff-ignore-glob`:
 
 ```bash

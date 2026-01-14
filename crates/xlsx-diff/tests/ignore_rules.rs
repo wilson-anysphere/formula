@@ -1532,6 +1532,50 @@ fn cli_ignore_path_in_glob_suppresses_all_matching_parts() {
 }
 
 #[test]
+fn cli_ignore_path_kind_flag_filters_by_kind() {
+    let expected_zip = zip_bytes(&[("xl/theme/theme1.xml", br#"<a attr="1"/>"#)]);
+    let actual_zip = zip_bytes(&[("xl/theme/theme1.xml", br#"<a attr="2" foo="bar"/>"#)]);
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let original_path = tempdir.path().join("original.xlsx");
+    let modified_path = tempdir.path().join("modified.xlsx");
+    std::fs::write(&original_path, expected_zip).unwrap();
+    std::fs::write(&modified_path, actual_zip).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .arg("--format")
+        .arg("json")
+        // This substring matches both attribute paths (/@attr and /@foo). The kind filter should
+        // ensure we only suppress the attribute_changed diff.
+        .arg("--ignore-path-kind")
+        .arg("attribute_changed:@")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "expected exit 0 (no critical diffs), got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let diffs = json["diffs"].as_array().unwrap();
+    assert_eq!(diffs.len(), 1, "expected only one diff after filtering");
+    assert_eq!(diffs[0]["part"], "xl/theme/theme1.xml");
+    assert_eq!(diffs[0]["kind"], "attribute_added");
+
+    let ignore_paths = json["ignore_paths"].as_array().unwrap();
+    assert_eq!(ignore_paths.len(), 1);
+    assert_eq!(ignore_paths[0]["part"], serde_json::Value::Null);
+    assert_eq!(ignore_paths[0]["path_substring"], "@");
+    assert_eq!(ignore_paths[0]["kind"], "attribute_changed");
+}
+
+#[test]
 fn ignore_glob_suppresses_rels_targets_with_xl_prefix_without_leading_slash() {
     let expected_zip = zip_bytes(&[
         (
