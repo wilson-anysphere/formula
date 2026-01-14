@@ -76,6 +76,7 @@ export function registerBuiltinCommands(params: {
 
   const commandCategoryFormat = t("commandCategory.format");
   const commandCategoryData = t("commandCategory.data");
+  const commandCategoryPageLayout = "Page Layout";
 
   const toggleDockPanel = (panelId: string) => {
     const placement = getPanelPlacement(layoutController.layout, panelId);
@@ -831,6 +832,36 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.formulas.solutions.solver"),
       keywords: ["solver", "optimization"],
+    },
+  );
+
+  // Ribbon schema uses a Page Layout tab id for the Selection Pane. Register it directly so:
+  // - the ribbon doesn't rely on `main.ts` fallback wiring to stay enabled
+  // - the command palette/keybindings can invoke it consistently
+  commandRegistry.registerBuiltinCommand(
+    "pageLayout.arrange.selectionPane",
+    "Selection Pane",
+    () => {
+      openDockPanel(PanelIds.SELECTION_PANE);
+      // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
+      if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const el = document.querySelector<HTMLElement>('[data-testid="selection-pane"]');
+            try {
+              el?.focus();
+            } catch {
+              // Best-effort.
+            }
+          }),
+        );
+      }
+    },
+    {
+      category: commandCategoryPageLayout,
+      icon: null,
+      description: "Open the Selection Pane",
+      keywords: ["selection pane", "arrange", "objects"],
     },
   );
 
