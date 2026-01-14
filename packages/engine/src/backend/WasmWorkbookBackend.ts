@@ -1,4 +1,5 @@
 import type { EngineClient } from "../client.ts";
+import { isMissingGetRangeCompactError } from "../compat.ts";
 import type { CellDataCompact, CellScalar } from "../protocol.ts";
 import { fromA1, toA1, toA1Range } from "./a1.ts";
 import { isFormulaInput, normalizeFormulaTextOpt } from "./formula.ts";
@@ -258,13 +259,9 @@ export class WasmWorkbookBackend implements WorkbookBackend {
         compact = await engine.getRangeCompact(range, params.sheetId);
         this.supportsRangeCompact = true;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
         // Backward compatibility: older WASM builds (or older worker bundles) may not
         // implement the compact API yet.
-        const isMissingCompactApi =
-          message.includes("unknown method: getRangeCompact") ||
-          message.toLowerCase().includes("getrangecompact") && message.toLowerCase().includes("not available");
-        if (!isMissingCompactApi) {
+        if (!isMissingGetRangeCompactError(err)) {
           throw err;
         }
         this.supportsRangeCompact = false;

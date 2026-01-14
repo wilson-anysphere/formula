@@ -1,6 +1,15 @@
 import type { CellChange, CellData, CellDataCompact, CellScalar, EngineClient } from "@formula/engine";
 import { fromA1, range0ToA1, type Range0 } from "./a1.ts";
 
+function isMissingGetRangeCompactError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes("unknown method: getRangeCompact")) {
+    return true;
+  }
+  const lower = message.toLowerCase();
+  return lower.includes("getrangecompact") && lower.includes("not available");
+}
+
 function defaultSheetName(sheet?: string): string {
   return sheet ?? "Sheet1";
 }
@@ -101,11 +110,7 @@ export class EngineCellCache {
           compactRows = await engine.getRangeCompact(rangeA1, sheetName);
           this.supportsRangeCompact = true;
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          const isMissingCompactApi =
-            message.includes("unknown method: getRangeCompact") ||
-            (message.toLowerCase().includes("getrangecompact") && message.toLowerCase().includes("not available"));
-          if (!isMissingCompactApi) {
+          if (!isMissingGetRangeCompactError(err)) {
             throw err;
           }
           this.supportsRangeCompact = false;

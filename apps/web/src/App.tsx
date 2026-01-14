@@ -1,4 +1,11 @@
-import { createEngineClient, type CellChange, type CellDataCompact, type CellScalar, type EngineClient } from "@formula/engine";
+import {
+  createEngineClient,
+  isMissingGetRangeCompactError,
+  type CellChange,
+  type CellDataCompact,
+  type CellScalar,
+  type EngineClient,
+} from "@formula/engine";
 import { computeFillEdits, type FillSourceCell } from "@formula/fill-engine";
 import type { CellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
@@ -794,11 +801,7 @@ function EngineDemoApp() {
         supportsRangeCompactRef.current = true;
         return compact;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const isMissingCompactApi =
-          message.includes("unknown method: getRangeCompact") ||
-          (message.toLowerCase().includes("getrangecompact") && message.toLowerCase().includes("not available"));
-        if (!isMissingCompactApi) {
+        if (!isMissingGetRangeCompactError(err)) {
           throw err;
         }
         supportsRangeCompactRef.current = false;
