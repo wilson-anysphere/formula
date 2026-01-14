@@ -227,6 +227,8 @@ Important: **masking is not confidentiality**. Masking is a UX/access-control me
 `CollabSession` exposes permission-aware helpers:
 
 - `session.setPermissions({ role, rangeRestrictions, userId })`
+- `session.getPermissions()`
+- `session.onPermissionsChanged((permissions) => { ... })` (returns `unsubscribe()`)
 - `session.canReadCell({ sheetId, row, col })`
 - `session.canEditCell({ sheetId, row, col })`
 - Convenience role helpers: `session.getRole()`, `session.isReadOnly()`, `session.canComment()`, `session.canShare()`
