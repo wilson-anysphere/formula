@@ -32,6 +32,9 @@ tools/encrypted-ooxml-fixtures/generate.sh standard password fixtures/encrypted/
 
 # Empty password (note the explicit empty string argument):
 tools/encrypted-ooxml-fixtures/generate.sh agile "" fixtures/encrypted/ooxml/plaintext.xlsx /tmp/agile-empty-password.xlsx
+
+# Unicode password (NFC normalization form):
+tools/encrypted-ooxml-fixtures/generate.sh agile "pässwörd" fixtures/encrypted/ooxml/plaintext.xlsx /tmp/agile-unicode.xlsx
 ```
 
 ## Reproducibility / supply-chain safety

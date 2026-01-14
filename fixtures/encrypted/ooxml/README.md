@@ -50,15 +50,16 @@ These fixtures are referenced explicitly by encryption-focused tests (they are n
 ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
 
 - `crates/formula-io/tests/encrypted_ooxml.rs` and `crates/formula-io/tests/encrypted_ooxml_fixtures.rs`:
-  format/encryption detection (should surface `PasswordRequired`).
+  format/encryption detection (should surface `PasswordRequired`, including for the empty-password and
+  Unicode-password fixtures).
 - `crates/formula-io/tests/encrypted_ooxml_fixture_validation.rs`:
   sanity checks that the OLE container and `EncryptionInfo` headers match expectations.
 - `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` (behind `formula-io` feature `encrypted-workbooks`):
-  end-to-end decryption for `agile.xlsx` and `agile-empty-password.xlsx` against `plaintext.xlsx`,
+  end-to-end decryption for `agile.xlsx`, `agile-empty-password.xlsx`, and `agile-unicode.xlsx` against `plaintext.xlsx`,
   plus on-the-fly Agile encryption/decryption (via `ms_offcrypto_writer`) for
   `open_workbook_with_password` / `open_workbook_model_with_password`.
   Includes coverage that a **missing** password is distinct from an **empty** password (`""`), and
-  wrong-password coverage for `standard.xlsx`.
+  that Unicode password normalization matters (NFC vs NFD), and wrong-password coverage for `standard.xlsx`.
 - `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`:
   end-to-end decryption for `agile-large.xlsx` + `standard-large.xlsx` against `plaintext-large.xlsx`
   (exercises multi-segment decryption).
@@ -120,6 +121,7 @@ PLAINTEXT=fixtures/encrypted/ooxml/plaintext.xlsx
 tools/encrypted-ooxml-fixtures/generate.sh agile password "$PLAINTEXT" /tmp/agile.xlsx
 tools/encrypted-ooxml-fixtures/generate.sh standard password "$PLAINTEXT" /tmp/standard.xlsx
 tools/encrypted-ooxml-fixtures/generate.sh agile "" "$PLAINTEXT" /tmp/agile-empty-password.xlsx
+tools/encrypted-ooxml-fixtures/generate.sh agile "pässwörd" "$PLAINTEXT" /tmp/agile-unicode.xlsx
 ```
 
 Notes:

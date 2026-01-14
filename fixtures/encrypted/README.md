@@ -31,7 +31,8 @@ Note: Some encryption tests build minimal encrypted containers programmatically 
 `crates/formula-io/tests/encrypted_xls.rs` and the synthetic container in
 `crates/formula-io/tests/encrypted_ooxml.rs`). For end-to-end “password required” regression tests,
 we also keep small in-repo encrypted OOXML fixtures under `fixtures/encrypted/ooxml/` (including
-multi-segment `*-large.xlsx` variants; see `fixtures/encrypted/ooxml/README.md` for passwords and provenance).
+empty-password + Unicode-password samples and multi-segment `*-large.xlsx` variants; see
+`fixtures/encrypted/ooxml/README.md` for passwords and provenance).
 
 For background on Excel encryption formats and terminology, see `docs/21-encrypted-workbooks.md`.
 

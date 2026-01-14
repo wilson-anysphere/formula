@@ -253,7 +253,8 @@ privacy-sensitive environments.
 Encrypted workbook fixtures are stored under:
 
 - `fixtures/encrypted/ooxml/` (see `fixtures/encrypted/ooxml/README.md` for the full list; includes
-  Agile + Standard encrypted fixtures, an empty-password sample, and `*-large.xlsx` multi-segment variants)
+  Agile + Standard encrypted fixtures, empty-password and Unicode-password samples, and `*-large.xlsx`
+  multi-segment variants)
 
 These are **vendored test fixtures** used by multiple encryption-focused tests (for example under
 `crates/formula-io/tests/*encrypted_ooxml*` and `crates/formula-xlsx/tests/encrypted_ooxml_*.rs`).

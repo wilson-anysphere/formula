@@ -532,6 +532,7 @@ When implementing (or calling) encrypted-workbook support:
   - `fixtures/encrypted/ooxml/standard.xlsx` (Standard encryption; `EncryptionInfo` 3.2)
   - `fixtures/encrypted/ooxml/standard-large.xlsx` (Standard encryption; `EncryptionInfo` 3.2; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/agile-empty-password.xlsx` (Agile encryption; `EncryptionInfo` 4.4; empty password `""`)
+  - `fixtures/encrypted/ooxml/agile-unicode.xlsx` (Agile encryption; `EncryptionInfo` 4.4; Unicode password `pässwörd` in NFC normalization form)
   See `fixtures/encrypted/ooxml/README.md` for more fixture details.
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
   where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
@@ -541,7 +542,7 @@ When implementing (or calling) encrypted-workbook support:
 - `crates/formula-io/tests/encrypted_ooxml.rs` (and `encrypted_ooxml_fixtures.rs`) asserts that
   opening these fixtures without a password surfaces an error mentioning
   encryption/password protection (guards the “password required” UX path).
-- End-to-end decryption (including empty-password and multi-segment coverage) is exercised by
+- End-to-end decryption (including empty-password, Unicode-password, and multi-segment coverage) is exercised by
   `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` and
   `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`.
 - Some encryption coverage is exercised with **synthetic** containers generated directly in tests
