@@ -110,6 +110,53 @@ def _top_delta_list(
     return ", ".join(parts)
 
 
+def _top_delta_rows(
+    prev_rows: Any,
+    cur_rows: Any,
+    *,
+    key: str,
+    max_items: int = 3,
+) -> str | None:
+    """Return a compact delta string for top-N lists stored as [{key, count}, ...]."""
+
+    if not (isinstance(prev_rows, list) and isinstance(cur_rows, list)):
+        return None
+
+    prev_map: dict[str, int] = {}
+    for row in prev_rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get(key)
+        count = row.get("count")
+        if not isinstance(name, str) or not name:
+            continue
+        if isinstance(count, bool) or not isinstance(count, int):
+            continue
+        prev_map[name] = int(count)
+
+    items: list[tuple[str, int]] = []
+    for row in cur_rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get(key)
+        count = row.get("count")
+        if not isinstance(name, str) or not name:
+            continue
+        if isinstance(count, bool) or not isinstance(count, int):
+            continue
+        items.append((name, int(count)))
+    items.sort(key=lambda kv: (-kv[1], kv[0]))
+    top = items[:max_items]
+    if not top:
+        return None
+
+    parts: list[str] = []
+    for name, count in top:
+        prev_i = prev_map.get(name, 0)
+        parts.append(f"{name}={count} ({count - prev_i:+d})")
+    return ", ".join(parts)
+
+
 def trend_delta_markdown(
     entries: list[dict[str, Any]], *, summary: dict[str, Any] | None = None
 ) -> str | None:
@@ -172,6 +219,22 @@ def trend_delta_markdown(
     if top_categories:
         lines.append(f"- Top failure categories: {top_categories}")
 
+    top_functions = _top_delta_rows(
+        prev.get("top_functions_in_failures"),
+        cur.get("top_functions_in_failures"),
+        key="function",
+    )
+    if top_functions:
+        lines.append(f"- Top failing functions: {top_functions}")
+
+    top_features = _top_delta_rows(
+        prev.get("top_features_in_failures"),
+        cur.get("top_features_in_failures"),
+        key="feature",
+    )
+    if top_features:
+        lines.append(f"- Top failing features: {top_features}")
+
     prev_diff = prev.get("diff_totals") or {}
     cur_diff = cur.get("diff_totals") or {}
     lines.append(
@@ -210,4 +273,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

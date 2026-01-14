@@ -24,6 +24,8 @@ class TrendDeltaTests(unittest.TestCase):
             "diff_totals": {"critical": 1, "warning": 2, "info": 3},
             "failures_by_round_trip_failure_kind": {"round_trip_styles": 2},
             "failures_by_category": {"round_trip_diff": 2},
+            "top_functions_in_failures": [{"function": "VLOOKUP", "count": 10}],
+            "top_features_in_failures": [{"feature": "has_vba", "count": 2}],
         }
         cur = {
             "timestamp": "t1",
@@ -42,6 +44,8 @@ class TrendDeltaTests(unittest.TestCase):
             "diff_totals": {"critical": 0, "warning": 1, "info": 3},
             "failures_by_round_trip_failure_kind": {"round_trip_styles": 3},
             "failures_by_category": {"round_trip_diff": 3},
+            "top_functions_in_failures": [{"function": "VLOOKUP", "count": 12}],
+            "top_features_in_failures": [{"feature": "has_vba", "count": 1}],
         }
 
         md = trend_delta_markdown([prev, cur], summary={"timestamp": "t1"})
@@ -57,6 +61,8 @@ class TrendDeltaTests(unittest.TestCase):
         self.assertIn("Diff totals", md)
         self.assertIn("Top round-trip failure kinds", md)
         self.assertIn("Top failure categories", md)
+        self.assertIn("Top failing functions", md)
+        self.assertIn("Top failing features", md)
 
     def test_trend_delta_markdown_skips_when_summary_timestamp_mismatch(self) -> None:
         prev = {"timestamp": "t0"}
@@ -67,4 +73,3 @@ class TrendDeltaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
