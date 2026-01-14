@@ -819,416 +819,423 @@ class DAXEngine {
 
 ## What-If Analysis
 
+The Rust implementations live in:
+
+- Goal Seek: [`what_if/goal_seek.rs`](../crates/formula-engine/src/what_if/goal_seek.rs)
+- Scenario Manager: [`what_if/scenario_manager.rs`](../crates/formula-engine/src/what_if/scenario_manager.rs)
+- Monte Carlo: [`what_if/monte_carlo.rs`](../crates/formula-engine/src/what_if/monte_carlo.rs)
+
+and are exposed as `formula_engine::what_if`.
+
+All What‑If tools are written against the `what_if::WhatIfModel` trait (get/set cells + `recalculate()`), with an adapter for the real calc engine: `what_if::EngineWhatIfModel` (`what_if/engine_model.rs`).
+
+### Common types (used by Goal Seek / Scenarios / Monte Carlo)
+
+Rust:
+
+- `what_if::CellRef` — a `#[serde(transparent)]` A1-style cell reference string. `EngineWhatIfModel` accepts `A1` (uses `default_sheet`) or `Sheet1!A1` / `\'My Sheet\'!A1`.
+- `what_if::CellValue` — scalar-only values: `Number(f64)`, `Text(String)`, `Bool(bool)`, `Blank`.
+- `what_if::WhatIfError<E>` — returned for invalid parameters, non-numeric cells, or underlying model failures.
+
+Proposed JS/WASM DTOs (directly compatible with the current serde shapes):
+
+```ts
+export type CellRef = string;
+
+// Mirrors: what_if::CellValue  (tagged enum; snake_case tags)
+export type CellValue =
+  | { type: "number"; value: number }
+  | { type: "text"; value: string }
+  | { type: "bool"; value: boolean }
+  | { type: "blank" };
+```
+
+Error surface (host contract):
+
+- Rust functions return `Result<T, WhatIfError<_>>`. WASM bindings should throw a JS `Error` whose message is `WhatIfError::to_string()` (e.g. `"invalid parameters: iterations must be > 0"`).
+
 ### Goal Seek
 
-```typescript
-interface GoalSeekParams {
-  targetCell: CellRef;      // Cell containing formula
-  targetValue: number;      // Value we want
-  changingCell: CellRef;    // Cell to adjust
-  maxIterations?: number;
-  tolerance?: number;
+Rust API ([`what_if/goal_seek.rs`](../crates/formula-engine/src/what_if/goal_seek.rs)):
+
+- `GoalSeekParams` (`#[serde(rename_all = "camelCase")]`) — target/changing cells plus numeric tuning knobs.
+- `GoalSeekResult` (`#[serde(rename_all = "camelCase")]`) — final solution + diagnostics.
+- `GoalSeekProgress` (`#[serde(rename_all = "camelCase")]`) — progress event emitted once at iteration 0 and after every Newton/bisection step.
+- `GoalSeekStatus` — `{ Converged, MaxIterationsReached, NoBracketFound, NumericalFailure }`.
+- `GoalSeek::{solve, solve_with_progress}` — synchronous solver (Newton step + finite-difference derivative; falls back to bisection if derivative is too small or non-finite).
+
+Proposed JS/WASM DTOs:
+
+```ts
+export interface GoalSeekParams {
+  targetCell: CellRef;
+  targetValue: number;
+  changingCell: CellRef;
+
+  // Optional in JS; bindings should fill Rust defaults from GoalSeekParams::new()
+  maxIterations?: number; // default 100
+  tolerance?: number; // default 0.001
+  derivativeStep?: number | null; // null/undefined => auto (abs(x)*0.001 or 0.001)
+  minDerivative?: number; // default 1e-10
+  maxBracketExpansions?: number; // default 50
 }
 
-class GoalSeek {
-  async solve(params: GoalSeekParams): Promise<GoalSeekResult> {
-    const { targetCell, targetValue, changingCell } = params;
-    const maxIterations = params.maxIterations || 100;
-    const tolerance = params.tolerance || 0.001;
-    
-    // Get current values
-    let currentInput = this.getCellValue(changingCell) as number;
-    let currentOutput = this.getCellValue(targetCell) as number;
-    
-    // Newton-Raphson method with fallback to bisection
-    let iteration = 0;
-    let prevInput = currentInput;
-    let prevOutput = currentOutput;
-    
-    // Initial perturbation to estimate derivative
-    const delta = Math.abs(currentInput) * 0.001 || 0.001;
-    
-    while (iteration < maxIterations) {
-      const error = currentOutput - targetValue;
-      
-      if (Math.abs(error) < tolerance) {
-        return {
-          success: true,
-          solution: currentInput,
-          iterations: iteration,
-          finalError: error
-        };
-      }
-      
-      // Estimate derivative
-      this.setCellValue(changingCell, currentInput + delta);
-      await this.recalculate();
-      const perturbedOutput = this.getCellValue(targetCell) as number;
-      
-      const derivative = (perturbedOutput - currentOutput) / delta;
-      
-      if (Math.abs(derivative) < 1e-10) {
-        // Derivative too small, try bisection
-        return this.bisectionFallback(params, currentInput);
-      }
-      
-      // Newton-Raphson step
-      prevInput = currentInput;
-      prevOutput = currentOutput;
-      currentInput = currentInput - error / derivative;
-      
-      // Apply new input
-      this.setCellValue(changingCell, currentInput);
-      await this.recalculate();
-      currentOutput = this.getCellValue(targetCell) as number;
-      
-      iteration++;
-    }
-    
-    return {
-      success: false,
-      solution: currentInput,
-      iterations: iteration,
-      finalError: currentOutput - targetValue
-    };
-  }
+// Mirrors Rust GoalSeekStatus serialization today (PascalCase variant strings).
+export type GoalSeekStatus =
+  | "Converged"
+  | "MaxIterationsReached"
+  | "NoBracketFound"
+  | "NumericalFailure";
+
+export interface GoalSeekResult {
+  status: GoalSeekStatus;
+  solution: number;
+  iterations: number;
+  finalOutput: number;
+  finalError: number; // finalOutput - targetValue
 }
+
+export interface GoalSeekProgress {
+  iteration: number;
+  input: number;
+  output: number;
+  error: number;
+}
+
+// Suggested binding shape (sync in Rust; host decides whether to run in a worker):
+//   workbook.goalSeek(params, { defaultSheet?: string, onProgress?: (p: GoalSeekProgress) => void }): GoalSeekResult
 ```
+
+Validation + edge cases (Rust behavior):
+
+- `maxIterations` must be `> 0` → otherwise `WhatIfError::InvalidParams("max_iterations must be > 0")`.
+- `tolerance` must be `> 0` → otherwise `WhatIfError::InvalidParams("tolerance must be > 0")`.
+- `minDerivative` must be `> 0` → otherwise `WhatIfError::InvalidParams("min_derivative must be > 0")`.
+- `changingCell` and `targetCell` must evaluate to `CellValue::Number(..)` → otherwise `WhatIfError::NonNumericCell { cell, value }`.
+- If the starting state already satisfies the target (`|output-targetValue| < tolerance`) the solver returns `status: "Converged"` with `iterations: 0`.
+- If Newton’s method produces a tiny/non-finite derivative, the solver switches to bisection:
+  - If a sign-changing bracket cannot be found within `maxBracketExpansions`, the call succeeds but returns `status: "NoBracketFound"`.
+- If a Newton step would produce a non-finite next input (NaN/±Inf), the call succeeds but returns `status: "NumericalFailure"`.
 
 ### Scenario Manager
 
-```typescript
-interface Scenario {
-  id: string;
+Rust API ([`what_if/scenario_manager.rs`](../crates/formula-engine/src/what_if/scenario_manager.rs)):
+
+- `ScenarioManager` — in-memory store of named scenarios + a “base” snapshot used for restore.
+- `ScenarioId(u64)` (`#[serde(transparent)]`) — scenario identifier.
+- `Scenario` (`#[serde(rename_all = "camelCase")]`) — scenario metadata + `{ CellRef -> CellValue }` map.
+- `SummaryReport` (`#[serde(rename_all = "camelCase")]`) — `"Base"` row + per-scenario outputs.
+
+Key methods:
+
+- `create_scenario(name, changing_cells, values, created_by, comment) -> Result<ScenarioId, WhatIfError<_>>`
+- `delete_scenario(id) -> bool`
+- `apply_scenario(model, id) -> Result<(), WhatIfError<_>>`
+- `restore_base(model) -> Result<(), WhatIfError<_>>`
+- `generate_summary_report(model, result_cells, scenario_ids) -> Result<SummaryReport, WhatIfError<_>>`
+
+Proposed JS/WASM DTOs:
+
+```ts
+// Note: Rust uses u64; WASM bindings should require these to be safe integers.
+export type ScenarioId = number;
+
+// Matches ScenarioManager::create_scenario inputs (parallel arrays).
+export interface CreateScenarioParams {
   name: string;
   changingCells: CellRef[];
-  values: Record<string, CellValue>;  // Cell address -> value
-  created: Date;
+  values: CellValue[]; // must match changingCells length
   createdBy: string;
-  comment?: string;
+  comment?: string | null;
 }
 
-class ScenarioManager {
-  private scenarios: Map<string, Scenario> = new Map();
-  private currentScenario?: string;
-  private baseValues: Map<string, CellValue> = new Map();
-  
-  createScenario(name: string, cells: CellRef[], values: CellValue[]): Scenario {
-    const scenario: Scenario = {
-      id: crypto.randomUUID(),
-      name,
-      changingCells: cells,
-      values: Object.fromEntries(cells.map((c, i) => [cellToAddress(c), values[i]])),
-      created: new Date(),
-      createdBy: this.currentUser
-    };
-    
-    this.scenarios.set(scenario.id, scenario);
-    return scenario;
-  }
-  
-  async applyScenario(scenarioId: string): Promise<void> {
-    const scenario = this.scenarios.get(scenarioId);
-    if (!scenario) throw new Error("Scenario not found");
-    
-    // Save base values if not saved
-    if (this.baseValues.size === 0) {
-      for (const cell of scenario.changingCells) {
-        this.baseValues.set(cellToAddress(cell), this.getCellValue(cell));
-      }
-    }
-    
-    // Apply scenario values
-    for (const [address, value] of Object.entries(scenario.values)) {
-      this.setCellValue(addressToCell(address), value);
-    }
-    
-    this.currentScenario = scenarioId;
-    await this.recalculate();
-  }
-  
-  async generateSummaryReport(
-    resultCells: CellRef[],
-    scenarioIds: string[]
-  ): Promise<SummaryReport> {
-    const results: Record<string, Record<string, CellValue>> = {};
-    
-    // Get base results
-    await this.restoreBase();
-    results["Base"] = {};
-    for (const cell of resultCells) {
-      results["Base"][cellToAddress(cell)] = this.getCellValue(cell);
-    }
-    
-    // Get scenario results
-    for (const id of scenarioIds) {
-      await this.applyScenario(id);
-      const scenario = this.scenarios.get(id)!;
-      results[scenario.name] = {};
-      for (const cell of resultCells) {
-        results[scenario.name][cellToAddress(cell)] = this.getCellValue(cell);
-      }
-    }
-    
-    await this.restoreBase();
-    
-    return { changingCells: scenarioIds[0] ? this.scenarios.get(scenarioIds[0])!.changingCells : [], resultCells, results };
-  }
-}
-```
-
-### Solver
-
-```typescript
-interface SolverProblem {
-  objective: CellRef;
-  objectiveType: "maximize" | "minimize" | "targetValue";
-  targetValue?: number;
+export interface Scenario {
+  id: ScenarioId;
+  name: string;
   changingCells: CellRef[];
-  constraints: Constraint[];
-  options: SolverOptions;
+  values: Record<CellRef, CellValue>;
+  createdMs: number; // ms since Unix epoch
+  createdBy: string;
+  comment?: string | null;
 }
 
-interface Constraint {
-  cell: CellRef;
-  relation: "<=" | ">=" | "=" | "int" | "bin";
-  value?: number;
+export interface SummaryReport {
+  changingCells: CellRef[];
+  resultCells: CellRef[];
+  // scenarioName -> (cell -> value). Always includes "Base".
+  results: Record<string, Record<CellRef, CellValue>>;
 }
 
-interface SolverOptions {
-  maxTime: number;
-  precision: number;
-  assumeNonNegative: boolean;
-  method: "simplex" | "grg" | "evolutionary";
-}
-
-class Solver {
-  async solve(problem: SolverProblem): Promise<SolverResult> {
-    switch (problem.options.method) {
-      case "simplex":
-        return this.solveSimplex(problem);
-      case "grg":
-        return this.solveGRG(problem);
-      case "evolutionary":
-        return this.solveEvolutionary(problem);
-    }
-  }
-  
-  private async solveGRG(problem: SolverProblem): Promise<SolverResult> {
-    // Generalized Reduced Gradient method for nonlinear problems
-    const vars = problem.changingCells;
-    const n = vars.length;
-    
-    // Initialize
-    let x = vars.map(v => this.getCellValue(v) as number);
-    let bestObjective = await this.evaluateObjective(problem, x);
-    
-    const maxIterations = 1000;
-    const tolerance = problem.options.precision;
-    
-    for (let iter = 0; iter < maxIterations; iter++) {
-      // Compute gradient
-      const gradient = await this.computeGradient(problem, x);
-      
-      // Compute reduced gradient (accounting for constraints)
-      const reducedGradient = this.computeReducedGradient(gradient, x, problem.constraints);
-      
-      // Check convergence
-      if (this.norm(reducedGradient) < tolerance) {
-        return {
-          success: true,
-          solution: x,
-          objectiveValue: bestObjective,
-          iterations: iter
-        };
-      }
-      
-      // Line search
-      const direction = problem.objectiveType === "maximize" 
-        ? reducedGradient 
-        : reducedGradient.map(g => -g);
-      
-      const stepSize = await this.lineSearch(problem, x, direction);
-      
-      // Update
-      x = x.map((xi, i) => xi + stepSize * direction[i]);
-      
-      // Apply constraints
-      x = this.projectToFeasible(x, problem.constraints);
-      
-      // Update cells and recalculate
-      for (let i = 0; i < n; i++) {
-        this.setCellValue(vars[i], x[i]);
-      }
-      await this.recalculate();
-      
-      bestObjective = await this.evaluateObjective(problem, x);
-    }
-    
-    return {
-      success: false,
-      solution: x,
-      objectiveValue: bestObjective,
-      iterations: maxIterations
-    };
-  }
-}
+// Suggested binding shape:
+//   const mgr = workbook.createScenarioManager();
+//   mgr.createScenario(params: CreateScenarioParams) -> ScenarioId
+//   mgr.applyScenario(id) / mgr.restoreBase()
+//   mgr.generateSummaryReport({ resultCells, scenarioIds }) -> SummaryReport
 ```
 
----
+Validation + edge cases (Rust behavior):
 
-## Monte Carlo Simulation
+- `create_scenario`: `changing_cells.len()` must equal `values.len()` → `WhatIfError::InvalidParams("changing_cells and values must have equal length")`.
+- Scenario names are not required to be unique. **If two scenarios share a name**, `generate_summary_report` will overwrite the earlier entry in `results` (it’s a `HashMap<String, ...>` keyed by name).
+- `apply_scenario` / `generate_summary_report` with an unknown `ScenarioId` → `WhatIfError::InvalidParams("scenario not found")`.
+- `restore_base` is a no-op if no scenario has been applied yet (`base_values` empty).
+- Base snapshot semantics: applying multiple scenarios captures the **union** of their `changing_cells` in `base_values` so `restore_base` can fully return to the original state even if scenarios touch different inputs.
+- `restore_base` does **not** clear `base_values`; hosts can call `clear_base_values()` to reset the snapshot explicitly.
 
-```typescript
-interface SimulationConfig {
+### Monte Carlo Simulation
+
+Rust API ([`what_if/monte_carlo.rs`](../crates/formula-engine/src/what_if/monte_carlo.rs)):
+
+- `SimulationConfig` (`#[serde(rename_all = "camelCase")]`), `InputDistribution`, `Distribution`, `CorrelationMatrix`
+- `MonteCarloEngine::{run_simulation, run_simulation_with_progress}`
+- `SimulationProgress` (`completedIterations`, `totalIterations`)
+- `SimulationResult` (`outputStats`, `outputSamples`)
+- `OutputStatistics` (`mean`, `median`, `stdDev`, `percentiles`, `histogram`, …)
+
+Proposed JS/WASM DTOs (field names match Rust’s serde output):
+
+```ts
+export interface SimulationConfig {
   iterations: number;
   inputDistributions: InputDistribution[];
   outputCells: CellRef[];
-  seed?: number;
-  correlations?: CorrelationMatrix;
+
+  // Optional in JS; Rust defaults: seed=0, histogramBins=50
+  seed?: number; // u64; require a safe integer to preserve determinism
+  correlations?: CorrelationMatrix | null;
+  histogramBins?: number;
 }
 
-interface InputDistribution {
+export interface InputDistribution {
   cell: CellRef;
   distribution: Distribution;
 }
 
-type Distribution =
+// Mirrors Rust: #[serde(tag = "type", rename_all = "snake_case")]
+export type Distribution =
   | { type: "normal"; mean: number; stdDev: number }
   | { type: "uniform"; min: number; max: number }
   | { type: "triangular"; min: number; mode: number; max: number }
   | { type: "lognormal"; mean: number; stdDev: number }
   | { type: "discrete"; values: number[]; probabilities: number[] }
-  | { type: "beta"; alpha: number; beta: number; min?: number; max?: number }
+  | { type: "beta"; alpha: number; beta: number; min?: number | null; max?: number | null }
   | { type: "exponential"; rate: number }
   | { type: "poisson"; lambda: number };
 
-class MonteCarloEngine {
-  async runSimulation(config: SimulationConfig): Promise<SimulationResult> {
-    const results: SimulationIteration[] = [];
-    const rng = new SeededRandom(config.seed);
-    
-    // Generate correlated random numbers if needed
-    const correlatedSamples = config.correlations
-      ? this.generateCorrelatedSamples(config, rng)
-      : null;
-    
-    for (let i = 0; i < config.iterations; i++) {
-      // Generate input values
-      const inputs: Record<string, number> = {};
-      
-      for (let j = 0; j < config.inputDistributions.length; j++) {
-        const { cell, distribution } = config.inputDistributions[j];
-        const address = cellToAddress(cell);
-        
-        if (correlatedSamples) {
-          inputs[address] = correlatedSamples[i][j];
-        } else {
-          inputs[address] = this.sampleDistribution(distribution, rng);
-        }
-        
-        this.setCellValue(cell, inputs[address]);
-      }
-      
-      // Recalculate
-      await this.recalculate();
-      
-      // Collect outputs
-      const outputs: Record<string, number> = {};
-      for (const cell of config.outputCells) {
-        outputs[cellToAddress(cell)] = this.getCellValue(cell) as number;
-      }
-      
-      results.push({ iteration: i, inputs, outputs });
-      
-      // Progress callback
-      if (i % 100 === 0) {
-        this.reportProgress(i / config.iterations);
-      }
-    }
-    
-    return this.analyzeResults(results, config);
-  }
-  
-  private generateCorrelatedSamples(
-    config: SimulationConfig,
-    rng: SeededRandom
-  ): number[][] {
-    const n = config.iterations;
-    const k = config.inputDistributions.length;
-    const corr = config.correlations!;
-    
-    // Cholesky decomposition of correlation matrix
-    const L = this.choleskyDecomposition(corr.matrix);
-    
-    // Generate independent standard normal samples
-    const Z: number[][] = [];
-    for (let i = 0; i < n; i++) {
-      Z.push(Array(k).fill(0).map(() => this.standardNormal(rng)));
-    }
-    
-    // Apply correlation
-    const correlatedZ: number[][] = [];
-    for (let i = 0; i < n; i++) {
-      const row = Array(k).fill(0);
-      for (let j = 0; j < k; j++) {
-        for (let m = 0; m <= j; m++) {
-          row[j] += L[j][m] * Z[i][m];
-        }
-      }
-      correlatedZ.push(row);
-    }
-    
-    // Transform to target distributions
-    const samples: number[][] = [];
-    for (let i = 0; i < n; i++) {
-      const row: number[] = [];
-      for (let j = 0; j < k; j++) {
-        const u = this.normalCDF(correlatedZ[i][j]);
-        row.push(this.inverseDistribution(config.inputDistributions[j].distribution, u));
-      }
-      samples.push(row);
-    }
-    
-    return samples;
-  }
-  
-  private analyzeResults(
-    results: SimulationIteration[],
-    config: SimulationConfig
-  ): SimulationResult {
-    const outputStats: Record<string, OutputStatistics> = {};
-    
-    for (const cell of config.outputCells) {
-      const address = cellToAddress(cell);
-      const values = results.map(r => r.outputs[address]);
-      
-      outputStats[address] = {
-        mean: this.mean(values),
-        median: this.median(values),
-        stdDev: this.stdDev(values),
-        min: Math.min(...values),
-        max: Math.max(...values),
-        percentiles: {
-          5: this.percentile(values, 5),
-          10: this.percentile(values, 10),
-          25: this.percentile(values, 25),
-          75: this.percentile(values, 75),
-          90: this.percentile(values, 90),
-          95: this.percentile(values, 95)
-        },
-        histogram: this.buildHistogram(values, 50)
-      };
-    }
-    
-    return {
-      iterations: results.length,
-      outputStats,
-      rawResults: results
-    };
-  }
+export interface CorrelationMatrix {
+  matrix: number[][];
 }
+
+export interface SimulationProgress {
+  completedIterations: number;
+  totalIterations: number;
+}
+
+export interface HistogramBin {
+  start: number;
+  end: number;
+  count: number;
+}
+
+export interface Histogram {
+  bins: HistogramBin[];
+}
+
+export interface OutputStatistics {
+  mean: number;
+  median: number;
+  stdDev: number; // sample std dev (n-1); 0 when n<=1
+  min: number;
+  max: number;
+  // Keys are the fixed percentiles computed by Rust: 5,10,25,75,90,95.
+  // (Serialized as an object; keys will be strings in JS.)
+  percentiles: Record<string, number>;
+  histogram: Histogram;
+}
+
+export interface SimulationResult {
+  iterations: number;
+  outputStats: Record<CellRef, OutputStatistics>;
+  // Raw samples for charting: output cell -> length=iterations values.
+  outputSamples: Record<CellRef, number[]>;
+}
+
+// Suggested binding shape:
+//   workbook.runMonteCarloSimulation(config, { defaultSheet?: string, onProgress?: (p: SimulationProgress) => void }): SimulationResult
 ```
+
+Validation + edge cases (Rust behavior):
+
+- `iterations` must be `> 0` → `WhatIfError::InvalidParams("iterations must be > 0")`.
+- `histogramBins` must be `> 0` → `WhatIfError::InvalidParams("histogram_bins must be > 0")`.
+- `outputCells` must be non-empty → `WhatIfError::InvalidParams("output_cells must not be empty")`.
+- Every `Distribution` is validated up-front:
+  - normal/lognormal: `stdDev >= 0`
+  - uniform: `min <= max`
+  - triangular: `min <= mode <= max`
+  - discrete: `values.len() > 0`, equal lengths, all `probabilities >= 0`, and `sum(probabilities) > 0` (does not need to equal 1)
+  - beta: `alpha > 0 && beta > 0`, and if both `min/max` set then `min <= max`
+  - exponential: `rate > 0`
+  - poisson: `lambda >= 0`
+- Output cells must evaluate to numbers each iteration; otherwise `WhatIfError::NonNumericCell { cell, value }`.
+- Correlations:
+  - `correlations.matrix` must be square, symmetric, diagonal=1, entries in `[-1, 1]`, and **positive definite** (Cholesky decomposition).
+  - Correlated sampling is currently supported **only** when *all* input distributions are `{ type: "normal", ... }` → otherwise `InvalidParams("correlated sampling is currently supported only for normal distributions")`.
+- Histogram edge cases:
+  - If all samples are identical (`min == max`), Rust returns a single bin with `count = iterations`.
+  - If samples are empty or min/max are non-finite (shouldn’t happen for valid runs), histogram bins are empty.
+
+---
+
+## Solver (Optimization)
+
+The Rust implementation lives in [`solver/mod.rs`](../crates/formula-engine/src/solver/mod.rs) (and supporting files under `crates/formula-engine/src/solver/*`) and is exposed as `formula_engine::solver`.
+
+This is a small-but-functional Excel-like Solver with three methods:
+
+- **Simplex** (`SolveMethod::Simplex`) — linear programming (LP) with optional integer/binary variables (branch-and-bound).
+- **GRG Nonlinear** (`SolveMethod::GrgNonlinear`) — penalty-based gradient method (continuous variables only).
+- **Evolutionary** (`SolveMethod::Evolutionary`) — genetic algorithm (supports integer/binary; suitable for non-smooth problems).
+
+### Rust API surface
+
+Core types ([`solver/mod.rs`](../crates/formula-engine/src/solver/mod.rs)):
+
+- `SolverModel` trait — model abstraction (`get_vars`/`set_vars`/`recalc`/`objective`/`constraints`).
+- `EngineSolverModel` ([`solver/engine_model.rs`](../crates/formula-engine/src/solver/engine_model.rs)) — adapter that binds the solver to `formula_engine::Engine` cell references.
+- `SolverProblem` — `{ objective: Objective, variables: Vec<VarSpec>, constraints: Vec<Constraint> }`
+- `Objective` / `ObjectiveKind` — maximize/minimize/target (with `targetValue` + `targetTolerance`)
+- `VarSpec` / `VarType` — bounds + variable domain (`Continuous | Integer | Binary`)
+- `Constraint` / `Relation` — constraint index + relation + RHS (+ tolerance)
+- `SolveOptions` — method selection, iteration limit, numeric tolerance, method-specific options, optional progress callback.
+- `SolveOutcome` / `SolveStatus` — solution + status (`Optimal | Feasible | Infeasible | Unbounded | IterationLimit | Cancelled`)
+
+### Proposed JS/WASM DTOs
+
+Solver types are not currently `serde` DTOs in Rust, so WASM bindings will need small wrapper DTOs that map into the Rust structs.
+
+```ts
+export type SolveMethod = "simplex" | "grgNonlinear" | "evolutionary";
+export type ObjectiveKind = "maximize" | "minimize" | "target";
+export type Relation = "lessEqual" | "greaterEqual" | "equal";
+export type VarType = "continuous" | "integer" | "binary";
+
+export interface Objective {
+  kind: ObjectiveKind;
+  targetValue?: number; // required for kind="target"
+  targetTolerance?: number; // defaults to 0 (Rust clamps to >=0)
+}
+
+export interface VarSpec {
+  // Use -Infinity/Infinity for unbounded (maps directly to f64 bounds in Rust).
+  lower: number;
+  upper: number;
+  varType: VarType;
+}
+
+export interface Constraint {
+  // Index into the model's constraint vector / constraintCells list.
+  index: number;
+  relation: Relation;
+  rhs: number;
+  tolerance?: number; // default 1e-8 (Rust clamps to >=0)
+}
+
+export interface SolverProblem {
+  objective: Objective;
+  variables: VarSpec[];
+  constraints: Constraint[];
+}
+
+export interface SimplexOptions {
+  maxPivots?: number; // default 10_000
+  maxBnbNodes?: number; // default 1_000
+  integerTolerance?: number; // default 1e-6
+}
+
+export interface GrgOptions {
+  initialStep?: number; // default 1.0
+  diffStep?: number; // default 1e-5
+  penaltyWeight?: number; // default 10.0
+  penaltyGrowth?: number; // default 2.0
+  lineSearchShrink?: number; // default 0.5
+  lineSearchMaxSteps?: number; // default 20
+}
+
+export interface EvolutionaryOptions {
+  populationSize?: number; // default 40
+  eliteCount?: number; // default 4
+  mutationRate?: number; // default 0.2
+  crossoverRate?: number; // default 0.7
+  penaltyWeight?: number; // default 50.0
+  seed?: number; // default 0x5EED_5EED_1234_5678 (u64; require safe integer)
+}
+
+export interface SolveOptions {
+  method: SolveMethod; // default "grgNonlinear"
+  maxIterations?: number; // default 500
+  tolerance?: number; // default 1e-8
+  applySolution?: boolean; // default true
+  simplex?: SimplexOptions;
+  grg?: GrgOptions;
+  evolutionary?: EvolutionaryOptions;
+}
+
+export interface SolveProgress {
+  iteration: number;
+  bestObjective: number;
+  currentObjective: number;
+  maxConstraintViolation: number;
+}
+
+export type SolveStatus =
+  | "Optimal"
+  | "Feasible"
+  | "Infeasible"
+  | "Unbounded"
+  | "IterationLimit"
+  | "Cancelled";
+
+export interface SolveOutcome {
+  status: SolveStatus;
+  iterations: number;
+  originalVars: number[];
+  bestVars: number[];
+  bestObjective: number;
+  maxConstraintViolation: number;
+}
+
+// Suggested binding shape (Engine-backed):
+//   workbook.solve(
+//     {
+//       defaultSheet?: string,
+//       objectiveCell: CellRef,
+//       variableCells: CellRef[],
+//       constraintCells: CellRef[],
+//       problem: SolverProblem,
+//       options?: SolveOptions,
+//       onProgress?: (p: SolveProgress) => boolean, // return false to cancel
+//     }
+//   ): SolveOutcome
+```
+
+Validation + edge cases (Rust behavior):
+
+- `Solver::solve` validates:
+  - `problem.variables.len()` must equal `model.num_vars()` → otherwise a `SolverError` with message like `"variable spec count (X) does not match model vars (Y)"`.
+  - Every `Constraint.index` must be `< model.num_constraints()` → otherwise `SolverError("constraint index ... out of range ...")`.
+- Integer/binary normalization:
+  - `VarType::Integer`: bounds are normalized to `ceil(lower)` / `floor(upper)`. If `lower > upper` after normalization → `SolverError("integer var {idx} has empty bounds [...]")`.
+  - `VarType::Binary`: bounds are forced to `[0, 1]` regardless of input.
+- Simplex-specific:
+  - If a variable has a non-finite lower bound, simplex treats it as `0.0` (Excel-like “Assume Non-Negative” default).
+  - Simplex infers a linear model by finite differences at the starting point; if the objective or any constraint is non-finite during inference it returns a `SolverError` (not a partial outcome).
+- GRG-specific: only `Continuous` variables participate in the gradient; integer/binary vars are effectively held fixed (use Simplex or Evolutionary for mixed-integer problems).
+- Progress + cancellation:
+  - `SolveOptions.progress` returns `false` to cancel; solver returns `SolveStatus::Cancelled` with the best solution found so far.
+- Engine integration (`EngineSolverModel`):
+  - Decision variables must be coercible to numbers at construction time; otherwise `EngineSolverModel::new` fails with a `SolverError` like `"cell Sheet1!A1 is not numeric (...)"`.
+  - Objective and constraint cells are coerced per-iteration; non-numeric values become `NaN` (methods treat non-finite values as very bad via a large penalty).
 
 ---
 
