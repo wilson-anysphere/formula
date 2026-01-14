@@ -18,6 +18,9 @@ import {
 } from "../merge-tauri-updater-manifests.mjs";
 import {
   ActionableError,
+  filenameFromUrl,
+  findPlatformsObject,
+  isPrimaryBundleAssetName,
   normalizeVersion as normalizeVersionForVerify,
   validateLatestJson,
 } from "../verify-desktop-release-assets.mjs";
@@ -50,6 +53,37 @@ test("normalizeVersion strips refs/tags + leading v", () => {
   // Keep behavior consistent across scripts.
   assert.equal(normalizeVersionForMerge("v0.1.0"), "0.1.0");
   assert.equal(normalizeVersionForMerge("refs/tags/v0.1.0"), "0.1.0");
+});
+
+test("verify-desktop-release-assets helpers: filenameFromUrl extracts decoded filenames", () => {
+  assert.equal(
+    filenameFromUrl(
+      "https://example.invalid/download/Formula%20Desktop_0.1.0_x64_en-US.msi?foo=bar",
+    ),
+    "Formula Desktop_0.1.0_x64_en-US.msi",
+  );
+  assert.equal(filenameFromUrl("https://example.invalid/download/latest.json#fragment"), "latest.json");
+  assert.equal(filenameFromUrl("not-a-url/Formula_0.1.0_x64_en-US.msi?x=y"), "Formula_0.1.0_x64_en-US.msi");
+});
+
+test("verify-desktop-release-assets helpers: findPlatformsObject locates nested platforms maps", () => {
+  const nested = {
+    foo: { bar: { platforms: { "windows-x86_64": { url: "https://example.invalid/x.msi" } } } },
+  };
+  const found = findPlatformsObject(nested);
+  assert.ok(found, "expected to find platforms object");
+  assert.deepEqual(found?.path, ["foo", "bar", "platforms"]);
+  assert.ok("windows-x86_64" in found.platforms);
+});
+
+test("verify-desktop-release-assets helpers: isPrimaryBundleAssetName matches expected bundle extensions", () => {
+  assert.equal(isPrimaryBundleAssetName("Formula_0.1.0_x64_en-US.msi"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula_0.1.0_x64_en-US.exe"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula_0.1.0_universal.dmg"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula_0.1.0.AppImage"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula_0.1.0_amd64.deb"), true);
+  assert.equal(isPrimaryBundleAssetName("latest.json"), false);
+  assert.equal(isPrimaryBundleAssetName("latest.json.sig"), false);
 });
 
 test("mergeTauriUpdaterManifests unions platform keys and normalizes version", async () => {
