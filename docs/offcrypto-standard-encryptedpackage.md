@@ -53,13 +53,15 @@ See also:
 
 ## Implementation references in this repo
 
-- **`formula-io` `EncryptedPackage` decryptors**:
+- **`formula-io` `EncryptedPackage` decryptors (baseline AES-ECB)**:
   - `crates/formula-io/src/offcrypto/encrypted_package.rs`
     - `decrypt_encrypted_package_standard_aes_to_writer` (streaming Standard AES-ECB; no IV)
     - `decrypt_standard_encrypted_package_stream` (buffered Standard AES-ECB; no IV; truncates to `orig_size`)
-- **`formula-offcrypto` Standard AES-ECB helper**:
-  - `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
-- **More permissive Standard decryptor (handles additional variants)**:
+- **`formula-offcrypto` Standard AES helpers**:
+  - `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb` (baseline AES-ECB)
+  - `crates/formula-offcrypto/src/encrypted_package.rs`: `decrypt_standard_encrypted_package_auto` (ECB vs segmented CBC auto-detect)
+- **More permissive Standard decryptors (handles additional variants)**:
+  - `crates/formula-io/src/encrypted_ooxml.rs` (tries multiple `EncryptedPackage` layouts for compatibility)
   - `crates/formula-office-crypto/src/standard.rs`
 
 ## Normative spec references (MS-OFFCRYPTO)
@@ -136,8 +138,11 @@ iv_i = SHA1(salt || LE32(i))[0..16]
 ```
 
 This is **not** the Excel-default Standard AES scheme (Excel uses AES-ECB). `formula-io`
-intentionally implements the baseline AES-ECB behavior only; if you need to handle additional
-producer variants, see `crates/formula-office-crypto/src/standard.rs`.
+implements baseline AES-ECB primitives in `crates/formula-io/src/offcrypto/encrypted_package.rs`,
+but higher-level decryptors in this repo include CBC-segmented compatibility fallbacks (notably
+`crates/formula-offcrypto/src/encrypted_package.rs` and `crates/formula-io/src/encrypted_ooxml.rs`).
+`crates/formula-office-crypto` is the most permissive Standard decryptor for unusual producer
+variants.
 
 ## Padding + truncation (do not trust PKCS#7)
 
