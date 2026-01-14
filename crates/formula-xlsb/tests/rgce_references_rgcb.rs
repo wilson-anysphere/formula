@@ -115,6 +115,19 @@ fn ptg_err_literal(code: u8) -> Vec<u8> {
     vec![0x1C, code]
 }
 
+fn assert_invalid_input_contains(err: Error, needle: &str) {
+    match err {
+        Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains(needle),
+                "expected error message to contain {needle:?}, got: {io_err}"
+            );
+        }
+        other => panic!("expected Error::Io, got {other:?}"),
+    }
+}
+
 fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open xlsb zip");
     let mut entry = zip
@@ -586,4 +599,258 @@ fn patch_sheet_bin_streaming_rejects_brt_fmla_error_update_that_requires_rgcb_wi
         }
         other => panic!("expected Error::Io, got {other:?}"),
     }
+}
+
+#[test]
+fn patch_sheet_bin_rejects_brt_fmla_string_rgce_replacement_when_existing_rgcb_present_without_new_rgcb(
+) {
+    // Seed a value cell, convert it to a formula string cell that carries non-empty rgcb bytes,
+    // then attempt to replace the rgce without explicitly providing new_rgcb.
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_inline_string(0, 0, "Hello");
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let sheet_with_rgcb = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(fixture_builder::rgce::array_placeholder()),
+            new_rgcb: Some(vec![0xAA]),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("convert value cell to formula string with rgcb");
+
+    let err = patch_sheet_bin(
+        &sheet_with_rgcb,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(ptg_str_literal("Hello")),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when replacing rgce without new_rgcb");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+}
+
+#[test]
+fn patch_sheet_bin_streaming_rejects_brt_fmla_string_rgce_replacement_when_existing_rgcb_present_without_new_rgcb(
+) {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_inline_string(0, 0, "Hello");
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let sheet_with_rgcb = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(fixture_builder::rgce::array_placeholder()),
+            new_rgcb: Some(vec![0xAA]),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("convert value cell to formula string with rgcb");
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(
+        Cursor::new(&sheet_with_rgcb),
+        &mut out,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(ptg_str_literal("Hello")),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when streaming replace rgce without new_rgcb");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+}
+
+#[test]
+fn patch_sheet_bin_rejects_brt_fmla_bool_rgce_replacement_when_existing_rgcb_present_without_new_rgcb(
+) {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_bool(0, 0, true);
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let sheet_with_rgcb = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Bool(true),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(fixture_builder::rgce::array_placeholder()),
+            new_rgcb: Some(vec![0xAA]),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("convert value cell to formula bool with rgcb");
+
+    let err = patch_sheet_bin(
+        &sheet_with_rgcb,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Bool(true),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(ptg_bool_literal(true)),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when replacing rgce without new_rgcb");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+}
+
+#[test]
+fn patch_sheet_bin_streaming_rejects_brt_fmla_bool_rgce_replacement_when_existing_rgcb_present_without_new_rgcb(
+) {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_bool(0, 0, true);
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let sheet_with_rgcb = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Bool(true),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(fixture_builder::rgce::array_placeholder()),
+            new_rgcb: Some(vec![0xAA]),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("convert value cell to formula bool with rgcb");
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(
+        Cursor::new(&sheet_with_rgcb),
+        &mut out,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Bool(true),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(ptg_bool_literal(true)),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when streaming replace rgce without new_rgcb");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+}
+
+#[test]
+fn patch_sheet_bin_rejects_brt_fmla_error_rgce_replacement_when_existing_rgcb_present_without_new_rgcb(
+) {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_error(0, 0, 0x2A); // #N/A
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let sheet_with_rgcb = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Error(0x2A),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(fixture_builder::rgce::array_placeholder()),
+            new_rgcb: Some(vec![0xAA]),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("convert value cell to formula error with rgcb");
+
+    let err = patch_sheet_bin(
+        &sheet_with_rgcb,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Error(0x2A),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(ptg_err_literal(0x2A)),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when replacing rgce without new_rgcb");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+}
+
+#[test]
+fn patch_sheet_bin_streaming_rejects_brt_fmla_error_rgce_replacement_when_existing_rgcb_present_without_new_rgcb(
+) {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_error(0, 0, 0x2A); // #N/A
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let sheet_with_rgcb = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Error(0x2A),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(fixture_builder::rgce::array_placeholder()),
+            new_rgcb: Some(vec![0xAA]),
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("convert value cell to formula error with rgcb");
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(
+        Cursor::new(&sheet_with_rgcb),
+        &mut out,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Error(0x2A),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(ptg_err_literal(0x2A)),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when streaming replace rgce without new_rgcb");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
 }
