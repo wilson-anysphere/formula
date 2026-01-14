@@ -210,6 +210,32 @@ function unwrapSingletonId(value: unknown): unknown {
   return value;
 }
 
+function unwrapSingletonArrayWrapper(value: unknown): unknown[] | null {
+  let current = value;
+  for (let depth = 0; depth < 4; depth++) {
+    if (Array.isArray(current)) {
+      // Some interop layers wrap arrays as singleton arrays-of-arrays.
+      if (current.length === 1 && Array.isArray(current[0])) {
+        current = current[0];
+        continue;
+      }
+      return current;
+    }
+    // Some interop layers wrap arrays as `{0: [...]}` objects.
+    if (
+      isRecord(current) &&
+      Object.keys(current).length === 1 &&
+      Object.prototype.hasOwnProperty.call(current, "0") &&
+      Array.isArray((current as JsonRecord)["0"])
+    ) {
+      current = (current as JsonRecord)["0"];
+      continue;
+    }
+    return null;
+  }
+  return Array.isArray(current) ? current : null;
+}
+
 function parseSheetId(value: unknown): string | undefined {
   const unwrapped = unwrapSingletonId(value);
   if (unwrapped == null) return undefined;
@@ -874,8 +900,9 @@ export function convertModelImageStoreToUiImageStore(modelImagesJson: unknown): 
 export function convertModelWorksheetDrawingsToUiDrawingObjects(modelWorksheetJson: unknown): DrawingObject[] {
   if (!isRecord(modelWorksheetJson)) return [];
   const sheetId = parseSheetId(pick(modelWorksheetJson, ["id", "sheet_id", "sheetId"]));
-  const drawingsValue = pick(modelWorksheetJson, ["drawings"]);
-  if (!Array.isArray(drawingsValue)) return [];
+  const drawingsValueRaw = pick(modelWorksheetJson, ["drawings"]);
+  const drawingsValue = unwrapSingletonArrayWrapper(drawingsValueRaw);
+  if (!drawingsValue) return [];
 
   const out: DrawingObject[] = [];
   for (const obj of drawingsValue) {
@@ -1373,18 +1400,19 @@ export function convertModelWorkbookDrawingsToUiDrawingLayer(modelWorkbookJson: 
   const images = convertModelImageStoreToUiImageStore(pick(modelWorkbookJson, ["images"]));
   const drawingsBySheetName: Record<string, DrawingObject[]> = {};
 
-  const sheetsValue = pick(modelWorkbookJson, ["sheets"]);
-  if (Array.isArray(sheetsValue)) {
-    for (const sheet of sheetsValue) {
+  const sheetsValueRaw = pick(modelWorkbookJson, ["sheets"]);
+  const sheetsArray = unwrapSingletonArrayWrapper(sheetsValueRaw);
+  if (sheetsArray) {
+    for (const sheet of sheetsArray) {
       if (!isRecord(sheet)) continue;
       const name = readOptionalString(pick(sheet, ["name"])) ?? "";
       if (!name) continue;
       drawingsBySheetName[name] = convertModelWorksheetDrawingsToUiDrawingObjects(sheet);
     }
-  } else if (isRecord(sheetsValue)) {
+  } else if (isRecord(sheetsValueRaw)) {
     // Some workbook JSON snapshots represent sheets as a keyed object rather than
     // an array (e.g. `{ sheets: { Sheet1: {...}, Sheet2: {...} } }`).
-    for (const [key, sheet] of Object.entries(sheetsValue)) {
+    for (const [key, sheet] of Object.entries(sheetsValueRaw)) {
       if (!isRecord(sheet)) continue;
       const name = readOptionalString(pick(sheet, ["name"])) ?? key;
       if (!name) continue;
