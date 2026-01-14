@@ -155,6 +155,72 @@ class CompatScorecardTests(unittest.TestCase):
             self.assertIn("| L2 | Calculate (Excel oracle) | FAIL | 95.00% | 95 / 100 |", md)
             self.assertIn("| L4 | Round-trip (corpus) | FAIL | 70.00% | 7 / 10 |", md)
 
+    def test_zero_totals_render_as_missing(self) -> None:
+        scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
+        self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            corpus_path = tmp_path / "corpus-summary.json"
+            oracle_path = tmp_path / "mismatch-report.json"
+            out_md = tmp_path / "scorecard.md"
+
+            corpus_payload = {
+                "timestamp": "unit-test",
+                "counts": {
+                    "total": 0,
+                    "open_ok": 0,
+                    "calculate_ok": 0,
+                    "render_ok": 0,
+                    "round_trip_ok": 0,
+                },
+            }
+            corpus_path.write_text(
+                json.dumps(corpus_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            oracle_payload = {
+                "schemaVersion": 1,
+                "summary": {
+                    "totalCases": 0,
+                    "mismatches": 0,
+                },
+            }
+            oracle_path.write_text(
+                json.dumps(oracle_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(scorecard_py),
+                    "--corpus-summary",
+                    str(corpus_path),
+                    "--oracle-report",
+                    str(oracle_path),
+                    "--out-md",
+                    str(out_md),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            if proc.returncode != 0:
+                self.fail(
+                    f"compat_scorecard.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            md = out_md.read_text(encoding="utf-8")
+            self.assertIn("| L1 | Read (corpus open) | MISSING |", md)
+            self.assertIn("| L2 | Calculate (Excel oracle) | MISSING |", md)
+            self.assertIn("| L4 | Round-trip (corpus) | MISSING |", md)
+            self.assertIn("no cases", md)
+            self.assertIn("no workbooks", md)
+
     def test_missing_inputs_exits_nonzero(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
         self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
