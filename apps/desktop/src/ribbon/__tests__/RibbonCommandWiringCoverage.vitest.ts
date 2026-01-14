@@ -8,6 +8,8 @@ import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutS
 import { panelRegistry } from "../../panels/panelRegistry";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands";
 import { registerFormatPainterCommand } from "../../commands/formatPainterCommand";
+import { registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands";
+import { registerDataQueriesCommands } from "../../commands/registerDataQueriesCommands";
 
 import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
 import { defaultRibbonSchema, type RibbonSchema } from "../ribbonSchema";
@@ -25,6 +27,22 @@ function collectRibbonCommandIds(schema: RibbonSchema): string[] {
     }
   }
   return [...ids].sort();
+}
+
+function collectRibbonDropdownTriggerIds(schema: RibbonSchema): Set<string> {
+  const ids = new Set<string>();
+  for (const tab of schema.tabs) {
+    for (const group of tab.groups) {
+      for (const button of group.buttons) {
+        const kind = button.kind ?? "button";
+        if (kind === "dropdown" && (button.menuItems?.length ?? 0) > 0) {
+          // Dropdown triggers with menus do not invoke `onCommand`; only their menu items do.
+          ids.add(button.id);
+        }
+      }
+    }
+  }
+  return ids;
 }
 
 describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
@@ -153,6 +171,33 @@ function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry
     openCommandPalette: () => {},
   });
 
+  // View/Developer macro commands are registered separately from `registerDesktopCommands`
+  // because they require panel focus wiring + macro-recorder integration in the desktop shell.
+  registerRibbonMacroCommands({
+    commandRegistry,
+    handlers: {
+      openPanel: () => {},
+      focusScriptEditorPanel: () => {},
+      focusVbaMigratePanel: () => {},
+      setPendingMacrosPanelFocus: () => {},
+      startMacroRecorder: () => {},
+      stopMacroRecorder: () => {},
+      isTauri: () => false,
+    },
+  });
+
+  // Power Query / Data → Queries & Connections ribbon commands are registered outside of
+  // `registerDesktopCommands` because they depend on PowerQueryService wiring.
+  registerDataQueriesCommands({
+    commandRegistry,
+    layoutController,
+    getPowerQueryService: () => null,
+    showToast: () => {},
+    notify: async () => {},
+    refreshRibbonUiState: () => {},
+    focusAfterExecute: () => {},
+  });
+
   registerFormatPainterCommand({
     commandRegistry,
     isArmed: () => false,
@@ -185,4 +230,37 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
         .join("\n")}`,
     ).toEqual([]);
   });
+
+  it("ensures enabled ribbon ids that are not registered as commands are referenced in main.ts", () => {
+    const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
+    const dropdownTriggerIds = collectRibbonDropdownTriggerIds(defaultRibbonSchema);
+
+    const commandRegistry = new CommandRegistry();
+    registerCommandsForRibbonDisablingTest(commandRegistry);
+
+    const disabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema: defaultRibbonSchema });
+
+    const enabledButUnregistered = schemaCommandIds
+      .filter((id) => !dropdownTriggerIds.has(id))
+      .filter((id) => commandRegistry.getCommand(id) == null)
+      .filter((id) => !disabledById[id]);
+
+    // Guard: we should always have at least one exempt/non-command ribbon id (e.g. File tab wiring).
+    expect(enabledButUnregistered.length).toBeGreaterThan(0);
+
+    const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
+    const source = readFileSync(mainTsPath, "utf8");
+
+    const missing = enabledButUnregistered.filter((id) => !source.includes(`"${id}"`));
+    expect(
+      missing,
+      [
+        "Found ribbon ids that would be enabled but are not registered as commands and are not referenced in main.ts.",
+        "These ids should either be registered as builtin commands or explicitly handled in the desktop shell.",
+        "",
+        ...missing.map((id) => `- ${id}`),
+      ].join("\n"),
+    ).toEqual([]);
+  });
 });
+
