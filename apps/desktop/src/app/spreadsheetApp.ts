@@ -2196,10 +2196,26 @@ export class SpreadsheetApp {
       };
       if (state?.formula != null) {
         // Charts should use computed values for formulas (show-formulas is a display-only toggle).
-        return this.getCellComputedValueForSheetInternal(sheetId, chartCoordScratch);
+        const computed = this.getCellComputedValueForSheetInternal(sheetId, chartCoordScratch);
+        if (isRichTextValue(computed)) return computed.text;
+        const computedImage = parseImageCellPayload(computed);
+        if (computedImage) return computedImage.altText ?? "[Image]";
+
+        // Some formula cells (notably IMAGE()) can store an image payload in `state.value`
+        // while the computed-value cache is empty/blank. When that happens, treat the cell
+        // as an image so charts don't fall back to `[object Object]`/blank labels.
+        if ((computed == null || computed === "") && state.value != null) {
+          const cachedImage = parseImageCellPayload(state.value);
+          if (cachedImage) return cachedImage.altText ?? "[Image]";
+        }
+
+        return computed;
       }
       const value = state?.value ?? null;
-      return isRichTextValue(value) ? value.text : value;
+      if (isRichTextValue(value)) return value.text;
+      const image = parseImageCellPayload(value);
+      if (image) return image.altText ?? "[Image]";
+      return value;
     };
 
        // `ChartStore.onChange` fires for anchor updates as well as chart create/delete. Prune cached
