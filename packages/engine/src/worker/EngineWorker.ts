@@ -489,7 +489,6 @@ export class EngineWorker {
 
     await this.invoke("setSheetDefaultStyleId", { sheet, styleId }, finalRpcOptions);
   }
-
   /**
    * Set (or clear) a per-column width override.
    *

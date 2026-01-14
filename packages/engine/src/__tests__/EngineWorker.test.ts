@@ -435,6 +435,39 @@ describe("EngineWorker RPC", () => {
     expect(requests[2].params).toEqual({ sheet: "Sheet1", styleId: 42 });
   });
 
+  it("accepts legacy row/col/sheet style layer call signatures (styleId=0 clears)", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.setRowStyleId(5, 123, "Sheet1");
+    await engine.setRowStyleId(6, 0, "Sheet1");
+    await engine.setColStyleId(2, 456, "Sheet1");
+    await engine.setColStyleId(3, 0, "Sheet1");
+    await engine.setSheetDefaultStyleId(42, "Sheet1");
+    await engine.setSheetDefaultStyleId(0, "Sheet1");
+
+    const requests = worker.received.filter((msg): msg is RpcRequest => msg.type === "request");
+    expect(requests.map((r) => r.method)).toEqual([
+      "setRowStyleId",
+      "setRowStyleId",
+      "setColStyleId",
+      "setColStyleId",
+      "setSheetDefaultStyleId",
+      "setSheetDefaultStyleId"
+    ]);
+
+    expect(requests[0].params).toEqual({ sheet: "Sheet1", row: 5, styleId: 123 });
+    expect(requests[1].params).toEqual({ sheet: "Sheet1", row: 6, styleId: 0 });
+    expect(requests[2].params).toEqual({ sheet: "Sheet1", col: 2, styleId: 456 });
+    expect(requests[3].params).toEqual({ sheet: "Sheet1", col: 3, styleId: 0 });
+    expect(requests[4].params).toEqual({ sheet: "Sheet1", styleId: 42 });
+    expect(requests[5].params).toEqual({ sheet: "Sheet1", styleId: 0 });
+  });
+
   it("sends getCellRich RPC requests with the expected params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
