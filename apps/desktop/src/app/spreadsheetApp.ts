@@ -5976,6 +5976,15 @@ export class SpreadsheetApp {
     // `clearSelectionContents()` is a public command surface used by the command registry / context
     // menus. It already triggers a refresh, but `clearContents()` is also called by some internal
     // UX flows; avoid double-refreshing by calling the underlying mutation directly here.
+    if (this.inlineEditController.isOpen()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.clearSelectionContentsInternal();
     this.refresh();
   }

@@ -268,6 +268,29 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     root.remove();
   });
 
+  it("shows a read-only toast when clearing contents via clearContents in read-only collab mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+    app.getDocument().setCellValue(sheetId, "A1", "Seed", { label: "Seed Cell" });
+
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    app.clearContents();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+    expect(app.getDocument().getCell(sheetId, "A1").value).toBe("Seed");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("shows a read-only toast when invoking Insert Cells in read-only collab mode", async () => {
     const root = createRoot();
     const status = {
