@@ -109,6 +109,10 @@ assert!(decrypted_zip.starts_with(b"PK"));
 Once decrypted, you can open the ZIP bytes using normal XLSX readers (e.g.
 `formula_xlsx::XlsxPackage::from_bytes(&decrypted_zip)`).
 
+Note: encrypted `.xlsb` files also decrypt to a ZIP/OPC package, but the payload contains
+`xl/workbook.bin` instead of `xl/workbook.xml`. In that case, open the decrypted bytes via
+`formula-io` / `formula-xlsb` rather than `formula-xlsx`.
+
 ### Desktop app UX flow
 
 The expected UX is:
@@ -121,6 +125,14 @@ The expected UX is:
    re-saving without encryption in Excel).
 
 Passwords should not be persisted or logged by default.
+
+Current desktop limitations:
+
+- Password prompting/open is implemented for **encrypted OOXML workbooks that decrypt to XLSX/XLSM**
+  packages.
+- Legacy `.xls` BIFF `FILEPASS` password prompting is not yet wired through the desktop open path.
+- Encrypted `.xlsb` containers are detected, but the decrypted payload is not currently routed
+  through the `.xlsb` reader.
 
 ---
 

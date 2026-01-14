@@ -240,6 +240,7 @@ XLSX is a ZIP archive following Open Packaging Conventions (ECMA-376).
 when they use a `.xlsx`/`.xlsm` extension. Excel wraps the encrypted workbook in an **OLE/CFB**
 container with `EncryptionInfo` + `EncryptedPackage` streams. See:
 
+- [`docs/encrypted-workbooks.md`](./encrypted-workbooks.md) (overview + entrypoints)
 - [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) (high-level background + terminology)
 - [`docs/21-offcrypto.md`](./21-offcrypto.md) (developer-facing MS-OFFCRYPTO debugging + API usage)
 
