@@ -263,6 +263,38 @@ fn detect_chart_kind(
     "unknown".to_string()
 }
 
+fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    // Best-effort: capture any attribute-based hints that might identify the ChartEx chart kind.
+    //
+    // This is diagnostic-only and should be stable/deterministic (for fixture tests), so we
+    // de-duplicate and sort the collected hints.
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        if let Some(layout_id) = attribute_case_insensitive(node, "layoutId")
+            .and_then(normalize_chart_ex_kind_hint)
+        {
+            let hint = format!("layoutId={layout_id}");
+            if seen.insert(hint.clone()) {
+                out.push(hint);
+            }
+        }
+
+        if let Some(chart_type) = attribute_case_insensitive(node, "chartType")
+            .and_then(normalize_chart_ex_kind_hint)
+        {
+            let hint = format!("chartType={chart_type}");
+            if seen.insert(hint.clone()) {
+                out.push(hint);
+            }
+        }
+    }
+
+    out.sort();
+    out
+}
+
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
     // Prefer explicit known chart-type nodes. Some ChartEx parts contain other
     // `*Chart`-suffixed elements (e.g. style/theme) that can appear before the
