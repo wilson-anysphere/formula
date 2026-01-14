@@ -376,6 +376,14 @@ describe("engine.worker workbook metadata RPCs", () => {
       expect(resp.ok).toBe(true);
       expect((resp as RpcResponseOk).result).toEqual({ rows: 100, cols: 200 });
 
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 10,
+        method: "setFormatRunsByCol",
+        params: { sheet: "", col: 2, runs: [{ startRow: 0, endRowExclusive: 1, styleId: 17 }] }
+      });
+      expect(resp.ok).toBe(true);
+
       expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
         ["setCellStyleId", "Sheet1", "A1", 7],
         ["setRowStyleId", "Sheet1", 5, 9],
@@ -385,7 +393,8 @@ describe("engine.worker workbook metadata RPCs", () => {
         ["setColWidthChars", "Sheet1", 3, 8.5],
         ["setColHidden", "Sheet1", 2, true],
         ["setSheetDimensions", "Sheet1", 10, 20],
-        ["getSheetDimensions", "Sheet1"]
+        ["getSheetDimensions", "Sheet1"],
+        ["setFormatRunsByCol", "Sheet1", 2, [{ startRow: 0, endRowExclusive: 1, styleId: 17 }]]
       ]);
     } finally {
       dispose();

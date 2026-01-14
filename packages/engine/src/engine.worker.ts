@@ -871,7 +871,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   "setFormatRunsByCol: WasmWorkbook.setFormatRunsByCol is not available in this WASM build"
                 );
               }
-              (wb as any).setFormatRunsByCol(params.sheet ?? "Sheet1", params.col, params.runs ?? []);
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setFormatRunsByCol(sheet, params.col, params.runs ?? []);
+              }
               result = null;
               break;
             case "setColWidth":
