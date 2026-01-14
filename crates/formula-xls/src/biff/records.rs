@@ -7,10 +7,18 @@ pub(crate) const RECORD_EOF: u16 = 0x000A;
 /// BIFF `FILEPASS` record id (workbook encryption / password protection).
 ///
 /// Presence of this record in the workbook globals substream indicates the file
-/// is encrypted. The `.xls` importer uses this as a preflight check so it can:
-/// - return a clear [`crate::ImportError::EncryptedWorkbook`] when no password is provided, and
-/// - decrypt the workbook stream when a password is provided (see
-///   [`crate::import_xls_path_with_password`]).
+/// is encrypted (record headers remain plaintext, but record payload bytes *after*
+/// `FILEPASS` are encrypted).
+///
+/// The `.xls` importer uses this record as a preflight check so it can:
+/// - return a clear [`crate::ImportError::EncryptedWorkbook`] from [`crate::import_xls_path`] when
+///   no password is provided, and
+/// - decrypt supported `FILEPASS` schemes when a password is provided (see
+///   [`crate::import_xls_path_with_password`], `crates/formula-xls/src/decrypt.rs`, and
+///   `crates/formula-xls/src/biff/encryption.rs`).
+///
+/// Decrypted streams must also mask the `FILEPASS` record id so downstream parsers don't treat the
+/// workbook as still-encrypted (see [`mask_workbook_globals_filepass_record_id_in_place`]).
 pub(crate) const RECORD_FILEPASS: u16 = 0x002F;
 /// BIFF record id reserved for "unknown" sanitization.
 ///
