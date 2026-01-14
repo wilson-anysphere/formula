@@ -114,5 +114,14 @@ fn oauth_loopback_listen_is_centralized_capped_and_dual_stack_for_localhost() {
         wants_ipv6.contains("LoopbackHostKind::Localhost"),
         "oauth_loopback_listen wants_ipv6 must include LoopbackHostKind::Localhost so localhost redirect URIs bind IPv6"
     );
-}
 
+    // Security/behavior guardrails: ensure we only accept the expected redirect endpoint.
+    assert!(
+        window.contains("if method != \"GET\""),
+        "oauth_loopback_listen must reject non-GET requests (RFC 8252 redirect requests are GET)"
+    );
+    assert!(
+        window.contains("if path != expected_path"),
+        "oauth_loopback_listen must compare the request path against the configured redirect_uri path (avoid accepting arbitrary requests on the loopback port)"
+    );
+}
