@@ -429,6 +429,15 @@ export async function runOnce({
     }
 
     const safeRoot = perfHome;
+    // Extra guardrail: do not allow resetting the repo's `target/` directory itself.
+    // The perf harness should always use a dedicated subdirectory (default: `target/perf-home`).
+    const targetRoot = resolve(repoRoot, 'target');
+    if (safeRoot === targetRoot) {
+      throw new Error(
+        `Refusing to reset FORMULA_PERF_HOME=${safeRoot} because it points at target/ itself.\n` +
+          'Pick a subdirectory like target/perf-home (recommended).',
+      );
+    }
     const safeRootDir = parse(safeRoot).root;
     if (safeRoot === safeRootDir || safeRoot === repoRoot) {
       throw new Error(`Refusing to reset unsafe desktop benchmark perf home dir: ${safeRoot}`);
