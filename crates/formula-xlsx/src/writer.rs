@@ -637,29 +637,6 @@ struct ColXmlProps {
     style_xf: Option<u32>,
 }
 
-fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
-    if sheet.default_col_width.is_none()
-        && sheet.default_row_height.is_none()
-        && sheet.base_col_width.is_none()
-    {
-        return String::new();
-    }
-
-    let mut out = String::new();
-    out.push_str("<sheetFormatPr");
-    if let Some(base) = sheet.base_col_width {
-        out.push_str(&format!(r#" baseColWidth="{base}""#));
-    }
-    if let Some(width) = sheet.default_col_width {
-        out.push_str(&format!(r#" defaultColWidth="{width}""#));
-    }
-    if let Some(height) = sheet.default_row_height {
-        out.push_str(&format!(r#" defaultRowHeight="{height}""#));
-    }
-    out.push_str("/>");
-    out
-}
-
 fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, u32>) -> String {
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
 
@@ -855,29 +832,6 @@ fn cell_is_operator_attr(op: CellIsOperator) -> &'static str {
         CellIsOperator::Between => "between",
         CellIsOperator::NotBetween => "notBetween",
     }
-}
-
-fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
-    if sheet.default_row_height.is_none()
-        && sheet.default_col_width.is_none()
-        && sheet.base_col_width.is_none()
-    {
-        return String::new();
-    }
-
-    let mut attrs = String::new();
-    if let Some(base) = sheet.base_col_width {
-        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
-    }
-    if let Some(width) = sheet.default_col_width {
-        let width = trim_float(width as f64);
-        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
-    }
-    if let Some(height) = sheet.default_row_height {
-        let height = trim_float(height as f64);
-        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
-    }
-    format!(r#"<sheetFormatPr{attrs}/>"#)
 }
 
 fn sheet_xml(
