@@ -155,10 +155,16 @@ fn translate_formula_with_style(
                 idx += 1;
             }
             TokenKind::Boolean(value) => {
-                match dir {
-                    Direction::ToCanonical => out.push_str(bool_literal(*value)),
-                    Direction::ToLocalized => {
-                        out.push_str(locale.localized_boolean_literal(*value))
+                // Preserve boolean keywords used as field-access selectors (e.g. `A1.TRUE`) by
+                // skipping localization/canonicalization when preceded by `.`.
+                if matches!(prev_non_trivia_kind(&tokens, idx), Some(TokenKind::Dot)) {
+                    out.push_str(token_slice(expr_src, tok)?);
+                } else {
+                    match dir {
+                        Direction::ToCanonical => out.push_str(bool_literal(*value)),
+                        Direction::ToLocalized => {
+                            out.push_str(locale.localized_boolean_literal(*value))
+                        }
                     }
                 }
                 idx += 1;
@@ -294,6 +300,22 @@ fn next_non_trivia_kind<'a>(tokens: &'a [Token], idx: usize) -> Option<&'a Token
         j += 1;
     }
     tokens.get(j).map(|t| &t.kind)
+}
+
+fn prev_non_trivia_kind<'a>(tokens: &'a [Token], idx: usize) -> Option<&'a TokenKind> {
+    if idx == 0 {
+        return None;
+    }
+
+    let mut j = idx;
+    while j > 0 {
+        j -= 1;
+        match &tokens[j].kind {
+            TokenKind::Whitespace(_) => continue,
+            other => return Some(other),
+        }
+    }
+    None
 }
 
 fn is_sheet_prefix_ident(tokens: &[Token], idx: usize) -> bool {

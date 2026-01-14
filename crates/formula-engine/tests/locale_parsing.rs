@@ -611,6 +611,26 @@ fn localized_boolean_keywords_are_not_translated_in_3d_sheet_spans() {
 }
 
 #[test]
+fn field_access_selectors_are_not_translated() {
+    assert_eq!(
+        locale::canonicalize_formula("=A1.WAHR", &locale::DE_DE).unwrap(),
+        "=A1.WAHR"
+    );
+    assert_eq!(
+        locale::localize_formula("=A1.TRUE", &locale::DE_DE).unwrap(),
+        "=A1.TRUE"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=A1.SUMME(1;2)", &locale::DE_DE).unwrap(),
+        "=A1.SUMME(1,2)"
+    );
+    assert_eq!(
+        locale::localize_formula("=A1.SUM(1,2)", &locale::DE_DE).unwrap(),
+        "=A1.SUM(1;2)"
+    );
+}
+
+#[test]
 fn canonicalize_and_localize_error_literals() {
     let de = "=#WERT!";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
