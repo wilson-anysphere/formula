@@ -67,6 +67,35 @@ def _redact_function_name(name: str, *, privacy_mode: str) -> str:
     return f"sha256={_sha256_text(name)}"
 
 
+def _redact_tag_name(tag: str, *, privacy_mode: str) -> str:
+    """Redact tag names that may embed custom function namespaces.
+
+    Tags in the oracle corpus are typically either:
+    - function names (e.g. "SUM", "XLOOKUP")
+    - high-level categories (e.g. "arith", "spill")
+    - or (in private corpora) custom add-in namespaces (e.g. "CORP.ADDIN.FOO")
+
+    In privacy mode we keep category tags and built-in Excel function tags readable, but hash
+    namespace-like tags (containing ".") that are not in the function allowlist.
+    """
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return tag
+    if not tag or tag.startswith("sha256="):
+        return tag
+
+    raw = tag.strip()
+    if "." not in raw:
+        return tag
+
+    normalized = raw.upper()
+    if normalized.startswith("_XLFN."):
+        normalized = normalized[len("_XLFN.") :]
+    if normalized in _load_known_function_names():
+        return tag
+    return f"sha256={_sha256_text(normalized)}"
+
+
 def _load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -783,6 +812,56 @@ def main() -> int:
         )
     tag_summary.sort(key=lambda x: (-x["mismatches"], -x["total"], x["tag"]))
 
+    if args.privacy_mode == _PRIVACY_PRIVATE:
+        # Redact tag names in the report output (defense in depth). This is intentionally applied
+        # after all accounting/filtering is complete so behavior doesn't change.
+
+        # Redact per-case mismatch tags.
+        for m in mismatches:
+            tags = m.get("tags")
+            if isinstance(tags, list):
+                out_tags: list[str] = []
+                for t in tags:
+                    if isinstance(t, str) and t:
+                        out_tags.append(_redact_tag_name(t, privacy_mode=args.privacy_mode))
+                if out_tags:
+                    m["tags"] = out_tags
+
+        # Redact tag summary labels, merging rows if redaction collapses multiple raw tags.
+        tag_summary_by_name: dict[str, dict[str, Any]] = {}
+        for row in tag_summary:
+            raw_tag = row.get("tag")
+            if not isinstance(raw_tag, str) or not raw_tag:
+                continue
+            redacted_tag = _redact_tag_name(raw_tag, privacy_mode=args.privacy_mode)
+            existing = tag_summary_by_name.get(redacted_tag)
+            if existing is None:
+                tag_summary_by_name[redacted_tag] = dict(row, tag=redacted_tag)
+                continue
+            existing["total"] = int(existing.get("total") or 0) + int(row.get("total") or 0)
+            existing["passes"] = int(existing.get("passes") or 0) + int(row.get("passes") or 0)
+            existing["mismatches"] = int(existing.get("mismatches") or 0) + int(row.get("mismatches") or 0)
+            tot = int(existing.get("total") or 0)
+            mism = int(existing.get("mismatches") or 0)
+            existing["mismatchRate"] = (mism / tot) if tot else 0.0
+        tag_summary = list(tag_summary_by_name.values())
+        tag_summary.sort(key=lambda x: (-x["mismatches"], -x["total"], x["tag"]))
+
+        # Redact tag tolerance mapping keys (user-provided CLI tags can include custom namespaces).
+        def _redact_tag_tolerance_map(data: dict[str, float]) -> dict[str, float]:
+            out: dict[str, float] = {}
+            for k, v in data.items():
+                if not isinstance(k, str) or not k:
+                    continue
+                key = _redact_tag_name(k, privacy_mode=args.privacy_mode)
+                prev = out.get(key)
+                if prev is None or float(v) > float(prev):
+                    out[key] = float(v)
+            return out
+
+        tag_abs_tol = _redact_tag_tolerance_map(tag_abs_tol)
+        tag_rel_tol = _redact_tag_tolerance_map(tag_rel_tol)
+
     if args.privacy_mode == _PRIVACY_PRIVATE and missing_functions:
         redacted_counts: dict[str, int] = {}
         for fn, cnt in missing_functions.items():
@@ -801,8 +880,12 @@ def main() -> int:
 
     summary: dict[str, Any] = {
         "totalCases": total,
-        "includeTags": sorted(include_tags),
-        "excludeTags": sorted(exclude_tags),
+        "includeTags": sorted(
+            _redact_tag_name(t, privacy_mode=args.privacy_mode) for t in include_tags
+        ),
+        "excludeTags": sorted(
+            _redact_tag_name(t, privacy_mode=args.privacy_mode) for t in exclude_tags
+        ),
         "maxCases": args.max_cases,
         "absTol": args.abs_tol,
         "relTol": args.rel_tol,
