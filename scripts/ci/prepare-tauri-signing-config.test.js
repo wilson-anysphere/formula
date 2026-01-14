@@ -216,4 +216,18 @@ test("exports Tauri updater signing env vars only when configured", () => {
     assert.match(githubEnv, /\bTAURI_PRIVATE_KEY<</);
     assert.doesNotMatch(githubEnv, /\bTAURI_KEY_PASSWORD<</);
   }
+
+  {
+    const { proc, githubEnv } = runWithConfig(
+      {
+        RUNNER_OS: "Linux",
+        TAURI_PRIVATE_KEY: "",
+        TAURI_KEY_PASSWORD: "pw",
+      },
+      minimalConfig,
+    );
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.doesNotMatch(githubEnv, /\bTAURI_PRIVATE_KEY<</);
+    assert.doesNotMatch(githubEnv, /\bTAURI_KEY_PASSWORD<</);
+  }
 });
