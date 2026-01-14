@@ -376,15 +376,39 @@ const DEFAULT_ARG_SEPARATOR = (() => {
 
 const SIGNATURE_PREVIEW_CACHE = new Map<string, string>();
 
+const UNICODE_LETTER_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^\\p{Alphabetic}$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+const UNICODE_ALNUM_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+function isUnicodeAlphabetic(ch: string): boolean {
+  if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+  return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z");
+}
+
+function isUnicodeAlphanumeric(ch: string): boolean {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return isUnicodeAlphabetic(ch) || (ch >= "0" && ch <= "9");
+}
+
 function isIdentifierChar(ch: string): boolean {
   // Match the formula tokenizer's identifier rules closely enough for completion.
   // Excel function names allow dots (e.g. `COVARIANCE.P`) and digits (e.g. `LOG10`).
   return (
     ch === "_" ||
     ch === "." ||
-    (ch >= "0" && ch <= "9") ||
-    (ch >= "A" && ch <= "Z") ||
-    (ch >= "a" && ch <= "z")
+    isUnicodeAlphanumeric(ch)
   );
 }
 
@@ -428,7 +452,8 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
 
   // Only trigger on identifier-looking starts.
   // (We handle `_xlfn.` separately below.)
-  if (!/^[_A-Za-z]/.test(typedPrefix)) return null;
+  const firstChar = typedPrefix[0] ?? "";
+  if (!(firstChar === "_" || isUnicodeAlphabetic(firstChar))) return null;
 
   // Avoid suggesting functions while the caret is inside a likely A1-style cell reference
   // (e.g. `=A1`, `=XFD1048576`). This prevents the autocomplete dropdown from stealing

@@ -27,6 +27,27 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("does not treat non-ASCII letters as token boundaries (=ZÄH should not suggest HLOOKUP)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=ZÄH";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    // We don't currently provide localized function-name suggestions here, but we should also
+    // avoid suggesting unrelated ASCII functions due to mis-tokenizing `Ä`.
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+    expect(dropdown?.textContent).not.toContain("HLOOKUP");
+
+    host.remove();
+  });
+
   it("shows function suggestions inside argument lists (=SUM(IF → includes IF)", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
