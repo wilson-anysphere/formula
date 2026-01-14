@@ -15,6 +15,14 @@ This enables `rollup-plugin-visualizer` via `VITE_BUNDLE_ANALYZE=1` and writes t
 
 Note: `pnpm -C apps/desktop build:analyze` sets `VITE_BUNDLE_ANALYZE=1` automatically.
 
+Optional: for more accurate *per-module* attribution, you can also enable sourcemap-based analysis:
+
+```bash
+VITE_BUNDLE_ANALYZE_SOURCEMAP=1 pnpm -C apps/desktop build:analyze
+```
+
+This additionally generates `apps/desktop/dist/bundle-stats-sourcemap.html` (and enables `build.sourcemap` for that run).
+
 To get a quick CLI summary of the largest chunks and dependency groups (from `bundle-stats.json`):
 
 ```bash

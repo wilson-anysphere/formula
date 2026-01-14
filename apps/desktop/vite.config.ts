@@ -31,6 +31,7 @@ const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app
 const isE2E = process.env.FORMULA_E2E === "1";
 const isPlaywright = process.env.FORMULA_E2E === "0" || process.env.FORMULA_E2E === "1";
 const isBundleAnalyze = process.env.VITE_BUNDLE_ANALYZE === "1";
+const isBundleAnalyzeSourcemap = process.env.VITE_BUNDLE_ANALYZE_SOURCEMAP === "1";
 const visualizer: null | ((opts: any) => any) = (() => {
   if (!isBundleAnalyze) return null;
   try {
@@ -115,6 +116,21 @@ export default defineConfig({
             projectRoot: repoRoot,
             emitFile: true,
           }),
+          ...(isBundleAnalyzeSourcemap
+            ? [
+                visualizer({
+                  filename: "bundle-stats-sourcemap.html",
+                  template: "treemap",
+                  // Use Rollup sourcemaps to attribute minified output back to source modules.
+                  sourcemap: true,
+                  // Compressed sizes are less meaningful in sourcemap mode; keep this report focused on attribution.
+                  gzipSize: false,
+                  brotliSize: false,
+                  projectRoot: repoRoot,
+                  emitFile: true,
+                }),
+              ]
+            : []),
         ]
       : []),
   ],
@@ -148,6 +164,9 @@ export default defineConfig({
     // optional dependencies (e.g. apache-arrow) can rely on top-level await without
     // breaking production builds.
     target: "es2022",
+    // Optional: enable Rollup sourcemaps when doing bundle analysis so visualizer can attribute
+    // sizes more accurately back to source modules.
+    sourcemap: isBundleAnalyzeSourcemap,
     commonjsOptions: {
       // `shared/` is CommonJS, but the desktop runtime imports ESM shims that depend on
       // `shared/extension-package/core/v2-core.js`. Ensure Rollup runs the CommonJS
