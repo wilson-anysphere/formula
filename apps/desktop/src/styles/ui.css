@@ -1237,6 +1237,13 @@ a:visited {
   color: var(--text-primary);
 }
 
+#sheet-tabs.sheet-bar .sheet-nav-btn:focus-visible,
+#sheet-tabs.sheet-bar .sheet-add:focus-visible,
+#sheet-tabs.sheet-bar .sheet-overflow:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
 #sheet-tabs.sheet-bar .sheet-nav-btn:disabled {
   opacity: 0.45;
   cursor: default;
