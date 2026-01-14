@@ -11992,13 +11992,16 @@ export class SpreadsheetApp {
     if (this.sharedGrid) {
       return this.sharedGrid.renderer.getFillHandleRect();
     }
+    const cached = this.selectionRenderer.getLastFillHandleRect(this.selection);
+    if (cached !== undefined) return cached;
+
     this.ensureViewportMappingCurrent();
     return this.selectionRenderer.getFillHandleRect(
       this.selection,
       {
         getCellRect: (cell) => this.getCellRect(cell),
-        visibleRows: this.visibleRows,
-        visibleCols: this.visibleCols,
+        visibleRows: this.frozenVisibleRows.length ? [...this.frozenVisibleRows, ...this.visibleRows] : this.visibleRows,
+        visibleCols: this.frozenVisibleCols.length ? [...this.frozenVisibleCols, ...this.visibleCols] : this.visibleCols,
       },
       {
         clipRect: {

@@ -66,6 +66,7 @@ export type SelectionRangeRenderInfo = {
 export type SelectionRenderDebugInfo = {
   ranges: SelectionRangeRenderInfo[];
   activeCellRect: Rect | null;
+  fillHandleRect: Rect | null;
 };
 
 function defaultStyleFromTheme(cssVarRoot?: HTMLElement | null): SelectionRenderStyle {
@@ -109,15 +110,25 @@ export class SelectionRenderer {
 
   private style: SelectionRenderStyle | null;
   private lastDebug: SelectionRenderDebugInfo | null = null;
+  private lastFillHandleRect: Rect | null = null;
+  private lastFillHandleSelection: SelectionState | null = null;
 
   getLastDebug(): SelectionRenderDebugInfo | null {
     return this.lastDebug;
   }
 
+  getLastFillHandleRect(selection?: SelectionState): Rect | null | undefined {
+    if (selection && this.lastFillHandleSelection !== selection) return undefined;
+    return this.lastFillHandleRect;
+  }
+
   getFillHandleRect(selection: SelectionState, metrics: GridMetrics, options: SelectionRenderOptions = {}): Rect | null {
     let style = this.style ?? defaultStyleFromTheme(this.cssVarRoot);
     if (!this.style && this.styleOverrides) style = { ...style, ...this.styleOverrides };
-    return this.computeFillHandleRect(selection, metrics, style, options);
+    const rect = this.computeFillHandleRect(selection, metrics, style, options);
+    this.lastFillHandleRect = rect;
+    this.lastFillHandleSelection = selection;
+    return rect;
   }
 
   render(
@@ -144,6 +155,7 @@ export class SelectionRenderer {
     this.lastDebug = {
       ranges: visibleRanges,
       activeCellRect: metrics.getCellRect(selection.active),
+      fillHandleRect: null,
     };
 
     // We draw in CSS pixels; the caller should already have adjusted for DPR.
@@ -157,7 +169,8 @@ export class SelectionRenderer {
     this.renderFill(ctx, visibleRanges, style);
     this.renderBorders(ctx, visibleRanges, style);
     this.renderActiveCell(ctx, selection.active, metrics, style);
-    this.renderFillHandle(ctx, selection, metrics, style, options);
+    const fillHandleRect = this.renderFillHandle(ctx, selection, metrics, style, options);
+    if (this.lastDebug) this.lastDebug.fillHandleRect = fillHandleRect;
 
     if (options.clipRect) {
       ctx.restore();
@@ -208,14 +221,17 @@ export class SelectionRenderer {
     metrics: GridMetrics,
     style: SelectionRenderStyle,
     options: SelectionRenderOptions,
-  ): void {
+  ): Rect | null {
     const rect = this.computeFillHandleRect(selection, metrics, style, options);
-    if (!rect) return;
+    this.lastFillHandleRect = rect;
+    this.lastFillHandleSelection = selection;
+    if (!rect) return null;
 
     ctx.save();
     ctx.fillStyle = style.fillHandleColor;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.restore();
+    return rect;
   }
 
   private computeFillHandleRect(
