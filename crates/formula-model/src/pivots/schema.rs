@@ -4,9 +4,6 @@ use std::fmt;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 
-fn default_true() -> bool {
-    true
-}
 /// Canonical reference to a field used by a pivot configuration.
 ///
 /// Pivot tables can be sourced from either:
@@ -334,11 +331,9 @@ impl Default for SubtotalPosition {
 
 /// Whether to render grand totals for rows and/or columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct GrandTotals {
-    #[serde(default = "default_true")]
     pub rows: bool,
-    #[serde(default = "default_true")]
     pub columns: bool,
 }
 
