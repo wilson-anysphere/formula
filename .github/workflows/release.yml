@@ -1296,14 +1296,38 @@ jobs:
 
           app=""
           for root in "${search_roots[@]}"; do
-            if [[ -d "$root" ]]; then
+            [[ -d "$root" ]] || continue
+
+            # Fast path: avoid traversing the entire Cargo target directory (which can be large)
+            # by checking the canonical bundle locations directly:
+            # - <target>/release/bundle/macos/*.app
+            # - <target>/<triple>/release/bundle/macos/*.app
+            nullglob_was_set=0
+            if shopt -q nullglob; then nullglob_was_set=1; fi
+            shopt -s nullglob
+            candidates=(
+              "$root"/release/bundle/macos/*.app
+              "$root"/*/release/bundle/macos/*.app
+            )
+            if [[ "${nullglob_was_set}" -eq 0 ]]; then shopt -u nullglob; fi
+
+            if ((${#candidates[@]} > 0)); then
+              app="${candidates[0]}"
+              break
+            fi
+          done
+
+          # Fallback (slower): scan with `find` if the bundle layout is unexpected.
+          if [[ -z "${app:-}" ]]; then
+            for root in "${search_roots[@]}"; do
+              [[ -d "$root" ]] || continue
               candidate="$(find "$root" -maxdepth 12 -type d -path '*/release/bundle/macos/*.app' -print 2>/dev/null | head -n 1 || true)"
               if [[ -n "$candidate" ]]; then
                 app="$candidate"
                 break
               fi
-            fi
-          done
+            done
+          fi
 
           if [[ -z "${app:-}" ]]; then
             echo "::error::No .app bundle found under expected release bundle roots." >&2
@@ -1847,9 +1871,12 @@ jobs:
           name: desktop-bundles-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
           if-no-files-found: error
           path: |
-            apps/desktop/src-tauri/target/**/release/bundle/**
-            apps/desktop/target/**/release/bundle/**
-            target/**/release/bundle/**
+            apps/desktop/src-tauri/target/release/bundle/**
+            apps/desktop/src-tauri/target/*/release/bundle/**
+            apps/desktop/target/release/bundle/**
+            apps/desktop/target/*/release/bundle/**
+            target/release/bundle/**
+            target/*/release/bundle/**
 
       - name: Export updater manifest for merge (latest.json)
         if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
@@ -2267,12 +2294,35 @@ jobs:
 
           app_path=""
           for root in "${search_roots[@]}"; do
-            candidate="$(find "$root" -type d -path '*/release/bundle/macos/*.app' -prune -print 2>/dev/null | head -n 1 || true)"
-            if [[ -n "$candidate" ]]; then
-              app_path="$candidate"
+            # Fast path: avoid traversing the entire Cargo target directory (which can be large)
+            # by checking the canonical bundle locations directly:
+            # - <target>/release/bundle/macos/*.app
+            # - <target>/<triple>/release/bundle/macos/*.app
+            nullglob_was_set=0
+            if shopt -q nullglob; then nullglob_was_set=1; fi
+            shopt -s nullglob
+            candidates=(
+              "$root"/release/bundle/macos/*.app
+              "$root"/*/release/bundle/macos/*.app
+            )
+            if [[ "${nullglob_was_set}" -eq 0 ]]; then shopt -u nullglob; fi
+
+            if ((${#candidates[@]} > 0)); then
+              app_path="${candidates[0]}"
               break
             fi
           done
+
+          # Fallback (slower): scan with `find` if the bundle layout is unexpected.
+          if [[ -z "${app_path}" ]]; then
+            for root in "${search_roots[@]}"; do
+              candidate="$(find "$root" -type d -path '*/release/bundle/macos/*.app' -prune -print 2>/dev/null | head -n 1 || true)"
+              if [[ -n "$candidate" ]]; then
+                app_path="$candidate"
+                break
+              fi
+            done
+          fi
 
           if [[ -z "${app_path}" ]]; then
             echo "::error::Could not find a built .app bundle under expected target roots." >&2
@@ -2395,15 +2445,58 @@ jobs:
 
           search_roots=(target apps/desktop/src-tauri/target apps/desktop/target)
           app_path=""
+
+          # Fast path: avoid traversing large Cargo target dirs by checking expected bundle locations directly.
           for root in "${search_roots[@]}"; do
-            if [[ -d "$root" ]]; then
-              candidate="$(find "$root" -type d -path "*/release/bundle/macos/Formula.app" | head -n 1 || true)"
-              if [[ -n "$candidate" ]]; then
-                app_path="$candidate"
-                break
-              fi
+            [[ -d "$root" ]] || continue
+
+            nullglob_was_set=0
+            if shopt -q nullglob; then nullglob_was_set=1; fi
+            shopt -s nullglob
+            candidates=(
+              "$root"/release/bundle/macos/Formula.app
+              "$root"/*/release/bundle/macos/Formula.app
+            )
+            if [[ "${nullglob_was_set}" -eq 0 ]]; then shopt -u nullglob; fi
+
+            if ((${#candidates[@]} > 0)); then
+              app_path="${candidates[0]}"
+              break
             fi
           done
+
+          if [[ -z "$app_path" ]]; then
+            for root in "${search_roots[@]}"; do
+              [[ -d "$root" ]] || continue
+
+              nullglob_was_set=0
+              if shopt -q nullglob; then nullglob_was_set=1; fi
+              shopt -s nullglob
+              candidates=(
+                "$root"/release/bundle/macos/*.app
+                "$root"/*/release/bundle/macos/*.app
+              )
+              if [[ "${nullglob_was_set}" -eq 0 ]]; then shopt -u nullglob; fi
+
+              if ((${#candidates[@]} > 0)); then
+                app_path="${candidates[0]}"
+                break
+              fi
+            done
+          fi
+
+          # Fallback (slower): scan with `find` if the bundle layout is unexpected.
+          if [[ -z "$app_path" ]]; then
+            for root in "${search_roots[@]}"; do
+              if [[ -d "$root" ]]; then
+                candidate="$(find "$root" -type d -path "*/release/bundle/macos/Formula.app" | head -n 1 || true)"
+                if [[ -n "$candidate" ]]; then
+                  app_path="$candidate"
+                  break
+                fi
+              fi
+            done
+          fi
 
           if [[ -z "$app_path" ]]; then
             for root in "${search_roots[@]}"; do

@@ -751,14 +751,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_path="$(
-            find apps/desktop/src-tauri/target apps/desktop/target target \
-              -type d \
-              -path '*/release/bundle/macos/*.app' \
-              -prune \
-              -print 2>/dev/null \
-              | head -n 1 || true
-          )"
+
+          # Prefer predictable globs over `find` to avoid traversing large Cargo target directories.
+          app_path=""
+          roots=(apps/desktop/src-tauri/target apps/desktop/target target)
+          nullglob_was_set=0
+          if shopt -q nullglob; then nullglob_was_set=1; fi
+          shopt -s nullglob
+          for root in "${roots[@]}"; do
+            [[ -d "${root}" ]] || continue
+            candidates=(
+              "${root}"/release/bundle/macos/*.app
+              "${root}"/*/release/bundle/macos/*.app
+            )
+            if ((${#candidates[@]} > 0)); then
+              app_path="${candidates[0]}"
+              break
+            fi
+          done
+          if [[ "${nullglob_was_set}" -eq 0 ]]; then shopt -u nullglob; fi
+
+          # Fallback (slower): scan with `find` if the bundle layout is unexpected.
+          if [[ -z "${app_path}" ]]; then
+            app_path="$(
+              find apps/desktop/src-tauri/target apps/desktop/target target \
+                -type d \
+                -path '*/release/bundle/macos/*.app' \
+                -prune \
+                -print 2>/dev/null \
+                | head -n 1 || true
+            )"
+          fi
           if [[ -z "$app_path" ]]; then
             echo "::error::Could not find a built .app bundle under expected target roots." >&2
             find apps/desktop/src-tauri/target apps/desktop/target target -maxdepth 12 -type d -name '*.app' -print 2>/dev/null | head -n 20 || true
@@ -1074,42 +1097,87 @@ jobs:
           name: desktop-bundles-dry-run-${{ matrix.cache_target }}
           if-no-files-found: warn
           path: |
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.deb
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.rpm
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.exe
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.pkg
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.zip
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.tar.gz
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.tgz
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.sig
-            apps/desktop/src-tauri/target/**/release/bundle/**/latest.json
-            apps/desktop/src-tauri/target/**/release/bundle/**/update.json
-            apps/desktop/target/**/release/bundle/**/*.dmg
-            apps/desktop/target/**/release/bundle/**/*.AppImage
-            apps/desktop/target/**/release/bundle/**/*.deb
-            apps/desktop/target/**/release/bundle/**/*.rpm
-            apps/desktop/target/**/release/bundle/**/*.msi
-            apps/desktop/target/**/release/bundle/**/*.exe
-            apps/desktop/target/**/release/bundle/**/*.pkg
-            apps/desktop/target/**/release/bundle/**/*.zip
-            apps/desktop/target/**/release/bundle/**/*.tar.gz
-            apps/desktop/target/**/release/bundle/**/*.tgz
-            apps/desktop/target/**/release/bundle/**/*.sig
-            apps/desktop/target/**/release/bundle/**/latest.json
-            apps/desktop/target/**/release/bundle/**/update.json
-            target/**/release/bundle/**/*.dmg
-            target/**/release/bundle/**/*.AppImage
-            target/**/release/bundle/**/*.deb
-            target/**/release/bundle/**/*.rpm
-            target/**/release/bundle/**/*.msi
-            target/**/release/bundle/**/*.exe
-            target/**/release/bundle/**/*.pkg
-            target/**/release/bundle/**/*.zip
-            target/**/release/bundle/**/*.tar.gz
-            target/**/release/bundle/**/*.tgz
-            target/**/release/bundle/**/*.sig
-            target/**/release/bundle/**/latest.json
-            target/**/release/bundle/**/update.json
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/*/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            apps/desktop/src-tauri/target/*/release/bundle/appimage/*.AppImage
+            apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+            apps/desktop/src-tauri/target/*/release/bundle/deb/*.deb
+            apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm
+            apps/desktop/src-tauri/target/*/release/bundle/rpm/*.rpm
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/*/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/*/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis-web/*.exe
+            apps/desktop/src-tauri/target/*/release/bundle/nsis-web/*.exe
+            apps/desktop/src-tauri/target/release/bundle/*/*.pkg
+            apps/desktop/src-tauri/target/*/release/bundle/*/*.pkg
+            apps/desktop/src-tauri/target/release/bundle/*/*.zip
+            apps/desktop/src-tauri/target/*/release/bundle/*/*.zip
+            apps/desktop/src-tauri/target/release/bundle/*/*.tar.gz
+            apps/desktop/src-tauri/target/*/release/bundle/*/*.tar.gz
+            apps/desktop/src-tauri/target/release/bundle/*/*.tgz
+            apps/desktop/src-tauri/target/*/release/bundle/*/*.tgz
+            apps/desktop/src-tauri/target/release/bundle/*/*.sig
+            apps/desktop/src-tauri/target/*/release/bundle/*/*.sig
+            apps/desktop/src-tauri/target/release/bundle/*/latest.json
+            apps/desktop/src-tauri/target/*/release/bundle/*/latest.json
+            apps/desktop/src-tauri/target/release/bundle/*/update.json
+            apps/desktop/src-tauri/target/*/release/bundle/*/update.json
+            apps/desktop/target/release/bundle/dmg/*.dmg
+            apps/desktop/target/*/release/bundle/dmg/*.dmg
+            apps/desktop/target/release/bundle/appimage/*.AppImage
+            apps/desktop/target/*/release/bundle/appimage/*.AppImage
+            apps/desktop/target/release/bundle/deb/*.deb
+            apps/desktop/target/*/release/bundle/deb/*.deb
+            apps/desktop/target/release/bundle/rpm/*.rpm
+            apps/desktop/target/*/release/bundle/rpm/*.rpm
+            apps/desktop/target/release/bundle/msi/*.msi
+            apps/desktop/target/*/release/bundle/msi/*.msi
+            apps/desktop/target/release/bundle/nsis/*.exe
+            apps/desktop/target/*/release/bundle/nsis/*.exe
+            apps/desktop/target/release/bundle/nsis-web/*.exe
+            apps/desktop/target/*/release/bundle/nsis-web/*.exe
+            apps/desktop/target/release/bundle/*/*.pkg
+            apps/desktop/target/*/release/bundle/*/*.pkg
+            apps/desktop/target/release/bundle/*/*.zip
+            apps/desktop/target/*/release/bundle/*/*.zip
+            apps/desktop/target/release/bundle/*/*.tar.gz
+            apps/desktop/target/*/release/bundle/*/*.tar.gz
+            apps/desktop/target/release/bundle/*/*.tgz
+            apps/desktop/target/*/release/bundle/*/*.tgz
+            apps/desktop/target/release/bundle/*/*.sig
+            apps/desktop/target/*/release/bundle/*/*.sig
+            apps/desktop/target/release/bundle/*/latest.json
+            apps/desktop/target/*/release/bundle/*/latest.json
+            apps/desktop/target/release/bundle/*/update.json
+            apps/desktop/target/*/release/bundle/*/update.json
+            target/release/bundle/dmg/*.dmg
+            target/*/release/bundle/dmg/*.dmg
+            target/release/bundle/appimage/*.AppImage
+            target/*/release/bundle/appimage/*.AppImage
+            target/release/bundle/deb/*.deb
+            target/*/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/*/release/bundle/rpm/*.rpm
+            target/release/bundle/msi/*.msi
+            target/*/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+            target/*/release/bundle/nsis/*.exe
+            target/release/bundle/nsis-web/*.exe
+            target/*/release/bundle/nsis-web/*.exe
+            target/release/bundle/*/*.pkg
+            target/*/release/bundle/*/*.pkg
+            target/release/bundle/*/*.zip
+            target/*/release/bundle/*/*.zip
+            target/release/bundle/*/*.tar.gz
+            target/*/release/bundle/*/*.tar.gz
+            target/release/bundle/*/*.tgz
+            target/*/release/bundle/*/*.tgz
+            target/release/bundle/*/*.sig
+            target/*/release/bundle/*/*.sig
+            target/release/bundle/*/latest.json
+            target/*/release/bundle/*/latest.json
+            target/release/bundle/*/update.json
+            target/*/release/bundle/*/update.json
