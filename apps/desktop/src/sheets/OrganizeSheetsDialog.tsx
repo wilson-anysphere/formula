@@ -99,6 +99,27 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     }
   }, [host, sheets]);
 
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onSheetActivated = (evt: Event) => {
+      const detail = (evt as CustomEvent).detail as any;
+      const next = typeof detail?.sheetId === "string" ? String(detail.sheetId).trim() : "";
+      if (next) {
+        setActiveSheetId(next);
+        return;
+      }
+      try {
+        setActiveSheetId(host.getActiveSheetId());
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener("formula:sheet-activated", onSheetActivated);
+    return () => window.removeEventListener("formula:sheet-activated", onSheetActivated);
+  }, [host]);
+
   // If the underlying store is replaced (collab) or a sheet is removed remotely while the
   // dialog is open, clear any inline UI state that references non-existent sheets so the
   // dialog doesn't get stuck in a "disabled" state.

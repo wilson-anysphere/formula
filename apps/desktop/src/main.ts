@@ -501,6 +501,13 @@ function emitSheetActivated(sheetId: string): void {
   const id = String(sheetId ?? "").trim();
   if (!id) return;
   const event: SheetActivatedEvent = { sheet: { id, name: workbookSheetStore.getName(id) ?? id } };
+  // Emit a DOM event so non-extension UI surfaces (e.g. dialogs) can react to sheet activation
+  // without wiring directly into SpreadsheetApp internals.
+  try {
+    window.dispatchEvent(new CustomEvent("formula:sheet-activated", { detail: { sheetId: id } }));
+  } catch {
+    // ignore
+  }
   for (const listener of [...sheetActivatedListeners]) {
     try {
       listener(event);
