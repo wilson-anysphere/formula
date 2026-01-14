@@ -49,6 +49,12 @@ Environment:
   FORMULA_APPIMAGE_MAIN_BINARY
     Override the expected main binary name inside the AppImage AppDir (defaults to
     tauri.conf.json mainBinaryName when available).
+  FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK=1
+    Additionally run a lightweight "can execute" check by invoking the extracted
+    AppRun with `--startup-bench` (headless-friendly, exits quickly).
+  FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS
+    Timeout (seconds) for the exec check (default: 20). Requires the `timeout`
+    command to enforce.
   FORMULA_VALIDATE_ALL_APPIMAGES=1
     When auto-discovering, validate all matching AppImages instead of selecting
     the most recently modified one.
@@ -461,7 +467,7 @@ validate_appimage() {
   local found_version_marker=0
   local found_value=""
   for desktop_file in "${desktop_files[@]}"; do
-    found_value="$(grep -E '^X-AppImage-Version=' "$desktop_file" | head -n 1 | sed 's/^X-AppImage-Version=//' | tr -d '\r')"
+    found_value="$(grep -E '^X-AppImage-Version=' "$desktop_file" | head -n 1 | sed 's/^X-AppImage-Version=//' | tr -d '\r' || true)"
     if [ -n "$found_value" ]; then
       found_version_marker=1
       if [ "$found_value" != "$EXPECTED_VERSION" ]; then
@@ -472,7 +478,7 @@ validate_appimage() {
 
   if [ "$found_version_marker" -eq 0 ]; then
     for desktop_file in "${desktop_files[@]}"; do
-      found_value="$(grep -E '^Version=' "$desktop_file" | head -n 1 | sed 's/^Version=//' | tr -d '\r')"
+      found_value="$(grep -E '^Version=' "$desktop_file" | head -n 1 | sed 's/^Version=//' | tr -d '\r' || true)"
       # Note: Desktop Entry "Version" is often the spec version (commonly 1.0), not
       # the application version. Only treat semver-like values as an app version.
       if [[ -n "$found_value" && "$found_value" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
@@ -489,6 +495,44 @@ validate_appimage() {
     appimage_filename="$(basename "$appimage_path")"
     if [[ "$appimage_filename" != *"$EXPECTED_VERSION"* ]]; then
       die "AppImage did not expose X-AppImage-Version/Version in its desktop entry, and filename did not contain expected version ${EXPECTED_VERSION}: ${appimage_filename}"
+    fi
+  fi
+
+  # Optional (recommended): ensure the extracted AppRun can execute without FUSE by
+  # running in a mode that exits quickly. This is disabled by default because it
+  # may require a working display (Xvfb) and WebKit/GTK runtime dependencies.
+  if [ -n "${FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK:-}" ]; then
+    local timeout_secs="${FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS:-20}"
+    if ! [[ "$timeout_secs" =~ ^[0-9]+$ ]] || [ "$timeout_secs" -lt 1 ]; then
+      die "Invalid FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS=${timeout_secs} (expected integer >= 1)"
+    fi
+
+    info "Exec check: running extracted AppRun --startup-bench (timeout ${timeout_secs}s)"
+    local exec_log
+    exec_log="$TMPDIR/apprun-exec.log"
+
+    # Run under a virtual display when available/needed.
+    local -a runner=()
+    if [ -x "$REPO_ROOT/scripts/xvfb-run-safe.sh" ] && { [ -z "${DISPLAY:-}" ] || [ -n "${CI:-}" ]; }; then
+      runner=("$REPO_ROOT/scripts/xvfb-run-safe.sh")
+    fi
+
+    local status=0
+    set +e
+    if command -v timeout >/dev/null 2>&1; then
+      "${runner[@]}" timeout "${timeout_secs}s" bash -lc "cd \"$appdir\" && ./AppRun --startup-bench" >"$exec_log" 2>&1
+      status=$?
+    else
+      info "Exec check: 'timeout' not found; running without an enforced timeout"
+      "${runner[@]}" bash -lc "cd \"$appdir\" && ./AppRun --startup-bench" >"$exec_log" 2>&1
+      status=$?
+    fi
+    set -e
+
+    if [ "$status" -ne 0 ]; then
+      echo "${SCRIPT_NAME}: error: AppRun --startup-bench failed (exit ${status}) for AppImage: $appimage_path" >&2
+      tail -200 "$exec_log" >&2 || true
+      die "Extracted AppRun did not execute successfully for AppImage: $appimage_path"
     fi
   fi
 
