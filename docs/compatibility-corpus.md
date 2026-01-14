@@ -459,7 +459,7 @@ The corpus dashboard captures **read + round-trip** behavior, while the Excel-or
 **calculation fidelity**. To get a single view across both, generate a unified scorecard:
 
 ```bash
-# 1) Run corpus triage + dashboard (produces tools/corpus/out/**/summary.json)
+# 1) Run corpus triage + dashboard (produces tools/corpus/out/<variant>/summary.json)
 python -m tools.corpus.triage --corpus-dir tools/corpus/public --out-dir tools/corpus/out/public \
   --expectations tools/corpus/public/expectations.json
 python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
@@ -475,7 +475,7 @@ python -m tools.compat_scorecard --out-md compat_scorecard.md
 
 By default, `tools/compat_scorecard.py` looks for:
 
-- the newest `tools/corpus/out/**/summary.json` (public/private/strict variants)
+- the newest `tools/corpus/out/<variant>/summary.json` (public/private/strict variants)
 - `tests/compatibility/excel-oracle/reports/mismatch-report.json`
 
 If one input is missing, it exits non-zero and prints which file is missing (use
@@ -553,7 +553,7 @@ repo variable `CORPUS_RUN_RECALC=false`.
 
 ### Compatibility gate thresholds
 
-After generating `tools/corpus/out/**/summary.json` via `tools/corpus/dashboard.py`, you can enforce minimum
+After generating `tools/corpus/out/<variant>/summary.json` via `tools/corpus/dashboard.py`, you can enforce minimum
 pass rates:
 
 ```bash

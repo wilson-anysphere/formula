@@ -5,7 +5,7 @@ Unified compatibility scorecard generator.
 This script merges:
 
 * The XLSX compatibility corpus harness (file I/O) summary:
-    tools/corpus/out/**/summary.json
+    tools/corpus/out/<variant>/summary.json
 * The Excel-oracle mismatch report (calculation fidelity):
     tests/compatibility/excel-oracle/reports/mismatch-report.json
 
@@ -334,7 +334,22 @@ def _find_default_corpus_summary(repo_root: Path) -> Path | None:
     if not out_root.is_dir():
         return None
 
-    candidates = [p for p in out_root.glob("**/summary.json") if p.is_file()]
+    # Fast path: dashboards write summary.json at the output root (typically one directory
+    # below tools/corpus/out, e.g. tools/corpus/out/private/summary.json). Avoid recursive
+    # `**/summary.json` scans because corpus output dirs can contain large `reports/` trees.
+    candidates: list[Path] = []
+    for pattern in ("summary.json", "*/summary.json", "*/*/summary.json"):
+        candidates.extend([p for p in out_root.glob(pattern) if p.is_file()])
+
+    if not candidates:
+        # Fallback: walk for non-standard layouts, but prune known-large directories.
+        skip_dirnames = {".git", "node_modules", "target", "reports", "__pycache__"}
+        for root, dirs, files in os.walk(out_root):
+            dirs[:] = [d for d in dirs if d not in skip_dirnames]
+            if "summary.json" in files:
+                p = Path(root) / "summary.json"
+                if p.is_file():
+                    candidates.append(p)
     if not candidates:
         return None
     # Multiple corpora (public/private/strict variants). Pick the newest output so local runs
@@ -394,7 +409,7 @@ def main() -> int:
         default="",
         help=(
             "Path to corpus summary.json. If omitted, selects the newest "
-            "tools/corpus/out/**/summary.json (public/private/strict variants)."
+            "tools/corpus/out/<variant>/summary.json (public/private/strict variants)."
         ),
     )
     parser.add_argument(
@@ -480,7 +495,7 @@ def main() -> int:
         searched = repo_root / "tools" / "corpus" / "out"
         msg = (
             "Missing corpus summary.json. "
-            "Expected a file under tools/corpus/out/**/summary.json "
+            "Expected a file under tools/corpus/out/<variant>/summary.json "
             "(run: python -m tools.corpus.triage ... then python -m tools.corpus.dashboard ...)."
         )
         if corpus_path is not None:
