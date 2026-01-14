@@ -877,7 +877,7 @@ fn drawing_rels_path(drawing_path: &str) -> String {
 fn parse_anchor(anchor_node: &roxmltree::Node<'_, '_>) -> Result<Anchor> {
     crate::drawingml::anchor::parse_anchor(anchor_node).ok_or_else(|| {
         XlsxError::Invalid(format!(
-            "failed to parse anchor <{}>",
+            "failed to parse DrawingML anchor <{}>",
             anchor_node.tag_name().name()
         ))
     })
