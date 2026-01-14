@@ -29,6 +29,7 @@ const PASSWORD: &str = "password";
 const CALG_RC4: u32 = 0x0000_6801;
 const CALG_SHA1: u32 = 0x0000_8004;
 const PROV_RSA_FULL: u32 = 1;
+const ENCRYPTION_HEADER_F_CRYPTOAPI: u32 = 0x0000_0004;
 
 const SPIN_COUNT: u32 = 50_000;
 const RC4_BLOCK_SIZE: usize = 0x200;
@@ -159,7 +160,8 @@ fn build_encryption_info_rc4(
     csp_utf16le.extend_from_slice(&0u16.to_le_bytes()); // NUL terminator
 
     let mut header = Vec::new();
-    header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    // `EncryptionHeader.Flags` must include fCryptoAPI for Standard/CryptoAPI encryption.
+    header.extend_from_slice(&ENCRYPTION_HEADER_F_CRYPTOAPI.to_le_bytes());
     header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
     header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
     header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIDHash
@@ -260,4 +262,3 @@ fn main() {
     }
     fs::write(&out_path, bytes).expect("write encrypted fixture");
 }
-
