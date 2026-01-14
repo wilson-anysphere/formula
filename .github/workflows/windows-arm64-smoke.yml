@@ -35,7 +35,12 @@ jobs:
     name: Build + bundle (aarch64-pc-windows-msvc)
     # Avoid spending compute on scheduled runs in forks.
     if: github.event_name != 'schedule' || github.repository == 'wilson-anysphere/formula'
-    runs-on: windows-latest
+    # Pin runner image versions for reproducibility. GitHub's `*-latest` labels move
+    # over time, which can unexpectedly break desktop packaging workflows.
+    #
+    # Update this pin only after validating the workflow succeeds on the newer runner
+    # images (see https://github.com/actions/runner-images).
+    runs-on: windows-2022
 
     env:
       # Keep this aligned with the pinned versions in `.github/workflows/release.yml`
@@ -110,7 +115,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           if (!(Test-Path $vswhere)) {
-            throw "vswhere not found at $vswhere (expected on windows-latest)."
+            throw "vswhere not found at $vswhere (expected on windows-2022)."
           }
           $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (!$installPath) {
