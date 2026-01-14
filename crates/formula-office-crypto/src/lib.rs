@@ -79,7 +79,8 @@ pub fn is_encrypted_ooxml_ole(bytes: &[u8]) -> bool {
         return false;
     };
 
-    stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
+    stream_exists_case_tolerant(&mut ole, "EncryptionInfo")
+        && stream_exists_case_tolerant(&mut ole, "EncryptedPackage")
 }
 
 /// Decrypt an Office-encrypted OOXML OLE/CFB wrapper and return the decrypted raw ZIP bytes.
@@ -100,10 +101,10 @@ pub fn decrypt_encrypted_package_ole_with_options(
     let mut ole = cfb::CompoundFile::open(cursor)?;
 
     let mut encryption_info = Vec::new();
-    open_stream(&mut ole, "EncryptionInfo")?.read_to_end(&mut encryption_info)?;
+    open_stream_case_tolerant(&mut ole, "EncryptionInfo")?.read_to_end(&mut encryption_info)?;
 
     let mut encrypted_package = Vec::new();
-    open_stream(&mut ole, "EncryptedPackage")?.read_to_end(&mut encrypted_package)?;
+    open_stream_case_tolerant(&mut ole, "EncryptedPackage")?.read_to_end(&mut encrypted_package)?;
 
     decrypt_encrypted_package_streams_with_options(&encryption_info, &encrypted_package, password, opts)
 }
@@ -208,21 +209,29 @@ fn decrypt_encrypted_package_streams_with_options(
     }
 }
 
-fn stream_exists<R: Read + std::io::Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
-    if ole.open_stream(name).is_ok() {
-        return true;
-    }
-    let with_leading_slash = format!("/{name}");
-    ole.open_stream(&with_leading_slash).is_ok()
-}
-
-fn open_stream<R: Read + std::io::Seek>(
+fn open_stream_case_tolerant<R: Read + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> Result<cfb::Stream<R>, OfficeCryptoError> {
+    // Some OLE writers expose root streams with a leading `/` (e.g. `/EncryptionInfo`) even though
+    // most Office-produced containers use `EncryptionInfo`. Be tolerant and try both.
     match ole.open_stream(name) {
         Ok(s) => Ok(s),
         Err(err1) => {
+            if let Some(stripped) = name.strip_prefix('/') {
+                return match ole.open_stream(stripped) {
+                    Ok(s) => Ok(s),
+                    Err(err2) if err1.kind() == std::io::ErrorKind::NotFound => {
+                        Err(OfficeCryptoError::InvalidFormat(format!(
+                            "missing OLE stream {name}: {err2}"
+                        )))
+                    }
+                    Err(err2) => Err(OfficeCryptoError::InvalidFormat(format!(
+                        "failed to open OLE stream {name}: {err1}; {err2}"
+                    ))),
+                };
+            }
+
             let with_leading_slash = format!("/{name}");
             match ole.open_stream(&with_leading_slash) {
                 Ok(s) => Ok(s),
@@ -237,6 +246,17 @@ fn open_stream<R: Read + std::io::Seek>(
             }
         }
     }
+}
+
+fn stream_exists_case_tolerant<R: Read + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> bool {
+    if ole.open_stream(name).is_ok() {
+        return true;
+    }
+    let with_leading_slash = format!("/{name}");
+    ole.open_stream(&with_leading_slash).is_ok()
 }
 
 fn validate_decrypted_package(bytes: &[u8]) -> Result<(), OfficeCryptoError> {
@@ -265,6 +285,28 @@ mod tests {
             .expect("create EncryptedPackage stream");
         let bytes = ole.into_inner().into_inner();
         assert!(is_encrypted_ooxml_ole(&bytes));
+    }
+
+    #[test]
+    fn detects_encrypted_ooxml_ole_container_with_leading_slash_stream_names() {
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        ole.create_stream("/EncryptionInfo")
+            .expect("create /EncryptionInfo stream");
+        ole.create_stream("/EncryptedPackage")
+            .expect("create /EncryptedPackage stream");
+        let bytes = ole.into_inner().into_inner();
+
+        // Ensure the encrypted OOXML detection is tolerant to the leading `/` naming quirk.
+        assert!(is_encrypted_ooxml_ole(&bytes));
+
+        // Ensure we reach a format-related error (corrupt/missing content) instead of failing to
+        // open the streams with NotFound.
+        let err = decrypt_encrypted_package_ole(&bytes, "password").expect_err("expected error");
+        assert!(
+            matches!(err, OfficeCryptoError::InvalidFormat(_)),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
