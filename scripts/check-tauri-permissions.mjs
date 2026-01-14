@@ -51,7 +51,7 @@ function readCachedPermissionLsOutput() {
   if (!permissionLsCachePath) return null;
   try {
     if (!fs.existsSync(permissionLsCachePath)) return null;
-    const text = fs.readFileSync(permissionLsCachePath, "utf8");
+    const text = stripAnsi(fs.readFileSync(permissionLsCachePath, "utf8"));
     const trimmed = text.trim();
     if (!trimmed) return null;
     return trimmed;
