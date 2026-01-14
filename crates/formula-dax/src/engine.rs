@@ -2822,8 +2822,8 @@ impl DaxEngine {
                 override_pairs.insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
             }
         }
-        let current_row = row_ctx
-            .row_for(current_table)
+        let (current_row, current_visible_cols) = row_ctx
+            .physical_row_for(current_table)
             .ok_or_else(|| DaxError::Eval("missing row for current table".into()))?;
 
         let Some(path) = model.find_unique_active_relationship_path(
@@ -2847,11 +2847,25 @@ impl DaxEngine {
         };
 
         let mut row = current_row;
-        for rel_idx in path {
+        for (hop_idx, rel_idx) in path.into_iter().enumerate() {
             let rel_info = model
                 .relationships()
                 .get(rel_idx)
                 .expect("relationship index from path");
+
+            // If the current row context is restricted (e.g. iterating `VALUES(Table[Column])`),
+            // prevent `RELATED` from reading join key columns that are not visible in the row
+            // context.
+            if hop_idx == 0 {
+                if let Some(visible_cols) = current_visible_cols {
+                    if !visible_cols.contains(&rel_info.from_idx) {
+                        return Err(DaxError::Eval(format!(
+                            "column {current_table}[{}] is not available in the current row context",
+                            rel_info.rel.from_column
+                        )));
+                    }
+                }
+            }
 
             let from_table = model
                 .table(&rel_info.rel.from_table)
@@ -4092,8 +4106,8 @@ impl DaxEngine {
                         return Err(DaxError::Eval("RELATEDTABLE requires row context".into()));
                     };
 
-                    let current_row = row_ctx
-                        .row_for(current_table)
+                    let (current_row, current_visible_cols) = row_ctx
+                        .physical_row_for(current_table)
                         .ok_or_else(|| DaxError::Eval("missing current row".into()))?;
 
                     // Resolve a unique active relationship chain in the reverse direction
@@ -4129,6 +4143,26 @@ impl DaxEngine {
                             "no active relationship between {current_table} and {target_table}"
                         )));
                     };
+
+                    // If the current row context is restricted (e.g. iterating `VALUES(Table[Column])`),
+                    // ensure `RELATEDTABLE` does not read hidden join key columns from a
+                    // representative physical row.
+                    if let Some(visible_cols) = current_visible_cols {
+                        if let Some(&first_rel_idx) = path.first() {
+                            let rel_info = model
+                                .relationships()
+                                .get(first_rel_idx)
+                                .expect("relationship index from path");
+                            if rel_info.rel.to_table == current_table
+                                && !visible_cols.contains(&rel_info.to_idx)
+                            {
+                                return Err(DaxError::Eval(format!(
+                                    "column {current_table}[{}] is not available in the current row context",
+                                    rel_info.rel.to_column
+                                )));
+                            }
+                        }
+                    }
 
                     // Fast path: direct relationship `target_table (many) -> current_table (one)`.
                     if path.len() == 1 {
