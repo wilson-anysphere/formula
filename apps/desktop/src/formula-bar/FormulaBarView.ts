@@ -15,7 +15,7 @@ import { FormulaBarFunctionAutocompleteController } from "./completion/functionA
 import { computeFormulaIndentation } from "./computeFormulaIndentation.js";
 import { buildFunctionPickerItems, renderFunctionPickerList, type FunctionPickerItem } from "./functionPicker.js";
 
-export type FixFormulaErrorWithAiInfo = {
+type FixFormulaErrorWithAiInfo = {
   address: string;
   /** The committed formula text currently stored in the active cell. */
   input: string;
@@ -33,7 +33,7 @@ type FormulaReferenceHighlight = {
   active?: boolean;
 };
 
-export type NameBoxMenuItem = {
+type NameBoxMenuItem = {
   /**
    * User-visible label. For named ranges/tables this is typically the workbook-defined name.
    */
@@ -92,7 +92,7 @@ function storeFormulaBarExpandedState(expanded: boolean): void {
   formulaBarExpandedFallback = expanded;
 }
 
-export type NameBoxDropdownItemKind = "namedRange" | "table" | "sheet" | "recent";
+type NameBoxDropdownItemKind = "namedRange" | "table" | "sheet" | "recent";
 
 export type NameBoxDropdownItem = {
   /**
@@ -120,11 +120,11 @@ export interface NameBoxDropdownProvider {
   getItems(): NameBoxDropdownItem[];
 }
 
-export type FormulaBarViewOptions = FormulaBarViewToolingOptions & {
+type FormulaBarViewOptions = FormulaBarViewToolingOptions & {
   nameBoxDropdownProvider?: NameBoxDropdownProvider;
 };
 
-export interface FormulaBarViewCallbacks {
+interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
   onCommit: (text: string, commit: FormulaBarCommit) => void;
   onCancel?: () => void;
@@ -174,7 +174,7 @@ function nextFunctionPickerListId(): string {
   return `formula-function-picker-list-${functionPickerListIdCounter}`;
 }
 
-export type FormulaBarCommitReason = "enter" | "tab" | "command";
+type FormulaBarCommitReason = "enter" | "tab" | "command";
 
 export interface FormulaBarCommit {
   reason: FormulaBarCommitReason;
@@ -184,7 +184,7 @@ export interface FormulaBarCommit {
   shift: boolean;
 }
 
-export type FormulaBarViewToolingOptions = {
+type FormulaBarViewToolingOptions = {
   /**
    * Returns the current WASM engine instance (may be null while the worker/WASM is still loading).
    *
