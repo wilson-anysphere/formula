@@ -54,13 +54,14 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
      then runs three sources concurrently:
 
    **A. Rule-based (deterministic)**
-   - Implemented by `getRuleBasedSuggestions()`.
-   - Only active for formulas (`parsed.isFormula`).
-   - Covers:
-     - **Function name completion** (e.g. `=VLO` → `=VLOOKUP(`) via `suggestFunctionNames()`.
-     - **Workbook identifiers** when not in a call (named ranges + structured refs) via `suggestWorkbookIdentifiers()`.
-     - **Range completions** when a function argument expects a range (e.g. `=SUM(A` → `=SUM(A1:A10)`) via `suggestRangeCompletions()`.
-     - **Argument value hints** for simple arg types (`TRUE/FALSE`, `0/1`, “cell to the left”) via `suggestArgumentValues()`.
+    - Implemented by `getRuleBasedSuggestions()`.
+    - Only active for formulas (`parsed.isFormula`).
+    - Covers:
+      - **Starter function stubs** when the user has only typed `=` (e.g. `=` → `=SUM(`) via `suggestTopLevelFunctions()`.
+      - **Function name completion** (e.g. `=VLO` → `=VLOOKUP(`) via `suggestFunctionNames()`.
+      - **Workbook identifiers** when not in a call (named ranges + structured refs) via `suggestWorkbookIdentifiers()`.
+      - **Range completions** when a function argument expects a range (e.g. `=SUM(A` → `=SUM(A1:A10)`) via `suggestRangeCompletions()`.
+      - **Argument value hints** for simple arg types (`TRUE/FALSE`, `0/1`, “cell to the left”) via `suggestArgumentValues()`.
 
    **B. Pattern-based (local value repetition)**
    - Implemented by `getPatternSuggestions()`.
@@ -137,7 +138,7 @@ If you’re integrating the engine into a new surface:
 
 The engine can optionally use workbook schema to suggest:
 - named ranges (`Revenue`, `salesData`, …)
-- sheet names for sheet-qualified ranges (`Sheet2!A…`)
+- sheet names for sheet-qualified ranges (`Sheet2!A…`) and sheet-prefix stubs inside range args (`Sheet2!`)
 - structured references for tables (`Table1[Amount]`)
 
 ### `SchemaProvider` interface
@@ -169,6 +170,20 @@ Key behavior:
 Notes:
 - The suggestion engine only requires `{ name, columns }`.
 - Desktop preview evaluation becomes much better if table coordinates are provided (`sheetName`, `startRow/startCol/endRow/endCol`) because previews can rewrite structured references into A1 ranges (see `rewriteStructuredReferences()` in `apps/desktop/src/ai/completion/formulaBarTabCompletion.ts`).
+
+### Sheet-name prefixes (before `!`)
+
+When the user is inside a range argument and has not typed `!` yet, the engine can suggest **sheet-prefix stubs**:
+- `=SUM(She` → `=SUM(Sheet2!`
+- `=SUM('My` → `=SUM('My Sheet'!`
+
+Key rules (desktop formula bar / pure insertion):
+- Only suggest **unquoted** sheet names when `needsSheetQuotes(sheetName) === false`.
+- For sheet names that **require quotes**, only suggest them when the user has already typed a leading `'` in the argument.
+  - We intentionally do **not** “fix” missing quotes (e.g. `=SUM(My Sheet` produces no suggestions).
+- We intentionally do **not** suggest anything for inputs like `=SUM(She!A`:
+  - completing `She` → `Sheet2` would require inserting characters **before** the already-typed `!`, which cannot be represented as ghost text in the formula bar.
+- Sheet-prefix suggestions end with `!` and are intentionally treated as *incomplete* (we do not auto-close function parens for them).
 
 ### Sheet-qualified ranges
 
