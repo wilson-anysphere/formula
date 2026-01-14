@@ -12456,6 +12456,19 @@ impl crate::eval::ValueResolver for Snapshot {
         sheet_id: usize,
         addr: CellAddr,
     ) -> crate::style_patch::EffectiveStyle {
+        // Excel displays spilled outputs using the spill origin cell's formatting. Mirror that
+        // behavior so worksheet-information functions like `CELL("prefix")`/`CELL("protect")`
+        // observe the same effective style for any cell in the spill range.
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
+        if let Some(origin) = self.spill_origin_by_cell.get(&key).copied() {
+            if origin != key {
+                return self.effective_cell_style(origin.sheet, origin.addr);
+            }
+        }
+
         let sheet_default_style_id = self
             .dc_sheet_default_style_ids
             .get(sheet_id)

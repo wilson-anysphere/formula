@@ -104,3 +104,38 @@ fn cell_protect_respects_layered_locked_overrides() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
 }
+
+#[test]
+fn spilled_outputs_use_origin_style_patch() {
+    let mut engine = Engine::new();
+
+    // Style the spill origin (A1) with explicit right alignment.
+    engine.set_style_patch(
+        1,
+        StylePatch {
+            alignment: Some(AlignmentPatch {
+                horizontal: Some(Some(HorizontalAlignment::Right)),
+            }),
+            ..StylePatch::default()
+        },
+    );
+    engine
+        .set_cell_patch_style_id("Sheet1", "A1", 1)
+        .unwrap();
+
+    // Spill a 1x2 array from A1 to B1.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(1,2)")
+        .unwrap();
+
+    // `CELL("prefix",B1)` should observe the origin cell's formatting.
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=CELL("prefix",B1)"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("\"".to_string())
+    );
+}
