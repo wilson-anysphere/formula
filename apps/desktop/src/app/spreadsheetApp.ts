@@ -4495,7 +4495,6 @@ export class SpreadsheetApp {
 
   private scheduleDrawingsRender(reason?: string): void {
     if (this.disposed) return;
-    if (!this.uiReady) return;
     // A pending refresh will redraw drawings (and other overlays) anyway.
     if (this.renderScheduled) return;
     if (this.drawingsRenderScheduled) return;
@@ -4514,16 +4513,19 @@ export class SpreadsheetApp {
     schedule(() => {
       this.drawingsRenderScheduled = false;
       if (this.disposed) return;
-      if (!this.uiReady) return;
       const needsSelectionRefresh =
         !this.sharedGrid && this.drawingInteractionController == null && this.selectedDrawingId != null;
       // In shared-grid mode, axis size changes (and related scroll clamping/alignment) can update the
       // renderer's internal scroll offsets even when the user didn't actively scroll. Keep our legacy
       // scroll state in sync before computing drawing viewport geometry so overlays remain pixel-aligned.
       if (this.sharedGrid) {
-        const scroll = this.sharedGrid.getScroll();
-        this.scrollX = scroll.x;
-        this.scrollY = scroll.y;
+        try {
+          const scroll = this.sharedGrid.getScroll();
+          this.scrollX = scroll.x;
+          this.scrollY = scroll.y;
+        } catch {
+          // ignore
+        }
       }
       this.renderDrawings();
       // In legacy grid mode, drawing selection chrome is rendered on the selection canvas layer.
