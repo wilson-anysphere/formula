@@ -537,10 +537,12 @@ workbook’s sheet order*. Because the engine cannot know the sheet ordering for
 host must supply it:
 
 1. `workbook_sheet_names("Book.xlsx")` returns sheet names in workbook order (case-insensitive semantics).
-   - In the Rust `ExternalValueProvider` trait, this is exposed as
-     `ExternalValueProvider::sheet_order(workbook)`.
-   - When embedding the evaluator directly via `ValueResolver`, this is exposed as
-     `ValueResolver::external_sheet_order(workbook)`.
+    - In the Rust `ExternalValueProvider` trait, this is exposed as
+      `ExternalValueProvider::sheet_order(workbook)`.
+    - Conceptually (in other host bindings), this can be thought of as
+      `workbook_sheet_names(workbook)`.
+    - When embedding the evaluator directly via `ValueResolver`, this is exposed as
+      `ValueResolver::external_sheet_order(workbook)`.
 2. The engine finds `start` and `end` within that list and selects the inclusive slice between them (order
    independent, like Excel).
 3. Each sheet name `S` in that slice is queried as `sheet_key = "[Book.xlsx]S"`.
@@ -578,8 +580,9 @@ To support external workbook links (cells/ranges and external 3D spans), integra
 - `ValueResolver::get_external_value(sheet_key, addr)` — evaluator-facing hook (used when embedding the
   evaluator directly).
 - `ExternalValueProvider::get(sheet_key, addr)` — return a scalar value for an external cell.
-- `ExternalValueProvider::sheet_order(workbook)` (aka `workbook_sheet_names`) — return sheet names for
-  `workbook` in workbook order (required for external 3D spans).
+- `ExternalValueProvider::sheet_order(workbook)` — return sheet names for `workbook` in workbook order
+  (required for external 3D spans).
+  - Conceptually (in other host bindings), this can be thought of as `workbook_sheet_names(workbook)`.
 
 To support **external structured references** like `[Book.xlsx]Sheet1!Table1[Col]`, the engine will need an
 additional host API to provide external table metadata (for example a future
