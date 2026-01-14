@@ -608,10 +608,10 @@ impl Workbook {
         if idx == usize::MAX {
             return None;
         }
-
-        // Defensively validate the cached index against `sheet_order` so we remain correct even if
-        // internal tests (or future refactors) mutate `sheet_order` without updating the cache.
-        // In the common case (cache is valid) this is still O(1).
+        // `sheet_tab_index_by_id` is a cache derived from `sheet_order`. In normal operation it is
+        // updated whenever `sheet_order` changes, but internal tests (or future refactors) may
+        // mutate `sheet_order` without updating the cache. Validate the cached index before
+        // trusting it so we don't incorrectly treat a missing sheet as present.
         if self.sheet_order.get(idx).copied() == Some(sheet) {
             return Some(idx);
         }
