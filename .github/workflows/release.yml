@@ -1191,6 +1191,19 @@ jobs:
 
           ls -lah debug-symbols
 
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            {
+              echo "### Debug symbols (${CACHE_TARGET})"
+              echo
+              echo "- Workflow artifact: \`debug-symbols-${ARTIFACT_LABEL}-${CACHE_TARGET}\`"
+              echo "- Files:"
+              for f in debug-symbols/*.zip; do
+                echo "  - \`$(basename "$f")\`"
+              done
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload debug symbol archives (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -1429,6 +1442,17 @@ jobs:
           }
 
           Get-ChildItem -Path "debug-symbols" | Format-Table Name,Length
+
+          if ($env:GITHUB_STEP_SUMMARY) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Debug symbols ($cacheTarget)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ('- Workflow artifact: `debug-symbols-' + $label + '-' + $cacheTarget + '`')
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Files:"
+            Get-ChildItem -Path "debug-symbols" -Filter "*.zip" -File | ForEach-Object {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ('  - `' + $_.Name + '`')
+            }
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          }
 
       - name: Upload debug symbol archives (Windows)
         if: runner.os == 'Windows'
