@@ -824,6 +824,55 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
         return formula.to_string();
     }
 
+    fn is_external_sheet_qualified_prefix(bytes: &[u8], bang: usize) -> bool {
+        // Determine whether the sheet reference immediately before `!` refers to an external
+        // workbook (e.g. `[Book.xlsx]Sheet1!` or `'C:\path\[Book.xlsx]Sheet1'!`).
+        //
+        // Excel forbids `[` / `]` in local sheet names, so we treat the presence of `[` in the
+        // sheet token as indicating an external workbook reference.
+        if bang == 0 {
+            return false;
+        }
+
+        // Quoted sheet reference: `'...'!`
+        if bytes.get(bang.wrapping_sub(1)) == Some(&b'\'') {
+            let end_quote = bang - 1;
+            let mut i = end_quote;
+            while i > 0 {
+                i -= 1;
+                if bytes[i] != b'\'' {
+                    continue;
+                }
+                // Escaped quote inside a quoted sheet name is represented as `''`.
+                if i > 0 && bytes[i - 1] == b'\'' {
+                    i -= 1;
+                    continue;
+                }
+                let start_quote = i;
+                return bytes[start_quote + 1..end_quote].contains(&b'[');
+            }
+            return false;
+        }
+
+        // Unquoted sheet reference: scan backwards over a conservative set of characters that can
+        // appear in an unquoted external sheet key (`[Book.xlsx]Sheet1` / `Sheet1:Sheet3`).
+        let mut start = bang;
+        while start > 0 {
+            let b = bytes[start - 1];
+            let allowed = b.is_ascii_alphanumeric()
+                || b == b'_'
+                || b == b'.'
+                || b == b'['
+                || b == b']'
+                || b == b':';
+            if !allowed {
+                break;
+            }
+            start -= 1;
+        }
+        bytes[start..bang].contains(&b'[')
+    }
+
     let mut out = String::with_capacity(formula.len());
     let mut i = 0;
     let mut in_string = false;
@@ -870,6 +919,21 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
                 };
                 if !bytes_eq_ignore_ascii_case(window, old_bytes) {
                     continue;
+                }
+                // Avoid rewriting external workbook structured references (e.g.
+                // `"[Book.xlsx]Sheet1!Table1[Col]"` or `"[Book.xlsx]Table1[Col]"`) when renaming a
+                // local table.
+                //
+                // Table names are workbook-scoped, so external workbook references should not be
+                // impacted by local table renames.
+                if i > 0 {
+                    match bytes[i - 1] {
+                        // Workbook-only structured ref prefix: `"[Book.xlsx]Table1[...]"`
+                        b']' => continue,
+                        // Sheet-qualified: `"...!Table1[...]"`.
+                        b'!' if is_external_sheet_qualified_prefix(bytes, i - 1) => continue,
+                        _ => {}
+                    }
                 }
                 // Ensure the match ends at an identifier boundary.
                 match bytes.get(i + old_bytes.len()) {
@@ -1048,6 +1112,23 @@ mod tests {
         assert_eq!(
             rewrite_table_names_in_formula("=SUM(Table1[Amount])", &renames),
             "=SUM(Table1_1[Amount])"
+        );
+    }
+
+    #[test]
+    fn rewrite_table_names_does_not_touch_external_workbook_structured_refs() {
+        let renames = vec![("Table1".to_string(), "Sales".to_string())];
+        assert_eq!(
+            rewrite_table_names_in_formula("=SUM([Book.xlsx]Sheet1!Table1[Amount])", &renames),
+            "=SUM([Book.xlsx]Sheet1!Table1[Amount])"
+        );
+        assert_eq!(
+            rewrite_table_names_in_formula("=SUM('[Book.xlsx]Sheet1'!Table1[Amount])", &renames),
+            "=SUM('[Book.xlsx]Sheet1'!Table1[Amount])"
+        );
+        assert_eq!(
+            rewrite_table_names_in_formula("=SUM([Book.xlsx]Table1[Amount])", &renames),
+            "=SUM([Book.xlsx]Table1[Amount])"
         );
     }
 

@@ -818,6 +818,29 @@ fn rename_table_rewrites_formulas_that_use_display_name() {
 }
 
 #[test]
+fn rename_table_does_not_rewrite_external_workbook_structured_refs() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet1", "E1", "=SUM([Book.xlsx]Sheet1!Table1[Col1])")
+        .expect("formula");
+
+    let rewrites = engine
+        .rename_table("Table1", "Sales")
+        .expect("rename should succeed");
+
+    assert!(
+        !rewrites
+            .iter()
+            .any(|r| r.sheet == "Sheet1" && r.cell.to_a1() == "E1"),
+        "external workbook structured ref should not be rewritten: {rewrites:?}"
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "E1"),
+        Some("=SUM([Book.xlsx]Sheet1!Table1[Col1])")
+    );
+}
+
+#[test]
 fn rename_table_rejects_duplicate_name_case_insensitive() {
     let mut engine = Engine::new();
     engine.set_sheet_tables("Sheet1", vec![table_fixture_single_col()]);

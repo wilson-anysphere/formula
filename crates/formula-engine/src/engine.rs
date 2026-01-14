@@ -9566,6 +9566,10 @@ fn rewrite_table_names_in_compiled_expr(expr: &mut CompiledExpr, renames: &[(Str
             }
         }
         Expr::StructuredRef(sref_expr) => {
+            // Avoid rewriting external workbook structured references when renaming a local table.
+            if matches!(sref_expr.sheet, SheetReference::External(_)) {
+                return;
+            }
             let Some(name) = sref_expr.sref.table_name.clone() else {
                 return;
             };
@@ -16996,7 +17000,6 @@ fn walk_external_expr(
                 Some(p) => p,
                 None => return,
             };
-
             let (workbook, explicit_sheet_key) = match crate::eval::split_external_sheet_key(key) {
                 Some((workbook, sheet)) if !sheet.contains(':') => (workbook, Some(key.as_str())),
                 Some((_workbook, _sheet)) => {
@@ -17032,7 +17035,6 @@ fn walk_external_expr(
             {
                 return;
             }
-
             let Some((table_sheet, table)) = provider.workbook_table(workbook, table_name) else {
                 return;
             };
