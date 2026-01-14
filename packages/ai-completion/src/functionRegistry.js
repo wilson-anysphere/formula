@@ -2372,6 +2372,39 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "BASE",
+    description: "Converts a number into a text representation in the given radix (base).",
+    args: [
+      { name: "number", type: "range" },
+      { name: "radix", type: "number" },
+      { name: "min_length", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "DEC2BIN",
+    description: "Converts a decimal number to binary.",
+    args: [
+      { name: "decimal_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "DEC2HEX",
+    description: "Converts a decimal number to hexadecimal.",
+    args: [
+      { name: "decimal_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "DEC2OCT",
+    description: "Converts a decimal number to octal.",
+    args: [
+      { name: "decimal_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
     name: "BIN2DEC",
     description: "Converts a binary number to decimal.",
     args: [

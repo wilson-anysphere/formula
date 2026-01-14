@@ -92,6 +92,13 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("UNICHAR", 0), "number", "Expected UNICHAR number to be a number");
   assert.ok(registry.isRangeArg("VALUE", 0), "Expected VALUE text to be a range");
   assert.ok(registry.isRangeArg("DECIMAL", 0), "Expected DECIMAL text to be a range");
+  assert.ok(registry.isRangeArg("BASE", 0), "Expected BASE number to be a range");
+  assert.equal(registry.getArgType("BASE", 1), "number", "Expected BASE radix to be a number");
+  assert.ok(registry.getFunction("BASE")?.args?.[2]?.optional, "Expected BASE min_length to be optional");
+  assert.ok(registry.isRangeArg("DEC2BIN", 0), "Expected DEC2BIN decimal_number to be a range");
+  assert.ok(registry.getFunction("DEC2BIN")?.args?.[1]?.optional, "Expected DEC2BIN places to be optional");
+  assert.ok(registry.isRangeArg("DEC2HEX", 0), "Expected DEC2HEX decimal_number to be a range");
+  assert.ok(registry.isRangeArg("DEC2OCT", 0), "Expected DEC2OCT decimal_number to be a range");
   assert.equal(registry.getArgType("CONVERT", 1), "string", "Expected CONVERT from_unit to be string-like");
   assert.ok(registry.isRangeArg("BIN2DEC", 0), "Expected BIN2DEC binary_number to be a range");
   assert.ok(registry.isRangeArg("HEX2DEC", 0), "Expected HEX2DEC hex_number to be a range");
