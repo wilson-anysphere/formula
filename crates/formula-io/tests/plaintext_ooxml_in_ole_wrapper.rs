@@ -100,6 +100,15 @@ fn wrap_plain_zip_in_encrypted_ooxml_ole_with_case_variant_names(plain_zip: &[u8
     )
 }
 
+fn wrap_plain_zip_in_encrypted_ooxml_ole_with_leading_slash_names(plain_zip: &[u8]) -> Vec<u8> {
+    wrap_plain_zip_in_encrypted_ooxml_ole_with_names(
+        plain_zip,
+        "/EncryptionInfo",
+        "/EncryptedPackage",
+        true,
+    )
+}
+
 fn assert_expected_contents(workbook: &formula_model::Workbook) {
     let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
     assert_eq!(
@@ -181,6 +190,20 @@ fn opens_plaintext_ooxml_in_encrypted_ole_wrapper_with_case_variant_stream_names
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("wrapped-case.xlsx");
+    std::fs::write(&path, wrapped).expect("write wrapper file");
+
+    let err = open_workbook_with_password(&path, None).expect_err("expected error");
+    assert_missing_password_error(err);
+    assert_opens_tiny_xlsx_when_password_is_provided(&path);
+}
+
+#[test]
+fn opens_plaintext_ooxml_in_encrypted_ole_wrapper_with_leading_slash_stream_names() {
+    let plain_xlsx = build_tiny_xlsx();
+    let wrapped = wrap_plain_zip_in_encrypted_ooxml_ole_with_leading_slash_names(&plain_xlsx);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("wrapped-slash.xlsx");
     std::fs::write(&path, wrapped).expect("write wrapper file");
 
     let err = open_workbook_with_password(&path, None).expect_err("expected error");
