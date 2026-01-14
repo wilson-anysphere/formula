@@ -196,6 +196,10 @@ export class EngineWorker {
   }
 
   terminate(): void {
+    // If the caller fired-and-forgot `setCell`, we may have a microtask-batched `setCells`
+    // flush pending. Clearing the update batch avoids posting a message to a closed port
+    // (which would reject the flush promise and can surface as an unhandled rejection).
+    this.pendingCellUpdates = [];
     for (const [id, pending] of this.pending) {
       pending.reject(new Error(`worker terminated (request ${id})`));
     }
