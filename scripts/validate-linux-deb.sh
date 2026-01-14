@@ -302,6 +302,12 @@ fi
 if [[ ${#EXPECTED_DEEP_LINK_SCHEMES[@]} -eq 0 ]]; then
   EXPECTED_DEEP_LINK_SCHEMES=("formula")
 fi
+
+for scheme in "${EXPECTED_DEEP_LINK_SCHEMES[@]}"; do
+  if [[ "$scheme" == *:* || "$scheme" == */* ]]; then
+    die "Invalid deep-link scheme configured in ${TAURI_CONF} (plugins[\"deep-link\"].desktop.schemes): '${scheme}'. Expected scheme names only (no ':' or '/' characters)."
+  fi
+done
 declare -a EXPECTED_SCHEME_MIMES=()
 for scheme in "${EXPECTED_DEEP_LINK_SCHEMES[@]}"; do
   EXPECTED_SCHEME_MIMES+=("x-scheme-handler/${scheme}")
