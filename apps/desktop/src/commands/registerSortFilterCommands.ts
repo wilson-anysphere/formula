@@ -81,15 +81,31 @@ export function registerSortFilterCommands(params: {
                   return false;
                 }
               },
-              getDocument: () => app.getDocument(),
-              getSheetId: () => app.getCurrentSheetId(),
-              getSelectionRanges: () => app.getSelectionRanges(),
-              getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
-              focusGrid: () => app.focus(),
-            });
-          },
-      { category, icon: null, keywords: ["sort", "custom sort"], when: options.when ?? null },
-    );
+               getDocument: () => app.getDocument(),
+               getSheetId: () => app.getCurrentSheetId(),
+               getSelectionRanges: () => app.getSelectionRanges(),
+               getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
+               inferCollabEditRejection: (cell) => {
+                 try {
+                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                   const appAny = app as any;
+                   const infer = appAny?.inferCollabEditRejection;
+                   if (typeof infer === "function") {
+                     const inferred = infer.call(appAny, cell);
+                     if (inferred && typeof inferred === "object" && typeof (inferred as any).rejectionReason === "string") {
+                       return inferred as any;
+                     }
+                   }
+                 } catch {
+                   // ignore
+                 }
+                 return { rejectionReason: "permission" };
+               },
+               focusGrid: () => app.focus(),
+             });
+           },
+       { category, icon: null, keywords: ["sort", "custom sort"], when: options.when ?? null },
+     );
   };
 
   // Home uses a ribbon-scoped id for UI parity; hide it from the command palette to avoid

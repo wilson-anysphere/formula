@@ -188,6 +188,44 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     root.remove();
   });
 
+  it("shows a missing encryption key toast when a fill operation applies 0 edits due to canEditCell", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+    // Seed A1 so the fill has a source value.
+    doc.setCellInput("Sheet1", { row: 0, col: 0 }, 1);
+
+    // Select A1:A2 so Ctrl+D style fill will target A2.
+    app.selectRange({ sheetId: "Sheet1", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 0 } }, { focus: false });
+
+    // Simulate a permissions guard installed by collab mode (e.g. missing encryption key).
+    (app as any).document.canEditCell = () => false;
+
+    const ydoc = new Y.Doc();
+    const cells = ydoc.getMap("cells");
+    (app as any).collabSession = {
+      cells,
+      getEncryptionConfig: () => ({
+        keyForCell: () => null,
+        shouldEncryptCell: () => true,
+      }),
+    };
+
+    app.fillDown();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Missing encryption key");
+    expect(doc.getCell("Sheet1", { row: 1, col: 0 })).toMatchObject({ value: null, formula: null });
+
+    app.destroy();
+    root.remove();
+  });
+
   it("includes the encrypted payload key id when a collab edit is blocked due to keyId mismatch", () => {
     const root = createRoot();
     const status = {

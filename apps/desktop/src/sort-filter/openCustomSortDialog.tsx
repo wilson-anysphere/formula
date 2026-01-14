@@ -29,6 +29,17 @@ export type CustomSortDialogHost = {
    * (e.g. formulas evaluated to their computed value).
    */
   getCellValue: (sheetId: string, cell: { row: number; col: number }) => SpreadsheetValue;
+  /**
+   * Optional hook to infer why a cell edit is blocked (permission vs missing encryption key).
+   *
+   * This is provided by SpreadsheetApp so sort operations can show encryption-aware rejection
+   * toasts instead of silently no-op'ing.
+   */
+  inferCollabEditRejection?: (cell: {
+    sheetId: string;
+    row: number;
+    col: number;
+  }) => { rejectionReason: "permission" | "encryption" | "unknown"; encryptionKeyId?: string; encryptionPayloadUnsupported?: boolean };
   focusGrid: () => void;
 };
 
@@ -234,6 +245,50 @@ export function openCustomSortDialog(host: CustomSortDialogHost): void {
       initial={initial}
       onCancel={() => closeDialog(dialog, "cancel")}
       onApply={(spec) => {
+        // Sorting writes the full selection range back into the document. In collab/protected/encrypted
+        // contexts, `DocumentController` filters writes per-cell via `canEditCell`. For sort this is
+        // unsafe because it can corrupt row integrity if any cell is blocked. Preflight the selection
+        // and abort with a toast instead of attempting a partial sort.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const canEditCell = (host.getDocument() as any)?.canEditCell as
+          | ((cell: { sheetId: string; row: number; col: number }) => boolean)
+          | null
+          | undefined;
+        if (typeof canEditCell === "function") {
+          const dataStartRow = spec.hasHeader ? selection.startRow + 1 : selection.startRow;
+          let blocked: { row: number; col: number } | null = null;
+          try {
+            outer: for (let row = dataStartRow; row <= selection.endRow; row += 1) {
+              for (let col = selection.startCol; col <= selection.endCol; col += 1) {
+                if (!canEditCell.call(host.getDocument(), { sheetId, row, col })) {
+                  blocked = { row, col };
+                  break outer;
+                }
+              }
+            }
+          } catch {
+            blocked = null;
+          }
+          if (blocked) {
+            const rejection = (() => {
+              if (typeof host.inferCollabEditRejection === "function") {
+                const inferred = host.inferCollabEditRejection({ sheetId, row: blocked.row, col: blocked.col });
+                if (inferred && typeof inferred === "object" && typeof (inferred as any).rejectionReason === "string") {
+                  return inferred;
+                }
+              }
+              return { rejectionReason: "permission" as const };
+            })();
+            showCollabEditRejectedToast([
+              {
+                rejectionKind: "sort",
+                ...rejection,
+              },
+            ]);
+            return;
+          }
+        }
+
         const ok = sortSelection.applySortSpecToSelection({
           doc: host.getDocument(),
           sheetId,

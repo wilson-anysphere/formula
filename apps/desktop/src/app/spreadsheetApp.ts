@@ -3045,10 +3045,10 @@ export class SpreadsheetApp {
           onAxisSizeChange: (change) => {
             this.onSharedGridAxisSizeChange(change);
           },
-          onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
-          onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
-          onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
-           onFillCommit: ({ sourceRange, targetRange, mode }) => {
+           onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
+           onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
+           onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
+            onFillCommit: ({ sourceRange, targetRange, mode }) => {
              // Fill operations should never mutate the sheet while the user is actively editing text
              // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
              //
@@ -3101,13 +3101,31 @@ export class SpreadsheetApp {
               return { startRow, endRow, startCol, endCol };
             };
 
-            const source = toFillRange(sourceRange);
-            const target = toFillRange(targetRange);
-            if (!source || !target) return;
+             const source = toFillRange(sourceRange);
+             const target = toFillRange(targetRange);
+             if (!source || !target) return;
 
-            const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
-            const targetCells = (target.endRow - target.startRow) * (target.endCol - target.startCol);
-            if (sourceCells > MAX_FILL_CELLS || targetCells > MAX_FILL_CELLS) {
+             // Respect per-cell permissions/encryption. `DocumentController` will filter out
+             // individual cell writes via `canEditCell`, but for fill we want deterministic behavior
+             // and a clear UX outcome when nothing can be applied (avoid "selection expanded but
+             // nothing happened").
+             //
+             // When `canEditCell` is unavailable (local/non-collab), treat all cells as writable.
+             const canEditCellFn = (this.document as any)?.canEditCell;
+             const canWriteCell =
+               typeof canEditCellFn === "function"
+                 ? (row: number, col: number) => {
+                     try {
+                       return Boolean(canEditCellFn.call(this.document, { sheetId, row, col }));
+                     } catch {
+                       return true;
+                     }
+                   }
+                 : undefined;
+ 
+             const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
+             const targetCells = (target.endRow - target.startRow) * (target.endCol - target.startCol);
+             if (sourceCells > MAX_FILL_CELLS || targetCells > MAX_FILL_CELLS) {
               try {
                 showToast(
                   `Fill range too large (>${MAX_FILL_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
@@ -3136,42 +3154,90 @@ export class SpreadsheetApp {
                  this.updateStatus();
                  this.focus();
               });
-              return;
-            }
+               return;
+             }
 
-             const fillCoordScratch = { row: 0, col: 0 };
-             const getCellComputedValue = (row: number, col: number) => {
-               fillCoordScratch.row = row;
-               fillCoordScratch.col = col;
-               return this.getCellComputedValueForSheetInternal(sheetId, fillCoordScratch) as any;
-             };
+             if (canWriteCell) {
+               let hasWritableTargetCell = false;
+               outer: for (let row = target.startRow; row < target.endRow; row += 1) {
+                 for (let col = target.startCol; col < target.endCol; col += 1) {
+                   if (canWriteCell(row, col)) {
+                     hasWritableTargetCell = true;
+                     break outer;
+                   }
+                 }
+               }
+               if (!hasWritableTargetCell) {
+                 const rejection = this.inferCollabEditRejection({
+                   sheetId,
+                   row: target.startRow,
+                   col: target.startCol,
+                 });
+                 showCollabEditRejectedToast([
+                   {
+                     rejectionKind: "fillCells",
+                     ...rejection,
+                   },
+                 ]);
+ 
+                 // DesktopSharedGrid will still expand the selection to the dragged target range
+                 // after this callback runs. Revert selection back to the pre-fill state on the
+                 // next microtask turn so the UI reflects that no fill occurred.
+                 const selectionSnapshot = {
+                   ranges: this.selection.ranges.map((r) => ({ ...r })),
+                   active: { ...this.selection.active },
+                   anchor: { ...this.selection.anchor },
+                   activeRangeIndex: this.selection.activeRangeIndex,
+                 };
+                 queueMicrotask(() => {
+                   if (!this.sharedGrid) return;
+                   if (this.disposed) return;
+                   if (this.sheetId !== sheetId) return;
+                   this.selection = buildSelection(selectionSnapshot, this.limits);
+                   this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+                   this.renderSelection();
+                   this.updateStatus();
+                   this.focus();
+                 });
+                 return;
+               }
+             }
+
+              const fillCoordScratch = { row: 0, col: 0 };
+              const getCellComputedValue = (row: number, col: number) => {
+                fillCoordScratch.row = row;
+                fillCoordScratch.col = col;
+                return this.getCellComputedValueForSheetInternal(sheetId, fillCoordScratch) as any;
+              };
 
              // Prefer engine-backed formula shifting when available (handles A:A / 1:1 / ranges, etc).
              const wasm = this.wasmEngine;
              if (wasm && mode !== "copy") {
-               const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
-                 document: this.document,
-                 sheetId,
-                 sourceRange: source,
-                 targetRange: target,
-                 mode,
-                 getCellComputedValue,
-                 rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
-               })
-                 .catch(() => {
-                   // Fall back to the legacy best-effort fill engine if the worker is unavailable.
-                   applyFillCommitToDocumentController({
-                     document: this.document,
-                     sheetId,
-                     sourceRange: source,
-                     targetRange: target,
-                     mode,
-                     getCellComputedValue,
-                   });
-                 })
-                 .finally(() => {
-                   if (this.sheetId === sheetId) {
-                     // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
+                const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
+                  document: this.document,
+                  sheetId,
+                  sourceRange: source,
+                  targetRange: target,
+                  mode,
+                  getCellComputedValue,
+                  ...(canWriteCell ? { canWriteCell } : {}),
+                  rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
+                })
+                  .catch(() => {
+                    // Fall back to the legacy best-effort fill engine if the worker is unavailable.
+                    applyFillCommitToDocumentController({
+                      document: this.document,
+                      sheetId,
+                      sourceRange: source,
+                      targetRange: target,
+                      mode,
+                      getCellComputedValue,
+                      ...(canWriteCell ? { canWriteCell } : {}),
+                    });
+                  })
+                  .finally(() => {
+                    if (this.sheetId === sheetId) {
+                      // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
                      // Avoid stealing focus from a different sheet if the user navigated away
                      // while the async fill commit was in-flight.
                      this.refresh();
@@ -3180,20 +3246,51 @@ export class SpreadsheetApp {
                  });
                this.idle.track(task);
                return;
-             }
+              }
 
-             applyFillCommitToDocumentController({
-               document: this.document,
-               sheetId,
-               sourceRange: source,
-               targetRange: target,
-               mode,
-               getCellComputedValue,
-             });
+              const { editsApplied } = applyFillCommitToDocumentController({
+                document: this.document,
+                sheetId,
+                sourceRange: source,
+                targetRange: target,
+                mode,
+                getCellComputedValue,
+                ...(canWriteCell ? { canWriteCell } : {}),
+              });
+              if (editsApplied === 0 && canWriteCell) {
+                const rejection = this.inferCollabEditRejection({
+                  sheetId,
+                  row: target.startRow,
+                  col: target.startCol,
+                });
+                showCollabEditRejectedToast([
+                  {
+                    rejectionKind: "fillCells",
+                    ...rejection,
+                  },
+                ]);
+                const selectionSnapshot = {
+                  ranges: this.selection.ranges.map((r) => ({ ...r })),
+                  active: { ...this.selection.active },
+                  anchor: { ...this.selection.anchor },
+                  activeRangeIndex: this.selection.activeRangeIndex,
+                };
+                queueMicrotask(() => {
+                  if (!this.sharedGrid) return;
+                  if (this.disposed) return;
+                  if (this.sheetId !== sheetId) return;
+                  this.selection = buildSelection(selectionSnapshot, this.limits);
+                  this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+                  this.renderSelection();
+                  this.updateStatus();
+                  this.focus();
+                });
+                return;
+              }
 
-            // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
-            this.refresh();
-            this.focus();
+             // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
+             this.refresh();
+             this.focus();
           }
         }
       });
@@ -22306,6 +22403,21 @@ export class SpreadsheetApp {
 
     if (!deltaRange) return false;
 
+    // Respect per-cell permissions/encryption. `DocumentController` filters writes per-cell via
+    // `canEditCell`, but for fill we want deterministic skipping and a clear UX outcome when
+    // nothing can be applied (avoid expanding selection to a range where all cells are blocked).
+    const canEditCellFn = (this.document as any)?.canEditCell;
+    const canWriteCell =
+      typeof canEditCellFn === "function"
+        ? (row: number, col: number) => {
+            try {
+              return Boolean(canEditCellFn.call(this.document, { sheetId, row, col }));
+            } catch {
+              return true;
+            }
+          }
+        : undefined;
+
     const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
     const targetCells = (deltaRange.endRow - deltaRange.startRow) * (deltaRange.endCol - deltaRange.startCol);
     if (sourceCells > MAX_FILL_CELLS || targetCells > MAX_FILL_CELLS) {
@@ -22318,6 +22430,28 @@ export class SpreadsheetApp {
         // `showToast` requires a #toast-root; unit tests don't always include it.
       }
       return false;
+    }
+
+    if (canWriteCell) {
+      let hasWritableTargetCell = false;
+      outer: for (let row = deltaRange.startRow; row < deltaRange.endRow; row += 1) {
+        for (let col = deltaRange.startCol; col < deltaRange.endCol; col += 1) {
+          if (canWriteCell(row, col)) {
+            hasWritableTargetCell = true;
+            break outer;
+          }
+        }
+      }
+      if (!hasWritableTargetCell) {
+        const rejection = this.inferCollabEditRejection({ sheetId, row: deltaRange.startRow, col: deltaRange.startCol });
+        showCollabEditRejectedToast([
+          {
+            rejectionKind: "fillCells",
+            ...rejection,
+          },
+        ]);
+        return false;
+      }
     }
 
     const fillCoordScratch = { row: 0, col: 0 };
@@ -22336,6 +22470,7 @@ export class SpreadsheetApp {
         targetRange: deltaRange,
         mode,
         getCellComputedValue,
+        ...(canWriteCell ? { canWriteCell } : {}),
         rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
         label: "Fill",
       })
@@ -22347,6 +22482,7 @@ export class SpreadsheetApp {
             targetRange: deltaRange,
             mode,
             getCellComputedValue,
+            ...(canWriteCell ? { canWriteCell } : {}),
           });
         })
         .finally(() => {
@@ -22359,15 +22495,26 @@ export class SpreadsheetApp {
       return true;
     }
 
-    applyFillCommitToDocumentController({
+    const { editsApplied } = applyFillCommitToDocumentController({
       document: this.document,
       sheetId,
       sourceRange: source,
       targetRange: deltaRange,
       mode,
       getCellComputedValue,
+      ...(canWriteCell ? { canWriteCell } : {}),
     });
-    return true;
+    if (editsApplied === 0 && canWriteCell) {
+      const rejection = this.inferCollabEditRejection({ sheetId, row: deltaRange.startRow, col: deltaRange.startCol });
+      showCollabEditRejectedToast([
+        {
+          rejectionKind: "fillCells",
+          ...rejection,
+        },
+      ]);
+      return false;
+    }
+    return editsApplied > 0;
   }
 
   private applyFillShortcut(direction: "down" | "right" | "up" | "left", mode: Exclude<FillHandleMode, "copy">): void {
@@ -22496,9 +22643,34 @@ export class SpreadsheetApp {
           return t("command.edit.fillLeft");
       }
     })();
-
+ 
     const wasm = this.wasmEngine;
     const sheetId = this.sheetId;
+ 
+     const canEditCellFn = (this.document as any)?.canEditCell;
+     const canWriteCell =
+       typeof canEditCellFn === "function"
+         ? (row: number, col: number) => {
+             try {
+               return Boolean(canEditCellFn.call(this.document, { sheetId, row, col }));
+             } catch {
+               return true;
+             }
+           }
+         : undefined;
+ 
+     const showRejectedToast = (): void => {
+       if (!canWriteCell) return;
+       const first = operations[0];
+       const cell = first ? { row: first.targetRange.startRow, col: first.targetRange.startCol } : this.selection.active;
+       const rejection = this.inferCollabEditRejection({ sheetId, row: cell.row, col: cell.col });
+       showCollabEditRejectedToast([
+         {
+           rejectionKind: "fillCells",
+           ...rejection,
+         },
+       ]);
+     };
 
     // Explicit batch so multi-range selections become a single undo step.
     const fillCoordScratch = { row: 0, col: 0 };
@@ -22520,21 +22692,27 @@ export class SpreadsheetApp {
         targetRange: op.targetRange,
         mode,
         getCellComputedValue,
+        ...(canWriteCell ? { canWriteCell } : {}),
         rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
         label,
       })
+        .then(({ editsApplied }) => {
+          if (editsApplied === 0) showRejectedToast();
+        })
         .catch(() => {
           // Fall back to legacy fill behavior if the worker is unavailable.
           this.document.beginBatch({ label });
           try {
-            applyFillCommitToDocumentController({
+            const { editsApplied } = applyFillCommitToDocumentController({
               document: this.document,
               sheetId,
               sourceRange: op.sourceRange,
               targetRange: op.targetRange,
               mode,
               getCellComputedValue,
+              ...(canWriteCell ? { canWriteCell } : {}),
             });
+            if (editsApplied === 0) showRejectedToast();
           } finally {
             this.document.endBatch();
           }
@@ -22553,7 +22731,7 @@ export class SpreadsheetApp {
       const task = (async () => {
         const coordScratch = { row: 0, col: 0 };
         const edits: Array<{ row: number; col: number; value: unknown }> = [];
-
+ 
         for (const op of operations) {
           const computed = await computeFillEditsForDocumentControllerWithFormulaRewrite({
             document: this.document,
@@ -22562,6 +22740,7 @@ export class SpreadsheetApp {
             targetRange: op.targetRange,
             mode,
             getCellComputedValue,
+            ...(canWriteCell ? { canWriteCell } : {}),
             rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
           });
           for (const edit of computed) {
@@ -22569,8 +22748,11 @@ export class SpreadsheetApp {
           }
         }
 
-        if (edits.length === 0) return;
-
+        if (edits.length === 0) {
+          showRejectedToast();
+          return;
+        }
+ 
         this.document.beginBatch({ label });
         try {
           for (const edit of edits) {
@@ -22586,16 +22768,19 @@ export class SpreadsheetApp {
           // Fall back to legacy fill behavior if the worker is unavailable.
           this.document.beginBatch({ label });
           try {
+            let editsApplied = 0;
             for (const op of operations) {
-              applyFillCommitToDocumentController({
+              editsApplied += applyFillCommitToDocumentController({
                 document: this.document,
                 sheetId,
                 sourceRange: op.sourceRange,
                 targetRange: op.targetRange,
                 mode,
                 getCellComputedValue,
-              });
+                ...(canWriteCell ? { canWriteCell } : {}),
+              }).editsApplied;
             }
+            if (editsApplied === 0) showRejectedToast();
           } finally {
             this.document.endBatch();
           }
@@ -22612,16 +22797,19 @@ export class SpreadsheetApp {
 
     this.document.beginBatch({ label });
     try {
+      let editsApplied = 0;
       for (const op of operations) {
-        applyFillCommitToDocumentController({
+        editsApplied += applyFillCommitToDocumentController({
           document: this.document,
           sheetId,
           sourceRange: op.sourceRange,
           targetRange: op.targetRange,
           mode,
-          getCellComputedValue
-        });
+          getCellComputedValue,
+          ...(canWriteCell ? { canWriteCell } : {}),
+        }).editsApplied;
       }
+      if (editsApplied === 0) showRejectedToast();
     } finally {
       this.document.endBatch();
     }

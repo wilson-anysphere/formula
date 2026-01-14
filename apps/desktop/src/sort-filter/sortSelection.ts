@@ -197,6 +197,76 @@ export function sortSelection(app: SpreadsheetApp, options: { order: SortOrder }
 
   const sheetId = app.getCurrentSheetId();
   const doc = app.getDocument();
+ 
+   // Reject partial sorts when any cell in the target range is non-writable (protected/encrypted).
+   // `DocumentController` filters disallowed deltas per-cell, which can corrupt row integrity if
+   // we attempt a sort and some writes are silently skipped.
+   //
+   // When `canEditCell` is unavailable (local/non-collab), treat all cells as writable.
+   const normalized = normalizeSelectionRange(range);
+   const normRowCount = normalized.endRow - normalized.startRow + 1;
+   const normColCount = normalized.endCol - normalized.startCol + 1;
+   const normCellCount = normRowCount * normColCount;
+   if (normCellCount > DEFAULT_SORT_CELL_LIMIT) {
+     showToast(
+       `Selection too large to sort (${normCellCount.toLocaleString()} cells). ` +
+         `Reduce the selection to under ${DEFAULT_SORT_CELL_LIMIT.toLocaleString()} cells and try again.`,
+       "warning",
+     );
+     app.focus();
+     return;
+   }
+ 
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   const canEditCell = (doc as any)?.canEditCell as
+     | ((cell: { sheetId: string; row: number; col: number }) => boolean)
+     | null
+     | undefined;
+   if (typeof canEditCell === "function") {
+     let blockedCell: { row: number; col: number } | null = null;
+     try {
+       outer: for (let row = normalized.startRow; row <= normalized.endRow; row += 1) {
+         for (let col = normalized.startCol; col <= normalized.endCol; col += 1) {
+           if (!canEditCell.call(doc, { sheetId, row, col })) {
+             blockedCell = { row, col };
+             break outer;
+           }
+         }
+       }
+     } catch {
+       blockedCell = null;
+     }
+     if (blockedCell) {
+       const rejection = (() => {
+         try {
+           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           const appAny = app as any;
+           const infer = appAny?.inferCollabEditRejection;
+           if (typeof infer === "function") {
+             const inferred = infer.call(appAny, { sheetId, row: blockedCell.row, col: blockedCell.col }) as any;
+             if (inferred && typeof inferred === "object" && typeof inferred.rejectionReason === "string") {
+               return inferred as {
+                 rejectionReason: "permission" | "encryption" | "unknown";
+                 encryptionKeyId?: string;
+                 encryptionPayloadUnsupported?: boolean;
+               };
+             }
+           }
+         } catch {
+           // ignore
+         }
+         return { rejectionReason: "permission" as const };
+       })();
+       showCollabEditRejectedToast([
+         {
+           rejectionKind: "sort",
+           ...rejection,
+         },
+       ]);
+       app.focus();
+       return;
+     }
+   }
 
   const result = sortRangeRowsInDocument(doc, sheetId, range, activeCell, {
     order: options.order,
@@ -264,6 +334,27 @@ export function applySortSpecToSelection(params: {
   if (dataStartRow > endRow) return true;
   const dataHeight = endRow - dataStartRow + 1;
   if (dataHeight <= 1) return true;
+ 
+   // Reject partial sorts when any cell in the sort payload is non-writable. `DocumentController`
+   // filters disallowed deltas per-cell; for sort that can corrupt row integrity.
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   const canEditCell = (params.doc as any)?.canEditCell as
+     | ((cell: { sheetId: string; row: number; col: number }) => boolean)
+     | null
+     | undefined;
+   if (typeof canEditCell === "function") {
+     try {
+       for (let row = dataStartRow; row <= endRow; row += 1) {
+         for (let col = startCol; col <= endCol; col += 1) {
+           if (!canEditCell.call(params.doc, { sheetId: params.sheetId, row, col })) {
+             return false;
+           }
+         }
+       }
+     } catch {
+       // Best-effort: if `canEditCell` throws, fall through to attempting the sort.
+     }
+   }
 
   type RowRecord = {
     originalIndex: number;
