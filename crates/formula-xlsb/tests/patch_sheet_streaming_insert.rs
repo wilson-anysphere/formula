@@ -287,7 +287,11 @@ fn rewrite_cell_isst_header_as_two_byte_varints(
     out
 }
 
-fn rewrite_cell_header_as_two_byte_varints(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Vec<u8> {
+fn rewrite_cell_header_as_two_byte_varints(
+    sheet_bin: &[u8],
+    target_row: u32,
+    target_col: u32,
+) -> Vec<u8> {
     // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const SHEETDATA: u32 = 0x0091;
     const SHEETDATA_END: u32 = 0x0092;
@@ -300,17 +304,11 @@ fn rewrite_cell_header_as_two_byte_varints(sheet_bin: &[u8], target_row: u32, ta
 
     loop {
         let record_start = cursor.position() as usize;
-        let Some(id) = biff12_varint::read_record_id(&mut cursor)
-            .ok()
-            .flatten()
-        else {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor).ok().flatten() else {
             break;
         };
         let id_end = cursor.position() as usize;
-        let Some(len) = biff12_varint::read_record_len(&mut cursor)
-            .ok()
-            .flatten()
-        else {
+        let Some(len) = biff12_varint::read_record_len(&mut cursor).ok().flatten() else {
             break;
         };
         let len_start = id_end;
@@ -1005,6 +1003,66 @@ fn patch_sheet_bin_streaming_preserves_cell_isst_header_varint_bytes_when_patchi
 }
 
 #[test]
+fn patch_sheet_bin_streaming_preserves_cell_st_header_varint_bytes_for_style_only_edit() {
+    const CELL_ST: u32 = 0x0006;
+    // BrtCellSt payload is: [col:u32][style:u32][cch:u32][utf16 chars...].
+    // For "Hello" (5 UTF-16 code units), payload length is 8 + 4 + 10 = 22 bytes.
+    const CELL_ST_PAYLOAD_LEN: u8 = 22;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_inline_string(0, 0, "Hello");
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+    let tweaked = rewrite_cell_header_as_two_byte_varints(&sheet_bin, 0, 0);
+
+    let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(
+        id_raw,
+        vec![0x86, 0x00],
+        "expected non-canonical id varint for CELL_ST"
+    );
+    assert_eq!(
+        len_raw,
+        vec![(CELL_ST_PAYLOAD_LEN | 0x80), 0x00],
+        "expected non-canonical len varint for CELL_ST payload"
+    );
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("Hello".to_string()),
+        new_style: Some(1),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let Some((patched_id_raw, patched_len_raw)) = cell_header_raw(&patched_in_mem, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(patched_id_raw, id_raw);
+    assert_eq!(patched_len_raw, len_raw);
+
+    let (id, payload) = find_cell_record(&patched_in_mem, 0, 0).expect("find patched cell");
+    assert_eq!(id, CELL_ST);
+    assert_eq!(
+        u32::from_le_bytes(payload[4..8].try_into().unwrap()),
+        1,
+        "expected patched CELL_ST style id"
+    );
+}
+
+#[test]
 fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_fixed_size_value_edits() {
     const FLOAT: u32 = 0x0005;
 
@@ -1016,8 +1074,16 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_fixed_size_v
     let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
         panic!("expected cell record");
     };
-    assert_eq!(id_raw, vec![0x85, 0x00], "expected non-canonical id varint for FLOAT");
-    assert_eq!(len_raw, vec![0x90, 0x00], "expected non-canonical len varint for FLOAT payload");
+    assert_eq!(
+        id_raw,
+        vec![0x85, 0x00],
+        "expected non-canonical id varint for FLOAT"
+    );
+    assert_eq!(
+        len_raw,
+        vec![0x90, 0x00],
+        "expected non-canonical len varint for FLOAT payload"
+    );
 
     let edits = [CellEdit {
         row: 0,
@@ -1068,7 +1134,11 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_fixed_size_b
     let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
         panic!("expected cell record");
     };
-    assert_eq!(id_raw, vec![0x84, 0x00], "expected non-canonical id varint for BOOL");
+    assert_eq!(
+        id_raw,
+        vec![0x84, 0x00],
+        "expected non-canonical id varint for BOOL"
+    );
     assert_eq!(
         len_raw,
         vec![(BOOL_PAYLOAD_LEN | 0x80), 0x00],
@@ -1119,7 +1189,11 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_fixed_size_e
     let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
         panic!("expected cell record");
     };
-    assert_eq!(id_raw, vec![0x83, 0x00], "expected non-canonical id varint for BOOLERR");
+    assert_eq!(
+        id_raw,
+        vec![0x83, 0x00],
+        "expected non-canonical id varint for BOOLERR"
+    );
     assert_eq!(
         len_raw,
         vec![(BOOLERR_PAYLOAD_LEN | 0x80), 0x00],
@@ -1170,7 +1244,11 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_blank_style_
     let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
         panic!("expected cell record");
     };
-    assert_eq!(id_raw, vec![0x81, 0x00], "expected non-canonical id varint for BLANK");
+    assert_eq!(
+        id_raw,
+        vec![0x81, 0x00],
+        "expected non-canonical id varint for BLANK"
+    );
     assert_eq!(
         len_raw,
         vec![(BLANK_PAYLOAD_LEN | 0x80), 0x00],
@@ -1226,7 +1304,11 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_rk_edit_when
     let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
         panic!("expected cell record");
     };
-    assert_eq!(id_raw, vec![0x82, 0x00], "expected non-canonical id varint for NUM/RK");
+    assert_eq!(
+        id_raw,
+        vec![0x82, 0x00],
+        "expected non-canonical id varint for NUM/RK"
+    );
     assert_eq!(
         len_raw,
         vec![(NUM_PAYLOAD_LEN | 0x80), 0x00],
@@ -1262,6 +1344,78 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_rk_edit_when
     assert_eq!(id, NUM);
     let rk = u32::from_le_bytes(payload[8..12].try_into().unwrap());
     assert_eq!(decode_rk_number(rk).to_bits(), 0.125f64.to_bits());
+}
+
+#[test]
+fn patch_sheet_bin_streaming_preserves_formula_string_header_varint_bytes_when_payload_len_unchanged(
+) {
+    const FORMULA_STRING: u32 = 0x0008;
+    // For "Hello" and a `PtgStr` token stream containing "Hello":
+    //   payload = [col+style:8] + [cached: cch(4) + flags(2) + utf16(10) = 16] + [cce:4] + [rgce:13]
+    //         = 41 bytes.
+    const FORMULA_STRING_PAYLOAD_LEN: u8 = 41;
+
+    fn ptg_str(s: &str) -> Vec<u8> {
+        let mut out = vec![0x17]; // PtgStr
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        for u in units {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        out
+    }
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_formula_str(0, 0, "Hello", ptg_str("Hello"));
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+    let tweaked = rewrite_cell_header_as_two_byte_varints(&sheet_bin, 0, 0);
+
+    let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(
+        id_raw,
+        vec![0x88, 0x00],
+        "expected non-canonical id varint for FORMULA_STRING"
+    );
+    assert_eq!(
+        len_raw,
+        vec![(FORMULA_STRING_PAYLOAD_LEN | 0x80), 0x00],
+        "expected non-canonical len varint for FORMULA_STRING payload"
+    );
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("Hello".to_string()),
+        new_style: Some(1),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let Some((patched_id_raw, patched_len_raw)) = cell_header_raw(&patched_in_mem, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(patched_id_raw, id_raw);
+    assert_eq!(patched_len_raw, len_raw);
+
+    let (id, payload) = find_cell_record(&patched_in_mem, 0, 0).expect("find patched cell");
+    assert_eq!(id, FORMULA_STRING);
+    assert_eq!(
+        u32::from_le_bytes(payload[4..8].try_into().unwrap()),
+        1,
+        "expected patched FORMULA_STRING style id"
+    );
 }
 
 #[test]
@@ -1326,7 +1480,8 @@ fn patch_sheet_bin_streaming_preserves_formula_header_varint_bytes_when_payload_
 }
 
 #[test]
-fn patch_sheet_bin_streaming_preserves_formula_bool_header_varint_bytes_when_payload_len_unchanged() {
+fn patch_sheet_bin_streaming_preserves_formula_bool_header_varint_bytes_when_payload_len_unchanged()
+{
     const FORMULA_BOOL: u32 = 0x000A;
 
     let mut builder = XlsbFixtureBuilder::new();
@@ -1377,11 +1532,15 @@ fn patch_sheet_bin_streaming_preserves_formula_bool_header_varint_bytes_when_pay
 
     let (id, payload) = find_cell_record(&patched_in_mem, 0, 0).expect("find patched cell");
     assert_eq!(id, FORMULA_BOOL);
-    assert_eq!(payload[8], 0, "expected patched cached value in FORMULA_BOOL payload");
+    assert_eq!(
+        payload[8], 0,
+        "expected patched cached value in FORMULA_BOOL payload"
+    );
 }
 
 #[test]
-fn patch_sheet_bin_streaming_preserves_formula_error_header_varint_bytes_when_payload_len_unchanged() {
+fn patch_sheet_bin_streaming_preserves_formula_error_header_varint_bytes_when_payload_len_unchanged(
+) {
     const FORMULA_BOOLERR: u32 = 0x000B;
 
     let mut builder = XlsbFixtureBuilder::new();
