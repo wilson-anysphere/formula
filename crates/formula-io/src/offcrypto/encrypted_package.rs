@@ -93,6 +93,89 @@ fn padded_aes_len(len: usize) -> usize {
     }
 }
 
+fn derive_standard_cryptoapi_iv_sha1(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_LEN] {
+    // See docs/offcrypto-standard-encryptedpackage.md ("Variant B").
+    let mut hasher = Sha1::new();
+    hasher.update(salt);
+    hasher.update(segment_index.to_le_bytes());
+    let digest = hasher.finalize();
+    let mut iv = [0u8; AES_BLOCK_LEN];
+    iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
+    iv
+}
+
+fn aes_cbc_decrypt_in_place(
+    key: &[u8],
+    iv: &[u8; AES_BLOCK_LEN],
+    buf: &mut [u8],
+) -> Result<(), EncryptedPackageError> {
+    if buf.len() % AES_BLOCK_LEN != 0 {
+        return Err(EncryptedPackageError::CiphertextLenNotBlockAligned {
+            ciphertext_len: buf.len(),
+        });
+    }
+
+    fn decrypt_with<C: BlockDecrypt + KeyInit>(
+        key: &[u8],
+        iv: &[u8; AES_BLOCK_LEN],
+        buf: &mut [u8],
+    ) -> Result<(), EncryptedPackageError> {
+        let cipher = C::new_from_slice(key)
+            .map_err(|_| EncryptedPackageError::InvalidAesKeyLength { key_len: key.len() })?;
+        let mut prev = *iv;
+        for block in buf.chunks_exact_mut(AES_BLOCK_LEN) {
+            let mut cur = [0u8; AES_BLOCK_LEN];
+            cur.copy_from_slice(block);
+
+            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+            for (b, p) in block.iter_mut().zip(prev.iter()) {
+                *b ^= p;
+            }
+            prev = cur;
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, iv, buf),
+        24 => decrypt_with::<Aes192>(key, iv, buf),
+        32 => decrypt_with::<Aes256>(key, iv, buf),
+        other => Err(EncryptedPackageError::InvalidAesKeyLength { key_len: other }),
+    }
+}
+
+fn looks_like_zip_prefix(buf: &[u8]) -> bool {
+    // Local file header / empty archive / spanning signature.
+    buf.starts_with(b"PK\x03\x04")
+        || buf.starts_with(b"PK\x05\x06")
+        || buf.starts_with(b"PK\x07\x08")
+}
+
+fn pkcs7_padding_matches(decrypted_ciphertext: &[u8], orig_size: usize) -> bool {
+    if orig_size == 0 {
+        return false;
+    }
+    let rem = orig_size % AES_BLOCK_LEN;
+    if rem != 0 {
+        let padded_len = orig_size + (AES_BLOCK_LEN - rem);
+        if decrypted_ciphertext.len() < padded_len {
+            return false;
+        }
+        let pad_len = padded_len - orig_size;
+        decrypted_ciphertext[orig_size..padded_len]
+            .iter()
+            .all(|b| *b == pad_len as u8)
+    } else {
+        let padded_len = orig_size + AES_BLOCK_LEN;
+        if decrypted_ciphertext.len() < padded_len {
+            return false;
+        }
+        decrypted_ciphertext[orig_size..padded_len]
+            .iter()
+            .all(|b| *b == AES_BLOCK_LEN as u8)
+    }
+}
+
 /// Decrypt a Standard (CryptoAPI) AES `EncryptedPackage` stream to an arbitrary writer.
 ///
 /// This implements the baseline MS-OFFCRYPTO/ECMA-376 behavior for Standard AES `EncryptedPackage`:
@@ -165,16 +248,20 @@ pub fn decrypt_encrypted_package_standard_aes_to_writer<R: Read, W: Write>(
 /// - `key`: the file encryption key (AES-128/192/256), derived from the password and
 ///   `EncryptionInfo`.
 ///
-/// Algorithm summary (AES-ECB):
+/// Algorithm summary:
 /// - First 8 bytes are the original plaintext size (`orig_size`) as a little-endian `u64`.
-/// - Remaining bytes are AES-ECB ciphertext (no IV).
+/// - Remaining bytes are AES ciphertext.
+///   - Baseline MS-OFFCRYPTO/ECMA-376: AES-ECB (no IV).
+///   - Some producers: segmented AES-CBC with per-segment IV derived from `salt` (see
+///     `docs/offcrypto-standard-encryptedpackage.md`).
 /// - The concatenated plaintext is truncated to `orig_size` (do **not** rely on PKCS#7 unpadding).
 ///
-/// For baseline AES-ECB framing + truncation rules, see `docs/offcrypto-standard-encryptedpackage.md`.
+/// When `salt` is present, this function will try both modes and pick the most plausible output
+/// (preferring a ZIP prefix, then falling back to PKCS#7 padding shape).
 pub fn decrypt_standard_encrypted_package_stream(
     encrypted_package_stream: &[u8],
     key: &[u8],
-    _salt: &[u8],
+    salt: &[u8],
 ) -> Result<Vec<u8>, EncryptedPackageError> {
     if encrypted_package_stream.len() < ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN {
         return Err(EncryptedPackageError::StreamTooShort {
@@ -218,8 +305,55 @@ pub fn decrypt_standard_encrypted_package_stream(
         });
     }
 
-    let mut plaintext = ciphertext.to_vec();
-    aes_ecb_decrypt_in_place(key, &mut plaintext)?;
+    let mut plaintext = if !salt.is_empty() {
+        // Some producers encrypt Standard/CryptoAPI `EncryptedPackage` using segmented AES-CBC
+        // with a per-segment IV derived from the Standard salt ("Variant B" in our docs).
+        //
+        // Unfortunately, some real-world files still use AES-ECB while also carrying a salt, so
+        // we cannot select the mode purely from `salt.is_empty()`.
+        //
+        // Approach:
+        // - Try both CBC and ECB.
+        // - Prefer whichever candidate looks like a valid ZIP (OOXML payload).
+        // - If neither looks like a ZIP, fall back to PKCS#7 padding shape as a weak heuristic,
+        //   then default to ECB for compatibility.
+
+        let mut cbc = ciphertext.to_vec();
+        for (segment_index, segment) in cbc.chunks_mut(ENCRYPTED_PACKAGE_SEGMENT_LEN).enumerate() {
+            let iv = derive_standard_cryptoapi_iv_sha1(salt, segment_index as u32);
+            aes_cbc_decrypt_in_place(key, &iv, segment)?;
+        }
+
+        let mut ecb = ciphertext.to_vec();
+        aes_ecb_decrypt_in_place(key, &mut ecb)?;
+
+        let cbc_prefix = cbc.get(..orig_size_usize.min(cbc.len())).unwrap_or(&[]);
+        if looks_like_zip_prefix(cbc_prefix) {
+            cbc
+        } else {
+            let ecb_prefix = ecb.get(..orig_size_usize.min(ecb.len())).unwrap_or(&[]);
+            if looks_like_zip_prefix(ecb_prefix) {
+                ecb
+            } else if pkcs7_padding_matches(&cbc, orig_size_usize)
+                && !pkcs7_padding_matches(&ecb, orig_size_usize)
+            {
+                cbc
+            } else if !pkcs7_padding_matches(&cbc, orig_size_usize)
+                && pkcs7_padding_matches(&ecb, orig_size_usize)
+            {
+                ecb
+            } else if pkcs7_padding_matches(&cbc, orig_size_usize) {
+                cbc
+            } else {
+                ecb
+            }
+        }
+    } else {
+        // AES-ECB variant (no IV).
+        let mut out = ciphertext.to_vec();
+        aes_ecb_decrypt_in_place(key, &mut out)?;
+        out
+    };
 
     if plaintext.len() < orig_size_usize {
         return Err(EncryptedPackageError::DecryptedTooShort {
