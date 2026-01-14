@@ -2904,6 +2904,10 @@ function findFunctionTokenAtCursor(input, cursorPosition) {
   // (e.g. `A1:O` / `A1:OFF10`). Require >3 letters so we don't suggest function names
   // while the user is still typing a cell reference.
   if (before === ":" && /^[A-Za-z]{1,3}$/.test(text)) return null;
+  // Also treat A1-looking tokens after a range colon as cell references rather than
+  // function-name prefixes (e.g. `A1:LOG1`), since the user is most likely typing an
+  // end-cell reference.
+  if (before === ":" && /^[A-Za-z]{1,3}\d+$/.test(text)) return null;
 
   return { text, start, end };
 }

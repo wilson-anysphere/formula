@@ -656,6 +656,23 @@ test("Range-colon function completion is conservative for 1-3 letter tokens (A1:
   );
 });
 
+test("Range-colon function completion is conservative for A1-like tokens (A1:LOG1)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(A1:LOG1";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({ A1: 1 }),
+  });
+
+  assert.ok(
+    suggestions.length === 0 || !suggestions.some((s) => s.text.includes("LOG10(")),
+    `Did not expect LOG10( completion for A1-like A1:LOG1 token, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions work inside grouping parens (=SUM((A → =SUM((A1:A10)))", async () => {
   const engine = new TabCompletionEngine();
 
