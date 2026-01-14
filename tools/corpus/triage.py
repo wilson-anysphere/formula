@@ -1269,6 +1269,15 @@ def triage_workbook(
                                 path = entry.get("path")
                                 if isinstance(path, str) and path:
                                     entry["path"] = _redact_uri_like_in_text(path)
+                        ignore_paths = details.get("ignore_paths")
+                        if isinstance(ignore_paths, list):
+                            # `xlsx-diff` ignore-path rules can embed custom namespaces/domains. Hash
+                            # them to avoid leaking potentially sensitive strings into uploaded
+                            # private-corpus artifacts.
+                            details["ignore_paths"] = [
+                                f"sha256={_sha256_text(p)}" if isinstance(p, str) and p else p
+                                for p in ignore_paths
+                            ]
     except Exception as e:  # noqa: BLE001
         report["steps"] = {"load": asdict(_step_failed(_now_ms(), e))}
         report["result"] = {

@@ -329,6 +329,45 @@ class TriagePrivacyModeTests(unittest.TestCase):
         self.assertEqual(functions.get(f"sha256={expected_hash}"), 1)
         self.assertFalse(any(custom in k for k in functions.keys()))
 
+    def test_private_mode_hashes_ignore_path_settings_in_diff_details(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "ignore_paths": [
+                                "xr:uid",
+                                "http://corp.example.com/ns",
+                            ],
+                            "top_differences": [],
+                        },
+                    }
+                },
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            data = _make_xlsx_with_custom_relationship_uris()
+            report = triage_workbook(
+                WorkbookInput(display_name="book.xlsx", data=data),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+                privacy_mode="private",
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        ignore_paths = report["steps"]["diff"]["details"]["ignore_paths"]
+        self.assertIsInstance(ignore_paths, list)
+        self.assertTrue(all(isinstance(p, str) and p.startswith("sha256=") for p in ignore_paths))
+        self.assertFalse(any("corp.example.com" in p for p in ignore_paths))
+
 
 if __name__ == "__main__":
     unittest.main()
