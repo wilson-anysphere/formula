@@ -280,4 +280,53 @@ describe("registerEncryptionUiCommands", () => {
     expect(manager.add).not.toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/already used by encrypted cells/i), "warning");
   });
+
+  it("encryptSelectedRange fails early when encrypted range metadata is unreadable (avoids orphaned keys)", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const keyStore = {
+      getCachedKey: vi.fn(() => null),
+      get: vi.fn(async () => null),
+      set: vi.fn(async (_docId: string, keyId: string) => ({ keyId })),
+    };
+
+    const manager = {
+      add: vi.fn(() => "r1"),
+      list: () => {
+        throw new Error("Unsupported metadata.encryptedRanges schema");
+      },
+      update: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({
+        doc: { guid: "doc-1" },
+        getRole: () => "editor",
+        getPermissions: () => ({ userId: "u1" }),
+      }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("k1");
+
+    await commandRegistry.executeCommand("collab.encryptSelectedRange");
+
+    expect(showQuickPick).not.toHaveBeenCalled();
+    expect(keyStore.getCachedKey).not.toHaveBeenCalled();
+    expect(keyStore.get).not.toHaveBeenCalled();
+    expect(keyStore.set).not.toHaveBeenCalled();
+    expect(manager.add).not.toHaveBeenCalled();
+
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringMatching(/Encrypted range metadata is in an unsupported format/i),
+      "error",
+    );
+  });
 });
