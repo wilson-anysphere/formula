@@ -5067,11 +5067,13 @@ impl WasmWorkbook {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let sheet = self.inner.require_sheet(sheet)?.to_string();
         let range = WorkbookState::parse_range(&range)?;
+        let start_row = range.start.row;
+        let start_col = range.start.col;
 
         let values = self
             .inner
             .engine
-            .get_range_values(&sheet, range.clone())
+            .get_range_values(&sheet, range)
             .map_err(|err| js_err(err.to_string()))?;
 
         let sheet_cells = self.inner.sheets.get(&sheet);
@@ -5081,28 +5083,40 @@ impl WasmWorkbook {
         let key_input = JsValue::from_str("input");
         let key_value = JsValue::from_str("value");
 
-        let outer = Array::new();
-        for (r_idx, row_values) in values.into_iter().enumerate() {
-            let inner = Array::new();
-            for (c_idx, value) in row_values.into_iter().enumerate() {
-                let row = range.start.row + r_idx as u32;
-                let col = range.start.col + c_idx as u32;
-                let address = CellRef::new(row, col).to_a1();
+        let outer = Array::new_with_length(values.len() as u32);
+        // Reuse buffers to avoid per-cell string allocations (both for input lookup and
+        // for emitting the `address` string field).
+        let mut addr_buf = String::with_capacity(16);
+        let mut row_buf = String::with_capacity(16);
+        for (row_off, row_values) in values.into_iter().enumerate() {
+            let row = start_row + row_off as u32;
+            row_buf.clear();
+            push_u64_decimal(u64::from(row).saturating_add(1), &mut row_buf);
+            let inner = Array::new_with_length(row_values.len() as u32);
+            for (col_off, engine_value) in row_values.into_iter().enumerate() {
+                let col = start_col + col_off as u32;
+                addr_buf.clear();
+                push_a1_col_name(col, &mut addr_buf);
+                addr_buf.push_str(&row_buf);
 
-                let input = sheet_cells
-                    .and_then(|cells| cells.get(&address))
-                    .cloned()
-                    .unwrap_or(JsonValue::Null);
-                let value = engine_value_to_json(value);
+                let input = if let Some(cells) = sheet_cells {
+                    cells
+                        .get(addr_buf.as_str())
+                        .map(json_scalar_to_js)
+                        .unwrap_or(JsValue::NULL)
+                } else {
+                    JsValue::NULL
+                };
+                let value = engine_value_to_js_scalar(engine_value);
 
                 let obj = Object::new();
                 Reflect::set(&obj, &key_sheet, &sheet_js)?;
-                Reflect::set(&obj, &key_address, &JsValue::from_str(&address))?;
-                Reflect::set(&obj, &key_input, &json_scalar_to_js(&input))?;
-                Reflect::set(&obj, &key_value, &json_scalar_to_js(&value))?;
-                inner.push(&obj);
+                Reflect::set(&obj, &key_address, &JsValue::from_str(&addr_buf))?;
+                Reflect::set(&obj, &key_input, &input)?;
+                Reflect::set(&obj, &key_value, &value)?;
+                inner.set(col_off as u32, obj.into());
             }
-            outer.push(&inner);
+            outer.set(row_off as u32, inner.into());
         }
 
         Ok(outer.into())
