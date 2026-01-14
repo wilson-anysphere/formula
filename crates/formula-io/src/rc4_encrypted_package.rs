@@ -8,13 +8,17 @@
 //! - `u32 totalSize` + `u32 reserved` (where `reserved` is often `0`), or
 //! - a single `u64` little-endian size.
 //!
-//! To remain compatible, we treat the prefix as a 64-bit size split across two little-endian DWORDs:
+//! To remain compatible, we parse the prefix as a 64-bit size split across two little-endian DWORDs:
 //!
 //! ```text
 //! lo = u32le(bytes[0..4])
 //! hi = u32le(bytes[4..8])
 //! package_size = lo as u64 | ((hi as u64) << 32)
 //! ```
+//!
+//! MS-OFFCRYPTO describes this field as a `u64le`, but some producers/libraries treat it as
+//! `(u32 totalSize, u32 reserved)`. When the high DWORD is non-zero and the combined 64-bit value
+//! is not plausible for the available ciphertext, we fall back to the low DWORD for compatibility.
 //!
 //! This module is intentionally self-contained and does *not* implement RC4 decryption; it only
 //! parses and validates the size header. The decryption logic should treat the first 8 bytes as
@@ -98,7 +102,8 @@ pub(crate) fn parse_rc4_encrypted_package_size_header(
 ) -> Result<(Rc4EncryptedPackageSizeHeader, Vec<String>), Rc4EncryptedPackageParseError> {
     let lo = parse_u32_le(&header[0..4]);
     let hi = parse_u32_le(&header[4..8]);
-    let package_size = (lo as u64) | ((hi as u64) << 32);
+    let package_size_raw = (lo as u64) | ((hi as u64) << 32);
+    let package_size = crate::parse_encrypted_package_size_prefix_bytes(*header, Some(available_payload_len));
 
     // Warnings are best-effort diagnostics; they don't influence parsing unless
     // strict callers choose to treat them as fatal.
@@ -107,9 +112,15 @@ pub(crate) fn parse_rc4_encrypted_package_size_header(
         // Many specs/libraries treat the high DWORD as a reserved field that MUST be 0. In the
         // wild, some producers appear to store a true u64 size instead. Warn so strict callers can
         // decide whether to accept it.
-        warnings.push(format!(
-            "EncryptedPackage size header high DWORD is non-zero ({hi}); treating header as 64-bit size"
-        ));
+        if package_size != package_size_raw {
+            warnings.push(format!(
+                "EncryptedPackage size header high DWORD is non-zero ({hi}); treating high DWORD as reserved and using low DWORD size {lo}"
+            ));
+        } else {
+            warnings.push(format!(
+                "EncryptedPackage size header high DWORD is non-zero ({hi}); treating header as 64-bit size"
+            ));
+        }
     }
 
     // Safety checks: avoid pathological allocations and truncated reads.
@@ -265,5 +276,29 @@ mod tests {
         let parsed = parse_rc4_encrypted_package_stream(&stream, &opts).expect("parse stream");
         assert_eq!(parsed.header.package_size, 4);
         assert_eq!(parsed.encrypted_payload, &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn rc4_encrypted_package_size_header_falls_back_to_low_dword_when_high_dword_is_reserved() {
+        let opts = Rc4EncryptedPackageParseOptions {
+            strict: true,
+            max_decrypted_package_size: 10_000,
+        };
+
+        // Producer writes (lo=size, hi=reserved) and sets reserved to a non-zero value.
+        let lo = 1234u32;
+        let hi = 1u32;
+        let mut header = [0u8; ENCRYPTED_PACKAGE_SIZE_HEADER_LEN];
+        header[0..4].copy_from_slice(&lo.to_le_bytes());
+        header[4..8].copy_from_slice(&hi.to_le_bytes());
+
+        // Available payload is too small for the combined u64, but large enough for the low DWORD.
+        let (parsed, warnings) =
+            parse_rc4_encrypted_package_size_header(&header, 5000, &opts).expect("parse header");
+        assert_eq!(parsed.package_size, lo as u64);
+        assert_eq!(parsed.lo, lo);
+        assert_eq!(parsed.hi, hi);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("reserved"));
     }
 }

@@ -159,12 +159,21 @@ impl Rc4CryptoApiDecryptor {
             .map_err(|_| Rc4CryptoApiError::Truncated)?;
         // The `EncryptedPackage` stream begins with an 8-byte **plaintext** size header.
         //
-        // Some implementations treat it as `u32 totalSize` + `u32 reserved`, while others treat it
-        // as a true little-endian `u64`. Parse as lo/hi DWORDs so we never accidentally truncate the
-        // high bits on 32-bit targets.
+        // MS-OFFCRYPTO describes this prefix as a `u64le`, but some producers/libraries treat it as
+        // `(u32 totalSize, u32 reserved)` (often with `reserved = 0`).
+        //
+        // For compatibility, when the high DWORD is non-zero and the combined 64-bit value is not
+        // plausible for the available ciphertext, fall back to the low DWORD.
         let lo = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
         let hi = u32::from_le_bytes([len_bytes[4], len_bytes[5], len_bytes[6], len_bytes[7]]);
-        let plaintext_len_u64 = (lo as u64) | ((hi as u64) << 32);
+        let plaintext_len_u64_raw = (lo as u64) | ((hi as u64) << 32);
+        let ciphertext_len = encrypted_package_stream.len().saturating_sub(8) as u64;
+        let plaintext_len_u64 =
+            if hi != 0 && plaintext_len_u64_raw > ciphertext_len && (lo as u64) <= ciphertext_len {
+                lo as u64
+            } else {
+                plaintext_len_u64_raw
+            };
         let plaintext_len = usize::try_from(plaintext_len_u64)
             .map_err(|_| Rc4CryptoApiError::PlaintextLenTooLarge(plaintext_len_u64))?;
 
@@ -318,6 +327,32 @@ mod tests {
         // Ensure plaintext crosses a 0x200 boundary so we rekey.
         let plaintext = make_plaintext_pattern(10_000);
         let encrypted_package = helper.encrypt_encrypted_package(&plaintext);
+        let decrypted = decryptor
+            .decrypt_encrypted_package(&encrypted_package)
+            .expect("decrypt");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn rc4_cryptoapi_encryptedpackage_falls_back_to_low_dword_when_high_dword_is_reserved() {
+        // Fixed parameters; keep deterministic.
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+            0xDC, 0xFE,
+        ];
+        let key_len = 16; // 128-bit RC4 key
+
+        let helper = TestCryptoApiRc4::new(password, &salt, key_len);
+        let decryptor =
+            Rc4CryptoApiDecryptor::new(password, &salt, key_len, HashAlg::Sha1).expect("decryptor");
+
+        let plaintext = make_plaintext_pattern(1024);
+        let mut encrypted_package = helper.encrypt_encrypted_package(&plaintext);
+
+        // Mutate the size prefix high DWORD to a non-zero reserved value.
+        encrypted_package[4..8].copy_from_slice(&1u32.to_le_bytes());
+
         let decrypted = decryptor
             .decrypt_encrypted_package(&encrypted_package)
             .expect("decrypt");
