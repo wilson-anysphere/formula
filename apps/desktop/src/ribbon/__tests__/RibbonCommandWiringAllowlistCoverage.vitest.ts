@@ -245,6 +245,7 @@ const implementedCommandIds: string[] = [
   "navigation.goTo",
   "pageLayout.arrange.bringForward",
   "pageLayout.arrange.sendBackward",
+  "pageLayout.arrange.selectionPane",
   "pageLayout.export.exportPdf",
   "pageLayout.pageSetup.margins.custom",
   "pageLayout.pageSetup.margins.narrow",
