@@ -155,6 +155,7 @@ describe("ImageBitmapCache", () => {
 
     // Since the only waiter was aborted, the decoded bitmap should be closed (otherwise it would leak).
     expect(close).toHaveBeenCalledTimes(1);
+    expect(cache.__testOnly_failCount).toBe(0);
 
     await cache.get(entry);
     expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
@@ -205,7 +206,8 @@ describe("ImageBitmapCache", () => {
     const inflightDecode = new Promise<ImageBitmap>((resolve) => {
       resolveDecode = resolve;
     });
-    const bitmap = {} as ImageBitmap;
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
 
     const createImageBitmapMock = vi.fn().mockReturnValue(inflightDecode);
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
@@ -223,6 +225,7 @@ describe("ImageBitmapCache", () => {
 
     resolveDecode(bitmap);
     await expect(p2).resolves.toBe(bitmap);
+    expect(close).not.toHaveBeenCalled();
 
     // The decode should not have been restarted.
     expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
