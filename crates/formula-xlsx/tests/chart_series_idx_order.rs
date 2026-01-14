@@ -111,3 +111,46 @@ fn chart_ex_missing_idx_order_defaults_to_position() {
     assert_eq!(model.series[0].idx, Some(0));
     assert_eq!(model.series[0].order, Some(0));
 }
+
+#[test]
+fn parses_chart_ex_idx_order_from_series_attributes() {
+    let xml = br#"
+        <cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+          <cx:chart>
+            <cx:plotArea>
+              <cx:histogramChart>
+                <cx:ser idx="7" ORDER="8"/>
+              </cx:histogramChart>
+            </cx:plotArea>
+          </cx:chart>
+        </cx:chartSpace>
+    "#;
+
+    let model = parse_chart_ex(xml, "chartEx1.xml").expect("parse chartEx");
+    assert_eq!(model.series.len(), 1);
+    assert_eq!(model.series[0].idx, Some(7));
+    assert_eq!(model.series[0].order, Some(8));
+}
+
+#[test]
+fn parses_chart_ex_idx_order_from_text_content() {
+    let xml = br#"
+        <cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+          <cx:chart>
+            <cx:plotArea>
+              <cx:histogramChart>
+                <cx:ser>
+                  <cx:idx>9</cx:idx>
+                  <cx:order>10</cx:order>
+                </cx:ser>
+              </cx:histogramChart>
+            </cx:plotArea>
+          </cx:chart>
+        </cx:chartSpace>
+    "#;
+
+    let model = parse_chart_ex(xml, "chartEx1.xml").expect("parse chartEx");
+    assert_eq!(model.series.len(), 1);
+    assert_eq!(model.series[0].idx, Some(9));
+    assert_eq!(model.series[0].order, Some(10));
+}
