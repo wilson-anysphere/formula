@@ -2154,6 +2154,8 @@ def main() -> int:
         "diff_limit": args.diff_limit,
         "round_trip_fail_on": args.round_trip_fail_on,
         "diff_ignore": sorted(diff_ignore),
+        "diff_ignore_globs": sorted(diff_ignore_globs),
+        "diff_ignore_presets": list(diff_ignore_presets),
         "diff_ignore_path": diff_ignore_path_out,
         "diff_ignore_path_in": diff_ignore_path_in_out,
         "diff_ignore_path_kind": diff_ignore_path_kind_out,
