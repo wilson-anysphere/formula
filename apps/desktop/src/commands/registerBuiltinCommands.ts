@@ -717,10 +717,23 @@ export function registerBuiltinCommands(params: {
     "view.insertPivotTable",
     t("command.view.insertPivotTable"),
     () => {
+      // Always call openPanel so we activate docked panels and also trigger a layout re-render
+      // even when the panel is already floating (useful for refreshing panel-local state).
+      const placement = getPanelPlacement(layoutController.layout, PanelIds.PIVOT_BUILDER);
       layoutController.openPanel(PanelIds.PIVOT_BUILDER);
+
+      // Floating panels can be minimized; opening should restore them.
+      if (placement.kind === "floating" && (layoutController.layout as any)?.floating?.[PanelIds.PIVOT_BUILDER]?.minimized) {
+        layoutController.setFloatingPanelMinimized(PanelIds.PIVOT_BUILDER, false);
+      }
       // If the panel is already open, we still want to refresh its source range from
       // the latest selection.
-      window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
+      try {
+        if (typeof window === "undefined") return;
+        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
+      } catch {
+        // ignore (non-DOM contexts/tests)
+      }
     },
     {
       category: t("commandCategory.data"),

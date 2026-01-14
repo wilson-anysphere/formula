@@ -110,6 +110,25 @@ describe("registerBuiltinCommands: panel toggles", () => {
     expect(layoutController.layout.docks.left.collapsed).toBe(false);
   });
 
+  it("restores minimized floating Pivot Builder panel when inserting a pivot table", async () => {
+    const { commandRegistry, layoutController } = createHarness();
+
+    // Open once so the panel exists in the layout.
+    await commandRegistry.executeCommand("view.insertPivotTable");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.PIVOT_BUILDER).kind).not.toBe("closed");
+
+    // Force it into floating+minimized state.
+    layoutController.layout = floatPanel(layoutController.layout, PanelIds.PIVOT_BUILDER, { x: 10, y: 10, width: 300, height: 200 });
+    layoutController.layout = setFloatingPanelMinimized(layoutController.layout, PanelIds.PIVOT_BUILDER, true);
+    expect(getPanelPlacement(layoutController.layout, PanelIds.PIVOT_BUILDER).kind).toBe("floating");
+    expect(layoutController.layout.floating?.[PanelIds.PIVOT_BUILDER]?.minimized).toBe(true);
+
+    // Inserting a pivot table should restore (unminimize) the panel.
+    await commandRegistry.executeCommand("view.insertPivotTable");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.PIVOT_BUILDER).kind).toBe("floating");
+    expect(layoutController.layout.floating?.[PanelIds.PIVOT_BUILDER]?.minimized).toBe(false);
+  });
+
   it("toggles Version History panel open/closed", async () => {
     const { commandRegistry, layoutController } = createHarness();
 
