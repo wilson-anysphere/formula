@@ -8449,6 +8449,8 @@ export class SpreadsheetApp {
         "pointerleave",
         () => {
           view.container.style.cursor = "";
+          const canvas = this.splitViewSecondarySelectionCanvas;
+          if (canvas) canvas.style.cursor = "";
         },
         { signal: abort.signal },
       );
@@ -8927,10 +8929,31 @@ export class SpreadsheetApp {
     if (this.disposed) return;
     const secondary = this.splitViewSecondaryGrid;
     if (!secondary) return;
+    const selectionCanvas = this.splitViewSecondarySelectionCanvas;
+    const clearDrawingCursorOverride = (): void => {
+      // Cursor overrides for drawings are applied directly to the selection canvas because the
+      // shared-grid renderer controls its own cursor there. When we are no longer hovering a
+      // drawing, clear any prior drawing cursor override so we don't leave a "move"/resize cursor
+      // stuck if the grid doesn't update it on this frame.
+      if (!selectionCanvas) return;
+      const cursor = selectionCanvas.style.cursor;
+      if (
+        cursor === "move" ||
+        cursor === "grab" ||
+        cursor === "grabbing" ||
+        cursor === "nwse-resize" ||
+        cursor === "nesw-resize" ||
+        cursor === "ns-resize" ||
+        cursor === "ew-resize"
+      ) {
+        selectionCanvas.style.cursor = "";
+      }
+    };
 
     // Touch pointers do not have a hover state; skip cursor work to avoid overhead during scroll/pan.
     if (e.pointerType === "touch") {
       if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+      clearDrawingCursorOverride();
       return;
     }
 
@@ -8940,10 +8963,10 @@ export class SpreadsheetApp {
     // When the formula bar is in range-selection mode, do not show drawing hover cursors.
     if (this.formulaBar?.isFormulaEditing()) {
       if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+      clearDrawingCursorOverride();
       return;
     }
 
-    const selectionCanvas = this.splitViewSecondarySelectionCanvas;
     const target = e.target as HTMLElement | null;
     if (target && selectionCanvas && target !== selectionCanvas) {
       // Skip pointermoves over scrollbars/editor overlays so drawings don't change the cursor
@@ -8951,6 +8974,7 @@ export class SpreadsheetApp {
       try {
         if (target.closest?.(".grid-scrollbar-track") || target.closest?.(".grid-scrollbar-thumb") || target.closest?.(".cell-editor")) {
           if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+          clearDrawingCursorOverride();
           return;
         }
       } catch {
@@ -8974,6 +8998,7 @@ export class SpreadsheetApp {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     if (x < 0 || y < 0 || x > width || y > height) {
       if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+      clearDrawingCursorOverride();
       return;
     }
 
@@ -8986,6 +9011,8 @@ export class SpreadsheetApp {
     // drawings show the correct hover affordance.
     if (cursor && selectionCanvas && selectionCanvas.style.cursor !== cursor) {
       selectionCanvas.style.cursor = cursor;
+    } else if (!cursor) {
+      clearDrawingCursorOverride();
     }
   }
 
