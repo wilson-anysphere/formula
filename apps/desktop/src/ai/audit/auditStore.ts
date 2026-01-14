@@ -59,6 +59,18 @@ function coerceViteUrlToNodeFileUrl(href: string): string {
   if (href.startsWith("file://")) return href;
   if (!isNodeRuntime()) return href;
 
+  // Vite can emit absolute-path URLs using a special `/@fs/...` prefix. sql.js will treat whatever
+  // we return from `locateFile` as a filesystem path in Node, so strip the `/@fs` marker and convert
+  // to a file:// URL rooted at the absolute path.
+  if (href.startsWith("/@fs/")) {
+    let absPath = href.slice("/@fs".length); // `/path` (posix) or `/C:/path` (win)
+    // Windows absolute paths in Vite `/@fs` URLs can include an extra leading slash.
+    if (/^\/[A-Za-z]:[\\/]/.test(absPath)) absPath = absPath.slice(1);
+    absPath = absPath.replaceAll("\\\\", "/");
+    if (/^[A-Za-z]:\//.test(absPath)) return `file:///${absPath}`;
+    return `file://${absPath}`;
+  }
+
   // Vite asset URLs are typically root-relative (`/node_modules/...` or `/assets/...`).
   // In Node, sql.js uses `fs.readFileSync` for wasm loading, so convert these to a
   // file:// URL rooted at the repository cwd.
