@@ -12,6 +12,7 @@ import type { ThemeController } from "../theme/themeController.js";
 import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript, type CellRange } from "../formatting/toolbar.js";
 import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "../formatting/selectionSizeGuard.js";
+import { executeCellsStructuralRibbonCommand } from "../ribbon/cellsStructuralCommands.js";
 import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.js";
 import { handleInsertPicturesRibbonCommand } from "../main.insertPicturesRibbonCommand.js";
 
@@ -420,6 +421,37 @@ export function registerDesktopCommands(params: {
       keywords: ["delete", "cells", "shift", "excel"],
     },
   );
+
+  // Home → Cells → Insert/Delete Sheet Rows/Columns.
+  //
+  // This logic lives in `ribbon/cellsStructuralCommands.ts` so it can be shared by both:
+  // - the desktop ribbon fallback handlers (main.ts), and
+  // - CommandRegistry registrations (so the ribbon can rely on baseline enable/disable).
+  const registerCellsStructuralCommand = (commandId: string, title: string, keywords: string[]): void => {
+    commandRegistry.registerBuiltinCommand(
+      commandId,
+      title,
+      () => {
+        executeCellsStructuralRibbonCommand(app, commandId);
+      },
+      { category: commandCategoryEditing, icon: null, keywords },
+    );
+  };
+  registerCellsStructuralCommand("home.cells.insert.insertSheetRows", "Insert Sheet Rows", ["insert", "rows", "sheet rows", "excel"]);
+  registerCellsStructuralCommand("home.cells.insert.insertSheetColumns", "Insert Sheet Columns", [
+    "insert",
+    "columns",
+    "sheet columns",
+    "excel",
+  ]);
+  registerCellsStructuralCommand("home.cells.delete.deleteSheetRows", "Delete Sheet Rows", ["delete", "rows", "sheet rows", "excel"]);
+  registerCellsStructuralCommand("home.cells.delete.deleteSheetColumns", "Delete Sheet Columns", [
+    "delete",
+    "columns",
+    "sheet columns",
+    "excel",
+  ]);
+
   if (layoutController) {
     registerBuiltinCommands({
       commandRegistry,

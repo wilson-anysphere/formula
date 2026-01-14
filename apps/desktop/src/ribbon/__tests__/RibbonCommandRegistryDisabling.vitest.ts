@@ -176,16 +176,16 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     // so they must be exempt from the registry-backed disabling allowlist.
     expect(baselineDisabledById["home.cells.format.organizeSheets"]).toBeUndefined();
 
-    // Home → Cells structural edit commands: most are still handled directly in `main.ts` and must
-    // remain exempt. Insert/Delete Cells… are now registered CommandRegistry commands and should
-    // be disabled when the registry does not include them.
+    // Home → Cells structural edit commands: some are still handled directly in `main.ts` and must
+    // remain exempt. Commands that are now registered via CommandRegistry should be disabled when
+    // the registry does not include them.
     expect(baselineDisabledById["home.cells.insert.insertCells"]).toBe(true);
-    expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBeUndefined();
-    expect(baselineDisabledById["home.cells.insert.insertSheetColumns"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBe(true);
+    expect(baselineDisabledById["home.cells.insert.insertSheetColumns"]).toBe(true);
     expect(baselineDisabledById["home.cells.insert.insertSheet"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.delete.deleteCells"]).toBe(true);
-    expect(baselineDisabledById["home.cells.delete.deleteSheetRows"]).toBeUndefined();
-    expect(baselineDisabledById["home.cells.delete.deleteSheetColumns"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.delete.deleteSheetRows"]).toBe(true);
+    expect(baselineDisabledById["home.cells.delete.deleteSheetColumns"]).toBe(true);
     expect(baselineDisabledById["home.cells.delete.deleteSheet"]).toBeUndefined();
   });
 
@@ -263,6 +263,23 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     }
   });
 
+  it("registers Insert/Delete Sheet Rows/Columns ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = [
+      "home.cells.insert.insertSheetRows",
+      "home.cells.insert.insertSheetColumns",
+      "home.cells.delete.deleteSheetRows",
+      "home.cells.delete.deleteSheetColumns",
+    ] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
   it("registers Custom Sort ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
     const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
@@ -316,14 +333,14 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                     // when the CommandRegistry does not register it.
                     { id: "home.cells.format.organizeSheets", label: "Organize Sheets…", ariaLabel: "Organize Sheets" },
                   ],
-                },
-                // Exempt command id to prove the exemption list keeps implemented ribbon-only
-                // actions enabled even when the CommandRegistry doesn't register them.
-                { id: "home.cells.insert.insertSheetRows", label: "Insert Sheet Rows", ariaLabel: "Insert Sheet Rows" },
-                // Non-exempt id to prove the baseline is still working.
-                { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
-              ],
-            },
+                 },
+                 // Exempt command id to prove the exemption list keeps implemented ribbon-only
+                 // actions enabled even when the CommandRegistry doesn't register them.
+                { id: "home.cells.insert.insertSheet", label: "Insert Sheet", ariaLabel: "Insert Sheet" },
+                 // Non-exempt id to prove the baseline is still working.
+                 { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
+               ],
+             },
           ],
         },
       ],
@@ -354,9 +371,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
-    const insertRows = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.insert.insertSheetRows"]');
-    expect(insertRows).toBeInstanceOf(HTMLButtonElement);
-    expect(insertRows?.disabled).toBe(false);
+    const insertSheet = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.insert.insertSheet"]');
+    expect(insertSheet).toBeInstanceOf(HTMLButtonElement);
+    expect(insertSheet?.disabled).toBe(false);
 
     const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
     expect(unknown).toBeInstanceOf(HTMLButtonElement);
