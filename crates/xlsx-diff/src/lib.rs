@@ -320,6 +320,37 @@ pub fn diff_workbooks_with_options(
     Ok(diff_archives_with_options(&expected, &actual, options))
 }
 
+/// Diff two workbooks, providing the same password for both (if either is encrypted).
+///
+/// For per-input passwords, use [`diff_workbooks_with_inputs`] / [`diff_workbooks_with_inputs_and_options`].
+pub fn diff_workbooks_with_password(
+    expected: &Path,
+    actual: &Path,
+    password: &str,
+) -> Result<DiffReport> {
+    diff_workbooks_with_password_and_options(expected, actual, password, &DiffOptions::default())
+}
+
+/// Diff two workbooks with custom diff options, providing the same password for both inputs.
+pub fn diff_workbooks_with_password_and_options(
+    expected: &Path,
+    actual: &Path,
+    password: &str,
+    options: &DiffOptions,
+) -> Result<DiffReport> {
+    diff_workbooks_with_inputs_and_options(
+        DiffInput {
+            path: expected,
+            password: Some(password),
+        },
+        DiffInput {
+            path: actual,
+            password: Some(password),
+        },
+        options,
+    )
+}
+
 pub fn diff_workbooks_with_inputs(
     expected: DiffInput<'_>,
     actual: DiffInput<'_>,

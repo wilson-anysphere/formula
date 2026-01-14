@@ -45,13 +45,7 @@ fn diff_can_read_password_protected_xlsb() -> Result<()> {
 
     // With the correct password, diffing the encrypted container against the underlying package
     // should produce no differences.
-    let report = xlsx_diff::diff_workbooks_with_inputs(
-        xlsx_diff::DiffInput {
-            path: &encrypted_path,
-            password: Some(PASSWORD),
-        },
-        xlsx_diff::DiffInput::new(&plain_path),
-    )?;
+    let report = xlsx_diff::diff_workbooks_with_password(&encrypted_path, &plain_path, PASSWORD)?;
     assert!(
         report.is_empty(),
         "expected no diffs between encrypted and plain fixture, got:\n{}",
