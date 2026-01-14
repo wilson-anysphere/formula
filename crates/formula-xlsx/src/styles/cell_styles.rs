@@ -260,9 +260,23 @@ impl StylesPart {
         }
 
         let dxfs_el = ensure_styles_child(&mut self.root, "dxfs");
-        dxfs_el
-            .children
-            .extend(dxfs.iter().map(|dxf| XmlNode::Element(build_conditional_formatting_dxf(dxf))));
+        let new_nodes: Vec<XmlNode> = dxfs
+            .iter()
+            .map(|dxf| XmlNode::Element(build_conditional_formatting_dxf(dxf)))
+            .collect();
+
+        // `<dxfs>` may contain an `<extLst>` element which must appear *after* all `<dxf>`
+        // children. When appending, preserve this ordering by inserting new `<dxf>` elements
+        // immediately before `<extLst>` if present.
+        if let Some(ext_lst_idx) = dxfs_el.children.iter().position(|child| {
+            matches!(child, XmlNode::Element(el) if el.name.local == "extLst")
+        }) {
+            dxfs_el
+                .children
+                .splice(ext_lst_idx..ext_lst_idx, new_nodes);
+        } else {
+            dxfs_el.children.extend(new_nodes);
+        }
         let count = dxfs_el.children_by_local("dxf").count();
         dxfs_el.set_attr("count", count.to_string());
     }
