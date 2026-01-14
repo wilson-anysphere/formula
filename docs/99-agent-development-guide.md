@@ -8,6 +8,15 @@ This guide is for **coding agents developing Formula**, not end-users. The devel
 - **Concurrency**: Up to ~200 agents, each with their own repo copy
 - **Critical constraint**: Memory. Disk/CPU are abundant; RAM exhaustion kills the machine.
 
+## Local-only agent files (`scratchpad.md`, `handoff.md`)
+
+Some agent harnesses use `scratchpad.md` (working notes) and `handoff.md` (message to the planner)
+in the repo root. These files are **gitignored** and should **never** be committed.
+
+If these files become hard to read because patch/diff formatting was pasted into them by mistake,
+clean them up locally by replacing the literal backslash-`n` sequences and stray diff markers with
+real newlines / normal Markdown formatting.
+
 ---
 
 ## Memory Management (CRITICAL)
