@@ -489,6 +489,63 @@ describe("ToolExecutor", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  it("read_range formats rich text objects as plain text", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    workbook.setCell(parseA1Cell("Sheet1!A1"), {
+      value: {
+        text: "Hello world",
+        runs: [{ text: "Hello" }, { text: " world" }],
+      } as any,
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["Hello world"]]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  it("read_range formats in-cell image values as altText / [Image]", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    // Envelope shape: `{ type: "image", value: { imageId, altText? } }`
+    workbook.setCell(parseA1Cell("Sheet1!A1"), {
+      value: { type: "image", value: { imageId: "img_1", altText: "Product photo" } } as any,
+    });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), {
+      value: { type: "image", value: { imageId: "img_2" } } as any,
+    });
+
+    // Direct payload shape: `{ imageId, altText?, width?, height? }`
+    workbook.setCell(parseA1Cell("Sheet1!A3"), {
+      value: { imageId: "img_3", altText: "Logo", width: 120, height: 60 } as any,
+    });
+    workbook.setCell(parseA1Cell("Sheet1!A4"), {
+      value: { imageId: "img_4", altText: "   " } as any,
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A4" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["Product photo"], ["[Image]"], ["Logo"], ["[Image]"]]);
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   it("read_range summarizes ArrayBuffer views (typed arrays) to avoid huge JSON payloads", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);

@@ -30,6 +30,7 @@ function normalizeFormulaTextOpt(value: unknown): string | null {
 
 const DEFAULT_READ_RANGE_MAX_CELL_CHARS = 10_000;
 const UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER = "[Unserializable cell value]";
+const DEFAULT_IN_CELL_IMAGE_PLACEHOLDER = "[Image]";
 const DEFAULT_RICH_VALUE_SAMPLE_ITEMS = 32;
 const DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS = 256;
 const DEFAULT_RICH_VALUE_MAX_OBJECT_KEYS = 256;
@@ -71,6 +72,70 @@ function truncateCellString(value: string, maxChars: number): string {
   return `${value.slice(0, limit)}…[truncated ${truncated} chars]`;
 }
 
+function formatAltTextOrFallback(altText: unknown): string | null {
+  if (typeof altText !== "string") return null;
+  const trimmed = altText.trim();
+  if (!trimmed) return null;
+  return altText;
+}
+
+function looksLikeExcelRichTextValue(value: unknown): value is { text: string; runs?: unknown } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.text !== "string") return false;
+
+  // Rich text values returned from Excel are typically plain objects with just these keys. We
+  // intentionally reject objects with extra keys to avoid surprising behavior for generic
+  // `{ text: string, ... }` payloads users might store in cells.
+  for (const key of Object.keys(obj)) {
+    if (key !== "text" && key !== "runs") return false;
+  }
+  return true;
+}
+
+function looksLikeExcelInCellImageValue(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const obj = value as any;
+
+  // Direct payload shape: `{ imageId: string, altText?: string, width?: number, height?: number }`
+  if (typeof obj.imageId === "string" && obj.imageId.trim().length > 0) return true;
+
+  // Envelope shape: `{ type: "image", value: { imageId: string, altText?: string } }`
+  const type = obj.type;
+  if (typeof type === "string" && type.toLowerCase() === "image") {
+    const inner = obj.value;
+    if (inner && typeof inner === "object" && !Array.isArray(inner) && typeof (inner as any).imageId === "string") {
+      return (inner as any).imageId.trim().length > 0;
+    }
+  }
+
+  return false;
+}
+
+function formatExcelInCellImageValue(value: unknown): string | null {
+  if (!looksLikeExcelInCellImageValue(value)) return null;
+  const obj = value as any;
+
+  // Envelope shape.
+  const type = obj.type;
+  if (typeof type === "string" && type.toLowerCase() === "image") {
+    const inner = obj.value;
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+      const altText = formatAltTextOrFallback((inner as any).altText);
+      return altText ?? DEFAULT_IN_CELL_IMAGE_PLACEHOLDER;
+    }
+  }
+
+  // Direct payload shape.
+  const altText = formatAltTextOrFallback(obj.altText);
+  return altText ?? DEFAULT_IN_CELL_IMAGE_PLACEHOLDER;
+}
+
+function formatExcelRichValueCellText(value: unknown): string | null {
+  if (looksLikeExcelRichTextValue(value)) return value.text;
+  return formatExcelInCellImageValue(value);
+}
+
 function summarizeArrayBufferView(view: ArrayBufferView): Record<string, unknown> {
   const ctorName = (view as any)?.constructor?.name;
   const type = typeof ctorName === "string" && ctorName.trim().length > 0 ? ctorName.trim() : "ArrayBufferView";
@@ -105,6 +170,12 @@ function richValueJsonReplacer(_key: string, value: unknown): unknown {
   if (typeof value === "function" || typeof value === "symbol") return String(value);
   if (typeof value === "string" && value.length > DEFAULT_READ_RANGE_MAX_CELL_CHARS) {
     return truncateCellString(value, DEFAULT_READ_RANGE_MAX_CELL_CHARS);
+  }
+
+  const formatted = formatExcelRichValueCellText(value);
+  if (formatted !== null) {
+    // Avoid leaking huge rich value payloads (e.g. images with base64) into tool output.
+    return truncateCellString(formatted, DEFAULT_READ_RANGE_MAX_CELL_CHARS);
   }
 
   if (Array.isArray(value) && value.length > DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS) {
@@ -177,6 +248,8 @@ function richValueJsonReplacer(_key: string, value: unknown): unknown {
 
 function stringifyCellValue(value: unknown): string {
   if (typeof value === "bigint") return value.toString();
+  const formatted = formatExcelRichValueCellText(value);
+  if (formatted !== null) return formatted;
   const seen: WeakSet<object> | Set<object> | null =
     typeof WeakSet !== "undefined" ? new WeakSet<object>() : typeof Set !== "undefined" ? new Set<object>() : null;
   const replacer = (key: string, nextValue: unknown): unknown => {
@@ -208,6 +281,9 @@ function normalizeCellOutput(value: unknown, opts: { maxChars?: number } = {}): 
 
   if (typeof value === "string") return truncateCellString(value, maxChars);
   if (typeof value === "number" || typeof value === "boolean") return value;
+
+  const formatted = formatExcelRichValueCellText(value);
+  if (formatted !== null) return truncateCellString(formatted, maxChars);
 
   return truncateCellString(stringifyCellValue(value), maxChars);
 }
