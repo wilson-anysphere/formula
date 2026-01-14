@@ -46,6 +46,10 @@ fn drawing_part_from_objects_repairs_missing_image_relationship_type() {
     .expect("build DrawingPart");
 
     let mut parts = BTreeMap::<String, Vec<u8>>::new();
+    // `DrawingPart::write_into_parts` validates that image relationships point at an existing
+    // media part (either already present in `parts` or supplied via `workbook.images`).
+    // This test focuses on repairing the relationship metadata, so we provide a dummy payload.
+    parts.insert("xl/media/image1.png".to_string(), vec![0u8; 8]);
     let workbook = formula_model::Workbook::new();
     drawing_part
         .write_into_parts(&mut parts, &workbook)
@@ -64,4 +68,3 @@ fn drawing_part_from_objects_repairs_missing_image_relationship_type() {
     assert_eq!(rel.target, "../media/image1.png");
     assert_eq!(rel.target_mode, None);
 }
-
