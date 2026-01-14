@@ -184,6 +184,58 @@ describe("FormulaBarView tab completion (integration)", () => {
       setLocale(prevLocale);
     }
   });
+
+  it("uses the WASM partial parser (when available) to infer function context for non-ASCII function names", async () => {
+    const prevLocale = getLocale();
+    setLocale("ar");
+
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      doc.setCellValue("Sheet1", { row, col: 0 }, row + 1);
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "B11", input: "", value: null });
+
+    const calls: unknown[][] = [];
+    const engineStub = {
+      parseFormulaPartial: async (...args: unknown[]) => {
+        calls.push(args);
+        // In some locales, function names may be non-ASCII and the lightweight JS parser can’t
+        // reliably infer the function context. The WASM engine returns canonical function
+        // metadata so the completion engine can still suggest appropriate argument values/ranges.
+        return { context: { function: { name: "SUM", argIndex: 0 } }, error: null, ast: {} };
+      },
+    };
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      getEngineClient: () => engineStub as any,
+    });
+
+    try {
+      view.focus({ cursor: "end" });
+      // Use an arbitrary non-ASCII identifier to simulate a localized function name.
+      view.textarea.value = "=سوم(A";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      await completion.flushTabCompletion();
+
+      expect(calls).toHaveLength(1);
+      expect(view.model.aiSuggestion()).toBe("=سوم(A1:A10)");
+    } finally {
+      completion.destroy();
+      host.remove();
+      setLocale(prevLocale);
+    }
+  });
  
   it("falls back to the JS parser when the WASM partial parser throws", async () => {
     const prevLocale = getLocale();
