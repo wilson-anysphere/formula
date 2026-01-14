@@ -14997,7 +14997,9 @@ export class SpreadsheetApp {
     const imageId = `image_${uuid()}.png`;
     const drawingId = createDrawingObjectId();
     const drawing = {
-      id: drawingId,
+      // Store as a string to keep drawing ids JSON-friendly and stable across JS↔Rust↔Yjs hops.
+      // The UI adapters normalize ids back to numbers for rendering/interaction.
+      id: String(drawingId),
       kind: { type: "image", imageId },
       anchor: {
         type: "twoCell",
@@ -15016,6 +15018,10 @@ export class SpreadsheetApp {
       // Persist picture bytes out-of-band (IndexedDB) so they survive reloads without
       // bloating DocumentController snapshot payloads.
       this.drawingImages.set(imageEntry);
+      // Preload the bitmap so the first overlay render can reuse the decode promise.
+      void this.drawingOverlay.preloadImage(imageEntry).catch(() => {
+        // ignore
+      });
       try {
         this.imageBytesBinder?.onLocalImageInserted(imageEntry);
       } catch {
