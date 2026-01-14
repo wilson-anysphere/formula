@@ -30,6 +30,9 @@ function runWithConfigAndPlist(config, plistContents) {
   const plistPath = path.join(dir, "Info.plist");
   writeFileSync(plistPath, plistContents, "utf8");
 
+  // The preflight script validates that when Parquet is configured we ship a shared-mime-info
+  // definition under `mime/<identifier>.xml` (relative to tauri.conf.json). Create a minimal
+  // definition file in the synthetic config directory so the preflight can read it.
   if (isParquetConfigured(config)) {
     const identifier =
       typeof config?.identifier === "string" && config.identifier.trim() ? config.identifier.trim() : defaultIdentifier;
@@ -44,6 +47,7 @@ function runWithConfigAndPlist(config, plistContents) {
         '    <glob pattern="*.parquet" />',
         "  </mime-type>",
         "</mime-info>",
+        "",
       ].join("\n"),
       "utf8",
     );
@@ -136,6 +140,23 @@ test("passes when deep-link schemes includes 'formula://' (normalized)", () => {
   assert.match(proc.stdout, /preflight passed/i);
 });
 
+test("fails when Parquet association is configured but bundle.linux is missing", () => {
+  const config = baseConfig();
+  delete config.bundle.linux;
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Parquet file association configured/i);
+  assert.match(proc.stderr, /bundle\.linux/i);
+});
+
+test("fails when Parquet association is configured but identifier is missing", () => {
+  const config = baseConfig();
+  delete config.identifier;
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /identifier is missing/i);
+});
+
 test("fails when bundle.fileAssociations is present but missing required extensions", () => {
   const config = baseConfig({
     fileAssociations: [
@@ -207,7 +228,7 @@ test("fails when xlsx appears only in UT*TypeDeclarations (not CFBundleDocumentT
       { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
     ],
   });
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>txt</string>\n      </array>\n    </dict>\n  </array>\n  <key>UTImportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>txt</string>\n      </array>\n    </dict>\n  </array>\n  <key>UTExportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
 
   const proc = runWithConfigAndPlist(config, plist);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
