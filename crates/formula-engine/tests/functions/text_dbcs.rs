@@ -205,6 +205,26 @@ fn byte_count_text_functions_use_dbcs_byte_semantics_under_cp932() {
 }
 
 #[test]
+fn lenb_counts_bytes_for_chinese_korean_and_big5_dbcs_codepages() {
+    let mut sheet = TestSheet::new();
+
+    // Simplified Chinese (GBK / cp936).
+    sheet.set_text_codepage(936);
+    assert_eq!(sheet.eval(r#"=LENB("汉")"#), Value::Number(2.0));
+    assert_eq!(sheet.eval(r#"=LENB("A汉")"#), Value::Number(3.0));
+
+    // Korean (EUC-KR / cp949).
+    sheet.set_text_codepage(949);
+    assert_eq!(sheet.eval(r#"=LENB("가")"#), Value::Number(2.0));
+    assert_eq!(sheet.eval(r#"=LENB("A가")"#), Value::Number(3.0));
+
+    // Traditional Chinese (Big5 / cp950).
+    sheet.set_text_codepage(950);
+    assert_eq!(sheet.eval(r#"=LENB("漢")"#), Value::Number(2.0));
+    assert_eq!(sheet.eval(r#"=LENB("A漢")"#), Value::Number(3.0));
+}
+
+#[test]
 fn phonetic_reads_cell_metadata_or_falls_back_to_text() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "abc");
