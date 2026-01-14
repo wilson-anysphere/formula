@@ -135,6 +135,26 @@ pub(crate) fn decode_defined_name_rgce_with_context(
     decode_biff8_rgce(rgce, &ctx)
 }
 
+/// Decode a BIFF8 `rgce` token stream used in a defined-name (`NAME`) record using workbook
+/// context plus the trailing `rgcb` data blocks referenced by certain ptgs (notably `PtgArray`).
+///
+/// The returned text does **not** include a leading `=`.
+pub(crate) fn decode_defined_name_rgce_with_context_and_rgcb(
+    rgce: &[u8],
+    rgcb: &[u8],
+    codepage: u16,
+    ctx: &RgceDecodeContext<'_>,
+) -> DecodedRgce {
+    let ctx = RgceDecodeContext {
+        codepage,
+        sheet_names: ctx.sheet_names,
+        externsheet: ctx.externsheet,
+        supbooks: ctx.supbooks,
+        defined_names: ctx.defined_names,
+    };
+    decode_biff8_rgce_with_base_and_rgcb(rgce, rgcb, &ctx, None)
+}
+
 #[derive(Clone, Debug)]
 struct ExprFragment {
     text: String,

@@ -86,6 +86,8 @@ pub(super) struct RawDefinedName {
     pub(super) comment: Option<String>,
     pub(super) builtin_id: Option<u8>,
     pub(super) rgce: Vec<u8>,
+    /// Trailing data blocks (`rgcb`) referenced by certain ptgs (notably `PtgArray`).
+    pub(super) rgcb: Vec<u8>,
 }
 
 pub(crate) fn parse_biff_defined_names(
@@ -119,7 +121,16 @@ pub(crate) fn parse_biff_defined_names(
     let ctx = ctx_tables.rgce_decode_context(sheet_names);
 
     for raw in name_records.into_iter().flatten() {
-        let decoded = rgce::decode_defined_name_rgce_with_context(&raw.rgce, codepage, &ctx);
+        let decoded = if raw.rgcb.is_empty() {
+            rgce::decode_defined_name_rgce_with_context(&raw.rgce, codepage, &ctx)
+        } else {
+            rgce::decode_defined_name_rgce_with_context_and_rgcb(
+                &raw.rgce,
+                &raw.rgcb,
+                codepage,
+                &ctx,
+            )
+        };
         for warning in decoded.warnings {
             push_warning(&mut out, format!("defined name `{}`: {warning}", raw.name));
         }
@@ -296,25 +307,54 @@ pub(super) fn parse_biff8_name_record(
     // rgce payload bytes.
     let rgce = cursor.read_biff8_rgce(cce)?;
 
-    // Optional strings.
-    if cch_cust_menu > 0 {
-        let _ = cursor.read_biff8_unicode_string_no_cch(cch_cust_menu, codepage)?;
-    }
-    let comment = if cch_description > 0 {
-        let raw = cursor.read_biff8_unicode_string_no_cch(cch_description, codepage)?;
-        // Best-effort: Excel UIs generally treat embedded NULs as invalid; strip them so the value
-        // is usable as `formula_model::DefinedName.comment`.
-        let stripped = raw.replace('\0', "");
-        (!stripped.is_empty()).then_some(stripped)
+    let parse_optional_strings =
+        |cursor: &mut FragmentCursor<'_>| -> Result<Option<String>, String> {
+            if cch_cust_menu > 0 {
+                let _ = cursor.read_biff8_unicode_string_no_cch(cch_cust_menu, codepage)?;
+            }
+            let comment = if cch_description > 0 {
+                let raw = cursor.read_biff8_unicode_string_no_cch(cch_description, codepage)?;
+                // Best-effort: Excel UIs generally treat embedded NULs as invalid; strip them so the value
+                // is usable as `formula_model::DefinedName.comment`.
+                let stripped = raw.replace('\0', "");
+                (!stripped.is_empty()).then_some(stripped)
+            } else {
+                None
+            };
+            if cch_help_topic > 0 {
+                let _ = cursor.read_biff8_unicode_string_no_cch(cch_help_topic, codepage)?;
+            }
+            if cch_status_text > 0 {
+                let _ = cursor.read_biff8_unicode_string_no_cch(cch_status_text, codepage)?;
+            }
+            Ok(comment)
+        };
+
+    // Optional trailing `rgcb` blocks referenced by `PtgArray` tokens.
+    //
+    // BIFF8 stores array constant payloads in the record data immediately after the `rgce` token
+    // stream. These `rgcb` bytes are not counted in `cce` and must be consumed before any optional
+    // strings (custom menu/description/help/status) that may follow.
+    //
+    // Best-effort: try parsing `rgcb` when `rgce` likely contains `PtgArray`; if that fails, fall
+    // back to the legacy layout that assumes no `rgcb` is present.
+    let mut rgcb: Vec<u8> = Vec::new();
+    let may_have_ptgarray = rgce.iter().any(|&b| matches!(b, 0x20 | 0x40 | 0x60));
+    let comment = if may_have_ptgarray {
+        let mut with_rgcb = cursor.clone();
+        match read_biff8_rgcb_for_rgce_arrays(&rgce, &mut with_rgcb) {
+            Ok(rgcb_candidate) => match parse_optional_strings(&mut with_rgcb) {
+                Ok(comment) => {
+                    rgcb = rgcb_candidate;
+                    comment
+                }
+                Err(_) => parse_optional_strings(&mut cursor)?,
+            },
+            Err(_) => parse_optional_strings(&mut cursor)?,
+        }
     } else {
-        None
+        parse_optional_strings(&mut cursor)?
     };
-    if cch_help_topic > 0 {
-        let _ = cursor.read_biff8_unicode_string_no_cch(cch_help_topic, codepage)?;
-    }
-    if cch_status_text > 0 {
-        let _ = cursor.read_biff8_unicode_string_no_cch(cch_status_text, codepage)?;
-    }
 
     if let Some(scope) = scope_sheet {
         if scope >= sheet_names.len() {
@@ -333,7 +373,334 @@ pub(super) fn parse_biff8_name_record(
         comment,
         builtin_id,
         rgce,
+        rgcb,
     })
+}
+
+fn read_biff8_rgcb_for_rgce_arrays(
+    rgce: &[u8],
+    cursor: &mut FragmentCursor<'_>,
+) -> Result<Vec<u8>, String> {
+    let mut out = Vec::<u8>::new();
+    scan_biff8_rgce_for_array_constants(rgce, cursor, &mut out)?;
+    Ok(out)
+}
+
+fn scan_biff8_rgce_for_array_constants(
+    rgce: &[u8],
+    cursor: &mut FragmentCursor<'_>,
+    rgcb_out: &mut Vec<u8>,
+) -> Result<(), String> {
+    fn inner(
+        input: &[u8],
+        cursor: &mut FragmentCursor<'_>,
+        rgcb_out: &mut Vec<u8>,
+    ) -> Result<(), String> {
+        let mut i = 0usize;
+        while i < input.len() {
+            let ptg = *input.get(i).ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+            i = i.saturating_add(1);
+
+            match ptg {
+                // PtgExp / PtgTbl: [rw: u16][col: u16]
+                0x01 | 0x02 => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // Binary operators and simple operators with no payload.
+                0x03..=0x16 | 0x2F => {}
+                // PtgStr (ShortXLUnicodeString): variable.
+                0x17 => {
+                    let remaining = input
+                        .get(i..)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let (_s, consumed) = strings::parse_biff8_short_string(remaining, 1252)
+                        .map_err(|e| format!("failed to parse PtgStr: {e}"))?;
+                    i = i
+                        .checked_add(consumed)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
+                    if i > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                }
+                // PtgExtend* tokens (ptg=0x18 variants): [etpg: u8][payload...]
+                0x18 | 0x38 | 0x58 | 0x78 => {
+                    let etpg = *input
+                        .get(i)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    i += 1;
+                    match etpg {
+                        0x19 => {
+                            // PtgList: fixed 12-byte payload.
+                            if i + 12 > input.len() {
+                                return Err("unexpected end of rgce stream".to_string());
+                            }
+                            i += 12;
+                        }
+                        _ => {
+                            // Opaque 5-byte payload (see decoder heuristics).
+                            //
+                            // The ptg itself is followed by 5 bytes; since we consumed the first
+                            // one as the "etpg" discriminator above, skip the remaining 4 bytes.
+                            if i + 4 > input.len() {
+                                return Err("unexpected end of rgce stream".to_string());
+                            }
+                            i += 4;
+                        }
+                    }
+                }
+                // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
+                0x19 => {
+                    if i + 3 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    let grbit = input[i];
+                    let w_attr = u16::from_le_bytes([input[i + 1], input[i + 2]]) as usize;
+                    i += 3;
+
+                    const T_ATTR_CHOOSE: u8 = 0x04;
+                    if grbit & T_ATTR_CHOOSE != 0 {
+                        let needed = w_attr
+                            .checked_mul(2)
+                            .ok_or_else(|| "PtgAttr jump table length overflow".to_string())?;
+                        if i + needed > input.len() {
+                            return Err("unexpected end of rgce stream".to_string());
+                        }
+                        i += needed;
+                    }
+                }
+                // PtgErr / PtgBool: 1 byte.
+                0x1C | 0x1D => {
+                    if i + 1 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 1;
+                }
+                // PtgInt: 2 bytes.
+                0x1E => {
+                    if i + 2 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 2;
+                }
+                // PtgNum: 8 bytes.
+                0x1F => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgArray: [unused: 7 bytes] + array constant values stored in rgcb.
+                0x20 | 0x40 | 0x60 => {
+                    if i + 7 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 7;
+                    read_biff8_array_constant_from_record(cursor, rgcb_out)?;
+                }
+                // PtgFunc: 2 bytes.
+                0x21 | 0x41 | 0x61 => {
+                    if i + 2 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 2;
+                }
+                // PtgFuncVar: 3 bytes.
+                0x22 | 0x42 | 0x62 => {
+                    if i + 3 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 3;
+                }
+                // PtgName: 6 bytes.
+                0x23 | 0x43 | 0x63 => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgRef: 4 bytes.
+                0x24 | 0x44 | 0x64 => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // PtgArea: 8 bytes.
+                0x25 | 0x45 | 0x65 => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgMem* tokens: [cce: u16][rgce: cce bytes]
+                0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
+                | 0x69 | 0x2E | 0x4E | 0x6E => {
+                    if i + 2 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    let cce = u16::from_le_bytes([input[i], input[i + 1]]) as usize;
+                    i += 2;
+                    let sub = input
+                        .get(i..i + cce)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    inner(sub, cursor, rgcb_out)?;
+                    i += cce;
+                }
+                // PtgRefErr: 4 bytes.
+                0x2A | 0x4A | 0x6A => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // PtgAreaErr: 8 bytes.
+                0x2B | 0x4B | 0x6B => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgRefN: 4 bytes.
+                0x2C | 0x4C | 0x6C => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // PtgAreaN: 8 bytes.
+                0x2D | 0x4D | 0x6D => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgNameX: 6 bytes.
+                0x39 | 0x59 | 0x79 => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgRef3d: 6 bytes.
+                0x3A | 0x5A | 0x7A => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgArea3d: 10 bytes.
+                0x3B | 0x5B | 0x7B => {
+                    if i + 10 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 10;
+                }
+                // PtgRefErr3d: 6 bytes.
+                0x3C | 0x5C | 0x7C => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgAreaErr3d: 10 bytes.
+                0x3D | 0x5D | 0x7D => {
+                    if i + 10 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 10;
+                }
+                // PtgRefN3d: 6 bytes.
+                0x3E | 0x5E | 0x7E => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgAreaN3d: 10 bytes.
+                0x3F | 0x5F | 0x7F => {
+                    if i + 10 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 10;
+                }
+                other => {
+                    return Err(format!(
+                        "unsupported rgce token 0x{other:02X} while scanning for PtgArray constants"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    inner(rgce, cursor, rgcb_out)
+}
+
+fn read_biff8_array_constant_from_record(
+    cursor: &mut FragmentCursor<'_>,
+    out: &mut Vec<u8>,
+) -> Result<(), String> {
+    // BIFF8 array constant payload stream stored as trailing `rgcb` bytes.
+    // See MS-XLS 2.5.198.8 PtgArray.
+    //
+    // Layout:
+    //   [cols_minus1: u16][rows_minus1: u16][values...]
+    //
+    // Values are stored row-major and each starts with a type byte:
+    //   0x00 = empty
+    //   0x01 = number (f64)
+    //   0x02 = string ([cch: u16][utf16 chars...])
+    //   0x04 = bool ([b: u8])
+    //   0x10 = error ([code: u8])
+    const MAX_ARRAY_CELLS: usize = 4096;
+
+    let cols_minus1 = cursor.read_u16_le()?;
+    let rows_minus1 = cursor.read_u16_le()?;
+    out.extend_from_slice(&cols_minus1.to_le_bytes());
+    out.extend_from_slice(&rows_minus1.to_le_bytes());
+
+    let cols = cols_minus1 as usize + 1;
+    let rows = rows_minus1 as usize + 1;
+    let total = cols.saturating_mul(rows);
+    if total > MAX_ARRAY_CELLS {
+        return Err(format!(
+            "array constant is too large to parse (rows={rows}, cols={cols})"
+        ));
+    }
+
+    for _ in 0..total {
+        let ty = cursor.read_u8()?;
+        out.push(ty);
+        match ty {
+            0x00 => {}
+            0x01 => {
+                let bytes = cursor.read_bytes(8)?;
+                out.extend_from_slice(&bytes);
+            }
+            0x02 => {
+                let cch = cursor.read_u16_le()?;
+                out.extend_from_slice(&cch.to_le_bytes());
+                let byte_len = (cch as usize)
+                    .checked_mul(2)
+                    .ok_or_else(|| "array string length overflow".to_string())?;
+                let bytes = cursor.read_bytes(byte_len)?;
+                out.extend_from_slice(&bytes);
+            }
+            0x04 | 0x10 => {
+                out.push(cursor.read_u8()?);
+            }
+            other => {
+                return Err(format!(
+                    "unsupported array constant element type 0x{other:02X}"
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn builtin_name_to_string(id: u8) -> String {
@@ -360,6 +727,7 @@ fn builtin_name_to_string(id: u8) -> String {
     }
 }
 
+#[derive(Clone)]
 struct FragmentCursor<'a> {
     fragments: &'a [&'a [u8]],
     frag_idx: usize,
@@ -2264,6 +2632,99 @@ mod tests {
         assert_eq!(parsed.names[0].scope_sheet, None);
         assert_eq!(parsed.names[0].rgce, rgce);
         assert_eq!(parsed.names[0].refers_to, "1");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn imports_defined_name_array_constant_from_rgcb() {
+        // NAME formula `={1,2;3,4}` encoded with PtgArray + trailing rgcb bytes.
+        let name = "ArrConst";
+
+        let rgce: Vec<u8> = vec![
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+        ];
+
+        // BIFF8 array constant: [cols_minus1: u16][rows_minus1: u16] + values row-major.
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 cols
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 rows
+        for n in [1.0f64, 2.0, 3.0, 4.0] {
+            rgcb.push(0x01); // number
+            rgcb.extend_from_slice(&n.to_le_bytes());
+        }
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, rgce, rgcb].concat()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "{1,2;3,4}");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn imports_defined_name_array_constant_with_description_after_rgcb() {
+        // Ensure `rgcb` bytes do not interfere with parsing the optional description string.
+        let name = "ArrDesc";
+        let desc = "Hi";
+
+        let rgce: Vec<u8> = vec![
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+        ];
+
+        // {1,2}
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // 2 cols
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 row
+        for n in [1.0f64, 2.0] {
+            rgcb.push(0x01); // number
+            rgcb.extend_from_slice(&n.to_le_bytes());
+        }
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        header.extend_from_slice(&[0, desc.len() as u8, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+        let desc_str = xl_unicode_string_no_cch_compressed(desc);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, rgce, rgcb, desc_str].concat()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "{1,2}");
+        assert_eq!(parsed.names[0].comment.as_deref(), Some(desc));
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
