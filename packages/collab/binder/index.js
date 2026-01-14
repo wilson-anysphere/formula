@@ -194,7 +194,22 @@ function normalizeSheetViewState(view) {
 
   const colWidths = normalizeAxisOverrides(view?.colWidths);
   const rowHeights = normalizeAxisOverrides(view?.rowHeights);
-  const backgroundImageId = normalizeOptionalId(view?.backgroundImageId ?? view?.background_image_id);
+  // Legacy/alternate keys: some clients stored the background image id under
+  // `backgroundImage` / `background_image`. Treat those as aliases.
+  //
+  // Use `!== undefined` checks (not `??`) so explicit `null` clears do not fall
+  // back to a stale legacy value.
+  const backgroundImageRaw =
+    view?.backgroundImageId !== undefined
+      ? view.backgroundImageId
+      : view?.background_image_id !== undefined
+        ? view.background_image_id
+        : view?.backgroundImage !== undefined
+          ? view.backgroundImage
+          : view?.background_image !== undefined
+            ? view.background_image
+            : undefined;
+  const backgroundImageId = normalizeOptionalId(backgroundImageRaw);
 
   return {
     frozenRows: normalizeFrozenCount(view?.frozenRows),
@@ -943,7 +958,19 @@ export function bindYjsToDocumentController(options) {
       if (viewMap) {
         const frozenRows = viewMap.get("frozenRows");
         const frozenCols = viewMap.get("frozenCols");
-        const backgroundImageId = viewMap.get("backgroundImageId") ?? viewMap.get("background_image_id");
+        // Legacy/alternate keys: some clients stored the background image id under
+        // `backgroundImage` / `background_image`. Treat those as aliases.
+        //
+        // Use `!== undefined` checks (not `??`) so explicit `null` clears do not fall
+        // back to a stale legacy value.
+        const backgroundImageId =
+          viewMap.get("backgroundImageId") !== undefined
+            ? viewMap.get("backgroundImageId")
+            : viewMap.get("background_image_id") !== undefined
+              ? viewMap.get("background_image_id")
+              : viewMap.get("backgroundImage") !== undefined
+                ? viewMap.get("backgroundImage")
+                : viewMap.get("background_image");
         const colWidths = viewMap.get("colWidths");
         const rowHeights = viewMap.get("rowHeights");
         const defaultFormat = viewMap.get("defaultFormat");
@@ -977,7 +1004,14 @@ export function bindYjsToDocumentController(options) {
       if (isRecord(rawView)) {
         const frozenRows = rawView.frozenRows;
         const frozenCols = rawView.frozenCols;
-        const backgroundImageId = rawView.backgroundImageId ?? rawView.background_image_id;
+        const backgroundImageId =
+          rawView.backgroundImageId !== undefined
+            ? rawView.backgroundImageId
+            : rawView.background_image_id !== undefined
+              ? rawView.background_image_id
+              : rawView.backgroundImage !== undefined
+                ? rawView.backgroundImage
+                : rawView.background_image;
         const colWidths = rawView.colWidths;
         const rowHeights = rawView.rowHeights;
         const defaultFormat = rawView.defaultFormat;
@@ -1029,7 +1063,14 @@ export function bindYjsToDocumentController(options) {
       // and also accept `colWidths`/`rowHeights` in case older clients stored them similarly.
       const frozenRows = sheetMap.get("frozenRows");
       const frozenCols = sheetMap.get("frozenCols");
-      const backgroundImageId = sheetMap.get("backgroundImageId") ?? sheetMap.get("background_image_id");
+      const backgroundImageId =
+        sheetMap.get("backgroundImageId") !== undefined
+          ? sheetMap.get("backgroundImageId")
+          : sheetMap.get("background_image_id") !== undefined
+            ? sheetMap.get("background_image_id")
+            : sheetMap.get("backgroundImage") !== undefined
+              ? sheetMap.get("backgroundImage")
+              : sheetMap.get("background_image");
       const colWidths = sheetMap.get("colWidths");
       const rowHeights = sheetMap.get("rowHeights");
       const defaultFormat = sheetMap.get("defaultFormat");
@@ -1071,7 +1112,14 @@ export function bindYjsToDocumentController(options) {
 
       const frozenRows = sheetEntry.frozenRows;
       const frozenCols = sheetEntry.frozenCols;
-      const backgroundImageId = sheetEntry.backgroundImageId ?? sheetEntry.background_image_id;
+      const backgroundImageId =
+        sheetEntry.backgroundImageId !== undefined
+          ? sheetEntry.backgroundImageId
+          : sheetEntry.background_image_id !== undefined
+            ? sheetEntry.background_image_id
+            : sheetEntry.backgroundImage !== undefined
+              ? sheetEntry.backgroundImage
+              : sheetEntry.background_image;
       const colWidths = sheetEntry.colWidths;
       const rowHeights = sheetEntry.rowHeights;
       const defaultFormat = sheetEntry.defaultFormat;
@@ -2095,8 +2143,10 @@ export function bindYjsToDocumentController(options) {
             } else {
               existingViewMap.delete("backgroundImageId");
             }
-            // Converge legacy key to the canonical one (even if the value is unchanged).
+            // Converge legacy keys to the canonical one (even if the value is unchanged).
             existingViewMap.delete("background_image_id");
+            existingViewMap.delete("backgroundImage");
+            existingViewMap.delete("background_image");
 
             const colWidthsRaw = existingViewMap.get("colWidths");
             const rowHeightsRaw = existingViewMap.get("rowHeights");
@@ -2140,6 +2190,8 @@ export function bindYjsToDocumentController(options) {
                     key === "frozenCols" ||
                     key === "backgroundImageId" ||
                     key === "background_image_id" ||
+                    key === "backgroundImage" ||
+                    key === "background_image" ||
                     key === "colWidths" ||
                     key === "rowHeights"
                   ) {

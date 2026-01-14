@@ -61,7 +61,7 @@ class TestDocumentController {
   }
 }
 
-test("binder syncs sheet view backgroundImageId between Yjs and DocumentController", async () => {
+test("binder syncs sheet view backgroundImageId between Yjs and DocumentController (including legacy aliases)", async () => {
   const doc = new Y.Doc();
   const { sheets } = getWorkbookRoots(doc);
 
@@ -73,7 +73,8 @@ test("binder syncs sheet view backgroundImageId between Yjs and DocumentControll
     const view = new Y.Map();
     view.set("frozenRows", 0);
     view.set("frozenCols", 0);
-    view.set("backgroundImageId", "bg1.png");
+    // Legacy encodings used by older/experimental clients.
+    view.set("background_image", "bg1.png");
     sheet.set("view", view);
 
     sheets.push([sheet]);
@@ -82,16 +83,17 @@ test("binder syncs sheet view backgroundImageId between Yjs and DocumentControll
   const documentController = new TestDocumentController();
   const binder = bindYjsToDocumentController({ ydoc: doc, documentController, defaultSheetId: "Sheet1" });
 
-  // Initial hydration should apply backgroundImageId.
+  // Initial hydration should apply backgroundImageId from legacy aliases.
   assert.equal(documentController.getSheetView("Sheet1").backgroundImageId, "bg1.png");
 
-  // Remote update (Yjs -> DocumentController).
+  // Remote update (Yjs -> DocumentController) via legacy alias.
   doc.transact(() => {
     const sheet = sheets.get(0);
     assert.ok(sheet);
     const view = sheet.get("view");
     assert.ok(view && typeof view === "object");
-    view.set("backgroundImageId", "bg2.png");
+    view.set("backgroundImage", "bg2.png");
+    view.delete("background_image");
   });
   await flushAsync(5);
   assert.equal(documentController.getSheetView("Sheet1").backgroundImageId, "bg2.png");
@@ -102,12 +104,22 @@ test("binder syncs sheet view backgroundImageId between Yjs and DocumentControll
     assert.ok(sheet);
     const view = sheet.get("view");
     assert.ok(view && typeof view === "object");
-    view.delete("backgroundImageId");
+    view.delete("backgroundImage");
   });
   await flushAsync(5);
   assert.equal(documentController.getSheetView("Sheet1").backgroundImageId, undefined);
 
   // Local update (DocumentController -> Yjs).
+  // Seed legacy keys again to ensure the binder converges them when writing.
+  doc.transact(() => {
+    const sheet = sheets.get(0);
+    assert.ok(sheet);
+    const view = sheet.get("view");
+    assert.ok(view && typeof view === "object");
+    view.set("backgroundImage", "stale.png");
+    view.set("background_image", "stale-2.png");
+    view.set("background_image_id", "stale-3.png");
+  });
   documentController.setSheetView("Sheet1", { frozenRows: 0, frozenCols: 0, backgroundImageId: "bg3.png" });
   await flushAsync(5);
   {
@@ -117,8 +129,14 @@ test("binder syncs sheet view backgroundImageId between Yjs and DocumentControll
     assert.ok(view && typeof view === "object");
     if (typeof view.get === "function") {
       assert.equal(view.get("backgroundImageId"), "bg3.png");
+      assert.equal(view.get("background_image_id"), undefined);
+      assert.equal(view.get("backgroundImage"), undefined);
+      assert.equal(view.get("background_image"), undefined);
     } else {
       assert.equal(view.backgroundImageId, "bg3.png");
+      assert.equal(view.background_image_id, undefined);
+      assert.equal(view.backgroundImage, undefined);
+      assert.equal(view.background_image, undefined);
     }
   }
 
@@ -132,8 +150,14 @@ test("binder syncs sheet view backgroundImageId between Yjs and DocumentControll
     assert.ok(view && typeof view === "object");
     if (typeof view.get === "function") {
       assert.equal(view.get("backgroundImageId"), undefined);
+      assert.equal(view.get("background_image_id"), undefined);
+      assert.equal(view.get("backgroundImage"), undefined);
+      assert.equal(view.get("background_image"), undefined);
     } else {
       assert.equal(view.backgroundImageId, undefined);
+      assert.equal(view.background_image_id, undefined);
+      assert.equal(view.backgroundImage, undefined);
+      assert.equal(view.background_image, undefined);
     }
   }
 
