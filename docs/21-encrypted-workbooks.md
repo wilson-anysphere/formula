@@ -140,8 +140,10 @@ Implementation notes:
   - Standard (CryptoAPI; `versionMinor == 2`) header + verifier structures, and
   - Agile (4.4) XML (password key-encryptor subset),
   and implements Standard password→key derivation + verifier checks.
-- `crates/formula-io/src/offcrypto/encrypted_package.rs` decrypts the Standard/CryptoAPI
-  `EncryptedPackage` stream once you have the derived file key and verifier salt.
+- `crates/formula-io/src/offcrypto/encrypted_package.rs` contains a Standard/CryptoAPI
+  `EncryptedPackage` decrypt helper for a **CBC-segmented compatibility layout** (IV derived from
+  the verifier salt + segment index). Baseline Standard AES `EncryptedPackage` decryption is ECB
+  (no IV); see `docs/offcrypto-standard-encryptedpackage.md` for details.
 - For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
   [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
@@ -174,10 +176,11 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 
 The encryption *mode* differs by scheme:
 
-- **Standard (CryptoAPI; `versionMinor == 2`):** AES-CBC over **0x1000 (4096)-byte plaintext segments** with a
-  per-segment IV. Segment `i` uses `IV = SHA1(verifierSalt || LE32(i))[0..16]` and is decrypted
-  independently; the concatenated plaintext is truncated to `original_package_size` (see
-  `docs/offcrypto-standard-encryptedpackage.md`).
+- **Standard (CryptoAPI; `versionMinor == 2`):** in the baseline MS-OFFCRYPTO scheme,
+  `EncryptedPackage` is decrypted with **AES-ECB** (no IV) and then truncated to
+  `original_package_size`. Some producers use **CBC variants** (including 0x1000-segmented CBC with
+  `IV = SHA1(salt || LE32(i))[0..16]`); see `docs/offcrypto-standard-encryptedpackage.md` for a
+  breakdown and repo-specific behavior.
 - **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
   `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified by the XML
   descriptor.
@@ -238,8 +241,10 @@ Useful entrypoints when working on encrypted workbook support:
     `crates/formula-office-crypto`
   - Parse `EncryptionInfo`, derive/verify password key:
     `crates/formula-offcrypto`
-  - Decrypt `EncryptedPackage` (given a derived key + verifier salt):
-    `crates/formula-io/src/offcrypto/encrypted_package.rs`
+  - Decrypt `EncryptedPackage`:
+    - Baseline Standard AES-ECB helper: `crates/formula-offcrypto/src/encrypted_package.rs`
+    - CBC-segmented compatibility helper (IV derived from verifier salt + segment index):
+      `crates/formula-io/src/offcrypto/encrypted_package.rs`
   - Segment framing helper (size prefix + 0x1000 segment boundaries):
     `crates/formula-offcrypto/src/encrypted_package.rs`
 - **Agile (4.4) OOXML decryption details (HMAC target bytes + IV usage gotchas):**
