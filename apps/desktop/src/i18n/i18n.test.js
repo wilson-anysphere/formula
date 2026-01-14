@@ -58,16 +58,19 @@ test("ribbon label strings are localizable", () => {
   assert.equal(t("ribbon.label.mixed"), "Mixed");
   assert.equal(t("ribbon.label.custom"), "Custom");
   assert.equal(t("ribbon.label.comma"), "Comma");
+  assert.equal(t("ribbon.label.moreNumberFormats"), "More number formats");
 
   setLocale("de-DE");
   assert.equal(t("ribbon.label.mixed"), "Gemischt");
   assert.equal(t("ribbon.label.custom"), "Benutzerdefiniert");
   assert.equal(t("ribbon.label.comma"), "Komma");
+  assert.equal(t("ribbon.label.moreNumberFormats"), "Weitere Zahlenformate");
 
   setLocale("ar");
   assert.equal(t("ribbon.label.mixed"), "مختلط");
   assert.equal(t("ribbon.label.custom"), "مخصص");
   assert.equal(t("ribbon.label.comma"), "فاصلة");
+  assert.equal(t("ribbon.label.moreNumberFormats"), "مزيد من تنسيقات الأرقام");
 });
 
 test("number format quick-pick strings are localizable", () => {

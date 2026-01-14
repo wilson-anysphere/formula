@@ -469,6 +469,7 @@ export const enUS = {
   "ribbon.label.mixed": "Mixed",
   "ribbon.label.custom": "Custom",
   "ribbon.label.comma": "Comma",
+  "ribbon.label.moreNumberFormats": "More number formats",
   "ribbon.theme.system": "System",
   "ribbon.theme.light": "Light",
   "ribbon.theme.dark": "Dark",

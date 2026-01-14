@@ -65,6 +65,7 @@ export const deDE = {
   "ribbon.label.mixed": "Gemischt",
   "ribbon.label.custom": "Benutzerdefiniert",
   "ribbon.label.comma": "Komma",
+  "ribbon.label.moreNumberFormats": "Weitere Zahlenformate",
   "ribbon.theme.system": "System",
   "ribbon.theme.light": "Hell",
   "ribbon.theme.dark": "Dunkel",

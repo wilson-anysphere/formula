@@ -65,6 +65,7 @@ export const ar = {
   "ribbon.label.mixed": "مختلط",
   "ribbon.label.custom": "مخصص",
   "ribbon.label.comma": "فاصلة",
+  "ribbon.label.moreNumberFormats": "مزيد من تنسيقات الأرقام",
   "ribbon.theme.system": "النظام",
   "ribbon.theme.light": "فاتح",
   "ribbon.theme.dark": "داكن",

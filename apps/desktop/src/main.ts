@@ -2531,6 +2531,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       // Include the current selection value in the accessible name so screen readers can
       // announce both the control purpose and the active format (e.g. "Number format: General").
       "home.number.numberFormat.ariaLabel": `${t("quickPick.numberFormat.placeholder")}: ${numberFormatLabel}`,
+      "home.number.moreFormats.ariaLabel": t("ribbon.label.moreNumberFormats"),
       "view.appearance.theme": themeLabel,
       // The visible label is already "Theme: X"; use the same value so screen readers can
       // announce the current preference.
