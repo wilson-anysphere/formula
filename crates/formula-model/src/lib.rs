@@ -18,7 +18,7 @@ mod display;
 pub mod drawings;
 pub mod autofilter;
 mod error;
-mod formula_rewrite;
+pub mod formula_rewrite;
 mod formula_text;
 mod hyperlinks;
 pub mod import;

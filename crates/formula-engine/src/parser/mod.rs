@@ -6,7 +6,7 @@ use crate::{
     PostfixExpr, PostfixOp, ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr,
     UnaryOp,
 };
-use formula_model::sheet_name_eq_case_insensitive;
+use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
 
 /// Excel formula limits enforced by this parser.
 ///
@@ -3799,7 +3799,9 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
 fn sheet_ref_from_raw_prefix(raw: &str) -> (Option<String>, SheetRef) {
     let (workbook, sheet) = split_external_sheet_name(raw);
     let sheet_ref = match split_sheet_span_name(&sheet) {
-        Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => SheetRef::Sheet(start),
+        Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => {
+            SheetRef::Sheet(start)
+        }
         Some((start, end)) => SheetRef::SheetRange { start, end },
         None => SheetRef::Sheet(sheet),
     };
@@ -3977,7 +3979,7 @@ fn estimate_number_token_bytes(raw: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Expr, FunctionCall, ParseOptions};
+    use crate::{CellRef, Coord, Expr, FunctionCall, ParseOptions, SerializeOptions, SheetRef};
 
     #[test]
     fn true_false_lex_as_boolean_literals_when_not_followed_by_paren() {
@@ -4066,5 +4068,82 @@ mod tests {
                 TokenKind::Eof
             ]
         );
+    }
+
+    #[test]
+    fn unicode_sheet_span_collapses_with_excel_like_case_insensitive_matching() {
+        // German sharp s: Unicode uppercasing expands `ß` -> `SS`.
+        //
+        // Excel compares sheet names case-insensitively across Unicode, so this 3D span should
+        // collapse to a single-sheet reference.
+        let formula = "='ß':'SS'!A1";
+        let ast = parse_formula(formula, ParseOptions::default()).unwrap();
+
+        // Parser normalization: `'<name>':'<casefold-equivalent>'!A1` should become a single-sheet ref.
+        match &ast.expr {
+            Expr::CellRef(r) => {
+                assert_eq!(r.workbook, None);
+                assert_eq!(
+                    r.sheet,
+                    Some(SheetRef::Sheet("ß".to_string())),
+                    "expected sheet span to collapse during parsing"
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+
+        // Stringification should not reintroduce the 3D `start:end` form.
+        let rendered = ast.to_string(SerializeOptions::default()).unwrap();
+        assert_eq!(rendered, "='ß'!A1");
+
+        // Compiler normalization: even if a SheetRef::SheetRange reaches compilation, it should
+        // collapse to a single sheet id using Unicode-aware matching.
+        let range_expr = Expr::CellRef(CellRef {
+            workbook: None,
+            sheet: Some(SheetRef::SheetRange {
+                start: "ß".to_string(),
+                end: "SS".to_string(),
+            }),
+            col: Coord::A1 {
+                index: 0,
+                abs: false,
+            },
+            row: Coord::A1 {
+                index: 0,
+                abs: false,
+            },
+        });
+
+        let ast_range = crate::Ast::new(true, range_expr.clone());
+        let rendered_range = ast_range.to_string(SerializeOptions::default()).unwrap();
+        assert_eq!(
+            rendered_range, "='ß'!A1",
+            "expected sheet span to collapse during serialization"
+        );
+
+        let mut resolve_sheet = |name: &str| {
+            formula_model::formula_rewrite::sheet_name_eq_case_insensitive(name, "ß")
+                .then_some(0usize)
+        };
+        let mut sheet_dims =
+            |_id: usize| (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS);
+
+        let compiled = crate::eval::compile_canonical_expr(
+            &range_expr,
+            0,
+            crate::eval::CellAddr { row: 0, col: 0 },
+            &mut resolve_sheet,
+            &mut sheet_dims,
+        );
+        match compiled {
+            crate::eval::Expr::CellRef(r) => {
+                assert_eq!(
+                    r.sheet,
+                    crate::eval::SheetReference::Sheet(0),
+                    "expected sheet span to collapse during compilation"
+                );
+            }
+            other => panic!("expected compiled CellRef, got {other:?}"),
+        }
     }
 }

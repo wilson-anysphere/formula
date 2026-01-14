@@ -1,5 +1,5 @@
+use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
 use serde::{Deserialize, Serialize};
-use formula_model::sheet_name_eq_case_insensitive;
 
 /// 0-indexed cell address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

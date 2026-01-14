@@ -4,7 +4,7 @@ use crate::eval::{
 };
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, SheetId as FnSheetId};
 use crate::value::{Array, ErrorKind, Value};
-use formula_model::sheet_name_eq_case_insensitive;
+use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
 use std::cmp::Ordering;
 
 /// Maximum number of cells the debug trace evaluator will materialize when a formula result is a
@@ -823,9 +823,7 @@ fn parse_row_ref_str(input: &str) -> Option<u32> {
         if !ch.is_ascii_digit() {
             return None;
         }
-        row = row
-            .checked_mul(10)?
-            .checked_add((ch as u8 - b'0') as u32)?;
+        row = row.checked_mul(10)?.checked_add((ch as u8 - b'0') as u32)?;
     }
     if row == 0 {
         return None;
@@ -1979,17 +1977,17 @@ impl ParserImpl {
                             kind: SpannedExprKind::Error(ErrorKind::Ref),
                         });
                     };
-                    Ok(SpannedExpr {
-                        span,
-                        kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
-                            sheet,
-                            start,
-                            end,
-                        }),
-                    })
-                } else {
-                    Err(FormulaParseError::UnexpectedToken("number".to_string()))
-                }
+                Ok(SpannedExpr {
+                    span,
+                    kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                        sheet,
+                        start,
+                        end,
+                    }),
+                })
+            } else {
+                Err(FormulaParseError::UnexpectedToken("number".to_string()))
+            }
             }
             other => Err(FormulaParseError::Expected {
                 expected: "cell address".to_string(),
@@ -2154,7 +2152,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             // External workbooks do not expose dimensions via the ValueResolver interface, so treat
             // the bounds as unknown and only resolve whole-row/whole-column sentinels using Excel's
             // default grid size.
-            FnSheetId::External(_) => (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS),
+            FnSheetId::External(_) => {
+                (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS)
+            }
         };
 
         let max_row = rows.saturating_sub(1);
@@ -2173,8 +2173,16 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             },
         };
         let end = CellAddr {
-            row: if end.row == CellAddr::SHEET_END { max_row } else { end.row },
-            col: if end.col == CellAddr::SHEET_END { max_col } else { end.col },
+            row: if end.row == CellAddr::SHEET_END {
+                max_row
+            } else {
+                end.row
+            },
+            col: if end.col == CellAddr::SHEET_END {
+                max_col
+            } else {
+                end.col
+            },
         };
 
         if matches!(sheet_id, FnSheetId::Local(_))

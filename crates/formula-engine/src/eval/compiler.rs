@@ -5,7 +5,7 @@ use crate::eval::ast::{
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
-use formula_model::sheet_name_eq_case_insensitive;
+use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
 use formula_model::EXCEL_MAX_COLS;
 
 /// Excel column limit (0-indexed).
