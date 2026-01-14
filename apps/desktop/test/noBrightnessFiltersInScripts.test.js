@@ -74,22 +74,22 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
     },
     // setProperty("filter", "brightness(0.9)") / setProperty("backdrop-filter", "brightness(0.9)")
     {
-      re: /\.style\??\.setProperty\(\s*(["'])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.style\??\.setProperty\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(filter)",
     },
     // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("filter", "brightness(0.9)")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'](filter)",
     },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("filter", "brightness(0.9)")`)
     {
-      re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty[filter]",
     },
     // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("filter", "brightness(0.9)")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'][filter]",
     },
     // setAttribute("style", "filter: brightness(0.9)")

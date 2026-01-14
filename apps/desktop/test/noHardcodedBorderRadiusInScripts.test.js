@@ -155,82 +155,82 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
       },
       // setProperty("border-radius", 4)
       {
-        re: /\.style\??\.setProperty\(\s*(["'])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.style\??\.setProperty\(\s*(["'`])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty-number",
       },
       // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("border-radius", 4)`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty['style']-number",
       },
       // setProperty via bracket notation (e.g. `el.style["setProperty"]("border-radius", 4)`)
       {
-        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty[border-radius]-number",
       },
       // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("border-radius", 4)`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty['style'][border-radius]-number",
       },
       // setProperty("border-top-left-radius", 4)
       {
-        re: /\.style\??\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.style\??\.setProperty\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty-border-*-radius-number",
       },
       // setProperty via bracket access to `style` for longhand border radii (numeric) (e.g. `el["style"].setProperty("border-top-left-radius", 4)`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty['style']-border-*-radius-number",
       },
       // setProperty via bracket notation for longhand border radii (numeric) (e.g. `el.style["setProperty"]("border-top-left-radius", 4)`)
       {
-        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty[border-*-radius]-number",
       },
       // setProperty via bracket access to `style` + bracket notation for longhand border radii (numeric) (e.g. `el["style"]["setProperty"]("border-top-left-radius", 4)`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty['style'][border-*-radius]-number",
       },
       // setProperty("border-radius", "4px") / setProperty(..., "calc(4px)")
       {
-        re: /\.style\??\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\.style\??\.setProperty\(\s*(["'`])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty",
       },
       // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("border-radius", "4px")`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty['style']",
       },
       // setProperty via bracket notation (e.g. `el.style["setProperty"]("border-radius", "4px")`)
       {
-        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty[border-radius]",
       },
       // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("border-radius", "4px")`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty['style'][border-radius]",
       },
       // setProperty("border-top-left-radius", "4px")
       {
-        re: /\.style\??\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\.style\??\.setProperty\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty-border-*-radius",
       },
       // setProperty via bracket access to `style` for longhand border radii (e.g. `el["style"].setProperty("border-top-left-radius", "4px")`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty['style']-border-*-radius",
       },
       // setProperty via bracket notation for longhand border radii (e.g. `el.style["setProperty"]("border-top-left-radius", "4px")`)
       {
-        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty[border-*-radius]",
       },
       // setProperty via bracket access to `style` + bracket notation for longhand border radii (e.g. `el["style"]["setProperty"]("border-top-left-radius", "4px")`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "setProperty['style'][border-*-radius]",
       },
     ];
