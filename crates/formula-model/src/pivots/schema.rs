@@ -737,11 +737,19 @@ mod tests {
         );
         assert_eq!(
             PivotFieldRef::DataModelColumn {
-                table: "VAR".to_string(),
-                column: "X".to_string(),
+                table: "RETURN".to_string(),
+                column: "X".to_string()
             }
             .to_string(),
-            "'VAR'[X]"
+            "'RETURN'[X]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "IN".to_string(),
+                column: "X".to_string()
+            }
+            .to_string(),
+            "'IN'[X]"
         );
         assert_eq!(
             PivotFieldRef::DataModelMeasure("Total Sales".to_string()).to_string(),
