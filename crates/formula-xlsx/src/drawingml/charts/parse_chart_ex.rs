@@ -248,6 +248,7 @@ fn detect_chart_kind(doc: &Document<'_>, root_ns: &str, diagnostics: &mut Vec<Ch
         return chart_type;
     }
 
+    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
     let hints = collect_chart_ex_kind_hints(doc);
     let hint_list = if hints.is_empty() {
         "<none>".to_string()
