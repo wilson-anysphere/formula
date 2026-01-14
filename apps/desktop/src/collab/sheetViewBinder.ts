@@ -573,6 +573,16 @@ export function bindSheetViewToCollabSession(options: {
     if (destroyed) return;
     if (applyingRemote) return;
 
+    // The desktop app wires both the full collab binder (cell/format/etc) and this sheet-view binder.
+    // When the full binder applies remote deltas into the DocumentController, it emits `change`
+    // events with `payload.source === "collab"`. Treat those as remote and do not write them back
+    // into Yjs (otherwise we'd create redundant Yjs updates and potentially pollute collaborative undo).
+    //
+    // Similarly, `applyState` is used for version restore / snapshot hydration and should not
+    // automatically overwrite the shared collaborative state.
+    const source = typeof payload?.source === "string" ? payload.source : null;
+    if (source === "collab" || source === "applyState") return;
+
     // In read-only collab sessions (viewer/commenter), avoid persisting local view metadata
     // back into the shared Yjs document.
     if (session.isReadOnly()) return;
