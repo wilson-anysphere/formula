@@ -141,7 +141,7 @@ export async function load(url, context, defaultLoad) {
   // Vite-style `?raw` imports are used in a few desktop/node contexts (e.g. locale TSVs,
   // bundled extension entrypoints). Node does not understand these by default, so treat
   // them as "read the file and export a string".
-  if (urlObj.searchParams.has("raw")) {
+  if (urlObj.protocol === "file:" && urlObj.searchParams.has("raw")) {
     urlObj.search = "";
     urlObj.hash = "";
     const source = await readFile(urlObj, "utf8");

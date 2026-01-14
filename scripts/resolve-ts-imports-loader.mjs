@@ -138,7 +138,7 @@ export async function load(url, context, defaultLoad) {
   const urlObj = new URL(url);
   // Support Vite-style `?raw` imports when running node:test suites directly against
   // workspace TypeScript sources.
-  if (urlObj.searchParams.has("raw")) {
+  if (urlObj.protocol === "file:" && urlObj.searchParams.has("raw")) {
     urlObj.search = "";
     urlObj.hash = "";
     const source = await readFile(urlObj, "utf8");
