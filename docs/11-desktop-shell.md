@@ -147,7 +147,7 @@ Notes:
     - cross-OS merged artifact: `desktop-perf-platform-matrix` (`desktop-perf-platform-matrix.json`)
     - pinned runner matrix: `ubuntu-24.04`, `windows-2022`, `macos-14`
     - includes best-effort WebView runtime metadata (WebKitGTK / WKWebView / WebView2 version) to help attribute regressions to runner image updates
-    - scheduled runs on `main` also publish key p95 metrics to the benchmark-action `gh-pages` history (non-gating)
+    - scheduled runs on `main` also publish key p95 metrics to the benchmark-action `gh-pages` history (non-gating; skips publish when results are missing/empty)
       - metric name prefix: `desktop.platform.<os>.…` (`linux` / `windows` / `macos`)
       - these gh-pages publishing jobs (across perf workflows) share a concurrency group (`benchmark-gh-pages-publish`) to avoid concurrent pushes racing
     - manual `workflow_dispatch` runs can override run counts/timeouts via inputs: `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs` (and can optionally restrict the OS via `os`)
@@ -160,7 +160,7 @@ Notes:
 
   For long-running **idle memory** history on main (Linux only), see:
   - `.github/workflows/desktop-memory-perf.yml`
-    - publishes `desktop.memory.idle_rss_mb.p95` to the benchmark-action `gh-pages` history (non-gating)
+    - publishes `desktop.memory.idle_rss_mb.p95` to the benchmark-action `gh-pages` history (non-gating; skips publish when results are missing/empty)
     - manual `workflow_dispatch` runs support overriding the memory runner with inputs: `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`
 
 ### Idle memory benchmark (desktop process RSS)
