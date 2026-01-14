@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { parseStartupLine, repoRoot, runOnce } from './desktopStartupRunnerShared.ts';
 
@@ -78,12 +78,19 @@ describe('desktopStartupRunnerShared.parseStartupLine', () => {
 
 describe('desktopStartupRunnerShared.runOnce reset guardrails', () => {
   const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
+  const prevPerfHome = process.env.FORMULA_PERF_HOME;
 
   afterEach(() => {
     if (prevResetHome === undefined) {
       delete process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
     } else {
       process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = prevResetHome;
+    }
+
+    if (prevPerfHome === undefined) {
+      delete process.env.FORMULA_PERF_HOME;
+    } else {
+      process.env.FORMULA_PERF_HOME = prevPerfHome;
     }
   });
 
@@ -99,5 +106,16 @@ describe('desktopStartupRunnerShared.runOnce reset guardrails', () => {
     await expect(
       runOnce({ binPath: 'ignored', timeoutMs: 1, profileDir: repoRoot }),
     ).rejects.toThrow(/Refusing to reset unsafe desktop benchmark profile dir/);
+  });
+
+  test('refuses to reset when FORMULA_PERF_HOME resolves to filesystem root', async () => {
+    process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = '1';
+    process.env.FORMULA_PERF_HOME = '/';
+
+    vi.resetModules();
+    const mod = await import('./desktopStartupRunnerShared.ts');
+    await expect(mod.runOnce({ binPath: 'ignored', timeoutMs: 1, profileDir: '/tmp' })).rejects.toThrow(
+      /Refusing to reset unsafe desktop benchmark perf home dir/,
+    );
   });
 });

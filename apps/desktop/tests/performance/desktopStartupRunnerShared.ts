@@ -240,6 +240,10 @@ export async function runOnce({
     }
 
     const safeRoot = perfHome;
+    const safeRootDir = parse(safeRoot).root;
+    if (safeRoot === safeRootDir || safeRoot === repoRoot) {
+      throw new Error(`Refusing to reset unsafe desktop benchmark perf home dir: ${safeRoot}`);
+    }
     if (profileDir !== safeRoot && !isSubpath(safeRoot, profileDir)) {
       throw new Error(
         `Refusing to reset desktop benchmark profile dir outside ${safeRoot} (got ${profileDir})`,
