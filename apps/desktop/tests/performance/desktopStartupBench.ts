@@ -49,15 +49,12 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { type BenchmarkResult } from './benchmark.ts';
+import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   getProcessRssMbLinux,
   formatPerfPath,
-  mean,
-  median,
-  percentile,
   buildDesktopStartupProfileRoot,
   runDesktopStartupIterations,
   resolveDesktopStartupArgv,
@@ -65,7 +62,6 @@ import {
   resolveDesktopStartupMode,
   resolveDesktopStartupTargets,
   resolvePerfHome,
-  stdDev,
   type StartupMetrics,
 } from './desktopStartupUtil.ts';
 
@@ -74,34 +70,6 @@ import {
 //   background check/download on startup, which can add nondeterministic CPU/memory/network
 //   activity and skew startup/idle-memory benchmarks.
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
-
-function buildResult(
-  name: string,
-  values: number[],
-  target: number,
-  unit: BenchmarkResult['unit'],
-): BenchmarkResult {
-  const sorted = [...values].sort((a, b) => a - b);
-  const avg = mean(sorted);
-  const med = median(sorted);
-  const p95 = percentile(sorted, 0.95);
-  const p99 = percentile(sorted, 0.99);
-  const sd = stdDev(sorted, avg);
-
-  return {
-    name,
-    iterations: values.length,
-    warmup: 0,
-    unit,
-    mean: avg,
-    median: med,
-    p95,
-    p99,
-    stdDev: sd,
-    targetMs: target,
-    passed: p95 <= target,
-  };
-}
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
@@ -292,19 +260,38 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   }
 
   const results: BenchmarkResult[] = [
-    buildResult(`${metricPrefix}.${startupMode}.window_visible_ms.p95`, windowVisible, windowTarget, 'ms'),
+    buildBenchmarkResultFromValues(
+      `${metricPrefix}.${startupMode}.window_visible_ms.p95`,
+      windowVisible,
+      windowTarget,
+      'ms',
+    ),
   ];
   if (benchKind === 'full') {
     results.push(
-      buildResult(`${metricPrefix}.${startupMode}.first_render_ms.p95`, firstRender, firstRenderTarget, 'ms'),
+      buildBenchmarkResultFromValues(
+        `${metricPrefix}.${startupMode}.first_render_ms.p95`,
+        firstRender,
+        firstRenderTarget,
+        'ms',
+      ),
     );
   }
-  results.push(buildResult(`${metricPrefix}.${startupMode}.tti_ms.p95`, tti, ttiTarget, 'ms'));
+  results.push(
+    buildBenchmarkResultFromValues(`${metricPrefix}.${startupMode}.tti_ms.p95`, tti, ttiTarget, 'ms'),
+  );
 
   const minRssValidFraction = 0.8;
   const minRssValidRuns = Math.ceil(runs * minRssValidFraction);
   if (rssSamples.length >= minRssValidRuns) {
-    results.push(buildResult(`${memoryPrefix}.${startupMode}.rss_mb.p95`, rssSamples, rssTargetMb, 'mb'));
+    results.push(
+      buildBenchmarkResultFromValues(
+        `${memoryPrefix}.${startupMode}.rss_mb.p95`,
+        rssSamples,
+        rssTargetMb,
+        'mb',
+      ),
+    );
   } else if (rssSamples.length > 0) {
     // eslint-disable-next-line no-console
     console.log(
@@ -319,16 +306,37 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   // - For full startup, keep backwards-compatible legacy aliases.
   if (startupMode === 'cold') {
     if (benchKind === 'shell') {
-      results.push(buildResult('desktop.shell_startup.window_visible_ms.p95', windowVisible, windowTarget, 'ms'));
-      results.push(buildResult('desktop.shell_startup.tti_ms.p95', tti, ttiTarget, 'ms'));
+      results.push(
+        buildBenchmarkResultFromValues(
+          'desktop.shell_startup.window_visible_ms.p95',
+          windowVisible,
+          windowTarget,
+          'ms',
+        ),
+      );
+      results.push(buildBenchmarkResultFromValues('desktop.shell_startup.tti_ms.p95', tti, ttiTarget, 'ms'));
     } else {
-      results.push(buildResult('desktop.startup.window_visible_ms.p95', windowVisible, windowTarget, 'ms'));
-      results.push(buildResult('desktop.startup.first_render_ms.p95', firstRender, firstRenderTarget, 'ms'));
-      results.push(buildResult('desktop.startup.tti_ms.p95', tti, ttiTarget, 'ms'));
+      results.push(
+        buildBenchmarkResultFromValues(
+          'desktop.startup.window_visible_ms.p95',
+          windowVisible,
+          windowTarget,
+          'ms',
+        ),
+      );
+      results.push(
+        buildBenchmarkResultFromValues(
+          'desktop.startup.first_render_ms.p95',
+          firstRender,
+          firstRenderTarget,
+          'ms',
+        ),
+      );
+      results.push(buildBenchmarkResultFromValues('desktop.startup.tti_ms.p95', tti, ttiTarget, 'ms'));
     }
 
     if (rssSamples.length >= minRssValidRuns) {
-      results.push(buildResult(`${memoryPrefix}.rss_mb.p95`, rssSamples, rssTargetMb, 'mb'));
+      results.push(buildBenchmarkResultFromValues(`${memoryPrefix}.rss_mb.p95`, rssSamples, rssTargetMb, 'mb'));
     }
   }
 
@@ -365,7 +373,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
         benchKind === 'shell'
           ? 'desktop.shell_startup.webview_loaded_ms.p95'
           : 'desktop.startup.webview_loaded_ms.p95';
-      results.push(buildResult(name, webviewLoaded, webviewLoadedTarget, 'ms'));
+      results.push(buildBenchmarkResultFromValues(name, webviewLoaded, webviewLoadedTarget, 'ms'));
     }
   }
 

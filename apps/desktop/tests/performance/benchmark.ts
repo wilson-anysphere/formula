@@ -76,6 +76,40 @@ export function stdDev(values: number[], avg: number): number {
   return Math.sqrt(variance);
 }
 
+/**
+ * Build a `BenchmarkResult` from a list of measured values.
+ *
+ * This is used by benchmarks that measure outside the JS timing harness (e.g. desktop startup
+ * metrics emitted by a separate process) but still want consistent summary statistics.
+ */
+export function buildBenchmarkResultFromValues(
+  name: string,
+  values: number[],
+  targetMs: number,
+  unit: BenchmarkUnit,
+): BenchmarkResult {
+  const sorted = [...values].sort((a, b) => a - b);
+  const avg = mean(sorted);
+  const med = median(sorted);
+  const p95 = percentile(sorted, 0.95);
+  const p99 = percentile(sorted, 0.99);
+  const sd = stdDev(sorted, avg);
+
+  return {
+    name,
+    iterations: values.length,
+    warmup: 0,
+    unit,
+    mean: avg,
+    median: med,
+    p95,
+    p99,
+    stdDev: sd,
+    targetMs,
+    passed: p95 <= targetMs,
+  };
+}
+
 export async function runBenchmark(
   name: string,
   fn: BenchmarkFn,

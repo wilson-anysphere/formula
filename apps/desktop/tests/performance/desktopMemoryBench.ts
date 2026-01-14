@@ -23,22 +23,18 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { parse, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
-import { type BenchmarkResult } from './benchmark.ts';
+import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
   collectProcessTreePidsLinux,
   findPidForExecutableLinux,
   formatPerfPath,
   getProcessTreeRssBytesLinux,
-  mean,
-  median,
-  percentile,
   parseStartupLine as parseStartupMetricsLine,
   repoRoot,
   resolvePerfHome,
   shouldUseXvfb,
   terminateProcessTree,
-  stdDev,
 } from './desktopStartupUtil.ts';
 
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
@@ -348,29 +344,6 @@ async function runOnce(
   }
 }
 
-function buildResult(name: string, values: number[], targetMb: number): BenchmarkResult {
-  const sorted = [...values].sort((a, b) => a - b);
-  const avg = mean(sorted);
-  const med = median(sorted);
-  const p95 = percentile(sorted, 0.95);
-  const p99 = percentile(sorted, 0.99);
-  const sd = stdDev(sorted, avg);
-
-  return {
-    name,
-    iterations: values.length,
-    warmup: 0,
-    unit: 'mb',
-    mean: avg,
-    median: med,
-    p95,
-    p99,
-    stdDev: sd,
-    targetMs: targetMb,
-    passed: p95 <= targetMb,
-  };
-}
-
 export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
   if (process.env.FORMULA_RUN_DESKTOP_MEMORY_BENCH !== '1') {
     return [];
@@ -422,7 +395,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
     console.log(`[desktop-memory]   idleRssMb=${rssMb.toFixed(1)}mb`);
   }
 
-  const p95 = buildResult('desktop.memory.idle_rss_mb.p95', values, targetMb);
+  const p95 = buildBenchmarkResultFromValues('desktop.memory.idle_rss_mb.p95', values, targetMb, 'mb');
   const p50: BenchmarkResult = {
     ...p95,
     name: 'desktop.memory.idle_rss_mb.p50',
