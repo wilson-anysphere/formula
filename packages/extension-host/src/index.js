@@ -1190,7 +1190,9 @@ class ExtensionHost {
               code === 0
                 ? new Error("Worker exited")
                 : new Error(`Worker exited with code ${code ?? "unknown"}`);
-            void this._terminateWorker(extension, { reason: "exit", cause: err });
+            void this._terminateWorker(extension, { reason: "exit", cause: err }).catch(() => {
+              // Best-effort: avoid unhandled rejections from worker termination bookkeeping.
+            });
           });
 
           return;
@@ -1252,6 +1254,8 @@ class ExtensionHost {
               void this._terminateWorker(extension, {
                 reason: "timeout",
                 cause: err
+              }).catch(() => {
+                // Best-effort: avoid unhandled rejections from worker termination bookkeeping.
               });
             }, timeoutMs)
           : null;
@@ -1956,6 +1960,8 @@ class ExtensionHost {
     void this._terminateWorker(extension, {
       reason: "crash",
       cause: error
+    }).catch(() => {
+      // Best-effort: avoid unhandled rejections from worker termination bookkeeping.
     });
   }
 
