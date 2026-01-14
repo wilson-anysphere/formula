@@ -329,10 +329,10 @@ Formula’s decryption support is intentionally scoped:
 
 Current behavior:
 
-- `formula_xls::import_xls_path(...)` (no password) returns `ImportError::EncryptedWorkbook` when
-  `FILEPASS` is present.
-- `formula_xls::import_xls_path_with_password(...)` supports common BIFF `FILEPASS` encryption
-  schemes, including:
+- `formula_xls::import_xls_path(...)` and `formula_xls::import_xls_bytes(...)` (no password) return
+  `ImportError::EncryptedWorkbook` when `FILEPASS` is present.
+- `formula_xls::import_xls_path_with_password(...)` and `formula_xls::import_xls_bytes_with_password(...)`
+  support common BIFF `FILEPASS` encryption schemes, including:
   - XOR obfuscation (`wEncryptionType=0x0000`)
   - RC4 “standard” (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
   - RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)

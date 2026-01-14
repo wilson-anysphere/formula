@@ -31,7 +31,7 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 |---|---|---|---|---|
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile decryptor + primitives), `crates/formula-offcrypto` (Agile parse + decrypt helpers; optional integrity verification) |
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` `minor=2` (major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + Standard key derivation + verifier + `EncryptedPackage` decrypt for AES-ECB and RC4; stricter alg gating for Standard AES), `docs/offcrypto-standard-encryptedpackage.md` |
-| Legacy `.xls` (BIFF5/BIFF8) | **FILEPASS** (XOR / RC4 Standard / RC4 CryptoAPI) | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
+| Legacy `.xls` (BIFF5/BIFF8) | **FILEPASS** (XOR / RC4 Standard / RC4 CryptoAPI) | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password` / `import_xls_bytes_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
 Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors so
 callers can decide whether to prompt for a password vs report “unsupported encryption”.
