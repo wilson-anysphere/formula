@@ -238,6 +238,57 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     root.remove();
   });
 
+  it("keeps selection and tags context-click when right-clicking a selection handle", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // When drawing interactions are disabled, SpreadsheetApp relies on its capture-phase
+    // drawing hit testing (`onDrawingPointerDownCapture`) to keep shared-grid selection
+    // stable on right-click.
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("shared");
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+    app.selectDrawingById(1);
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+    // Right-click just outside the drawing bounds, but still within the top-left resize handle square.
+    const down = createPointerLikeMouseEvent("pointerdown", {
+      clientX: rowHeaderWidth + 100 - 1,
+      clientY: colHeaderHeight + 100 - 1,
+      button: 2,
+    });
+    selectionCanvas.dispatchEvent(down);
+
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect((down as any).__formulaDrawingContextClick).toBe(true);
+    expect(down.defaultPrevented).toBe(false);
+    expect(bubbled).toHaveBeenCalledTimes(1);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("hitTestDrawingAtClientPoint treats selection handles as drawing hits", () => {
     const root = createRoot();
     const status = {

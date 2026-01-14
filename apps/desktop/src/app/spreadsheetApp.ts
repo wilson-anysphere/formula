@@ -7878,7 +7878,7 @@ export class SpreadsheetApp {
     const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
     if (objects.length === 0) return null;
     const scratchBounds = this.drawingHitTestScratchRect;
-    const selectedId = this.selectedDrawingId;
+    const selectedId = this.getSelectedDrawingId();
 
     // --- Primary pane ----------------------------------------------------------
     this.maybeRefreshRootPosition({ force: true });
@@ -7889,10 +7889,12 @@ export class SpreadsheetApp {
       const viewport = this.getDrawingInteractionViewport(sharedViewport);
       if (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height) {
         const index = this.getDrawingHitTestIndex(objects);
+        const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+        const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
         // Treat right-clicks on selection handles/rotation handle as a hit for the selected drawing.
         // (Handles are centered on the outline and extend beyond the anchor rect, so `hitTestDrawings`
         // alone won't consider them.)
-        if (selectedId != null) {
+        if (selectedId != null && x >= headerOffsetX && y >= headerOffsetY) {
           const selectedIndex = index.byId.get(selectedId);
           const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
           if (selectedObject) {
@@ -7966,7 +7968,7 @@ export class SpreadsheetApp {
       };
 
       const index = this.getSplitViewDrawingHitTestIndex(secondary, objects, geom, zoom);
-      if (selectedId != null) {
+      if (selectedId != null && sx >= headerOffsetX && sy >= headerOffsetY) {
         const selectedIndex = index.byId.get(selectedId);
         const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
         if (selectedObject) {
@@ -12375,13 +12377,53 @@ export class SpreadsheetApp {
     const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
     const viewport = this.getDrawingInteractionViewport(sharedViewport);
     const index = this.getDrawingHitTestIndex(objects);
+    const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+    const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+
+    // Treat clicks on selection handles/rotation handle as a hit for the current selection.
+    // This keeps selection stable (and allows context menus) even when the pointer is slightly
+    // outside the drawing's bounds.
+    if (prevSelected != null && x >= headerOffsetX && y >= headerOffsetY) {
+      const selectedIndex = index.byId.get(prevSelected);
+      const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
+      if (selected) {
+        const sheetRect = index.bounds[selectedIndex!]!;
+        const scroll = effectiveScrollForAnchor(selected.anchor, viewport);
+        const bounds = this.drawingHitTestScratchRect;
+        bounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
+        bounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
+        bounds.width = sheetRect.width;
+        bounds.height = sheetRect.height;
+
+        if (hitTestRotationHandle(bounds, x, y, selected.transform) || hitTestResizeHandle(bounds, x, y, selected.transform)) {
+          if (editorWasOpen) {
+            this.editor.commit("command");
+          }
+
+          if (this.sharedGrid && !isContextClick) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+
+          if (this.selectedChartId != null) {
+            this.setSelectedChartId(null);
+          }
+
+          if (isContextClick) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (e as any).__formulaDrawingContextClick = true;
+          }
+          this.focus();
+          return;
+        }
+      }
+    }
+
     const hit = hitTestDrawingsInto(index, viewport, x, y, this.drawingHitTestScratchRect);
 
     if (!hit) {
       // Clicking outside of any drawing clears selection, but still allows normal grid selection.
       if (prevSelected != null) {
-        const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
-        const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
         if (x >= headerOffsetX && y >= headerOffsetY) {
           this.selectedDrawingId = null;
           this.dispatchDrawingSelectionChanged();
