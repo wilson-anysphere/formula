@@ -3114,7 +3114,7 @@ export class FormulaBarView {
     const draftVersion = this.model.draftVersion;
 
     const isFormulaEditing = this.model.isEditing && isFormulaText(draft);
-    const coloredReferences = isFormulaEditing ? this.model.coloredReferences() : [];
+    const coloredReferences = isFormulaEditing ? this.model.coloredReferences() : EMPTY_COLORED_REFERENCES;
     const activeReferenceIndex = isFormulaEditing ? this.model.activeReferenceIndex() : null;
     const highlightedSpans = this.model.highlightedSpans();
 
@@ -3127,7 +3127,24 @@ export class FormulaBarView {
       this.#lastHighlightSpans === highlightedSpans &&
       this.#lastColoredReferences === coloredReferences;
 
-    if (canFastUpdateActiveReference) {
+    const canSkipHighlight =
+      !ghost &&
+      !isFormulaEditing &&
+      this.#lastHighlightDraft === draft &&
+      !this.#lastHighlightIsFormulaEditing &&
+      !this.#lastHighlightHadGhost &&
+      this.#lastHighlightSpans === highlightedSpans;
+
+    if (canSkipHighlight) {
+      // No cursor-dependent styling in view/plain-text mode; avoid rebuilding the highlight HTML
+      // string when the draft/tokenization state is unchanged (common on cursor moves).
+      this.#lastHighlightDraft = draft;
+      this.#lastHighlightIsFormulaEditing = false;
+      this.#lastHighlightHadGhost = false;
+      this.#lastActiveReferenceIndex = null;
+      this.#lastHighlightSpans = highlightedSpans;
+      this.#lastColoredReferences = coloredReferences;
+    } else if (canFastUpdateActiveReference) {
       if (this.#lastActiveReferenceIndex !== activeReferenceIndex) {
         const prev = this.#lastActiveReferenceIndex;
         const next = activeReferenceIndex;
@@ -4431,6 +4448,7 @@ const ESCAPE_HTML_RE = /[&<>]/g;
 const ESCAPE_HTML_TEST_RE = /[&<>]/;
 const ESCAPE_HTML_MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
 const ESCAPE_HTML_REPLACER = (ch: string): string => ESCAPE_HTML_MAP[ch] ?? ch;
+const EMPTY_COLORED_REFERENCES: ReturnType<FormulaBarModel["coloredReferences"]> = [];
 const EMPTY_REFERENCE_ELS: HTMLElement[] = [];
 
 function escapeHtml(text: string): string {

@@ -746,11 +746,14 @@ export class FormulaBarModel {
 
   #updateReferenceHighlights(): void {
     if (!this.#isEditing || !isFormulaText(this.#draft)) {
-      this.#coloredReferences = [];
-      this.#activeReferenceIndex = null;
-      this.#referenceHighlightsCache = null;
-      this.#referenceHighlightsCacheRefs = null;
-      this.#referenceHighlightsCacheActiveIndex = null;
+      // Cursor moves can still call into this method (e.g. while editing plain text).
+      // Avoid allocating fresh empty arrays / resetting caches when we're already in the
+      // "no reference highlights" state.
+      if (this.#coloredReferences.length !== 0) this.#coloredReferences = [];
+      if (this.#activeReferenceIndex != null) this.#activeReferenceIndex = null;
+      if (this.#referenceHighlightsCache != null) this.#referenceHighlightsCache = null;
+      if (this.#referenceHighlightsCacheRefs != null) this.#referenceHighlightsCacheRefs = null;
+      if (this.#referenceHighlightsCacheActiveIndex != null) this.#referenceHighlightsCacheActiveIndex = null;
       return;
     }
 
