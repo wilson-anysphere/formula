@@ -8201,6 +8201,7 @@ export class SpreadsheetApp {
       } catch {
         // `showToast` requires a #toast-root; unit tests don't always include it.
       }
+      this.focus();
       return;
     }
 
