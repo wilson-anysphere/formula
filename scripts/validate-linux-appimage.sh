@@ -288,6 +288,10 @@ if [ "${#APPIMAGES[@]}" -eq 0 ]; then
   die "Internal error: no AppImage paths to validate"
 fi
 
+if ! command -v unsquashfs >/dev/null 2>&1; then
+  info "Note: 'unsquashfs' not found on PATH (package: squashfs-tools). AppImage extraction may fail without it."
+fi
+
 info "Validating ${#APPIMAGES[@]} AppImage(s)"
 for appimage in "${APPIMAGES[@]}"; do
   validate_appimage "$appimage"
