@@ -249,8 +249,12 @@ export default defineConfig({
       "node_modules/**",
       // Desktop `src/app/**` `.test.ts` suites are large integration tests and are exercised by the
       // repo-root Vitest run; keep the desktop-scoped suite focused and fast.
-      "src/app/**/*.test.ts",
-      "src/app/**/*.test.tsx",
+      //
+      // Shared-grid regression tests are relatively small and are useful to keep in the
+      // desktop-scoped suite. Exclude everything else under `src/app/**` that uses the `.test.ts`
+      // suffix.
+      "src/app/**/!(*sharedGrid*).test.ts",
+      "src/app/**/!(*sharedGrid*).test.tsx",
     ],
   },
 });
