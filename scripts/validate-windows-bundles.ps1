@@ -837,6 +837,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($schemeNorm)) {
       throw "URL protocol handler check: expected a non-empty scheme name."
     }
+    $schemeNormLc = $schemeNorm.ToLowerInvariant()
  
     Write-Host "URL protocol handler check (MSI): $($Msi.FullName)"
  
@@ -855,15 +856,22 @@ try {
  
     $schemeKeyMatch = $false
     $urlProtocolValueMatch = $false
+    $schemeValueNames = New-Object System.Collections.Generic.List[string]
+    $schemeKeyCandidates = New-Object System.Collections.Generic.List[string]
     foreach ($r in $rows) {
       if ($r.Count -lt 4) { continue }
       $keyRaw = if ($null -ne $r[1]) { $r[1] } else { "" }
       $nameRaw = if ($null -ne $r[2]) { $r[2] } else { "" }
- 
-      $key = $keyRaw.Trim().Replace("/", "\").TrimStart("\")
+
+      $key = $keyRaw.Trim().Replace("/", "\").Trim("\")
       $name = $nameRaw.Trim()
- 
+
       if ([string]::IsNullOrWhiteSpace($key)) { continue }
+      if ($key.ToLowerInvariant().Contains($schemeNormLc)) {
+        if (-not $schemeKeyCandidates.Contains($key)) {
+          $schemeKeyCandidates.Add($key) | Out-Null
+        }
+      }
  
       # The protocol can be registered either directly under HKCR\<scheme> (Root=0, Key="formula")
       # or under HKCU/HKLM\Software\Classes\<scheme> which merges into HKCR.
@@ -874,18 +882,31 @@ try {
  
       if (-not $isSchemeKey) { continue }
       $schemeKeyMatch = $true
- 
+
+      $prettyName = if ([string]::IsNullOrWhiteSpace($name)) { "(default)" } else { $name }
+      if (-not $schemeValueNames.Contains($prettyName)) {
+        $schemeValueNames.Add($prettyName) | Out-Null
+      }
+
       if ($name -ieq "URL Protocol") {
         $urlProtocolValueMatch = $true
         break
       }
     }
- 
+
     if (-not $schemeKeyMatch) {
-      throw "MSI did not contain any Registry table entries for the '$schemeNorm' protocol key. Expected to see a key like HKCR\\$schemeNorm or (HKCU/HKLM)\\Software\\Classes\\$schemeNorm."
+      $candidatesText = "(none)"
+      if ($schemeKeyCandidates.Count -gt 0) {
+        $candidatesText = (@($schemeKeyCandidates | Sort-Object -Unique | Select-Object -First 20) -join ", ")
+      }
+      throw "MSI did not contain any Registry table entries for the '$schemeNorm' protocol key. Expected to see a key like HKCR\\$schemeNorm or (HKCU/HKLM)\\Software\\Classes\\$schemeNorm.`n- Registry keys containing '$schemeNorm': $candidatesText"
     }
     if (-not $urlProtocolValueMatch) {
-      throw "MSI did not register '$schemeNorm://' as a URL protocol handler. Expected a Registry table value named 'URL Protocol' under HKCR\\$schemeNorm (or equivalent under Software\\Classes\\$schemeNorm)."
+      $valuesText = "(none)"
+      if ($schemeValueNames.Count -gt 0) {
+        $valuesText = (@($schemeValueNames | Sort-Object -Unique) -join ", ")
+      }
+      throw "MSI did not register '$schemeNorm://' as a URL protocol handler. Expected a Registry table value named 'URL Protocol' under HKCR\\$schemeNorm (or equivalent under Software\\Classes\\$schemeNorm).`n- Values found for scheme key: $valuesText"
     }
   }
 
