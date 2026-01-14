@@ -341,7 +341,9 @@ describe("SpreadsheetApp drawings header clipping", () => {
       expect(strokeIdx).toBeGreaterThan(clipIdx);
 
       expect((app as any).selectedDrawingId).toBe(null);
-      (app as any).onDrawingPointerDownCapture(
+      // Dispatch the event through the DOM so `event.target` is set. `onDrawingPointerDownCapture`
+      // ignores non-grid targets to avoid interfering with interactive overlays.
+      root.dispatchEvent(
         new PointerEvent("pointerdown", {
           bubbles: true,
           cancelable: true,
@@ -352,7 +354,7 @@ describe("SpreadsheetApp drawings header clipping", () => {
       );
       expect((app as any).selectedDrawingId).toBe(null);
 
-      (app as any).onDrawingPointerDownCapture(
+      root.dispatchEvent(
         new PointerEvent("pointerdown", {
           bubbles: true,
           cancelable: true,
