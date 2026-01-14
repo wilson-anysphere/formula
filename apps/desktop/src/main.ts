@@ -3165,6 +3165,11 @@ function currentSelectionRect(): SelectionRect {
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
 
+// Expose for Playwright e2e so tests can execute commands by id without going
+// through UI affordances. Assign this as early as possible so e2e can still
+// attach even if later desktop integrations fail during startup.
+window.__formulaCommandRegistry = commandRegistry;
+
 // Excel-style edit mode: some commands are disabled while a cell/formula edit is active.
 // This prevents bypassing ribbon-disabled actions via non-ribbon surfaces (command palette,
 // keybindings, etc) and avoids "click does nothing" UX when command implementations no-op.
@@ -3277,10 +3282,6 @@ window.addEventListener("unload", () => {
 // `updateContextKeys` is initialized once the extensions/context-key wiring is ready.
 // Sheet UI helpers (like sheet rename) can call it safely; it is a no-op until wired.
 let updateContextKeys: (selection?: SelectionState | null) => void = () => {};
-
-// Expose for Playwright e2e so tests can execute commands by id without going
-// through UI affordances.
-window.__formulaCommandRegistry = commandRegistry;
 
 // --- Sheet tabs (Excel-like multi-sheet UI) -----------------------------------
 

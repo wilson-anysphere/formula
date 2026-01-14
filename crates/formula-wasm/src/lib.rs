@@ -3655,6 +3655,8 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setRowStyleId")]
     pub fn set_row_style_id(&mut self, sheet: String, row: u32, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
+        // Backward compatibility: treat `0` as "clear override" (style id `0` is always the
+        // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
         self.inner.engine.set_row_style_id(&sheet, row, style_id);
     }
@@ -3665,16 +3667,20 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setColStyleId")]
     pub fn set_col_style_id(&mut self, sheet: String, col: u32, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
+        // Backward compatibility: treat `0` as "clear override" (style id `0` is always the
+        // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
         self.inner.engine.set_col_style_id(&sheet, col, style_id);
     }
 
     /// Set (or clear) the default style id for an entire sheet.
     ///
-    /// `style_id=0` (or `null`/`undefined`) clears the override.
+    /// Pass `null`/`undefined` (or `0` for backward compatibility) to clear the override.
     #[wasm_bindgen(js_name = "setSheetDefaultStyleId")]
     pub fn set_sheet_default_style_id(&mut self, sheet: String, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
+        // Backward compatibility: treat `0` as "clear override" (style id `0` is always the
+        // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
         self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
     }
@@ -4516,7 +4522,6 @@ impl WasmWorkbook {
             .set_sheet_origin(&sheet, origin_trimmed)
             .map_err(|err| js_err(err.to_string()))
     }
-
     #[wasm_bindgen(js_name = "toJson")]
     pub fn to_json(&self) -> Result<String, JsValue> {
         #[derive(Serialize)]

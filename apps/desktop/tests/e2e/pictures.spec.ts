@@ -99,7 +99,6 @@ for (const mode of MODES) {
   test.describe(`pictures (${mode.name})`, () => {
     test("insert/select/drag/resize + undo/redo", async ({ page }) => {
       await gotoDesktop(page, mode.path);
-      await page.waitForFunction(() => Boolean(window.__formulaCommandRegistry), undefined, { timeout: 10_000 });
       await waitForDrawingsReady(page);
 
       // Capture runtime errors after the app is booted (startup errors are handled by `gotoDesktop`).
@@ -268,12 +267,10 @@ for (const mode of MODES) {
         expect(rectAfterResize.height).toBeGreaterThan(rectAfterMove.height + 10);
 
         // Undo should revert the resize back to the moved rect.
-        await page.evaluate(async () => {
-          const registry = window.__formulaCommandRegistry as any;
-          if (!registry) throw new Error("Missing window.__formulaCommandRegistry (desktop e2e harness)");
-          await registry.executeCommand("edit.undo");
-          await (window.__formulaApp as any)?.whenIdle?.();
-        });
+        const quickAccessToolbar = page.getByRole("toolbar", { name: "Quick access toolbar" });
+        await expect(quickAccessToolbar.getByRole("button", { name: "Undo" })).toBeEnabled({ timeout: 10_000 });
+        await quickAccessToolbar.getByRole("button", { name: "Undo" }).click();
+        await page.evaluate(() => (window.__formulaApp as any)?.whenIdle?.());
 
         await expect
           .poll(async () => {
@@ -291,12 +288,9 @@ for (const mode of MODES) {
         expectApprox(rectAfterUndo.height, rectAfterMove.height);
 
         // Redo should re-apply the resize.
-        await page.evaluate(async () => {
-          const registry = window.__formulaCommandRegistry as any;
-          if (!registry) throw new Error("Missing window.__formulaCommandRegistry (desktop e2e harness)");
-          await registry.executeCommand("edit.redo");
-          await (window.__formulaApp as any)?.whenIdle?.();
-        });
+        await expect(quickAccessToolbar.getByRole("button", { name: "Redo" })).toBeEnabled({ timeout: 10_000 });
+        await quickAccessToolbar.getByRole("button", { name: "Redo" }).click();
+        await page.evaluate(() => (window.__formulaApp as any)?.whenIdle?.());
 
         await expect
           .poll(async () => {
