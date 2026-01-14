@@ -143,6 +143,19 @@ fn assert_fixture_is_ecb(
         ecb, expected,
         "ECB decrypted bytes must match {plaintext_name} for {encrypted_name}"
     );
+
+    // Extra safety: ensure CBC-segmented decryption does *not* also match the plaintext fixture.
+    // (If it did, this canary would not be able to disambiguate ECB vs CBC for the fixture.)
+    let cbc = formula_offcrypto::encrypted_package::decrypt_standard_encrypted_package_cbc(
+        &key,
+        &info.verifier.salt,
+        &encrypted_package_bytes,
+    )
+    .unwrap_or_else(|err| panic!("CBC decrypt_standard_encrypted_package_cbc({encrypted_name}) failed: {err:?}"));
+    assert_ne!(
+        cbc, expected,
+        "{encrypted_name}: CBC-segmented decrypt unexpectedly matches plaintext; fixture mode is ambiguous"
+    );
 }
 
 #[cold]
