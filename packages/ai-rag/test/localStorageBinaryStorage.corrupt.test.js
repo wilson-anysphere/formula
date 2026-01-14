@@ -52,7 +52,19 @@ async function withBrowserBase64(fn) {
   const originalBtoa = Object.getOwnPropertyDescriptor(globalThis, "btoa");
 
   // Ensure we exercise the browser path in toBase64/fromBase64 by hiding global Buffer.
-  Object.defineProperty(globalThis, "Buffer", { value: undefined, configurable: true });
+  if (originalBuffer) {
+    if ("value" in originalBuffer) {
+      // Data descriptor; keep original attributes.
+      Object.defineProperty(globalThis, "Buffer", { ...originalBuffer, value: undefined });
+    } else if (originalBuffer.configurable) {
+      // Accessor descriptor (Node 20+); redefine as a data property.
+      Object.defineProperty(globalThis, "Buffer", { value: undefined, configurable: true });
+    } else if (typeof originalBuffer.set === "function") {
+      // Non-configurable accessor: fall back to assignment via setter.
+      // eslint-disable-next-line no-undef
+      globalThis.Buffer = undefined;
+    }
+  }
 
   // Some Node versions don't expose atob/btoa; polyfill them for the duration of the test.
   if (!originalAtob) {
