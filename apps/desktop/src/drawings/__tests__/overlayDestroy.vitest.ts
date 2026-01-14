@@ -136,6 +136,72 @@ describe("DrawingOverlay destroy()", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("closes in-flight preload ImageBitmaps when the cache is cleared", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+    let resolveDecode!: (value: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const createImageBitmapMock = vi.fn(() => inflightDecode);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const imageEntry: ImageEntry = { id: "img_clear", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
+    const entries = new Map<string, ImageEntry>([[imageEntry.id, imageEntry]]);
+    const images: ImageStore = {
+      get: (id: string) => entries.get(id),
+      set: (entry: ImageEntry) => entries.set(entry.id, entry),
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const preload = overlay.preloadImage(imageEntry).catch(() => {});
+    overlay.clearImageCache();
+
+    resolveDecode(bitmap);
+    await preload;
+    await Promise.resolve();
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes in-flight preload ImageBitmaps when the image is invalidated", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+    let resolveDecode!: (value: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const createImageBitmapMock = vi.fn(() => inflightDecode);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const imageEntry: ImageEntry = { id: "img_invalidate", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
+    const entries = new Map<string, ImageEntry>([[imageEntry.id, imageEntry]]);
+    const images: ImageStore = {
+      get: (id: string) => entries.get(id),
+      set: (entry: ImageEntry) => entries.set(entry.id, entry),
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const preload = overlay.preloadImage(imageEntry).catch(() => {});
+    overlay.invalidateImage(imageEntry.id);
+
+    resolveDecode(bitmap);
+    await preload;
+    await Promise.resolve();
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("prunes cached shape text layouts when objects are removed", async () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
