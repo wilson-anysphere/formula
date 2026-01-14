@@ -2,6 +2,20 @@ import type { DrawingTransform } from "./types";
 
 const ROTATION_UNITS_PER_DEGREE = 60_000;
 
+type CachedTrig = { rotationDeg: number; cos: number; sin: number };
+
+const trigCache = new WeakMap<DrawingTransform, CachedTrig>();
+
+function getTransformTrig(transform: DrawingTransform): CachedTrig {
+  const cached = trigCache.get(transform);
+  const rot = transform.rotationDeg;
+  if (cached && cached.rotationDeg === rot) return cached;
+  const radians = (rot * Math.PI) / 180;
+  const next: CachedTrig = { rotationDeg: rot, cos: Math.cos(radians), sin: Math.sin(radians) };
+  trigCache.set(transform, next);
+  return next;
+}
+
 export function normalizeRotationDeg(rotationDeg: number): number {
   if (!Number.isFinite(rotationDeg)) return 0;
   // DrawingML accepts rotations outside [0, 360). Normalize to [-180, 180).
@@ -83,12 +97,12 @@ export function inverseTransformVector(
   dy: number,
   transform: DrawingTransform,
 ): { x: number; y: number } {
-  // Inverse of: rotate(theta) then scale(flip).
-  const rotated = rotateVector(dx, dy, -degToRad(transform.rotationDeg));
-  return {
-    x: transform.flipH ? -rotated.x : rotated.x,
-    y: transform.flipV ? -rotated.y : rotated.y,
-  };
+  // Inverse of: scale(flip) then rotate(theta).
+  // Apply rotate(-theta) then scale(flip). (flip is its own inverse)
+  const trig = getTransformTrig(transform);
+  const rx = dx * trig.cos + dy * trig.sin;
+  const ry = -dx * trig.sin + dy * trig.cos;
+  return { x: transform.flipH ? -rx : rx, y: transform.flipV ? -ry : ry };
 }
 
 export function applyTransformVector(
@@ -97,8 +111,8 @@ export function applyTransformVector(
   transform: DrawingTransform,
 ): { x: number; y: number } {
   // Forward transform: scale(flip) then rotate(theta).
-  const sx = transform.flipH ? -1 : 1;
-  const sy = transform.flipV ? -1 : 1;
-  const scaled = { x: dx * sx, y: dy * sy };
-  return rotateVector(scaled.x, scaled.y, degToRad(transform.rotationDeg));
+  const trig = getTransformTrig(transform);
+  const x = transform.flipH ? -dx : dx;
+  const y = transform.flipV ? -dy : dy;
+  return { x: x * trig.cos - y * trig.sin, y: x * trig.sin + y * trig.cos };
 }

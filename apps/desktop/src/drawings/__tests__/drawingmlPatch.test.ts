@@ -315,15 +315,15 @@ describe("DrawingInteractionController commit-time patching", () => {
       },
     });
 
-    canvas.dispatch("pointerdown", { offsetX: 50, offsetY: 50, pointerId: 3 });
-    canvas.dispatch("pointermove", { offsetX: 60, offsetY: 70, pointerId: 3 });
+    canvas.dispatch("pointerdown", createPointerEvent(50, 50, 3));
+    canvas.dispatch("pointermove", createPointerEvent(60, 70, 3));
 
     // Pointermove updates anchor but should not patch xml yet.
     const before = (objects[0]!.kind as any).rawXml as string;
     expect(before).toContain(`<xdr:colOff>0</xdr:colOff>`);
     expect(before).toContain(`<xdr:rowOff>0</xdr:rowOff>`);
 
-    canvas.dispatch("pointerup", { offsetX: 60, offsetY: 70, pointerId: 3 });
+    canvas.dispatch("pointerup", createPointerEvent(60, 70, 3));
 
     const xml = (objects[0]!.kind as any).rawXml as string;
     // Both from + to should have the same shifted offsets.
@@ -360,8 +360,8 @@ describe("DrawingInteractionController commit-time patching", () => {
       },
     });
 
-    canvas.dispatch("pointerdown", { offsetX: 100, offsetY: 100, pointerId: 4 });
-    canvas.dispatch("pointermove", { offsetX: 120, offsetY: 130, pointerId: 4 });
+    canvas.dispatch("pointerdown", createPointerEvent(100, 100, 4));
+    canvas.dispatch("pointermove", createPointerEvent(120, 130, 4));
 
     // Pointermove updates anchor but should not patch xml yet.
     expect(objects[0]!.anchor).toMatchObject({
@@ -372,7 +372,7 @@ describe("DrawingInteractionController commit-time patching", () => {
     expect(before).toContain(`cx="${startCx}"`);
     expect(before).toContain(`cy="${startCy}"`);
 
-    canvas.dispatch("pointerup", { offsetX: 120, offsetY: 130, pointerId: 4 });
+    canvas.dispatch("pointerup", createPointerEvent(120, 130, 4));
 
     const xml = (objects[0]!.kind as any).rawXml as string;
     // Outer anchor wrapper ext updated.
