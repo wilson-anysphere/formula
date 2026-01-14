@@ -715,6 +715,13 @@ export class DrawingOverlay {
     this.orderedObjectsSource = null;
     this.selectedId = null;
   }
+
+  /**
+   * Alias for `destroy()` (matches other UI controller teardown semantics).
+   */
+  dispose(): void {
+    this.destroy();
+  }
 }
 
 function isAbortError(err: unknown): boolean {

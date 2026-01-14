@@ -23,6 +23,7 @@ import {
   type GridGeometry as DrawingGridGeometry,
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
+import { DrawingInteractionController, type DrawingInteractionCallbacks } from "../drawings/interaction";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
@@ -744,6 +745,8 @@ export class SpreadsheetApp {
   private chartCanvas: HTMLCanvasElement;
   private drawingCanvas: HTMLCanvasElement;
   private drawingOverlay: DrawingOverlay;
+  private drawingInteractionController: DrawingInteractionController | null = null;
+  private drawingInteractionCallbacks: DrawingInteractionCallbacks | null = null;
   private readonly drawingImages: ImageStore;
   private drawingObjectsCache: { sheetId: string; objects: DrawingObject[]; source: unknown } | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
@@ -1053,6 +1056,14 @@ export class SpreadsheetApp {
         auditStore?: AIAuditStore;
         onWorkbookContextBuildStats?: (stats: WorkbookContextBuildStats) => void;
       };
+      /**
+       * Enables interactive drawing manipulation (click-to-select + drag/resize).
+       *
+       * This is currently used by unit tests and incremental rollout work; it is
+       * intentionally off by default to avoid changing pointer behavior without a
+       * dedicated feature flag.
+       */
+      enableDrawingInteractions?: boolean;
     } = {}
   ) {
     this.sheetNameResolver = opts.sheetNameResolver ?? null;
@@ -2026,13 +2037,32 @@ export class SpreadsheetApp {
     };
 
     this.drawingGeom = this.gridMode === "shared" ? sharedDrawingGeom : legacyDrawingGeom;
-
     this.drawingOverlay = new DrawingOverlay(
       this.drawingCanvas,
       this.drawingImages,
       this.drawingGeom,
       new ChartRendererAdapter(this.formulaChartModelStore),
     );
+
+    if (opts.enableDrawingInteractions) {
+      const callbacks: DrawingInteractionCallbacks = {
+        getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
+        getObjects: () => this.listDrawingObjectsForSheet(),
+        setObjects: (next) => {
+          const doc: any = this.document as any;
+          this.drawingObjectsCache = { sheetId: this.sheetId, objects: next, source: doc.getSheetDrawings };
+          this.renderDrawings();
+        },
+        onSelectionChange: (selectedId) => {
+          this.drawingOverlay.setSelectedId(selectedId);
+          this.renderDrawings();
+        },
+      };
+      this.drawingInteractionCallbacks = callbacks;
+      this.drawingInteractionController = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
+        capture: this.gridMode === "shared",
+      });
+    }
 
     if (this.gridMode === "shared") {
       // Shared-grid mode uses the CanvasGridRenderer selection layer, but we still
@@ -3011,6 +3041,11 @@ export class SpreadsheetApp {
 
   destroy(): void {
     this.disposed = true;
+    // Ensure any drawing interaction controller listeners are released promptly.
+    this.drawingInteractionController?.dispose();
+    this.drawingInteractionController = null;
+    this.drawingInteractionCallbacks = null;
+
     // Ensure overlay caches (ImageBitmaps, parsed XML) are released promptly.
     this.drawingOverlay?.destroy?.();
     this.chartSelectionOverlay?.destroy?.();
@@ -3089,6 +3124,13 @@ export class SpreadsheetApp {
     this.dirtyChartIds.clear();
     this.conflictUiContainer = null;
     this.root.replaceChildren();
+  }
+
+  /**
+   * Alias for `destroy()` (preferred by some call sites/tests).
+   */
+  dispose(): void {
+    this.destroy();
   }
 
   /**

@@ -247,6 +247,13 @@ export class ImageBitmapCache {
     this.negativeCache.clear();
   }
 
+  /**
+   * Alias for `clear()` to match common teardown naming (`dispose`/`destroy`).
+   */
+  dispose(): void {
+    this.clear();
+  }
+
   private wrapWithAbort(
     imageId: string,
     record: CacheEntry,
