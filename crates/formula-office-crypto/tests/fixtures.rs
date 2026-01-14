@@ -2,7 +2,9 @@ use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 
 use cfb::CompoundFile;
-use formula_office_crypto::{decrypt_encrypted_package_ole, OfficeCryptoError};
+use formula_office_crypto::{
+    decrypt_encrypted_package_ole, decrypt_standard_encrypted_package, OfficeCryptoError,
+};
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -48,6 +50,41 @@ fn decrypts_standard_rc4_fixture_matches_plaintext() {
     assert!(decrypted.starts_with(b"PK"));
 
     let err = decrypt_encrypted_package_ole(&standard_rc4, "wrong")
+        .expect_err("wrong password should fail");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
+fn decrypts_standard_rc4_fixture_with_stream_api_matches_plaintext() {
+    // Ensure the lower-level stream API works for the committed Standard/CryptoAPI RC4 fixture (not
+    // just the OLE wrapper convenience API).
+    let plaintext = read_fixture("plaintext.xlsx");
+    let standard_rc4 = read_fixture("standard-rc4.xlsx");
+
+    let cursor = std::io::Cursor::new(standard_rc4);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .or_else(|_| ole.open_stream("/EncryptionInfo"))
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .or_else(|_| ole.open_stream("/EncryptedPackage"))
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    let decrypted =
+        decrypt_standard_encrypted_package(&encryption_info, &encrypted_package, "password")
+            .expect("decrypt standard rc4 streams");
+    assert_eq!(decrypted, plaintext);
+    assert!(decrypted.starts_with(b"PK"));
+
+    let err = decrypt_standard_encrypted_package(&encryption_info, &encrypted_package, "wrong")
         .expect_err("wrong password should fail");
     assert!(matches!(err, OfficeCryptoError::InvalidPassword));
 }
