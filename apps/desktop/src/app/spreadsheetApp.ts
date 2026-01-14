@@ -10570,6 +10570,43 @@ export class SpreadsheetApp {
       const normalizeEmuInt = (n: unknown): number => Math.round(normalizeEmu(n));
       const uiType = typeof (uiAnchor as any).type === "string" ? normalizeTag((uiAnchor as any).type) : "";
 
+      const patchEmuSize = (size: any, next: { cx: number; cy: number }, roundEmu: boolean): void => {
+        if (!size || typeof size !== "object") return;
+        const cx = normalizeEmu(next.cx);
+        const cy = normalizeEmu(next.cy);
+        const cxEmuInt = normalizeEmuInt(cx);
+        const cyEmuInt = normalizeEmuInt(cy);
+        const outCx = roundEmu ? cxEmuInt : cx;
+        const outCy = roundEmu ? cyEmuInt : cy;
+
+        // If the stored schema uses pixel size fields, keep them aligned with the EMU payload.
+        const widthPx = Math.round(emuToPx(outCx));
+        const heightPx = Math.round(emuToPx(outCy));
+
+        // EMU key conventions.
+        if ("cx" in size) (size as any).cx = outCx;
+        if ("cy" in size) (size as any).cy = outCy;
+        if ("cxEmu" in size) (size as any).cxEmu = outCx;
+        if ("cyEmu" in size) (size as any).cyEmu = outCy;
+        if ("widthEmu" in size) (size as any).widthEmu = outCx;
+        if ("heightEmu" in size) (size as any).heightEmu = outCy;
+        // Snake_case variants are typically serialized from the Rust model (i64); preserve integer semantics.
+        if ("width_emu" in size) (size as any).width_emu = cxEmuInt;
+        if ("height_emu" in size) (size as any).height_emu = cyEmuInt;
+        if ("wEmu" in size) (size as any).wEmu = outCx;
+        if ("hEmu" in size) (size as any).hEmu = outCy;
+
+        // Pixel key conventions.
+        if ("width" in size) (size as any).width = widthPx;
+        if ("w" in size) (size as any).w = widthPx;
+        if ("widthPx" in size) (size as any).widthPx = widthPx;
+        if ("width_px" in size) (size as any).width_px = widthPx;
+        if ("height" in size) (size as any).height = heightPx;
+        if ("h" in size) (size as any).h = heightPx;
+        if ("heightPx" in size) (size as any).heightPx = heightPx;
+        if ("height_px" in size) (size as any).height_px = heightPx;
+      };
+
       // Preserve the legacy DocumentController "cell" anchor schema
       // (`{ type: "cell", row, col, x?, y? }`). `convertDocumentSheetDrawingsToUiDrawingObjects`
       // maps this to the UI `Anchor` shape (`type: "oneCell"`). When committing edits, prefer
@@ -10646,6 +10683,14 @@ export class SpreadsheetApp {
           }
         }
 
+        // Preserve legacy size encodings stored directly on the anchor (e.g. `anchor.size = { width, height }`).
+        const uiSize = (uiAnchor as any).size;
+        if (uiSize && typeof uiSize === "object" && typeof uiSize.cx === "number" && typeof uiSize.cy === "number") {
+          patchEmuSize((rawAnchor as any).size, uiSize, true);
+          patchEmuSize((rawAnchor as any).ext, uiSize, true);
+          patchEmuSize(rawAnchor, uiSize, true);
+        }
+
         return rawAnchor;
       }
 
@@ -10699,16 +10744,6 @@ export class SpreadsheetApp {
         const offset = (point as any).offset;
         patchCellRef(cell, next.cell);
         patchCellOffset(offset, next.offset);
-      };
-
-      const patchEmuSize = (size: any, next: { cx: number; cy: number }, roundEmu: boolean): void => {
-        if (!size || typeof size !== "object") return;
-        const cx = normalizeEmu(next.cx);
-        const cy = normalizeEmu(next.cy);
-        const outCx = roundEmu ? normalizeEmuInt(cx) : cx;
-        const outCy = roundEmu ? normalizeEmuInt(cy) : cy;
-        if ("cx" in size) (size as any).cx = outCx;
-        if ("cy" in size) (size as any).cy = outCy;
       };
 
       // Preserve the raw enum representation when the anchor is stored as a formula-model/Rust enum
