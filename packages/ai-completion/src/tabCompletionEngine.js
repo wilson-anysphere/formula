@@ -757,6 +757,7 @@ export class TabCompletionEngine {
 
     const fnName = parsed.functionName;
     const argIndex = parsed.argIndex ?? 0;
+    const fnSpec = fnName ? this.functionRegistry.getFunction(fnName) : undefined;
     const argType = this.functionRegistry.getArgType(fnName, argIndex) ?? "any";
 
     const spanStart = parsed.currentArg?.start ?? cursor;
@@ -780,9 +781,30 @@ export class TabCompletionEngine {
       });
     };
 
+    const getEnumEntries = () => {
+      const direct = getFunctionSpecificArgEnum(fnName, argIndex);
+      if (direct?.length) return direct;
+
+      // Apply the same enum mapping to later repetitions in a repeating argument group
+      // (e.g. SORTBY(array, by_array1, [sort_order1], by_array2, [sort_order2], ...)).
+      const args = Array.isArray(fnSpec?.args) ? fnSpec.args : [];
+      if (args.length === 0) return null;
+
+      const repeatingStart = args.findIndex((a) => a?.repeating);
+      if (repeatingStart < 0) return null;
+      if (!Number.isInteger(argIndex) || argIndex < repeatingStart) return null;
+
+      const groupLen = args.length - repeatingStart;
+      if (groupLen <= 0) return null;
+
+      const offset = (argIndex - repeatingStart) % groupLen;
+      const baseIndex = repeatingStart + offset;
+      if (baseIndex === argIndex) return null;
+      return getFunctionSpecificArgEnum(fnName, baseIndex);
+    };
+
     if (argType === "boolean") {
-      const enumEntries =
-        getFunctionSpecificArgEnum(fnName, argIndex) ?? getCumulativeDistributionBooleanEnum(fnName, argIndex);
+      const enumEntries = getEnumEntries() ?? getCumulativeDistributionBooleanEnum(fnName, argIndex);
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
         return dedupeSuggestions(suggestions);
@@ -795,7 +817,7 @@ export class TabCompletionEngine {
     }
 
     if (argType === "number") {
-      const enumEntries = getFunctionSpecificArgEnum(fnName, argIndex);
+      const enumEntries = getEnumEntries();
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
         return dedupeSuggestions(suggestions);

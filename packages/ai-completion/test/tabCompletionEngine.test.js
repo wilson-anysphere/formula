@@ -1957,6 +1957,29 @@ test("SORT sort_order suggests 1 and -1", async () => {
   );
 });
 
+test("SORTBY repeating sort_order suggests 1 and -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  // Test the second sort_order position to ensure repeating-group enum mapping works:
+  // SORTBY(array, by_array1, sort_order1, by_array2, sort_order2, ...)
+  const currentInput = "=SORTBY(A1:A10, B1:B10, 1, C1:C10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SORTBY(A1:A10, B1:B10, 1, C1:C10, 1"),
+    `Expected SORTBY to suggest sort_order2=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=SORTBY(A1:A10, B1:B10, 1, C1:C10, -1"),
+    `Expected SORTBY to suggest sort_order2=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TAKE rows suggests 1 and -1", async () => {
   const engine = new TabCompletionEngine();
 
