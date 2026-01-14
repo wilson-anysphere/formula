@@ -1774,6 +1774,7 @@ window.addEventListener("unload", () => {
 
 const openFormatCells = createOpenFormatCells({
   isEditing: () => isSpreadsheetEditing(),
+  isReadOnly: () => app.isReadOnly?.() === true,
   getDocument: () => app.getDocument(),
   getSheetId: () => app.getCurrentSheetId(),
   getActiveCell: () => app.getActiveCell(),

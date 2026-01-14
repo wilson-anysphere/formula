@@ -10,6 +10,14 @@ import { resolveCssVar } from "../theme/cssVars.js";
 
 export type FormatCellsDialogHost = {
   isEditing: () => boolean;
+  /**
+   * Optional read-only indicator (used in collab viewer/commenter sessions).
+   *
+   * In read-only roles we only allow applying formatting when the selection is an entire
+   * row/column/sheet band (i.e. "formatting defaults"). These mutations are intended to be
+   * local-only; collab binders prevent persisting them into the shared document state.
+   */
+  isReadOnly?: () => boolean;
   getDocument: () => any;
   getSheetId: () => string;
   getActiveCell: () => { row: number; col: number };
@@ -73,6 +81,27 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   const sheetId = host.getSheetId();
   const active = host.getActiveCell();
   const activeStyle = getEffectiveCellStyle(doc, sheetId, { row: active.row, col: active.col });
+  const isReadOnlyAtOpen = host.isReadOnly?.() === true;
+
+  if (isReadOnlyAtOpen) {
+    const selectionRanges = host.getSelectionRanges();
+    const rawRanges =
+      selectionRanges.length > 0
+        ? selectionRanges
+        : [{ startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col }];
+    const limits: GridLimits = host.getGridLimits?.() ?? DEFAULT_GRID_LIMITS;
+    const decision = evaluateFormattingSelectionSize(rawRanges as Range[], limits, {
+      maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
+    });
+    if (!decision.allRangesBand) {
+      try {
+        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+      } catch {
+        // ignore (e.g. toast root missing in tests)
+      }
+      return;
+    }
+  }
 
   const dialog = document.createElement("dialog");
   dialog.className = "format-cells-dialog";
@@ -487,6 +516,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
     const changes = computeChanges(styleNow);
     if (!changes) return;
 
+    const isReadOnly = host.isReadOnly?.() === true;
     const selectionRanges = host.getSelectionRanges();
     const rawRanges =
       selectionRanges.length > 0
@@ -497,6 +527,14 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
     const decision = evaluateFormattingSelectionSize(rawRanges as Range[], limits, {
       maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
     });
+    if (isReadOnly && !decision.allRangesBand) {
+      try {
+        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+      } catch {
+        // ignore (e.g. toast root missing in tests)
+      }
+      return;
+    }
     if (!decision.allowed) {
       try {
         showToast(

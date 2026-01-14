@@ -63,6 +63,52 @@ describe("openFormatCellsDialog formatting performance guards", () => {
     (document.querySelector<HTMLElement>('[data-testid="toast"]') as any)?.click?.();
   });
 
+  it("blocks opening the dialog in read-only mode for non-band selections", () => {
+    const doc = new DocumentController();
+
+    openFormatCellsDialog({
+      isEditing: () => false,
+      isReadOnly: () => true,
+      getDocument: () => doc,
+      getSheetId: () => "Sheet1",
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getSelectionRanges: () => [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+      getGridLimits: () => ({ maxRows: 10_000, maxCols: 200 }),
+      focusGrid: () => {},
+    });
+
+    expect(document.querySelector("dialog.format-cells-dialog")).toBeNull();
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+
+    // Cleanup: remove the toast so its auto-dismiss timeout doesn't keep the test alive.
+    (document.querySelector<HTMLElement>('[data-testid="toast"]') as any)?.click?.();
+  });
+
+  it("allows opening the dialog in read-only mode for full row/column band selections", () => {
+    const doc = new DocumentController();
+    const spy = vi.spyOn(doc, "setRangeFormat").mockImplementation(() => true);
+
+    openFormatCellsDialog({
+      isEditing: () => false,
+      isReadOnly: () => true,
+      getDocument: () => doc,
+      getSheetId: () => "Sheet1",
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      // Full column A within legacy limits (10k rows).
+      getSelectionRanges: () => [{ startRow: 0, endRow: 9_999, startCol: 0, endCol: 0 }],
+      getGridLimits: () => ({ maxRows: 10_000, maxCols: 200 }),
+      focusGrid: () => {},
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.format-cells-dialog");
+    expect(dialog).not.toBeNull();
+
+    dialog!.querySelector<HTMLButtonElement>('[data-testid="format-cells-bold"]')!.click();
+    dialog!.querySelector<HTMLButtonElement>('[data-testid="format-cells-apply"]')!.click();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("expands full-column selections to Excel bounds before applying", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat").mockImplementation(() => true);
