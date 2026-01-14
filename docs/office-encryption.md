@@ -178,9 +178,12 @@ Current state in this repo:
 - `crates/formula-offcrypto` enforces a configurable maximum via `DecryptOptions` /
   `DecryptLimits.max_spin_count` (default: `DEFAULT_MAX_SPIN_COUNT = 1_000_000`) and returns
   `OffcryptoError::SpinCountTooLarge { spin_count, max }` when exceeded.
-- `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` currently accept the file’s
-  `spinCount` without a hard cap; callers decrypting untrusted files should consider applying their
-  own limit at a higher layer.
+- `crates/formula-xlsx::offcrypto` enforces a configurable maximum via
+  `offcrypto::DecryptOptions.max_spin_count` (default: `DEFAULT_MAX_SPIN_COUNT = 1_000_000`) and
+  returns `OffCryptoError::SpinCountTooLarge { spin_count, max }` when exceeded.
+- `crates/formula-office-crypto` enforces a configurable maximum via
+  `DecryptOptions.max_spin_count` (default: `DEFAULT_MAX_SPIN_COUNT = 1_000_000`) and returns
+  `OfficeCryptoError::SpinCountTooLarge { spin_count, max }` when exceeded.
 
 #### Agile blockKey constants
 Agile defines several 8-byte `blockKey` constants. We use the canonical values from MS-OFFCRYPTO:
