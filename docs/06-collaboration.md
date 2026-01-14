@@ -122,7 +122,7 @@ Each cell is stored as a `Y.Map` with the following relevant fields:
 - `format`: JSON object for cell formatting (interned into `DocumentController.styleTable` on desktop)
 - `enc`: optional encrypted payload (see “Cell encryption” below)
 - `modified`: `number` (ms since epoch; best-effort)
-- `modifiedBy`: `string` (best-effort user id)
+- `modifiedBy`: `string` (best-effort user id; in some deployments the sync-server may rewrite this to the authenticated user id for touched cells when range restriction enforcement is enabled)
 
 Important nuance (conflict monitoring): for deterministic delete-vs-overwrite detection,
 `@formula/collab-conflicts`’ `FormulaConflictMonitor` expects local formula clears to be
