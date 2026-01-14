@@ -1035,7 +1035,9 @@ rpm -qpR "$rpm_pkg"
 # Extract and confirm all linked shared libraries resolve
 # (requires `cpio`: Fedora `dnf -y install cpio`, Debian/Ubuntu `apt-get install -y cpio`)
 tmpdir="$(mktemp -d)"
-(cd "$tmpdir" && rpm2cpio "$rpm_pkg" | cpio -idmv)
+# `rpm_pkg` is usually a relative path; run `rpm2cpio` from the current directory and only
+# `cd` for the extraction destination.
+rpm2cpio "$rpm_pkg" | (cd "$tmpdir" && cpio -idmv)
 ldd "$tmpdir/usr/bin/formula-desktop" | grep -q "not found" && exit 1 || true
 ```
 
@@ -1399,7 +1401,9 @@ python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir"
 # Linux (.rpm)
 rpm="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/rpm/*.rpm' -print -quit)"
 tmpdir_rpm="$(mktemp -d)"
-(cd "$tmpdir_rpm" && rpm2cpio "$rpm" | cpio -idm --quiet --no-absolute-filenames)
+# `rpm` is usually a relative path; run `rpm2cpio` from the current directory and only
+# `cd` for the extraction destination.
+rpm2cpio "$rpm" | (cd "$tmpdir_rpm" && cpio -idm --quiet --no-absolute-filenames)
 python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir_rpm"
 ```
 

@@ -2016,7 +2016,9 @@ jobs:
 
           echo "Validating .rpm desktop integration: ${rpm_path}"
           tmpdir_rpm="$(mktemp -d)"
-          (cd "${tmpdir_rpm}" && rpm2cpio "${rpm_path}" | cpio -idm --quiet --no-absolute-filenames)
+          # `find` may return a relative path; run `rpm2cpio` from the repo root and only `cd`
+          # for the `cpio` extraction destination.
+          rpm2cpio "${rpm_path}" | (cd "${tmpdir_rpm}" && cpio -idm --quiet --no-absolute-filenames)
           python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_rpm}"
 
       - name: Smoke test Linux .deb install in clean Ubuntu container
