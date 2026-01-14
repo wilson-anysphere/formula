@@ -1275,17 +1275,32 @@ Validation + edge cases (Rust behavior):
   - This is not currently validated by Rust; hosts/bindings should enforce uniqueness.
 - `inputDistributions[*].cell` should not contain duplicates (not currently validated):
   - duplicates will cause the same cell to be set multiple times per iteration (last write wins), and correlated sampling becomes ill-defined.
-- Every `Distribution` is validated up-front:
-  - normal/lognormal: `stdDev >= 0`
-  - uniform: `min <= max`
-  - triangular: `min <= mode <= max`
-  - discrete: `values.len() > 0`, equal lengths, all `probabilities >= 0`, and `sum(probabilities) > 0` (does not need to equal 1)
-  - beta: `alpha > 0 && beta > 0`, and if both `min/max` set then `min <= max`
-  - exponential: `rate > 0`
-  - poisson: `lambda >= 0`
+- Every `Distribution` is validated up-front. Invalid distributions return `WhatIfError::InvalidParams(<msg>)`, where `<msg>` is one of:
+  - normal: `"normal std_dev must be >= 0"`
+  - uniform: `"uniform min must be <= max"`
+  - triangular: `"triangular requires min <= mode <= max"`
+  - lognormal: `"lognormal std_dev must be >= 0"`
+  - discrete:
+    - `"discrete distribution requires at least one value"`
+    - `"discrete values and probabilities must have equal length"`
+    - `"discrete probabilities must be >= 0"`
+    - `"discrete probabilities must sum to > 0"` (does not need to equal 1)
+  - beta:
+    - `"beta alpha and beta must be > 0"`
+    - `"beta min must be <= max"` (when both are provided)
+  - exponential: `"exponential rate must be > 0"`
+  - poisson: `"poisson lambda must be >= 0"`
 - Output cells must evaluate to numbers each iteration; otherwise `WhatIfError::NonNumericCell { cell, value }`.
 - Correlations:
-  - `correlations.matrix` must be square, symmetric, diagonal=1, entries in `[-1, 1]`, and **positive definite** (Cholesky decomposition).
+  - `correlations.matrix` is validated up-front. Invalid matrices return `WhatIfError::InvalidParams(<msg>)`, where `<msg>` is one of:
+    - `"correlation matrix must not be empty"`
+    - `"correlation matrix size must match input_distributions length"`
+    - `"correlation matrix must be square"`
+    - `"correlation matrix contains non-finite value"`
+    - `"correlation matrix diagonal entries must be 1"`
+    - `"correlation matrix entries must be within [-1, 1]"`
+    - `"correlation matrix must be symmetric"`
+    - `"correlation matrix is not positive definite"` (Cholesky decomposition failure)
   - Correlated sampling is currently supported **only** when *all* input distributions are `{ type: "normal", ... }` → otherwise `InvalidParams("correlated sampling is currently supported only for normal distributions")`.
   - Matrix row/column order is the same as `inputDistributions` order (`matrix[i][j]` is corr(input i, input j)).
 - Histogram edge cases:
