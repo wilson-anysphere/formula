@@ -30,6 +30,28 @@ function assertAnyMatch(deps, re) {
   );
 }
 
+/**
+ * Assert a *single* RPM dependency entry uses rich dependency syntax to declare
+ * an OR between two distro-specific package names (instead of listing both as
+ * separate `Requires`, which would make the RPM uninstallable).
+ *
+ * @param {string[]} deps
+ * @param {RegExp} leftRe
+ * @param {RegExp} rightRe
+ * @param {string} label
+ */
+function assertRichAlt(deps, leftRe, rightRe, label) {
+  assert.ok(
+    deps.some((d) => leftRe.test(d) && rightRe.test(d) && /\bor\b/i.test(d)),
+    [
+      `Expected bundle.linux.rpm.depends to include a rich dependency OR expression for ${label}.`,
+      `It should include *both* ${leftRe} and ${rightRe} in the same dependency string (e.g. "(A or B)").`,
+      "Found:",
+      ...deps.map((d) => `- ${d}`),
+    ].join("\n"),
+  );
+}
+
 test("tauri.conf.json declares Linux .deb runtime dependencies (WebKitGTK/GTK/AppIndicator/librsvg/OpenSSL)", () => {
   const deps = normalizeDeps(tauriConf?.bundle?.linux?.deb?.depends);
   assert.ok(deps.length > 0, "bundle.linux.deb.depends is missing/empty in tauri.conf.json");
@@ -55,6 +77,19 @@ test("tauri.conf.json declares Linux .rpm runtime dependencies (WebKitGTK/GTK/Ap
   assert.ok(
     deps.every((d) => !/\bt64\b/i.test(d)),
     `bundle.linux.rpm.depends must not reference Ubuntu/Debian t64 package variants.\nFound:\n- ${deps.join("\n- ")}`,
+  );
+
+  // Enforce that distro variants are expressed via RPM rich deps (`(A or B)`), not
+  // by listing both package names as separate dependencies.
+  assertRichAlt(deps, /webkit2gtk4\.1/i, /libwebkit2gtk-4_1/i, "WebKitGTK 4.1 (webview)");
+  assertRichAlt(deps, /\bgtk3\b/i, /libgtk-3-0/i, "GTK3");
+  assertRichAlt(deps, /\blibrsvg2\b/i, /\blibrsvg-2-2\b/i, "librsvg");
+  assertRichAlt(deps, /\bopenssl-libs\b/i, /\blibopenssl3\b/i, "OpenSSL");
+  assertRichAlt(
+    deps,
+    /(libayatana-appindicator-gtk3|libappindicator-gtk3)/i,
+    /(libayatana-appindicator3-1|libappindicator3-1)/i,
+    "AppIndicator/Ayatana (tray)",
   );
 
   assertAnyMatch(deps, /webkit2gtk4\.1/i);
