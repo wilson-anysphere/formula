@@ -58,7 +58,7 @@ extract_first_numeric_major() {
     raw="${raw#\'}"
     raw="${raw%\'}"
   fi
-  # Strip a leading "v" (Node version strings sometimes use v22.0.0).
+  # Strip a leading "v" (Node version strings sometimes use vX.Y.Z).
   raw="${raw#v}"
   raw="${raw#V}"
   # Capture leading digits as the major.
@@ -212,7 +212,7 @@ if [ -z "$ci_node_major" ]; then
 fi
 
 if ! [[ "$ci_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${ci_workflow} to be a Node major (e.g. 22); got ${ci_node_major}" >&2
+  echo "Expected NODE_VERSION in ${ci_workflow} to be a numeric Node major; got ${ci_node_major}" >&2
   exit 1
 fi
 # Discover workflows that depend on Node (setup-node, pnpm, or direct `node` invocation)
