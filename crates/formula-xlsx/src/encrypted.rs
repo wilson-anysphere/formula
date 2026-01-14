@@ -67,7 +67,7 @@ pub(crate) fn maybe_decrypt_office_encrypted_package<'a>(
     bytes: &'a [u8],
     password: &str,
 ) -> Result<Cow<'a, [u8]>, EncryptedOoxmlError> {
-    // Common fast path: ordinary XLSX/XLSM are ZIP-based OPC archives.
+    // Common fast path: ordinary XLSX/XLSM/XLSB are ZIP-based OPC archives.
     if looks_like_zip(bytes) {
         return Ok(Cow::Borrowed(bytes));
     }
