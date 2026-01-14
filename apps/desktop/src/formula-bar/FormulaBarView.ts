@@ -20,7 +20,6 @@ import {
 } from "./highlight/functionSignatures.js";
 import {
   normalizeFormulaLocaleId,
-  normalizeLocaleId,
   type FormulaLocaleId,
 } from "../spreadsheet/formulaLocale.js";
 
@@ -443,7 +442,7 @@ const ARG_SEPARATOR_CACHE = new Map<string, string>();
 function inferArgSeparator(localeId: string): string {
   // Prefer the formula engine's normalized locale IDs so UI separators match parsing semantics
   // for language/region variants (e.g. `de-CH` is treated as `de-DE` by the engine today).
-  const locale = normalizeFormulaLocaleId(localeId) ?? normalizeLocaleId(localeId) ?? "en-US";
+  const locale = normalizeFormulaLocaleId(localeId) ?? "en-US";
   const cached = ARG_SEPARATOR_CACHE.get(locale);
   if (cached) return cached;
 
@@ -2567,10 +2566,13 @@ export class FormulaBarView {
     const engine = this.#tooling?.getWasmEngine?.() ?? null;
     if (!engine) return;
 
-    const localeId =
+    const rawLocaleId =
       this.#tooling?.getLocaleId?.() ??
       (typeof document !== "undefined" ? document.documentElement?.lang : "") ??
       "en-US";
+    // `parseFormulaPartial` expects a supported formula locale id. Normalize variants and fall
+    // back to `en-US` when the host locale is unsupported so engine tooling stays available.
+    const localeId = normalizeFormulaLocaleId(rawLocaleId) ?? "en-US";
     const referenceStyle = this.#tooling?.referenceStyle ?? "A1";
 
     const cursor = this.model.cursorStart;

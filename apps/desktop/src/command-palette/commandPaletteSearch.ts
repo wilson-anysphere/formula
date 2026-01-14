@@ -2,7 +2,6 @@ import type { CommandContribution } from "../extensions/commandRegistry.js";
 import { getFunctionSignature } from "../formula-bar/highlight/functionSignatures.js";
 import {
   normalizeFormulaLocaleId,
-  normalizeLocaleId,
   type FormulaLocaleId,
 } from "../spreadsheet/formulaLocale.js";
 
@@ -444,7 +443,7 @@ function scoreFunctionResults(queryLower: string, limit: number, localeIdOverrid
 const ARG_SEPARATOR_CACHE = new Map<string, string>();
 
 function inferArgSeparator(localeId: string): string {
-  const locale = normalizeFormulaLocaleId(localeId) ?? normalizeLocaleId(localeId) ?? "en-US";
+  const locale = normalizeFormulaLocaleId(localeId) ?? "en-US";
   const cached = ARG_SEPARATOR_CACHE.get(locale);
   if (cached) return cached;
 

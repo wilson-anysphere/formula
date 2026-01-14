@@ -25,7 +25,7 @@ import type {
   FunctionContext as EngineFunctionContext,
 } from "@formula/engine";
 import { splitSheetQualifier } from "../../../../packages/search/index.js";
-import { normalizeFormulaLocaleId, normalizeLocaleId } from "../spreadsheet/formulaLocale.js";
+import { normalizeFormulaLocaleId } from "../spreadsheet/formulaLocale.js";
 
 type ActiveCellInfo = {
   address: string;
@@ -927,7 +927,7 @@ const ARG_SEPARATOR_CACHE = new Map<string, string>();
 function inferArgSeparator(localeId: string): string {
   // Prefer the formula engine's normalized locale IDs so UI arg separators stay consistent
   // with parsing semantics (e.g. `de-CH` is currently treated as `de-DE` by the engine).
-  const locale = normalizeFormulaLocaleId(localeId) ?? normalizeLocaleId(localeId) ?? "en-US";
+  const locale = normalizeFormulaLocaleId(localeId) ?? "en-US";
   const cached = ARG_SEPARATOR_CACHE.get(locale);
   if (cached) return cached;
 

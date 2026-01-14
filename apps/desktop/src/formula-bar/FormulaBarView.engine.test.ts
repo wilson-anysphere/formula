@@ -198,6 +198,59 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     host.remove();
   });
 
+  it("normalizes unsupported locale IDs to en-US so engine tooling stays available", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const draft = "=SUM(1, 2)";
+
+    const tokens: FormulaToken[] = [
+      { kind: "Eq", span: { start: 0, end: 1 } },
+      { kind: "Ident", span: { start: 1, end: 4 }, value: "SUM" },
+      { kind: "LParen", span: { start: 4, end: 5 } },
+      { kind: "Number", span: { start: 5, end: 6 }, value: "1" },
+      { kind: "ArgSep", span: { start: 6, end: 7 } },
+      { kind: "Whitespace", span: { start: 7, end: 8 }, value: " " },
+      { kind: "Number", span: { start: 8, end: 9 }, value: "2" },
+      { kind: "RParen", span: { start: 9, end: 10 } },
+      { kind: "Eof", span: { start: 10, end: 10 } },
+    ];
+
+    const lexResult: FormulaPartialLexResult = { tokens, error: null };
+    const parseResult: FormulaPartialParseResult = { ast: null, error: null, context: { function: null } };
+
+    const engine = {
+      lexFormulaPartial: vi.fn(async () => lexResult),
+      parseFormulaPartial: vi.fn(async () => parseResult),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(
+      host,
+      { onCommit: () => {} },
+      // pt-BR is not currently supported by the formula engine's locale registry. The view should
+      // fall back to en-US so tooling requests don't hard-fail.
+      { getWasmEngine: () => engine, getLocaleId: () => "pt-BR", referenceStyle: "A1" },
+    );
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+    view.textarea.value = draft;
+    view.textarea.setSelectionRange(draft.length, draft.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushTooling();
+
+    expect(engine.lexFormulaPartial).toHaveBeenCalledTimes(1);
+    const lexOptions = (engine.lexFormulaPartial as any).mock.calls[0]?.[1];
+    expect(lexOptions?.localeId).toBe("en-US");
+
+    expect(engine.parseFormulaPartial).toHaveBeenCalledTimes(1);
+    const parseOptions = (engine.parseFormulaPartial as any).mock.calls[0]?.[2];
+    expect(parseOptions?.localeId).toBe("en-US");
+
+    host.remove();
+  });
+
   it("falls back to the local tokenizer/highlighter when the engine is absent", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
