@@ -538,8 +538,11 @@ async function readWebClipboardRichOnly(wants = {}) {
       if (wantImagePng && !(out.imagePng instanceof Uint8Array)) {
         const imagePngType = item.types.find((t) => matchMime(t, "image/png"));
         if (imagePngType) {
-          const imagePng = await readClipboardItemPng(item, imagePngType, MAX_IMAGE_BYTES);
-          if (imagePng instanceof Uint8Array) out.imagePng = imagePng;
+          const imagePngResult = await readClipboardItemPng(item, imagePngType, MAX_IMAGE_BYTES);
+          if (imagePngResult?.bytes instanceof Uint8Array) out.imagePng = imagePngResult.bytes;
+          if (imagePngResult?.skippedOversized) {
+            Object.defineProperty(out, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
+          }
         }
       }
 
@@ -548,7 +551,13 @@ async function readWebClipboardRichOnly(wants = {}) {
       }
     }
 
-    if (typeof out.rtf === "string" || out.imagePng instanceof Uint8Array) return out;
+    if (
+      typeof out.rtf === "string" ||
+      out.imagePng instanceof Uint8Array ||
+      (out && typeof out === "object" && out[SKIPPED_OVERSIZED_IMAGE_PNG])
+    ) {
+      return out;
+    }
     return undefined;
   } catch {
     return undefined;
