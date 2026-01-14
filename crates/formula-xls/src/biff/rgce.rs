@@ -1228,6 +1228,32 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                     );
                     return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
+
+                // `PtgMem*` tokens contain nested subexpressions that are not directly rendered in
+                // the output formula text, but their nested streams can still contain `PtgArray`
+                // tokens that consume data blocks from the trailing `rgcb` stream.
+                //
+                // If we skip the nested stream without consuming its referenced `rgcb` blocks, any
+                // later visible `PtgArray` tokens will decode against the wrong `rgcb` offset.
+                if let Some(rgcb) = rgcb {
+                    let sub = &input[..cce];
+                    if let Err(err) = consume_rgcb_arrays_in_subexpression(
+                        sub,
+                        rgcb,
+                        &mut rgcb_pos,
+                        &mut warnings,
+                        &mut warnings_suppressed,
+                    ) {
+                        push_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to scan PtgMem* subexpression for nested PtgArray constants: {err}"
+                            ),
+                            &mut warnings_suppressed,
+                        );
+                    }
+                }
+
                 input = &input[cce..];
             }
             // PtgRefErr / PtgRefErrN: [rw: u16][col: u16]
@@ -1747,6 +1773,282 @@ fn decode_array_constant(
 
     *pos = i;
     Some(format!("{{{}}}", row_texts.join(";")))
+}
+
+/// Scan a nested BIFF8 token subexpression (e.g. the payload of `PtgMemFunc`) and advance the
+/// `rgcb` cursor for any `PtgArray` tokens encountered.
+///
+/// `PtgMem*` tokens are non-printing, but their nested streams can still contain `PtgArray`, which
+/// consumes an array-constant block from the trailing `rgcb` stream. If we skip the nested stream
+/// without consuming its referenced `rgcb` bytes, later visible `PtgArray` tokens will decode
+/// against the wrong `rgcb` block.
+fn consume_rgcb_arrays_in_subexpression(
+    rgce: &[u8],
+    rgcb: &[u8],
+    rgcb_pos: &mut usize,
+    warnings: &mut Vec<String>,
+    suppressed: &mut bool,
+) -> Result<(), String> {
+    fn inner(
+        input: &[u8],
+        rgcb: &[u8],
+        rgcb_pos: &mut usize,
+        warnings: &mut Vec<String>,
+        suppressed: &mut bool,
+    ) -> Result<(), String> {
+        let mut i = 0usize;
+        while i < input.len() {
+            let ptg = *input
+                .get(i)
+                .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+            i = i
+                .checked_add(1)
+                .ok_or_else(|| "rgce offset overflow".to_string())?;
+
+            match ptg {
+                // PtgExp / PtgTbl: [rw: u16][col: u16]
+                0x01 | 0x02 => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // Fixed-width / no-payload operators and punctuation.
+                0x03..=0x16 | 0x2F => {}
+                // PtgStr: ShortXLUnicodeString (variable).
+                0x17 => {
+                    let remaining = input
+                        .get(i..)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let (_s, consumed) = strings::parse_biff8_short_string(remaining, 1252)
+                        .map_err(|e| format!("failed to parse PtgStr: {e}"))?;
+                    i = i
+                        .checked_add(consumed)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
+                    if i > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                }
+                // PtgExtend* tokens: [etpg: u8][payload...]
+                0x18 | 0x38 | 0x58 | 0x78 => {
+                    let etpg = *input
+                        .get(i)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    i += 1;
+                    match etpg {
+                        0x19 => {
+                            // PtgList: fixed 12-byte payload.
+                            if i + 12 > input.len() {
+                                return Err("unexpected end of rgce stream".to_string());
+                            }
+                            i += 12;
+                        }
+                        _ => {
+                            // Opaque 5-byte payload (see decoder heuristics).
+                            //
+                            // The ptg itself is followed by 5 bytes; since we consumed the first
+                            // one as the "etpg" discriminator above, skip the remaining 4 bytes.
+                            if i + 4 > input.len() {
+                                return Err("unexpected end of rgce stream".to_string());
+                            }
+                            i += 4;
+                        }
+                    }
+                }
+                // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
+                0x19 => {
+                    if i + 3 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    let grbit = input[i];
+                    let w_attr = u16::from_le_bytes([input[i + 1], input[i + 2]]);
+                    i += 3;
+                    const T_ATTR_CHOOSE: u8 = 0x04;
+                    if grbit & T_ATTR_CHOOSE != 0 {
+                        let needed = (w_attr as usize)
+                            .checked_mul(2)
+                            .ok_or_else(|| "PtgAttr jump table length overflow".to_string())?;
+                        if i + needed > input.len() {
+                            return Err("unexpected end of rgce stream".to_string());
+                        }
+                        i += needed;
+                    }
+                }
+                // PtgErr / PtgBool: 1 byte.
+                0x1C | 0x1D => {
+                    if i + 1 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 1;
+                }
+                // PtgInt: 2 bytes.
+                0x1E => {
+                    if i + 2 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 2;
+                }
+                // PtgNum: 8 bytes.
+                0x1F => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgArray: [unused: 7 bytes] + serialized array constant stored in rgcb.
+                0x20 | 0x40 | 0x60 => {
+                    if i + 7 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 7;
+                    if decode_array_constant(rgcb, rgcb_pos, warnings, suppressed).is_none() {
+                        return Err("failed to decode PtgArray constant from rgcb".to_string());
+                    }
+                }
+                // PtgFunc: 2 bytes.
+                0x21 | 0x41 | 0x61 => {
+                    if i + 2 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 2;
+                }
+                // PtgFuncVar: 3 bytes.
+                0x22 | 0x42 | 0x62 => {
+                    if i + 3 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 3;
+                }
+                // PtgName: 6 bytes.
+                0x23 | 0x43 | 0x63 => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgRef: 4 bytes.
+                0x24 | 0x44 | 0x64 => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // PtgArea: 8 bytes.
+                0x25 | 0x45 | 0x65 => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgMem* tokens: [cce: u16][rgce: cce bytes]
+                0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
+                | 0x69 | 0x2E | 0x4E | 0x6E => {
+                    if i + 2 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    let cce = u16::from_le_bytes([input[i], input[i + 1]]) as usize;
+                    i += 2;
+                    let sub = input
+                        .get(i..i + cce)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    inner(sub, rgcb, rgcb_pos, warnings, suppressed)?;
+                    i += cce;
+                }
+                // PtgRefErr: 4 bytes.
+                0x2A | 0x4A | 0x6A => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // PtgAreaErr: 8 bytes.
+                0x2B | 0x4B | 0x6B => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgRefN: 4 bytes.
+                0x2C | 0x4C | 0x6C => {
+                    if i + 4 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 4;
+                }
+                // PtgAreaN: 8 bytes.
+                0x2D | 0x4D | 0x6D => {
+                    if i + 8 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 8;
+                }
+                // PtgNameX: 6 bytes.
+                0x39 | 0x59 | 0x79 => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgRef3d: 6 bytes.
+                0x3A | 0x5A | 0x7A => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgArea3d: 10 bytes.
+                0x3B | 0x5B | 0x7B => {
+                    if i + 10 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 10;
+                }
+                // PtgRefErr3d: 6 bytes.
+                0x3C | 0x5C | 0x7C => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgAreaErr3d: 10 bytes.
+                0x3D | 0x5D | 0x7D => {
+                    if i + 10 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 10;
+                }
+                // PtgRefN3d: 6 bytes.
+                0x3E | 0x5E | 0x7E => {
+                    if i + 6 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 6;
+                }
+                // PtgAreaN3d: 10 bytes.
+                0x3F | 0x5F | 0x7F => {
+                    if i + 10 > input.len() {
+                        return Err("unexpected end of rgce stream".to_string());
+                    }
+                    i += 10;
+                }
+                other => {
+                    // Unknown/unsupported token. We can't safely skip it without knowing its
+                    // payload length. Be conservative and stop scanning so we don't desync.
+                    push_warning(
+                        warnings,
+                        format!(
+                            "unsupported rgce token 0x{other:02X} while scanning PtgMem* subexpression"
+                        ),
+                        suppressed,
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    inner(rgce, rgcb, rgcb_pos, warnings, suppressed)
 }
 
 fn unsupported(ptg: u8, warnings: Vec<String>, suppressed: &mut bool) -> DecodeRgceResult {
@@ -3915,6 +4217,44 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base_and_rgcb(&rgce, &rgcb, &ctx, None);
         assert_eq!(decoded.text, "1+{1,2;3,4}");
+        assert!(
+            decoded.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_array_in_ptgmemfunc_subexpression_advances_rgcb_cursor() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgMemFunc (non-printing) containing a nested PtgArray, followed by a visible PtgArray.
+        //
+        // The nested array consumes the *first* array constant block in rgcb; the visible array
+        // should therefore decode from the *second* block.
+        let mut rgce = Vec::<u8>::new();
+        rgce.push(0x29); // PtgMemFunc
+        rgce.extend_from_slice(&8u16.to_le_bytes()); // cce = PtgArray (1) + 7-byte header
+        rgce.push(0x20); // nested PtgArray
+        rgce.extend_from_slice(&[0u8; 7]);
+        rgce.push(0x20); // visible PtgArray
+        rgce.extend_from_slice(&[0u8; 7]);
+
+        // Two 1x1 array constants: {1} then {2}.
+        let mut rgcb = Vec::<u8>::new();
+        for n in [1.0f64, 2.0] {
+            rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 col
+            rgcb.extend_from_slice(&0u16.to_le_bytes()); // 1 row
+            rgcb.push(0x01); // number
+            rgcb.extend_from_slice(&n.to_le_bytes());
+        }
+
+        let decoded = decode_biff8_rgce_with_base_and_rgcb(&rgce, &rgcb, &ctx, None);
+        assert_eq!(decoded.text, "{2}");
         assert!(
             decoded.warnings.is_empty(),
             "expected no warnings, got {:?}",

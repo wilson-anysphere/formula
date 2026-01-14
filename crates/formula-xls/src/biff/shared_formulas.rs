@@ -100,7 +100,8 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
     // After the range header, accept an optional small prefix (0/2/4 bytes) followed by:
     //   [cce: u16][rgce: cce bytes]
     //
-    // Any trailing bytes are ignored.
+    // Any trailing bytes after `rgce` are treated as `rgcb` (data blocks referenced by ptgs like
+    // `PtgArray`).
 
     #[derive(Clone, Copy)]
     struct RangeHeader {
