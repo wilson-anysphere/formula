@@ -1,4 +1,5 @@
 import type { SpreadsheetApp } from "../app/spreadsheetApp";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import type { QuickPickItem } from "../extensions/ui.js";
 import { showToast } from "../extensions/ui.js";
@@ -96,7 +97,7 @@ export function registerHomeStylesCommands(params: {
       // `applyFormattingToSelection` enforces the same read-only band-selection restrictions. Guard
       // early here so users don't pick a style only to be blocked on apply.
       if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true && !decision.allRangesBand) {
-        safeShowToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+        showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
         focusGrid();
         return;
       }

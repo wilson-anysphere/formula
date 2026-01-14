@@ -463,7 +463,7 @@ export function registerDesktopCommands(params: {
         }
 
         if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true && !decision.allRangesBand) {
-          safeShowToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+          showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
           return;
         }
 

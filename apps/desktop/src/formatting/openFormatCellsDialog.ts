@@ -2,6 +2,7 @@ import { applyFormatCells } from "./formatCellsDialog.js";
 import { getEffectiveCellStyle } from "./getEffectiveCellStyle.js";
 import { getStyleFillFgColor, getStyleFontSizePt, getStyleNumberFormat, getStyleWrapText } from "./styleFieldAccess.js";
 import { showToast } from "../extensions/ui.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { markKeybindingBarrier } from "../keybindingBarrier.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import type { GridLimits, Range } from "../selection/types";
@@ -109,11 +110,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
       maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
     });
     if (!decision.allRangesBand) {
-      try {
-        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-      } catch {
-        // ignore (e.g. toast root missing in tests)
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
       return;
     }
   }
@@ -543,11 +540,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
       maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
     });
     if (isReadOnly && !decision.allRangesBand) {
-      try {
-        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-      } catch {
-        // ignore (e.g. toast root missing in tests)
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
       return;
     }
     if (!decision.allowed) {
