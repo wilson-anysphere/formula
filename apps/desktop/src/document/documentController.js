@@ -6594,11 +6594,13 @@ export class DocumentController {
       if (!id) return;
       const unwrappedEntry = unwrapSingletonObjectWrapper(rawEntry);
       const record = unwrappedEntry && typeof unwrappedEntry === "object" ? unwrappedEntry : {};
+      const bytesBase64Candidate = unwrapSingletonId(record.bytesBase64);
+      const bytesBase64SnakeCandidate = unwrapSingletonId(record.bytes_base64);
       const bytesBase64 =
-        typeof record.bytesBase64 === "string"
-          ? record.bytesBase64
-          : typeof record.bytes_base64 === "string"
-            ? record.bytes_base64
+        typeof bytesBase64Candidate === "string"
+          ? bytesBase64Candidate
+          : typeof bytesBase64SnakeCandidate === "string"
+            ? bytesBase64SnakeCandidate
             : null;
       const bytesValue = bytesBase64 ?? ("bytes" in record ? record.bytes : unwrappedEntry);
       const bytes = parseBytes(bytesValue);

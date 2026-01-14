@@ -161,6 +161,33 @@ test("applyState accepts singleton-wrapped mimeType strings (interop)", () => {
   assert.equal(doc.getImage("img1")?.mimeType, "image/png");
 });
 
+test("applyState accepts singleton-wrapped bytesBase64 strings (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [],
+        },
+      ],
+      images: [{ id: "img1", mimeType: "image/png", bytesBase64: { 0: "AQID" } }],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const image = doc.getImage("img1");
+  assert.ok(image);
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
+});
+
 test("applyState ignores images with oversized declared byte lengths (defensive)", () => {
   const snapshot = new TextEncoder().encode(
     JSON.stringify({
