@@ -40,6 +40,151 @@ class FakeEngine {
 }
 
 describe("EngineCellCache", () => {
+  it("prefers getRangeCompact when available", async () => {
+    const values = new Map<string, CellScalar>([
+      ["Sheet1!A1", 1],
+      ["Sheet1!B1", 2]
+    ]);
+
+    class FakeEngineCompact {
+      calls: Array<{ method: "getRange" | "getRangeCompact"; range: string; sheet?: string }> = [];
+
+      constructor(private readonly values: Map<string, CellScalar>) {}
+
+      async getRange(range: string, sheet?: string): Promise<EngineCellData[][]> {
+        this.calls.push({ method: "getRange", range, sheet });
+
+        const [start, end = start] = range.split(":");
+        const startPos = fromA1(start);
+        const endPos = fromA1(end);
+
+        const startRow0 = Math.min(startPos.row0, endPos.row0);
+        const endRow0 = Math.max(startPos.row0, endPos.row0);
+        const startCol0 = Math.min(startPos.col0, endPos.col0);
+        const endCol0 = Math.max(startPos.col0, endPos.col0);
+
+        const sheetName = sheet ?? "Sheet1";
+        const rows: EngineCellData[][] = [];
+        for (let r = startRow0; r <= endRow0; r++) {
+          const row: EngineCellData[] = [];
+          for (let c = startCol0; c <= endCol0; c++) {
+            const address = toA1(r, c);
+            const key = `${sheetName}!${address}`;
+            const value = this.values.get(key) ?? null;
+            row.push({ sheet: sheetName, address, input: value, value });
+          }
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      async getRangeCompact(range: string, sheet?: string): Promise<[CellScalar, CellScalar][][]> {
+        this.calls.push({ method: "getRangeCompact", range, sheet });
+
+        const [start, end = start] = range.split(":");
+        const startPos = fromA1(start);
+        const endPos = fromA1(end);
+
+        const startRow0 = Math.min(startPos.row0, endPos.row0);
+        const endRow0 = Math.max(startPos.row0, endPos.row0);
+        const startCol0 = Math.min(startPos.col0, endPos.col0);
+        const endCol0 = Math.max(startPos.col0, endPos.col0);
+
+        const sheetName = sheet ?? "Sheet1";
+        const rows: [CellScalar, CellScalar][][] = [];
+        for (let r = startRow0; r <= endRow0; r++) {
+          const row: [CellScalar, CellScalar][] = [];
+          for (let c = startCol0; c <= endCol0; c++) {
+            const address = toA1(r, c);
+            const key = `${sheetName}!${address}`;
+            const value = this.values.get(key) ?? null;
+            row.push([value, value]);
+          }
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      async recalculate(): Promise<CellChange[]> {
+        return [];
+      }
+    }
+
+    const engine = new FakeEngineCompact(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
+
+    await cache.prefetch({ startRow0: 0, endRow0Exclusive: 1, startCol0: 0, endCol0Exclusive: 2 });
+
+    expect(engine.calls).toEqual([{ method: "getRangeCompact", range: "A1:B1", sheet: "Sheet1" }]);
+    expect(cache.getValue(0, 0)).toBe(1);
+    expect(cache.getValue(0, 1)).toBe(2);
+  });
+
+  it("falls back to getRange when getRangeCompact is not supported (and stops retrying)", async () => {
+    const values = new Map<string, CellScalar>([
+      ["Sheet1!A1", 1],
+      ["Sheet1!B1", 2]
+    ]);
+
+    class FakeEngineMissingCompact {
+      calls: Array<{ method: "getRange" | "getRangeCompact"; range: string; sheet?: string }> = [];
+
+      constructor(private readonly values: Map<string, CellScalar>) {}
+
+      async getRangeCompact(range: string, sheet?: string): Promise<never> {
+        this.calls.push({ method: "getRangeCompact", range, sheet });
+        throw new Error("unknown method: getRangeCompact");
+      }
+
+      async getRange(range: string, sheet?: string): Promise<EngineCellData[][]> {
+        this.calls.push({ method: "getRange", range, sheet });
+
+        const [start, end = start] = range.split(":");
+        const startPos = fromA1(start);
+        const endPos = fromA1(end);
+
+        const startRow0 = Math.min(startPos.row0, endPos.row0);
+        const endRow0 = Math.max(startPos.row0, endPos.row0);
+        const startCol0 = Math.min(startPos.col0, endPos.col0);
+        const endCol0 = Math.max(startPos.col0, endPos.col0);
+
+        const sheetName = sheet ?? "Sheet1";
+        const rows: EngineCellData[][] = [];
+        for (let r = startRow0; r <= endRow0; r++) {
+          const row: EngineCellData[] = [];
+          for (let c = startCol0; c <= endCol0; c++) {
+            const address = toA1(r, c);
+            const key = `${sheetName}!${address}`;
+            const value = this.values.get(key) ?? null;
+            row.push({ sheet: sheetName, address, input: value, value });
+          }
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      async recalculate(): Promise<CellChange[]> {
+        return [];
+      }
+    }
+
+    const engine = new FakeEngineMissingCompact(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
+
+    await cache.prefetch({ startRow0: 0, endRow0Exclusive: 1, startCol0: 0, endCol0Exclusive: 1 });
+    await cache.prefetch({ startRow0: 0, endRow0Exclusive: 1, startCol0: 1, endCol0Exclusive: 2 });
+
+    expect(engine.calls).toEqual([
+      { method: "getRangeCompact", range: "A1", sheet: "Sheet1" },
+      { method: "getRange", range: "A1", sheet: "Sheet1" },
+      // Compact should not be retried after we learn it's missing.
+      { method: "getRange", range: "B1", sheet: "Sheet1" }
+    ]);
+
+    expect(cache.getValue(0, 0)).toBe(1);
+    expect(cache.getValue(0, 1)).toBe(2);
+  });
+
   it("evicts oldest entries when exceeding maxEntries", async () => {
     const values = new Map<string, CellScalar>([
       ["Sheet1!A1", 1],

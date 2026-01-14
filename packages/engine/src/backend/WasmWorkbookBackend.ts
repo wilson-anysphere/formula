@@ -219,12 +219,14 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     endCol: number;
   }): Promise<RangeData> {
     const range = toA1Range(params.startRow, params.startCol, params.endRow, params.endCol);
-    const getRangeCompact = (this.engine as EngineClient).getRangeCompact;
+    const engine = this.engine as EngineClient;
 
     let compact: CellDataCompact[][] | null = null;
-    if (this.supportsRangeCompact !== false && typeof getRangeCompact === "function") {
+    // Call through the engine object (not a detached function reference) so `this`
+    // binding remains correct for EngineClient implementations that are class instances.
+    if (this.supportsRangeCompact !== false && typeof engine.getRangeCompact === "function") {
       try {
-        compact = await getRangeCompact(range, params.sheetId);
+        compact = await engine.getRangeCompact(range, params.sheetId);
         this.supportsRangeCompact = true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -249,7 +251,7 @@ export class WasmWorkbookBackend implements WorkbookBackend {
             return { value, formula, display_value: String(value ?? "") };
           }),
         )
-      : (await this.engine.getRange(range, params.sheetId)).map((row) =>
+      : (await engine.getRange(range, params.sheetId)).map((row) =>
           row.map((cell) => {
             const input = cell?.input ?? null;
             const formula = isFormulaInput(input) ? normalizeFormulaTextOpt(input) : null;

@@ -92,13 +92,14 @@ export class EngineCellCache {
 
     const generation = this.generation;
     const task = (async () => {
-      const getRangeCompact = (this.engine as EngineClient).getRangeCompact;
-
+      const engine = this.engine as EngineClient;
       let rows: any[][] | null = null;
       let usedCompact = false;
-      if (this.supportsRangeCompact !== false && typeof getRangeCompact === "function") {
+      // Call through the engine object (not a detached function reference) so `this`
+      // binding remains correct for EngineClient implementations that are class instances.
+      if (this.supportsRangeCompact !== false && typeof engine.getRangeCompact === "function") {
         try {
-          rows = (await getRangeCompact(rangeA1, sheetName)) as any[][];
+          rows = (await engine.getRangeCompact(rangeA1, sheetName)) as any[][];
           this.supportsRangeCompact = true;
           usedCompact = true;
         } catch (err) {
@@ -114,7 +115,7 @@ export class EngineCellCache {
       }
 
       if (!rows) {
-        rows = (await this.engine.getRange(rangeA1, sheetName)) as any[][];
+        rows = (await engine.getRange(rangeA1, sheetName)) as any[][];
       }
 
       if (generation !== this.generation) {
