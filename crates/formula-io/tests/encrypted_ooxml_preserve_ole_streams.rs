@@ -22,6 +22,12 @@ fn ooxml_fixture_path(rel: &str) -> PathBuf {
         .join(rel)
 }
 
+fn xlsb_fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-xlsb/tests/fixtures")
+        .join(rel)
+}
+
 fn build_tiny_zip() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut writer = zip::ZipWriter::new(cursor);
@@ -115,6 +121,51 @@ fn preserves_extra_ole_metadata_streams_on_encrypt_roundtrip() {
         }
         other => panic!("expected Workbook::Xlsx, got {other:?}"),
     }
+}
+
+#[test]
+fn preserves_extra_ole_metadata_streams_for_xlsb_open_path() {
+    let password = "correct horse battery staple";
+    let xlsb_bytes = std::fs::read(xlsb_fixture_path("simple.xlsb")).expect("read xlsb fixture");
+    let encrypted_cfb = encrypt_zip_with_password(&xlsb_bytes, password);
+
+    // Add a dummy metadata stream to the OLE wrapper so the preserved-OLE open path has something
+    // to capture. This is the same shape used by Excel for SummaryInformation streams.
+    let dummy_bytes = b"dummy summary information bytes (xlsb)";
+    let cursor = Cursor::new(encrypted_cfb);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open encrypted cfb");
+    ole.create_stream(SUMMARY_INFORMATION)
+        .expect("create SummaryInformation stream")
+        .write_all(dummy_bytes)
+        .expect("write SummaryInformation bytes");
+    let encrypted_with_extra = ole.into_inner().into_inner();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let in_path = tmp.path().join("input.xlsb");
+    std::fs::write(&in_path, &encrypted_with_extra).expect("write encrypted input");
+
+    let opened = open_workbook_with_password_and_preserved_ole(&in_path, Some(password))
+        .expect("open encrypted XLSB with preservation");
+    assert!(
+        matches!(opened.workbook, Workbook::Xlsb(_)),
+        "expected Workbook::Xlsb, got {:?}",
+        opened.workbook
+    );
+
+    let preserved = opened.preserved_ole.expect("expected preserved OLE entries to be captured");
+    let preserved_stream = preserved
+        .streams
+        .iter()
+        .find(|s| {
+            let path = s.path.to_string_lossy();
+            let normalized = path.strip_prefix('/').unwrap_or(path.as_ref());
+            normalized == SUMMARY_INFORMATION
+        })
+        .expect("expected SummaryInformation stream to be preserved");
+    assert_eq!(
+        preserved_stream.bytes, dummy_bytes,
+        "expected preserved SummaryInformation bytes to match input"
+    );
 }
 
 #[test]
