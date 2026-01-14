@@ -295,6 +295,40 @@ fn structured_reference_items_are_not_translated() {
 }
 
 #[test]
+fn de_de_translation_table_covers_function_catalog() {
+    let mut covered = HashSet::new();
+    let tsv = include_str!("../src/locale/data/de-DE.tsv");
+    for line in tsv.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (canon, _loc) = line
+            .split_once('\t')
+            .unwrap_or_else(|| panic!("invalid TSV line in de-DE.tsv: {line:?}"));
+        assert!(
+            covered.insert(canon),
+            "duplicate canonical entry in de-DE.tsv: {canon}"
+        );
+    }
+
+    for spec in formula_engine::functions::iter_function_specs() {
+        let name = spec.name.to_ascii_uppercase();
+        assert!(
+            covered.contains(name.as_str()),
+            "missing de-DE function translation for {name}"
+        );
+    }
+
+    let expected_count = formula_engine::functions::iter_function_specs().count();
+    assert_eq!(
+        covered.len(),
+        expected_count,
+        "de-DE.tsv should contain exactly one entry per function in the engine catalog"
+    );
+}
+
+#[test]
 fn fr_fr_translation_table_covers_function_catalog() {
     let mut covered = HashSet::new();
     let tsv = include_str!("../src/locale/data/fr-FR.tsv");
@@ -319,6 +353,47 @@ fn fr_fr_translation_table_covers_function_catalog() {
             "missing fr-FR function translation for {name}"
         );
     }
+
+    let expected_count = formula_engine::functions::iter_function_specs().count();
+    assert_eq!(
+        covered.len(),
+        expected_count,
+        "fr-FR.tsv should contain exactly one entry per function in the engine catalog"
+    );
+}
+
+#[test]
+fn es_es_translation_table_covers_function_catalog() {
+    let mut covered = HashSet::new();
+    let tsv = include_str!("../src/locale/data/es-ES.tsv");
+    for line in tsv.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (canon, _loc) = line
+            .split_once('\t')
+            .unwrap_or_else(|| panic!("invalid TSV line in es-ES.tsv: {line:?}"));
+        assert!(
+            covered.insert(canon),
+            "duplicate canonical entry in es-ES.tsv: {canon}"
+        );
+    }
+
+    for spec in formula_engine::functions::iter_function_specs() {
+        let name = spec.name.to_ascii_uppercase();
+        assert!(
+            covered.contains(name.as_str()),
+            "missing es-ES function translation for {name}"
+        );
+    }
+
+    let expected_count = formula_engine::functions::iter_function_specs().count();
+    assert_eq!(
+        covered.len(),
+        expected_count,
+        "es-ES.tsv should contain exactly one entry per function in the engine catalog"
+    );
 }
 
 #[test]
