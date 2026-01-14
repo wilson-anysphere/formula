@@ -7646,6 +7646,66 @@ mod tests {
     }
 
     #[test]
+    fn mark_saved_updates_engine_workbook_file_metadata_on_save_as() {
+        let initial_path = std::env::temp_dir().join("orig.xlsx");
+        let initial_path = initial_path.to_string_lossy().to_string();
+
+        let mut workbook = Workbook::new_empty(Some(initial_path.clone()));
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_formula("=CELL(\"filename\")".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut initial_dir = std::path::Path::new(&initial_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .to_string_lossy()
+            .to_string();
+        if !initial_dir.ends_with(std::path::MAIN_SEPARATOR) {
+            initial_dir.push(std::path::MAIN_SEPARATOR);
+        }
+        let expected_initial = format!("{initial_dir}[orig.xlsx]Sheet1");
+        assert_eq!(
+            state.engine.get_cell_value("Sheet1", "A1"),
+            EngineValue::Text(expected_initial.clone())
+        );
+
+        let new_path = std::env::temp_dir().join("new.xlsx");
+        let new_path = new_path.to_string_lossy().to_string();
+        state
+            .mark_saved(Some(new_path.clone()), None)
+            .expect("mark_saved succeeds");
+
+        let mut new_dir = std::path::Path::new(&new_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .to_string_lossy()
+            .to_string();
+        if !new_dir.ends_with(std::path::MAIN_SEPARATOR) {
+            new_dir.push(std::path::MAIN_SEPARATOR);
+        }
+        let expected_new = format!("{new_dir}[new.xlsx]Sheet1");
+
+        assert_eq!(
+            state.engine.get_cell_value("Sheet1", "A1"),
+            EngineValue::Text(expected_new.clone())
+        );
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let cell = workbook
+            .sheet(&sheet_id)
+            .expect("sheet exists")
+            .get_cell(0, 0);
+        assert_eq!(cell.computed_value, CellScalar::Text(expected_new));
+    }
+
+    #[test]
     fn normalize_formula_matches_formula_model_display_semantics() {
         assert_eq!(normalize_formula(None), None);
         assert_eq!(normalize_formula(Some("".to_string())), None);
