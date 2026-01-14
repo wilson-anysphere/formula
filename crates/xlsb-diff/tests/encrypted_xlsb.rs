@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use ms_offcrypto_writer::Ecma376AgileWriter;
@@ -126,6 +126,51 @@ fn cli_supports_password_file_for_encrypted_xlsb() -> Result<()> {
     assert!(
         stdout.contains("No differences."),
         "expected output to indicate no differences, got:\n{stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn cli_supports_password_file_stdin_for_encrypted_xlsb() -> Result<()> {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsb/tests/fixtures/simple.xlsb"
+    ));
+    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
+    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+
+    let tmp = tempfile::tempdir().context("tempdir")?;
+    let plain_path = tmp.path().join("plain.xlsb");
+    let encrypted_path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_xlsb_diff"))
+        .arg(&plain_path)
+        .arg(&encrypted_path)
+        .arg("--password-file")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("spawn xlsb-diff")?;
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(format!("{PASSWORD}\n").as_bytes())
+        .context("write password to stdin")?;
+
+    let output = child.wait_with_output().context("wait for xlsb-diff")?;
+
+    assert!(
+        output.status.success(),
+        "expected exit 0\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
     );
 
     Ok(())
