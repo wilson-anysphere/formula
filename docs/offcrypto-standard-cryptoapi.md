@@ -18,6 +18,9 @@ The intent is that an engineer can implement this without reading any external r
 For repo-specific implementation notes (which parameter subsets we accept, crate entrypoints, writer
 defaults), see `docs/office-encryption.md`.
 
+For Agile (4.4) OOXML password decryption details (different scheme; XML descriptor + `dataIntegrity`
+HMAC), see `docs/22-ooxml-encryption.md`.
+
 ---
 
 ## 1) Detecting “Standard” encryption (`versionMinor == 2`, commonly 3.2)

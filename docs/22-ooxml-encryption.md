@@ -33,6 +33,11 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - Note: with the `formula-io` crate feature **`encrypted-workbooks`** enabled, the password-aware
     open APIs (`open_workbook_with_password`, `open_workbook_model_with_password`) can also decrypt
     and open Agile (4.4) encrypted `.xlsx`/`.xlsm` in memory (via the `formula-xlsx` decryptor).
+- **Streaming decrypt reader (does not validate `dataIntegrity` HMAC):**
+  - `crates/formula-io/src/encrypted_ooxml.rs`
+  - `crates/formula-io/src/encrypted_package_reader.rs`
+  - Verifies the password and unwraps the package key, then decrypts `EncryptedPackage` on demand as
+    a `Read + Seek` stream.
 - **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification):**
   `crates/formula-xlsx/src/offcrypto/*`
 - **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
@@ -195,6 +200,27 @@ Notes:
     assuming the file is corrupted.
   - See the in-repo Unicode-password fixture `fixtures/encrypted/ooxml/agile-unicode.xlsx` and the
     regression tests in `crates/formula-io/tests/encrypted_ooxml_decrypt.rs`.
+
+### Agile `blockKey` constants (must match spec exactly)
+
+Agile uses a handful of fixed 8-byte `blockKey` constants. They are **not** derived from the file
+and are easy to mistype; incorrect constants often yield “almost works” implementations that fail
+on real Excel-produced files.
+
+The canonical values (MS-OFFCRYPTO) are:
+
+```text
+VERIFIER_HASH_INPUT_BLOCK = FE A7 D2 76 3B 4B 9E 79
+VERIFIER_HASH_VALUE_BLOCK = D7 AA 0F 6D 30 61 34 4E
+KEY_VALUE_BLOCK           = 14 6E 0B E7 AB AC D0 D6
+HMAC_KEY_BLOCK            = 5F B2 AD 01 0C B9 E1 F6
+HMAC_VALUE_BLOCK          = A0 67 7F 02 B2 2C 84 33
+```
+
+Code references:
+
+- `crates/formula-xlsx/src/offcrypto/crypto.rs`
+- `crates/formula-office-crypto/src/agile.rs`
 
 ### Verifier check (wrong password vs continue)
 

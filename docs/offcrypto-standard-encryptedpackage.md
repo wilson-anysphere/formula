@@ -25,7 +25,8 @@ interoperability bugs are in the `EncryptedPackage` stream framing (the `u64` si
   (Standard Encryption)”.
   * Salt is 16 bytes and stored in `EncryptionVerifier.Salt`.
 Note: Agile encryption (4.4) uses 4096-byte segmenting + per-segment IVs. Standard/CryptoAPI AES
-`EncryptedPackage` decryption uses **AES-ECB** (no IV).
+`EncryptedPackage` decryption uses **AES-ECB** (no IV). For Agile details, see
+[`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 ## `EncryptedPackage` stream layout
 
