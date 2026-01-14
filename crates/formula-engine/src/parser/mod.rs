@@ -3582,69 +3582,92 @@ impl<'a> Parser<'a> {
         let save = self.pos;
         let open_span = self.current_span();
         self.expect(TokenKind::LBracket)?;
-        while !matches!(self.peek_kind(), TokenKind::RBracket | TokenKind::Eof) {
-            self.next();
-        }
-        self.expect(TokenKind::RBracket)?;
-        let close_span = self.tokens[self.pos - 1].span;
-        let workbook = self.src[open_span.end..close_span.start].to_string();
-        self.skip_trivia();
-        let start_sheet = match self.peek_kind() {
-            TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => self.take_name_token()?,
-            _ => {
-                // Not an external ref; rewind and parse as structured.
-                self.pos = save;
-                return self.parse_structured_ref(None, None, None);
+        let after_open = self.pos;
+
+        // Workbook ids may include `]` (e.g. `C:\[foo]\Book.xlsx`), so the first `]` token is not
+        // necessarily the workbook delimiter. Instead, treat any `]` as a *candidate* delimiter
+        // and pick the one that yields a valid `[workbook]sheet!` prefix.
+        for close_idx in after_open..self.tokens.len() {
+            match self.tokens.get(close_idx).map(|t| &t.kind) {
+                Some(TokenKind::RBracket) => {}
+                Some(TokenKind::Eof) | None => break,
+                _ => continue,
             }
-        };
-        self.skip_trivia();
-        let sheet_ref = if matches!(self.peek_kind(), TokenKind::Colon) {
-            // 3D sheet span with external workbook prefix: `[Book]Sheet1:Sheet3!A1`.
-            self.next();
+
+            let close_span = self.tokens[close_idx].span;
+            let workbook_start = open_span.end;
+            let workbook_end = close_span.start;
+            if workbook_end <= workbook_start {
+                continue;
+            }
+
+            // Try parsing the sheet portion after this candidate `]`.
+            self.pos = close_idx + 1;
             self.skip_trivia();
-            let end_sheet = match self.peek_kind() {
-                TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => self.take_name_token()?,
-                _ => {
-                    self.pos = save;
-                    return self.parse_structured_ref(None, None, None);
-                }
+            let Ok(start_sheet) = self.take_name_token() else {
+                continue;
             };
             self.skip_trivia();
-            if !matches!(self.peek_kind(), TokenKind::Bang) {
-                self.pos = save;
-                return self.parse_structured_ref(None, None, None);
-            }
-            if sheet_name_eq_case_insensitive(&start_sheet, &end_sheet) {
-                SheetRef::Sheet(start_sheet)
+
+            let sheet_ref = if matches!(self.peek_kind(), TokenKind::Colon) {
+                // 3D sheet span with external workbook prefix: `[Book]Sheet1:Sheet3!A1`.
+                self.next();
+                self.skip_trivia();
+                let Ok(end_sheet) = self.take_name_token() else {
+                    continue;
+                };
+                self.skip_trivia();
+                if !matches!(self.peek_kind(), TokenKind::Bang) {
+                    continue;
+                }
+                if sheet_name_eq_case_insensitive(&start_sheet, &end_sheet) {
+                    SheetRef::Sheet(start_sheet)
+                } else {
+                    SheetRef::SheetRange {
+                        start: start_sheet,
+                        end: end_sheet,
+                    }
+                }
             } else {
-                SheetRef::SheetRange {
-                    start: start_sheet,
-                    end: end_sheet,
+                if !matches!(self.peek_kind(), TokenKind::Bang) {
+                    // Workbook-scoped external defined name, e.g. `[Book.xlsx]MyName`.
+                    //
+                    // Note: `formula-xlsb`'s NameX decoder prefers emitting the fully-quoted form
+                    // (`'[Book.xlsx]MyName'`) to avoid the structured-ref ambiguity, but some producers
+                    // (and users) omit quotes. Support both.
+                    //
+                    // If the token after the candidate name is another `]`, we're still inside a
+                    // larger bracketed segment (meaning this `]` was not the workbook delimiter).
+                    // Reject this candidate and keep scanning for the real delimiter.
+                    if matches!(self.peek_kind(), TokenKind::RBracket) {
+                        continue;
+                    }
+                    let workbook = self.src[workbook_start..workbook_end].to_string();
+                    return Ok(Expr::NameRef(NameRef {
+                        workbook: Some(workbook),
+                        sheet: None,
+                        name: start_sheet,
+                    }));
                 }
-            }
-        } else {
-            if !matches!(self.peek_kind(), TokenKind::Bang) {
-                // Workbook-scoped external defined name, e.g. `[Book.xlsx]MyName`.
-                //
-                // Note: `formula-xlsb`'s NameX decoder prefers emitting the fully-quoted form
-                // (`'[Book.xlsx]MyName'`) to avoid the structured-ref ambiguity, but some producers
-                // (and users) omit quotes. Support both.
-                return Ok(Expr::NameRef(NameRef {
-                    workbook: Some(workbook),
-                    sheet: None,
-                    name: start_sheet,
-                }));
-            }
-            match split_sheet_span_name(&start_sheet) {
-                Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => {
-                    SheetRef::Sheet(start)
+
+                // Quoted sheet spans are emitted as a single token like `'Sheet1:Sheet3'!A1`.
+                match split_sheet_span_name(&start_sheet) {
+                    Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => {
+                        SheetRef::Sheet(start)
+                    }
+                    Some((start, end)) => SheetRef::SheetRange { start, end },
+                    None => SheetRef::Sheet(start_sheet),
                 }
-                Some((start, end)) => SheetRef::SheetRange { start, end },
-                None => SheetRef::Sheet(start_sheet),
-            }
-        };
-        self.next(); // bang
-        self.parse_ref_after_prefix(Some(workbook), Some(sheet_ref))
+            };
+
+            self.next(); // bang
+            let workbook = self.src[workbook_start..workbook_end].to_string();
+            return self.parse_ref_after_prefix(Some(workbook), Some(sheet_ref));
+        }
+
+        // Not an external ref; rewind and parse as structured.
+        self.pos = save;
+        self.parse_structured_ref(None, None, None)
     }
 
     fn parse_structured_ref(
@@ -3956,7 +3979,6 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
                 continue;
             }
         }
-
         // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
         // inside multi-byte sequences as actual bracket characters.
         let ch = name[i..].chars().next().expect("i always at char boundary");
@@ -4416,5 +4438,85 @@ mod tests {
 
         let rendered = ast.to_string(SerializeOptions::default()).unwrap();
         assert_eq!(rendered, "='[A1[Name.xlsx]MyName'+1");
+    }
+
+    #[test]
+    fn external_workbook_prefix_parses_when_workbook_contains_brackets() {
+        // Regression test: workbook ids may include `]` (e.g. `C:\[foo]\Book.xlsx`), and our
+        // serializer can emit bracketed workbook prefixes like `[C:\[foo]\Book.xlsx]Sheet1!A1`.
+        //
+        // Ensure the parser does not treat the `]` from `[foo]` as the workbook delimiter.
+        let formula = r"=[C:\[foo]\Book.xlsx]Sheet1!A1";
+        let ast = parse_formula(formula, ParseOptions::default()).unwrap();
+
+        match &ast.expr {
+            Expr::CellRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some(r"C:\[foo]\Book.xlsx"));
+                assert_eq!(
+                    r.sheet,
+                    Some(SheetRef::Sheet("Sheet1".to_string())),
+                    "expected external workbook prefix to be parsed as a sheet reference"
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn external_workbook_prefix_parses_when_quoted_and_workbook_contains_brackets() {
+        // When the sheet name needs quoting, Excel-style external references quote the combined
+        // `[workbook]sheet` prefix. Ensure we still split on the *last* `]` when the workbook id
+        // contains brackets.
+        let formula = r"='[C:\[foo]\Book.xlsx]My Sheet'!A1";
+        let ast = parse_formula(formula, ParseOptions::default()).unwrap();
+
+        match &ast.expr {
+            Expr::CellRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some(r"C:\[foo]\Book.xlsx"));
+                assert_eq!(
+                    r.sheet,
+                    Some(SheetRef::Sheet("My Sheet".to_string())),
+                    "expected quoted external workbook prefix to be parsed correctly"
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn external_workbook_path_qualified_reference_round_trips_through_serializer() {
+        // Excel can include a path prefix before the `[Book.xlsx]Sheet` portion of an external
+        // reference. We canonicalize these into a single workbook id during parsing.
+        let formula = r"='C:\[foo]\[Book.xlsx]Sheet1'!A1";
+        let ast = parse_formula(formula, ParseOptions::default()).unwrap();
+
+        match &ast.expr {
+            Expr::CellRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some(r"C:\[foo]\Book.xlsx"));
+                assert_eq!(r.sheet, Some(SheetRef::Sheet("Sheet1".to_string())));
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+
+        let rendered = ast.to_string(SerializeOptions::default()).unwrap();
+        assert!(
+            rendered.contains(r"[C:\[foo]\Book.xlsx]Sheet1")
+                || rendered.contains(r"C:\[foo]\[Book.xlsx]Sheet1"),
+            "expected serializer to emit a canonical external workbook prefix, got {rendered}"
+        );
+
+        // The canonical form should be parseable again.
+        let reparsed = parse_formula(&rendered, ParseOptions::default()).unwrap();
+        match &reparsed.expr {
+            Expr::CellRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some(r"C:\[foo]\Book.xlsx"));
+                assert_eq!(r.sheet, Some(SheetRef::Sheet("Sheet1".to_string())));
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+        assert_eq!(
+            reparsed.to_string(SerializeOptions::default()).unwrap(),
+            rendered
+        );
     }
 }

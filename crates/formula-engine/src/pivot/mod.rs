@@ -36,19 +36,12 @@ pub use definition::{
     PivotTableId,
 };
 pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
+    // Prefer a user-facing label that matches common cache captions:
+    // - Columns: `Table[Column]` (without quoting table names)
+    // - Measures: raw name (without DAX brackets) so default captions read `Sum of Total Sales`
     match field {
-        // Cache-backed pivots use the header caption directly.
-        PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name.as_str()),
-        // Data Model measures are frequently stored in cache headers without DAX brackets, so
-        // prefer the raw measure name and fall back to the `[Measure]` display form elsewhere.
         PivotFieldRef::DataModelMeasure(name) => Cow::Borrowed(name.as_str()),
-        // Data Model column refs may be stored in cache headers with or without DAX quoting for
-        // table names (e.g. `Dim Product[Category]` vs `'Dim Product'[Category]`). Prefer the
-        // unquoted `{table}[{column}]` form and fall back to the quoted DAX form elsewhere.
-        PivotFieldRef::DataModelColumn { table, column } => {
-            let column = escape_dax_bracket_identifier(column);
-            Cow::Owned(format!("{table}[{column}]"))
-        }
+        _ => field.canonical_name(),
     }
 }
 
@@ -80,10 +73,7 @@ fn dax_quoted_column_ref(table: &str, column: &str) -> String {
 fn pivot_field_ref_caption(field: &PivotFieldRef) -> Cow<'_, str> {
     // Value field captions should use the human-facing field name (Excel-like), not the DAX
     // reference form. In particular, measures are displayed without surrounding brackets.
-    match field {
-        PivotFieldRef::DataModelMeasure(measure) => Cow::Borrowed(measure.as_str()),
-        _ => pivot_field_ref_name(field),
-    }
+    pivot_field_ref_name(field)
 }
 
 #[allow(dead_code)]
@@ -300,8 +290,8 @@ impl PivotCache {
         // - Measures either as the raw name (`Total`) or in DAX bracket form (`[Total]`).
         // - Column refs with or without quoted table names (`Sales[Region]` vs `'Sales Table'[Region]`).
         //
-        // Try a few common textual encodings in priority order so callers can resolve fields
-        // regardless of how the cache captions were generated.
+        // Try a few common textual encodings so callers can resolve fields regardless of how the
+        // cache captions were generated.
         let canonical = field.canonical_name();
         if let Some(idx) = self.field_index(canonical.as_ref()) {
             return Some(idx);
@@ -312,8 +302,8 @@ impl PivotCache {
         }
 
         match field {
-            PivotFieldRef::CacheFieldName(_) => {}
             PivotFieldRef::DataModelMeasure(name) => {
+                // Raw measure name (no brackets).
                 if let Some(idx) = self.field_index(name) {
                     return Some(idx);
                 }
@@ -339,7 +329,6 @@ impl PivotCache {
                         return Some(idx);
                     }
                 }
-
                 // Rare: quoted table name but raw (unescaped) column name.
                 let table = dax_quoted_table_name(table);
                 let quoted_unescaped = format!("'{table}'[{column}]");
@@ -349,6 +338,7 @@ impl PivotCache {
                     }
                 }
             }
+            PivotFieldRef::CacheFieldName(_) => {}
         }
 
         // Final fallback: try the canonical `Display` rendering. This handles Data Model columns
