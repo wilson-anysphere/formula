@@ -717,6 +717,40 @@ fn cell_filename_supports_filename_only_metadata() {
 }
 
 #[test]
+fn workbook_file_metadata_treats_empty_strings_as_unknown() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=INFO(\"directory\")")
+        .unwrap();
+
+    engine.set_workbook_file_metadata(Some(""), Some(""));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text(String::new()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    // Empty strings should behave like `None`: when only the filename is provided, omit the
+    // directory prefix and continue to return #N/A for `INFO("directory")`.
+    engine.set_workbook_file_metadata(Some(""), Some("Book.xlsx"));
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("[Book.xlsx]Sheet1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::NA)
+    );
+}
+
+#[test]
 fn cell_filename_uses_reference_sheet_name_without_quoting() {
     use formula_engine::Engine;
 
