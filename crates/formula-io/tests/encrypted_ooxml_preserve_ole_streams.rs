@@ -4,7 +4,7 @@
 //! `\u{0005}SummaryInformation`) when decrypting and then re-encrypting.
 #![cfg(all(feature = "encrypted-workbooks", not(target_arch = "wasm32")))]
 
-use std::io::{Cursor, Read as _, Write as _};
+use std::io::{Cursor, Read as _, Seek as _, Write as _};
 use std::path::PathBuf;
 
 use formula_office_crypto::{encrypt_package_to_ole, EncryptOptions, EncryptionScheme, HashAlgorithm};
@@ -120,6 +120,26 @@ fn preserves_extra_ole_metadata_streams_for_standard_fixture_roundtrip() {
     let dummy_bytes = b"dummy summary information bytes (standard)";
     let cursor = Cursor::new(encrypted_bytes);
     let mut ole = cfb::CompoundFile::open(cursor).expect("open standard encrypted cfb");
+
+    // Regression: some producers treat the 8-byte `EncryptedPackage` size prefix as
+    // `(u32 size, u32 reserved)` and may write a non-zero reserved high DWORD. Ensure the
+    // "preserve OLE entries" decrypt+re-encrypt path tolerates this variant.
+    {
+        let mut stream = ole
+            .open_stream("EncryptedPackage")
+            .or_else(|_| ole.open_stream("/EncryptedPackage"))
+            .expect("open EncryptedPackage stream");
+        let mut header = [0u8; 8];
+        stream.read_exact(&mut header).expect("read EncryptedPackage header");
+        header[4..8].copy_from_slice(&1u32.to_le_bytes());
+        stream
+            .seek(std::io::SeekFrom::Start(0))
+            .expect("seek EncryptedPackage to start");
+        stream
+            .write_all(&header)
+            .expect("write modified EncryptedPackage header");
+    }
+
     ole.create_stream(SUMMARY_INFORMATION)
         .expect("create SummaryInformation stream")
         .write_all(dummy_bytes)
