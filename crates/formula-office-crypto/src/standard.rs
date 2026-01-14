@@ -254,9 +254,7 @@ fn parse_encryption_verifier(
     // - AES uses 16-byte blocks and pads `encryptedVerifierHash` to a multiple of 16.
     let encrypted_hash_len = match header.alg_id {
         CALG_RC4 => verifier_hash_size as usize,
-        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
-            ((verifier_hash_size as usize + 15) / 16) * 16
-        }
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => padded_aes_len(verifier_hash_size as usize)?,
         other => {
             return Err(OfficeCryptoError::UnsupportedEncryption(format!(
                 "unsupported cipher AlgID {other:#x}"
