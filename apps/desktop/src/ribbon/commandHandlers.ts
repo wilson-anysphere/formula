@@ -597,6 +597,32 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       });
       return true;
     }
+    if (kind.startsWith("accounting.")) {
+      const currency = kind.slice("accounting.".length);
+      const symbol = (() => {
+        switch (currency) {
+          case "eur":
+            return "€";
+          case "gbp":
+            return "£";
+          case "jpy":
+            return "¥";
+          case "usd":
+          default:
+            return "$";
+        }
+      })();
+
+      ctx.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+        let applied = true;
+        for (const range of ranges) {
+          const ok = doc.setRangeFormat(sheetId, range, { numberFormat: `${symbol}#,##0.00` }, { label: "Number format" });
+          if (ok === false) applied = false;
+        }
+        return applied;
+      });
+      return true;
+    }
     if (kind === "increaseDecimal" || kind === "decreaseDecimal") {
       const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(ctx), kind === "increaseDecimal" ? "increase" : "decrease");
       if (!next) return true;
@@ -643,34 +669,6 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       });
       return true;
     }
-    return true;
-  }
-
-  const accountingPrefix = "format.numberFormat.accounting.";
-  if (commandId.startsWith(accountingPrefix)) {
-    const currency = commandId.slice(accountingPrefix.length);
-    const symbol = (() => {
-      switch (currency) {
-        case "eur":
-          return "€";
-        case "gbp":
-          return "£";
-        case "jpy":
-          return "¥";
-        case "usd":
-        default:
-          return "$";
-      }
-    })();
-
-    ctx.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-      let applied = true;
-      for (const range of ranges) {
-        const ok = doc.setRangeFormat(sheetId, range, { numberFormat: `${symbol}#,##0.00` }, { label: "Number format" });
-        if (ok === false) applied = false;
-      }
-      return applied;
-    });
     return true;
   }
 

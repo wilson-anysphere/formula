@@ -79,6 +79,17 @@ describe("handleRibbonCommand", () => {
     expect(style.numberFormat).toBe("yyyy-mm-dd");
   });
 
+  it("applies accounting symbol formats", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    handleRibbonCommand(ctx, "format.numberFormat.accounting.eur");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("€#,##0.00");
+
+    handleRibbonCommand(ctx, "format.numberFormat.accounting.jpy");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("¥#,##0.00");
+  });
+
   it("does not adjust decimals for time-only formats", () => {
     const doc = new DocumentController();
     const ctx = createCtx(doc);
