@@ -138,20 +138,20 @@ export function registerHomeStylesCommands(params: {
               return true;
             }
 
-             // `applyFormattingToSelection` allows full row/column band selections (Excel-scale) because
-             // many formatting operations are scalable via layered formats. Format-as-table banding
-             // requires per-row formatting and would be O(rows), so impose a stricter cap here.
-             const range = ranges[0];
-             const rowCount = range.end.row - range.start.row + 1;
-             const colCount = range.end.col - range.start.col + 1;
-             const cellCount = rowCount * colCount;
-             const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
-             if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
-               try {
-                 showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
-               } catch {
-                 // ignore
-               }
+            // `applyFormattingToSelection` allows full row/column band selections (Excel-scale) because
+            // many formatting operations are scalable via layered formats. Format-as-table banding
+            // requires per-row formatting and would be O(rows), so impose a stricter cap here.
+            const range = ranges[0];
+            const rowCount = range.end.row - range.start.row + 1;
+            const colCount = range.end.col - range.start.col + 1;
+            const cellCount = rowCount * colCount;
+            const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
+            if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
+              try {
+                showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
+              } catch {
+                // ignore
+              }
               return true;
             }
             return applyFormatAsTablePreset(doc, sheetId, ranges[0], presetId);
