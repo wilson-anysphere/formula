@@ -1,4 +1,4 @@
-import type { CellChange, CellData as EngineCellData, CellScalar, EngineClient } from "@formula/engine";
+import type { CellChange, CellData, CellDataCompact, CellScalar, EngineClient } from "@formula/engine";
 import { fromA1, range0ToA1, type Range0 } from "./a1.ts";
 
 function defaultSheetName(sheet?: string): string {
@@ -93,15 +93,13 @@ export class EngineCellCache {
     const generation = this.generation;
     const task = (async () => {
       const engine = this.engine as EngineClient;
-      let rows: any[][] | null = null;
-      let usedCompact = false;
+      let compactRows: CellDataCompact[][] | null = null;
       // Call through the engine object (not a detached function reference) so `this`
       // binding remains correct for EngineClient implementations that are class instances.
       if (this.supportsRangeCompact !== false && typeof engine.getRangeCompact === "function") {
         try {
-          rows = (await engine.getRangeCompact(rangeA1, sheetName)) as any[][];
+          compactRows = await engine.getRangeCompact(rangeA1, sheetName);
           this.supportsRangeCompact = true;
-          usedCompact = true;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           const isMissingCompactApi =
@@ -114,20 +112,40 @@ export class EngineCellCache {
         }
       }
 
-      if (!rows) {
-        rows = (await engine.getRange(rangeA1, sheetName)) as any[][];
+      if (generation !== this.generation) {
+        return;
       }
+
+      if (compactRows) {
+        for (let r = 0; r < compactRows.length; r++) {
+          const row = compactRows[r] ?? [];
+          for (let c = 0; c < row.length; c++) {
+            const cell = row[c];
+            const rawValue = cell?.[1] ?? null;
+            const value = normalizeCellValue(rawValue);
+            const cellRow0 = range.startRow0 + r;
+            const cellCol0 = range.startCol0 + c;
+            this.setValue(cacheKey(sheetName, cellRow0, cellCol0), value);
+          }
+        }
+        this.trim();
+        return;
+      }
+
+      // If compact fetching isn't supported, fall back to the legacy `{sheet,address,input,value}`
+      // payload shape.
+      const legacyRows = await engine.getRange(rangeA1, sheetName);
 
       if (generation !== this.generation) {
         return;
       }
 
-      for (let r = 0; r < rows.length; r++) {
-        const row = rows[r] ?? [];
+      for (let r = 0; r < legacyRows.length; r++) {
+        const row = legacyRows[r] ?? [];
         for (let c = 0; c < row.length; c++) {
-          const cell = row[c];
-          const rawValue = usedCompact ? cell?.[1] : cell?.value;
-          const value = normalizeCellValue(rawValue ?? null);
+          const cell = row[c] as CellData | undefined;
+          const rawValue = cell?.value ?? null;
+          const value = normalizeCellValue(rawValue);
           const cellRow0 = range.startRow0 + r;
           const cellCol0 = range.startCol0 + c;
           this.setValue(cacheKey(sheetName, cellRow0, cellCol0), value);
