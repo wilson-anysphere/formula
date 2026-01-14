@@ -1597,6 +1597,7 @@ export class SpreadsheetApp {
       }
     | null = null;
   private chartDragAbort: AbortController | null = null;
+
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
   private commentsPanelCell!: HTMLDivElement;
@@ -2165,6 +2166,7 @@ export class SpreadsheetApp {
     if (this.presenceCanvas) this.root.appendChild(this.presenceCanvas);
     this.root.appendChild(this.selectionCanvas);
     this.root.appendChild(this.chartSelectionCanvas);
+
     // Avoid allocating a fresh `{row,col}` object for every chart cell lookup.
     const chartCoordScratch = { row: 0, col: 0 };
     const getChartCellValue = (sheetId: string, row: number, col: number): unknown => {
@@ -3210,11 +3212,13 @@ export class SpreadsheetApp {
     // clipped to the cell grid body area under headers).
     //
     // Use a capture listener so we can intercept drawing clicks before grid selection handlers run.
-    this.root.addEventListener("pointerdown", (e) => this.onDrawingPointerDownCapture(e), {
-      capture: true,
-      passive: false,
-      signal: this.domAbort.signal,
-    });
+    if (this.sharedGrid) {
+      this.root.addEventListener("pointerdown", (e) => this.onDrawingPointerDownCapture(e), {
+        capture: true,
+        passive: false,
+        signal: this.domAbort.signal,
+      });
+    }
 
     this.root.addEventListener("dragover", (e) => this.onGridDragOver(e), { signal: this.domAbort.signal });
     this.root.addEventListener("drop", (e) => this.onGridDrop(e), { signal: this.domAbort.signal });
@@ -7747,17 +7751,16 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Test-only helper: force the in-memory drawings cache to resync from the DocumentController.
+   * Test-only helper: force SpreadsheetApp to refresh its cached drawing objects from the document.
    *
-   * Some tests mutate the DocumentController drawings list directly and need a synchronous way to
-   * update SpreadsheetApp's memoized drawing/hit-test state.
+   * Some unit tests mutate `DocumentController.setSheetDrawings` directly and need a synchronous
+   * way to invalidate hit-test caches before dispatching pointer events.
    */
   syncSheetDrawings(): void {
     if (this.disposed) return;
     this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
-    // Prime the cache from the document.
+    this.invalidateDrawingGeometryCaches();
+    // Prime the cache from the document even if we can't render yet (defensive for tests).
     void this.listDrawingObjectsForSheet();
 
     // Keep legacy scroll state aligned before rendering in shared-grid mode.
@@ -18866,25 +18869,25 @@ export class SpreadsheetApp {
         nextAnchor = resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
       }
 
-      const objects = this.listDrawingObjectsForSheet();
-      const targetId = gesture.objectId;
-      let targetIndex = gesture.objectIndex;
-      const hasCachedIndex =
-        typeof targetIndex === "number" &&
-        targetIndex >= 0 &&
-        targetIndex < objects.length &&
-        objects[targetIndex]?.id === targetId;
-      if (!hasCachedIndex) {
-        targetIndex = -1;
-        for (let i = 0; i < objects.length; i += 1) {
-          if (objects[i]!.id === targetId) {
-            targetIndex = i;
-            break;
-          }
-        }
-        gesture.objectIndex = targetIndex;
-      }
-      const base = targetIndex >= 0 && targetIndex < objects.length ? objects[targetIndex] ?? null : null;
+	      const objects = this.listDrawingObjectsForSheet();
+	      const targetId = gesture.objectId;
+	      let targetIndex = gesture.objectIndex;
+	      const hasCachedIndex =
+	        typeof targetIndex === "number" &&
+	        targetIndex >= 0 &&
+	        targetIndex < objects.length &&
+	        objects[targetIndex]?.id === targetId;
+	      if (!hasCachedIndex) {
+	        targetIndex = -1;
+	        for (let i = 0; i < objects.length; i += 1) {
+	          if (objects[i]!.id === targetId) {
+	            targetIndex = i;
+	            break;
+	          }
+	        }
+	      }
+	      gesture.objectIndex = targetIndex;
+	      const base = targetIndex >= 0 && targetIndex < objects.length ? objects[targetIndex] ?? null : null;
       if (!base) {
         this.drawingGesture = null;
         try {
@@ -18964,7 +18967,6 @@ export class SpreadsheetApp {
       } catch {
         // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
       }
-
       this.commitDrawingInteraction({
         kind: gesture.mode === "resize" ? "resize" : "move",
         id: gesture.objectId,

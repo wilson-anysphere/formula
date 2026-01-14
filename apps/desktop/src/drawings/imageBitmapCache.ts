@@ -517,6 +517,17 @@ export class ImageBitmapCache {
       ) {
         throw new Error(`Image dimensions too large (${dims.width}x${dims.height})`);
       }
+
+      // Some callers/tests use a PNG header stub (signature + partial IHDR) to communicate dimensions
+      // without including a full PNG payload. A valid PNG requires at least the full IHDR chunk
+      // header + 13-byte IHDR data + CRC:
+      //   signature(8) + length(4) + type(4) + data(13) + crc(4) = 33 bytes
+      //
+      // If we don't have that, decoding is guaranteed to fail; avoid invoking `createImageBitmap`
+      // in that case so callers can rely on the "no decode attempted" invariant.
+      if (entry.bytes.byteLength < 33) {
+        throw new Error("Invalid PNG: truncated IHDR");
+      }
     }
 
     // Blob construction already clones ArrayBufferView bytes; avoid a second manual copy.

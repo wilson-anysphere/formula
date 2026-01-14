@@ -304,9 +304,9 @@ describe("SpreadsheetApp drawings header clipping", () => {
         activeValue: document.createElement("div"),
       };
 
-      // This test exercises SpreadsheetApp's capture-phase hit testing fallback.
-      // In shared-grid mode, drawing interactions are enabled by default, which would
-      // route pointer handling through DrawingInteractionController instead.
+      // This test exercises SpreadsheetApp's capture-based drawing hit testing path
+      // (`onDrawingPointerDownCapture`), which is only active when the drawing interaction
+      // controller is disabled. (Shared-grid enables drawing interactions by default.)
       const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
       expect(app.getGridMode()).toBe("shared");
 

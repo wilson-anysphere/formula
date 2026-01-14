@@ -769,6 +769,9 @@ export class SecondaryGridView {
     this.container.dataset.scrollX = String(scroll.x);
     this.container.dataset.scrollY = String(scroll.y);
     this.repositionEditor();
+    // Axis size overrides can change cell origins/sizes while the drawing object list is stable.
+    // Invalidate the spatial index so `DrawingOverlay` recomputes sheet-space bounds on next render.
+    this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
 
@@ -1065,10 +1068,10 @@ export class SecondaryGridView {
     const matchesSheet = (delta: any): boolean => String(delta?.sheetId ?? "") === sheetId;
     const touchesSheet = (deltas: any): boolean => Array.isArray(deltas) && deltas.some(matchesSheet);
 
-    // Drawings metadata now lives in sheet view state (undoable via `sheetViewDeltas`).
-    // Additionally, any sheet-view mutation can affect drawing rendering (frozen panes,
-    // row/col sizes), so treat sheetViewDeltas on the active sheet as drawing-affecting.
-    if (touchesSheet(payload?.sheetViewDeltas)) return true;
+    // NOTE: sheet view deltas (frozen panes / row+col sizes / drawing metadata) are synced via
+    // `syncSheetViewFromDocument()` in a dedicated listener, which also triggers a drawings render.
+    // Avoid treating them as drawing-affecting here to prevent redundant renders with stale geometry
+    // during axis resize / sheet-view sync flows.
 
     // Sheet meta/order changes can change the active sheet or invalidate cached geometry.
     if (touchesSheet(payload?.sheetMetaDeltas) || payload?.sheetOrderDelta) return true;

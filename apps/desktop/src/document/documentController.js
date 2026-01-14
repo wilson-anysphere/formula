@@ -4165,6 +4165,42 @@ export class DocumentController {
   }
 
   /**
+   * Set a full cell state (value/formula/styleId) in one operation.
+   *
+   * This is primarily used when importing/caching values where a cell may carry both a formula
+   * *and* a cached rich-value result (e.g. IMAGE(...) payloads). `setCellFormula()` intentionally
+   * clears the value, so callers that need to preserve both should use this API.
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number} col
+   * @param {Partial<CellState> | null | undefined} cell
+   * @param {{ mergeKey?: string, label?: string, source?: string }} [options]
+   */
+  setCell(sheetId, row, col, cell, options = {}) {
+    const r = Number(row);
+    const c = Number(col);
+    if (!Number.isInteger(r) || r < 0) return;
+    if (!Number.isInteger(c) || c < 0) return;
+    const before = this.model.getCell(sheetId, r, c);
+
+    const hasValue = cell != null && Object.prototype.hasOwnProperty.call(cell, "value");
+    const hasFormula = cell != null && Object.prototype.hasOwnProperty.call(cell, "formula");
+    const hasStyleId = cell != null && Object.prototype.hasOwnProperty.call(cell, "styleId");
+
+    const after = {
+      value: hasValue ? (cell.value ?? null) : before.value,
+      formula: hasFormula ? normalizeFormula(cell.formula) : before.formula,
+      styleId: hasStyleId && Number.isInteger(cell.styleId) ? cell.styleId : before.styleId,
+    };
+    if (cellStateEquals(before, after)) return;
+    this.#applyUserDeltas(
+      [{ sheetId, row: r, col: c, before, after: cloneCellState(after) }],
+      options,
+    );
+  }
+
+  /**
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @param {CellValue} value
