@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 
-use formula_model::{CellRef, CellValue, VerticalAlignment};
+use formula_model::CellValue;
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -97,40 +97,66 @@ fn patch_filepass_cryptoapi_alg_id(workbook_stream: &mut [u8], new_alg_id: u32) 
     panic!("FILEPASS record not found");
 }
 
+fn find_record_offset_from(workbook_stream: &[u8], start: usize, target_id: u16) -> Option<usize> {
+    let mut offset = start;
+    while offset + 4 <= workbook_stream.len() {
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len =
+            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let data_end = offset + 4 + len;
+        if data_end > workbook_stream.len() {
+            return None;
+        }
+        if record_id == target_id {
+            return Some(offset);
+        }
+        offset = data_end;
+    }
+    None
+}
+
 #[test]
 fn decrypts_rc4_cryptoapi_biff8_xls() {
+    const RECORD_FILEPASS: u16 = 0x002F;
+    const RECORD_WINDOW1: u16 = 0x003D;
+
+    // Sanity-check the fixture structure: the `WINDOW1` record we want to validate is stored *after*
+    // the `FILEPASS` record, meaning its payload is encrypted and can only be decoded once BIFF
+    // parsing continues past `FILEPASS` on the decrypted stream.
+    let bytes = std::fs::read(fixture_path()).expect("read fixture");
+    let workbook_stream = read_workbook_stream_from_xls_bytes(&bytes);
+    let filepass_offset =
+        find_record_offset_from(&workbook_stream, 0, RECORD_FILEPASS).expect("FILEPASS record");
+    let filepass_len = u16::from_le_bytes([
+        workbook_stream[filepass_offset + 2],
+        workbook_stream[filepass_offset + 3],
+    ]) as usize;
+    let after_filepass = filepass_offset + 4 + filepass_len;
+    let window1_offset =
+        find_record_offset_from(&workbook_stream, after_filepass, RECORD_WINDOW1)
+            .expect("WINDOW1 record after FILEPASS");
+    assert!(
+        window1_offset > filepass_offset,
+        "expected WINDOW1 to appear after FILEPASS in fixture stream"
+    );
+
     let result = formula_xls::import_xls_path_with_password(fixture_path(), PASSWORD)
         .expect("expected decrypt + import to succeed");
 
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
     assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
 
-    // Ensure workbook-global style metadata *after* FILEPASS was imported.
+    // Ensure workbook-global metadata *after* FILEPASS was imported.
     //
-    // In an encrypted workbook, XF/font/format records are located after FILEPASS and their
-    // payload bytes are encrypted. After decryption we still retain the FILEPASS record header,
-    // so we must mask it to allow BIFF parsing to continue and import the XF table.
-    let cell = sheet
-        .cell(CellRef::from_a1("A1").unwrap())
-        .expect("A1 cell exists");
-    assert_ne!(cell.style_id, 0, "expected BIFF-derived style id");
-
-    let style = result
-        .workbook
-        .styles
-        .get(cell.style_id)
-        .expect("style exists for A1");
-    assert!(
-        style.alignment.is_some(),
-        "expected at least one XF-derived alignment property to be imported"
-    );
+    // We use the active tab index (`WINDOW1.iTabCur`) as the canary for "did BIFF workbook-globals
+    // parsing continue after FILEPASS on the decrypted stream?".
+    //
+    // Without masking/ignoring `FILEPASS`, the workbook-globals parser stops at that record and
+    // never sees `WINDOW1`, leaving `active_sheet_id` unset.
     assert_eq!(
-        style
-            .alignment
-            .as_ref()
-            .and_then(|alignment| alignment.vertical),
-        Some(VerticalAlignment::Top),
-        "expected A1 style to preserve vertical alignment from the decrypted XF record"
+        result.workbook.view.active_sheet_id,
+        Some(sheet.id),
+        "expected BIFF-derived active sheet id"
     );
 }
 

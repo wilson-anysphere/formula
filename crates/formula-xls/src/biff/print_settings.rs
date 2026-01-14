@@ -13,6 +13,8 @@ const RECORD_LEFTMARGIN: u16 = 0x0026;
 const RECORD_RIGHTMARGIN: u16 = 0x0027;
 const RECORD_TOPMARGIN: u16 = 0x0028;
 const RECORD_BOTTOMMARGIN: u16 = 0x0029;
+// WSBOOL [MS-XLS 2.4.376] stores worksheet boolean properties; we only care about fFitToPage
+// (bit 8 / mask 0x0100).
 const RECORD_WSBOOL: u16 = 0x0081;
 
 // WSBOOL options.
