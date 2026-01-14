@@ -19,7 +19,10 @@ use crate::locale::{
     localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
 use crate::value::{Array, ErrorKind, Value};
-use formula_model::{CellId, CellRef, Range, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+use formula_model::{
+    CellId, CellRef, ColProperties, Range, RowProperties, Style, StyleTable, Table, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS,
+};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::cell::RefCell;
@@ -163,6 +166,11 @@ struct BytecodeFormula {
 #[derive(Debug, Clone)]
 struct Cell {
     value: Value,
+    /// Style id referencing [`Workbook::styles`].
+    ///
+    /// Excel preserves formatting when editing values/formulas, so engine APIs should avoid
+    /// overwriting this field unless explicitly changing formatting.
+    style_id: u32,
     formula: Option<String>,
     compiled: Option<CompiledFormula>,
     bytecode_compile_reason: Option<BytecodeCompileReason>,
@@ -175,6 +183,7 @@ impl Default for Cell {
     fn default() -> Self {
         Self {
             value: Value::Blank,
+            style_id: 0,
             formula: None,
             compiled: None,
             bytecode_compile_reason: None,
@@ -199,6 +208,10 @@ struct Sheet {
     ///
     /// The engine currently enforces Excel's 16,384-column maximum.
     col_count: u32,
+    /// Per-row formatting/visibility overrides.
+    row_properties: BTreeMap<u32, RowProperties>,
+    /// Per-column formatting/visibility overrides.
+    col_properties: BTreeMap<u32, ColProperties>,
 }
 
 impl Default for Sheet {
@@ -210,6 +223,8 @@ impl Default for Sheet {
             // Default to Excel-compatible sheet bounds.
             row_count: EXCEL_MAX_ROWS,
             col_count: EXCEL_MAX_COLS,
+            row_properties: BTreeMap::new(),
+            col_properties: BTreeMap::new(),
         }
     }
 }
@@ -220,6 +235,9 @@ struct Workbook {
     sheet_names: Vec<String>,
     sheet_name_to_id: HashMap<String, SheetId>,
     names: HashMap<String, DefinedName>,
+    styles: StyleTable,
+    workbook_directory: Option<String>,
+    workbook_filename: Option<String>,
 }
 
 impl Workbook {
@@ -455,6 +473,190 @@ impl Engine {
     /// before setting formulas to ensure cross-sheet references resolve correctly.
     pub fn ensure_sheet(&mut self, sheet: &str) {
         self.workbook.ensure_sheet(sheet);
+    }
+
+    /// Insert (or reuse) a style in the workbook's style table, returning its stable id.
+    pub fn intern_style(&mut self, style: Style) -> u32 {
+        self.workbook.styles.intern(style)
+    }
+
+    /// Set the style id for a cell.
+    ///
+    /// Note: Unlike [`Engine::clear_cell`], this does **not** clear a cell's value/formula. Excel
+    /// preserves formatting when editing contents, so this API only touches the cell's formatting
+    /// metadata.
+    pub fn set_cell_style_id(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        style_id: u32,
+    ) -> Result<(), EngineError> {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let addr = parse_a1(addr)?;
+        if addr.row >= i32::MAX as u32 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
+        }
+        if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+            // Sheet dimensions affect out-of-bounds semantics (`#REF!`). Formatting edits can
+            // introduce new in-bounds coordinates, so conservatively refresh compiled results.
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
+        let cell = self.workbook.get_or_create_cell_mut(key);
+        cell.style_id = style_id;
+        Ok(())
+    }
+
+    /// Set (or clear) the explicit width override for a column.
+    pub fn set_col_width(&mut self, sheet: &str, col_0based: u32, width: Option<f32>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        if self.workbook.grow_sheet_dimensions(
+            sheet_id,
+            CellAddr {
+                row: 0,
+                col: col_0based,
+            },
+        ) {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+        sheet
+            .col_properties
+            .entry(col_0based)
+            .and_modify(|p| p.width = width)
+            .or_insert_with(|| ColProperties {
+                width,
+                hidden: false,
+                style_id: None,
+            });
+
+        // Prune default entries to keep the map sparse.
+        if let Some(props) = sheet.col_properties.get(&col_0based) {
+            if props.width.is_none() && !props.hidden && props.style_id.is_none() {
+                sheet.col_properties.remove(&col_0based);
+            }
+        }
+    }
+
+    /// Set whether a column is user-hidden.
+    pub fn set_col_hidden(&mut self, sheet: &str, col_0based: u32, hidden: bool) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        if self.workbook.grow_sheet_dimensions(
+            sheet_id,
+            CellAddr {
+                row: 0,
+                col: col_0based,
+            },
+        ) {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+        sheet
+            .col_properties
+            .entry(col_0based)
+            .and_modify(|p| p.hidden = hidden)
+            .or_insert_with(|| ColProperties {
+                width: None,
+                hidden,
+                style_id: None,
+            });
+
+        // Prune default entries to keep the map sparse.
+        if let Some(props) = sheet.col_properties.get(&col_0based) {
+            if props.width.is_none() && !props.hidden && props.style_id.is_none() {
+                sheet.col_properties.remove(&col_0based);
+            }
+        }
+    }
+
+    /// Set the default style id for a row.
+    pub fn set_row_style_id(&mut self, sheet: &str, row_0based: u32, style_id: Option<u32>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        if self.workbook.grow_sheet_dimensions(
+            sheet_id,
+            CellAddr {
+                row: row_0based,
+                col: 0,
+            },
+        ) {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+        sheet
+            .row_properties
+            .entry(row_0based)
+            .and_modify(|p| p.style_id = style_id)
+            .or_insert_with(|| RowProperties {
+                height: None,
+                hidden: false,
+                style_id,
+            });
+
+        if let Some(props) = sheet.row_properties.get(&row_0based) {
+            if props.height.is_none() && !props.hidden && props.style_id.is_none() {
+                sheet.row_properties.remove(&row_0based);
+            }
+        }
+    }
+
+    /// Set the default style id for a column.
+    pub fn set_col_style_id(&mut self, sheet: &str, col_0based: u32, style_id: Option<u32>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        if self.workbook.grow_sheet_dimensions(
+            sheet_id,
+            CellAddr {
+                row: 0,
+                col: col_0based,
+            },
+        ) {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+        sheet
+            .col_properties
+            .entry(col_0based)
+            .and_modify(|p| p.style_id = style_id)
+            .or_insert_with(|| ColProperties {
+                width: None,
+                hidden: false,
+                style_id,
+            });
+
+        if let Some(props) = sheet.col_properties.get(&col_0based) {
+            if props.width.is_none() && !props.hidden && props.style_id.is_none() {
+                sheet.col_properties.remove(&col_0based);
+            }
+        }
+    }
+
+    /// Set workbook file metadata (directory + filename).
+    ///
+    /// This is primarily used by workbook information functions (`INFO("directory")`, etc).
+    pub fn set_workbook_file_metadata(
+        &mut self,
+        directory: Option<String>,
+        filename: Option<String>,
+    ) {
+        self.workbook.workbook_directory = directory;
+        self.workbook.workbook_filename = filename;
     }
 
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
@@ -3765,7 +3967,11 @@ impl Engine {
             }
         }
 
-        fn normalize_inner(expr: &crate::Expr, sheet_name: &str, fill_unprefixed: bool) -> crate::Expr {
+        fn normalize_inner(
+            expr: &crate::Expr,
+            sheet_name: &str,
+            fill_unprefixed: bool,
+        ) -> crate::Expr {
             match expr {
                 crate::Expr::CellRef(r) => {
                     let mut r = r.clone();
@@ -3832,10 +4038,12 @@ impl Engine {
                         .map(|arg| normalize_inner(arg, sheet_name, true))
                         .collect(),
                 }),
-                crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                    base: Box::new(normalize_inner(&access.base, sheet_name, true)),
-                    field: access.field.clone(),
-                }),
+                crate::Expr::FieldAccess(access) => {
+                    crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                        base: Box::new(normalize_inner(&access.base, sheet_name, true)),
+                        field: access.field.clone(),
+                    })
+                }
                 crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
                     rows: arr
                         .rows
@@ -3982,9 +4190,7 @@ impl Engine {
                     right: Box::new(right),
                 }))
             }
-            crate::Expr::StructuredRef(sref) => {
-                Some(crate::Expr::StructuredRef(sref.clone()))
-            }
+            crate::Expr::StructuredRef(sref) => Some(crate::Expr::StructuredRef(sref.clone())),
             crate::Expr::NameRef(nref) => self.try_inline_defined_name_ref_for_bytecode(
                 nref,
                 current_sheet,
@@ -4874,6 +5080,26 @@ fn shift_rows(sheet: &mut Sheet, row: u32, count: u32, insert: bool) {
         }
     }
     sheet.cells = new_cells;
+
+    // Shift row-level metadata alongside the cells for full-row edits.
+    let mut new_rows = BTreeMap::new();
+    for (r, props) in std::mem::take(&mut sheet.row_properties) {
+        if insert {
+            if r >= row {
+                new_rows.insert(r.saturating_add(count), props);
+            } else {
+                new_rows.insert(r, props);
+            }
+            continue;
+        }
+
+        if r < row {
+            new_rows.insert(r, props);
+        } else if r > del_end {
+            new_rows.insert(r.saturating_sub(count), props);
+        }
+    }
+    sheet.row_properties = new_rows;
 }
 
 fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
@@ -4908,6 +5134,26 @@ fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
         }
     }
     sheet.cells = new_cells;
+
+    // Shift column-level metadata alongside the cells for full-column edits.
+    let mut new_cols = BTreeMap::new();
+    for (c, props) in std::mem::take(&mut sheet.col_properties) {
+        if insert {
+            if c >= col {
+                new_cols.insert(c.saturating_add(count), props);
+            } else {
+                new_cols.insert(c, props);
+            }
+            continue;
+        }
+
+        if c < col {
+            new_cols.insert(c, props);
+        } else if c > del_end {
+            new_cols.insert(c.saturating_sub(count), props);
+        }
+    }
+    sheet.col_properties = new_cols;
 }
 
 fn insert_cells_shift_right(sheet: &mut Sheet, range: Range, width: u32) {
@@ -6026,16 +6272,13 @@ fn canonical_expr_collect_defined_name_prefix_errors_for_name(
         NameDefinition::Constant(_) => {}
         NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
             if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
-                flags.external_reference |= canonical_expr_contains_external_workbook_refs(&ast.expr);
+                flags.external_reference |=
+                    canonical_expr_contains_external_workbook_refs(&ast.expr);
                 canonical_expr_collect_sheet_prefix_errors(&ast.expr, sheet_id, workbook, flags);
 
                 if !flags.external_reference && !canonical_expr_contains_let_or_lambda(&ast.expr) {
                     canonical_expr_collect_defined_name_prefix_errors(
-                        &ast.expr,
-                        sheet_id,
-                        workbook,
-                        visiting,
-                        flags,
+                        &ast.expr, sheet_id, workbook, visiting, flags,
                     );
                 }
             }
@@ -6292,6 +6535,7 @@ struct Snapshot {
     sheet_names_by_id: Vec<String>,
     sheet_dimensions: Vec<(u32, u32)>,
     values: HashMap<CellKey, Value>,
+    style_ids: HashMap<CellKey, u32>,
     formulas: HashMap<CellKey, String>,
     /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
     ///
@@ -6305,6 +6549,11 @@ struct Snapshot {
     tables: Vec<Vec<Table>>,
     workbook_names: HashMap<String, crate::eval::ResolvedName>,
     sheet_names: Vec<HashMap<String, crate::eval::ResolvedName>>,
+    row_properties: Vec<BTreeMap<u32, RowProperties>>,
+    col_properties: Vec<BTreeMap<u32, ColProperties>>,
+    styles: StyleTable,
+    workbook_directory: Option<String>,
+    workbook_filename: Option<String>,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
 }
@@ -6324,6 +6573,7 @@ impl Snapshot {
             .map(|s| (s.row_count, s.col_count))
             .collect();
         let mut values = HashMap::new();
+        let mut style_ids = HashMap::new();
         let mut formulas = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
@@ -6333,6 +6583,7 @@ impl Snapshot {
                     addr: *addr,
                 };
                 values.insert(key, cell.value.clone());
+                style_ids.insert(key, cell.style_id);
                 if let Some(formula) = cell.formula.as_ref() {
                     formulas.insert(key, formula.clone());
                 }
@@ -6367,6 +6618,16 @@ impl Snapshot {
         }
         let spill_origin_by_cell = spills.origin_by_cell.clone();
         let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+        let row_properties = workbook
+            .sheets
+            .iter()
+            .map(|s| s.row_properties.clone())
+            .collect();
+        let col_properties = workbook
+            .sheets
+            .iter()
+            .map(|s| s.col_properties.clone())
+            .collect();
 
         let mut workbook_names = HashMap::new();
         for (name, def) in &workbook.names {
@@ -6400,6 +6661,7 @@ impl Snapshot {
             sheet_names_by_id,
             sheet_dimensions,
             values,
+            style_ids,
             formulas,
             ordered_cells,
             spill_end_by_origin,
@@ -6407,6 +6669,11 @@ impl Snapshot {
             tables,
             workbook_names,
             sheet_names,
+            row_properties,
+            col_properties,
+            styles: workbook.styles.clone(),
+            workbook_directory: workbook.workbook_directory.clone(),
+            workbook_filename: workbook.workbook_filename.clone(),
             external_value_provider,
             external_data_provider,
         }
@@ -6450,6 +6717,42 @@ impl crate::eval::ValueResolver for Snapshot {
                 addr,
             })
             .map(|s| s.as_str())
+    }
+
+    fn style_table(&self) -> Option<&StyleTable> {
+        Some(&self.styles)
+    }
+
+    fn cell_style_id(&self, sheet_id: usize, addr: CellAddr) -> u32 {
+        self.style_ids
+            .get(&CellKey {
+                sheet: sheet_id,
+                addr,
+            })
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn row_style_id(&self, sheet_id: usize, row: u32) -> Option<u32> {
+        self.row_properties
+            .get(sheet_id)
+            .and_then(|map| map.get(&row))
+            .and_then(|props| props.style_id)
+    }
+
+    fn col_properties(&self, sheet_id: usize, col: u32) -> Option<ColProperties> {
+        self.col_properties
+            .get(sheet_id)
+            .and_then(|map| map.get(&col))
+            .cloned()
+    }
+
+    fn workbook_directory(&self) -> Option<&str> {
+        self.workbook_directory.as_deref()
+    }
+
+    fn workbook_filename(&self) -> Option<&str> {
+        self.workbook_filename.as_deref()
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
@@ -6694,7 +6997,9 @@ fn rewrite_defined_name_constants_for_bytecode(
         lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         match expr {
-            crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook, lexical_scopes),
+            crate::Expr::NameRef(nref) => {
+                inline_name_ref(nref, current_sheet, workbook, lexical_scopes)
+            }
             crate::Expr::FieldAccess(access) => rewrite_inner(
                 access.base.as_ref(),
                 current_sheet,
@@ -7830,7 +8135,10 @@ fn bytecode_expr_first_unsupported_function(expr: &bytecode::Expr) -> Option<Arc
         }
         bytecode::Expr::Lambda { body, .. } => bytecode_expr_first_unsupported_function(body),
         bytecode::Expr::Call { callee, args } => bytecode_expr_first_unsupported_function(callee)
-            .or_else(|| args.iter().find_map(|arg| bytecode_expr_first_unsupported_function(arg))),
+            .or_else(|| {
+                args.iter()
+                    .find_map(|arg| bytecode_expr_first_unsupported_function(arg))
+            }),
         bytecode::Expr::Literal(_)
         | bytecode::Expr::CellRef(_)
         | bytecode::Expr::RangeRef(_)
@@ -8069,7 +8377,8 @@ fn bytecode_expr_is_eligible_inner(
                         BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle => {
                             BytecodeLocalBindingKind::Scalar
                         }
-                        BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral => {
+                        BytecodeLocalBindingKind::Range
+                        | BytecodeLocalBindingKind::ArrayLiteral => {
                             BytecodeLocalBindingKind::ArrayLiteral
                         }
                     }
@@ -8111,7 +8420,10 @@ fn bytecode_expr_is_eligible_inner(
                     // from incorrectly accepting LET locals that may spill at runtime.
                     let lookup_value_is_array = matches!(
                         args.get(0).map(|arg| infer_binding_kind(arg, scopes)),
-                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral)
+                        Some(
+                            BytecodeLocalBindingKind::Range
+                                | BytecodeLocalBindingKind::ArrayLiteral
+                        )
                     );
 
                     let return_array_is_2d_literal = matches!(
@@ -8122,10 +8434,14 @@ fn bytecode_expr_is_eligible_inner(
 
                     let if_not_found_is_array = matches!(
                         args.get(3).map(|arg| infer_binding_kind(arg, scopes)),
-                        Some(BytecodeLocalBindingKind::ArrayLiteral | BytecodeLocalBindingKind::Range)
+                        Some(
+                            BytecodeLocalBindingKind::ArrayLiteral
+                                | BytecodeLocalBindingKind::Range
+                        )
                     );
 
-                    if lookup_value_is_array || return_array_is_2d_literal || if_not_found_is_array {
+                    if lookup_value_is_array || return_array_is_2d_literal || if_not_found_is_array
+                    {
                         BytecodeLocalBindingKind::ArrayLiteral
                     } else {
                         BytecodeLocalBindingKind::Scalar
@@ -8182,7 +8498,9 @@ fn bytecode_expr_is_eligible_inner(
         match expr {
             bytecode::Expr::Literal(v) => !matches!(
                 v,
-                bytecode::Value::Array(_) | bytecode::Value::Range(_) | bytecode::Value::MultiRange(_)
+                bytecode::Value::Array(_)
+                    | bytecode::Value::Range(_)
+                    | bytecode::Value::MultiRange(_)
             ),
             bytecode::Expr::CellRef(_) => true,
             // Bare range values are not scalar indices (even if they resolve to a single cell).
@@ -8197,7 +8515,9 @@ fn bytecode_expr_is_eligible_inner(
             }
             bytecode::Expr::Unary { op, expr } => match op {
                 UnaryOp::ImplicitIntersection => true,
-                UnaryOp::Plus | UnaryOp::Neg => choose_index_is_guaranteed_scalar(expr, lexical_scopes),
+                UnaryOp::Plus | UnaryOp::Neg => {
+                    choose_index_is_guaranteed_scalar(expr, lexical_scopes)
+                }
             },
             bytecode::Expr::Binary { left, right, .. } => {
                 choose_index_is_guaranteed_scalar(left, lexical_scopes)
@@ -8253,16 +8573,19 @@ fn bytecode_expr_is_eligible_inner(
                         return true;
                     }
                     // Only the value expressions affect the output kind (conditions always coerce to bool).
-                    args.chunks_exact(2).all(|pair| {
-                        choose_index_is_guaranteed_scalar(&pair[1], lexical_scopes)
-                    })
+                    args.chunks_exact(2)
+                        .all(|pair| choose_index_is_guaranteed_scalar(&pair[1], lexical_scopes))
                 }
                 Function::Switch => {
                     if args.len() < 3 {
                         return true;
                     }
                     let has_default = (args.len() - 1) % 2 != 0;
-                    let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+                    let pairs_end = if has_default {
+                        args.len() - 1
+                    } else {
+                        args.len()
+                    };
                     let pairs = &args[1..pairs_end];
                     if pairs.len() < 2 || pairs.len() % 2 != 0 {
                         return true;
@@ -8354,9 +8677,9 @@ fn bytecode_expr_is_eligible_inner(
             // all bytecode function implementations support Excel's array-lifting semantics yet.
             // Gate array literals by context using the `allow_array_literals` flag.
             bytecode::Value::Array(_) => allow_array_literals,
-            bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) | bytecode::Value::Lambda(_) => {
-                false
-            }
+            bytecode::Value::Range(_)
+            | bytecode::Value::MultiRange(_)
+            | bytecode::Value::Lambda(_) => false,
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
@@ -8459,16 +8782,14 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
 
-                args[1..]
-                    .iter()
-                    .all(|arg| {
-                        bytecode_expr_is_eligible_inner(
-                            arg,
-                            allow_range,
-                            allow_array_literals,
-                            lexical_scopes,
-                        )
-                    })
+                args[1..].iter().all(|arg| {
+                    bytecode_expr_is_eligible_inner(
+                        arg,
+                        allow_range,
+                        allow_array_literals,
+                        lexical_scopes,
+                    )
+                })
             }
             bytecode::ast::Function::Ifs => {
                 if args.len() < 2 || args.len() % 2 != 0 {
@@ -8653,7 +8974,7 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 args.iter()
                     .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
-            },
+            }
             bytecode::ast::Function::Rand => args.is_empty(),
             bytecode::ast::Function::RandBetween => {
                 if args.len() != 2 {
@@ -8727,7 +9048,8 @@ fn bytecode_expr_is_eligible_inner(
 
                 // MATCH accepts either reference-like lookup arrays or array values. Allow both
                 // ranges (including spill ranges) and array literals/expressions here.
-                let array_ok = bytecode_expr_is_eligible_inner(&args[1], true, true, lexical_scopes);
+                let array_ok =
+                    bytecode_expr_is_eligible_inner(&args[1], true, true, lexical_scopes);
                 // `lookup_value` is scalar and uses implicit intersection when passed a range.
                 let lookup_ok =
                     bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
@@ -8974,7 +9296,8 @@ fn bytecode_expr_is_eligible_inner(
             if !bytecode_expr_is_eligible_inner(callee, false, false, lexical_scopes) {
                 return false;
             }
-            args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes))
+            args.iter()
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes))
         }
     }
 }
@@ -9161,7 +9484,8 @@ fn walk_expr_flags(
                             // at runtime, enabling recursion. Treat the binding name as local while walking
                             // the lambda body so we don't incorrectly mark it as an unresolved UDF / defined
                             // name reference (which would disable the bytecode backend).
-                            if matches!(&pair[1], Expr::FunctionCall { name, .. } if name == "LAMBDA") {
+                            if matches!(&pair[1], Expr::FunctionCall { name, .. } if name == "LAMBDA")
+                            {
                                 lexical_scopes
                                     .last_mut()
                                     .expect("pushed scope")
@@ -10286,6 +10610,107 @@ fn rewrite_defined_name_range_map(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn cell_style_id_persists_on_blank_cells() {
+        let mut engine = Engine::new();
+        let style_id = engine.intern_style(Style {
+            number_format: Some("0.00".to_string()),
+            ..Style::default()
+        });
+        engine
+            .set_cell_style_id("Sheet1", "A1", style_id)
+            .expect("set style id");
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").unwrap();
+        let snapshot = Snapshot::from_workbook(&engine.workbook, &engine.spills, None, None);
+
+        assert_eq!(snapshot.get_cell_value(sheet_id, addr), Value::Blank);
+        assert_eq!(snapshot.cell_style_id(sheet_id, addr), style_id);
+    }
+
+    #[test]
+    fn set_cell_value_preserves_style_id() {
+        let mut engine = Engine::new();
+        let style_id = engine.intern_style(Style {
+            number_format: Some("0".to_string()),
+            ..Style::default()
+        });
+        engine
+            .set_cell_style_id("Sheet1", "A1", style_id)
+            .expect("set style");
+        engine
+            .set_cell_value("Sheet1", "A1", 123.0_f64)
+            .expect("set value");
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").unwrap();
+        let cell = engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&addr)
+            .expect("cell stored");
+        assert_eq!(cell.style_id, style_id);
+    }
+
+    #[test]
+    fn insert_delete_cols_shift_col_properties() {
+        let mut engine = Engine::new();
+        engine.set_col_width("Sheet1", 2, Some(42.0));
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        assert_eq!(
+            engine.workbook.sheets[sheet_id]
+                .col_properties
+                .get(&2)
+                .and_then(|p| p.width),
+            Some(42.0)
+        );
+
+        engine
+            .apply_operation(EditOp::InsertCols {
+                sheet: "Sheet1".to_string(),
+                col: 1,
+                count: 2,
+            })
+            .expect("insert cols");
+
+        assert!(
+            !engine.workbook.sheets[sheet_id]
+                .col_properties
+                .contains_key(&2),
+            "col properties should shift right on insert"
+        );
+        assert_eq!(
+            engine.workbook.sheets[sheet_id]
+                .col_properties
+                .get(&4)
+                .and_then(|p| p.width),
+            Some(42.0)
+        );
+
+        engine
+            .apply_operation(EditOp::DeleteCols {
+                sheet: "Sheet1".to_string(),
+                col: 1,
+                count: 2,
+            })
+            .expect("delete cols");
+
+        assert!(
+            !engine.workbook.sheets[sheet_id]
+                .col_properties
+                .contains_key(&4),
+            "col properties should shift left on delete"
+        );
+        assert_eq!(
+            engine.workbook.sheets[sheet_id]
+                .col_properties
+                .get(&2)
+                .and_then(|p| p.width),
+            Some(42.0)
+        );
+    }
 
     #[test]
     fn let_lambda_calls_are_thread_safe() {

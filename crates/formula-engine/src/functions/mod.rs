@@ -9,8 +9,8 @@ use crate::LocaleConfig;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 pub(crate) mod array_lift;
-pub mod date_time;
 pub mod database;
+pub mod date_time;
 pub mod engineering;
 pub mod financial;
 pub mod information;
@@ -37,39 +37,39 @@ pub enum SheetId {
 // registry live in dedicated modules to avoid merge conflicts.
 mod builtins_array;
 mod builtins_cube;
-mod builtins_date_time;
 mod builtins_database;
-mod builtins_dynamic_arrays;
+mod builtins_date_time;
 mod builtins_dynamic_array_textsplit;
-mod builtins_engineering_convert;
+mod builtins_dynamic_arrays;
 mod builtins_engineering;
+mod builtins_engineering_complex;
+mod builtins_engineering_convert;
+mod builtins_engineering_special;
+mod builtins_image;
 mod builtins_information;
-mod builtins_information_worksheet;
 mod builtins_information_workbook;
+mod builtins_information_worksheet;
 mod builtins_lambda;
-mod builtins_logical_constants;
 mod builtins_logical;
+mod builtins_logical_constants;
 mod builtins_logical_extended;
 mod builtins_lookup;
 mod builtins_math;
-mod builtins_math_matrix;
 mod builtins_math_extended;
+mod builtins_math_matrix;
 mod builtins_math_more;
-mod builtins_engineering_complex;
-mod builtins_engineering_special;
-mod builtins_roman;
-mod builtins_select;
 mod builtins_reference;
 mod builtins_rich_values;
+mod builtins_roman;
+mod builtins_select;
 mod builtins_statistical;
 mod builtins_statistical_distributions;
+mod builtins_statistical_ets;
 mod builtins_statistical_moments;
 mod builtins_statistical_more;
-mod builtins_statistical_ets;
 mod builtins_statistical_regression;
 mod builtins_text;
 mod builtins_text_dbcs;
-mod builtins_image;
 mod builtins_thai;
 
 // On wasm targets, `inventory` registrations can be dropped by the linker if the object file
@@ -248,6 +248,42 @@ pub trait FunctionContext {
     fn get_cell_formula(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
         None
     }
+
+    /// Returns the workbook's style table, if available.
+    fn style_table(&self) -> Option<&formula_model::StyleTable> {
+        None
+    }
+
+    /// Return the style id for a specific cell.
+    ///
+    /// Style id `0` is always the default (empty) style.
+    fn cell_style_id(&self, _sheet_id: &SheetId, _addr: CellAddr) -> u32 {
+        0
+    }
+
+    /// Return the default style id for an entire row, if present.
+    fn row_style_id(&self, _sheet_id: &SheetId, _row: u32) -> Option<u32> {
+        None
+    }
+
+    /// Return per-column properties (width/hidden/default style), if present.
+    fn col_properties(
+        &self,
+        _sheet_id: &SheetId,
+        _col: u32,
+    ) -> Option<formula_model::ColProperties> {
+        None
+    }
+
+    /// Optional workbook directory metadata (typically with a trailing path separator).
+    fn workbook_directory(&self) -> Option<&str> {
+        None
+    }
+
+    /// Optional workbook filename metadata (e.g. `Book1.xlsx`).
+    fn workbook_filename(&self) -> Option<&str> {
+        None
+    }
     fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
         None
     }
@@ -333,7 +369,9 @@ fn registry() -> &'static HashMap<String, &'static FunctionSpec> {
 
         // Internal synthetic functions used by expression lowering.
         map.insert(
-            builtins_rich_values::FIELDACCESS_SPEC.name.to_ascii_uppercase(),
+            builtins_rich_values::FIELDACCESS_SPEC
+                .name
+                .to_ascii_uppercase(),
             &builtins_rich_values::FIELDACCESS_SPEC,
         );
         map

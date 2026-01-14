@@ -1,10 +1,10 @@
+use crate::calc_settings::CalculationMode;
 use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::eval::address::CellAddr;
 use crate::eval::ast::{
     BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp,
 };
-use crate::calc_settings::CalculationMode;
 use crate::functions::{
     ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId,
 };
@@ -151,6 +151,38 @@ pub trait ValueResolver {
     ///
     /// This is used by `CELL("contents")` and future formula-text functions.
     fn get_cell_formula(&self, _sheet_id: usize, _addr: CellAddr) -> Option<&str> {
+        None
+    }
+
+    /// Returns the workbook's style table, if available.
+    fn style_table(&self) -> Option<&formula_model::StyleTable> {
+        None
+    }
+
+    /// Return the style id for a specific cell.
+    ///
+    /// Style id `0` is always the default (empty) style.
+    fn cell_style_id(&self, _sheet_id: usize, _addr: CellAddr) -> u32 {
+        0
+    }
+
+    /// Return the default style id for an entire row, if present.
+    fn row_style_id(&self, _sheet_id: usize, _row: u32) -> Option<u32> {
+        None
+    }
+
+    /// Return per-column properties (width/hidden/default style), if present.
+    fn col_properties(&self, _sheet_id: usize, _col: u32) -> Option<formula_model::ColProperties> {
+        None
+    }
+
+    /// Optional workbook directory metadata (typically with a trailing path separator).
+    fn workbook_directory(&self) -> Option<&str> {
+        None
+    }
+
+    /// Optional workbook filename metadata (e.g. `Book1.xlsx`).
+    fn workbook_filename(&self) -> Option<&str> {
         None
     }
     /// Resolve a value from an external workbook reference like `[Book.xlsx]Sheet1!A1`.
@@ -1633,6 +1665,43 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             FnSheetId::Local(id) => self.resolver.get_cell_formula(*id, addr),
             FnSheetId::External(_) => None,
         }
+    }
+
+    fn style_table(&self) -> Option<&formula_model::StyleTable> {
+        self.resolver.style_table()
+    }
+
+    fn cell_style_id(&self, sheet_id: &FnSheetId, addr: CellAddr) -> u32 {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.cell_style_id(*id, addr),
+            FnSheetId::External(_) => 0,
+        }
+    }
+
+    fn row_style_id(&self, sheet_id: &FnSheetId, row: u32) -> Option<u32> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.row_style_id(*id, row),
+            FnSheetId::External(_) => None,
+        }
+    }
+
+    fn col_properties(
+        &self,
+        sheet_id: &FnSheetId,
+        col: u32,
+    ) -> Option<formula_model::ColProperties> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.col_properties(*id, col),
+            FnSheetId::External(_) => None,
+        }
+    }
+
+    fn workbook_directory(&self) -> Option<&str> {
+        self.resolver.workbook_directory()
+    }
+
+    fn workbook_filename(&self) -> Option<&str> {
+        self.resolver.workbook_filename()
     }
 
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
