@@ -8936,27 +8936,6 @@ function handleRibbonCommand(commandId: string): void {
     }
 
     switch (commandId) {
-      case "view.appearance.theme.system":
-        themeController.setThemePreference("system");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
-      case "view.appearance.theme.light":
-        themeController.setThemePreference("light");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
-      case "view.appearance.theme.dark":
-        themeController.setThemePreference("dark");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
-      case "view.appearance.theme.highContrast":
-        themeController.setThemePreference("high-contrast");
-        scheduleRibbonSelectionFormatStateUpdate();
-        app.focus();
-        return;
-
       case "insert.illustrations.pictures":
       case "insert.illustrations.pictures.thisDevice":
       case "insert.illustrations.pictures.stockImages":
@@ -9068,15 +9047,6 @@ function handleRibbonCommand(commandId: string): void {
           app.focus();
         })();
         return;
-      case "edit.find":
-        executeBuiltinCommand("edit.find");
-        return;
-      case "edit.replace":
-        executeBuiltinCommand("edit.replace");
-        return;
-      case "navigation.goTo":
-        executeBuiltinCommand("navigation.goTo");
-        return;
       case "data.forecast.whatIfAnalysis.scenarioManager": {
         const controller = ribbonLayoutController;
         if (!controller) {
@@ -9107,12 +9077,6 @@ function handleRibbonCommand(commandId: string): void {
         controller.openPanel(PanelIds.SOLVER);
         return;
       }
-      case "view.freezePanes":
-      case "view.freezeTopRow":
-      case "view.freezeFirstColumn":
-      case "view.unfreezePanes":
-        executeBuiltinCommand(commandId);
-        return;
       default:
         if (commandId.startsWith("file.")) {
           showToast(`File command not implemented: ${commandId}`);
