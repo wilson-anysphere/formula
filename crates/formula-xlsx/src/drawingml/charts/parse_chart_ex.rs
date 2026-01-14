@@ -265,11 +265,7 @@ fn detect_chart_kind(
         return chart_type;
     }
 
-    let root_ns = doc
-        .root_element()
-        .tag_name()
-        .namespace()
-        .unwrap_or("<none>");
+    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("<none>");
 
     let hints = collect_chart_ex_kind_hints(doc);
     let hint_list = if hints.is_empty() {
