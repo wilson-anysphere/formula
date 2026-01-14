@@ -753,6 +753,21 @@ mod sheet_format_pr_tests {
         assert_eq!(node.attribute("defaultColWidth"), Some("0"));
         assert_eq!(node.attribute("defaultRowHeight"), Some("0"));
     }
+
+    #[test]
+    fn renders_outline_levels_when_present() {
+        let mut sheet = Worksheet::new(1, "Sheet1");
+        sheet.outline.rows.entry_mut(1).level = 2;
+        sheet.outline.rows.entry_mut(10).level = 5;
+        sheet.outline.cols.entry_mut(1).level = 1;
+        sheet.outline.cols.entry_mut(3).level = 4;
+
+        let xml = sheet_format_pr_xml(&sheet);
+        let doc = roxmltree::Document::parse(&xml).expect("parse sheetFormatPr XML");
+        let node = doc.root_element();
+        assert_eq!(node.attribute("outlineLevelRow"), Some("5"));
+        assert_eq!(node.attribute("outlineLevelCol"), Some("4"));
+    }
 }
 
 #[cfg(test)]
