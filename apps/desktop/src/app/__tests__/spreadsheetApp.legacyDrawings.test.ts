@@ -285,8 +285,9 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
         button: 0,
         pointerType: "mouse",
       });
- 
+  
       const committed = (app.getDocument() as any).getSheetDrawings(sheetId)[0];
+      expect(committed.id).toBe("drawing1");
       expect(committed.anchor.type).toBe("oneCell");
       expect(committed.anchor.from.offset.xEmu).toBe(startFromX + pxToEmu(dxPx));
       expect(committed.anchor.from.offset.yEmu).toBe(startFromY + pxToEmu(dyPx));
@@ -372,6 +373,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
 
       // Pointerup should commit the new anchor to the DocumentController.
       const committed = (app.getDocument() as any).getSheetDrawings(sheetId)[0];
+      expect(committed.id).toBe("drawing1");
       expect(committed.anchor.type).toBe("oneCell");
       expect(committed.anchor.from.offset.xEmu).toBe(startFromX + pxToEmu(dxPx));
       expect(committed.anchor.from.offset.yEmu).toBe(startFromY + pxToEmu(dyPx));
