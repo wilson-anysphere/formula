@@ -249,6 +249,42 @@ test("buildContext: heuristic DLP also considers sheet metadata (namedRanges/tab
   assert.equal(auditEvents[0]?.decision?.decision, "redact");
 });
 
+test("buildContext: heuristic DLP detects percent-encoded sensitive tokens (e.g. alice%40example.com) even with a no-op redactor", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const auditEvents = [];
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Email"], ["alice%40example.com"]],
+    },
+    query: "email",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+      auditLogger: { log: (e) => auditEvents.push(e) },
+    },
+  });
+
+  assert.match(out.promptContext, /## dlp/i);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /alice%40example\.com/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.doesNotMatch(JSON.stringify(out.sampledRows), /alice%40example\.com/);
+  assert.doesNotMatch(JSON.stringify(out.sampledRows), /alice@example\.com/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /alice%40example\.com/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /alice@example\.com/);
+
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.decision?.decision, "redact");
+});
+
 test("buildContext: heuristic DLP sheet-name findings can block when policy requires", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
