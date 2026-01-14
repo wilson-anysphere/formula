@@ -5331,6 +5331,11 @@ export class SpreadsheetApp {
       const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
       const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
       if (!hasWasmEngine || !useEngineCache) {
+        // Workbook metadata changes behave like a recalculation from the perspective of formulas and charts,
+        // but they do not flow through DocumentController deltas. Mark formula-containing charts as dirty
+        // *before* triggering any synchronous redraws (tests often stub `requestAnimationFrame` to run
+        // immediately), so their cached series data is regenerated against the updated metadata.
+        this.markFormulaChartsDirty();
         // If the WASM engine is unavailable (missing bundle, init failure, etc) but we previously
         // cached computed values, clear them so the in-process evaluator is authoritative.
         // Otherwise `getCellComputedValue` may keep returning stale engine-derived values even
@@ -5347,6 +5352,10 @@ export class SpreadsheetApp {
         // summary) even when no document deltas occur (multi-sheet fallback evaluation or missing
         // WASM engine). Keep status/formula bar UI in sync.
         this.scheduleStatusUpdate();
+        // Charts render outside the grid provider pipeline; schedule a chart refresh so visible charts
+        // update promptly even when no DocumentController deltas occur (notably shared-grid mode, which
+        // does not call `refresh()` for provider invalidations).
+        this.scheduleChartContentRefresh({ recalc: true });
       }
     }
 
