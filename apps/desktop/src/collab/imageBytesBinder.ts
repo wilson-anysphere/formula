@@ -313,6 +313,33 @@ export function bindImageBytesToCollabSession(options: {
         // In that case, rely on the Yjs event filtering (changedIds) and re-hydrate.
         if (prevRaw === raw && !getYMap(raw)) continue;
 
+        // If we already have bytes locally for this image id (e.g. from IndexedDB persistence),
+        // avoid re-decoding base64 and re-writing the ImageStore.
+        //
+        // For the MVP picture insertion flow, image ids are treated as immutable, so matching
+        // byteLength + mimeType is sufficient to consider the image "already hydrated".
+        const existingLocal = images.get(imageId);
+        if (existingLocal?.bytes instanceof Uint8Array) {
+          const meta = coerceStoredImageMeta(raw);
+          if (meta) {
+            const normalized = normalizeBase64String(meta.bytesBase64);
+            if (normalized) {
+              const estimatedBytes = estimateBase64Bytes(normalized);
+              if (
+                estimatedBytes <= maxImageBytes &&
+                existingLocal.bytes.byteLength === estimatedBytes &&
+                String(existingLocal.mimeType ?? "") === meta.mimeType
+              ) {
+                hydratedRawValues.set(imageId, raw);
+                continue;
+              }
+            }
+          } else if (raw instanceof Uint8Array && existingLocal.bytes.byteLength === raw.byteLength) {
+            hydratedRawValues.set(imageId, raw);
+            continue;
+          }
+        }
+
         const entry = coerceStoredImageEntry(raw, maxImageBytes);
         if (!entry) {
           hydratedRawValues.set(imageId, raw);

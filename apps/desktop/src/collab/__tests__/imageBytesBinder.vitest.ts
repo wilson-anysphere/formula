@@ -80,6 +80,34 @@ describe("imageBytesBinder", () => {
     binderB.destroy();
   });
 
+  it("skips base64 decode/write when bytes already exist locally", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    // Seed the collaborative drawingImages map with one entry.
+    const imagesMap = new Y.Map();
+    metadata.set("drawingImages", imagesMap);
+    imagesMap.set("img-1", {
+      mimeType: "image/png",
+      bytesBase64: Buffer.from([1, 2, 3, 4]).toString("base64"),
+    });
+
+    const store = createMemoryImageStore();
+    // Simulate a local persistence layer having already populated bytes.
+    store.map.set("img-1", { id: "img-1", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3, 4]) });
+    let sets = 0;
+    store.set = () => {
+      sets += 1;
+    };
+
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    expect(sets).toBe(0);
+
+    binder.destroy();
+  });
+
   it("does not propagate oversized images", () => {
     const doc = new Y.Doc();
     const metadata = doc.getMap("metadata");
