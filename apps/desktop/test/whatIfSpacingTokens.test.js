@@ -19,7 +19,7 @@ test("what-if styles keep spacing on the shared --space-* scale", () => {
   const stripped = stripCssNonSemanticText(css);
 
   const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
-  const spacingProp = /^(?:gap|row-gap|column-gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?)$/i;
+  const spacingProp = /^(?:gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)$/i;
   const unitRegex = /([+-]?(?:\d+(?:\.\d+)?|\.\d+))px(?![A-Za-z0-9_])/gi;
 
   /** @type {Set<string>} */
