@@ -226,16 +226,17 @@ impl fmt::Display for PivotFieldRef {
     }
 }
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    let raw = raw.trim();
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
     // DAX identifiers (when unquoted) follow an identifier-like grammar. Everything else (spaces,
     // punctuation, leading digits, etc.) must be wrapped in single quotes.
     //
     // Use Unicode-aware character classes so names like `Straße` can remain unquoted.
     // Also quote identifiers that collide with keywords like `VAR`/`RETURN`/`IN`.
+    let raw = raw.trim();
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+
     let is_keyword = raw.eq_ignore_ascii_case("VAR")
         || raw.eq_ignore_ascii_case("RETURN")
         || raw.eq_ignore_ascii_case("IN");
@@ -276,7 +277,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
         Cow::Borrowed(raw)
     }
 }
-
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
