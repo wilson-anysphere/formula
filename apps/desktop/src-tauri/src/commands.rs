@@ -2092,20 +2092,26 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
             })
         }
         // Standard (CryptoAPI) encryption.
-        (3, 2) | (3, 3) => {
+        //
+        // MS-OFFCRYPTO identifies Standard encryption via `versionMinor == 2`, but real-world
+        // files vary `versionMajor` (commonly 3/4; 2 is also seen).
+        (2 | 3 | 4, 2) => {
+            const MIN_STANDARD_HEADER_SIZE: usize = 8 * 4;
+            const MAX_STANDARD_HEADER_SIZE: usize = 1024 * 1024;
+
             if bytes.len() < 12 {
                 return Err("EncryptionInfo stream is too short for standard encryption".to_string());
             }
             let header_size = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
+            if header_size < MIN_STANDARD_HEADER_SIZE || header_size > MAX_STANDARD_HEADER_SIZE {
+                return Err("EncryptionInfo standard header size is out of bounds".to_string());
+            }
             let header_start = 12usize;
             let header_end = header_start.saturating_add(header_size);
             if bytes.len() < header_end {
                 return Err("EncryptionInfo stream is truncated (header size exceeds stream length)".to_string());
             }
             let header = &bytes[header_start..header_end];
-            if header.len() < 32 {
-                return Err("EncryptionInfo standard header is too short".to_string());
-            }
             let alg_id = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
             let alg_id_hash = u32::from_le_bytes([header[12], header[13], header[14], header[15]]);
             let key_size = u32::from_le_bytes([header[16], header[17], header[18], header[19]]);
@@ -2120,7 +2126,7 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
             })
         }
         _ => Err(format!(
-            "Unsupported workbook encryption version {major}.{minor} (expected 4.4 agile or 3.2 standard)"
+            "Unsupported workbook encryption version {major}.{minor} (expected 4.4 agile or *.2 standard)"
         )),
     }
 }
@@ -9218,6 +9224,59 @@ mod tests {
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
         assert_eq!(summary.spin_count, Some(100000));
         assert_eq!(summary.key_bits, Some(256));
+    }
+
+    #[test]
+    fn inspect_workbook_encryption_returns_summary_for_standard_encrypted_ooxml() {
+        use std::io::{Cursor, Write as _};
+
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-standard-encrypted-ooxml")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
+        let path = dir.path().join("encrypted.xlsx");
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut stream = ole
+                .create_stream("EncryptionInfo")
+                .expect("create EncryptionInfo stream");
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMajor (standard variants vary)
+            bytes.extend_from_slice(&2u16.to_le_bytes()); // VersionMinor (standard)
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // Flags
+            bytes.extend_from_slice(&32u32.to_le_bytes()); // Header size (EncryptionHeader)
+
+            // Minimal CryptoAPI EncryptionHeader (8 * u32 = 32 bytes).
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+            bytes.extend_from_slice(&0x0000_6610u32.to_le_bytes()); // algId (AES-256)
+            bytes.extend_from_slice(&0x0000_8004u32.to_le_bytes()); // algIdHash (SHA1)
+            bytes.extend_from_slice(&256u32.to_le_bytes()); // keySize (bits)
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // providerType
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+            stream.write_all(&bytes).expect("write EncryptionInfo");
+        }
+        ole.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+        let ole_bytes = ole.into_inner().into_inner();
+
+        std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
+
+        let summary = inspect_workbook_encryption(path.to_string_lossy().to_string())
+            .expect("inspect_workbook_encryption should succeed")
+            .expect("expected encryption summary");
+
+        assert_eq!(summary.encryption_type, EncryptionTypeDto::Standard);
+        assert_eq!(summary.cipher.as_deref(), Some("AES-256"));
+        assert_eq!(summary.key_size, Some(256));
+        assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA1"));
+        assert_eq!(summary.spin_count, None);
+        assert_eq!(summary.key_bits, None);
     }
 
     #[cfg(feature = "parquet")]
