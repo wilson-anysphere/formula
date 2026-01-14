@@ -175,6 +175,17 @@ fn pivot_field_ref_parses_dax_refs_and_serializes_structured_data_model_fields()
     );
     assert_eq!(escaped_col.to_string(), "'O''Brien'[Amount]");
 
+    let col_with_brackets: PivotFieldRef =
+        serde_json::from_value(json!("Orders[Amount]]USD]")).unwrap();
+    assert_eq!(
+        col_with_brackets,
+        PivotFieldRef::DataModelColumn {
+            table: "Orders".to_string(),
+            column: "Amount]USD".to_string()
+        }
+    );
+    assert_eq!(col_with_brackets.to_string(), "Orders[Amount]]USD]");
+
     let measure: PivotFieldRef = serde_json::from_value(json!("[Total Sales]")).unwrap();
     assert_eq!(
         measure,
@@ -186,6 +197,14 @@ fn pivot_field_ref_parses_dax_refs_and_serializes_structured_data_model_fields()
         json!({"measure": "Total Sales"})
     );
     assert_eq!(measure.to_string(), "[Total Sales]");
+
+    let measure_with_brackets: PivotFieldRef =
+        serde_json::from_value(json!("[Total]]USD]")).unwrap();
+    assert_eq!(
+        measure_with_brackets,
+        PivotFieldRef::DataModelMeasure("Total]USD".to_string())
+    );
+    assert_eq!(measure_with_brackets.to_string(), "[Total]]USD]");
 
     // Back-compat: allow `{ name: \"...\" }` as an alternate measure payload shape.
     let measure_alt: PivotFieldRef =
@@ -301,6 +320,10 @@ fn dax_column_ref_parser_handles_basic_and_quoted_tables() {
         Some(("Table".to_string(), "Column".to_string()))
     );
     assert_eq!(
+        parse_dax_column_ref("Table[Column]]Name]"),
+        Some(("Table".to_string(), "Column]Name".to_string()))
+    );
+    assert_eq!(
         parse_dax_column_ref("  Table [ Column ]  "),
         Some(("Table".to_string(), "Column".to_string()))
     );
@@ -327,6 +350,10 @@ fn dax_measure_ref_parser_handles_basic_and_rejects_nested_brackets() {
     assert_eq!(
         parse_dax_measure_ref("[Measure]"),
         Some("Measure".to_string())
+    );
+    assert_eq!(
+        parse_dax_measure_ref("[Measure]]Name]"),
+        Some("Measure]Name".to_string())
     );
     assert_eq!(
         parse_dax_measure_ref(" [ Measure ] "),

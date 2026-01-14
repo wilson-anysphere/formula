@@ -268,6 +268,30 @@ fn escape_dax_bracket_identifier(raw: &str) -> String {
     raw.replace(']', "]]")
 }
 
+fn unescape_dax_bracket_identifier(raw: &str) -> String {
+    // Best-effort: convert DAX-style `]]` escapes back to `]`.
+    //
+    // This is intentionally forgiving: if the identifier contains unescaped `]`, we treat it as a
+    // literal character. This matches the "best-effort" nature of `parse_dax_column_ref` and helps
+    // with legacy/unstructured inputs that may not follow strict DAX escaping rules.
+    if !raw.contains(']') {
+        return raw.to_string();
+    }
+
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == ']' {
+            if chars.peek() == Some(&']') {
+                chars.next();
+            }
+            out.push(']');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
 ///
 /// Parsing is best-effort:
@@ -302,6 +326,7 @@ pub fn parse_dax_column_ref(input: &str) -> Option<(String, String)> {
     if column.is_empty() {
         return None;
     }
+    let column = unescape_dax_bracket_identifier(column);
 
     let table = if raw_table.starts_with('\'') {
         let table = parse_dax_quoted_identifier(raw_table)?;
@@ -317,7 +342,7 @@ pub fn parse_dax_column_ref(input: &str) -> Option<(String, String)> {
         t.to_string()
     };
 
-    Some((table, column.to_string()))
+    Some((table, column))
 }
 
 /// Parse a DAX measure reference of the form `[Measure]`.
@@ -332,10 +357,10 @@ pub fn parse_dax_measure_ref(input: &str) -> Option<String> {
         return None;
     }
     // Measures are bracket-only; reject anything that looks like a column ref.
-    if inner.contains('[') || inner.contains(']') {
+    if inner.contains('[') {
         return None;
     }
-    Some(inner.to_string())
+    Some(unescape_dax_bracket_identifier(inner))
 }
 
 fn parse_dax_quoted_identifier(raw: &str) -> Option<String> {
