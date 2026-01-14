@@ -132,6 +132,18 @@ describe("CanvasGridRenderer image cells", () => {
     vi.unstubAllGlobals();
   });
 
+  const installContexts = (
+    contexts: Map<HTMLCanvasElement, CanvasRenderingContext2D>,
+  ): void => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+  };
+
   it("draws image thumbnails with the expected destination rect", async () => {
     const provider: CellProvider = {
       getCell: (row, col) =>
@@ -164,13 +176,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
@@ -228,13 +234,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
@@ -295,13 +295,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     // jsdom does not implement URL.createObjectURL; stub it while keeping the URL constructor.
     const URLCtor = globalThis.URL as any;
@@ -411,13 +405,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const URLCtor = globalThis.URL as any;
     const originalCreateObjectURL = URLCtor?.createObjectURL;
@@ -522,13 +510,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const URLCtor = globalThis.URL as any;
     const originalCreateObjectURL = URLCtor?.createObjectURL;
@@ -618,13 +600,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
@@ -698,13 +674,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
@@ -774,13 +744,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
@@ -857,13 +821,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
@@ -934,13 +892,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
@@ -1190,13 +1142,7 @@ describe("CanvasGridRenderer image cells", () => {
       [selectionCanvas, selection.ctx]
     ]);
 
-    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
-      const existing = contexts.get(this);
-      if (existing) return existing;
-      const created = createRecordingContext(this).ctx;
-      contexts.set(this, created);
-      return created;
-    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    installContexts(contexts);
 
     const renderer = new CanvasGridRenderer({
       provider,
