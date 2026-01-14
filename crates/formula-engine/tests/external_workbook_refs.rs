@@ -1075,3 +1075,21 @@ fn sheet_returns_na_for_external_refs_when_provider_lacks_sheet_order() {
         Value::Error(formula_engine::ErrorKind::NA)
     );
 }
+
+#[test]
+fn sheet_returns_na_for_external_refs_when_sheet_missing_from_order() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order("Book.xlsx", vec!["Sheet1".to_string()]);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet2!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::NA)
+    );
+}
