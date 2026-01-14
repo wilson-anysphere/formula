@@ -13,8 +13,10 @@ test("applyFormatAsTablePreset applies header formatting, banded rows, and outli
   ]);
 
   const preset = getFormatAsTablePreset("light");
+  const historyBefore = doc.history.length;
   const ok = applyFormatAsTablePreset(doc, "Sheet1", { start: { row: 0, col: 0 }, end: { row: 2, col: 1 } }, "light");
   assert.equal(ok, true);
+  assert.equal(doc.history.length, historyBefore + 1);
 
   const headerA1 = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
   const headerB1 = doc.getCellFormat("Sheet1", { row: 0, col: 1 });
