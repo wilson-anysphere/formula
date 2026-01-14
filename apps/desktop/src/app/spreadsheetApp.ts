@@ -8359,8 +8359,60 @@ export class SpreadsheetApp {
           : null;
       if (afterRawXmlString != null) {
         const kindValue: any = (drawing as any).kind;
-        if (kindValue && typeof kindValue === "object") {
-          next.kind = { ...kindValue, rawXml: afterRawXmlString, raw_xml: afterRawXmlString };
+        if (kindValue && typeof kindValue === "object" && !Array.isArray(kindValue)) {
+          const patchedKind = (() => {
+            // UI / DocumentController encoding: `{ type: "shape" | "chart" | "unknown", rawXml?: ... }`.
+            const kindType = typeof kindValue.type === "string" ? kindValue.type : null;
+            const normalizedType = kindType ? kindType.toLowerCase() : "";
+            const isLikelyUiKind =
+              kindType && kindType.length > 0 ? kindType[0] === kindType[0]!.toLowerCase() : false;
+            if (
+              isLikelyUiKind &&
+              (normalizedType === "shape" ||
+                normalizedType === "chart" ||
+                normalizedType === "unknown" ||
+                normalizedType === "chartplaceholder")
+            ) {
+              return { ...kindValue, rawXml: afterRawXmlString, raw_xml: afterRawXmlString };
+            }
+
+            // Serde internally-tagged enums: `{ kind: "Shape", value: {...} }` or `{ type: "Shape", value: {...} }`.
+            const tag = typeof kindValue.kind === "string" ? kindValue.kind : typeof kindValue.type === "string" ? kindValue.type : null;
+            if (tag) {
+              const contentKey = typeof kindValue.value === "object" && kindValue.value && !Array.isArray(kindValue.value) ? "value" : (
+                typeof kindValue.content === "object" && kindValue.content && !Array.isArray(kindValue.content) ? "content" : null
+              );
+              if (contentKey) {
+                return {
+                  ...kindValue,
+                  [contentKey]: { ...(kindValue as any)[contentKey], rawXml: afterRawXmlString, raw_xml: afterRawXmlString },
+                };
+              }
+              // Tag present but no structured content object; patch at the top level.
+              return { ...kindValue, rawXml: afterRawXmlString, raw_xml: afterRawXmlString };
+            }
+
+            // Serde externally-tagged enums: `{ Shape: {...} }`.
+            const keys = Object.keys(kindValue);
+            if (keys.length === 1) {
+              const variant = keys[0]!;
+              const variantValue = (kindValue as any)[variant];
+              if (variantValue && typeof variantValue === "object" && !Array.isArray(variantValue)) {
+                return { [variant]: { ...variantValue, rawXml: afterRawXmlString, raw_xml: afterRawXmlString } };
+              }
+              return kindValue;
+            }
+
+            // Unknown schema; only patch if it already looks like it stores raw xml at the top level.
+            if (Object.prototype.hasOwnProperty.call(kindValue, "rawXml") || Object.prototype.hasOwnProperty.call(kindValue, "raw_xml")) {
+              return { ...kindValue, rawXml: afterRawXmlString, raw_xml: afterRawXmlString };
+            }
+            return kindValue;
+          })();
+
+          if (patchedKind !== kindValue) {
+            next.kind = patchedKind;
+          }
         }
       }
       // Ensure stable identity + z-order even if callers accidentally include them in `after`.

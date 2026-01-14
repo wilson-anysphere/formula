@@ -298,6 +298,56 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 
+  it("persists kind.rawXml patches for externally-tagged kind encodings without corrupting the enum shape", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      // Externally-tagged enum (Rust model encoding).
+      kind: { Shape: { raw_xml: "<before/>" } },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(120), cy: pxToEmu(80) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    const after = {
+      ...before,
+      kind: { ...(before.kind as any), rawXml: "<after/>" },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "move", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.kind).toBeTruthy();
+    expect(Object.keys(updated.kind ?? {})).toEqual(["Shape"]);
+    expect(updated?.kind?.Shape?.raw_xml ?? updated?.kind?.Shape?.rawXml).toBe("<after/>");
+
+    if (typeof doc.undo === "function") {
+      expect(doc.undo()).toBe(true);
+      const reverted = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+      expect(Object.keys(reverted?.kind ?? {})).toEqual(["Shape"]);
+      expect(reverted?.kind?.Shape?.raw_xml ?? reverted?.kind?.Shape?.rawXml).toBe("<before/>");
+    }
+
+    app.dispose();
+    root.remove();
+  });
+
   it("ignores drawing interaction commits when the app is read-only", () => {
     const root = createRoot();
     const status = {
