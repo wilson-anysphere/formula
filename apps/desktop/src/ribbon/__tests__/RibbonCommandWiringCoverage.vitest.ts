@@ -253,7 +253,7 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     ).toEqual([]);
   });
 
-  it("ensures enabled ribbon ids that are not registered as commands are referenced in main.ts", () => {
+  it("ensures enabled ribbon ids that are not registered as commands are handled in the desktop shell", () => {
     const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
     const schemaIdSet = new Set(schemaCommandIds);
     const dropdownTriggerIds = collectRibbonDropdownTriggerIds(defaultRibbonSchema);
@@ -274,11 +274,27 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     const implementedIds = extractImplementedCommandIdsFromMainTs(schemaIdSet);
     const implementedSet = new Set(implementedIds);
 
+    // Some ribbon ids are handled via `ribbon/commandHandlers.ts` (invoked from `main.ts`).
+    // Keep this test resilient to that split so enabled-but-unregistered ids can still be
+    // validated as "handled" even if `main.ts` doesn't contain the literal string id.
+    {
+      const handlerPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
+      const handlerSource = readFileSync(handlerPath, "utf8");
+      for (const match of handlerSource.matchAll(/case\s+["']([^"']+)["']/g)) {
+        const id = match[1]!;
+        if (schemaIdSet.has(id)) implementedSet.add(id);
+      }
+      for (const match of handlerSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
+        const id = match[1]!;
+        if (schemaIdSet.has(id)) implementedSet.add(id);
+      }
+    }
+
     const missing = enabledButUnregistered.filter((id) => !implementedSet.has(id)).sort();
     expect(
       missing,
       [
-        "Found ribbon ids that would be enabled but are not registered as commands and are not handled in main.ts.",
+        "Found ribbon ids that would be enabled but are not registered as commands and are not handled in the desktop shell.",
         "These ids should either be registered as builtin commands, explicitly handled in the desktop shell,",
         "or removed from the CommandRegistry exemption list so they are disabled by default.",
         "",
