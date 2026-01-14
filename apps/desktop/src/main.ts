@@ -132,6 +132,7 @@ import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
 import { promptAndApplyCustomNumberFormat } from "./formatting/promptCustomNumberFormat.js";
 import { getStyleNumberFormat } from "./formatting/styleFieldAccess.js";
 import { handleCustomSortCommand } from "./sort-filter/openCustomSortDialog.js";
+import { sortSelection } from "./sort-filter/sortSelection.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
 import { loadCollabToken, preloadCollabTokenFromKeychain, storeCollabToken } from "./sharing/collabTokenStore.js";
