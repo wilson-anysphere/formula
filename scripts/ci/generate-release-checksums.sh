@@ -74,7 +74,8 @@ if [ ${#mac_app_targz[@]} -eq 0 ]; then
   for f in "${fallback_targz[@]}"; do
     base="$(basename "$f")"
     # Be case-insensitive (some toolchains emit `.appimage`, while others use `.AppImage`).
-    base_lower="${base,,}"
+    # Avoid Bash 4+ `${var,,}` expansion so this script can run on macOS's default Bash 3.x.
+    base_lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
     if [[ "$base_lower" == *.appimage.tar.gz ]] || [[ "$base_lower" == *.appimage.tgz ]]; then
       continue
     fi
@@ -96,7 +97,7 @@ win_exe=( "$assets_dir"/*.exe )
 filtered_win_msi=()
 for f in "${win_msi[@]}"; do
   base="$(basename "$f")"
-  base_lower="${base,,}"
+  base_lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
   if [[ "$base_lower" == *microsoftedgewebview2* ]]; then
     continue
   fi
@@ -107,7 +108,7 @@ win_msi=( "${filtered_win_msi[@]}" )
 filtered_win_exe=()
 for f in "${win_exe[@]}"; do
   base="$(basename "$f")"
-  base_lower="${base,,}"
+  base_lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
   if [[ "$base_lower" == *microsoftedgewebview2* ]]; then
     continue
   fi
