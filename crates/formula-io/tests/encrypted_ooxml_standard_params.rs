@@ -126,9 +126,10 @@ fn assert_standard_fixture_encryption_params(path: &Path, expected: ExpectedStan
 fn standard_encryption_info_parameters_are_pinned() {
     // CryptoAPI ALG_ID constants used by the MS-OFFCRYPTO Standard encryption header.
     const CALG_AES_128: u32 = 0x0000_660E;
+    const CALG_RC4: u32 = 0x0000_6801;
     const CALG_SHA1: u32 = 0x0000_8004;
 
-    let expected = ExpectedStandardParams {
+    let expected_aes = ExpectedStandardParams {
         alg_id: CALG_AES_128,
         alg_id_hash: CALG_SHA1,
         key_size_bits: 128,
@@ -138,13 +139,23 @@ fn standard_encryption_info_parameters_are_pinned() {
         encrypted_verifier_hash_len: 32,
     };
 
-    // Standard fixtures.
-    for rel in [
-        "standard.xlsx",
-        "standard-large.xlsx",
-        "standard-basic.xlsm",
-        "standard-4.2.xlsx",
-        "standard-unicode.xlsx",
+    let expected_rc4 = ExpectedStandardParams {
+        alg_id: CALG_RC4,
+        alg_id_hash: CALG_SHA1,
+        key_size_bits: 128,
+        salt_size: 16,
+        verifier_hash_size: 20,
+        // RC4 encrypts the verifier hash without AES block padding.
+        encrypted_verifier_hash_len: 20,
+    };
+
+    for (rel, expected) in [
+        ("standard.xlsx", expected_aes),
+        ("standard-large.xlsx", expected_aes),
+        ("standard-basic.xlsm", expected_aes),
+        ("standard-4.2.xlsx", expected_aes),
+        ("standard-unicode.xlsx", expected_aes),
+        ("standard-rc4.xlsx", expected_rc4),
     ] {
         let path = fixture_path(rel);
         assert_standard_fixture_encryption_params(&path, expected);
