@@ -36,7 +36,8 @@ fn writes_data_validations_section() -> Result<(), Box<dyn std::error::Error>> {
             allow_blank: true,
             show_input_message: true,
             show_error_message: true,
-            show_drop_down: false,
+            // Excel shows the in-cell dropdown arrow by default for list validations.
+            show_drop_down: true,
             input_message: None,
             error_alert: None,
         };
@@ -63,6 +64,10 @@ fn writes_data_validations_section() -> Result<(), Box<dyn std::error::Error>> {
     assert!(
         sheet_xml.contains("<formula1>\"Yes,No\"</formula1>"),
         "expected literal list formula1, got:\n{sheet_xml}"
+    );
+    assert!(
+        !sheet_xml.contains("showDropDown=\"1\""),
+        "expected dropdown arrow to be shown when show_drop_down=true, got:\n{sheet_xml}"
     );
 
     Ok(())
@@ -99,6 +104,43 @@ fn writes_data_validation_formulas_add_xlfn_prefixes() -> Result<(), Box<dyn std
     assert!(
         sheet_xml.contains("<formula1>_xlfn.SEQUENCE(1)</formula1>"),
         "expected `_xlfn.`-prefixed formula, got:\n{sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn writes_list_data_validation_hides_drop_down_arrow_when_disabled(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1")?;
+    let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+
+    let rule = DataValidation {
+        kind: DataValidationKind::List,
+        operator: None,
+        formula1: "\"Yes,No\"".to_string(),
+        formula2: None,
+        allow_blank: true,
+        show_input_message: false,
+        show_error_message: false,
+        // UI semantics: false => suppress the in-cell dropdown arrow.
+        show_drop_down: false,
+        input_message: None,
+        error_alert: None,
+    };
+    sheet.add_data_validation(vec![Range::from_a1("C3")?], rule);
+
+    let bytes = XlsxDocument::new(workbook).save_to_vec()?;
+    let sheet_xml = read_part(&bytes, "xl/worksheets/sheet1.xml")?;
+
+    assert!(
+        sheet_xml.contains("type=\"list\"") && sheet_xml.contains("sqref=\"C3\""),
+        "expected list data validation on C3, got:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("showDropDown=\"1\""),
+        "expected showDropDown=\"1\" when show_drop_down=false, got:\n{sheet_xml}"
     );
 
     Ok(())

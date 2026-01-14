@@ -162,8 +162,8 @@ fn reads_synthetic_data_validations_ranges_operator_and_messages(
     assert_eq!(second.validation.kind, DataValidationKind::Custom);
     assert_eq!(second.validation.allow_blank, true);
     assert_eq!(
-        second.validation.formula1, "_xlfn.SEQUENCE(1)",
-        "import should strip a single leading '=' but preserve formula text otherwise"
+        second.validation.formula1, "SEQUENCE(1)",
+        "import should strip a single leading '=' and any `_xlfn.` prefixes"
     );
 
     Ok(())

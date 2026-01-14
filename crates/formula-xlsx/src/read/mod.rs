@@ -3488,8 +3488,9 @@ fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<
                 // NOTE: Excel's `showDropDown` is historically inverted relative to the UI:
                 // `showDropDown="1"` means "suppress the in-cell dropdown arrow".
                 //
-                // We store the raw OOXML value in `show_drop_down` for round-trip fidelity.
-                show_drop_down = Some(parse_xml_bool(&val));
+                // The in-memory model stores the UI-facing behavior: `show_drop_down=true` means
+                // "show the in-cell dropdown arrow". Therefore we invert the OOXML attribute.
+                show_drop_down = Some(!parse_xml_bool(&val));
             }
             b"promptTitle" => prompt_title = Some(val),
             b"prompt" => prompt_body = Some(val),
@@ -3506,8 +3507,9 @@ fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<
         return None;
     }
 
-    // OOXML `showDropDown` defaults to false when omitted.
-    let show_drop_down = show_drop_down.unwrap_or(false);
+    // OOXML `showDropDown` defaults to false (arrow shown) when omitted. Our model stores the UI
+    // semantics (`true` = arrow shown), and the setting is only meaningful for list validations.
+    let show_drop_down = show_drop_down.unwrap_or(kind == DataValidationKind::List);
 
     let input_message = if prompt_title.is_some() || prompt_body.is_some() {
         Some(DataValidationInputMessage {
@@ -3580,8 +3582,9 @@ fn parse_data_validation_start<R: std::io::BufRead>(
                 // NOTE: Excel's `showDropDown` is historically inverted relative to the UI:
                 // `showDropDown="1"` means "suppress the in-cell dropdown arrow".
                 //
-                // We store the raw OOXML value in `show_drop_down` for round-trip fidelity.
-                show_drop_down = Some(parse_xml_bool(&val));
+                // The in-memory model stores the UI-facing behavior: `show_drop_down=true` means
+                // "show the in-cell dropdown arrow". Therefore we invert the OOXML attribute.
+                show_drop_down = Some(!parse_xml_bool(&val));
             }
             b"promptTitle" => prompt_title = Some(val),
             b"prompt" => prompt_body = Some(val),
@@ -3639,8 +3642,9 @@ fn parse_data_validation_start<R: std::io::BufRead>(
 
     let kind = kind.expect("checked in should_store");
 
-    // OOXML `showDropDown` defaults to false when omitted.
-    let show_drop_down = show_drop_down.unwrap_or(false);
+    // OOXML `showDropDown` defaults to false (arrow shown) when omitted. Our model stores the UI
+    // semantics (`true` = arrow shown), and the setting is only meaningful for list validations.
+    let show_drop_down = show_drop_down.unwrap_or(kind == DataValidationKind::List);
 
     let input_message = if prompt_title.is_some() || prompt_body.is_some() {
         Some(DataValidationInputMessage {
