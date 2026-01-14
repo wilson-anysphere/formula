@@ -27,7 +27,9 @@ impl PivotFieldRef {
     /// Returns a canonical string representation for this field reference.
     ///
     /// - Cache fields use the raw header text.
-    /// - Data Model fields use a DAX-like display form (`Table[Column]` / `[Measure]`).
+    /// - Data Model fields use a minimal DAX-like display form (`Table[Column]` / `[Measure]`).
+    ///   Note: we intentionally avoid quoting table names here (even when they contain spaces)
+    ///   because pivot caches and UI layers often store/display unquoted table captions.
     ///
     /// This is intended for UI labels and for matching against pivot cache column names.
     pub fn canonical_name(&self) -> Cow<'_, str> {
