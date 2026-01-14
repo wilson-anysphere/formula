@@ -207,6 +207,30 @@ function buildBannedResForGlobalAlias(globalAlias: string): RegExp[] {
           `${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]${container}['"]\\s*\\]\\s*(?:\\?\\.|\\.)\\s*${ns}\\b`,
         ),
       );
+
+      // Destructuring directly from plugin containers:
+      //   const { dialog } = g.__TAURI__.plugin;
+      //   const { dialog } = g["__TAURI__"].plugin;
+      out.push(
+        new RegExp(
+          `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b${ns}\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.|\\.)\\s*${container}\\b`,
+        ),
+      );
+      out.push(
+        new RegExp(
+          `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b${ns}\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]\\s*(?:\\?\\.|\\.)\\s*${container}\\b`,
+        ),
+      );
+      out.push(
+        new RegExp(
+          `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b${ns}\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.)?\\s*\\[\\s*['"]${container}['"]\\s*\\]`,
+        ),
+      );
+      out.push(
+        new RegExp(
+          `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b${ns}\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]${container}['"]\\s*\\]`,
+        ),
+      );
     }
   }
 
@@ -444,6 +468,23 @@ function buildBannedResForTauriAlias(root: string): RegExp[] {
     ),
     new RegExp(
       `\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugins['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]dialog['"]\\s*\\]`,
+    ),
+
+    // Destructuring directly from plugin containers (not via an intermediate alias):
+    //   const { dialog } = tauri.plugin;
+    //   const { dialog } = tauri["plugin"];
+    //   const { dialog } = tauri.plugins;
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${r}\\s*(?:\\?\\.|\\.)\\s*plugin\\b`,
+    ),
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugin['"]\\s*\\]`,
+    ),
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${r}\\s*(?:\\?\\.|\\.)\\s*plugins\\b`,
+    ),
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]plugins['"]\\s*\\]`,
     ),
   ];
 }
