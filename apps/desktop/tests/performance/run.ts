@@ -10,19 +10,16 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 import { formatMb, formatMs, runBenchmark, type BenchmarkResult } from './benchmark.ts';
 import { createCollaborationBenchmarks } from './benchmarks/collaboration.bench.ts';
 import { createRenderBenchmarks } from './benchmarks/render.bench.ts';
 import { createSharedGridRendererBenchmarks } from './benchmarks/sharedGridRenderer.bench.ts';
 import { createStartupBenchmarks } from './benchmarks/startup.bench.ts';
+import { repoRoot } from './desktopStartupUtil.ts';
 import { runDesktopStartupBenchmarks } from './desktopStartupBench.ts';
 import { runDesktopMemoryBenchmarks } from './desktopMemoryBench.ts';
-
-// Ensure paths are rooted at repo root even when invoked from elsewhere.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 type DetailedReport = {
   generatedAt: string;
