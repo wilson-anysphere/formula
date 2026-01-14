@@ -669,9 +669,14 @@ Hosts can opt into explicit invalidation semantics by disabling external volatil
 - `Engine::mark_external_sheet_dirty("[Book.xlsx]Sheet1")` (canonical external sheet key)
 - `Engine::mark_external_workbook_dirty("Book.xlsx")` (workbook id inside `[...]`)
 
-Note: workbook-only external structured refs like `[Book.xlsx]Table1[Col]` are indexed only to the
-workbook id (not a specific sheet key), since the formula itself does not identify the sheet. If
-you need to refresh those dependents after a change, call `mark_external_workbook_dirty(...)`.
+Note: workbook-only external structured refs like `[Book.xlsx]Table1[Col]` always register a
+dependency on the workbook id, since the formula itself does not identify the sheet.
+
+When external table metadata is available via `ExternalValueProvider::workbook_table(workbook,
+table_name)`, the engine also refines the dependency to the table's resolved sheet key (e.g.
+`"[Book.xlsx]Sheet1"`), so `mark_external_sheet_dirty(...)` will also invalidate those formulas. If
+the engine cannot determine the sheet (for example, if the provider is not configured), fall back to
+`mark_external_workbook_dirty(...)`.
 
 ## Dependency Graph
 
