@@ -105,9 +105,7 @@ pub fn encrypt_package_to_ole(
             agile::encrypt_agile_encrypted_package(zip_bytes, password, &opts)?
         }
         EncryptionScheme::Standard => {
-            return Err(OfficeCryptoError::UnsupportedEncryption(
-                "Standard encryption writer not implemented".to_string(),
-            ))
+            standard::encrypt_standard_encrypted_package(zip_bytes, password, &opts)?
         }
     };
 
@@ -177,9 +175,9 @@ fn open_stream<R: Read + std::io::Seek>(
 }
 
 fn validate_decrypted_package(bytes: &[u8]) -> Result<(), OfficeCryptoError> {
-    if bytes.len() < 2 || &bytes[..2] != b"PK" {
+    if !util::looks_like_zip(bytes) {
         return Err(OfficeCryptoError::InvalidFormat(
-            "decrypted package does not look like a ZIP (missing PK signature)".to_string(),
+            "decrypted package does not look like a valid ZIP archive".to_string(),
         ));
     }
     Ok(())

@@ -49,9 +49,7 @@ pub(crate) struct AgileKeyData {
 
 #[derive(Debug, Clone)]
 pub(crate) struct AgileDataIntegrity {
-    #[allow(dead_code)]
     pub(crate) encrypted_hmac_key: Vec<u8>,
-    #[allow(dead_code)]
     pub(crate) encrypted_hmac_value: Vec<u8>,
 }
 
@@ -74,10 +72,11 @@ pub(crate) fn parse_agile_encryption_info(
     header: &EncryptionInfoHeader,
 ) -> Result<AgileEncryptionInfo, OfficeCryptoError> {
     let start = header.header_offset;
-    let xml_len = header.header_size as usize;
-    let xml_bytes = bytes.get(start..start + xml_len).ok_or_else(|| {
-        OfficeCryptoError::InvalidFormat("EncryptionInfo XML size out of range".to_string())
-    })?;
+    let end = start
+        .checked_add(header.header_size as usize)
+        .unwrap_or(bytes.len());
+    let payload = bytes.get(start..end).unwrap_or_else(|| bytes.get(start..).unwrap_or_default());
+    let xml_bytes = extract_agile_xml_payload(payload)?;
     let xml_str = std::str::from_utf8(xml_bytes).map_err(|_| {
         OfficeCryptoError::InvalidFormat("EncryptionInfo XML is not valid UTF-8".to_string())
     })?;
@@ -136,102 +135,28 @@ pub(crate) fn decrypt_agile_encrypted_package(
 
     let pw_utf16 = password_to_utf16le(password);
 
-    // In MS-OFFCRYPTO Agile encryption, the password key encryptor uses `saltValue` directly as the
-    // AES-CBC IV when decrypting verifier and key blobs. (The per-purpose block keys are only for
-    // key derivation.)
-    let password_block_size = info.password_key_encryptor.block_size;
-    if password_block_size != 16 {
+    // Agile (MS-OFFCRYPTO) uses AES-CBC for both the password key encryptor and the package data.
+    if info.password_key_encryptor.block_size != 16 {
         return Err(OfficeCryptoError::UnsupportedEncryption(format!(
-            "unsupported password blockSize {password_block_size}"
+            "unsupported password blockSize {}",
+            info.password_key_encryptor.block_size
         )));
     }
-    let password_iv = info
-        .password_key_encryptor
-        .salt
-        .get(..password_block_size)
-        .ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat(format!(
-                "password saltValue shorter than blockSize ({password_block_size})"
-            ))
-        })?;
-
-    // Password verification.
-    let verifier_input_key = derive_agile_key(
-        info.password_key_encryptor.hash_algorithm,
-        &info.password_key_encryptor.salt,
-        &pw_utf16,
-        info.password_key_encryptor.spin_count,
-        info.password_key_encryptor.key_bits / 8,
-        BLOCK_KEY_VERIFIER_HASH_INPUT,
-    );
-    let verifier_hash_input_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-        &verifier_input_key,
-        password_iv,
-        &info.password_key_encryptor.encrypted_verifier_hash_input,
-    )?);
-    let verifier_hash_input_slice = verifier_hash_input_plain
-        .get(..password_block_size)
-        .ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat(
-                "decrypted verifierHashInput shorter than 16 bytes".to_string(),
-            )
-        })?;
-
-    let verifier_hash: Zeroizing<Vec<u8>> = Zeroizing::new(
-        info.password_key_encryptor
-            .hash_algorithm
-            .digest(verifier_hash_input_slice),
-    );
-
-    let verifier_value_key = derive_agile_key(
-        info.password_key_encryptor.hash_algorithm,
-        &info.password_key_encryptor.salt,
-        &pw_utf16,
-        info.password_key_encryptor.spin_count,
-        info.password_key_encryptor.key_bits / 8,
-        BLOCK_KEY_VERIFIER_HASH_VALUE,
-    );
-    let verifier_hash_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-        &verifier_value_key,
-        password_iv,
-        &info.password_key_encryptor.encrypted_verifier_hash_value,
-    )?);
-    let expected_hash_slice = verifier_hash_value_plain
-        .get(..verifier_hash.len())
-        .ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat(
-                "decrypted verifierHashValue shorter than hash".to_string(),
-            )
-        })?;
-
-    if !ct_eq(expected_hash_slice, verifier_hash.as_slice()) {
-        return Err(OfficeCryptoError::InvalidPassword);
+    if info.key_data.block_size != 16 {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported keyData blockSize {}",
+            info.key_data.block_size
+        )));
     }
 
-    // Decrypt the package key.
-    let key_value_key = derive_agile_key(
-        info.password_key_encryptor.hash_algorithm,
-        &info.password_key_encryptor.salt,
-        &pw_utf16,
-        info.password_key_encryptor.spin_count,
-        info.password_key_encryptor.key_bits / 8,
-        BLOCK_KEY_ENCRYPTED_KEY_VALUE,
-    );
-    let key_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-        &key_value_key,
-        password_iv,
-        &info.password_key_encryptor.encrypted_key_value,
-    )?);
-    let key_len = info.key_data.key_bits / 8;
-    let package_key_bytes = key_value_plain.get(..key_len).ok_or_else(|| {
-        OfficeCryptoError::InvalidFormat("decrypted keyValue shorter than keyBytes".to_string())
-    })?;
-    let package_key: Zeroizing<Vec<u8>> = Zeroizing::new(package_key_bytes.to_vec());
-
-    // Validate data integrity (HMAC over the entire EncryptedPackage stream).
+    // Password verification + package key unwrapping.
     //
-    // The HMAC key/value are encrypted using the package key, with IVs derived from the keyData
-    // salt and fixed block keys.
+    // Per spec (and Excel), the password key-encryptor fields use `saltValue` as the CBC IV
+    // (truncated to blockSize). They do **not** use the derived IV scheme used for package
+    // segments.
+    let package_key = derive_package_key_from_password(info, &pw_utf16)?;
+
+    // Decrypt the `dataIntegrity` HMAC key/value.
     let digest_len = info.key_data.hash_algorithm.digest_len();
     let iv_hmac_key = derive_iv(
         info.key_data.hash_algorithm,
@@ -239,16 +164,12 @@ pub(crate) fn decrypt_agile_encrypted_package(
         BLOCK_KEY_INTEGRITY_HMAC_KEY,
         info.key_data.block_size,
     );
-    let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-        &package_key,
-        &iv_hmac_key,
-        &info.data_integrity.encrypted_hmac_key,
-    )?);
+    let hmac_key_plain =
+        aes_cbc_decrypt(&package_key, &iv_hmac_key, &info.data_integrity.encrypted_hmac_key)?;
     let hmac_key_plain = hmac_key_plain.get(..digest_len).ok_or_else(|| {
-        OfficeCryptoError::InvalidFormat(
-            "decrypted encryptedHmacKey shorter than hash output".to_string(),
-        )
+        OfficeCryptoError::InvalidFormat("decrypted HMAC key shorter than hash output".to_string())
     })?;
+    let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(hmac_key_plain.to_vec());
 
     let iv_hmac_val = derive_iv(
         info.key_data.hash_algorithm,
@@ -256,21 +177,26 @@ pub(crate) fn decrypt_agile_encrypted_package(
         BLOCK_KEY_INTEGRITY_HMAC_VALUE,
         info.key_data.block_size,
     );
-    let hmac_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-        &package_key,
-        &iv_hmac_val,
-        &info.data_integrity.encrypted_hmac_value,
-    )?);
-    let expected_hmac = hmac_value_plain.get(..digest_len).ok_or_else(|| {
-        OfficeCryptoError::InvalidFormat(
-            "decrypted encryptedHmacValue shorter than hash output".to_string(),
-        )
+    let expected_hmac_plain =
+        aes_cbc_decrypt(&package_key, &iv_hmac_val, &info.data_integrity.encrypted_hmac_value)?;
+    let expected_hmac_plain = expected_hmac_plain.get(..digest_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("decrypted HMAC value shorter than hash output".to_string())
     })?;
 
-    let computed_hmac = compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
-    if !ct_eq(expected_hmac, &computed_hmac) {
-        return Err(OfficeCryptoError::IntegrityCheckFailed);
-    }
+    // Validate the `dataIntegrity` HMAC. There are multiple variants in the wild for what bytes are
+    // covered by this HMAC:
+    // - Some producers compute it over the full `EncryptedPackage` stream (size prefix + ciphertext).
+    // - Others compute it over the ciphertext only (no size prefix).
+    // - Others compute it over the decrypted plaintext package bytes.
+    //
+    // We validate ciphertext variants up front, and fall back to plaintext variants after
+    // decryption if needed.
+    let actual_hmac_cipher_full =
+        compute_hmac(info.key_data.hash_algorithm, &hmac_key_plain, encrypted_package);
+    let actual_hmac_cipher_only =
+        compute_hmac(info.key_data.hash_algorithm, &hmac_key_plain, ciphertext);
+    let mut integrity_ok = ct_eq(&actual_hmac_cipher_full, expected_hmac_plain)
+        || ct_eq(&actual_hmac_cipher_only, expected_hmac_plain);
 
     // Decrypt the package data in 4096-byte segments.
     const SEGMENT_LEN: usize = 4096;
@@ -304,7 +230,114 @@ pub(crate) fn decrypt_agile_encrypted_package(
         )));
     }
     out.truncate(expected_len);
+
+    if !integrity_ok {
+        let actual_hmac_plain = compute_hmac(info.key_data.hash_algorithm, &hmac_key_plain, &out);
+        let actual_hmac_plain_with_size = compute_hmac_two(
+            info.key_data.hash_algorithm,
+            &hmac_key_plain,
+            &encrypted_package[..8],
+            &out,
+        );
+        integrity_ok = ct_eq(&actual_hmac_plain, expected_hmac_plain)
+            || ct_eq(&actual_hmac_plain_with_size, expected_hmac_plain);
+    }
+
+    if !integrity_ok {
+        return Err(OfficeCryptoError::IntegrityCheckFailed);
+    }
+
     Ok(out)
+}
+
+fn derive_package_key_from_password(
+    info: &AgileEncryptionInfo,
+    password_utf16le: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, OfficeCryptoError> {
+    let key_encryptor = &info.password_key_encryptor;
+    let key_data = &info.key_data;
+
+    let password_iv = key_encryptor
+        .salt
+        .get(..key_encryptor.block_size)
+        .ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("password salt shorter than blockSize".to_string())
+        })?;
+
+    // Password verifier.
+    let verifier_input_key = derive_agile_key(
+        key_encryptor.hash_algorithm,
+        &key_encryptor.salt,
+        password_utf16le,
+        key_encryptor.spin_count,
+        key_encryptor.key_bits / 8,
+        BLOCK_KEY_VERIFIER_HASH_INPUT,
+    );
+    let verifier_hash_input_plain = aes_cbc_decrypt(
+        &verifier_input_key,
+        password_iv,
+        &key_encryptor.encrypted_verifier_hash_input,
+    )?;
+    let verifier_hash_input_plain = verifier_hash_input_plain
+        .get(..key_encryptor.block_size)
+        .ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat(
+                format!(
+                    "decrypted verifierHashInput shorter than {} bytes",
+                    key_encryptor.block_size
+                ),
+            )
+        })?
+        .to_vec();
+
+    let verifier_hash = key_encryptor
+        .hash_algorithm
+        .digest(&verifier_hash_input_plain);
+
+    let verifier_value_key = derive_agile_key(
+        key_encryptor.hash_algorithm,
+        &key_encryptor.salt,
+        password_utf16le,
+        key_encryptor.spin_count,
+        key_encryptor.key_bits / 8,
+        BLOCK_KEY_VERIFIER_HASH_VALUE,
+    );
+    let verifier_hash_value_plain = aes_cbc_decrypt(
+        &verifier_value_key,
+        password_iv,
+        &key_encryptor.encrypted_verifier_hash_value,
+    )?;
+    let expected_hash_slice = verifier_hash_value_plain
+        .get(..verifier_hash.len())
+        .ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat(
+                "decrypted verifierHashValue shorter than hash".to_string(),
+            )
+        })?;
+
+    if !ct_eq(expected_hash_slice, verifier_hash.as_slice()) {
+        return Err(OfficeCryptoError::InvalidPassword);
+    }
+
+    // Decrypt the package key (encryptedKeyValue).
+    let key_value_key = derive_agile_key(
+        key_encryptor.hash_algorithm,
+        &key_encryptor.salt,
+        password_utf16le,
+        key_encryptor.spin_count,
+        key_encryptor.key_bits / 8,
+        BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+    );
+    let key_value_plain = aes_cbc_decrypt(
+        &key_value_key,
+        password_iv,
+        &key_encryptor.encrypted_key_value,
+    )?;
+    let key_len = key_data.key_bits / 8;
+    let package_key_bytes = key_value_plain.get(..key_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("decrypted keyValue shorter than keyBytes".to_string())
+    })?;
+    Ok(Zeroizing::new(package_key_bytes.to_vec()))
 }
 
 pub(crate) fn encrypt_agile_encrypted_package(
@@ -433,21 +466,19 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
-  <keyData saltSize="16" blockSize="16" keyBits="{key_bits}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
+  <keyData saltSize="16" blockSize="16" keyBits="{key_bits}" hashSize="{hash_size}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
   <dataIntegrity encryptedHmacKey="{enc_hmac_key_b64}" encryptedHmacValue="{enc_hmac_value_b64}"/>
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
       <p:encryptedKey xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
-        saltSize="16" blockSize="16" keyBits="{key_bits}" spinCount="{spin_count}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
-        <p:encryptedVerifierHashInput>{enc_vhi_b64}</p:encryptedVerifierHashInput>
-        <p:encryptedVerifierHashValue>{enc_vhv_b64}</p:encryptedVerifierHashValue>
-        <p:encryptedKeyValue>{enc_kv_b64}</p:encryptedKeyValue>
-      </p:encryptedKey>
+        saltSize="16" blockSize="16" keyBits="{key_bits}" hashSize="{hash_size}" spinCount="{spin_count}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}"
+        encryptedVerifierHashInput="{enc_vhi_b64}" encryptedVerifierHashValue="{enc_vhv_b64}" encryptedKeyValue="{enc_kv_b64}"/>
     </keyEncryptor>
   </keyEncryptors>
 </encryption>"#,
         key_bits = opts.key_bits,
         spin_count = opts.spin_count,
+        hash_size = hash_alg.digest_len(),
         hash_alg_name = hash_alg.as_ooxml_name(),
         salt_key_data_b64 = salt_key_data_b64,
         salt_key_encryptor_b64 = salt_key_encryptor_b64,
@@ -458,14 +489,12 @@ pub(crate) fn encrypt_agile_encrypted_package(
         enc_hmac_value_b64 = enc_hmac_value_b64,
     );
 
-    // Build EncryptionInfo stream: version header + xml length + xml bytes.
+    // Build EncryptionInfo stream: 8-byte version header + UTF-8 XML payload.
     let flags: u32 = 0x0000_0040;
-    let xml_len = xml.as_bytes().len() as u32;
     let mut encryption_info = Vec::new();
     encryption_info.extend_from_slice(&4u16.to_le_bytes());
     encryption_info.extend_from_slice(&4u16.to_le_bytes());
     encryption_info.extend_from_slice(&flags.to_le_bytes());
-    encryption_info.extend_from_slice(&xml_len.to_le_bytes());
     encryption_info.extend_from_slice(xml.as_bytes());
 
     Ok((encryption_info, encrypted_package))
@@ -538,6 +567,95 @@ fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
             mac.finalize().into_bytes().to_vec()
         }
     }
+}
+
+fn compute_hmac_two(hash_alg: HashAlgorithm, key: &[u8], part1: &[u8], part2: &[u8]) -> Vec<u8> {
+    match hash_alg {
+        HashAlgorithm::Md5 => {
+            let mut mac: Hmac<md5::Md5> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(part1);
+            mac.update(part2);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha1 => {
+            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(part1);
+            mac.update(part2);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha256 => {
+            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(part1);
+            mac.update(part2);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha384 => {
+            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(part1);
+            mac.update(part2);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha512 => {
+            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(part1);
+            mac.update(part2);
+            mac.finalize().into_bytes().to_vec()
+        }
+    }
+}
+
+fn extract_agile_xml_payload(payload: &[u8]) -> Result<&[u8], OfficeCryptoError> {
+    let mut bytes = trim_trailing_nuls(payload);
+
+    // Some implementations prefix the UTF-8 XML payload with a 4-byte little-endian length.
+    if bytes.len() >= 4 {
+        let len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        if len > 0 && len <= bytes.len().saturating_sub(4) {
+            let candidate = &bytes[4..4 + len];
+            let candidate = skip_ascii_whitespace(candidate);
+            if candidate.first() == Some(&b'<') {
+                bytes = candidate;
+            }
+        }
+    }
+
+    // Find the first XML tag if the buffer has leading bytes (should start with `<encryption`).
+    bytes = skip_ascii_whitespace(bytes);
+    if bytes.first() != Some(&b'<') {
+        if let Some(idx) = bytes.iter().position(|&b| b == b'<') {
+            bytes = &bytes[idx..];
+        }
+    }
+
+    if bytes.first() != Some(&b'<') {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptionInfo XML payload missing <encryption> root".to_string(),
+        ));
+    }
+
+    Ok(bytes)
+}
+
+fn trim_trailing_nuls(mut bytes: &[u8]) -> &[u8] {
+    while let Some((&last, rest)) = bytes.split_last() {
+        if last == 0 {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+fn skip_ascii_whitespace(mut bytes: &[u8]) -> &[u8] {
+    while let Some((&first, rest)) = bytes.split_first() {
+        if matches!(first, b' ' | b'\t' | b'\r' | b'\n') {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
 }
 
 struct AgileDescriptor {

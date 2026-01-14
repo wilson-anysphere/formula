@@ -138,8 +138,7 @@ pub(crate) fn checked_vec_len(total_size: u64) -> Result<usize, OfficeCryptoErro
         .map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
-    isize::try_from(len)
-        .map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
+    isize::try_from(len).map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     Ok(len)
 }
@@ -166,3 +165,79 @@ pub(crate) fn reset_ct_eq_calls() {
 pub(crate) fn ct_eq_call_count() -> usize {
     CT_EQ_CALLS.load(Ordering::Relaxed)
 }
+
+/// Very lightweight ZIP validator for decrypted OOXML packages.
+///
+/// This is intentionally stricter than just checking the `PK` prefix: when decrypting with the
+/// wrong scheme/key it's not impossible to produce bytes starting with `PK` by chance.
+///
+/// We look for the End of Central Directory (EOCD) record and validate that it is consistent.
+pub(crate) fn looks_like_zip(bytes: &[u8]) -> bool {
+    // ZIP local file header signature `PK\x03\x04`.
+    if bytes.len() < 4 || &bytes[..2] != b"PK" {
+        return false;
+    }
+
+    // EOCD signature `PK\x05\x06` is at least 22 bytes from the end, and the comment length is
+    // stored in the final 2 bytes of the fixed-size structure.
+    const EOCD_LEN: usize = 22;
+    const EOCD_SIG: [u8; 4] = [0x50, 0x4B, 0x05, 0x06];
+
+    if bytes.len() < EOCD_LEN {
+        return false;
+    }
+
+    // Per ZIP spec, comment length is a u16 so EOCD should appear within the last 65535+22 bytes.
+    let search_window = EOCD_LEN + 65_535;
+    let start = bytes.len().saturating_sub(search_window);
+
+    for i in (start..=bytes.len() - 4).rev() {
+        if bytes[i..i + 4] != EOCD_SIG {
+            continue;
+        }
+        // Fixed-size EOCD must fit.
+        if i + EOCD_LEN > bytes.len() {
+            continue;
+        }
+
+        let disk_no = u16::from_le_bytes([bytes[i + 4], bytes[i + 5]]);
+        let cd_disk_no = u16::from_le_bytes([bytes[i + 6], bytes[i + 7]]);
+        let entries_disk = u16::from_le_bytes([bytes[i + 8], bytes[i + 9]]);
+        let entries_total = u16::from_le_bytes([bytes[i + 10], bytes[i + 11]]);
+        let cd_size =
+            u32::from_le_bytes([bytes[i + 12], bytes[i + 13], bytes[i + 14], bytes[i + 15]])
+                as usize;
+        let cd_offset =
+            u32::from_le_bytes([bytes[i + 16], bytes[i + 17], bytes[i + 18], bytes[i + 19]])
+                as usize;
+        let comment_len = u16::from_le_bytes([bytes[i + 20], bytes[i + 21]]) as usize;
+
+        // EOCD record should end at EOF (including comment).
+        if i + EOCD_LEN + comment_len != bytes.len() {
+            continue;
+        }
+
+        // Reject multi-disk archives (OOXML packages are not spanned).
+        if disk_no != 0 || cd_disk_no != 0 || entries_disk != entries_total {
+            continue;
+        }
+
+        // Basic bounds checks.
+        if cd_offset >= bytes.len() || cd_offset.checked_add(cd_size).is_none() {
+            continue;
+        }
+        if cd_offset + cd_size > i {
+            continue;
+        }
+
+        // Central directory file header signature `PK\x01\x02`.
+        if bytes.get(cd_offset..cd_offset + 4) != Some(b"PK\x01\x02") {
+            continue;
+        }
+
+        return true;
+    }
+
+    false
+}
+

@@ -488,9 +488,19 @@ impl StandardKeyDeriver {
         password: &str,
         derivation: StandardKeyDerivation,
     ) -> Self {
+        Self::new_with_spin_count(hash_alg, key_bits, salt, password, derivation, 50_000)
+    }
+
+    pub(crate) fn new_with_spin_count(
+        hash_alg: HashAlgorithm,
+        key_bits: u32,
+        salt: &[u8],
+        password: &str,
+        derivation: StandardKeyDerivation,
+        spin_count: u32,
+    ) -> Self {
         let pw = password_to_utf16le(password);
-        // Office Standard encryption uses a fixed spin count of 50k.
-        let password_hash = hash_password(hash_alg, salt, &pw, 50_000);
+        let password_hash = hash_password(hash_alg, salt, &pw, spin_count);
         let key_bytes = (key_bits as usize) / 8;
         Self {
             hash_alg,
@@ -510,7 +520,7 @@ impl StandardKeyDeriver {
         buf.extend_from_slice(&block_index.to_le_bytes());
         let h: Zeroizing<Vec<u8>> = Zeroizing::new(self.hash_alg.digest(&buf));
         match self.derivation {
-            StandardKeyDerivation::Aes => Ok(crypt_derive_key_aes(self.hash_alg, &h, self.key_bytes)?),
+            StandardKeyDerivation::Aes => crypt_derive_key_aes(self.hash_alg, &h, self.key_bytes),
             StandardKeyDerivation::Rc4 => {
                 if self.key_bytes > h.len() {
                     return Err(OfficeCryptoError::UnsupportedEncryption(format!(
