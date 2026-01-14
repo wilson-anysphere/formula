@@ -5,7 +5,9 @@ use std::fmt;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 
-const fn default_true() -> bool {
+// Used by serde `default = "default_true"` attributes (not detected by the `dead_code` lint).
+#[allow(dead_code)]
+fn default_true() -> bool {
     true
 }
 

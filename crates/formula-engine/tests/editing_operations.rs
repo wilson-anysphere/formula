@@ -224,6 +224,37 @@ fn range_map_edits_update_unicode_sheet_range_references() {
 }
 
 #[test]
+fn structural_edits_resolve_sheet_names_using_nfkc_normalization() {
+    // Regression test for NFKC sheet name equivalence in structural edit rewrites.
+    //
+    // Excel compares sheet names case-insensitively across Unicode and applies compatibility
+    // normalization (NFKC). For example, Å (ANGSTROM SIGN) is compatibility-equivalent to Å
+    // (LATIN CAPITAL LETTER A WITH RING ABOVE). The engine's sheet lookup and structural formula
+    // rewrite resolvers must treat them as the same sheet name.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Å", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine
+        // The 3D span uses Å, while the actual sheet name is Å.
+        .set_cell_formula("Summary", "A1", "=SUM('Å:Sheet3'!A1)")
+        .unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "Sheet2".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("Summary", "A1"),
+        Some("=SUM('Å:Sheet3'!A2)")
+    );
+}
+
+#[test]
 fn insert_row_updates_mixed_absolute_and_relative_references() {
     let mut engine = Engine::new();
     engine
