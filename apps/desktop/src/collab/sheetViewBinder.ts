@@ -336,16 +336,32 @@ function readMergedRanges(raw: unknown): Array<{ startRow: number; endRow: numbe
     return undefined;
   };
 
+  const readNonNegInt = (entry: any, keys: string[]): number | null => {
+    const rawValue = readEntryField(entry, keys);
+    const num = Number(yjsValueToJson(rawValue));
+    if (!Number.isInteger(num) || num < 0) return null;
+    return num;
+  };
+
   const out: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
   for (const entry of raw) {
-    const sr = Number(yjsValueToJson(readEntryField(entry, ["startRow", "start_row", "sr"])));
-    const er = Number(yjsValueToJson(readEntryField(entry, ["endRow", "end_row", "er"])));
-    const sc = Number(yjsValueToJson(readEntryField(entry, ["startCol", "start_col", "sc"])));
-    const ec = Number(yjsValueToJson(readEntryField(entry, ["endCol", "end_col", "ec"])));
-    if (!Number.isInteger(sr) || sr < 0) continue;
-    if (!Number.isInteger(er) || er < 0) continue;
-    if (!Number.isInteger(sc) || sc < 0) continue;
-    if (!Number.isInteger(ec) || ec < 0) continue;
+    const range = readEntryField(entry, ["range"]) ?? entry;
+
+    let sr = readNonNegInt(range, ["startRow", "start_row", "sr"]);
+    let er = readNonNegInt(range, ["endRow", "end_row", "er"]);
+    let sc = readNonNegInt(range, ["startCol", "start_col", "sc"]);
+    let ec = readNonNegInt(range, ["endCol", "end_col", "ec"]);
+
+    if (sr == null || er == null || sc == null || ec == null) {
+      const start = readEntryField(range, ["start"]);
+      const end = readEntryField(range, ["end"]);
+      if (sr == null) sr = readNonNegInt(start, ["row", "r"]);
+      if (sc == null) sc = readNonNegInt(start, ["col", "c"]);
+      if (er == null) er = readNonNegInt(end, ["row", "r"]);
+      if (ec == null) ec = readNonNegInt(end, ["col", "c"]);
+    }
+
+    if (sr == null || er == null || sc == null || ec == null) continue;
 
     const startRow = Math.min(sr, er);
     const endRow = Math.max(sr, er);

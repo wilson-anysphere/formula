@@ -91,6 +91,8 @@ describe("bindSheetViewToCollabSession (mergedRanges)", () => {
     yRanges.push([
       { start_row: 0, end_row: 1, start_col: 0, end_col: 1 },
       mapEntry,
+      { start: { row: 4, col: 0 }, end: { row: 5, col: 1 } },
+      { range: { startRow: 6, endRow: 7, startCol: 0, endCol: 1 } },
     ]);
     doc.transact(() => {
       const view = new Y.Map<any>();
@@ -109,6 +111,8 @@ describe("bindSheetViewToCollabSession (mergedRanges)", () => {
     expect(document.getMergedRanges(sheetId)).toEqual([
       { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
       { startRow: 2, endRow: 3, startCol: 1, endCol: 2 },
+      { startRow: 4, endRow: 5, startCol: 0, endCol: 1 },
+      { startRow: 6, endRow: 7, startCol: 0, endCol: 1 },
     ]);
 
     binder.destroy();
