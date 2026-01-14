@@ -122,6 +122,11 @@ Notes:
   node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
   ```
 
+  To save JSON output (samples + summary):
+  ```bash
+  pnpm perf:desktop-startup -- --json target/perf-artifacts/desktop-startup.json
+  ```
+
   A scheduled cross-platform GitHub Actions workflow also runs this benchmark daily and uploads JSON + log artifacts per OS:
   - `.github/workflows/desktop-perf-platform-matrix.yml`
 
@@ -131,6 +136,12 @@ To measure idle memory for the desktop app (after TTI, with an empty workbook), 
 
 ```bash
 pnpm perf:desktop-memory
+```
+
+To save JSON output (samples + summary):
+
+```bash
+pnpm perf:desktop-memory -- --json target/perf-artifacts/desktop-memory.json
 ```
 
 This reports `idleRssMb`, which is the **resident set size (RSS)** of the desktop process *plus its child processes*,
