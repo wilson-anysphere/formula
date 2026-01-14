@@ -14119,6 +14119,52 @@ export class SpreadsheetApp {
 
     const { frozenRows, frozenCols } = this.getFrozen();
     const rectScratch = this.chartCursorScratchRect;
+    // Selection handles are drawn above other overlays, so handle hits should win even if the chart body is
+    // obscured (e.g. by drawings in non-canvas mode). Prefer returning the selected chart when the pointer is
+    // on one of its resize handles, even if the point is slightly outside its rect (handles extend beyond the
+    // outline by half their size).
+    if (this.selectedChartId != null) {
+      for (let i = charts.length - 1; i >= 0; i -= 1) {
+        const chart = charts[i]!;
+        if (chart.id !== this.selectedChartId) continue;
+        if (chart.sheetId !== sheetId) break;
+        const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
+        if (!rect) break;
+        const fromRow =
+          chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
+        const fromCol =
+          chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
+        const inFrozenRows = fromRow < frozenRows;
+        const inFrozenCols = fromCol < frozenCols;
+        const paneKey: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" =
+          inFrozenRows && inFrozenCols
+            ? "topLeft"
+            : inFrozenRows && !inFrozenCols
+              ? "topRight"
+              : !inFrozenRows && inFrozenCols
+                ? "bottomLeft"
+                : "bottomRight";
+        const paneRect = layout.paneRects[paneKey];
+        const pointInPane =
+          x >= paneRect.x && x <= paneRect.x + paneRect.width && y >= paneRect.y && y <= paneRect.y + paneRect.height;
+        if (!pointInPane) break;
+        const bounds = this.chartCursorScratchBounds;
+        bounds.x = rect.left;
+        bounds.y = rect.top;
+        bounds.width = rect.width;
+        bounds.height = rect.height;
+        const handle = hitTestResizeHandle(bounds, x, y);
+        if (handle) {
+          return {
+            chart,
+            rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+            pane: { key: paneKey, rect: paneRect },
+            pointInCellArea: { x, y },
+          };
+        }
+        break;
+      }
+    }
     for (let i = charts.length - 1; i >= 0; i -= 1) {
       const chart = charts[i]!;
       if (chart.sheetId !== sheetId) continue;
