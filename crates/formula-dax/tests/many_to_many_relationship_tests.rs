@@ -303,3 +303,173 @@ fn relatedtable_works_when_dimension_keys_are_not_unique() {
         2.into()
     );
 }
+
+#[test]
+fn many_to_many_crossfilter_can_enable_bidirectional_filtering_inside_calculate() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![1.into(), "B".into()]).unwrap();
+    dim.push_row(vec![2.into(), "C".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key"]);
+    fact.push_row(vec![10.into(), 1.into()]).unwrap();
+    fact.push_row(vec![11.into(), 2.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    // Without CROSSFILTER(BOTH), filters on Fact do not flow to Dim (relationship is single-direction).
+    let no_crossfilter = engine
+        .evaluate(
+            &model,
+            "CALCULATE(DISTINCTCOUNT(Dim[Attr]), Fact[Key] = 1)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(no_crossfilter, 3.into());
+
+    // With CROSSFILTER(BOTH), Fact filters propagate to Dim; for M2M, all Dim rows for a visible key remain.
+    let with_crossfilter = engine
+        .evaluate(
+            &model,
+            "CALCULATE(DISTINCTCOUNT(Dim[Attr]), Fact[Key] = 1, CROSSFILTER(Fact[Key], Dim[Key], BOTH))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(with_crossfilter, 2.into());
+}
+
+#[test]
+fn many_to_many_crossfilter_none_disables_relationship_propagation() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![1.into(), "B".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![10.into(), 1.into(), 5.0.into()]).unwrap();
+    fact.push_row(vec![11.into(), 1.into(), 7.0.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    // With CROSSFILTER(NONE), Dim filters should not propagate to Fact.
+    let value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Fact[Amount]), Dim[Attr] = \"B\", CROSSFILTER(Fact[Key], Dim[Key], NONE))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 12.0.into());
+}
+
+#[test]
+fn many_to_many_userelationship_can_override_active_relationship() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
+    dim.push_row(vec![1.into(), 10.into(), "A".into()]).unwrap();
+    dim.push_row(vec![1.into(), 11.into(), "B".into()]).unwrap();
+    dim.push_row(vec![2.into(), 20.into(), "C".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB", "Amount"]);
+    fact.push_row(vec![100.into(), 1.into(), 10.into(), 5.0.into()])
+        .unwrap();
+    fact.push_row(vec![101.into(), 1.into(), 11.into(), 7.0.into()])
+        .unwrap();
+    fact.push_row(vec![102.into(), 2.into(), 20.into(), 3.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    // Active relationship on KeyA.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    // Inactive relationship on KeyB.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    // With the active KeyA relationship, Dim[Attr] = "B" implies KeyA = 1, which includes both KeyA=1 fact rows.
+    let active_rel = engine
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Fact[Amount]), Dim[Attr] = \"B\")",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(active_rel, 12.0.into());
+
+    // USERELATIONSHIP activates the inactive relationship and overrides the active one for the same table pair.
+    let userel = engine
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Fact[Amount]), Dim[Attr] = \"B\", USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(userel, 7.0.into());
+}
