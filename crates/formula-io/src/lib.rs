@@ -1705,6 +1705,7 @@ fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> 
     None
 }
 
+#[cfg(not(feature = "encrypted-workbooks"))]
 fn unsupported_office_ooxml_encryption(path: &Path) -> Error {
     Error::UnsupportedEncryption {
         path: path.to_path_buf(),

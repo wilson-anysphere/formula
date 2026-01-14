@@ -126,7 +126,6 @@ struct AgileKeyData {
     hash_algorithm: HashAlgorithm,
     block_size: usize,
     key_bits: usize,
-    hash_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -188,7 +187,6 @@ fn parse_agile_encryption_info(xml: &str) -> Result<AgileEncryptionInfo, Decrypt
         hash_algorithm: parse_hash_algorithm(key_data_node, "hashAlgorithm")?,
         block_size: parse_usize_attr(key_data_node, "blockSize")?,
         key_bits: parse_usize_attr(key_data_node, "keyBits")?,
-        hash_size: parse_usize_attr(key_data_node, "hashSize")?,
     };
 
     let key_encryptor_node = doc
