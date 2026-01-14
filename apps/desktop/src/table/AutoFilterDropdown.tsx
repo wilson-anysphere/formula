@@ -25,7 +25,16 @@ export function AutoFilterDropdown({
 }: AutoFilterDropdownProps) {
   const values = useMemo(() => distinctColumnValues(rows, colId), [rows, colId]);
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(initialSelected == null ? values : initialSelected),
+    () => {
+      if (initialSelected == null) return new Set(values);
+      const allowed = new Set(values);
+      const out = new Set<string>();
+      for (const raw of initialSelected) {
+        const v = String(raw ?? "");
+        if (allowed.has(v)) out.add(v);
+      }
+      return out;
+    },
   );
   const [query, setQuery] = useState("");
 
@@ -121,7 +130,8 @@ export function AutoFilterDropdown({
           className="formula-sort-filter__button formula-sort-filter__button--primary"
           type="button"
           onClick={() => {
-            onApply(Array.from(selected));
+            // Preserve the current display order (and avoid returning stale values that are not in the list).
+            onApply(values.filter((v) => selected.has(v)));
             onClose();
           }}
         >
