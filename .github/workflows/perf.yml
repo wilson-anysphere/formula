@@ -44,9 +44,8 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      # Desktop idle RSS should eventually be ~100MB, but start conservative while
-      # the measurement stabilizes in CI. Override via repo variable when tightening.
-      FORMULA_DESKTOP_IDLE_RSS_TARGET_MB: ${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB || '250' }}
+      # Desktop idle RSS budget in MB. Override via the repository variable.
+      FORMULA_DESKTOP_IDLE_RSS_TARGET_MB: ${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB || '100' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
