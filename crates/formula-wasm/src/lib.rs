@@ -12,7 +12,6 @@ use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
     iter_locales, ValueLocaleConfig, EN_US,
 };
-use formula_engine::metadata::FormatRun as EngineFormatRun;
 use formula_engine::pivot as pivot_engine;
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
