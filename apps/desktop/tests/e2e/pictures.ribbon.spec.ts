@@ -6,6 +6,30 @@ const TINY_PNG_BASE64 =
   // 1×1 transparent PNG
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PYpgVwAAAABJRU5ErkJggg==";
 
+async function evaluateWithRetry<T>(page: Page, fn: () => T | Promise<T>): Promise<T> {
+  // Vite may trigger a one-time full reload after dependency optimization.
+  // Retry once if the execution context is destroyed mid-evaluate.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await page.evaluate(fn);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        attempt === 0 &&
+        (message.includes("Execution context was destroyed") ||
+          message.includes("frame was detached") ||
+          message.includes("net::ERR_ABORTED"))
+      ) {
+        await page.waitForLoadState("domcontentloaded");
+        continue;
+      }
+      throw err;
+    }
+  }
+  // Unreachable, but keeps TypeScript happy.
+  throw new Error("evaluateWithRetry exhausted retries");
+}
+
 async function whenIdle(page: Page, timeoutMs: number = 15_000): Promise<void> {
   // Vite may trigger a one-time full reload after dependency optimization.
   // Retry once if the execution context is destroyed mid-wait.
@@ -32,7 +56,7 @@ async function whenIdle(page: Page, timeoutMs: number = 15_000): Promise<void> {
 }
 
 async function getImageDrawingCount(page: Page): Promise<number> {
-  return await page.evaluate(() => {
+  return await evaluateWithRetry(page, () => {
     const app = window.__formulaApp as any;
     if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
 
@@ -55,7 +79,7 @@ test.describe("Insert → Pictures", () => {
       await whenIdle(page);
 
       // Ensure insertion starts from a deterministic location so the inserted pictures land in the viewport.
-      await page.evaluate(() => {
+      await evaluateWithRetry(page, () => {
         const app = window.__formulaApp as any;
         app.activateCell({ row: 0, col: 0 });
         app.focus();
@@ -115,7 +139,7 @@ test.describe("Insert → Pictures", () => {
         .poll(
           async () => {
             await whenIdle(page, 5_000);
-            return await page.evaluate(() => {
+            return await evaluateWithRetry(page, () => {
               const state = (window.__formulaApp as any).getDrawingsDebugState();
               const drawings = Array.isArray(state?.drawings) ? state.drawings : [];
               const visibleImages = drawings.filter((d: any) => {
