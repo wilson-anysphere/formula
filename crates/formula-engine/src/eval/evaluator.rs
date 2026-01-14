@@ -219,11 +219,19 @@ pub trait ValueResolver {
     fn sheet_dimensions(&self, _sheet_id: usize) -> (u32, u32) {
         (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS)
     }
-
     /// Returns the sheet default column width in Excel "character" units.
     ///
     /// This corresponds to the worksheet's `<sheetFormatPr defaultColWidth="...">` metadata.
     fn sheet_default_col_width(&self, _sheet_id: usize) -> Option<f32> {
+        None
+    }
+
+    /// Returns the top-left visible cell ("origin") for a worksheet view, if provided.
+    ///
+    /// This corresponds to Excel's `INFO("origin")` semantics (driven by scroll position + frozen
+    /// panes). The core engine is deterministic and must not consult UI/window state directly, so
+    /// hosts should plumb this metadata through.
+    fn sheet_origin_cell(&self, _sheet_id: usize) -> Option<CellAddr> {
         None
     }
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
@@ -1796,6 +1804,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             FnSheetId::Local(id) => self.resolver.sheet_default_col_width(*id),
             FnSheetId::External(_) => None,
         }
+    }
+
+    fn sheet_origin_cell(&self, sheet_id: usize) -> Option<CellAddr> {
+        self.resolver.sheet_origin_cell(sheet_id)
     }
 
     fn iter_reference_cells<'b>(

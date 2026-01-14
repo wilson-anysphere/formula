@@ -299,6 +299,14 @@ struct Sheet {
     ///
     /// Note: This is currently informational only; the engine does not enforce edit restrictions.
     sheet_protection_enabled: bool,
+    /// Host-provided worksheet view metadata: the top-left visible cell in the current view.
+    ///
+    /// This is surfaced via `INFO("origin")`.
+    origin: Option<CellAddr>,
+    /// Reverse index of formula cells that depend on `INFO("origin")` for this sheet.
+    ///
+    /// This allows `set_sheet_origin` to efficiently mark only impacted cells dirty.
+    origin_dependents: HashSet<CellAddr>,
     /// Logical row count for the worksheet grid.
     ///
     /// Defaults to Excel's row limit, but can grow beyond Excel to support very large sheets. The
@@ -325,6 +333,8 @@ impl Default for Sheet {
             default_style_id: None,
             default_col_width: None,
             sheet_protection_enabled: false,
+            origin: None,
+            origin_dependents: HashSet::new(),
             // Default to Excel-compatible sheet bounds.
             row_count: EXCEL_MAX_ROWS,
             col_count: EXCEL_MAX_COLS,
@@ -1833,6 +1843,72 @@ impl Engine {
         Ok(())
     }
 
+    /// Set the host-provided top-left visible cell ("origin") for `sheet`.
+    ///
+    /// Excel's `INFO("origin")` is tied to the active window's view state (scroll position +
+    /// frozen panes). The core engine is deterministic and does not query UI state directly, so
+    /// hosts should provide the current origin explicitly.
+    ///
+    /// When the origin changes, any formulas that depend on `INFO("origin")` are marked dirty so
+    /// the next recalculation observes the updated view state.
+    pub fn set_sheet_origin(&mut self, sheet: &str, origin: Option<&str>) -> Result<(), EngineError> {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+
+        let origin = origin.map(str::trim).filter(|s| !s.is_empty());
+        let origin = match origin {
+            Some(addr) => Some(parse_a1(addr)?),
+            None => None,
+        };
+
+        // Reject out-of-bounds origin coordinates. This keeps `INFO("origin")` deterministic and
+        // avoids fabricating invalid absolute A1 strings.
+        if let Some(addr) = origin {
+            if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+                if addr.row >= sheet_state.row_count {
+                    return Err(EngineError::Address(
+                        crate::eval::AddressParseError::RowOutOfRange,
+                    ));
+                }
+                if addr.col >= sheet_state.col_count {
+                    return Err(EngineError::Address(
+                        crate::eval::AddressParseError::ColumnOutOfRange,
+                    ));
+                }
+            }
+        }
+
+        let dependents: Vec<CellKey> = {
+            let sheet_state = self
+                .workbook
+                .sheets
+                .get_mut(sheet_id)
+                .expect("sheet just ensured must exist");
+            if sheet_state.origin == origin {
+                return Ok(());
+            }
+            sheet_state.origin = origin;
+            sheet_state
+                .origin_dependents
+                .iter()
+                .copied()
+                .map(|addr| CellKey { sheet: sheet_id, addr })
+                .collect()
+        };
+
+        for key in dependents {
+            let cell_id = cell_id_from_key(key);
+            self.mark_dirty_including_self_with_reasons(key);
+            self.calc_graph.mark_dirty(cell_id);
+        }
+        self.sync_dirty_from_calc_graph();
+
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+
+        Ok(())
+    }
+
     /// Return the workbook style table (interned style objects).
     pub fn style_table(&self) -> &StyleTable {
         &self.workbook.styles
@@ -2259,7 +2335,7 @@ impl Engine {
                     sheet: sheet_id,
                     addr: *addr,
                 };
-                let (_, is_volatile, _, _) = analyze_expr_flags(
+                let (_, is_volatile, _, _, _) = analyze_expr_flags(
                     compiled.ast(),
                     key,
                     &tables_by_sheet,
@@ -2739,8 +2815,11 @@ impl Engine {
                 && cell.phonetic.is_none()
                 && cell.number_format.is_none()
         };
-        if remove_cell {
-            if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
+        if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
+            // Clearing a cell value removes any formula metadata, so drop it from the
+            // `INFO("origin")` dependency index as well.
+            sheet.origin_dependents.remove(&addr);
+            if remove_cell {
                 sheet.cells.remove(&addr);
             }
         }
@@ -3093,6 +3172,7 @@ impl Engine {
 
         if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
             sheet.cells.remove(&addr);
+            sheet.origin_dependents.remove(&addr);
         }
 
         // Mark downstream dependents dirty.
@@ -3189,13 +3269,14 @@ impl Engine {
 
         for (key, formula, ast) in formulas {
             let cell_id = cell_id_from_key(key);
-            let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
-                &ast,
-                key,
-                &tables_by_sheet,
-                &self.workbook,
-                self.external_refs_volatile,
-            );
+            let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
+                analyze_expr_flags(
+                    &ast,
+                    key,
+                    &tables_by_sheet,
+                    &self.workbook,
+                    self.external_refs_volatile,
+                );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
                 analyze_external_dependencies(&ast, key, &self.workbook);
@@ -3257,12 +3338,22 @@ impl Engine {
                 }
             };
 
-            let cell = self.workbook.get_or_create_cell_mut(key);
-            cell.compiled = Some(compiled_formula);
-            cell.bytecode_compile_reason = bytecode_compile_reason;
-            cell.volatile = volatile;
-            cell.thread_safe = thread_safe;
-            cell.dynamic_deps = dynamic_deps;
+            {
+                let cell = self.workbook.get_or_create_cell_mut(key);
+                cell.compiled = Some(compiled_formula);
+                cell.bytecode_compile_reason = bytecode_compile_reason;
+                cell.volatile = volatile;
+                cell.thread_safe = thread_safe;
+                cell.dynamic_deps = dynamic_deps;
+            }
+
+            if let Some(sheet_state) = self.workbook.sheets.get_mut(key.sheet) {
+                if origin_deps {
+                    sheet_state.origin_dependents.insert(key.addr);
+                } else {
+                    sheet_state.origin_dependents.remove(&key.addr);
+                }
+            }
 
             self.dirty.insert(key);
             self.dirty_reasons.remove(&key);
@@ -3478,13 +3569,14 @@ impl Engine {
                 &mut sheet_dims,
             );
 
-            let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
-                &compiled_ast,
-                key,
-                &tables_by_sheet,
-                &self.workbook,
-                self.external_refs_volatile,
-            );
+            let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
+                analyze_expr_flags(
+                    &compiled_ast,
+                    key,
+                    &tables_by_sheet,
+                    &self.workbook,
+                    self.external_refs_volatile,
+                );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
                 analyze_external_dependencies(&compiled_ast, key, &self.workbook);
@@ -3537,6 +3629,14 @@ impl Engine {
                 cell.volatile = volatile;
                 cell.thread_safe = thread_safe;
                 cell.dynamic_deps = dynamic_deps;
+            }
+
+            if let Some(sheet_state) = self.workbook.sheets.get_mut(key.sheet) {
+                if origin_deps {
+                    sheet_state.origin_dependents.insert(key.addr);
+                } else {
+                    sheet_state.origin_dependents.remove(&key.addr);
+                }
             }
 
             // Mark the formula (and its transitive dependents) dirty so recalculation picks up any
@@ -3771,13 +3871,14 @@ impl Engine {
             .iter()
             .map(|s| s.tables.clone())
             .collect();
-        let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
-            &compiled,
-            key,
-            &tables_by_sheet,
-            &self.workbook,
-            self.external_refs_volatile,
-        );
+        let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
+            analyze_expr_flags(
+                &compiled,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
+            );
         self.set_cell_name_refs(key, names);
         let (external_sheets, external_workbooks) =
             analyze_external_dependencies(&compiled, key, &self.workbook);
@@ -3819,14 +3920,24 @@ impl Engine {
                 Err(reason) => (CompiledFormula::Ast(compiled), Some(reason)),
             };
 
-        let cell = self.workbook.get_or_create_cell_mut(key);
-        cell.phonetic = None;
-        cell.formula = Some(formula.to_string());
-        cell.compiled = Some(compiled_formula);
-        cell.bytecode_compile_reason = bytecode_compile_reason;
-        cell.volatile = volatile;
-        cell.thread_safe = thread_safe;
-        cell.dynamic_deps = dynamic_deps;
+        {
+            let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.phonetic = None;
+            cell.formula = Some(formula.to_string());
+            cell.compiled = Some(compiled_formula);
+            cell.bytecode_compile_reason = bytecode_compile_reason;
+            cell.volatile = volatile;
+            cell.thread_safe = thread_safe;
+            cell.dynamic_deps = dynamic_deps;
+        }
+
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+            if origin_deps {
+                sheet_state.origin_dependents.insert(addr);
+            } else {
+                sheet_state.origin_dependents.remove(&addr);
+            }
+        }
 
         // Recalculate this cell and anything depending on it.
         self.mark_dirty_including_self_with_reasons(key);
@@ -7035,13 +7146,14 @@ impl Engine {
 
             let cell_id = cell_id_from_key(key);
 
-            let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
-                &ast,
-                key,
-                &tables_by_sheet,
-                &self.workbook,
-                self.external_refs_volatile,
-            );
+            let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
+                analyze_expr_flags(
+                    &ast,
+                    key,
+                    &tables_by_sheet,
+                    &self.workbook,
+                    self.external_refs_volatile,
+                );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
                 analyze_external_dependencies(&ast, key, &self.workbook);
@@ -7101,12 +7213,22 @@ impl Engine {
                 }
             };
 
-            let cell = self.workbook.get_or_create_cell_mut(key);
-            cell.compiled = Some(compiled_formula);
-            cell.bytecode_compile_reason = bytecode_compile_reason;
-            cell.volatile = volatile;
-            cell.thread_safe = thread_safe;
-            cell.dynamic_deps = dynamic_deps;
+            {
+                let cell = self.workbook.get_or_create_cell_mut(key);
+                cell.compiled = Some(compiled_formula);
+                cell.bytecode_compile_reason = bytecode_compile_reason;
+                cell.volatile = volatile;
+                cell.thread_safe = thread_safe;
+                cell.dynamic_deps = dynamic_deps;
+            }
+
+            if let Some(sheet_state) = self.workbook.sheets.get_mut(key.sheet) {
+                if origin_deps {
+                    sheet_state.origin_dependents.insert(key.addr);
+                } else {
+                    sheet_state.origin_dependents.remove(&key.addr);
+                }
+            }
 
             self.mark_dirty_including_self_with_reasons(key);
             self.calc_graph.mark_dirty(cell_id);
@@ -7136,6 +7258,9 @@ impl Engine {
         self.dirty.clear();
         self.dirty_reasons.clear();
         self.spills = SpillState::default();
+        for sheet in &mut self.workbook.sheets {
+            sheet.origin_dependents.clear();
+        }
 
         for (sheet_name, addr, formula) in formulas {
             let addr_a1 = cell_addr_to_a1(addr);
@@ -9517,6 +9642,7 @@ struct Snapshot {
     sheet_default_col_width: Vec<Option<f32>>,
     format_runs_by_col: Vec<BTreeMap<u32, Vec<FormatRun>>>,
     text_codepage: u16,
+    sheet_origin_cells: Vec<Option<CellAddr>>,
     values: HashMap<CellKey, Value>,
     style_ids: HashMap<CellKey, u32>,
     phonetics: HashMap<CellKey, String>,
@@ -9605,6 +9731,13 @@ impl Snapshot {
                     BTreeMap::new()
                 }
             })
+            .collect();
+
+        let sheet_origin_cells = workbook
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(sheet_id, s)| if workbook.sheet_exists(sheet_id) { s.origin } else { None })
             .collect();
         let mut values = HashMap::new();
         let mut phonetics = HashMap::new();
@@ -9735,6 +9868,7 @@ impl Snapshot {
             sheet_default_col_width,
             format_runs_by_col,
             text_codepage: workbook.text_codepage,
+            sheet_origin_cells,
             values,
             style_ids,
             phonetics,
@@ -9846,6 +9980,10 @@ impl crate::eval::ValueResolver for Snapshot {
             .get(sheet_id)
             .copied()
             .flatten()
+    }
+
+    fn sheet_origin_cell(&self, sheet_id: usize) -> Option<CellAddr> {
+        self.sheet_origin_cells.get(sheet_id).copied().flatten()
     }
 
     fn get_cell_formula(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
@@ -13207,11 +13345,12 @@ fn analyze_expr_flags(
     tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
     external_refs_volatile: bool,
-) -> (HashSet<String>, bool, bool, bool) {
+) -> (HashSet<String>, bool, bool, bool, bool) {
     let mut names = HashSet::new();
     let mut volatile = false;
     let mut thread_safe = true;
     let mut dynamic_deps = false;
+    let mut origin_deps = false;
     let mut visiting_names = HashSet::new();
     let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
     walk_expr_flags(
@@ -13223,11 +13362,12 @@ fn analyze_expr_flags(
         &mut volatile,
         &mut thread_safe,
         &mut dynamic_deps,
+        &mut origin_deps,
         &mut visiting_names,
         &mut lexical_scopes,
         external_refs_volatile,
     );
-    (names, volatile, thread_safe, dynamic_deps)
+    (names, volatile, thread_safe, dynamic_deps, origin_deps)
 }
 
 fn walk_expr_flags(
@@ -13239,6 +13379,7 @@ fn walk_expr_flags(
     volatile: &mut bool,
     thread_safe: &mut bool,
     dynamic_deps: &mut bool,
+    origin_deps: &mut bool,
     visiting_names: &mut HashSet<(SheetId, String)>,
     lexical_scopes: &mut Vec<HashSet<String>>,
     external_refs_volatile: bool,
@@ -13313,6 +13454,7 @@ fn walk_expr_flags(
                         volatile,
                         thread_safe,
                         dynamic_deps,
+                        origin_deps,
                         visiting_names,
                         lexical_scopes,
                         external_refs_volatile,
@@ -13332,6 +13474,7 @@ fn walk_expr_flags(
                 volatile,
                 thread_safe,
                 dynamic_deps,
+                origin_deps,
                 visiting_names,
                 lexical_scopes,
                 external_refs_volatile,
@@ -13347,6 +13490,7 @@ fn walk_expr_flags(
                 volatile,
                 thread_safe,
                 dynamic_deps,
+                origin_deps,
                 visiting_names,
                 lexical_scopes,
                 external_refs_volatile,
@@ -13362,6 +13506,7 @@ fn walk_expr_flags(
                 volatile,
                 thread_safe,
                 dynamic_deps,
+                origin_deps,
                 visiting_names,
                 lexical_scopes,
                 external_refs_volatile,
@@ -13375,6 +13520,7 @@ fn walk_expr_flags(
                 volatile,
                 thread_safe,
                 dynamic_deps,
+                origin_deps,
                 visiting_names,
                 lexical_scopes,
                 external_refs_volatile,
@@ -13398,6 +13544,14 @@ fn walk_expr_flags(
                 //   single (unchanged) cell.
                 if matches!(spec.name, "OFFSET" | "INDIRECT" | "GETPIVOTDATA") {
                     *dynamic_deps = true;
+                }
+
+                if spec.name == "INFO" {
+                    if let Some(first) = args.first() {
+                        if matches!(first, Expr::Text(s) if s.trim().eq_ignore_ascii_case("origin")) {
+                            *origin_deps = true;
+                        }
+                    }
                 }
 
                 match spec.name {
@@ -13463,6 +13617,7 @@ fn walk_expr_flags(
                                 volatile,
                                 thread_safe,
                                 dynamic_deps,
+                                origin_deps,
                                 visiting_names,
                                 lexical_scopes,
                                 external_refs_volatile,
@@ -13482,6 +13637,7 @@ fn walk_expr_flags(
                             volatile,
                             thread_safe,
                             dynamic_deps,
+                            origin_deps,
                             visiting_names,
                             lexical_scopes,
                             external_refs_volatile,
@@ -13514,6 +13670,7 @@ fn walk_expr_flags(
                             volatile,
                             thread_safe,
                             dynamic_deps,
+                            origin_deps,
                             visiting_names,
                             lexical_scopes,
                             external_refs_volatile,
@@ -13548,6 +13705,7 @@ fn walk_expr_flags(
                                     volatile,
                                     thread_safe,
                                     dynamic_deps,
+                                    origin_deps,
                                     visiting_names,
                                     lexical_scopes,
                                     external_refs_volatile,
@@ -13573,6 +13731,7 @@ fn walk_expr_flags(
                     volatile,
                     thread_safe,
                     dynamic_deps,
+                    origin_deps,
                     visiting_names,
                     lexical_scopes,
                     external_refs_volatile,
@@ -13589,6 +13748,7 @@ fn walk_expr_flags(
                 volatile,
                 thread_safe,
                 dynamic_deps,
+                origin_deps,
                 visiting_names,
                 lexical_scopes,
                 external_refs_volatile,
@@ -13603,6 +13763,7 @@ fn walk_expr_flags(
                     volatile,
                     thread_safe,
                     dynamic_deps,
+                    origin_deps,
                     visiting_names,
                     lexical_scopes,
                     external_refs_volatile,
@@ -13620,6 +13781,7 @@ fn walk_expr_flags(
                     volatile,
                     thread_safe,
                     dynamic_deps,
+                    origin_deps,
                     visiting_names,
                     lexical_scopes,
                     external_refs_volatile,
@@ -13636,6 +13798,7 @@ fn walk_expr_flags(
                 volatile,
                 thread_safe,
                 dynamic_deps,
+                origin_deps,
                 visiting_names,
                 lexical_scopes,
                 external_refs_volatile,

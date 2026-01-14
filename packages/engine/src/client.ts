@@ -226,6 +226,12 @@ export interface EngineClient {
    */
   setSheetDimensions(sheet: string, rows: number, cols: number, options?: RpcOptions): Promise<void>;
   getSheetDimensions(sheet: string, options?: RpcOptions): Promise<{ rows: number; cols: number }>;
+  /**
+   * Set the top-left visible cell ("origin") for a worksheet view.
+   *
+   * This is host-provided UI metadata surfaced to formulas via `INFO("origin")`.
+   */
+  setSheetOrigin(sheet: string, origin: string | null, options?: RpcOptions): Promise<void>;
 
   /**
    * Rename a worksheet and rewrite formulas that reference it (Excel-like).
@@ -506,6 +512,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.getSheetDimensions(sheet, rpcOptions)),
     renameSheet: async (oldName, newName, rpcOptions) =>
       await withEngine((connected) => connected.renameSheet(oldName, newName, rpcOptions)),
+    setSheetOrigin: async (sheet, origin, rpcOptions) =>
+      await withEngine((connected) => connected.setSheetOrigin(sheet, origin, rpcOptions)),
     setColWidthChars: async (sheet, col, widthChars, rpcOptions) =>
       await withEngine((connected) => connected.setColWidthChars(sheet, col, widthChars, rpcOptions)),
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),

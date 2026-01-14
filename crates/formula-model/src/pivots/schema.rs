@@ -367,6 +367,10 @@ impl Default for SubtotalPosition {
     }
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 /// Whether to render grand totals for rows and/or columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

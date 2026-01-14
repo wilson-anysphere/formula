@@ -57,6 +57,7 @@ type WasmWorkbookInstance = {
   setColWidth?: (sheet: string, col: number, width: number | null) => void;
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
   internStyle?: (style: unknown) => number;
+  setSheetOrigin?: (sheet: string, origin: string | null) => void;
   setColWidthChars?: (sheet: string, col: number, widthChars: number | null) => void;
   toJson(): string;
 };
@@ -651,6 +652,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("renameSheet: WasmWorkbook.renameSheet is not available in this WASM build");
               }
               result = Boolean((wb as any).renameSheet(params.oldName, params.newName));
+              break;
+            case "setSheetOrigin":
+              if (typeof (wb as any).setSheetOrigin !== "function") {
+                throw new Error("setSheetOrigin: not available in this WASM build");
+              }
+              (wb as any).setSheetOrigin(params.sheet, params.origin);
+              result = null;
               break;
             case "setColWidthChars":
               if (typeof (wb as any).setColWidthChars !== "function") {

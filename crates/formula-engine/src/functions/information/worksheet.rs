@@ -99,10 +99,12 @@ pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
                 }
             }
         }
-        InfoType::Origin => ctx
-            .info_origin()
-            .map(|s| Value::Text(s.to_string()))
-            .unwrap_or(Value::Error(ErrorKind::NA)),
+        InfoType::Origin => {
+            let origin = ctx
+                .sheet_origin_cell(ctx.current_sheet_id())
+                .unwrap_or(CellAddr { row: 0, col: 0 });
+            Value::Text(abs_a1(origin))
+        }
         InfoType::OSVersion => ctx
             .info_osversion()
             .map(|s| Value::Text(s.to_string()))

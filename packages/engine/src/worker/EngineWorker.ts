@@ -806,6 +806,11 @@ export class EngineWorker {
     return (await this.invoke("renameSheet", { oldName, newName }, options)) as boolean;
   }
 
+  async setSheetOrigin(sheet: string, origin: string | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setSheetOrigin", { sheet, origin }, options);
+  }
+
   /**
    * Set (or clear) a per-column width override.
    *

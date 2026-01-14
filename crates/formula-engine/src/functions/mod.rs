@@ -316,11 +316,19 @@ pub trait FunctionContext {
     fn sheet_dimensions(&self, _sheet_id: &SheetId) -> (u32, u32) {
         (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
     }
-
     /// Returns the sheet default column width in Excel "character" units.
     ///
     /// This corresponds to the worksheet's `<sheetFormatPr defaultColWidth="...">` metadata.
     fn sheet_default_col_width(&self, _sheet_id: &SheetId) -> Option<f32> {
+        None
+    }
+
+    /// Returns the top-left visible cell ("origin") for a worksheet view, if provided by the host.
+    ///
+    /// This is used by Excel-compatibility functions like `INFO("origin")`. The formula engine is
+    /// deterministic and does not inspect UI state directly; hosts should provide view metadata
+    /// explicitly via engine APIs.
+    fn sheet_origin_cell(&self, _sheet_id: usize) -> Option<CellAddr> {
         None
     }
     /// Returns the stored formula text for a cell (including the leading `=`), if available.

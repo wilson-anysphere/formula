@@ -4466,6 +4466,41 @@ impl WasmWorkbook {
             .set_cell_style_id_internal(sheet, &address, style_id)
     }
 
+    #[wasm_bindgen(js_name = "setSheetOrigin")]
+    pub fn set_sheet_origin(
+        &mut self,
+        sheet_name: String,
+        origin: JsValue,
+    ) -> Result<(), JsValue> {
+        let sheet_name = sheet_name.trim();
+        let sheet_name = if sheet_name.is_empty() {
+            DEFAULT_SHEET
+        } else {
+            sheet_name
+        };
+        let sheet = self.inner.ensure_sheet(sheet_name);
+
+        let origin_opt: Option<String> = if origin.is_null() || origin.is_undefined() {
+            None
+        } else {
+            Some(
+                origin
+                    .as_string()
+                    .ok_or_else(|| js_err("origin must be a string or null".to_string()))?,
+            )
+        };
+
+        let origin_trimmed = origin_opt
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        self.inner
+            .engine
+            .set_sheet_origin(&sheet, origin_trimmed)
+            .map_err(|err| js_err(err.to_string()))
+    }
+
     #[wasm_bindgen(js_name = "toJson")]
     pub fn to_json(&self) -> Result<String, JsValue> {
         #[derive(Serialize)]

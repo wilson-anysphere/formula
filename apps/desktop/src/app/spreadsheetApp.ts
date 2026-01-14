@@ -1216,6 +1216,10 @@ export class SpreadsheetApp {
   private wasmSyncSuspended = false;
   private wasmUnsubscribe: (() => void) | null = null;
   private wasmSyncPromise: Promise<void> = Promise.resolve();
+  // Cache of the last sheet-origin A1 address sent to the WASM engine per sheet.
+  // This avoids spamming the worker during scroll gestures where the top-left cell
+  // does not change on every pixel.
+  private readonly wasmSheetOriginA1BySheetId = new Map<string, string>();
   private auditingUnsubscribe: (() => void) | null = null;
   private externalRepaintUnsubscribe: (() => void) | null = null;
   private drawingsUnsubscribe: (() => void) | null = null;
@@ -2573,6 +2577,7 @@ export class SpreadsheetApp {
             if (this.scrollX !== prevX || this.scrollY !== prevY) {
               this.notifyScrollListeners();
             }
+            this.syncWasmSheetOrigin(effectiveViewport);
           },
           onSelectionChange: () => {
             if (this.sharedGridSelectionSyncInProgress) return;
@@ -5773,6 +5778,29 @@ export class SpreadsheetApp {
     }
   }
 
+  private syncWasmSheetOrigin(viewport?: GridViewportState | null): void {
+    if (!this.wasmEngine || this.wasmSyncSuspended) return;
+    const sheetId = this.sheetId;
+    const sheetName = this.resolveSheetDisplayNameById(sheetId);
+    let originA1 = "A1";
+
+    const resolvedViewport = viewport ?? (this.sharedGrid?.renderer.getViewportState() ?? null);
+    if (this.gridMode === "shared" && resolvedViewport) {
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      const row = Math.max(0, resolvedViewport.main.rows.start - headerRows);
+      const col = Math.max(0, resolvedViewport.main.cols.start - headerCols);
+      originA1 = cellToA1({ row, col });
+    }
+
+    if (this.wasmSheetOriginA1BySheetId.get(sheetId) === originA1) return;
+    this.wasmSheetOriginA1BySheetId.set(sheetId, originA1);
+
+    void this.enqueueWasmSync(async (engine) => {
+      await engine.setSheetOrigin(sheetName, originA1);
+    });
+  }
+
   private notifyZoomListeners(): void {
     if (this.zoomListeners.size === 0) return;
     const zoom = this.getZoom();
@@ -6140,6 +6168,7 @@ export class SpreadsheetApp {
       this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
       this.syncSharedGridAxisSizesFromDocument();
       // Scrollbars + overlays update via DesktopSharedGrid's renderer viewport subscription.
+      this.syncWasmSheetOrigin();
       return;
     }
 
@@ -7250,6 +7279,10 @@ export class SpreadsheetApp {
       }
     } finally {
       this.wasmSyncSuspended = false;
+      // Full hydration replaces workbook state in the WASM engine (which clears view metadata).
+      // Clear the per-sheet origin cache so we always re-send the active sheet origin.
+      this.wasmSheetOriginA1BySheetId.clear();
+      this.syncWasmSheetOrigin();
     }
   }
 
@@ -7391,6 +7424,8 @@ export class SpreadsheetApp {
                 });
                 this.applyComputedChanges(changes);
               });
+              this.wasmSheetOriginA1BySheetId.clear();
+              this.syncWasmSheetOrigin();
               return;
             }
 
@@ -7415,6 +7450,8 @@ export class SpreadsheetApp {
                 });
                 this.applyComputedChanges(changes);
               });
+              this.wasmSheetOriginA1BySheetId.clear();
+              this.syncWasmSheetOrigin();
               return;
             }
 
@@ -7477,13 +7514,17 @@ export class SpreadsheetApp {
            //
            // Note: do not `await` inside this init chain (it would deadlock by waiting on the
            // promise chain we're currently building).
-          postInitHydrate = this.enqueueWasmSync(async (worker) => {
-            const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-              workbookFileMetadata: this.workbookFileMetadata,
-              localeId: getLocale(),
+            postInitHydrate = this.enqueueWasmSync(async (worker) => {
+              const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                workbookFileMetadata: this.workbookFileMetadata,
+                localeId: getLocale(),
+              });
+              this.applyComputedChanges(changes);
             });
-            this.applyComputedChanges(changes);
-          });
+ 
+            // The worker is now hydrated; sync the active sheet origin so `INFO("origin")` matches the UI view.
+            this.wasmSheetOriginA1BySheetId.clear();
+            this.syncWasmSheetOrigin();
         } catch {
           // Ignore initialization failures (e.g. missing WASM bundle).
           engine?.terminate();
@@ -7624,6 +7665,7 @@ export class SpreadsheetApp {
     // Active sheet switch changes which drawings are visible/selected.
     this.dispatchDrawingsChanged();
     this.dispatchDrawingSelectionChanged();
+    this.syncWasmSheetOrigin();
   }
 
   /**
@@ -7699,6 +7741,7 @@ export class SpreadsheetApp {
     } else if (didScroll) {
       this.refresh("scroll");
     }
+    this.syncWasmSheetOrigin();
     if (focus) this.focus();
   }
 
@@ -7782,6 +7825,7 @@ export class SpreadsheetApp {
     } else if (didScroll) {
       this.refresh("scroll");
     }
+    this.syncWasmSheetOrigin();
     if (focus) this.focus();
   }
 
