@@ -208,6 +208,41 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not clobber the draft when setActiveCell is called while editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "editing";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    expect(view.model.isEditing).toBe(true);
+    expect(view.model.draft).toBe("editing");
+    expect(view.model.activeCell.address).toBe("A1");
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
+
+    // Spreadsheet selection changes while editing should update the Name Box display,
+    // but must not overwrite the in-progress draft or active cell being edited.
+    view.setActiveCell({ address: "B2", input: "new", value: null });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    expect(address.value).toBe("B2");
+
+    expect(view.model.isEditing).toBe(true);
+    expect(view.model.draft).toBe("editing");
+    expect(view.textarea.value).toBe("editing");
+    expect(view.model.activeCell.address).toBe("A1");
+
+    host.remove();
+  });
+
   it("does not begin editing when focusing the address (name box) input", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
