@@ -586,7 +586,7 @@ impl XlsxDocument {
         // (`#VALUE!`).
         if !matches!(
             cell_record.value,
-            CellValue::Error(formula_model::ErrorValue::Value)
+            CellValue::Error(ErrorValue::Value)
         ) {
             meta.vm = None;
         }

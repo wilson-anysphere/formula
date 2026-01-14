@@ -354,8 +354,8 @@ impl XlsxPackage {
                     None
                 };
 
-                // When the rdRichValue local-image schema/tables are missing we cannot recover
-                // `CalcOrigin`, so report it as `0` (unknown) rather than guessing.
+                // Without `rdrichvalue.xml` local-image metadata we cannot recover `CalcOrigin`.
+                // Treat it as unknown (`0`) rather than guessing.
                 let mut calc_origin: u32 = 0;
                 let mut alt_text: Option<String> = None;
 
