@@ -721,33 +721,9 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         name: &str,
         max_bytes: u64,
     ) -> Result<Vec<u8>, XlsxError> {
-        let part = name.strip_prefix('/').unwrap_or(name).to_string();
-        let file = open_zip_part(zip, name)?;
-        if file.is_dir() {
-            return Err(XlsxError::Invalid(format!("{name} is a directory")));
-        }
-
-        let declared_size = file.size();
-        if declared_size > max_bytes {
-            return Err(XlsxError::PartTooLarge {
-                part,
-                size: declared_size,
-                max: max_bytes,
-            });
-        }
-
-        let mut buf = Vec::new();
-        let take_limit = max_bytes.saturating_add(1);
-        let mut limited = file.take(take_limit);
-        limited.read_to_end(&mut buf)?;
-        if (buf.len() as u64) > max_bytes {
-            return Err(XlsxError::PartTooLarge {
-                part,
-                size: buf.len() as u64,
-                max: max_bytes,
-            });
-        }
-        Ok(buf)
+        crate::zip_util::read_zip_part_optional_with_limit(zip, name, max_bytes)?.ok_or_else(|| {
+            XlsxError::MissingPart(name.strip_prefix('/').unwrap_or(name).to_string())
+        })
     }
 
     fn read_zip_part_optional<R: Read + Seek>(
@@ -755,45 +731,10 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         name: &str,
         max_bytes: u64,
     ) -> Result<Option<Vec<u8>>, XlsxError> {
-        match open_zip_part(zip, name) {
-            Ok(file) => {
-                if file.is_dir() {
-                    return Ok(None);
-                }
-                let part = name.strip_prefix('/').unwrap_or(name).to_string();
-                let declared_size = file.size();
-                if declared_size > max_bytes {
-                    return Err(XlsxError::PartTooLarge {
-                        part,
-                        size: declared_size,
-                        max: max_bytes,
-                    });
-                }
-                let mut buf = Vec::new();
-                let take_limit = max_bytes.saturating_add(1);
-                let mut limited = file.take(take_limit);
-                limited.read_to_end(&mut buf)?;
-                if (buf.len() as u64) > max_bytes {
-                    return Err(XlsxError::PartTooLarge {
-                        part,
-                        size: buf.len() as u64,
-                        max: max_bytes,
-                    });
-                }
-                Ok(Some(buf))
-            }
-            Err(zip::result::ZipError::FileNotFound) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+        crate::zip_util::read_zip_part_optional_with_limit(zip, name, max_bytes)
     }
 
-    let workbook_xml = match read_zip_part_required(&mut zip, "xl/workbook.xml", max_part_bytes) {
-        Ok(bytes) => bytes,
-        Err(XlsxError::Zip(zip::result::ZipError::FileNotFound)) => {
-            return Err(XlsxError::MissingPart("xl/workbook.xml".to_string()))
-        }
-        Err(err) => return Err(err),
-    };
+    let workbook_xml = read_zip_part_required(&mut zip, "xl/workbook.xml", max_part_bytes)?;
     let workbook_xml = String::from_utf8(workbook_xml)?;
     let sheets = parse_workbook_sheets(&workbook_xml)?;
 
