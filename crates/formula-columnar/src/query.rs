@@ -2822,6 +2822,16 @@ impl<L, R> JoinResult<L, R> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum JoinType {
+    /// Only emit pairs of matching rows.
+    Inner,
+    /// Emit all left rows. Unmatched rows have `None` for the right index.
+    Left,
+    /// Emit all rows from both sides. Unmatched rows have `None` for the missing partner index.
+    FullOuter,
+}
+
 fn build_dict_mapping(
     left_dict: &Arc<Vec<Arc<str>>>,
     right_dict: &Arc<Vec<Arc<str>>>,
@@ -3382,4 +3392,66 @@ pub fn hash_full_outer_join_multi(
         },
         true,
     )
+}
+
+/// Hash join on multiple key columns with a runtime join type.
+///
+/// This is a convenience API that always returns optional indices, regardless of join type.
+pub fn hash_join_multi_with_type(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_keys: &[usize],
+    right_keys: &[usize],
+    join_type: JoinType,
+) -> Result<JoinResult<Option<usize>, Option<usize>>, QueryError> {
+    match join_type {
+        JoinType::Inner => hash_join_multi_core(
+            left,
+            right,
+            left_keys,
+            right_keys,
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, l, r| {
+                out.left_indices.push(Some(l));
+                out.right_indices.push(Some(r));
+            },
+            |_out: &mut JoinResult<Option<usize>, Option<usize>>, _l| {},
+            |_out: &mut JoinResult<Option<usize>, Option<usize>>, _r| {},
+            false,
+        ),
+        JoinType::Left => hash_join_multi_core(
+            left,
+            right,
+            left_keys,
+            right_keys,
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, l, r| {
+                out.left_indices.push(Some(l));
+                out.right_indices.push(Some(r));
+            },
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, l| {
+                out.left_indices.push(Some(l));
+                out.right_indices.push(None);
+            },
+            |_out: &mut JoinResult<Option<usize>, Option<usize>>, _r| {},
+            false,
+        ),
+        JoinType::FullOuter => hash_join_multi_core(
+            left,
+            right,
+            left_keys,
+            right_keys,
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, l, r| {
+                out.left_indices.push(Some(l));
+                out.right_indices.push(Some(r));
+            },
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, l| {
+                out.left_indices.push(Some(l));
+                out.right_indices.push(None);
+            },
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, r| {
+                out.left_indices.push(None);
+                out.right_indices.push(Some(r));
+            },
+            true,
+        ),
+    }
 }

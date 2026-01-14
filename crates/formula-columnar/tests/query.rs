@@ -1,6 +1,6 @@
 use formula_columnar::{
     AggSpec, BitVec, ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, PageCacheConfig,
-    QueryError, TableOptions, Value,
+    JoinType, QueryError, TableOptions, Value,
 };
 use std::sync::Arc;
 
@@ -1190,6 +1190,63 @@ fn hash_full_outer_join_multi_includes_unmatched_right_rows_and_respects_nulls()
     );
     assert_eq!(
         join.right_indices,
+        vec![Some(0), None, None, Some(1), Some(2), Some(3)]
+    );
+}
+
+#[test]
+fn hash_join_multi_with_type_supports_inner_left_and_full_outer() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::Null, Value::DateTime(1)],
+        ],
+    );
+
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("C")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("B")), Value::Null],
+            vec![Value::Null, Value::DateTime(1)],
+        ],
+    );
+
+    let inner = left
+        .hash_join_multi_with_type(&right, &[0, 1], &[0, 1], JoinType::Inner)
+        .unwrap();
+    assert_eq!(inner.left_indices, vec![Some(0)]);
+    assert_eq!(inner.right_indices, vec![Some(0)]);
+
+    let left_join = left
+        .hash_join_multi_with_type(&right, &[0, 1], &[0, 1], JoinType::Left)
+        .unwrap();
+    assert_eq!(left_join.left_indices, vec![Some(0), Some(1), Some(2)]);
+    assert_eq!(left_join.right_indices, vec![Some(0), None, None]);
+
+    let full = left
+        .hash_join_multi_with_type(&right, &[0, 1], &[0, 1], JoinType::FullOuter)
+        .unwrap();
+    assert_eq!(
+        full.left_indices,
+        vec![Some(0), Some(1), Some(2), None, None, None]
+    );
+    assert_eq!(
+        full.right_indices,
         vec![Some(0), None, None, Some(1), Some(2), Some(3)]
     );
 }

@@ -673,6 +673,19 @@ impl ColumnarTable {
     ) -> Result<crate::query::JoinResult<Option<usize>, Option<usize>>, crate::query::QueryError> {
         crate::query::hash_full_outer_join_multi(self, right, left_keys, right_keys)
     }
+
+    /// Hash join on multiple key columns with a runtime join type.
+    ///
+    /// This is a convenience API that always returns optional indices, regardless of join type.
+    pub fn hash_join_multi_with_type(
+        &self,
+        right: &ColumnarTable,
+        left_keys: &[usize],
+        right_keys: &[usize],
+        join_type: crate::query::JoinType,
+    ) -> Result<crate::query::JoinResult<Option<usize>, Option<usize>>, crate::query::QueryError> {
+        crate::query::hash_join_multi_with_type(self, right, left_keys, right_keys, join_type)
+    }
 }
 
 /// A mutable, incrementally updatable columnar table.
