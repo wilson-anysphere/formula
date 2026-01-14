@@ -2570,6 +2570,49 @@ export function bindYjsToDocumentController(options) {
       return stableStringify(before) === stableStringify(after);
     };
 
+    const normalizeRunList = (runs) => {
+      if (!Array.isArray(runs) || runs.length === 0) return [];
+      /** @type {Array<{ startRow: number, endRowExclusive: number }>} */
+      const out = [];
+      for (const run of runs) {
+        const startRow = Number(run?.startRow);
+        const endRowExclusive = Number(run?.endRowExclusive);
+        if (!Number.isInteger(startRow) || !Number.isInteger(endRowExclusive)) continue;
+        if (endRowExclusive <= startRow) continue;
+        out.push({ startRow, endRowExclusive });
+      }
+      out.sort((a, b) => a.startRow - b.startRow);
+      return out;
+    };
+    /**
+     * Return true when the "after" run coverage is a subset of the "before" coverage (i.e. the
+     * delta only patches existing range-run formatting and does not introduce formatting in gaps).
+     *
+     * This matches `DocumentController`'s `patchExistingFormatRuns` behavior used when applying
+     * full-row/full-col/full-sheet formatting defaults: range-runs have higher precedence than
+     * row/col/sheet defaults, so the controller patches existing runs but avoids creating new ones.
+     */
+    const isRangeRunCoverageSubset = (beforeRuns, afterRuns) => {
+      const before = normalizeRunList(beforeRuns);
+      const after = normalizeRunList(afterRuns);
+      if (after.length === 0) return true;
+      if (before.length === 0) return false;
+
+      let bi = 0;
+      for (const a of after) {
+        let cursor = a.startRow;
+        const end = a.endRowExclusive;
+        while (cursor < end) {
+          while (bi < before.length && before[bi].endRowExclusive <= cursor) bi += 1;
+          const b = before[bi];
+          // Gap or no covering run.
+          if (!b || b.startRow > cursor) return false;
+          cursor = Math.min(end, b.endRowExclusive);
+        }
+      }
+      return true;
+    };
+
     /** @type {any[]} */
     const deniedInverseSheetViews = [];
     /** @type {any[]} */
@@ -2599,6 +2642,13 @@ export function bindYjsToDocumentController(options) {
         if (!Number.isInteger(col) || col < 0) continue;
         if (!Number.isInteger(startRow) || startRow < 0) continue;
         if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+        // When applying full-row/full-col/full-sheet formatting defaults, DocumentController may
+        // patch existing range-run formatting (so defaults win over higher-precedence range runs)
+        // without creating new run segments in gaps. Allow those patches to remain local-only.
+        //
+        // If a delta would *introduce* new run coverage (e.g. formatting a rectangular range stored
+        // as range runs), revert it to avoid enabling arbitrary cell formatting in read-only roles.
+        if (isRangeRunCoverageSubset(delta.beforeRuns, delta.afterRuns)) continue;
         deniedInverseRangeRuns.push({
           sheetId,
           col,
