@@ -796,17 +796,25 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               }
               {
                 const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
-                // `crates/formula-wasm` prefers a sheet-first signature (`setCellStyleId(sheet, address, styleId)`),
+                // `crates/formula-wasm` uses a sheet-first signature (`setCellStyleId(sheet, address, styleId)`),
                 // but some older builds used a sheet-last form (`setCellStyleId(address, styleId, sheet)`).
-                // Try sheet-first first, then fall back on obvious signature/type mismatches.
+                //
+                // Prefer sheet-first, but fall back when the call fails with a parse error that clearly
+                // indicates we sent the sheet name as the cell address (legacy signature).
                 try {
                   (wb as any).setCellStyleId(sheet, params.address, params.styleId);
                 } catch (err) {
-                  if (err instanceof TypeError) {
+                  const message =
+                    typeof err === "string"
+                      ? err
+                      : err && typeof err === "object" && typeof (err as any).message === "string"
+                        ? String((err as any).message)
+                        : null;
+                  if (message && message.includes(`invalid cell address: ${sheet}`)) {
                     (wb as any).setCellStyleId(params.address, params.styleId, sheet);
-                  } else {
-                    throw err;
+                    break;
                   }
+                  throw err;
                 }
               }
               result = null;
