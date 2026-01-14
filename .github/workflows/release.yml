@@ -757,20 +757,35 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
-            target/**/release/deps
-            target/**/release/build
-            target/**/release/.fingerprint
-            target/**/release/incremental
-            target/**/release/wbuild
+            # Avoid recursive `target/**/...` patterns here: Cargo target directories can be large,
+            # and GitHub Actions globbing will traverse the tree to find matches. The release output
+            # layout is predictable:
+            #   - target/release/<dir>
+            #   - target/<triple>/release/<dir>
+            target/release/deps
+            target/*/release/deps
+            target/release/build
+            target/*/release/build
+            target/release/.fingerprint
+            target/*/release/.fingerprint
+            target/release/incremental
+            target/*/release/incremental
+            target/release/wbuild
+            target/*/release/wbuild
             target/.rustc_info.json
-            target/**/.rustc_info.json
-            apps/desktop/src-tauri/target/**/release/deps
-            apps/desktop/src-tauri/target/**/release/build
-            apps/desktop/src-tauri/target/**/release/.fingerprint
-            apps/desktop/src-tauri/target/**/release/incremental
-            apps/desktop/src-tauri/target/**/release/wbuild
+            target/*/.rustc_info.json
+            apps/desktop/src-tauri/target/release/deps
+            apps/desktop/src-tauri/target/*/release/deps
+            apps/desktop/src-tauri/target/release/build
+            apps/desktop/src-tauri/target/*/release/build
+            apps/desktop/src-tauri/target/release/.fingerprint
+            apps/desktop/src-tauri/target/*/release/.fingerprint
+            apps/desktop/src-tauri/target/release/incremental
+            apps/desktop/src-tauri/target/*/release/incremental
+            apps/desktop/src-tauri/target/release/wbuild
+            apps/desktop/src-tauri/target/*/release/wbuild
             apps/desktop/src-tauri/target/.rustc_info.json
-            apps/desktop/src-tauri/target/**/.rustc_info.json
+            apps/desktop/src-tauri/target/*/.rustc_info.json
           # Keep these caches isolated per Rust target triple + runner arch so cross-compile jobs
           # (e.g. Windows aarch64) don't thrash/overwrite caches or restore host build-script
           # binaries from an incompatible runner architecture.

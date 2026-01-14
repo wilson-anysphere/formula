@@ -159,3 +159,24 @@ test("desktop-bundle-dry-run workflow uploads bundles without recursive target/*
     `Expected upload step to include the bundle-root latest.json pattern.\nSaw snippet:\n${snippet}`,
   );
 });
+
+test("desktop-bundle-dry-run workflow caches Cargo release artifacts without recursive target/** globs", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const needle = "Cache cargo target (release build artifacts)";
+  const idx = lines.findIndex((line) => line.includes(needle));
+  assert.ok(
+    idx >= 0,
+    `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${needle}`,
+  );
+
+  const snippet = yamlListItemBlock(lines, idx);
+  assert.doesNotMatch(
+    snippet,
+    /target\/\*\*\/release\/deps/,
+    `Expected cache step to avoid recursive target/**/release/deps globs.\nSaw snippet:\n${snippet}`,
+  );
+  assert.ok(snippet.includes("target/release/deps"), `Expected cache step to include target/release/deps.`);
+  assert.ok(snippet.includes("target/*/release/deps"), `Expected cache step to include target/*/release/deps.`);
+});
