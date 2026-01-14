@@ -24,6 +24,6 @@ describe("startup metrics bootstrap wiring", () => {
     // Only consider runtime imports: `import type ...` is erased and does not affect module
     // evaluation order in the built JS bundle.
     const firstImport = source.match(/^\s*import(?!\s+type\b)\s+.*$/m)?.[0] ?? "";
-    expect(firstImport).toMatch(/import\s+["']\.\/tauri\/startupMetricsBootstrap\.js["']\s*;/);
+    expect(firstImport).toMatch(/import\s+["']\.\/tauri\/startupMetricsBootstrap\.(?:ts|js)["']\s*;/);
   });
 });

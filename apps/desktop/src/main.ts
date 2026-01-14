@@ -1,7 +1,11 @@
 // IMPORTANT: keep this as the very first import so startup timing listeners are installed
 // as early as possible. The Rust host may emit `startup:*` events very early during app
 // load; we ask it to re-emit cached timings once listeners are ready.
-import "./tauri/startupMetricsBootstrap.js";
+//
+// NOTE: This uses the `.ts` extension (rather than the repo's usual `.js` specifier convention)
+// so it matches the separate module script entry in `apps/desktop/index.html`, ensuring the
+// bootstrap side effects run exactly once in the browser module graph.
+import "./tauri/startupMetricsBootstrap.ts";
 
 import { SpreadsheetApp } from "./app/spreadsheetApp";
 import type { SheetNameResolver } from "./sheet/sheetNameResolver";
