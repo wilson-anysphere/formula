@@ -7515,6 +7515,10 @@ registerDesktopCommands({
   isEditing: isSpreadsheetEditing,
   focusAfterSheetNavigation: focusAfterSheetNavigationFromCommandRef,
   getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
+  sheetStructureHandlers: {
+    insertSheet: handleAddSheet,
+    deleteActiveSheet: handleDeleteActiveSheet,
+  },
   ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
   onExtensionsLoaded: () => {
     updateKeybindingsRef?.();

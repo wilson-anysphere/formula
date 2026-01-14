@@ -52,6 +52,20 @@ export type DataQueriesCommandHandlers = Pick<
   "getPowerQueryService" | "showToast" | "notify" | "now" | "focusAfterExecute"
 >;
 
+export type SheetStructureCommandHandlers = {
+  /**
+   * Insert a new sheet and activate it (Excel-style "Insert Sheet").
+   *
+   * The desktop shell owns workbook sheet metadata and confirmations, so the handler is
+   * provided by `main.ts` (typically via `createAddSheetCommand(...)`).
+   */
+  insertSheet: () => void | Promise<void>;
+  /**
+   * Delete the active sheet (with confirmation) and activate a remaining sheet if needed.
+   */
+  deleteActiveSheet: () => void | Promise<void>;
+};
+
 export function registerDesktopCommands(params: {
   commandRegistry: CommandRegistry;
   app: SpreadsheetApp;
@@ -80,6 +94,13 @@ export function registerDesktopCommands(params: {
   ribbonMacroHandlers?: RibbonMacroCommandHandlers | null;
   dataQueriesHandlers?: DataQueriesCommandHandlers | null;
   pageLayoutHandlers?: PageLayoutCommandHandlers | null;
+  /**
+   * Optional handlers for sheet structure commands (Insert/Delete Sheet).
+   *
+   * These ids come from the ribbon schema (`home.cells.*`) but the implementation depends on
+   * workbook sheet store state that lives in the desktop shell (`main.ts`).
+   */
+  sheetStructureHandlers?: SheetStructureCommandHandlers | null;
   /**
    * Optional command palette opener. When provided, `workbench.showCommandPalette` will be
    * overridden to invoke this handler (instead of the built-in no-op registration).
@@ -112,6 +133,7 @@ export function registerDesktopCommands(params: {
     ribbonMacroHandlers = null,
     dataQueriesHandlers = null,
     pageLayoutHandlers = null,
+    sheetStructureHandlers = null,
     openCommandPalette = null,
     openGoalSeekDialog = null,
   } = params;
@@ -449,6 +471,57 @@ export function registerDesktopCommands(params: {
     "sheet columns",
     "excel",
   ]);
+
+  // Home → Cells → Insert/Delete Sheet.
+  //
+  // These ribbon ids are registered here so ribbon enable/disable can rely on CommandRegistry.
+  // The actual workbook mutation logic lives in `main.ts` (sheet store + confirmations), so
+  // we delegate to optional `sheetStructureHandlers`.
+  const isReadOnly = (): boolean => {
+    try {
+      return typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true;
+    } catch {
+      return false;
+    }
+  };
+  commandRegistry.registerBuiltinCommand(
+    "home.cells.insert.insertSheet",
+    "Insert Sheet",
+    async () => {
+      if (isEditingFn() || isReadOnly()) return;
+      const handler = sheetStructureHandlers?.insertSheet;
+      if (!handler) {
+        safeShowToast("Insert Sheet is not available in this environment.", "warning");
+        return;
+      }
+      await handler();
+    },
+    {
+      category: commandCategoryEditing,
+      icon: null,
+      description: "Insert a new sheet after the active sheet",
+      keywords: ["insert", "sheet", "worksheet", "tab"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "home.cells.delete.deleteSheet",
+    "Delete Sheet",
+    async () => {
+      if (isEditingFn() || isReadOnly()) return;
+      const handler = sheetStructureHandlers?.deleteActiveSheet;
+      if (!handler) {
+        safeShowToast("Delete Sheet is not available in this environment.", "warning");
+        return;
+      }
+      await handler();
+    },
+    {
+      category: commandCategoryEditing,
+      icon: null,
+      description: "Delete the active sheet",
+      keywords: ["delete", "sheet", "worksheet", "tab"],
+    },
+  );
 
   if (layoutController) {
     registerBuiltinCommands({

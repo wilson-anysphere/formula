@@ -176,17 +176,16 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     // so they must be exempt from the registry-backed disabling allowlist.
     expect(baselineDisabledById["home.cells.format.organizeSheets"]).toBeUndefined();
 
-    // Home → Cells structural edit commands: some are still handled directly in `main.ts` and must
-    // remain exempt. Commands that are now registered via CommandRegistry should be disabled when
-    // the registry does not include them.
+    // Home → Cells structural edit commands should be disabled when the CommandRegistry does not
+    // register them (baseline allowlist behavior).
     expect(baselineDisabledById["home.cells.insert.insertCells"]).toBe(true);
     expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBe(true);
     expect(baselineDisabledById["home.cells.insert.insertSheetColumns"]).toBe(true);
-    expect(baselineDisabledById["home.cells.insert.insertSheet"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.insert.insertSheet"]).toBe(true);
     expect(baselineDisabledById["home.cells.delete.deleteCells"]).toBe(true);
     expect(baselineDisabledById["home.cells.delete.deleteSheetRows"]).toBe(true);
     expect(baselineDisabledById["home.cells.delete.deleteSheetColumns"]).toBe(true);
-    expect(baselineDisabledById["home.cells.delete.deleteSheet"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.delete.deleteSheet"]).toBe(true);
   });
 
   it("registers Fill Up/Left/Series ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
@@ -280,6 +279,18 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     }
   });
 
+  it("registers Insert/Delete Sheet ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = ["home.cells.insert.insertSheet", "home.cells.delete.deleteSheet"] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
   it("registers Custom Sort ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
     const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
@@ -336,11 +347,11 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                  },
                  // Exempt command id to prove the exemption list keeps implemented ribbon-only
                  // actions enabled even when the CommandRegistry doesn't register them.
-                { id: "home.cells.insert.insertSheet", label: "Insert Sheet", ariaLabel: "Insert Sheet" },
+                { id: "file.save.save", label: "Save", ariaLabel: "Save" },
                  // Non-exempt id to prove the baseline is still working.
                  { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
                ],
-             },
+              },
           ],
         },
       ],
@@ -371,9 +382,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
-    const insertSheet = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.insert.insertSheet"]');
-    expect(insertSheet).toBeInstanceOf(HTMLButtonElement);
-    expect(insertSheet?.disabled).toBe(false);
+    const save = container.querySelector<HTMLButtonElement>('[data-command-id="file.save.save"]');
+    expect(save).toBeInstanceOf(HTMLButtonElement);
+    expect(save?.disabled).toBe(false);
 
     const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
     expect(unknown).toBeInstanceOf(HTMLButtonElement);
