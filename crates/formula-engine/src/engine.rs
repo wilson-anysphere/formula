@@ -1118,18 +1118,19 @@ impl Engine {
 
     /// Returns a per-cell list of formulas that were not compiled to bytecode.
     ///
-    /// The results are deterministically ordered by `(sheet_id, row, col)` and truncated to `limit`.
+    /// The results are deterministically ordered by `(tab_index, row, col)` (where `tab_index`
+    /// follows the workbook's sheet tab order) and truncated to `limit`.
     pub fn bytecode_compile_report(&self, limit: usize) -> Vec<BytecodeCompileReportEntry> {
         if limit == 0 {
             return Vec::new();
         }
 
-        let mut entries: Vec<(SheetId, CellAddr, BytecodeCompileReason)> = Vec::new();
+        let mut entries: Vec<(usize, SheetId, CellAddr, BytecodeCompileReason)> = Vec::new();
 
-        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
-            if !self.workbook.sheet_exists(sheet_id) {
+        for (tab_index, &sheet_id) in self.workbook.sheet_ids_in_order().iter().enumerate() {
+            let Some(sheet) = self.workbook.sheets.get(sheet_id) else {
                 continue;
-            }
+            };
             for (addr, cell) in &sheet.cells {
                 if cell.formula.is_none() {
                     continue;
@@ -1141,14 +1142,14 @@ impl Engine {
                     .bytecode_compile_reason
                     .clone()
                     .unwrap_or(BytecodeCompileReason::IneligibleExpr);
-                entries.push((sheet_id, *addr, reason));
+                entries.push((tab_index, sheet_id, *addr, reason));
             }
         }
 
-        entries.sort_by_key(|(sheet_id, addr, _)| (*sheet_id, addr.row, addr.col));
+        entries.sort_by_key(|(tab_index, _, addr, _)| (*tab_index, addr.row, addr.col));
 
         let mut out = Vec::new();
-        for (sheet_id, addr, reason) in entries.into_iter().take(limit) {
+        for (_, sheet_id, addr, reason) in entries.into_iter().take(limit) {
             let sheet = self.workbook.sheet_name(sheet_id).unwrap_or_default().to_string();
             out.push(BytecodeCompileReportEntry {
                 sheet,
@@ -13053,6 +13054,44 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 0);
+    }
+
+    #[test]
+    fn bytecode_compile_report_orders_by_tab_order_after_sheet_reorder() {
+        let mut engine = Engine::new();
+
+        // Use a non-thread-safe function so formulas deterministically fall back from bytecode.
+        for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+            engine
+                .set_cell_formula(sheet, "A1", "=RTD(\"prog\",\"server\",\"topic\")")
+                .unwrap();
+        }
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 3);
+        assert_eq!(
+            report.iter().map(|e| e.sheet.as_str()).collect::<Vec<_>>(),
+            vec!["Sheet1", "Sheet2", "Sheet3"],
+            "expected report order to match the default tab order"
+        );
+
+        let sheet1_id = engine.workbook.sheet_id("Sheet1").unwrap();
+        let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+        let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
+        engine
+            .workbook
+            .set_sheet_order(vec![sheet2_id, sheet3_id, sheet1_id]);
+
+        let reordered = engine.bytecode_compile_report(10);
+        assert_eq!(reordered.len(), 3);
+        assert_eq!(
+            reordered
+                .iter()
+                .map(|e| e.sheet.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Sheet2", "Sheet3", "Sheet1"],
+            "expected report order to match the updated tab order"
+        );
     }
 
     #[test]
