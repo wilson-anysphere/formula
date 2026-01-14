@@ -529,12 +529,6 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             if addr.row >= rows || addr.col >= cols {
                 return Value::Error(ErrorKind::Ref);
             }
-
-            // Excel returns "" until the workbook has a known filename (i.e. it has been saved).
-            let Some(filename) = ctx.workbook_filename().filter(|s| !s.is_empty()) else {
-                return Value::Text(String::new());
-            };
-
             // Use the sheet containing the referenced cell (not necessarily the current sheet).
             let sheet_name = match &cell_ref.sheet_id {
                 SheetId::Local(id) => ctx.sheet_name(*id).unwrap_or_default(),
@@ -542,6 +536,11 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 // canonical external sheet key already includes `[Book.xlsx]Sheet`, so return it
                 // directly (no directory prefix).
                 SheetId::External(key) => return Value::Text(key.clone()),
+            };
+
+            // Excel returns "" until the workbook has a known filename (i.e. it has been saved).
+            let Some(filename) = ctx.workbook_filename().filter(|s| !s.is_empty()) else {
+                return Value::Text(String::new());
             };
 
             match ctx.workbook_directory().filter(|s| !s.is_empty()) {

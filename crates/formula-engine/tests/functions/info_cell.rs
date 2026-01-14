@@ -1593,6 +1593,24 @@ fn cell_filename_is_empty_for_unsaved_workbooks() {
 }
 
 #[test]
+fn cell_filename_returns_external_sheet_key_even_when_workbook_is_unsaved() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=CELL("filename",[Book.xlsx]Sheet1!A1)"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // External workbook references carry their own workbook+sheet identifier, so `CELL("filename")`
+    // can return a useful value even when the current workbook has not been saved.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("[Book.xlsx]Sheet1".to_string())
+    );
+}
+
+#[test]
 fn cell_filename_is_empty_when_workbook_filename_is_empty_even_if_directory_is_set() {
     use formula_engine::Engine;
 
