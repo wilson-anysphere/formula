@@ -3076,6 +3076,35 @@ fn cell_filename_updates_after_set_workbook_file_metadata() {
 }
 
 #[wasm_bindgen_test]
+fn cell_filename_reflects_sheet_display_name() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_str("=CELL(\"filename\")"),
+        None,
+    )
+    .unwrap();
+    wb.set_workbook_file_metadata(JsValue::from_str("/tmp"), JsValue::from_str("book.xlsx"))
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let before_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let before: CellData = serde_wasm_bindgen::from_value(before_js).unwrap();
+    assert_eq!(
+        before.value,
+        JsonValue::String(format!("/tmp/[book.xlsx]{DEFAULT_SHEET}"))
+    );
+
+    wb.set_sheet_display_name(DEFAULT_SHEET.to_string(), "Summary".to_string())
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let after_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let after: CellData = serde_wasm_bindgen::from_value(after_js).unwrap();
+    assert_eq!(after.value, JsonValue::String("/tmp/[book.xlsx]Summary".to_string()));
+}
+
+#[wasm_bindgen_test]
 fn cell_format_reflects_intern_style_and_set_cell_style_id() {
     let mut wb = WasmWorkbook::new();
 
