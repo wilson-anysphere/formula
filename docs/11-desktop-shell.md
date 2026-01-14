@@ -448,7 +448,9 @@ showing a lightweight “Update ready to install” toast and uses the `install_
 as part of the restart-to-install flow (falling back to the updater plugin API if needed).
 
 Release CI note: when `plugins.updater.active=true`, tagged releases validate `pubkey`/`endpoints`
-via `node scripts/check-updater-config.mjs`.
+via `node scripts/check-updater-config.mjs`, and also verify that the uploaded updater manifest
+signature (`latest.json.sig`) matches `latest.json` under the embedded `pubkey` (see
+`scripts/ci/verify-updater-manifest-signature.mjs`).
 
 ### `plugins.notification`
 
