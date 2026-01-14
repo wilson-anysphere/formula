@@ -402,7 +402,8 @@ pub(crate) fn parse_biff8_worksheet_formulas(
     let allows_continuation = |id: u16| {
         id == RECORD_FORMULA || id == RECORD_SHRFMLA || id == RECORD_ARRAY || id == RECORD_TABLE
     };
-    let mut iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+    let mut iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
     while let Some(next) = iter.next() {
         let record = match next {
@@ -426,7 +427,8 @@ pub(crate) fn parse_biff8_worksheet_formulas(
         match record.record_id {
             RECORD_FORMULA => match parse_biff8_formula_record(&record) {
                 Ok(parsed_formula) => {
-                    let Some(cell) = parse_cell_ref_u16(parsed_formula.row, parsed_formula.col) else {
+                    let Some(cell) = parse_cell_ref_u16(parsed_formula.row, parsed_formula.col)
+                    else {
                         continue;
                     };
                     out.formula_cells.insert(
@@ -503,7 +505,10 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                     }
                     Err(err) => warn(
                         &mut out.warnings,
-                        format!("failed to parse ARRAY record at offset {}: {err}", record.offset),
+                        format!(
+                            "failed to parse ARRAY record at offset {}: {err}",
+                            record.offset
+                        ),
                     ),
                 }
             }
@@ -538,9 +543,13 @@ pub(crate) fn parse_biff8_worksheet_formulas(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LeadingPtg {
     /// `PtgExp` (0x01): points at a shared/array formula definition.
-    Exp { base: CellRef },
+    Exp {
+        base: CellRef,
+    },
     /// `PtgTbl` (0x02): points at a data table definition.
-    Tbl { base: CellRef },
+    Tbl {
+        base: CellRef,
+    },
     Other,
     Empty,
 }
@@ -574,9 +583,15 @@ fn decode_leading_ptg(rgce: &[u8]) -> LeadingPtg {
 pub(crate) enum PtgReferenceResolution {
     /// No PtgExp/PtgTbl indirection; use the cell's own `rgce`.
     None,
-    Shared { base: CellRef },
-    Array { base: CellRef },
-    Table { base: CellRef },
+    Shared {
+        base: CellRef,
+    },
+    Array {
+        base: CellRef,
+    },
+    Table {
+        base: CellRef,
+    },
     /// `PtgExp`/`PtgTbl` present but no suitable backing record could be found.
     Unresolved,
 }
@@ -894,6 +909,38 @@ impl<'a> FragmentCursor<'a> {
         Ok(())
     }
 
+    fn advance_fragment_in_biff8_string(&mut self, is_unicode: &mut bool) -> Result<(), String> {
+        self.advance_fragment()?;
+        // When a BIFF8 string spans a CONTINUE boundary, Excel inserts a 1-byte option flags prefix
+        // at the start of the continued fragment. The only relevant bit for formula string tokens is
+        // `fHighByte` (unicode vs compressed).
+        let cont_flags = self.read_u8()?;
+        *is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+        Ok(())
+    }
+
+    fn read_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<Vec<u8>, String> {
+        // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
+        // continuation flags prefix that appears at the start of each continued fragment.
+        let mut out = Vec::with_capacity(n);
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            let bytes = self.read_exact_from_current(take)?;
+            out.extend_from_slice(bytes);
+            n -= take;
+        }
+        Ok(out)
+    }
+
     fn read_biff8_rgce(&mut self, cce: usize) -> Result<Vec<u8>, String> {
         // Best-effort: parse BIFF8 ptg tokens so we can skip the continuation flags byte injected
         // at fragment boundaries when a `PtgStr` (ShortXLUnicodeString) payload is split across
@@ -930,31 +977,29 @@ impl<'a> FragmentCursor<'a> {
                     out.push(cch as u8);
                     out.push(flags);
 
+                    let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
                     let richtext_runs = if (flags & STR_FLAG_RICH_TEXT) != 0 {
-                        let v = self.read_u16_le()?;
-                        out.extend_from_slice(&v.to_le_bytes());
-                        v as usize
+                        let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+                        out.extend_from_slice(&bytes);
+                        u16::from_le_bytes([bytes[0], bytes[1]]) as usize
                     } else {
                         0
                     };
 
                     let ext_size = if (flags & STR_FLAG_EXT) != 0 {
-                        let v = self.read_u32_le()?;
-                        out.extend_from_slice(&v.to_le_bytes());
-                        v as usize
+                        let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+                        out.extend_from_slice(&bytes);
+                        u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
                     } else {
                         0
                     };
 
-                    let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
                     let mut remaining_chars = cch;
 
                     while remaining_chars > 0 {
                         if self.remaining_in_fragment() == 0 {
-                            self.advance_fragment()?;
-                            // Continued-segment option flags byte (fHighByte).
-                            let cont_flags = self.read_u8()?;
-                            is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                            self.advance_fragment_in_biff8_string(&mut is_unicode)?;
                             continue;
                         }
 
@@ -976,7 +1021,8 @@ impl<'a> FragmentCursor<'a> {
                         .checked_mul(4)
                         .ok_or_else(|| "rich text run count overflow".to_string())?;
                     if richtext_bytes + ext_size > 0 {
-                        let extra = self.read_bytes(richtext_bytes + ext_size)?;
+                        let extra =
+                            self.read_biff8_string_bytes(richtext_bytes + ext_size, &mut is_unicode)?;
                         out.extend_from_slice(&extra);
                     }
                 }
@@ -1305,7 +1351,8 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
     let allows_continuation = |id: u16| {
         id == RECORD_FORMULA || id == RECORD_SHRFMLA || id == RECORD_ARRAY || id == RECORD_TABLE
     };
-    let mut iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+    let mut iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
     let mut shrfmla: HashMap<CellRef, Biff8ShrFmlaRecord> = HashMap::new();
     let mut array: HashMap<CellRef, Biff8ArrayRecord> = HashMap::new();
@@ -1631,10 +1678,8 @@ mod tests {
             None
         );
         assert_eq!(
-            FormulaGrbit(
-                FormulaGrbit::F_SHR_FMLA | FormulaGrbit::F_ARRAY | FormulaGrbit::F_TBL
-            )
-            .membership_hint(),
+            FormulaGrbit(FormulaGrbit::F_SHR_FMLA | FormulaGrbit::F_ARRAY | FormulaGrbit::F_TBL)
+                .membership_hint(),
             None
         );
     }
@@ -1809,6 +1854,265 @@ mod tests {
 
         let parsed = parse_biff8_formula_record(&record).expect("parse formula");
         assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
+    fn parses_formula_rgce_with_richtext_ptgstr_split_inside_char_bytes() {
+        let literal = "ABCDE";
+        let c_run = 1u16;
+        let rg_run = [0x11, 0x22, 0x33, 0x44];
+
+        let rgce_expected: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_RICH_TEXT],
+            c_run.to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            rg_run.to_vec(),
+        ]
+        .concat();
+
+        // Split after the first two characters ("AB") inside the character bytes.
+        let first_rgce_len = 3 + 2 + 2; // header + cRun + "AB"
+        let first_rgce = &rgce_expected[..first_rgce_len];
+        let remaining = &rgce_expected[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (compressed)
+        continue_payload.extend_from_slice(remaining);
+
+        let row = 0u16;
+        let col = 0u16;
+        let xf = 0u16;
+        let cached_result = 0f64;
+        let cce = rgce_expected.len() as u16;
+
+        let mut formula_payload_part1 = Vec::new();
+        formula_payload_part1.extend_from_slice(&row.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&col.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&xf.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload_part1.extend_from_slice(&cce.to_le_bytes());
+        formula_payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_FORMULA, &formula_payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_formula_record(&record).expect("parse formula");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
+    fn parses_formula_rgce_with_richtext_ptgstr_split_between_crun_bytes() {
+        let literal = "ABCDE";
+        let c_run = 1u16;
+        let rg_run = [0x11, 0x22, 0x33, 0x44];
+
+        let rgce_expected: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_RICH_TEXT],
+            c_run.to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            rg_run.to_vec(),
+        ]
+        .concat();
+
+        // Split between the two bytes of `cRun`.
+        let first_rgce_len = 3 + 1; // header + low byte of cRun
+        let first_rgce = &rgce_expected[..first_rgce_len];
+        let remaining = &rgce_expected[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (compressed)
+        continue_payload.extend_from_slice(remaining);
+
+        let row = 0u16;
+        let col = 0u16;
+        let xf = 0u16;
+        let cached_result = 0f64;
+        let cce = rgce_expected.len() as u16;
+
+        let mut formula_payload_part1 = Vec::new();
+        formula_payload_part1.extend_from_slice(&row.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&col.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&xf.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload_part1.extend_from_slice(&cce.to_le_bytes());
+        formula_payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_FORMULA, &formula_payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_formula_record(&record).expect("parse formula");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
+    fn parses_formula_rgce_with_ext_ptgstr_split_inside_ext_bytes() {
+        let literal = "ABCDE";
+        let ext = [0xDE, 0xAD, 0xBE, 0xEF];
+
+        let rgce_expected: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_EXT],
+            (ext.len() as u32).to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            ext.to_vec(),
+        ]
+        .concat();
+
+        // Split inside the ext bytes.
+        let first_rgce_len = 3 + 4 + literal.len() + 2; // header + cbExtRst + chars + first 2 ext bytes
+        let first_rgce = &rgce_expected[..first_rgce_len];
+        let remaining = &rgce_expected[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (compressed)
+        continue_payload.extend_from_slice(remaining);
+
+        let row = 0u16;
+        let col = 0u16;
+        let xf = 0u16;
+        let cached_result = 0f64;
+        let cce = rgce_expected.len() as u16;
+
+        let mut formula_payload_part1 = Vec::new();
+        formula_payload_part1.extend_from_slice(&row.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&col.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&xf.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload_part1.extend_from_slice(&cce.to_le_bytes());
+        formula_payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_FORMULA, &formula_payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_formula_record(&record).expect("parse formula");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
+    fn parses_formula_rgce_with_richtext_and_ext_ptgstr_split_inside_rgrun_bytes() {
+        let literal = "ABCDE";
+        let c_run = 1u16;
+        let rg_run = [0x11, 0x22, 0x33, 0x44];
+        let ext = [0x55, 0x66, 0x77, 0x88];
+
+        let rgce_expected: Vec<u8> = [
+            vec![0x17, literal.len() as u8, STR_FLAG_RICH_TEXT | STR_FLAG_EXT],
+            c_run.to_le_bytes().to_vec(),
+            (ext.len() as u32).to_le_bytes().to_vec(),
+            literal.as_bytes().to_vec(),
+            rg_run.to_vec(),
+            ext.to_vec(),
+        ]
+        .concat();
+
+        // Split inside the `rgRun` bytes.
+        let first_rgce_len = 3 + 2 + 4 + literal.len() + 2; // header + cRun + cbExtRst + chars + first 2 rgRun bytes
+        let first_rgce = &rgce_expected[..first_rgce_len];
+        let remaining = &rgce_expected[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (compressed)
+        continue_payload.extend_from_slice(remaining);
+
+        let row = 0u16;
+        let col = 0u16;
+        let xf = 0u16;
+        let cached_result = 0f64;
+        let cce = rgce_expected.len() as u16;
+
+        let mut formula_payload_part1 = Vec::new();
+        formula_payload_part1.extend_from_slice(&row.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&col.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&xf.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload_part1.extend_from_slice(&cce.to_le_bytes());
+        formula_payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_FORMULA, &formula_payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_formula_record(&record).expect("parse formula");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
+    fn unicode_ptgstr_errors_on_mid_code_unit_split() {
+        // cch=1, unicode, but split after only 1 byte of the UTF-16LE code unit.
+        let rgce_expected = vec![0x17, 1u8, STR_FLAG_HIGH_BYTE, b'A', 0x00];
+
+        let first_rgce = &rgce_expected[..4]; // ptg + cch + flags + first byte of code unit
+        let mut continue_payload = Vec::new();
+        continue_payload.push(STR_FLAG_HIGH_BYTE); // continued segment option flags (unicode)
+        continue_payload.push(0x00); // remaining byte of UTF-16LE code unit
+
+        let row = 0u16;
+        let col = 0u16;
+        let xf = 0u16;
+        let cached_result = 0f64;
+        let cce = rgce_expected.len() as u16;
+
+        let mut formula_payload_part1 = Vec::new();
+        formula_payload_part1.extend_from_slice(&row.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&col.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&xf.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload_part1.extend_from_slice(&cce.to_le_bytes());
+        formula_payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_FORMULA, &formula_payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert!(record.is_continued());
+
+        let err = parse_biff8_formula_record(&record).unwrap_err();
+        assert_eq!(err, "string continuation split mid-character");
     }
 
     #[test]
