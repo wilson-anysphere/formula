@@ -1111,14 +1111,6 @@ try {
     return Find-BinaryMarkerInFile -File $Exe -MarkerStrings $markers
   }
 
-  function Test-StringContainsIgnoreCase {
-    param(
-      [Parameter(Mandatory = $true)] [string]$Haystack,
-      [Parameter(Mandatory = $true)] [string]$Needle
-    )
-    return $Haystack.IndexOf($Needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-  }
-
   function Test-ExeHasFileAssociationHints {
     param(
       [Parameter(Mandatory = $true)]
@@ -1129,9 +1121,11 @@ try {
 
     Write-Host "File association check (NSIS/EXE, best-effort): $($Exe.FullName)"
 
-    # Best-effort validation: scan for registry path strings that strongly suggest file
+    # Best-effort validation: streaming scan for registry path strings that strongly suggest file
     # association registration. (We intentionally avoid relying on external NSIS parsing tools.)
-    $dotExt = "." + $ExtensionNoDot
+    $dotExt = "." + ($ExtensionNoDot.Trim().TrimStart("."))
+    $dotExtUpper = $dotExt.ToUpperInvariant()
+
     $strongNeedles = @(
       "Software\\Classes\\$dotExt",
       "Software\Classes\$dotExt",
@@ -1140,25 +1134,20 @@ try {
       "HKCR\\$dotExt",
       "HKCR $dotExt"
     )
-    $contextNeedles = @("Software\Classes", "HKEY_CLASSES_ROOT", "HKCR", "WriteRegStr", "OpenWithProgids")
-
-    $bytes = [System.IO.File]::ReadAllBytes($Exe.FullName)
-    $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
-    $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
-
-    foreach ($n in $strongNeedles) {
-      if (Test-StringContainsIgnoreCase -Haystack $ascii -Needle $n) { return $true }
-      if (Test-StringContainsIgnoreCase -Haystack $unicode -Needle $n) { return $true }
+    $strongMarker = Find-BinaryMarkerInFile -File $Exe -MarkerStrings $strongNeedles
+    if (-not [string]::IsNullOrWhiteSpace($strongMarker)) {
+      return $true
     }
 
-    $hasContext =
-      ($contextNeedles | Where-Object { Test-StringContainsIgnoreCase -Haystack $ascii -Needle $_ }).Count -gt 0 -or
-      ($contextNeedles | Where-Object { Test-StringContainsIgnoreCase -Haystack $unicode -Needle $_ }).Count -gt 0
-    $hasExt =
-      (Test-StringContainsIgnoreCase -Haystack $ascii -Needle $dotExt) -or
-      (Test-StringContainsIgnoreCase -Haystack $unicode -Needle $dotExt)
+    # Fallback: require both a registry-ish context string and the extension itself.
+    $contextNeedles = @("Software\Classes", "HKEY_CLASSES_ROOT", "HKCR", "WriteRegStr", "OpenWithProgids")
+    $contextMarker = Find-BinaryMarkerInFile -File $Exe -MarkerStrings $contextNeedles
+    if ([string]::IsNullOrWhiteSpace($contextMarker)) {
+      return $false
+    }
 
-    return ($hasContext -and $hasExt)
+    $extMarker = Find-BinaryMarkerInFile -File $Exe -MarkerStrings @($dotExt, $dotExtUpper)
+    return (-not [string]::IsNullOrWhiteSpace($extMarker))
   }
 
   function Assert-ExeContainsComplianceArtifacts {
