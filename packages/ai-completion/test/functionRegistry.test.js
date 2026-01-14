@@ -369,6 +369,14 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("BETA.DIST", 0), "value", "Expected BETA.DIST x to be value-like");
   assert.equal(registry.getArgType("BETA.DIST", 3), "boolean", "Expected BETA.DIST cumulative to be boolean");
   assert.ok(registry.getFunction("BETA.DIST")?.args?.[4]?.optional, "Expected BETA.DIST A to be optional");
+  assert.equal(registry.getArgType("CHISQ.DIST", 0), "value", "Expected CHISQ.DIST x to be value-like");
+  assert.equal(registry.getArgType("CHISQ.DIST", 2), "boolean", "Expected CHISQ.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("F.DIST", 0), "value", "Expected F.DIST x to be value-like");
+  assert.equal(registry.getArgType("F.DIST", 3), "boolean", "Expected F.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("T.DIST", 0), "value", "Expected T.DIST x to be value-like");
+  assert.equal(registry.getArgType("T.DIST", 2), "boolean", "Expected T.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("TDIST", 0), "value", "Expected TDIST x to be value-like");
+  assert.equal(registry.getArgType("TDIST", 2), "number", "Expected TDIST tails to be numeric");
   assert.equal(registry.getArgType("POISSON", 0), "value", "Expected POISSON x to be value-like");
   assert.equal(registry.getArgType("POISSON", 2), "boolean", "Expected POISSON cumulative to be boolean");
   assert.equal(registry.getArgType("WEIBULL", 0), "value", "Expected WEIBULL x to be value-like");

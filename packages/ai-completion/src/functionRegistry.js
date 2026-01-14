@@ -1791,6 +1791,168 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "CHISQ.DIST",
+    description: "Returns the chi-squared distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "CHISQ.DIST.RT",
+    description: "Returns the right-tailed probability of the chi-squared distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "CHISQ.INV",
+    description: "Returns the inverse of the chi-squared cumulative distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "CHISQ.INV.RT",
+    description: "Returns the inverse of the right-tailed probability of the chi-squared distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "CHIDIST",
+    description: "Returns the right-tailed probability of the chi-squared distribution (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "CHIINV",
+    description: "Returns the inverse of the right-tailed probability of the chi-squared distribution (legacy).",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "F.DIST",
+    description: "Returns the F distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom1", type: "value" },
+      { name: "deg_freedom2", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "F.DIST.RT",
+    description: "Returns the right-tailed probability of the F distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom1", type: "value" },
+      { name: "deg_freedom2", type: "value" },
+    ],
+  },
+  {
+    name: "F.INV",
+    description: "Returns the inverse of the F cumulative distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom1", type: "value" },
+      { name: "deg_freedom2", type: "value" },
+    ],
+  },
+  {
+    name: "F.INV.RT",
+    description: "Returns the inverse of the right-tailed probability of the F distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom1", type: "value" },
+      { name: "deg_freedom2", type: "value" },
+    ],
+  },
+  {
+    name: "FDIST",
+    description: "Returns the (right-tailed) F distribution (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom1", type: "value" },
+      { name: "deg_freedom2", type: "value" },
+    ],
+  },
+  {
+    name: "FINV",
+    description: "Returns the inverse of the F distribution (legacy).",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom1", type: "value" },
+      { name: "deg_freedom2", type: "value" },
+    ],
+  },
+  {
+    name: "T.DIST",
+    description: "Returns the Student's t distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "T.DIST.2T",
+    description: "Returns the two-tailed Student's t distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "T.DIST.RT",
+    description: "Returns the right-tailed Student's t distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "T.INV",
+    description: "Returns the inverse of the Student's t distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "T.INV.2T",
+    description: "Returns the inverse of the two-tailed Student's t distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
+    name: "TDIST",
+    description: "Returns the Student's t distribution (legacy).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "deg_freedom", type: "value" },
+      { name: "tails", type: "number" },
+    ],
+  },
+  {
+    name: "TINV",
+    description: "Returns the inverse of the Student's t distribution (legacy).",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "deg_freedom", type: "value" },
+    ],
+  },
+  {
     name: "POISSON",
     description: "Returns the Poisson distribution.",
     args: [

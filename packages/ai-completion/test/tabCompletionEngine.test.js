@@ -3113,6 +3113,27 @@ test("T.TEST tails suggests 1 and 2", async () => {
   );
 });
 
+test("TDIST tails suggests 1 and 2", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TDIST(1, 10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=TDIST(1, 10, 1"),
+    `Expected TDIST to suggest tails=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=TDIST(1, 10, 2"),
+    `Expected TDIST to suggest tails=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("T.TEST type suggests 1, 2, 3", async () => {
   const engine = new TabCompletionEngine();
 

@@ -1551,6 +1551,13 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "3", displayText: "3 (two-sample unequal variance)", confidence: 0.65 },
     ],
   },
+  TDIST: {
+    // tails
+    2: [
+      { replacement: "1", displayText: "1 (one-tailed)", confidence: 0.68 },
+      { replacement: "2", displayText: "2 (two-tailed)", confidence: 0.67 },
+    ],
+  },
   POISSON: {
     // cumulative
     2: CUMULATIVE_BOOLEAN_ENUM,
