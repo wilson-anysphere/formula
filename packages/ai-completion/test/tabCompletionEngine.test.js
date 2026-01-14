@@ -4722,6 +4722,40 @@ test("WEIBULL cumulative suggests TRUE/FALSE", async () => {
   );
 });
 
+test("PV rate suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PV(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=PV(A1"),
+    `Expected PV to suggest A1 for rate, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("IRR guess suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=IRR(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 2 }, // C1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=IRR(A1:A10, B1"),
+    `Expected IRR to suggest B1 for guess, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 

@@ -11,7 +11,11 @@ test("FunctionRegistry loads the Rust function catalog (HLOOKUP is present)", ()
   assert.ok(registry.isRangeArg("_xlfn.XLOOKUP", 1), "Expected _xlfn.XLOOKUP arg2 to be a range");
   assert.equal(registry.getFunction("SUM")?.minArgs, 0, "Expected SUM minArgs to come from catalog");
   assert.equal(registry.getFunction("SUM")?.maxArgs, 255, "Expected SUM maxArgs to come from catalog");
-  assert.equal(registry.getArgType("PV", 0), "number", "Expected PV arg1 type to come from catalog arg_types");
+  assert.equal(
+    registry.getArgType("RANDBETWEEN", 0),
+    "number",
+    "Expected RANDBETWEEN arg1 type to come from catalog arg_types"
+  );
   assert.ok(
     registry.getFunction("HLOOKUP"),
     `Expected HLOOKUP to be present, got: ${registry.list().map(f => f.name).join(", ")}`
@@ -370,8 +374,11 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
 
   // Finance/stat functions that take ranges (catalog arg_types are too coarse)
   assert.equal(registry.isRangeArg("FVSCHEDULE", 0), false, "Expected FVSCHEDULE principal not to be a range");
+  assert.equal(registry.getArgType("FVSCHEDULE", 0), "value", "Expected FVSCHEDULE principal to be value-like");
   assert.ok(registry.isRangeArg("FVSCHEDULE", 1), "Expected FVSCHEDULE schedule to be a range");
   assert.ok(registry.isRangeArg("MIRR", 0), "Expected MIRR values to be a range");
+  assert.equal(registry.getArgType("MIRR", 1), "value", "Expected MIRR finance_rate to be value-like");
+  assert.equal(registry.getArgType("MIRR", 2), "value", "Expected MIRR reinvest_rate to be value-like");
   assert.ok(registry.isRangeArg("PROB", 0), "Expected PROB x_range to be a range");
   assert.ok(registry.isRangeArg("PROB", 1), "Expected PROB prob_range to be a range");
   assert.equal(registry.getArgType("PROB", 2), "value", "Expected PROB lower_limit to be value-like");
@@ -488,7 +495,23 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(pv?.args?.[0]?.name, "rate", "Expected PV arg1 to be rate");
   assert.equal(pv?.args?.[4]?.name, "type", "Expected PV arg5 to be type");
   assert.ok(pv?.args?.[4]?.optional, "Expected PV type to be optional");
+  assert.equal(registry.getArgType("PV", 0), "value", "Expected PV rate to be value-like");
+  assert.equal(registry.getArgType("PV", 1), "value", "Expected PV nper to be value-like");
+  assert.equal(registry.getArgType("PV", 2), "value", "Expected PV pmt to be value-like");
+  assert.equal(registry.getArgType("PV", 3), "value", "Expected PV fv to be value-like");
+  assert.equal(registry.getArgType("PV", 4), "number", "Expected PV type to be numeric");
+  assert.equal(registry.getArgType("NPV", 0), "value", "Expected NPV rate to be value-like");
+  assert.equal(registry.getArgType("FV", 0), "value", "Expected FV rate to be value-like");
+  assert.equal(registry.getArgType("PMT", 0), "value", "Expected PMT rate to be value-like");
+  assert.equal(registry.getArgType("RATE", 5), "value", "Expected RATE guess to be value-like");
+  assert.equal(registry.getArgType("IRR", 1), "value", "Expected IRR guess to be value-like");
+  assert.equal(registry.getArgType("XNPV", 0), "value", "Expected XNPV rate to be value-like");
+  assert.equal(registry.getArgType("XIRR", 2), "value", "Expected XIRR guess to be value-like");
   assert.equal(registry.getArgType("CUMIPMT", 5), "number", "Expected CUMIPMT type to be a number");
+  assert.equal(registry.getArgType("CUMIPMT", 0), "value", "Expected CUMIPMT rate to be value-like");
+  assert.equal(registry.getArgType("CUMPRINC", 0), "value", "Expected CUMPRINC rate to be value-like");
+  assert.equal(registry.getArgType("VDB", 0), "value", "Expected VDB cost to be value-like");
+  assert.equal(registry.getArgType("VDB", 5), "value", "Expected VDB factor to be value-like");
   assert.equal(registry.getFunction("VDB")?.args?.[6]?.type, "boolean", "Expected VDB no_switch to be boolean");
 
   // Bond/treasury functions: ensure arg naming matches enum indices in TabCompletionEngine.
