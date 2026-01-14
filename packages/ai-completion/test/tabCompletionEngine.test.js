@@ -292,6 +292,111 @@ test("Typing =mat suggests match( and a modern xmatch( alternative", async () =>
   );
 });
 
+test("Typing =CONCATE suggests CONCATENATE( and a modern CONCAT( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CONCATE";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CONCATENATE("),
+    `Expected a CONCATENATE( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=CONCAT("),
+    `Expected a CONCAT( modern alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =STDEVP suggests STDEVP( and a modern STDEV.P( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=STDEVP";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=STDEVP("),
+    `Expected a STDEVP( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=STDEV.P("),
+    `Expected a STDEV.P( modern alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =stdevp suggests stdevp( and a modern stdev.p( alternative (lowercase)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=stdevp";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=stdevp("),
+    `Expected a stdevp( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=stdev.p("),
+    `Expected a stdev.p( modern alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =VARP suggests VARP( and a modern VAR.P( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=VARP";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=VARP("),
+    `Expected a VARP( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=VAR.P("),
+    `Expected a VAR.P( modern alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =NORMD suggests NORMDIST( and a modern NORM.DIST( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=NORMD";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=NORMDIST("),
+    `Expected a NORMDIST( suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=NORM.DIST("),
+    `Expected a NORM.DIST( modern alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   const engine = new TabCompletionEngine();
 

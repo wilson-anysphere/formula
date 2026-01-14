@@ -10,6 +10,37 @@ import { normalizeCellRef, toA1, columnIndexToLetter } from "./a1.js";
 // Keep this list stable (ordering matters for predictable UX + tests).
 const DEFAULT_STARTER_FUNCTIONS = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP(", "INDEX(", "MATCH("];
 
+// Lightweight "modern alternative" suggestions for a handful of legacy Excel functions.
+// These are intentionally low-confidence and primarily intended for UIs that show a suggestion list
+// (they are not representable as "pure insertions" for the formula bar ghost-text UX).
+const MODERN_FUNCTION_ALTERNATIVES = {
+  // Legacy lookup helpers.
+  VLOOKUP: "XLOOKUP",
+  HLOOKUP: "XLOOKUP",
+  LOOKUP: "XLOOKUP",
+  MATCH: "XMATCH",
+
+  // Deprecated/non-dotted statistical aliases.
+  STDEVP: "STDEV.P",
+  VARP: "VAR.P",
+
+  // Legacy distribution/inverse functions whose modern equivalents insert `.` segments.
+  NORMDIST: "NORM.DIST",
+  NORMINV: "NORM.INV",
+  NORMSDIST: "NORM.S.DIST",
+  NORMSINV: "NORM.S.INV",
+  LOGNORMDIST: "LOGNORM.DIST",
+  BINOMDIST: "BINOM.DIST",
+  CHIDIST: "CHISQ.DIST.RT",
+  CHIINV: "CHISQ.INV.RT",
+  CHITEST: "CHISQ.TEST",
+  FDIST: "F.DIST.RT",
+  FINV: "F.INV.RT",
+
+  // Legacy text concatenation.
+  CONCATENATE: "CONCAT",
+};
+
 /**
  * @typedef {"formula" | "value" | "function_arg" | "range"} SuggestionType
  *
@@ -406,8 +437,9 @@ export class TabCompletionEngine {
       });
 
       // Provide lightweight "modern alternative" suggestions for some legacy functions.
-      const suggestModernAlternative = (targetName) => {
-        const completedTarget = applyNameCase(targetName, prefix);
+      const modernTarget = MODERN_FUNCTION_ALTERNATIVES[spec.name];
+      if (modernTarget) {
+        const completedTarget = applyNameCase(modernTarget, prefix);
         const call = `${completedTarget}(`;
         suggestions.push({
           text: replaceSpan(input, token.start, token.end, call),
@@ -415,16 +447,6 @@ export class TabCompletionEngine {
           type: "formula",
           confidence: 0.35,
         });
-      };
-
-      if (spec.name === "VLOOKUP") {
-        suggestModernAlternative("XLOOKUP");
-      } else if (spec.name === "HLOOKUP") {
-        suggestModernAlternative("XLOOKUP");
-      } else if (spec.name === "LOOKUP") {
-        suggestModernAlternative("XLOOKUP");
-      } else if (spec.name === "MATCH") {
-        suggestModernAlternative("XMATCH");
       }
     }
 
