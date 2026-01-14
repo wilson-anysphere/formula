@@ -142,6 +142,61 @@ describe("registerEncryptionUiCommands", () => {
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/key id: k-old/i), "warning");
   });
 
+  it("exportEncryptionKey does not fall back to policy when an enc payload exists but its keyId cannot be determined", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const docId = "doc-1";
+    const doc = new Y.Doc({ guid: docId });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    const range = new Y.Map<any>();
+    range.set("id", "r1");
+    range.set("sheetId", "Sheet1");
+    range.set("startRow", 0);
+    range.set("startCol", 0);
+    range.set("endRow", 0);
+    range.set("endCol", 0);
+    range.set("keyId", "policy-key");
+    ranges.push([range]);
+    metadata.set("encryptedRanges", ranges);
+
+    // Cell contains an `enc` payload but the key id is malformed/unsupported.
+    const cells = doc.getMap("cells");
+    const cellMap = new Y.Map<any>();
+    cellMap.set("enc", {
+      v: 2,
+      alg: "AES-256-GCM",
+      keyId: { bogus: true },
+      ivBase64: "AA==",
+      tagBase64: "AA==",
+      ciphertextBase64: "AA==",
+    });
+    cells.set("Sheet1:0:0", cellMap);
+
+    const keyBytes = new Uint8Array(32).fill(3);
+    const keyStore = {
+      getCachedKey: vi.fn((_docId: string, keyId: string) => (keyId === "policy-key" ? { keyId, keyBytes } : null)),
+      get: vi.fn(async () => null),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ doc, cells }),
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    await commandRegistry.executeCommand("collab.exportEncryptionKey");
+
+    expect(showInputBox).not.toHaveBeenCalled();
+    expect(keyStore.getCachedKey).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/cannot determine the key id/i), "error");
+  });
+
   it("exportEncryptionKey falls back to policy metadata when the active cell is not yet encrypted", async () => {
     const commandRegistry = new CommandRegistry();
 

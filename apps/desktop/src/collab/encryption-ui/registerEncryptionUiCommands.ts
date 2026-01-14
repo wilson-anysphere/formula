@@ -65,14 +65,20 @@ function bestEffortKeyIdFromEncPayload(enc: unknown): string | null {
   return null;
 }
 
-function keyIdFromEncryptedCellPayload(session: any, cell: { sheetId: string; row: number; col: number }): string | null {
+function encryptedCellPayloadMeta(
+  session: any,
+  cell: { sheetId: string; row: number; col: number },
+): { hasEncPayload: boolean; keyId: string | null } {
+  let hasEncPayload = false;
   try {
     const cells = session?.cells;
-    if (!cells || typeof cells.get !== "function") return null;
+    if (!cells || typeof cells.get !== "function") return { hasEncPayload: false, keyId: null };
     const sheetId = String(cell.sheetId ?? "").trim();
     const row = Number(cell.row);
     const col = Number(cell.col);
-    if (!sheetId || !Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
+    if (!sheetId || !Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) {
+      return { hasEncPayload: false, keyId: null };
+    }
 
     const keys: string[] = [`${sheetId}:${row}:${col}`, `${sheetId}:${row},${col}`];
     const defaultSheetId = String((session as any)?.defaultSheetId ?? "").trim();
@@ -84,18 +90,26 @@ function keyIdFromEncryptedCellPayload(session: any, cell: { sheetId: string; ro
       const raw = cells.get(key);
       if (!raw || typeof raw !== "object" || typeof (raw as any).get !== "function") continue;
       const enc = (raw as any).get("enc");
-      if (enc == null) continue;
+      if (enc === undefined) continue;
+      hasEncPayload = true;
       // Best-effort: treat any object with a string `keyId` as an encrypted payload, even if
       // the payload schema is unknown/unsupported by this client. This avoids key-id
       // conflicts (encryptSelectedRange) and allows export flows to still identify which key
       // id is needed (even if the client cannot decrypt/edit the cell).
       const keyId = bestEffortKeyIdFromEncPayload(enc) ?? (isEncryptedCellPayload(enc) ? String((enc as any).keyId ?? "").trim() : null);
-      if (keyId) return keyId;
+      if (keyId) return { hasEncPayload: true, keyId };
     }
+
+    if (hasEncPayload) return { hasEncPayload: true, keyId: null };
   } catch {
     // ignore
   }
-  return null;
+  return { hasEncPayload: false, keyId: null };
+}
+
+function keyIdFromEncryptedCellPayload(session: any, cell: { sheetId: string; row: number; col: number }): string | null {
+  const meta = encryptedCellPayloadMeta(session, cell);
+  return meta.keyId;
 }
 
 function roleCanEncrypt(role: string | null | undefined): boolean {
@@ -618,23 +632,10 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const sheetName = app.getCurrentSheetDisplayName();
       const docId = session.doc.guid;
       const cell = { sheetId, row: active.row, col: active.col };
-      // Prefer the key id from an existing encrypted payload (when available locally) so callers
-      // can export the correct key even if the encrypted range policy has since changed (e.g.
-      // key rotation via add/remove overrides).
-      const keyIdFromEnc = keyIdFromEncryptedCellPayload(session as any, cell);
+
+      const encMeta = encryptedCellPayloadMeta(session as any, cell);
       const policy = createEncryptionPolicyFromDoc(session.doc);
       const keyIdFromPolicy = policy.keyIdForCell(cell);
-      if (!keyIdFromEnc && !keyIdFromPolicy) {
-        // If the policy fails closed (unknown encryptedRanges schema), shouldEncryptCell returns true
-        // for all valid cells but keyIdForCell returns null. In that case, surface a more actionable
-        // error rather than incorrectly claiming the cell isn't encrypted.
-        if (policy.shouldEncryptCell(cell)) {
-          showToast("Encrypted range metadata is in an unsupported format; cannot determine the key id for this cell.", "error");
-          return;
-        }
-        showToast(`The active cell is not inside an encrypted range (${sheetName}).`, "warning");
-        return;
-      }
 
       const loadKeyBytes = async (keyId: string): Promise<Uint8Array | null> => {
         const cached = keyStore.getCachedKey(docId, keyId);
@@ -657,9 +658,20 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       //   be misleading.
       // - Otherwise, fall back to the policy key id (for cells in an encrypted range that have not
       //   yet been written/encrypted).
-      const keyId = keyIdFromEnc ?? keyIdFromPolicy;
+      const keyId = encMeta.hasEncPayload ? encMeta.keyId : keyIdFromPolicy;
       if (!keyId) {
-        showToast("Missing encryption key for this range. Import the key first.", "warning");
+        // If the policy fails closed (unknown encryptedRanges schema), shouldEncryptCell returns true
+        // for all valid cells but keyIdForCell returns null. In that case, surface a more actionable
+        // error rather than incorrectly claiming the cell isn't encrypted.
+        if (encMeta.hasEncPayload) {
+          showToast("Encrypted cell payload is in an unsupported format; cannot determine the key id.", "error");
+          return;
+        }
+        if (policy.shouldEncryptCell(cell)) {
+          showToast("Encrypted range metadata is in an unsupported format; cannot determine the key id for this cell.", "error");
+          return;
+        }
+        showToast(`The active cell is not inside an encrypted range (${sheetName}).`, "warning");
         return;
       }
 
