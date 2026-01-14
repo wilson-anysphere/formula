@@ -180,13 +180,35 @@ function inferHeaderRow(cells) {
     for (const cell of row) {
       const v = cell?.v;
       if (v == null) continue;
+
+      // For header detection we want to treat rich values (e.g. DocumentController rich text + in-cell
+      // images) as text, while still treating numbers/booleans as non-string values so purely numeric
+      // rows are not misclassified as headers.
+      let text = null;
+      if (typeof v === "string") {
+        text = v;
+      } else if (isPlainObject(v)) {
+        const maybeText = /** @type {any} */ (v)?.text;
+        if (typeof maybeText === "string") {
+          text = maybeText;
+        } else {
+          const image = parseImageValue(v);
+          if (image) text = image.altText ?? "[Image]";
+        }
+      }
+
+      if (text != null) {
+        const trimmedText = text.trim();
+        if (!trimmedText) continue;
+        nonEmpty += 1;
+        stringish += 1;
+        if (firstString == null) firstString = trimmedText;
+        continue;
+      }
+
       const trimmed = String(v).trim();
       if (!trimmed) continue;
       nonEmpty += 1;
-      if (typeof v === "string") {
-        stringish += 1;
-        if (firstString == null) firstString = trimmed;
-      }
     }
     return { row, nonEmpty, stringish, firstString };
   }

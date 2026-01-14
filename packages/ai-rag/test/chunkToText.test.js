@@ -164,6 +164,23 @@ test("chunkToText formats in-cell image values as alt text / placeholders", () =
   assert.doesNotMatch(text, /imageId|img_1|img_2|\"type\"/);
 });
 
+test("chunkToText detects header rows when header cells contain rich values", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: { text: "Product", runs: [{ start: 0, end: 7, style: { bold: true } }] } }, { v: { type: "image", value: { imageId: "img_1", altText: "Photo" } } }],
+      [{ v: "Alpha" }, { v: { type: "image", value: { imageId: "img_2" } } }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Product=Alpha/);
+  assert.match(text, /Photo=\[Image\]/);
+});
+
 test("chunkToText detects header rows below a title row and preserves the title as pre-header context", () => {
   const chunk = {
     kind: "dataRegion",
