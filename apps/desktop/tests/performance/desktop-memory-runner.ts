@@ -287,6 +287,12 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
       throw new Error(`Refusing to reset unsafe desktop benchmark home dir: ${perfHome}`);
     }
     const safeRoot = resolve(repoRoot, "target");
+    if (perfHome === safeRoot) {
+      throw new Error(
+        `Refusing to reset FORMULA_PERF_HOME=${perfHome} because it points at target/ itself.\n` +
+          "Pick a subdirectory like target/perf-home (recommended).",
+      );
+    }
     const allowUnsafe =
       process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN === "1" ||
       String(process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN ?? "")

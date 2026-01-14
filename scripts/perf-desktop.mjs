@@ -96,6 +96,25 @@ function ensureCleanPerfHome(perfHome) {
 
   const safeRoot = path.resolve(repoRoot, "target");
   const allowUnsafe = isTruthyEnv(process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN);
+
+  // Never delete the entire `target/` directory, even with the unsafe override. This directory
+  // contains build artifacts and other tooling state; deleting it is almost never intended.
+  if (perfHome === safeRoot) {
+    if (allowUnsafe) {
+      throw new Error(
+        `[perf-desktop] Refusing to reset FORMULA_PERF_HOME=${perfHome} because it points at target/ itself.\n` +
+          "Pick a subdirectory like target/perf-home (recommended).",
+      );
+    }
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[perf-desktop] WARN refusing to delete FORMULA_PERF_HOME=${perfHome} because it points at target/ itself.\n` +
+        "  - Pick a subdirectory like target/perf-home (recommended)\n",
+    );
+    mkdirSync(perfHome, { recursive: true });
+    return;
+  }
+
   const safeToDelete = perfHome !== safeRoot && isSubpath(safeRoot, perfHome);
   if (!safeToDelete && !allowUnsafe) {
     // eslint-disable-next-line no-console
