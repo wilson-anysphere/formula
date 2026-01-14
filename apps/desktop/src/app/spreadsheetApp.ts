@@ -4671,7 +4671,9 @@ export class SpreadsheetApp {
       throw new Error("Finish editing before inserting a picture.");
     }
 
-    const normalized = Array.isArray(files) ? (files.filter((file) => file && typeof (file as File).name === "string") as File[]) : [];
+    const normalized = Array.isArray(files)
+      ? (files.filter((file) => file && typeof (file as File).name === "string") as File[])
+      : [];
     if (normalized.length === 0) return;
 
     const guessMimeType = (name: string): string => {
@@ -4735,39 +4737,39 @@ export class SpreadsheetApp {
       throw new Error("Picture insertion is not supported in this build.");
     }
 
-     const readFileBytes = async (file: File): Promise<Uint8Array> => {
-       // Preferred path: the standard File/Blob `arrayBuffer()` API.
-       if (typeof (file as any)?.arrayBuffer === "function") {
-         return new Uint8Array(await file.arrayBuffer());
-       }
+    const readFileBytes = async (file: File): Promise<Uint8Array> => {
+      // Preferred path: the standard File/Blob `arrayBuffer()` API.
+      if (typeof (file as any)?.arrayBuffer === "function") {
+        return new Uint8Array(await file.arrayBuffer());
+      }
 
-       // JSDOM (and some older environments) may not implement `File.arrayBuffer`.
-       // Fall back to FileReader when available.
-       if (typeof (globalThis as any).FileReader === "function") {
-         const reader = new (globalThis as any).FileReader() as FileReader;
-         const buf = await new Promise<ArrayBuffer>((resolve, reject) => {
-           reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
-           reader.onload = () => resolve(reader.result as ArrayBuffer);
-           reader.readAsArrayBuffer(file);
-         });
-         return new Uint8Array(buf);
-       }
+      // JSDOM (and some older environments) may not implement `File.arrayBuffer`.
+      // Fall back to FileReader when available.
+      if (typeof (globalThis as any).FileReader === "function") {
+        const reader = new (globalThis as any).FileReader() as FileReader;
+        const buf = await new Promise<ArrayBuffer>((resolve, reject) => {
+          reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.readAsArrayBuffer(file);
+        });
+        return new Uint8Array(buf);
+      }
 
-       // Last resort: try the Fetch API's Body helpers.
-       if (typeof (globalThis as any).Response === "function") {
-         const buf = await new (globalThis as any).Response(file).arrayBuffer();
-         return new Uint8Array(buf);
-       }
+      // Last resort: try the Fetch API's Body helpers.
+      if (typeof (globalThis as any).Response === "function") {
+        const buf = await new (globalThis as any).Response(file).arrayBuffer();
+        return new Uint8Array(buf);
+      }
 
-       throw new Error("Reading file bytes is not supported in this environment.");
-     };
+      throw new Error("Reading file bytes is not supported in this environment.");
+    };
 
-     this.document.beginBatch({ label: "Insert Picture" });
-     try {
-       for (let i = 0; i < normalized.length; i += 1) {
-         const file = normalized[i]!;
-         const bytes = await readFileBytes(file);
-         const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
+    this.document.beginBatch({ label: "Insert Picture" });
+    try {
+      for (let i = 0; i < normalized.length; i += 1) {
+        const file = normalized[i]!;
+        const bytes = await readFileBytes(file);
+        const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
 
         const ext = (() => {
           const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
@@ -4787,15 +4789,21 @@ export class SpreadsheetApp {
         // Kick off ImageBitmap decode immediately so the first overlay paint can
         // reuse an already-decoding promise (avoids blocking on decode during
         // the render pass right after insertion).
-        void this.drawingOverlay
-          .preloadImage(imageEntry)
-          // Insertion should succeed even if bitmap decode fails.
-          .catch(() => {});
+        // Some environments (e.g. JSDOM unit tests) don't implement `createImageBitmap`;
+        // avoid spawning rejected decode promises in those cases.
+        if (typeof createImageBitmap === "function") {
+          void this.drawingOverlay
+            .preloadImage(imageEntry)
+            // Insertion should succeed even if bitmap decode fails.
+            .catch(() => {});
+        }
 
         const fromCol = startCol + i * (DEFAULT_PICTURE_WIDTH_COLS + DEFAULT_PICTURE_GAP_COLS);
         const fromRow = startRow;
         const drawing = {
-          id: createDrawingObjectId(),
+          // Store as a string to keep drawing ids JSON-friendly and stable across JS↔Rust↔Yjs hops.
+          // The UI adapters normalize ids back to numbers for rendering/interaction.
+          id: String(createDrawingObjectId()),
           kind: { type: "image", imageId },
           anchor: {
             type: "twoCell",
