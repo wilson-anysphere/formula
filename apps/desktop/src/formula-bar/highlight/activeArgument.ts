@@ -63,6 +63,7 @@ function isEscapedStructuredRefBracket(formulaText: string, index: number, brack
 
 function findArgumentEnd(formulaText: string, start: number): number {
   let inString = false;
+  let inSheetQuote = false;
   let parenDepth = 0;
   let bracketDepth = 0;
   let braceDepth = 0;
@@ -81,8 +82,25 @@ function findArgumentEnd(formulaText: string, start: number): number {
       continue;
     }
 
+    if (inSheetQuote) {
+      if (ch === "'") {
+        // Excel escapes apostrophes in sheet names by doubling them: '' -> '
+        if (formulaText[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      continue;
+    }
+
     if (ch === '"') {
       inString = true;
+      continue;
+    }
+
+    if (ch === "'") {
+      inSheetQuote = true;
       continue;
     }
 
@@ -147,6 +165,7 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
 
   let i = 0;
   let inString = false;
+  let inSheetQuote = false;
 
   while (i < cursor) {
     const ch = formulaText[i];
@@ -163,8 +182,27 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
       continue;
     }
 
+    if (inSheetQuote) {
+      if (ch === "'") {
+        // Excel escapes apostrophes in sheet names by doubling them: '' -> '
+        if (formulaText[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      i += 1;
+      continue;
+    }
+
     if (ch === '"') {
       inString = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "'") {
+      inSheetQuote = true;
       i += 1;
       continue;
     }

@@ -126,6 +126,37 @@ describe("FormulaBarView argument preview (integration)", () => {
     host.remove();
   });
 
+  it("ignores commas inside quoted sheet names (sheet-qualified refs)", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    const provider = vi.fn((expr: string) => {
+      if (expr === "'Budget,2025)'!A1") return 7;
+      return "(preview unavailable)";
+    });
+    view.setArgumentPreviewProvider(provider);
+
+    const formula = "=SUM('Budget,2025)'!A1, 1)";
+    view.textarea.value = formula;
+
+    // Cursor inside the sheet-qualified reference argument.
+    const cursor = formula.indexOf("A1") + 1;
+    view.textarea.setSelectionRange(cursor, cursor);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushPreview();
+
+    const preview = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+    expect(preview?.textContent).toBe("↳ 'Budget,2025)'!A1  →  7");
+    expect(provider).toHaveBeenCalledWith("'Budget,2025)'!A1");
+
+    host.remove();
+  });
+
   it("collapses whitespace in the displayed argument expression", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

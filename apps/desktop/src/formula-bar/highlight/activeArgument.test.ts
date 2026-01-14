@@ -94,6 +94,33 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("ignores commas and parentheses inside quoted sheet names", () => {
+    const formula = "=SUM('Budget,2025)'!A1, 1)";
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+
+    const insideSheetRef = formula.indexOf("A1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSheetRef)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 0,
+      argText: "'Budget,2025)'!A1",
+    });
+  });
+
+  it("ignores semicolons inside quoted sheet names (locale arg separators)", () => {
+    const formula = "=SUM('Budget;2025'!A1; 1)";
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+  });
+
   it("ignores commas inside curly braces (array literals)", () => {
     const formula = "=SUM({1,2,3}, 4)";
     const insideSecondArg = formula.indexOf("4") + 1;
