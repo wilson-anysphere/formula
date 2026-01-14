@@ -118,10 +118,10 @@ pub(crate) fn parse_biff_sheet_sort_state(
                 }
                 if pending.fragments >= records::MAX_LOGICAL_RECORD_FRAGMENTS {
                     let kind = match pending.rt {
-                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12 record",
-                        _ => "unsupported Sort12 record",
+                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12",
+                        _ => "unsupported Sort12",
                     };
-                    push_warning_once_with_offset(&mut out.warnings, kind, pending.record_offset);
+                    push_warning_once(&mut out.warnings, kind);
                     pending_frt_sort = None;
                     continue;
                 }
@@ -132,10 +132,10 @@ pub(crate) fn parse_biff_sheet_sort_state(
                     > records::MAX_LOGICAL_RECORD_BYTES
                 {
                     let kind = match pending.rt {
-                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12 record",
-                        _ => "unsupported Sort12 record",
+                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12",
+                        _ => "unsupported Sort12",
                     };
-                    push_warning_once_with_offset(&mut out.warnings, kind, pending.record_offset);
+                    push_warning_once(&mut out.warnings, kind);
                     pending_frt_sort = None;
                     continue;
                 }
@@ -206,13 +206,11 @@ fn flush_pending_frt_sort(
 
     match pending.rt {
         RT_SORT12 | RT_SORT12_ALT => {
-            push_warning_once_with_offset(&mut out.warnings, "unsupported Sort12 record", pending.record_offset)
+            push_warning_once(&mut out.warnings, "unsupported Sort12")
         }
-        RT_SORTDATA12 | RT_SORTDATA12_ALT => push_warning_once_with_offset(
-            &mut out.warnings,
-            "unsupported SortData12 record",
-            pending.record_offset,
-        ),
+        RT_SORTDATA12 | RT_SORTDATA12_ALT => {
+            push_warning_once(&mut out.warnings, "unsupported SortData12")
+        }
         _ => {}
     }
 }
@@ -294,11 +292,11 @@ fn parse_frt_header(data: &[u8]) -> Option<(u16, &[u8])> {
     Some((rt, &data[8..]))
 }
 
-fn push_warning_once_with_offset(warnings: &mut Vec<String>, kind: &'static str, offset: usize) {
-    if warnings.iter().any(|w| w.starts_with(kind)) {
+fn push_warning_once(warnings: &mut Vec<String>, msg: &'static str) {
+    if warnings.iter().any(|w| w == msg) {
         return;
     }
-    warnings.push(format!("{kind} at offset {offset}"));
+    warnings.push(msg.to_string());
 }
 
 /// Returns true if the payload appears to contain a Ref8 range that matches or is contained by the
@@ -812,10 +810,7 @@ mod tests {
 
         let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
         assert!(parsed.sort_state.is_none());
-        assert_eq!(
-            parsed.warnings,
-            vec!["unsupported Sort12 record at offset 20".to_string()]
-        );
+        assert_eq!(parsed.warnings, vec!["unsupported Sort12".to_string()]);
     }
 
     #[test]
@@ -895,10 +890,7 @@ mod tests {
 
         let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
         assert!(parsed.sort_state.is_none());
-        assert_eq!(
-            parsed.warnings,
-            vec!["unsupported SortData12 record at offset 20".to_string()]
-        );
+        assert_eq!(parsed.warnings, vec!["unsupported SortData12".to_string()]);
     }
 
     #[test]
