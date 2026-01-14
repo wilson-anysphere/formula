@@ -20,6 +20,7 @@
 
 use crate::util::ct_eq;
 use crate::{AgileEncryptionInfo, HashAlgorithm, OffcryptoError};
+use zeroize::Zeroizing;
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -91,7 +92,7 @@ pub fn agile_iterated_hash(
     salt: &[u8],
     hash_alg: HashAlgorithm,
     spin_count: u32,
-) -> Vec<u8> {
+) -> Zeroizing<Vec<u8>> {
     #[cfg(test)]
     ITERATED_HASH_CALLS.fetch_add(1, Ordering::Relaxed);
 
@@ -121,22 +122,22 @@ pub fn agile_iterated_hash(
     }
 
     let digest_len = hash_output_len(hash_alg);
-    let mut h = vec![0u8; digest_len];
+    let mut h = Zeroizing::new(vec![0u8; digest_len]);
 
     // Initial round: Hash(salt || password_utf16le)
-    let mut buf = Vec::with_capacity(salt.len() + password_utf16le.len());
+    let mut buf = Zeroizing::new(Vec::with_capacity(salt.len() + password_utf16le.len()));
     buf.extend_from_slice(salt);
     buf.extend_from_slice(password_utf16le);
-    hash_into(hash_alg, &buf, &mut h);
+    hash_into(hash_alg, &buf[..], &mut h[..]);
 
     // Iteration 0..spinCount-1: Hash(LE32(i) || H)
     //
     // Avoid allocating in the loop: reuse a fixed-size buffer and overwrite the hash output.
-    let mut round = vec![0u8; 4 + digest_len];
+    let mut round = Zeroizing::new(vec![0u8; 4 + digest_len]);
     for i in 0..spin_count {
         round[..4].copy_from_slice(&i.to_le_bytes());
         round[4..].copy_from_slice(&h);
-        hash_into(hash_alg, &round, &mut h);
+        hash_into(hash_alg, &round[..], &mut h[..]);
     }
 
     h
@@ -149,7 +150,7 @@ pub fn agile_iterated_hash(
 pub fn agile_secret_key_from_password(
     info: &AgileEncryptionInfo,
     password: &str,
-) -> Result<Vec<u8>, OffcryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     if info.password_salt.len() != 16 {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "encryptedKey.saltValue must be 16 bytes",
@@ -169,7 +170,7 @@ pub fn agile_secret_key_from_password(
         });
     }
 
-    let password_utf16le = crate::password_to_utf16le_bytes(password);
+    let password_utf16le = Zeroizing::new(crate::password_to_utf16le_bytes(password));
     let h = agile_iterated_hash(
         &password_utf16le,
         &info.password_salt,
@@ -228,7 +229,7 @@ pub fn agile_secret_key_from_password(
             context: "decrypted keyValue is truncated",
         });
     }
-    Ok(key_value[..key_len].to_vec())
+    Ok(Zeroizing::new(key_value[..key_len].to_vec()))
 }
 
 #[cfg(test)]
@@ -355,7 +356,7 @@ mod tests {
         ITERATED_HASH_CALLS.store(0, Ordering::Relaxed);
 
         let out = agile_secret_key_from_password(&info, password).unwrap();
-        assert_eq!(out, secret_key_plain);
+        assert_eq!(out.as_slice(), secret_key_plain.as_slice());
         assert_eq!(ITERATED_HASH_CALLS.load(Ordering::Relaxed), 1);
     }
 }
