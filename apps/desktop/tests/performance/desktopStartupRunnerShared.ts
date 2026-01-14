@@ -176,7 +176,11 @@ type RunOnceOptions = {
    * This is used by benchmarks that need to take a final measurement (e.g. RSS) while the app is
    * still alive. The hook is best-effort: any error is ignored and shutdown proceeds.
    */
-  afterCapture?: (child: ChildProcess, metrics: StartupMetrics) => void | Promise<void>;
+  afterCapture?: (
+    child: ChildProcess,
+    metrics: StartupMetrics,
+    signal: AbortSignal,
+  ) => void | Promise<void>;
   /**
    * Maximum time to wait for `afterCapture` before proceeding with shutdown.
    *
@@ -382,13 +386,22 @@ export async function runOnce({
 
       const hookTimeoutMs = afterCaptureTimeoutMs ?? 5000;
       void (async () => {
+        const controller = new AbortController();
+        let timer: NodeJS.Timeout | null = null;
         try {
           await Promise.race([
-            Promise.resolve(hook(child, parsed)),
-            sleep(Math.max(0, hookTimeoutMs)),
+            Promise.resolve().then(() => hook(child, parsed, controller.signal)),
+            new Promise<void>((resolve) => {
+              timer = setTimeout(() => {
+                controller.abort();
+                resolve();
+              }, Math.max(0, hookTimeoutMs));
+            }),
           ]);
         } catch {
           // Best-effort hook: ignore errors and proceed to shutdown.
+        } finally {
+          if (timer) clearTimeout(timer);
         }
         beginShutdown('captured');
       })();

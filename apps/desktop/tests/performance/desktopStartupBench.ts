@@ -130,8 +130,28 @@ function parseBenchKind(): StartupBenchKind {
   return kindRaw;
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolvePromise();
+    }, ms);
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      rejectPromise(new Error('aborted'));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort);
+    }
+  });
 }
 
 function parseProcChildrenPids(content: string): number[] {
@@ -216,6 +236,7 @@ async function findPidForExecutableLinux(
   rootPid: number,
   binPath: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<number | null> {
   const binResolved = resolve(binPath);
   let binReal = binResolved;
@@ -227,13 +248,14 @@ async function findPidForExecutableLinux(
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (signal?.aborted) return null;
     const pids = await collectProcessTreePidsLinux(rootPid);
     for (const pid of pids) {
       const exe = await readProcExeLinux(pid);
       if (!exe) continue;
       if (exe === binReal || exe === binResolved) return pid;
     }
-    await sleep(50);
+    await sleep(50, signal);
   }
   return null;
 }
@@ -279,14 +301,20 @@ async function captureDesktopRssMb(
   binPath: string,
   idleDelayMs: number,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<number | null> {
   try {
-    await sleep(idleDelayMs);
+    await sleep(idleDelayMs, signal);
 
     if (process.platform === 'linux') {
       // When running under Xvfb, `childPid` is the wrapper process group leader. Resolve the real
       // desktop PID by executable path.
-      const desktopPid = await findPidForExecutableLinux(childPid, binPath, Math.min(2000, timeoutMs));
+      const desktopPid = await findPidForExecutableLinux(
+        childPid,
+        binPath,
+        Math.min(2000, timeoutMs),
+        signal,
+      );
       if (!desktopPid) return null;
       return await getProcessRssMbLinux(desktopPid);
     }
@@ -375,9 +403,9 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
       argv,
       envOverrides,
       profileDir,
-      afterCapture: async (child) => {
+      afterCapture: async (child, _metrics, signal) => {
         if (!child.pid) return;
-        rssMb = await captureDesktopRssMb(child.pid, binPath, rssIdleDelayMs, timeoutMs);
+        rssMb = await captureDesktopRssMb(child.pid, binPath, rssIdleDelayMs, timeoutMs, signal);
       },
       afterCaptureTimeoutMs: rssIdleDelayMs + 4000,
     });
