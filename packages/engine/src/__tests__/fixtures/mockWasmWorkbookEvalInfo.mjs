@@ -27,6 +27,23 @@ function parseInfoKey(formula) {
   return match[1];
 }
 
+function normalizeOriginA1(origin) {
+  const s = String(origin ?? "").trim();
+  if (s === "") return null;
+
+  const match = /^\$?([A-Za-z]+)\$?([1-9][0-9]*)$/.exec(s);
+  if (!match) {
+    throw new Error("origin must be an A1 address");
+  }
+  const [, colRaw, rowRaw] = match;
+  const row = Number(rowRaw);
+  if (!Number.isInteger(row) || row < 1) {
+    throw new Error("origin must be an A1 address");
+  }
+  const col = colRaw.toUpperCase();
+  return `$${col}$${row}`;
+}
+
 function workbookDirForExcel(dir) {
   const d = String(dir ?? "");
   if (d === "") return "";
@@ -73,8 +90,9 @@ export class WasmWorkbook {
     this.version = null;
     this.memavail = null;
     this.totmem = null;
-    this.origin = null;
-    this.originBySheet = new Map();
+    // Excel INFO("origin") is derived from the sheet view state (top-left visible cell).
+    // Model it per-sheet and default to "$A$1".
+    this.sheetOriginBySheet = new Map();
   }
 
   _sheetMap(map, sheet) {
@@ -105,20 +123,13 @@ export class WasmWorkbook {
     if ("totmem" in info) this.totmem = normalizeInfoNumber(info.totmem, { key: "totmem" });
   }
 
-  setInfoOrigin(origin) {
-    this.origin = normalizeInfoString(origin, { key: "origin" });
-  }
-
-  setInfoOriginForSheet(sheet, origin) {
-    if (typeof sheet !== "string" || sheet.trim() === "") {
-      throw new Error("sheet must be a non-empty string");
-    }
-    const sheetName = sheet.trim();
-    const normalized = normalizeInfoString(origin, { key: "origin" });
+  setSheetOrigin(sheet, origin) {
+    const sheetName = normalizeSheet(sheet);
+    const normalized = normalizeOriginA1(origin);
     if (normalized == null) {
-      this.originBySheet.delete(sheetName);
+      this.sheetOriginBySheet.delete(sheetName);
     } else {
-      this.originBySheet.set(sheetName, normalized);
+      this.sheetOriginBySheet.set(sheetName, normalized);
     }
   }
 
@@ -178,9 +189,7 @@ export class WasmWorkbook {
       case "totmem":
         return typeof this.totmem === "number" && Number.isFinite(this.totmem) ? this.totmem : "#N/A";
       case "origin": {
-        const sheetOrigin = this.originBySheet.get(sheetName);
-        const origin = sheetOrigin ?? this.origin;
-        return origin ?? "#N/A";
+        return this.sheetOriginBySheet.get(sheetName) ?? "$A$1";
       }
       default:
         return "#VALUE!";
@@ -230,4 +239,3 @@ export function lexFormula() {
 export function parseFormulaPartial() {
   return { ast: null, error: null, context: { function: null } };
 }
-

@@ -108,7 +108,7 @@ describe("engine.worker INFO() metadata integration", () => {
     (globalThis as any).self = previousSelf;
   });
 
-  it("propagates setEngineInfo + setInfoOrigin via worker RPC", async () => {
+  it("propagates setEngineInfo + setSheetOrigin via worker RPC", async () => {
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalInfo.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });
 
@@ -152,14 +152,12 @@ describe("engine.worker INFO() metadata integration", () => {
         },
       });
 
-      // Workbook-level fallback.
-      await sendRequest(port, { type: "request", id: 3, method: "setInfoOrigin", params: { origin: "workbook-origin" } });
-      // Per-sheet override.
+      // Host-provided sheet origin state drives `INFO("origin")`.
       await sendRequest(port, {
         type: "request",
         id: 4,
-        method: "setInfoOriginForSheet",
-        params: { sheet: "Sheet1", origin: "sheet-origin" },
+        method: "setSheetOrigin",
+        params: { sheet: "Sheet1", origin: "B2" },
       });
 
       await sendRequest(port, { type: "request", id: 5, method: "recalculate", params: {} });
@@ -178,10 +176,10 @@ describe("engine.worker INFO() metadata integration", () => {
       expect(await read(11, "Sheet1", "A6")).toBe(456.25);
       // Excel-compatible directory results include a trailing path separator.
       expect(await read(12, "Sheet1", "A7")).toBe("/tmp/");
-      expect(await read(13, "Sheet1", "A8")).toBe("sheet-origin");
+      expect(await read(13, "Sheet1", "A8")).toBe("$B$2");
 
-      // Sheet2 falls back to the workbook-level origin.
-      expect(await read(14, "Sheet2", "A1")).toBe("workbook-origin");
+      // Sheet2 uses the default origin.
+      expect(await read(14, "Sheet2", "A1")).toBe("$A$1");
     } finally {
       dispose();
     }
@@ -214,12 +212,11 @@ describe("engine.worker INFO() metadata integration", () => {
         method: "setEngineInfo",
         params: { info: { system: "mac", osversion: "14.0", memavail: 100 } },
       });
-      await sendRequest(port, { type: "request", id: 3, method: "setInfoOrigin", params: { origin: "workbook-origin" } });
       await sendRequest(port, {
         type: "request",
-        id: 4,
-        method: "setInfoOriginForSheet",
-        params: { sheet: "Sheet1", origin: "sheet-origin" },
+        id: 3,
+        method: "setSheetOrigin",
+        params: { sheet: "Sheet1", origin: "B2" },
       });
       await sendRequest(port, { type: "request", id: 5, method: "recalculate", params: {} });
 
@@ -231,39 +228,34 @@ describe("engine.worker INFO() metadata integration", () => {
 
       expect(await read(6, "A1")).toBe("mac");
       expect(await read(7, "A2")).toBe("14.0");
-      expect(await read(8, "A3")).toBe("sheet-origin");
+      expect(await read(8, "A3")).toBe("$B$2");
       expect(await read(9, "A4")).toBe(100);
 
-      // Clearing the per-sheet origin should fall back to the workbook-level origin.
+      // Clearing the origin should fall back to `$A$1`.
       await sendRequest(port, {
         type: "request",
         id: 10,
-        method: "setInfoOriginForSheet",
+        method: "setSheetOrigin",
         params: { sheet: "Sheet1", origin: "" },
       });
       await sendRequest(port, { type: "request", id: 11, method: "recalculate", params: {} });
-      expect(await read(12, "A3")).toBe("workbook-origin");
-
-      // Clearing the workbook origin should return #N/A.
-      await sendRequest(port, { type: "request", id: 13, method: "setInfoOrigin", params: { origin: "" } });
-      await sendRequest(port, { type: "request", id: 14, method: "recalculate", params: {} });
-      expect(await read(15, "A3")).toBe("#N/A");
+      expect(await read(12, "A3")).toBe("$A$1");
 
       // Clearing string metadata should revert to Excel defaults / #N/A.
       await sendRequest(port, {
         type: "request",
-        id: 16,
+        id: 13,
         method: "setEngineInfo",
         params: { info: { system: "", osversion: "" } },
       });
-      await sendRequest(port, { type: "request", id: 17, method: "recalculate", params: {} });
-      expect(await read(18, "A1")).toBe("pcdos");
-      expect(await read(19, "A2")).toBe("#N/A");
+      await sendRequest(port, { type: "request", id: 14, method: "recalculate", params: {} });
+      expect(await read(15, "A1")).toBe("pcdos");
+      expect(await read(16, "A2")).toBe("#N/A");
 
       // memavail must be finite numbers.
       const bad = await sendRequest(port, {
         type: "request",
-        id: 20,
+        id: 17,
         method: "setEngineInfo",
         params: { info: { memavail: Infinity } },
       });
@@ -271,18 +263,18 @@ describe("engine.worker INFO() metadata integration", () => {
       expect(String((bad as any).error)).toContain("memavail");
 
       // Failed update should not clobber existing metadata.
-      await sendRequest(port, { type: "request", id: 21, method: "recalculate", params: {} });
-      expect(await read(22, "A4")).toBe(100);
+      await sendRequest(port, { type: "request", id: 18, method: "recalculate", params: {} });
+      expect(await read(19, "A4")).toBe(100);
 
       // Clearing memavail should restore #N/A.
       await sendRequest(port, {
         type: "request",
-        id: 23,
+        id: 20,
         method: "setEngineInfo",
         params: { info: { memavail: null } },
       });
-      await sendRequest(port, { type: "request", id: 24, method: "recalculate", params: {} });
-      expect(await read(25, "A4")).toBe("#N/A");
+      await sendRequest(port, { type: "request", id: 21, method: "recalculate", params: {} });
+      expect(await read(22, "A4")).toBe("#N/A");
     } finally {
       dispose();
     }
