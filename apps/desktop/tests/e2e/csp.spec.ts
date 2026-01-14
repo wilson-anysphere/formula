@@ -70,6 +70,33 @@ function startHttpServer(
   });
 }
 
+async function gotoDesktopRootWithRetry(
+  page: import("@playwright/test").Page,
+): Promise<import("@playwright/test").Response | null> {
+  // Vite may occasionally trigger a one-time full reload after dependency optimization. If that
+  // happens mid-navigation, retry once after the current navigation settles.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await page.goto("/", { waitUntil: "domcontentloaded" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        attempt === 0 &&
+        (message.includes("Execution context was destroyed") ||
+          message.includes("net::ERR_ABORTED") ||
+          message.includes("net::ERR_NETWORK_CHANGED") ||
+          message.includes("interrupted by another navigation") ||
+          message.includes("frame was detached"))
+      ) {
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+        continue;
+      }
+      throw err;
+    }
+  }
+  return null;
+}
+
 test.describe("Content Security Policy (Tauri parity)", () => {
   test("startup has no CSP violations and allows WASM-in-worker execution", async ({ page }) => {
     const cspViolations: string[] = [];
@@ -84,7 +111,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+    const response = await gotoDesktopRootWithRetry(page);
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -391,7 +418,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         }
       });
 
-      const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+      const response = await gotoDesktopRootWithRetry(page);
       const cspHeader = response?.headers()["content-security-policy"];
       expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -487,7 +514,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+    const response = await gotoDesktopRootWithRetry(page);
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -531,7 +558,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+    const response = await gotoDesktopRootWithRetry(page);
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -606,7 +633,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+    const response = await gotoDesktopRootWithRetry(page);
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -799,7 +826,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         };
       });
 
-      const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+      const response = await gotoDesktopRootWithRetry(page);
       const cspHeader = response?.headers()["content-security-policy"];
       expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -972,7 +999,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       });
     });
 
-    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+    const response = await gotoDesktopRootWithRetry(page);
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -1040,7 +1067,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+    const response = await gotoDesktopRootWithRetry(page);
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
