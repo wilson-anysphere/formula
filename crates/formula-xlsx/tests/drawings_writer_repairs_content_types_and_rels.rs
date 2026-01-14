@@ -667,3 +667,119 @@ fn save_adds_content_types_default_for_wmf_media() {
         "expected wmf Default content type to be present, got:\n{ct_xml}"
     );
 }
+
+#[test]
+fn save_adds_content_types_default_for_webp_media() {
+    let mut workbook = formula_model::Workbook::default();
+    let sheet_id = workbook.add_sheet("Sheet1").expect("add sheet");
+
+    let image_id = workbook.images.ensure_unique_name("image", "webp");
+    workbook.images.insert(
+        image_id.clone(),
+        ImageData {
+            // Placeholder bytes: writer does not validate image payloads.
+            bytes: vec![0, 1, 2, 3],
+            content_type: Some("image/webp".to_string()),
+        },
+    );
+
+    let ext = EmuSize::new(914_400, 914_400);
+    let drawing = DrawingObject {
+        id: DrawingObjectId(1),
+        kind: DrawingObjectKind::Image { image_id },
+        anchor: Anchor::OneCell {
+            from: AnchorPoint::new(CellRef::new(0, 0), CellOffset::new(0, 0)),
+            ext,
+        },
+        z_order: 0,
+        size: Some(ext),
+        preserved: HashMap::new(),
+    };
+
+    workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .drawings = vec![drawing];
+
+    let doc = XlsxDocument::new(workbook);
+    let saved = doc.save_to_vec().expect("save xlsx");
+
+    let cursor = Cursor::new(saved);
+    let mut archive = ZipArchive::new(cursor).expect("open saved zip");
+
+    let mut ct_xml = String::new();
+    archive
+        .by_name("[Content_Types].xml")
+        .expect("ct part exists")
+        .read_to_string(&mut ct_xml)
+        .expect("read ct xml");
+    let ct_doc = Document::parse(&ct_xml).expect("parse ct xml");
+
+    assert!(
+        ct_doc.descendants().any(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Default"
+                && n.attribute("Extension") == Some("webp")
+                && n.attribute("ContentType") == Some("image/webp")
+        }),
+        "expected webp Default content type to be present, got:\n{ct_xml}"
+    );
+}
+
+#[test]
+fn save_adds_content_types_default_for_svg_media() {
+    let mut workbook = formula_model::Workbook::default();
+    let sheet_id = workbook.add_sheet("Sheet1").expect("add sheet");
+
+    let image_id = workbook.images.ensure_unique_name("image", "svg");
+    workbook.images.insert(
+        image_id.clone(),
+        ImageData {
+            // Minimal SVG payload (not intended to render, but sufficient for writer paths).
+            bytes: br#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#.to_vec(),
+            content_type: Some("image/svg+xml".to_string()),
+        },
+    );
+
+    let ext = EmuSize::new(914_400, 914_400);
+    let drawing = DrawingObject {
+        id: DrawingObjectId(1),
+        kind: DrawingObjectKind::Image { image_id },
+        anchor: Anchor::OneCell {
+            from: AnchorPoint::new(CellRef::new(0, 0), CellOffset::new(0, 0)),
+            ext,
+        },
+        z_order: 0,
+        size: Some(ext),
+        preserved: HashMap::new(),
+    };
+
+    workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .drawings = vec![drawing];
+
+    let doc = XlsxDocument::new(workbook);
+    let saved = doc.save_to_vec().expect("save xlsx");
+
+    let cursor = Cursor::new(saved);
+    let mut archive = ZipArchive::new(cursor).expect("open saved zip");
+
+    let mut ct_xml = String::new();
+    archive
+        .by_name("[Content_Types].xml")
+        .expect("ct part exists")
+        .read_to_string(&mut ct_xml)
+        .expect("read ct xml");
+    let ct_doc = Document::parse(&ct_xml).expect("parse ct xml");
+
+    assert!(
+        ct_doc.descendants().any(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Default"
+                && n.attribute("Extension") == Some("svg")
+                && n.attribute("ContentType") == Some("image/svg+xml")
+        }),
+        "expected svg Default content type to be present, got:\n{ct_xml}"
+    );
+}

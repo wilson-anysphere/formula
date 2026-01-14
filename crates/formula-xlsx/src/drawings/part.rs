@@ -1032,6 +1032,8 @@ pub fn content_type_for_extension(ext: &str) -> &'static str {
         // without repair prompts.
         "emf" => "image/x-emf",
         "wmf" => "image/x-wmf",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
         "tif" | "tiff" => "image/tiff",
         _ => "application/octet-stream",
     }
