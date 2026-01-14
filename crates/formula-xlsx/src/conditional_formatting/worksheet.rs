@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use formula_model::{
-    CellIsOperator, CfRule, CfRuleKind, CfRuleSchema, Cfvo, CfvoType, ColorScaleRule, DataBarRule,
-    IconSet, IconSetRule, Range, TopBottomKind, UniqueDuplicateRule,
+    CellIsOperator, CfRule, CfRuleKind, CfRuleSchema, Cfvo, CfvoType, ColorScaleRule,
+    DataBarDirection, DataBarRule, IconSet, IconSetRule, Range, TopBottomKind, UniqueDuplicateRule,
 };
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
@@ -366,19 +366,29 @@ fn write_x14_data_bar_rule<W: std::io::Write>(
         db_start.push_attribute(("gradient", if gradient { "1" } else { "0" }));
     }
     // Excel emits this even when it matches the default. Include it for compatibility.
-    db_start.push_attribute(("direction", "leftToRight"));
+    let direction = db.direction.unwrap_or(DataBarDirection::LeftToRight);
+    db_start.push_attribute(("direction", data_bar_direction_to_ooxml(direction)));
 
     writer.write_event(Event::Start(db_start))?;
 
     write_cfvo(writer, "x14:cfvo", &db.min)?;
     write_cfvo(writer, "x14:cfvo", &db.max)?;
 
-    // Defaults match Excel's typical output and are ignored by our parser if present.
+    // Defaults match Excel's typical output.
+    let negative_fill_color = db
+        .negative_fill_color
+        .unwrap_or(formula_model::Color::new_argb(0xFFFF0000));
+    let axis_color = db
+        .axis_color
+        .unwrap_or(formula_model::Color::new_argb(0xFF000000));
+    let negative_rgb = format!("{:08X}", negative_fill_color.argb().unwrap_or(0));
+    let axis_rgb = format!("{:08X}", axis_color.argb().unwrap_or(0));
+
     let mut neg = BytesStart::new("x14:negativeFillColor");
-    neg.push_attribute(("rgb", "FFFF0000"));
+    neg.push_attribute(("rgb", negative_rgb.as_str()));
     writer.write_event(Event::Empty(neg))?;
     let mut axis = BytesStart::new("x14:axisColor");
-    axis.push_attribute(("rgb", "FF000000"));
+    axis.push_attribute(("rgb", axis_rgb.as_str()));
     writer.write_event(Event::Empty(axis))?;
 
     writer.write_event(Event::End(BytesEnd::new("x14:dataBar")))?;
@@ -690,6 +700,14 @@ fn icon_set_to_ooxml(set: IconSet) -> &'static str {
     }
 }
 
+fn data_bar_direction_to_ooxml(direction: DataBarDirection) -> &'static str {
+    match direction {
+        DataBarDirection::LeftToRight => "leftToRight",
+        DataBarDirection::RightToLeft => "rightToLeft",
+        DataBarDirection::Context => "context",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,6 +758,52 @@ mod tests {
             }),
             dependencies: vec![],
         }
+    }
+
+    #[test]
+    fn x14_data_bar_writer_uses_model_direction_and_colors() {
+        let rule = CfRule {
+            schema: CfRuleSchema::X14,
+            id: Some("{11111111-2222-3333-4444-555555555555}".to_string()),
+            priority: 1,
+            applies_to: vec![parse_range_a1("A1:A1").unwrap()],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::DataBar(DataBarRule {
+                min: Cfvo {
+                    type_: CfvoType::AutoMin,
+                    value: None,
+                },
+                max: Cfvo {
+                    type_: CfvoType::AutoMax,
+                    value: None,
+                },
+                color: Some(Color::new_argb(0xFF638EC6)),
+                min_length: Some(0),
+                max_length: Some(100),
+                gradient: Some(false),
+                negative_fill_color: Some(Color::new_argb(0xFF00FF00)),
+                axis_color: Some(Color::new_argb(0xFF112233)),
+                direction: Some(DataBarDirection::RightToLeft),
+            }),
+            dependencies: vec![],
+        };
+
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let updated = update_worksheet_conditional_formatting_xml(xml, &[rule]).unwrap();
+
+        assert!(
+            updated.contains(r#"direction="rightToLeft""#),
+            "expected direction to roundtrip, got:\n{updated}"
+        );
+        assert!(
+            updated.contains(r#"negativeFillColor rgb="FF00FF00""#),
+            "expected negative fill color to roundtrip, got:\n{updated}"
+        );
+        assert!(
+            updated.contains(r#"axisColor rgb="FF112233""#),
+            "expected axis color to roundtrip, got:\n{updated}"
+        );
     }
 
     #[test]
