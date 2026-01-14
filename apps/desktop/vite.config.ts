@@ -234,6 +234,7 @@ export default defineConfig({
     ],
     include: [
       "src/**/*.vitest.ts",
+      "src/**/*.vitest.tsx",
       // Formula bar tests use the `.test.ts` suffix and rely on per-file `@vitest-environment`
       // directives (jsdom). Include them explicitly so:
       // - `pnpm -C apps/desktop test` runs formula-bar coverage

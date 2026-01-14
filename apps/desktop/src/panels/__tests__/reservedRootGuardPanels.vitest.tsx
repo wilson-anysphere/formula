@@ -1,18 +1,57 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
 import { CollabVersionHistoryPanel } from "../version-history/CollabVersionHistoryPanel.js";
 import { CollabBranchManagerPanel } from "../branch-manager/CollabBranchManagerPanel.js";
 import { subscribeToReservedRootGuardDisconnect } from "../collabReservedRootGuard.js";
 
+const createCollabVersioningForPanelMock = vi.fn(async () => ({
+  listVersions: vi.fn(async () => []),
+  createCheckpoint: vi.fn(async () => ({ id: "ckpt_1" })),
+  setCheckpointLocked: vi.fn(async () => {}),
+  deleteVersion: vi.fn(async () => {}),
+  restoreVersion: vi.fn(async () => {}),
+  destroy: vi.fn(),
+}));
+
+// The panels lazy-load versioning/branching dependencies that pull in Node-only modules.
+// These tests focus on the reserved-root-guard UX; mock the heavy dependencies so the
+// UI renders deterministically in jsdom.
+vi.mock("../version-history/createCollabVersioningForPanel.js", () => ({
+  createCollabVersioningForPanel: (...args: any[]) => createCollabVersioningForPanelMock(...args),
+}));
+
+vi.mock("../../../../../packages/versioning/branches/src/browser.js", () => {
+  class YjsBranchStoreMock {
+    constructor(_opts: any) {}
+  }
+  class BranchServiceMock {
+    constructor(_opts: any) {}
+    async init() {}
+    async listBranches() {
+      return [];
+    }
+    async getCurrentBranchName() {
+      return "main";
+    }
+  }
+
+  return {
+    YjsBranchStore: YjsBranchStoreMock,
+    BranchService: BranchServiceMock,
+    applyDocumentStateToYjsDoc: () => {},
+    yjsDocToDocumentState: () => ({}),
+  };
+});
+
 function flushPromises() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
-async function waitFor(condition: () => boolean, timeoutMs = 1_000) {
+async function waitFor(condition: () => boolean, timeoutMs = 5_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (condition()) return;
