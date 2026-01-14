@@ -183,6 +183,56 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     root.remove();
   });
 
+  it("does not merge unrelated edits into the image insertion undo step while bytes are loading", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+
+    let resolveBytes: ((buffer: ArrayBuffer) => void) | null = null;
+    const bytesPromise = new Promise<ArrayBuffer>((resolve) => {
+      resolveBytes = resolve;
+    });
+
+    const file = {
+      name: "slow.png",
+      type: "image/png",
+      size: bytes.byteLength,
+      arrayBuffer: vi.fn(async () => bytesPromise),
+    } as any as File;
+
+    const insertPromise = (app as any).insertImageFromPickedFile(file);
+
+    // While the image bytes are still loading, perform a normal cell edit.
+    doc.setCellInput(sheetId, { row: 0, col: 0 }, "hello", { label: "Edit Cell" });
+
+    resolveBytes!(bytes.buffer);
+    await insertPromise;
+
+    expect((doc as any).getSheetDrawings(sheetId)).toHaveLength(1);
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("hello");
+
+    // Undo should first remove the inserted drawing, leaving the cell edit intact.
+    doc.undo();
+    expect((doc as any).getSheetDrawings(sheetId)).toHaveLength(0);
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("hello");
+
+    // Undo again should revert the cell edit.
+    doc.undo();
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("shows a toast and skips oversized files when inserting an image from the local file picker", async () => {
     const root = createRoot();
     const status = {

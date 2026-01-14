@@ -9332,10 +9332,6 @@ export class SpreadsheetApp {
     const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     const canInsertDrawing = typeof docAny.insertDrawing === "function";
 
-    if (canInsertDrawing) {
-      this.document.beginBatch({ label: "Insert Image" });
-    }
-
     try {
       const { objects: combinedObjects, image } = await insertImageFromFile(file, {
         imageId,
@@ -9346,36 +9342,53 @@ export class SpreadsheetApp {
 
       const inserted = combinedObjects[combinedObjects.length - 1];
       if (!inserted) {
-        if (canInsertDrawing) this.document.endBatch();
         return;
       }
 
       // Prefer placing the new object on top of existing drawings.
-      inserted.zOrder = maxZOrder + 1;
+      //
+      // IMPORTANT: determine zOrder from the DocumentController at commit time so
+      // we don't race remote inserts while async file decoding is in progress.
+      const nextZOrder = (() => {
+        if (typeof docAny.getSheetDrawings !== "function") return maxZOrder + 1;
+        try {
+          const raw = docAny.getSheetDrawings(this.sheetId);
+          const list = Array.isArray(raw) ? raw : [];
+          let max = -1;
+          for (const entry of list) {
+            const z = Number((entry as any)?.zOrder ?? (entry as any)?.z_order);
+            if (Number.isFinite(z) && z > max) max = z;
+          }
+          return max + 1;
+        } catch {
+          return maxZOrder + 1;
+        }
+      })();
+      inserted.zOrder = nextZOrder;
 
+      let persistedToDocument = false;
       if (canInsertDrawing) {
         try {
           // Persist the drawing id as a string for compatibility with existing document-schema
           // expectations (some integrations treat drawing ids as JSON-friendly string keys).
           // The overlay adapters normalize ids back to numbers for rendering/interaction.
-          docAny.insertDrawing(this.sheetId, { ...inserted, id: String(inserted.id) });
-        } catch {
+          docAny.insertDrawing(this.sheetId, { ...inserted, id: String(inserted.id) }, { label: "Insert Image" });
+          persistedToDocument = true;
+        } catch (err) {
           // Best-effort: if inserting into the document fails, fall back to the in-memory cache below.
-          try {
-            this.document.cancelBatch();
-          } catch {
-            // ignore
-          }
+          console.warn("Insert image: failed to persist drawing into document", err);
         }
       }
 
-      if (canInsertDrawing) {
-        this.document.endBatch();
+      if (persistedToDocument) {
+        // Ensure subsequent reads re-derive drawing state from the DocumentController snapshot.
+        // (This avoids caching a stale pre-insert list if drawings changed while decoding the file.)
+        this.drawingObjectsCache = null;
+      } else {
+        // Update the cache immediately so the first re-render includes the inserted object even
+        // if the DocumentController does not publish drawing changes synchronously.
+        this.drawingObjectsCache = { sheetId: this.sheetId, objects: combinedObjects, source: drawingsGetter };
       }
-
-      // Update the cache immediately so the first re-render includes the inserted object even
-      // if the DocumentController does not publish drawing changes synchronously.
-      this.drawingObjectsCache = { sheetId: this.sheetId, objects: combinedObjects, source: drawingsGetter };
 
       // Preload the bitmap so the first overlay render can reuse the decode promise.
       void this.drawingOverlay.preloadImage(image).catch(() => {
@@ -9416,13 +9429,6 @@ export class SpreadsheetApp {
       this.emitDrawingsChanged();
       this.focus();
     } catch (err) {
-      if (canInsertDrawing) {
-        try {
-          this.document.cancelBatch();
-        } catch {
-          // ignore
-        }
-      }
       throw err;
     }
   }
