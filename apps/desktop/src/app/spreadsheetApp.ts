@@ -13578,6 +13578,11 @@ export class SpreadsheetApp {
         this.selectedDrawingIndex = null;
         this.dispatchDrawingSelectionChanged();
         this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+        // In legacy grid mode, drawing selection handles are rendered on the selection canvas. Clearing
+        // selection without repainting can leave stale handle chrome until the next cell-selection redraw.
+        if (!this.sharedGrid && this.drawingInteractionController == null) {
+          this.renderSelection();
+        }
       }
       return;
     }
@@ -13657,6 +13662,11 @@ export class SpreadsheetApp {
           this.selectedDrawingIndex = null;
           this.dispatchDrawingSelectionChanged();
           this.renderDrawings(sharedViewport);
+          // In legacy grid mode, drawing selection handles are rendered on the selection canvas. Clear them
+          // immediately when deselecting via a pointer click (even if the active cell selection does not change).
+          if (!this.sharedGrid && this.drawingInteractionController == null) {
+            this.renderSelection();
+          }
         }
       }
       return;

@@ -183,6 +183,61 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
     root.remove();
   });
 
+  it("repaints the legacy selection canvas when deselecting a drawing via capture hit testing", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+    const app = new SpreadsheetApp(root, status);
+
+    const objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "rect" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(50), cy: pxToEmu(50) },
+        },
+        zOrder: 0,
+      },
+    ];
+    app.setDrawingObjects(objects);
+    app.selectDrawingById(1);
+    expect(app.getSelectedDrawingId()).toBe(1);
+
+    const renderSelectionSpy = vi.spyOn(app as any, "renderSelection");
+    renderSelectionSpy.mockClear();
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+    // Call the capture handler directly with a grid-surface target so we can deterministically
+    // assert that deselection repaints the legacy selection canvas (clearing stale handle chrome),
+    // even if the active cell selection does not change.
+    (app as any).onDrawingPointerDownCapture({
+      pointerType: "mouse",
+      button: 0,
+      ctrlKey: false,
+      metaKey: false,
+      cancelBubble: false,
+      target: selectionCanvas,
+      clientX: rowHeaderWidth + 300,
+      clientY: colHeaderHeight + 300,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    });
+
+    expect(app.getSelectedDrawingId()).toBe(null);
+    expect(renderSelectionSpy).toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("commits an in-cell edit and selects the drawing when pointerdown hits a drawing (drawing interactions enabled)", () => {
     const root = createRoot();
     const status = {
