@@ -49,11 +49,6 @@ impl PivotFieldRef {
         }
     }
 
-    /// Backward-compatible alias for [`Self::as_cache_field_name`].
-    pub fn cache_field_name(&self) -> Option<&str> {
-        self.as_cache_field_name()
-    }
-
     /// Best-effort, human-friendly string representation of this ref.
     ///
     /// This is intended for diagnostics and UI; it is not a stable serialization format.
@@ -276,7 +271,6 @@ fn parse_dax_quoted_identifier(raw: &str) -> Option<String> {
 
     None
 }
-
 /// An Excel-style PivotTable *calculated field*.
 ///
 /// In Excel, a calculated field is a named formula that behaves like an extra source column:

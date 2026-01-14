@@ -14058,38 +14058,6 @@ fn walk_calc_expr(
         Expr::FunctionCall { name, args, .. } => {
             if let Some(spec) = crate::functions::lookup_function(name) {
                 match spec.name {
-                    "CELL" => {
-                        // `CELL(info_type, [reference])` is volatile. Some `info_type` variants
-                        // (e.g. `width`) depend on column/style metadata rather than the referenced
-                        // cell's *value*, so the reference argument should not participate in the
-                        // calculation dependency graph.
-                        //
-                        // This avoids spurious cycles like `=CELL("width", A1)` in `A1` which
-                        // should evaluate successfully (and matches Excel behavior).
-                        let skip_ref_arg = args.len() >= 2
-                            && matches!(&args[0], Expr::Text(t) if matches!(
-                                t.trim().to_ascii_lowercase().as_str(),
-                                "width" | "format" | "color" | "parentheses" | "protect" | "prefix"
-                            ));
-                        if skip_ref_arg {
-                            for (idx, a) in args.iter().enumerate() {
-                                if idx == 1 {
-                                    continue;
-                                }
-                                walk_calc_expr(
-                                    a,
-                                    current_cell,
-                                    tables_by_sheet,
-                                    workbook,
-                                    spills,
-                                    precedents,
-                                    visiting_names,
-                                    lexical_scopes,
-                                );
-                            }
-                            return;
-                        }
-                    }
                     "LET" => {
                         if args.len() < 3 || args.len() % 2 == 0 {
                             return;
