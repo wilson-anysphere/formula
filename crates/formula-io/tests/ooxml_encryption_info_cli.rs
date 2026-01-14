@@ -481,6 +481,7 @@ fn cli_prints_unknown_version() {
 #[test]
 fn cli_reports_expected_versions_for_repo_fixtures() {
     let agile = fixture_path("agile.xlsx");
+    let basic_password_xlsm = fixture_path("basic-password.xlsm");
     let standard = fixture_path("standard.xlsx");
 
     let out = Command::new(ooxml_encryption_info_bin())
@@ -502,6 +503,28 @@ fn cli_reports_expected_versions_for_repo_fixtures() {
         assert!(
             stdout.contains("xml_root=encryption"),
             "unexpected xml root tag for agile fixture: {stdout}"
+        );
+    }
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&basic_password_xlsm)
+        .output()
+        .expect("run cli on basic-password.xlsm fixture");
+    assert!(
+        out.status.success(),
+        "expected success exit status for basic-password.xlsm fixture, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = stdout.trim_end();
+    assert!(
+        stdout.starts_with("Agile (4.4) flags=0x00000040"),
+        "unexpected stdout for basic-password.xlsm fixture: {stdout}"
+    );
+    if stdout.contains("xml_root=") {
+        assert!(
+            stdout.contains("xml_root=encryption"),
+            "unexpected xml root tag for basic-password.xlsm fixture: {stdout}"
         );
     }
 
