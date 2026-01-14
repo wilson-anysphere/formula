@@ -211,6 +211,12 @@ jobs:
       - name: Build desktop binary (release, desktop feature)
         id: build_desktop_binary
         if: steps.desktop_bench.outputs.run == 'true'
+        env:
+          # `scripts/cargo_agent.sh` defaults `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` based on its job count
+          # for stability on multi-agent hosts. Override so the perf run matches the repo's Cargo.toml
+          # release profile (codegen-units = 1), keeping both runtime perf and binary-size reporting
+          # aligned with shipped release artifacts.
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         run: |
           bash scripts/cargo_agent.sh build \
             -p formula-desktop-tauri \

@@ -152,6 +152,12 @@ jobs:
 
       - name: Build desktop binary (release, desktop feature)
         shell: bash
+        env:
+          # `scripts/cargo_agent.sh` defaults `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` based on its job count
+          # for stability on multi-agent hosts. Override so this benchmark builds a binary matching the
+          # repo's Cargo.toml release profile (codegen-units = 1), aligning perf data with shipped
+          # release artifacts.
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         run: |
           set -euo pipefail
           # The desktop shell crate was historically named `formula-desktop-tauri`;
