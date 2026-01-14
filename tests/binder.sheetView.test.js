@@ -399,6 +399,85 @@ test("binder: collab undo/redo reverts local sheet view changes when sheet.view 
   }
 });
 
+test("binder: collab undo/redo reverts local col width changes when sheet.view.colWidths is a foreign Y.Map (CJS applyUpdate)", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  remote.transact(() => {
+    const sheets = remote.getArray("sheets");
+    const sheet = new Ycjs.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const view = new Ycjs.Map();
+    view.set("frozenRows", 0);
+    view.set("frozenCols", 0);
+
+    const colWidths = new Ycjs.Map();
+    colWidths.set("0", 111);
+    view.set("colWidths", colWidths);
+    sheet.set("view", view);
+
+    sheets.push([sheet]);
+  });
+
+  const ydoc = new Y.Doc();
+  // Ensure the root exists in the ESM Yjs instance so the update only introduces
+  // foreign nested sheet/view maps (not a foreign `sheets` root).
+  ydoc.getArray("sheets");
+  Ycjs.applyUpdate(ydoc, Ycjs.encodeStateAsUpdate(remote));
+
+  const sheets = ydoc.getArray("sheets");
+  const undo = createUndoService({ mode: "collab", doc: ydoc, scope: sheets });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    undoService: undo,
+    defaultSheetId: "Sheet1",
+  });
+
+  try {
+    await waitForCondition(() => documentController.getSheetView("Sheet1").colWidths?.["0"] === 111);
+
+    const entry = findSheetEntry(ydoc, "Sheet1");
+    assert.ok(entry, "expected Sheet1 entry");
+    const rawView = entry.get("view");
+    assert.ok(rawView && typeof rawView === "object");
+    assert.equal(rawView instanceof Y.Map, false, "expected sheet.view to be a foreign (non-ESM) Y.Map");
+    const rawColWidths = rawView?.get?.("colWidths");
+    assert.ok(rawColWidths && typeof rawColWidths === "object");
+    assert.equal(rawColWidths instanceof Y.Map, false, "expected view.colWidths to be a foreign (non-ESM) Y.Map");
+
+    // Local edit (overwrite col 0).
+    documentController.setColWidth("Sheet1", 0, 222);
+
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.colWidths?.["0"] === 222;
+    });
+
+    // Ensure the binder wrote the edit into Yjs.
+    await waitForCondition(() => {
+      const entry = findSheetEntry(ydoc, "Sheet1");
+      const view = entry?.get?.("view");
+      const colWidths = view?.get?.("colWidths");
+      const width = Number(colWidths?.get?.("0"));
+      return width === 222;
+    });
+
+    undo.undo();
+
+    await waitForCondition(() => documentController.getSheetView("Sheet1").colWidths?.["0"] === 111);
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0, colWidths: { "0": 111 } });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+    remote.destroy();
+  }
+});
+
 test("binder: applies view state when sheet id is set after view", async () => {
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");
