@@ -173,7 +173,7 @@ pub enum Error {
         #[source]
         source: zip::result::ZipError,
     },
-    #[error("failed to open `.xlsx` workbook `{path}`: {source}")]
+    #[error("failed to open `.xlsx`/`.xlsm` workbook `{path}`: {source}")]
     OpenXlsx {
         path: PathBuf,
         #[source]
