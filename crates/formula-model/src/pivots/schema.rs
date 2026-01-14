@@ -102,6 +102,7 @@ impl fmt::Display for PivotFieldRef {
         }
     }
 }
+
 impl From<String> for PivotFieldRef {
     fn from(value: String) -> Self {
         PivotFieldRef::CacheFieldName(value)

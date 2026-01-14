@@ -543,7 +543,7 @@ pub fn pivot_table_to_engine_config_with_styles(
         .filter_map(|page_field| {
             let field_idx = page_field.fld as usize;
             let cache_field = cache_def.cache_fields.get(field_idx)?;
-            let source_field = PivotFieldRef::CacheFieldName(cache_field.name.clone());
+            let source_field: PivotFieldRef = cache_field.name.clone().into();
 
             // `pageField@item` is typically a shared-item index for the field, with `-1` meaning
             // "(All)". We currently model report filters as a single-selection allowed-set.

@@ -45,7 +45,7 @@ pub fn pivot_table_to_model_value_fields(
                 .num_fmt_id
                 .and_then(|id| resolve_pivot_num_fmt_id(id, styles));
 
-            let source_field = PivotFieldRef::CacheFieldName(source_field_name);
+            let source_field: PivotFieldRef = source_field_name.into();
             Some(ValueField {
                 source_field: source_field.into(),
                 name,
