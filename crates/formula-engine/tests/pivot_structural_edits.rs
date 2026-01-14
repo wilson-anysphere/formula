@@ -1,7 +1,7 @@
 use formula_engine::{EditOp, Engine, Value};
 use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotSource,
-    PivotTableDefinition, SubtotalPosition, ValueField,
+    PivotFieldRef, PivotTableDefinition, SubtotalPosition, ValueField,
 };
 use formula_model::{CellRef, Range};
 use pretty_assertions::assert_eq;
@@ -29,14 +29,10 @@ fn seed_sales_data(engine: &mut Engine) {
 
 fn sum_sales_by_region_config() -> PivotConfig {
     PivotConfig {
-        row_fields: vec![PivotField {
-            source_field: "Region".to_string(),
-            sort_order: Default::default(),
-            manual_sort: None,
-        }],
+        row_fields: vec![PivotField::new("Region")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: "Sales".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,

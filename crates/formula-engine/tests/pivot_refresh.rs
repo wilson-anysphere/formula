@@ -2,7 +2,7 @@ use pretty_assertions::assert_eq;
 
 use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotValue, SubtotalPosition,
-    ValueField,
+    PivotFieldRef, ValueField,
 };
 use formula_model::Style;
 use formula_engine::Engine;
@@ -40,7 +40,7 @@ fn engine_can_calculate_pivot_from_live_range_values() {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: "Sales".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,
@@ -120,7 +120,7 @@ fn engine_pivot_infers_dates_from_cell_number_formats() {
         row_fields: vec![PivotField::new("Date")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: "Amount".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
             name: "Sum of Amount".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,

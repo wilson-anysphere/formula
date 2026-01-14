@@ -1220,7 +1220,7 @@ fn getpivotdata_returns_values_from_tabular_pivot_output() {
 fn getpivotdata_returns_values_from_compact_pivot_output() {
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotCache, PivotConfig, PivotEngine, PivotField,
-        PivotValue, SubtotalPosition, ValueField,
+        PivotFieldRef, PivotValue, SubtotalPosition, ValueField,
     };
 
     fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
@@ -1250,7 +1250,7 @@ fn getpivotdata_returns_values_from_compact_pivot_output() {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: "Sales".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,
@@ -1527,7 +1527,7 @@ fn getpivotdata_supports_column_fields_and_multiple_value_fields() {
 fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
-        SubtotalPosition, ValueField,
+        PivotFieldRef, SubtotalPosition, ValueField,
     };
     use formula_model::{CellRef, Range};
 
@@ -1553,7 +1553,7 @@ fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
         column_fields: vec![PivotField::new("Product")],
         value_fields: vec![
             ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -1562,7 +1562,7 @@ fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
                 base_item: None,
             },
             ValueField {
-                source_field: "Units".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Units".to_string()),
                 name: "Sum of Units".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,

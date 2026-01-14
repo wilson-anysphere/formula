@@ -3377,7 +3377,7 @@ mod tests {
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("Region")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3425,7 +3425,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3475,7 +3475,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3520,7 +3520,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3571,7 +3571,7 @@ mod tests {
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("Region")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3580,7 +3580,7 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![FilterField {
-                source_field: "Region".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
                 allowed: Some(allowed),
             }],
             column_fields: vec![],
@@ -3622,7 +3622,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3678,7 +3678,7 @@ mod tests {
             }],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Value".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Value".to_string()),
                 name: "Sum of Value".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3724,7 +3724,7 @@ mod tests {
             row_fields: vec![PivotField::new("Num")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3774,7 +3774,7 @@ mod tests {
                 ..PivotField::new("Product")
             }],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3832,7 +3832,7 @@ mod tests {
             }],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3883,7 +3883,7 @@ mod tests {
             }],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3937,7 +3937,7 @@ mod tests {
             }],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -3986,7 +3986,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4036,7 +4036,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4087,7 +4087,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4148,7 +4148,7 @@ mod tests {
             ],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4235,7 +4235,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4281,7 +4281,7 @@ mod tests {
             row_fields: vec![PivotField::new("Num")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4325,7 +4325,7 @@ mod tests {
             row_fields: vec![PivotField::new("Key")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4370,7 +4370,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4421,7 +4421,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4470,12 +4470,12 @@ mod tests {
             row_fields: vec![PivotField::new("Year")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::PercentOf),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: Some("2019".to_string()),
             }],
             filter_fields: vec![],
@@ -4513,12 +4513,12 @@ mod tests {
             row_fields: vec![PivotField::new("Year")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::PercentDifferenceFrom),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: Some("2019".to_string()),
             }],
             filter_fields: vec![],
@@ -4558,12 +4558,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Year")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::PercentOf),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: Some("2019".to_string()),
             }],
             filter_fields: vec![],
@@ -4607,12 +4607,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Year")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::PercentDifferenceFrom),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: Some("2019".to_string()),
             }],
             filter_fields: vec![],
@@ -4657,12 +4657,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::PercentOf),
-                base_field: Some("Region".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Region".to_string())),
                 base_item: Some("East".to_string()),
             }],
             filter_fields: vec![],
@@ -4719,12 +4719,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
             column_fields: vec![PivotField::new("Year")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::PercentOf),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: Some("2019".to_string()),
             }],
             filter_fields: vec![],
@@ -4792,7 +4792,7 @@ mod tests {
             row_fields: vec![PivotField::new("Item")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4838,12 +4838,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region"), PivotField::new("Year")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::RunningTotal),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: None,
             }],
             filter_fields: vec![],
@@ -4884,12 +4884,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Year")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::RunningTotal),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: None,
             }],
             filter_fields: vec![],
@@ -4932,7 +4932,7 @@ mod tests {
             row_fields: vec![PivotField::new("Item")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -4978,12 +4978,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region"), PivotField::new("Year")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::RankDescending),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: None,
             }],
             filter_fields: vec![],
@@ -5024,12 +5024,12 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Year")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
                 show_as: Some(ShowAsType::RankDescending),
-                base_field: Some("Year".to_string()),
+                base_field: Some(PivotFieldRef::CacheFieldName("Year".to_string())),
                 base_item: None,
             }],
             filter_fields: vec![],
@@ -5072,7 +5072,7 @@ mod tests {
             row_fields: vec![PivotField::new("Item")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -5134,7 +5134,7 @@ mod tests {
             row_fields: vec![PivotField::new("Key")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Amount".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -5231,7 +5231,7 @@ mod tests {
             column_fields: vec![],
             value_fields: vec![
                 ValueField {
-                    source_field: "Sales".to_string(),
+                    source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                     name: "Sum of Sales".to_string(),
                     aggregation: AggregationType::Sum,
                     number_format: None,
@@ -5240,7 +5240,7 @@ mod tests {
                     base_item: None,
                 },
                 ValueField {
-                    source_field: "Sales (2)".to_string(),
+                    source_field: PivotFieldRef::CacheFieldName("Sales (2)".to_string()),
                     name: "Sum of Sales 2".to_string(),
                     aggregation: AggregationType::Sum,
                     number_format: None,
@@ -5328,7 +5328,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -5407,7 +5407,7 @@ mod tests {
             row_fields: vec![PivotField::new("Cat")],
             column_fields: vec![],
             value_fields: vec![ValueField {
-                source_field: "Amount".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
