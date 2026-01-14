@@ -891,7 +891,8 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
   if (isRecord(contentCandidate)) return null;
   const type = normalizeEnumTag(readOptionalString(pick(kindJson, ["type"])) ?? "");
   const rawXml = readOptionalString(pick(kindJson, ["rawXml", "raw_xml"]));
-  const label = readOptionalString(pick(kindJson, ["label"]));
+  const labelRaw = readOptionalString(pick(kindJson, ["label"]));
+  const label = labelRaw && labelRaw.trim() !== "" ? labelRaw : undefined;
 
   switch (type) {
     case "image": {
@@ -899,8 +900,10 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
       if (!imageId) return null;
       return { type: "image", imageId };
     }
-    case "shape":
-      return { type: "shape", ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+    case "shape": {
+      const derived = label ?? extractDrawingObjectName(rawXml) ?? undefined;
+      return { type: "shape", ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
+    }
     case "chart": {
       const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
       // Mirror `convertModelDrawingObjectKind` behavior: some graphicFrames are not charts
@@ -911,17 +914,22 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
         return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
       }
 
-      return { type: "chart", chartId, ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+      const derived = label ?? extractDrawingObjectName(rawXml) ?? undefined;
+      return { type: "chart", chartId, ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
     }
     case "unknown":
-      return { type: "unknown", ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+      {
+        const derived = label ?? extractDrawingObjectName(rawXml) ?? undefined;
+        return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
+      }
     case "chartplaceholder": {
       const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
       if (!chartId || chartId.trim() === "" || chartId === "unknown") {
         const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
         return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
       }
-      return { type: "chart", chartId, ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+      const derived = label ?? extractDrawingObjectName(rawXml) ?? undefined;
+      return { type: "chart", chartId, ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
     }
     default:
       return null;
