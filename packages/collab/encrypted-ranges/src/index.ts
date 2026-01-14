@@ -693,6 +693,8 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
 
   function resolveSheetName(sheetId: string): string | null {
     try {
+      const needleCi = String(sheetId ?? "").trim().toLowerCase();
+      if (!needleCi) return null;
       const sheets = sheetsRoot as any;
       const length = typeof sheets?.length === "number" ? sheets.length : 0;
       for (let i = 0; i < length; i += 1) {
@@ -701,7 +703,7 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
         const obj = map ? null : entry && typeof entry === "object" ? (entry as any) : null;
         const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
         const entryId = coerceString(get("id"))?.trim() ?? "";
-        if (!entryId || entryId !== sheetId) continue;
+        if (!entryId || entryId.toLowerCase() !== needleCi) continue;
         const name = coerceString(get("name"))?.trim() ?? "";
         return name || null;
       }
