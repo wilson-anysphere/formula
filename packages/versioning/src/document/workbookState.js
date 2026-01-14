@@ -236,7 +236,7 @@ function normalizeColFormatRuns(raw) {
  * Note: do not add large fields here (e.g. colWidths/rowHeights) — this is used
  * for version history summaries and should remain small.
  *
- * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewMeta
+ * @typedef {{ frozenRows: number, frozenCols: number, backgroundImageId?: string }} SheetViewMeta
  *
  * @typedef {{
  *   id: string,
@@ -332,16 +332,32 @@ function normalizeTabColor(raw) {
 function sheetViewMetaFromSheetSnapshot(sheet) {
   const view = sheet?.view;
   if (view && typeof view === "object") {
+    const backgroundImageIdRaw = view.backgroundImageId ?? view.background_image_id ?? sheet?.backgroundImageId ?? sheet?.background_image_id;
+    const backgroundImageId = (() => {
+      if (backgroundImageIdRaw == null) return null;
+      if (typeof backgroundImageIdRaw !== "string") return null;
+      const trimmed = backgroundImageIdRaw.trim();
+      return trimmed ? trimmed : null;
+    })();
     return {
       frozenRows: normalizeFrozenCount(view.frozenRows),
       frozenCols: normalizeFrozenCount(view.frozenCols),
+      ...(backgroundImageId ? { backgroundImageId } : {}),
     };
   }
 
   // Canonical DocumentController snapshot shape stores view state at top-level.
+  const backgroundImageIdRaw = sheet?.backgroundImageId ?? sheet?.background_image_id;
+  const backgroundImageId = (() => {
+    if (backgroundImageIdRaw == null) return null;
+    if (typeof backgroundImageIdRaw !== "string") return null;
+    const trimmed = backgroundImageIdRaw.trim();
+    return trimmed ? trimmed : null;
+  })();
   return {
     frozenRows: normalizeFrozenCount(sheet?.frozenRows),
     frozenCols: normalizeFrozenCount(sheet?.frozenCols),
+    ...(backgroundImageId ? { backgroundImageId } : {}),
   };
 }
 

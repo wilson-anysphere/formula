@@ -165,6 +165,30 @@ test("diffYjsWorkbookSnapshots reports sheet metadata changes (visibility/tabCol
   ]);
 });
 
+test("diffYjsWorkbookSnapshots reports sheet view backgroundImageId changes", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  sheet1.set("view", { frozenRows: 0, frozenCols: 0, backgroundImageId: "bg1.png" });
+  sheets.push([sheet1]);
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    sheet1.set("view", { frozenRows: 0, frozenCols: 0, backgroundImageId: "bg2.png" });
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.metaChanged, [
+    { id: "sheet1", field: "view.backgroundImageId", before: "bg1.png", after: "bg2.png" },
+  ]);
+});
+
 test("diffYjsWorkbookSnapshots reads frozen panes from legacy top-level sheet keys", () => {
   const doc = new Y.Doc();
   const sheets = doc.getArray("sheets");

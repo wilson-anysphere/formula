@@ -4,7 +4,7 @@ import { workbookStateFromYjsSnapshot } from "./workbookState.js";
 
 /**
  * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
- * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewMeta
+ * @typedef {{ frozenRows: number, frozenCols: number, backgroundImageId?: string }} SheetViewMeta
  * @typedef {{ id: string, name: string | null, visibility: SheetVisibility, tabColor: string | null, view: SheetViewMeta }} SheetMeta
  * @typedef {{
  *   id: string,
@@ -270,6 +270,17 @@ export function diffYjsWorkbookSnapshots(opts) {
     const afterFrozenCols = afterView?.frozenCols ?? null;
     if (beforeFrozenCols !== afterFrozenCols) {
       sheets.metaChanged.push({ id, field: "view.frozenCols", before: beforeFrozenCols, after: afterFrozenCols });
+    }
+
+    const beforeBackgroundImageId = beforeView?.backgroundImageId ?? null;
+    const afterBackgroundImageId = afterView?.backgroundImageId ?? null;
+    if (beforeBackgroundImageId !== afterBackgroundImageId) {
+      sheets.metaChanged.push({
+        id,
+        field: "view.backgroundImageId",
+        before: beforeBackgroundImageId,
+        after: afterBackgroundImageId,
+      });
     }
   }
 

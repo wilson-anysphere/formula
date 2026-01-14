@@ -18,7 +18,7 @@ import { getArrayRoot, getMapRoot, getYArray, getYMap, getYText, yjsValueToJson 
  * Note: do not add large fields here (e.g. colWidths/rowHeights) — this is used
  * for version history summaries and should remain small.
  *
- * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewMeta
+ * @typedef {{ frozenRows: number, frozenCols: number, backgroundImageId?: string }} SheetViewMeta
  *
  * @typedef {{
  *   id: string,
@@ -128,16 +128,34 @@ function sheetViewMetaFromSheetEntry(entry) {
   if (rawView !== undefined) {
     // Avoid converting the entire view object to JSON (it can contain large maps
     // like `colWidths`/`rowHeights`). We only need frozen pane counts here.
+    const backgroundImageIdRaw =
+      readYMapOrObject(rawView, "backgroundImageId") ?? readYMapOrObject(rawView, "background_image_id");
+    const backgroundImageId = (() => {
+      const id = coerceString(backgroundImageIdRaw);
+      if (typeof id !== "string") return null;
+      const trimmed = id.trim();
+      return trimmed ? trimmed : null;
+    })();
     return {
       frozenRows: normalizeFrozenCount(readYMapOrObject(rawView, "frozenRows")),
       frozenCols: normalizeFrozenCount(readYMapOrObject(rawView, "frozenCols")),
+      ...(backgroundImageId ? { backgroundImageId } : {}),
     };
   }
 
   // Legacy/experimental: stored as top-level keys.
+  const backgroundImageIdRaw =
+    readYMapOrObject(entry, "backgroundImageId") ?? readYMapOrObject(entry, "background_image_id");
+  const backgroundImageId = (() => {
+    const id = coerceString(backgroundImageIdRaw);
+    if (typeof id !== "string") return null;
+    const trimmed = id.trim();
+    return trimmed ? trimmed : null;
+  })();
   return {
     frozenRows: normalizeFrozenCount(readYMapOrObject(entry, "frozenRows")),
     frozenCols: normalizeFrozenCount(readYMapOrObject(entry, "frozenCols")),
+    ...(backgroundImageId ? { backgroundImageId } : {}),
   };
 }
 

@@ -145,6 +145,37 @@ test("diffDocumentWorkbookSnapshots reports sheet metadata changes (visibility/t
   ]);
 });
 
+test("diffDocumentWorkbookSnapshots reports sheet view backgroundImageId changes", () => {
+  const beforeSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        backgroundImageId: "bg1.png",
+        cells: [],
+      },
+    ],
+  });
+
+  const afterSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        backgroundImageId: "bg2.png",
+        cells: [],
+      },
+    ],
+  });
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.metaChanged, [
+    { id: "sheet1", field: "view.backgroundImageId", before: "bg1.png", after: "bg2.png" },
+  ]);
+});
+
 test("diffDocumentWorkbookSnapshots reads frozen panes from nested sheet.view", () => {
   const beforeSnapshot = encodeSnapshot({
     schemaVersion: 1,
