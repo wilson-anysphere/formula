@@ -74,6 +74,7 @@
     but below the local selection/outline chrome. We match the selection layer's
     z-index and rely on DOM insertion order so selection stays on top.
   */
+  pointer-events: none;
   z-index: 4;
   z-index: var(--grid-z-selection-overlay, 4);
 }
@@ -89,6 +90,7 @@
 }
 
 .grid-canvas--drawings {
+  pointer-events: none;
   z-index: 3;
   z-index: var(--grid-z-drawings-overlay, 3);
 }

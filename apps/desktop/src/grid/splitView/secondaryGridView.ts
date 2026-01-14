@@ -184,7 +184,6 @@ export class SecondaryGridView {
     drawingsCanvas.className = "grid-canvas grid-canvas--drawings";
     drawingsCanvas.setAttribute("aria-hidden", "true");
     drawingsCanvas.classList.add("grid-canvas--shared-drawings");
-    drawingsCanvas.style.pointerEvents = "none";
 
     const selectionCanvas = document.createElement("canvas");
     selectionCanvas.className = "grid-canvas grid-canvas--selection";
