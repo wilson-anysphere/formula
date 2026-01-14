@@ -274,7 +274,7 @@ pub enum WorkbookEncryption {
     /// Workbook does not appear to be encrypted / password-protected.
     None,
     /// Office-encrypted OOXML package stored in an OLE compound file via the `EncryptionInfo` +
-    /// `EncryptedPackage` streams (e.g. a password-protected `.xlsx`).
+    /// `EncryptedPackage` streams (e.g. a password-protected `.xlsx`/`.xlsm`/`.xlsb`).
     OoxmlEncryptedPackage {
         /// Best-effort scheme classification derived from the `EncryptionInfo` header (when
         /// available).
@@ -620,7 +620,7 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
 
     if header.len() >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
         // OLE compound files can either be legacy `.xls` BIFF workbooks, or Office-encrypted
-        // OOXML packages (e.g. password-protected `.xlsx`) that wrap the real workbook in an
+        // OOXML packages (e.g. password-protected `.xlsx`/`.xlsm`/`.xlsb`) that wrap the real workbook in an
         // `EncryptedPackage` stream.
         //
         // We don't support decryption here; detect and return a user-friendly error so callers
@@ -956,7 +956,7 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
 
     if n >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
         // OLE compound files can either be legacy `.xls` BIFF workbooks, or Office-encrypted
-        // OOXML packages (e.g. password-protected `.xlsx`) that wrap the real workbook in an
+        // OOXML packages (e.g. password-protected `.xlsx`/`.xlsm`/`.xlsb`) that wrap the real workbook in an
         // `EncryptedPackage` stream.
         //
         // We don't support decryption here; detect and return a user-friendly error.
@@ -2771,8 +2771,8 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
 /// Returns an OOXML-encryption related error when the given OLE compound file is an encrypted
 /// OOXML container (`EncryptionInfo` + `EncryptedPackage` streams).
 ///
-/// This is used to provide user-friendly error reporting for password-protected `.xlsx` files
-/// (which are *not* ZIP archives; they are OLE containers that wrap an encrypted ZIP package).
+/// This is used to provide user-friendly error reporting for password-protected `.xlsx`/`.xlsm`/`.xlsb`
+/// files (which are *not* ZIP archives; they are OLE containers that wrap an encrypted ZIP package).
 fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     path: &Path,
