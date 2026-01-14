@@ -856,7 +856,7 @@ For update-driven restarts prefer `restart_app` (graceful).
 - **Tray integration**
   - `set_tray_status` (update tray icon + tooltip for simple statuses: `idle`, `syncing`, `error`)
 - **Startup metrics**
-  - `report_startup_webview_loaded`, `report_startup_tti`
+  - `report_startup_webview_loaded`, `report_startup_first_render`, `report_startup_tti`
 - **Notifications**
   - `show_system_notification` (best-effort native notification via `tauri-plugin-notification`; used as a fallback by `apps/desktop/src/tauri/notifications.ts`, and restricted to the main window)
 - **External URLs**
