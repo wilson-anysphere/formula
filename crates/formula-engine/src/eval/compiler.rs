@@ -1,7 +1,7 @@
 use crate::eval::address::CellAddr;
 use crate::eval::ast::{
-    BinaryOp, CellRef, CompareOp, CompiledExpr, Expr, NameRef, PostfixOp, RangeRef, SheetReference,
-    UnaryOp,
+    BinaryOp, CellRef, CompareOp, CompiledExpr, Expr, NameRef, PostfixOp, RangeRef, Ref,
+    SheetReference, UnaryOp,
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
@@ -65,9 +65,12 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
+            let Some(addr) = Ref::from_abs_cell_addr(CellAddr { row, col }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
             Expr::CellRef(CellRef {
                 sheet,
-                addr: CellAddr { row, col },
+                addr,
             })
         }
         crate::Expr::ColRef(r) => {
@@ -75,13 +78,19 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             let Some(col) = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL) else {
                 return Expr::Error(ErrorKind::Ref);
             };
+            let Some(start) = Ref::from_abs_cell_addr(CellAddr { row: 0, col }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            let Some(end) = Ref::from_abs_cell_addr(CellAddr {
+                row: CellAddr::SHEET_END,
+                col,
+            }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
             Expr::RangeRef(RangeRef {
                 sheet,
-                start: CellAddr { row: 0, col },
-                end: CellAddr {
-                    row: CellAddr::SHEET_END,
-                    col,
-                },
+                start,
+                end,
             })
         }
         crate::Expr::RowRef(r) => {
@@ -89,13 +98,19 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
+            let Some(start) = Ref::from_abs_cell_addr(CellAddr { row, col: 0 }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            let Some(end) = Ref::from_abs_cell_addr(CellAddr {
+                row,
+                col: CellAddr::SHEET_END,
+            }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
             Expr::RangeRef(RangeRef {
                 sheet,
-                start: CellAddr { row, col: 0 },
-                end: CellAddr {
-                    row,
-                    col: CellAddr::SHEET_END,
-                },
+                start,
+                end,
             })
         }
         crate::Expr::StructuredRef(r) => lower_structured_ref(r),
@@ -323,7 +338,11 @@ fn try_lower_static_range_ref(
     if left_op.workbook == right_op.workbook && left_op.sheet == right_op.sheet {
         let sheet = lower_sheet_reference(&left_op.workbook, &left_op.sheet);
         let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
-        return Some(RangeRef { sheet, start, end });
+        return Some(RangeRef {
+            sheet,
+            start: Ref::from_abs_cell_addr(start)?,
+            end: Ref::from_abs_cell_addr(end)?,
+        });
     }
 
     let explicit = if left_op.is_unprefixed() && !right_op.is_unprefixed() {
@@ -336,7 +355,11 @@ fn try_lower_static_range_ref(
 
     let sheet = lower_sheet_reference(&explicit.workbook, &explicit.sheet);
     let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
-    Some(RangeRef { sheet, start, end })
+    Some(RangeRef {
+        sheet,
+        start: Ref::from_abs_cell_addr(start)?,
+        end: Ref::from_abs_cell_addr(end)?,
+    })
 }
 
 fn try_lower_static_range_operand(
@@ -455,9 +478,12 @@ fn compile_expr_inner(
             let Some(row) = coord_to_index(&r.row, current_cell.row, MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
+            let Some(addr) = Ref::from_abs_cell_addr(CellAddr { row, col }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
             Expr::CellRef(CellRef {
                 sheet,
-                addr: CellAddr { row, col },
+                addr,
             })
         }
         crate::Expr::ColRef(r) => {
@@ -466,13 +492,19 @@ fn compile_expr_inner(
             let Some(col) = coord_to_index(&r.col, current_cell.col, MAX_COL) else {
                 return Expr::Error(ErrorKind::Ref);
             };
+            let Some(start) = Ref::from_abs_cell_addr(CellAddr { row: 0, col }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            let Some(end) = Ref::from_abs_cell_addr(CellAddr {
+                row: CellAddr::SHEET_END,
+                col,
+            }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
             Expr::RangeRef(RangeRef {
                 sheet,
-                start: CellAddr { row: 0, col },
-                end: CellAddr {
-                    row: CellAddr::SHEET_END,
-                    col,
-                },
+                start,
+                end,
             })
         }
         crate::Expr::RowRef(r) => {
@@ -481,13 +513,19 @@ fn compile_expr_inner(
             let Some(row) = coord_to_index(&r.row, current_cell.row, MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
+            let Some(start) = Ref::from_abs_cell_addr(CellAddr { row, col: 0 }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            let Some(end) = Ref::from_abs_cell_addr(CellAddr {
+                row,
+                col: CellAddr::SHEET_END,
+            }) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
             Expr::RangeRef(RangeRef {
                 sheet,
-                start: CellAddr { row, col: 0 },
-                end: CellAddr {
-                    row,
-                    col: CellAddr::SHEET_END,
-                },
+                start,
+                end,
             })
         }
         crate::Expr::StructuredRef(r) => {
@@ -957,8 +995,8 @@ fn try_compile_static_range_ref(
         let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
         return Some(RangeRef {
             sheet: left_op.sheet,
-            start,
-            end,
+            start: Ref::from_abs_cell_addr(start)?,
+            end: Ref::from_abs_cell_addr(end)?,
         });
     }
 
@@ -1003,8 +1041,8 @@ fn try_compile_static_range_ref(
                 bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
             Some(RangeRef {
                 sheet: left_op.sheet,
-                start,
-                end,
+                start: Ref::from_abs_cell_addr(start)?,
+                end: Ref::from_abs_cell_addr(end)?,
             })
         }
         SheetReference::SheetRange(start_sheet, end_sheet) => {
@@ -1012,8 +1050,8 @@ fn try_compile_static_range_ref(
                 bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
             Some(RangeRef {
                 sheet: SheetReference::SheetRange(start_sheet, end_sheet),
-                start,
-                end,
+                start: Ref::from_abs_cell_addr(start)?,
+                end: Ref::from_abs_cell_addr(end)?,
             })
         }
         SheetReference::External(key) => {
@@ -1021,8 +1059,8 @@ fn try_compile_static_range_ref(
                 bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
             Some(RangeRef {
                 sheet: SheetReference::External(key),
-                start,
-                end,
+                start: Ref::from_abs_cell_addr(start)?,
+                end: Ref::from_abs_cell_addr(end)?,
             })
         }
         SheetReference::Current => None,

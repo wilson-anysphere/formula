@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use crate::eval::address::{AddressParseError, CellAddr};
 use crate::eval::ast::{
-    BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef, SheetReference,
-    UnaryOp,
+    BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef, Ref,
+    SheetReference, UnaryOp,
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
@@ -59,21 +59,21 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
         // Standalone row/col refs are uncommon in A1 formulas (Excel normally uses `A:A` / `1:1`),
         // but lower them to their full-row/full-column ranges for completeness.
         crate::Expr::ColRef(r) => rect_from_col_ref(r)
-            .map(|rect| {
-                Expr::RangeRef(RangeRef {
+            .and_then(|rect| {
+                Some(Expr::RangeRef(RangeRef {
                     sheet: rect.sheet,
-                    start: rect.start,
-                    end: rect.end,
-                })
+                    start: Ref::from_abs_cell_addr(rect.start)?,
+                    end: Ref::from_abs_cell_addr(rect.end)?,
+                }))
             })
             .unwrap_or_else(|| Expr::Error(ErrorKind::Ref)),
         crate::Expr::RowRef(r) => rect_from_row_ref(r)
-            .map(|rect| {
-                Expr::RangeRef(RangeRef {
+            .and_then(|rect| {
+                Some(Expr::RangeRef(RangeRef {
                     sheet: rect.sheet,
-                    start: rect.start,
-                    end: rect.end,
-                })
+                    start: Ref::from_abs_cell_addr(rect.start)?,
+                    end: Ref::from_abs_cell_addr(rect.end)?,
+                }))
             })
             .unwrap_or_else(|| Expr::Error(ErrorKind::Ref)),
 
@@ -247,6 +247,13 @@ fn lower_range_ref(left: &crate::Expr, right: &crate::Expr) -> ParsedExpr {
         col: l.end.col.max(r.end.col),
     };
 
+    let Some(start) = Ref::from_abs_cell_addr(start) else {
+        return Expr::Error(ErrorKind::Ref);
+    };
+    let Some(end) = Ref::from_abs_cell_addr(end) else {
+        return Expr::Error(ErrorKind::Ref);
+    };
+
     Expr::RangeRef(RangeRef { sheet, start, end })
 }
 
@@ -254,10 +261,11 @@ fn rect_ref(expr: &crate::Expr) -> Option<RectRef> {
     match expr {
         crate::Expr::CellRef(r) => {
             let cell = lower_cell_ref(r)?;
+            let addr = cell.addr.as_abs_cell_addr()?;
             Some(RectRef {
                 sheet: cell.sheet,
-                start: cell.addr,
-                end: cell.addr,
+                start: addr,
+                end: addr,
             })
         }
         crate::Expr::ColRef(r) => rect_from_col_ref(r),
@@ -283,9 +291,10 @@ fn lower_cell_ref(r: &crate::CellRef) -> Option<CellRef<String>> {
     let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
     let row = coord_index(&r.row)?;
     let col = coord_index(&r.col)?;
+    let addr = Ref::from_abs_cell_addr(CellAddr { row, col })?;
     Some(CellRef {
         sheet,
-        addr: CellAddr { row, col },
+        addr,
     })
 }
 

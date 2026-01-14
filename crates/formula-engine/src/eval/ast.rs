@@ -5,6 +5,121 @@ use std::sync::Arc;
 pub type ParsedExpr = Expr<String>;
 pub type CompiledExpr = Expr<usize>;
 
+/// A 2D cell coordinate that can be either absolute (A1-style index) or relative (offset from the
+/// formula origin cell).
+///
+/// This is designed to be a compact, "bytecode-like" representation so compiled ASTs can be
+/// shared across filled formulas. The evaluator resolves relative coordinates using the current
+/// evaluation cell as the base.
+///
+/// ## Sentinel semantics
+///
+/// Excel whole-row/whole-column references (e.g. `A:A` / `1:1`) are represented using a sentinel
+/// "sheet end" coordinate for the open-ended axis. In the evaluation layer this is represented as
+/// [`CellAddr::SHEET_END`] (`u32::MAX`). In this IR we reserve [`i32::MAX`] as the corresponding
+/// sentinel for *absolute* coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Ref {
+    /// Row index or offset.
+    ///
+    /// - When `row_abs == true`, this is an absolute 0-indexed row number, or [`Ref::SHEET_END`]
+    ///   for whole-column endpoints.
+    /// - When `row_abs == false`, this is a signed row offset from the formula origin cell.
+    pub row: i32,
+    /// Column index or offset.
+    ///
+    /// - When `col_abs == true`, this is an absolute 0-indexed column number, or
+    ///   [`Ref::SHEET_END`] for whole-row endpoints.
+    /// - When `col_abs == false`, this is a signed column offset from the formula origin cell.
+    pub col: i32,
+    pub row_abs: bool,
+    pub col_abs: bool,
+}
+
+impl Ref {
+    /// Sentinel value used for absolute coordinates to represent "the last row/column of the
+    /// sheet" in whole-row/whole-column references.
+    pub const SHEET_END: i32 = i32::MAX;
+
+    /// Convert an absolute [`CellAddr`] component (`row` or `col`) into a compact i32 encoding.
+    ///
+    /// [`CellAddr::SHEET_END`] maps to [`Ref::SHEET_END`]. Values greater than or equal to
+    /// `Ref::SHEET_END` are rejected because `Ref::SHEET_END` is reserved.
+    pub fn encode_abs_component(value: u32) -> Option<i32> {
+        if value == CellAddr::SHEET_END {
+            return Some(Self::SHEET_END);
+        }
+        if value >= Self::SHEET_END as u32 {
+            return None;
+        }
+        Some(value as i32)
+    }
+
+    /// Convert a compact i32 absolute coordinate component back into the evaluation layer's u32
+    /// representation.
+    ///
+    /// [`Ref::SHEET_END`] maps to [`CellAddr::SHEET_END`].
+    pub fn decode_abs_component(value: i32) -> Option<u32> {
+        if value == Self::SHEET_END {
+            return Some(CellAddr::SHEET_END);
+        }
+        if value < 0 {
+            return None;
+        }
+        Some(value as u32)
+    }
+
+    /// Build a fully-absolute reference from an evaluation-layer [`CellAddr`].
+    pub fn from_abs_cell_addr(addr: CellAddr) -> Option<Self> {
+        Some(Self {
+            row: Self::encode_abs_component(addr.row)?,
+            col: Self::encode_abs_component(addr.col)?,
+            row_abs: true,
+            col_abs: true,
+        })
+    }
+
+    /// If this reference is fully absolute, decode it into a [`CellAddr`].
+    pub fn as_abs_cell_addr(&self) -> Option<CellAddr> {
+        if !self.row_abs || !self.col_abs {
+            return None;
+        }
+        Some(CellAddr {
+            row: Self::decode_abs_component(self.row)?,
+            col: Self::decode_abs_component(self.col)?,
+        })
+    }
+
+    /// Resolve this reference relative to `base` (the formula origin cell).
+    ///
+    /// Returns `None` when:
+    /// - A relative offset produces a negative coordinate.
+    /// - The computation overflows `u32`.
+    /// - The resolved coordinate lands on [`CellAddr::SHEET_END`] via relative arithmetic (the
+    ///   sentinel is reserved for absolute whole-row/whole-column endpoints).
+    pub fn resolve(&self, base: CellAddr) -> Option<CellAddr> {
+        let row = if self.row_abs {
+            Self::decode_abs_component(self.row)?
+        } else {
+            base.row.checked_add_signed(self.row)?
+        };
+        let col = if self.col_abs {
+            Self::decode_abs_component(self.col)?
+        } else {
+            base.col.checked_add_signed(self.col)?
+        };
+
+        if !self.row_abs && row == CellAddr::SHEET_END {
+            return None;
+        }
+        if !self.col_abs && col == CellAddr::SHEET_END {
+            return None;
+        }
+
+        Some(CellAddr { row, col })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SheetReference<S> {
     Current,
@@ -23,14 +138,14 @@ pub enum SheetReference<S> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CellRef<S> {
     pub sheet: SheetReference<S>,
-    pub addr: CellAddr,
+    pub addr: Ref,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RangeRef<S> {
     pub sheet: SheetReference<S>,
-    pub start: CellAddr,
-    pub end: CellAddr,
+    pub start: Ref,
+    pub end: Ref,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

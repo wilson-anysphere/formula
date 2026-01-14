@@ -12,7 +12,7 @@ pub(crate) const LAMBDA_OMITTED_PREFIX: &str = "\u{0}LAMBDA_OMITTED:";
 pub use address::{parse_a1, AddressParseError, CellAddr};
 pub use ast::{
     BinaryOp, CellRef, CompareOp, CompiledExpr, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef,
-    SheetReference, UnaryOp,
+    Ref, SheetReference, UnaryOp,
 };
 pub use compiler::{compile_canonical_expr, lower_ast, lower_expr};
 pub(crate) use evaluator::{

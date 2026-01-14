@@ -1948,6 +1948,9 @@ fn fn_fieldaccess(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Err(e) => return Value::Error(e),
         },
     };
+    // Match the AST evaluator's `.["..."]` semantics: reject empty/whitespace-only keys, but
+    // otherwise preserve the exact string (including leading/trailing spaces) for lookup so
+    // selectors like `A1.[" Price "]` can address keys that include whitespace.
     let field_key = field.as_str();
     if field_key.trim().is_empty() {
         return Value::Error(ErrorKind::Value);
@@ -5008,6 +5011,10 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Ref);
     };
     let origin_ast = crate::CellAddr::new(origin_row, origin_col);
+    let origin_eval = crate::eval::CellAddr {
+        row: origin_row,
+        col: origin_col,
+    };
 
     let lowered = crate::eval::lower_ast(&parsed, if a1 { None } else { Some(origin_ast) });
 
@@ -5083,13 +5090,22 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             let Some(sheet_id) = resolve_sheet(grid, &r.sheet) else {
                 return Value::Error(ErrorKind::Ref);
             };
-            make_range_value(sheet_id, r.addr, r.addr)
+            let Some(addr) = r.addr.resolve(origin_eval) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            make_range_value(sheet_id, addr, addr)
         }
         crate::eval::Expr::RangeRef(r) => {
             let Some(sheet_id) = resolve_sheet(grid, &r.sheet) else {
                 return Value::Error(ErrorKind::Ref);
             };
-            make_range_value(sheet_id, r.start, r.end)
+            let Some(start) = r.start.resolve(origin_eval) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            let Some(end) = r.end.resolve(origin_eval) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            make_range_value(sheet_id, start, end)
         }
         crate::eval::Expr::Error(e) => Value::Error(ErrorKind::from(e)),
         crate::eval::Expr::NameRef(_) => Value::Error(ErrorKind::Ref),

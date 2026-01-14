@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use formula_engine::eval::{BinaryOp, Expr, NameRef, RangeRef};
+use formula_engine::eval::{BinaryOp, Expr, NameRef, RangeRef, Ref};
 use formula_engine::eval::{
     CellAddr, EvalContext, Evaluator, RecalcContext, ResolvedName, SheetReference, ValueResolver,
 };
@@ -204,8 +204,8 @@ fn lambda_calls_can_return_reference_values() {
 
     let range_expr = Expr::RangeRef(RangeRef {
         sheet: SheetReference::Current,
-        start: CellAddr { row: 0, col: 0 },
-        end: CellAddr { row: 2, col: 0 },
+        start: Ref::from_abs_cell_addr(CellAddr { row: 0, col: 0 }).unwrap(),
+        end: Ref::from_abs_cell_addr(CellAddr { row: 2, col: 0 }).unwrap(),
     });
 
     let call_expr = Expr::FunctionCall {

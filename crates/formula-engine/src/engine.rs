@@ -381,6 +381,25 @@ impl Workbook {
         &self.sheet_order
     }
 
+    fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
+        if !self.sheet_exists(sheet) {
+            return false;
+        }
+        if new_index >= self.sheet_order.len() {
+            return false;
+        }
+        let Some(current) = self.sheet_order.iter().position(|&id| id == sheet) else {
+            return false;
+        };
+        if current == new_index {
+            return true;
+        }
+
+        self.sheet_order.remove(current);
+        self.sheet_order.insert(new_index, sheet);
+        true
+    }
+
     #[cfg(test)]
     fn set_sheet_order(&mut self, new_order: Vec<SheetId>) {
         // Keep invariants explicit: sheet order is a permutation of the currently-live sheets.
@@ -11714,9 +11733,12 @@ fn walk_external_expr(
         Expr::CellRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
                 if crate::eval::is_valid_external_sheet_key(key) {
+                    let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                        return;
+                    };
                     precedents.insert(PrecedentNode::ExternalCell {
                         sheet: key.clone(),
-                        addr: r.addr,
+                        addr,
                     });
                 }
             }
@@ -11724,10 +11746,16 @@ fn walk_external_expr(
         Expr::RangeRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
                 if crate::eval::is_valid_external_sheet_key(key) {
+                    let Some(start) = r.start.resolve(current_cell.addr) else {
+                        return;
+                    };
+                    let Some(end) = r.end.resolve(current_cell.addr) else {
+                        return;
+                    };
                     precedents.insert(PrecedentNode::ExternalRange {
                         sheet: key.clone(),
-                        start: clamp_addr_to_excel_dimensions(r.start),
-                        end: clamp_addr_to_excel_dimensions(r.end),
+                        start: clamp_addr_to_excel_dimensions(start),
+                        end: clamp_addr_to_excel_dimensions(end),
                     });
                 }
             }
@@ -11958,10 +11986,9 @@ fn walk_external_expr(
 fn spill_range_target_cell(expr: &CompiledExpr, current_cell: CellKey) -> Option<CellKey> {
     match expr {
         Expr::CellRef(r) => {
-            resolve_single_sheet(&r.sheet, current_cell.sheet).map(|sheet| CellKey {
-                sheet,
-                addr: r.addr,
-            })
+            let sheet = resolve_single_sheet(&r.sheet, current_cell.sheet)?;
+            let addr = r.addr.resolve(current_cell.addr)?;
+            Some(CellKey { sheet, addr })
         }
         Expr::FieldAccess { base, .. } => spill_range_target_cell(base, current_cell),
         Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
@@ -12011,17 +12038,26 @@ fn walk_calc_expr(
     match expr {
         Expr::CellRef(r) => {
             if let Some(sheets) = resolve_sheet_span(&r.sheet, current_cell.sheet, workbook) {
+                let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                    return;
+                };
                 for sheet in sheets {
                     precedents.insert(Precedent::Cell(CellId::new(
                         sheet_id_for_graph(sheet),
-                        r.addr.row,
-                        r.addr.col,
+                        addr.row,
+                        addr.col,
                     )));
                 }
             }
         }
         Expr::RangeRef(RangeRef { sheet, start, end }) => {
             if let Some(sheets) = resolve_sheet_span(sheet, current_cell.sheet, workbook) {
+                let Some(start) = start.resolve(current_cell.addr) else {
+                    return;
+                };
+                let Some(end) = end.resolve(current_cell.addr) else {
+                    return;
+                };
                 let range = Range::new(
                     CellRef::new(start.row, start.col),
                     CellRef::new(end.row, end.col),
@@ -12356,6 +12392,32 @@ fn walk_calc_expr(
                 // Implicit intersection over a static range only depends on the single intersected
                 // cell (if any), rather than the entire rectangle.
                 Expr::RangeRef(RangeRef { sheet, start, end }) => {
+                    let Some(start) = start.resolve(current_cell.addr) else {
+                        walk_calc_expr(
+                            inner,
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        return;
+                    };
+                    let Some(end) = end.resolve(current_cell.addr) else {
+                        walk_calc_expr(
+                            inner,
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        return;
+                    };
                     let row_start = start.row.min(end.row);
                     let row_end = start.row.max(end.row);
                     let col_start = start.col.min(end.col);

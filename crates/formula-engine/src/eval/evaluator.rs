@@ -695,6 +695,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             }
             Expr::CellRef(r) => match self.resolve_sheet_ids(&r.sheet) {
                 Some(sheet_ids) => {
+                    let Some(addr) = r.addr.resolve(self.ctx.current_cell) else {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                    };
                     let mut ranges = Vec::with_capacity(sheet_ids.len());
                     for sheet_id in sheet_ids {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
@@ -702,7 +705,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
                         let Some((start, end)) =
-                            self.resolve_range_bounds(&sheet_id, r.addr, r.addr)
+                            self.resolve_range_bounds(&sheet_id, addr, addr)
                         else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
@@ -718,6 +721,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             },
             Expr::RangeRef(r) => match self.resolve_sheet_ids(&r.sheet) {
                 Some(sheet_ids) => {
+                    let Some(start_addr) = r.start.resolve(self.ctx.current_cell) else {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                    };
+                    let Some(end_addr) = r.end.resolve(self.ctx.current_cell) else {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                    };
                     let mut ranges = Vec::with_capacity(sheet_ids.len());
                     for sheet_id in sheet_ids {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
@@ -725,7 +734,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
                         let Some((start, end)) =
-                            self.resolve_range_bounds(&sheet_id, r.start, r.end)
+                            self.resolve_range_bounds(&sheet_id, start_addr, end_addr)
                         else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };

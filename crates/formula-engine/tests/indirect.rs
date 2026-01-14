@@ -56,8 +56,10 @@ fn indirect_external_workbook_refs_resolve_via_provider() {
     }
 
     impl ExternalValueProvider for CountingExternalProvider {
-        fn get(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(sheet, "[Book.xlsx]Sheet1");
+            assert_eq!(addr, CellAddr { row: 0, col: 0 });
             Some(Value::Number(999.0))
         }
     }
