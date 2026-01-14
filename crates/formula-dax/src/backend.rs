@@ -408,16 +408,32 @@ impl ColumnarTableBackend {
                 },
                 AggregationKind::CountNonBlank => {
                     let col_idx = spec.column_idx?;
-                    Plan::Direct {
-                        col: ensure(AggOp::Count, Some(col_idx)),
+                    // Fast path: if the column has no blanks at all, COUNTNONBLANK is equivalent
+                    // to COUNTROWS(group) for every group.
+                    if !self.stats_has_blank(col_idx).unwrap_or(true) {
+                        Plan::Direct {
+                            col: ensure(AggOp::Count, None),
+                        }
+                    } else {
+                        Plan::Direct {
+                            col: ensure(AggOp::Count, Some(col_idx)),
+                        }
                     }
                 }
                 AggregationKind::CountNumbers => {
                     let col_idx = spec.column_idx?;
                     let column_type = schema.get(col_idx)?.column_type;
                     if Self::is_dax_numeric_column(column_type) {
-                        Plan::Direct {
-                            col: ensure(AggOp::CountNumbers, Some(col_idx)),
+                        // Fast path: for numeric columns with no blanks, COUNT(column) is just
+                        // COUNTROWS(group).
+                        if !self.stats_has_blank(col_idx).unwrap_or(true) {
+                            Plan::Direct {
+                                col: ensure(AggOp::Count, None),
+                            }
+                        } else {
+                            Plan::Direct {
+                                col: ensure(AggOp::CountNumbers, Some(col_idx)),
+                            }
                         }
                     } else {
                         Plan::Constant(Value::from(0))
