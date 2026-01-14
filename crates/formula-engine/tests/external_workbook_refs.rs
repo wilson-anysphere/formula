@@ -209,7 +209,7 @@ fn quoted_external_cell_ref_with_workbook_name_containing_lbracket_and_escaped_r
 }
 
 #[test]
-fn indirect_external_cell_ref_resolves_via_provider() {
+fn indirect_external_cell_ref_is_ref_error() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set(
         "[Book.xlsx]Sheet1",
@@ -224,10 +224,10 @@ fn indirect_external_cell_ref_resolves_via_provider() {
         .unwrap();
     engine.recalculate();
 
-    // INDIRECT parses its text argument as a standalone reference. When the engine has an
-    // `ExternalValueProvider` configured, external workbook references can resolve via the
-    // provider.
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn sum_over_external_range_uses_reference_semantics() {
 }
 
 #[test]
-fn indirect_external_range_ref_resolves_via_provider() {
+fn indirect_external_range_ref_is_ref_error() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
@@ -315,7 +315,10 @@ fn indirect_external_range_ref_resolves_via_provider() {
         .unwrap();
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
 }
 
 #[test]
