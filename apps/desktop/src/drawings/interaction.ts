@@ -132,6 +132,9 @@ export class DrawingInteractionController {
   }
 
   dispose(): void {
+    // If the app/view is torn down mid-gesture (e.g. hot reload, workbook switch),
+    // ensure we release pointer capture and close any pending undo batch.
+    this.cancelActiveGesture();
     this.element.removeEventListener("pointerdown", this.onPointerDown, this.listenerOptions);
     this.element.removeEventListener("pointermove", this.onPointerMove, this.listenerOptions);
     this.element.removeEventListener("pointerleave", this.onPointerLeave, this.listenerOptions);

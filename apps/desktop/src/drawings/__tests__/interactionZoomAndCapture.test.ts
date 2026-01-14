@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DrawingInteractionController } from "../interaction";
 import { pxToEmu, type GridGeometry, type Viewport } from "../overlay";
@@ -147,6 +147,43 @@ describe("DrawingInteractionController zoom + capture", () => {
     }
 
     controller.dispose();
+  });
+
+  it("cancels an active gesture (releases pointer capture and cancels undo batch) on dispose", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 300, height: 200, dpr: 1, zoom: 1 };
+    let objects: DrawingObject[] = [createAbsoluteObject()];
+    const original = objects;
+
+    const beginBatch = vi.fn();
+    const cancelBatch = vi.fn();
+
+    const controller = new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+      beginBatch,
+      cancelBatch,
+    });
+
+    // Start a drag inside the object's bounds.
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 60, clientY: 60, pointerId: 1 }));
+    expect(beginBatch).toHaveBeenCalledWith({ label: "Move Picture" });
+    expect(((el as any).pointerCapture as Set<number>).has(1)).toBe(true);
+
+    // Move to mutate the in-memory object list.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 80, clientY: 60, pointerId: 1 }));
+    expect(objects).not.toBe(original);
+
+    controller.dispose();
+
+    // Dispose should cancel the gesture, releasing pointer capture and restoring the original objects.
+    expect(cancelBatch).toHaveBeenCalledTimes(1);
+    expect(((el as any).pointerCapture as Set<number>).has(1)).toBe(false);
+    expect(objects).toBe(original);
   });
 
   it("stops propagation on hit, but not on miss (capture listener)", () => {
