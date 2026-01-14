@@ -19,7 +19,7 @@
 //! - block 3: `encryptedKeyValue` (the secret/package key)
 
 use crate::util::ct_eq;
-use crate::{AgileEncryptionInfo, HashAlgorithm, OffcryptoError};
+use crate::{AgileEncryptionInfo, DecryptOptions, HashAlgorithm, OffcryptoError};
 use zeroize::Zeroizing;
 
 #[cfg(test)]
@@ -151,6 +151,16 @@ pub fn agile_secret_key_from_password(
     info: &AgileEncryptionInfo,
     password: &str,
 ) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    let options = DecryptOptions::default();
+    agile_secret_key_from_password_with_options(info, password, &options)
+}
+
+/// Like [`agile_secret_key_from_password`], but allows overriding resource limits.
+pub fn agile_secret_key_from_password_with_options(
+    info: &AgileEncryptionInfo,
+    password: &str,
+    options: &DecryptOptions,
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     if info.password_salt.len() != 16 {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "encryptedKey.saltValue must be 16 bytes",
@@ -169,6 +179,9 @@ pub fn agile_secret_key_from_password(
             context: "missing encryptedVerifierHashInput/encryptedVerifierHashValue",
         });
     }
+
+    // `spinCount` is attacker-controlled; enforce limits up front to avoid CPU DoS.
+    crate::check_spin_count(info.spin_count, &options.limits)?;
 
     let password_utf16le = Zeroizing::new(crate::password_to_utf16le_bytes(password));
     let h = agile_iterated_hash(
@@ -358,5 +371,52 @@ mod tests {
         let out = agile_secret_key_from_password(&info, password).unwrap();
         assert_eq!(out.as_slice(), secret_key_plain.as_slice());
         assert_eq!(ITERATED_HASH_CALLS.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn agile_secret_key_from_password_rejects_spin_count_over_limit_without_hashing() {
+        let password = "password";
+        let salt = vec![0x11u8; 16];
+        let spin_count = u32::MAX;
+        let hash_algorithm = HashAlgorithm::Sha1;
+        let key_bits = 128usize;
+
+        let info = AgileEncryptionInfo {
+            key_data_salt: Vec::new(),
+            key_data_hash_algorithm: hash_algorithm,
+            key_data_block_size: 16,
+            encrypted_hmac_key: Vec::new(),
+            encrypted_hmac_value: Vec::new(),
+            spin_count,
+            password_salt: salt,
+            password_hash_algorithm: hash_algorithm,
+            password_key_bits: key_bits,
+            encrypted_key_value: vec![0u8; 16],
+            encrypted_verifier_hash_input: vec![0u8; 16],
+            encrypted_verifier_hash_value: vec![0u8; 16],
+        };
+
+        let options = DecryptOptions {
+            limits: crate::DecryptLimits {
+                max_spin_count: Some(10),
+            },
+        };
+
+        ITERATED_HASH_CALLS.store(0, Ordering::Relaxed);
+
+        let err = agile_secret_key_from_password_with_options(&info, password, &options)
+            .expect_err("expected spinCount over limit to error");
+        assert_eq!(
+            err,
+            OffcryptoError::SpinCountTooLarge {
+                spin_count,
+                max: 10
+            }
+        );
+        assert_eq!(
+            ITERATED_HASH_CALLS.load(Ordering::Relaxed),
+            0,
+            "expected iterated hash to not run when spinCount is over the limit"
+        );
     }
 }
