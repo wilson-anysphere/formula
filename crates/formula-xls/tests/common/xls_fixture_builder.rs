@@ -413,6 +413,24 @@ pub fn build_shared_formula_ptgfuncvar_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula whose body references a workbook-global
+/// defined name via `PtgName`.
+///
+/// This exercises the importer's BIFF8 shared-formula recovery path (`SHRFMLA` + `PtgExp`) while
+/// ensuring formula decoding uses the workbook NAME table for `PtgName` indices.
+pub fn build_shared_formula_ptgname_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgname_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a shared formula whose shared `SHRFMLA.rgce` includes a
 /// `PtgMemAreaN` token.
 ///
@@ -6936,6 +6954,113 @@ fn build_shared_formula_ptgref_relative_flags_sheet_stream(xf_cell: u16) -> Vec<
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_ptgname_workbook_stream() -> Vec<u8> {
+    // Minimal single-sheet workbook containing a shared formula whose shared rgce includes PtgName.
+    //
+    // We intentionally construct a workbook NAME table so BIFF8 formula decoding can resolve the
+    // PtgName index into the defined name string.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "SharedName");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // External reference tables required by the NAME formula token stream (PtgRef3d).
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(1));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    // One workbook-scoped defined name: MyName -> SharedName!$A$1.
+    let rgce = ptg_ref3d(0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("MyName", 0, false, None, &rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_shared_formula_ptgname_sheet_stream(xf_cell);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_shared_formula_ptgname_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric cells in A1/A2 so the sheet is not empty.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // Base cell B1 formula: `MyName` (PtgName index 1).
+    let base_rgce = ptg_name(1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &base_rgce),
+    );
+
+    // Shared formula rgce stored in SHRFMLA: `MyName`.
+    let shared_rgce = ptg_name(1);
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &shared_rgce),
+    );
+
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Follower cell B2: PtgExp(B1).
+    let ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
 }
 

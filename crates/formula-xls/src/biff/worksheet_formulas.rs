@@ -2117,17 +2117,16 @@ mod tests {
 ///
 /// This wraps the BIFF8 `rgce` decoder while reusing the same workbook-global context construction
 /// as defined-name decoding (SUPBOOK + EXTERNSHEET + ordered NAME metadata for `PtgName`).
-pub(crate) struct WorksheetFormulaDecoder<'a> {
+pub(crate) struct WorksheetFormulaDecoder {
     tables: super::workbook_context::BiffWorkbookContextTables,
-    sheet_names: &'a [String],
 }
 
-impl<'a> WorksheetFormulaDecoder<'a> {
+impl WorksheetFormulaDecoder {
     pub(crate) fn new(
         workbook_stream: &[u8],
         biff: super::BiffVersion,
         codepage: u16,
-        sheet_names: &'a [String],
+        sheet_names: &[String],
     ) -> Self {
         let tables = super::workbook_context::build_biff_workbook_context_tables(
             workbook_stream,
@@ -2135,19 +2134,27 @@ impl<'a> WorksheetFormulaDecoder<'a> {
             codepage,
             sheet_names,
         );
-        Self { tables, sheet_names }
+        Self { tables }
     }
 
     pub(crate) fn warnings(&self) -> &[String] {
         &self.tables.warnings
     }
 
+    pub(crate) fn rgce_decode_context<'a>(
+        &'a self,
+        sheet_names: &'a [String],
+    ) -> super::rgce::RgceDecodeContext<'a> {
+        self.tables.rgce_decode_context(sheet_names)
+    }
+
     pub(crate) fn decode_rgce(
         &self,
         rgce_bytes: &[u8],
+        sheet_names: &[String],
         base: super::rgce::CellCoord,
     ) -> super::rgce::DecodeRgceResult {
-        let ctx = self.tables.rgce_decode_context(self.sheet_names);
+        let ctx = self.tables.rgce_decode_context(sheet_names);
         super::rgce::decode_biff8_rgce_with_base(rgce_bytes, &ctx, Some(base))
     }
 }

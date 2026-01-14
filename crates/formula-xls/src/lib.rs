@@ -770,6 +770,31 @@ fn import_xls_path_with_biff_reader(
         push_import_warning(&mut warnings, message, &mut warnings_suppressed);
     }
 
+    // Precompute BIFF sheet names (BoundSheet order) for `rgce` decoding. These may differ from the
+    // final imported sheet names if we sanitize, but those references are rewritten later.
+    let sheet_names_by_biff_idx_for_rgce: Vec<String> = biff_sheets
+        .as_ref()
+        .map(|sheets| sheets.iter().map(|s| s.name.clone()).collect())
+        .unwrap_or_default();
+
+    // Best-effort workbook-global context for BIFF8 formula decoding (SUPBOOK + EXTERNSHEET + NAME
+    // metadata for `PtgName`).
+    let workbook_rgce_decoder: Option<biff::worksheet_formulas::WorksheetFormulaDecoder> =
+        if let (Some(workbook_stream), Some(biff_version), Some(codepage)) =
+            (workbook_stream.as_deref(), biff_version, biff_codepage)
+        {
+            (biff_version == biff::BiffVersion::Biff8).then(|| {
+                biff::worksheet_formulas::WorksheetFormulaDecoder::new(
+                    workbook_stream,
+                    biff_version,
+                    codepage,
+                    &sheet_names_by_biff_idx_for_rgce,
+                )
+            })
+        } else {
+            None
+        };
+
     let mut final_sheet_names_by_idx: Vec<String> = Vec::with_capacity(sheets.len());
     // Track worksheet ids so BIFF `itab` scopes can be mapped to the output model.
     let mut sheet_ids_by_calamine_idx: Vec<formula_model::WorksheetId> =
@@ -1609,21 +1634,23 @@ fn import_xls_path_with_biff_reader(
                             );
                         }
                     } else {
-                        // Provide a minimal rgce decode context: most formulas can be decoded
-                        // without workbook-global metadata, but we populate sheet names +
-                        // EXTERNSHEET so 3D references render as `Sheet!A1` rather than `#REF!`.
-                        let sheet_names_by_biff_idx: Vec<String> = biff_sheets
-                            .as_ref()
-                            .map(|sheets| sheets.iter().map(|s| s.name.clone()).collect())
-                            .unwrap_or_default();
-                        let supbooks: &[biff::supbook::SupBookInfo] = &[];
-                        let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
-                        let ctx = biff::rgce::RgceDecodeContext {
-                            codepage,
-                            sheet_names: &sheet_names_by_biff_idx,
-                            externsheet: &biff_rgce_externsheet,
-                            supbooks,
-                            defined_names,
+                        // Provide the full workbook-global rgce decode context so BIFF8 worksheet
+                        // formulas can resolve `PtgName` (NAME table) and 3D/external references
+                        // (EXTERNSHEET/SUPBOOK) consistently with defined-name decoding.
+                        let ctx = if let Some(decoder) = workbook_rgce_decoder.as_ref() {
+                            decoder.rgce_decode_context(&sheet_names_by_biff_idx_for_rgce)
+                        } else {
+                            let empty_sheet_names: &[String] = &[];
+                            let empty_externsheet: &[biff::externsheet::ExternSheetEntry] = &[];
+                            let empty_supbooks: &[biff::supbook::SupBookInfo] = &[];
+                            let empty_defined_names: &[biff::rgce::DefinedNameMeta] = &[];
+                            biff::rgce::RgceDecodeContext {
+                                codepage,
+                                sheet_names: empty_sheet_names,
+                                externsheet: empty_externsheet,
+                                supbooks: empty_supbooks,
+                                defined_names: empty_defined_names,
+                            }
                         };
 
                         match biff::parse_biff8_sheet_formulas(
@@ -1719,12 +1746,22 @@ fn import_xls_path_with_biff_reader(
         ) {
             if biff_version == biff::BiffVersion::Biff8 {
                 if let Some(sheet_info) = biff_sheets.get(biff_idx) {
-                    let ctx = biff::rgce::RgceDecodeContext {
-                        codepage,
-                        sheet_names: &biff_rgce_sheet_names,
-                        externsheet: &biff_rgce_externsheet,
-                        supbooks: &biff_rgce_supbooks,
-                        defined_names: &biff_rgce_defined_names,
+                    // Provide the full workbook-global rgce decode context so recovered formulas
+                    // can resolve `PtgName` and 3D/external references.
+                    let ctx = if let Some(decoder) = workbook_rgce_decoder.as_ref() {
+                        decoder.rgce_decode_context(&sheet_names_by_biff_idx_for_rgce)
+                    } else {
+                        let empty_sheet_names: &[String] = &[];
+                        let empty_externsheet: &[biff::externsheet::ExternSheetEntry] = &[];
+                        let empty_supbooks: &[biff::supbook::SupBookInfo] = &[];
+                        let empty_defined_names: &[biff::rgce::DefinedNameMeta] = &[];
+                            biff::rgce::RgceDecodeContext {
+                                codepage,
+                                sheet_names: empty_sheet_names,
+                                externsheet: empty_externsheet,
+                                supbooks: empty_supbooks,
+                                defined_names: empty_defined_names,
+                            }
                     };
 
                     // Best-effort: resolve `PtgExp`/`PtgTbl` formulas directly from the worksheet
@@ -2261,14 +2298,16 @@ fn import_xls_path_with_biff_reader(
         // Best-effort: recover shared/array formulas that are stored as BIFF token streams but are
         // not surfaced by calamine's `.xls` formula API (e.g. `SHRFMLA` + `PtgExp`).
         if biff_version == biff::BiffVersion::Biff8 {
-            if let Some(biff_sheets) = biff_sheets.as_deref() {
+            if let (Some(biff_sheets), Some(decoder)) =
+                (biff_sheets.as_deref(), workbook_rgce_decoder.as_ref())
+            {
                 import_biff8_shared_formulas(
                     &mut out,
                     workbook_stream,
-                    codepage,
                     biff_sheets,
                     &sheet_names_by_biff_idx,
                     &sheet_ids_by_biff_idx,
+                    decoder,
                     &mut warnings,
                     &mut warnings_suppressed,
                 );
@@ -4187,10 +4226,10 @@ fn build_sheet_names_by_biff_idx(
 fn import_biff8_shared_formulas(
     workbook: &mut Workbook,
     workbook_stream: &[u8],
-    codepage: u16,
     biff_sheets: &[biff::BoundSheetInfo],
     sheet_names_by_biff_idx: &[String],
     sheet_ids_by_biff_idx: &[Option<formula_model::WorksheetId>],
+    rgce_decoder: &biff::worksheet_formulas::WorksheetFormulaDecoder,
     warnings: &mut Vec<ImportWarning>,
     suppressed: &mut bool,
 ) {
@@ -4207,42 +4246,7 @@ fn import_biff8_shared_formulas(
     const RECORD_SHRFMLA: u16 = 0x04BC;
     const PTG_EXP: u8 = 0x01;
 
-    let biff::supbook::SupBookTable {
-        supbooks,
-        warnings: supbook_warnings,
-    } = biff::supbook::parse_biff8_supbook_table(workbook_stream, codepage);
-    for w in supbook_warnings {
-        push_import_warning(
-            warnings,
-            format!("failed to import `.xls` shared formulas: {w}"),
-            suppressed,
-        );
-    }
-
-    let biff::externsheet::ExternSheetTable {
-        entries: externsheet_entries,
-        warnings: extern_warnings,
-    } = biff::externsheet::parse_biff_externsheet(
-        workbook_stream,
-        biff::BiffVersion::Biff8,
-        codepage,
-    );
-    for w in extern_warnings {
-        push_import_warning(
-            warnings,
-            format!("failed to import `.xls` shared formulas: {w}"),
-            suppressed,
-        );
-    }
-
-    let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
-    let ctx = biff::rgce::RgceDecodeContext {
-        codepage,
-        sheet_names: sheet_names_by_biff_idx,
-        externsheet: &externsheet_entries,
-        supbooks: &supbooks,
-        defined_names,
-    };
+    let ctx = rgce_decoder.rgce_decode_context(sheet_names_by_biff_idx);
 
     for (biff_idx, sheet_info) in biff_sheets.iter().enumerate() {
         let Some(sheet_id) = sheet_ids_by_biff_idx.get(biff_idx).copied().flatten() else {
