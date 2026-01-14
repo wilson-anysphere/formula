@@ -25,7 +25,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
     (and `UnsupportedOoxmlEncryption` for unknown versions).
   - Legacy `.xls` with `FILEPASS` yields `formula_io::Error::EncryptedWorkbook` unless the caller
     uses the `.xls` importer with a password (see below).
-  - The desktop app surfaces an “encrypted workbook not supported” message.
+  - The desktop app surfaces a **password required** style error (so the UI can prompt for a password).
 - Password-based OOXML decryption is not yet implemented end-to-end in `formula-io`.
   - The default open path (`open_workbook` / `open_workbook_model`) has no password parameter.
   - `open_workbook_with_password` / `open_workbook_model_with_password` exist so callers can

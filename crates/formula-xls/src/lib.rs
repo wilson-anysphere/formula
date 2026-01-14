@@ -183,7 +183,9 @@ pub enum ImportError {
     Xls(#[from] calamine::XlsError),
     #[error("internal panic while reading `.xls`: {0}")]
     CalaminePanic(String),
-    #[error("workbook is password-protected/encrypted; a password is required to open it")]
+    #[error(
+        "password required: workbook is password-protected/encrypted; use `import_xls_path_with_password(..)` to open it"
+    )]
     EncryptedWorkbook,
     #[error("failed to decrypt `.xls`: {0}")]
     Decrypt(#[from] DecryptError),

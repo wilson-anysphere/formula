@@ -38,7 +38,7 @@ pub enum Error {
     #[error("unsupported extension `{extension}` for workbook `{path}`")]
     UnsupportedExtension { path: PathBuf, extension: String },
     #[error(
-        "password required: workbook `{path}` is password-protected/encrypted; provide the password to open it"
+        "password required: workbook `{path}` is password-protected/encrypted; supply a password via `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)`"
     )]
     PasswordRequired { path: PathBuf },
     #[error("invalid password for workbook `{path}`")]
@@ -52,7 +52,7 @@ pub enum Error {
         version_minor: u16,
     },
     #[error(
-        "password required: workbook `{path}` is password-protected/encrypted (legacy `.xls` encryption); provide the password to open it"
+        "password required: workbook `{path}` is password-protected/encrypted (legacy `.xls` encryption); supply a password via `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)`"
     )]
     EncryptedWorkbook { path: PathBuf },
     #[error(
