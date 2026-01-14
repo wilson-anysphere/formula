@@ -25,6 +25,7 @@ vi.mock("@formula/collab-session", () => ({
   bindCollabSessionToDocumentController: mocks.bindCollabSessionToDocumentController,
 }));
 
+import { LazyIndexedDbCollabPersistence } from "../../collab/lazyIndexedDbCollabPersistence";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function encodeBase64Url(value: string): string {
@@ -179,7 +180,7 @@ describe("SpreadsheetApp collab persistence", () => {
     expect(mocks.createCollabSession).toHaveBeenCalledTimes(1);
     const options = mocks.createCollabSession.mock.calls[0]?.[0] as any;
     expect(options?.connection?.docId).toBe("doc-123");
-    expect(options?.persistence).toBeInstanceOf(mocks.IndexedDbCollabPersistence);
+    expect(options?.persistence).toBeInstanceOf(LazyIndexedDbCollabPersistence);
     expect(options?.offline).toBeUndefined();
 
     app.destroy();
@@ -260,7 +261,7 @@ describe("SpreadsheetApp collab persistence", () => {
     expect(mocks.createCollabSession).toHaveBeenCalledTimes(1);
     const options = mocks.createCollabSession.mock.calls[0]?.[0] as any;
     expect(options?.connection?.docId).toBe("doc-legacy-offline-true");
-    expect(options?.persistence).toBeInstanceOf(mocks.IndexedDbCollabPersistence);
+    expect(options?.persistence).toBeInstanceOf(LazyIndexedDbCollabPersistence);
     expect(options?.offline).toBeUndefined();
 
     app.destroy();

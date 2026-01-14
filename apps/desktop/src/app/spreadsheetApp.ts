@@ -164,6 +164,7 @@ import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sh
 import { bindImageBytesToCollabSession, type ImageBytesBinder } from "../collab/imageBytesBinder";
 import { resolveDevCollabEncryptionFromSearch } from "../collab/devEncryption.js";
 import { CollabEncryptionKeyStore } from "../collab/encryptionKeyStore";
+import { LazyIndexedDbCollabPersistence } from "../collab/lazyIndexedDbCollabPersistence.js";
 import {
   createEncryptedRangeManagerForSession,
   createEncryptionPolicyFromDoc,
@@ -181,7 +182,6 @@ import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 import { bindCollabSessionToDocumentController, createCollabSession, makeCellKey, type CollabSession } from "@formula/collab-session";
-import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
 import { tryDeriveCollabSessionPermissionsFromJwtToken } from "../collab/jwt";
 import { getCollabUserIdentity, overrideCollabUserIdentityId, type CollabUserIdentity } from "../collab/userIdentity";
 
@@ -1724,7 +1724,7 @@ export class SpreadsheetApp {
       this.collabBinderOrigin = binderOrigin;
 
       const persistenceEnabled = collab.persistenceEnabled ?? collab.offlineEnabled ?? true;
-      const persistence = persistenceEnabled === false ? undefined : new IndexedDbCollabPersistence();
+      const persistence = persistenceEnabled === false ? undefined : new LazyIndexedDbCollabPersistence();
 
       const devEncryption =
         typeof window !== "undefined"

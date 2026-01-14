@@ -44,7 +44,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { createLazyImport } from "./startup/lazyImport.js";
 
 import { SheetTabStrip } from "./sheets/SheetTabStrip";
-import { openOrganizeSheetsDialog } from "./sheets/OrganizeSheetsDialog";
 
 import { ThemeController } from "./theme/themeController.js";
 
@@ -410,6 +409,11 @@ const loadPowerQueryTableSignaturesModule = createLazyImport(() => import("./pow
 const loadPowerQueryOauthBrokerModule = createLazyImport(() => import("./power-query/oauthBroker.js"), {
   label: "Power Query OAuth",
   onError: (err) => reportLazyImportFailure("Power Query OAuth", err),
+});
+
+const loadOrganizeSheetsDialogModule = createLazyImport(() => import("./sheets/OrganizeSheetsDialog"), {
+  label: "Organize Sheets",
+  onError: (err) => reportLazyImportFailure("Organize Sheets", err),
 });
 
 const loadPageSetupDialogModule = createLazyImport(() => import("./print/PageSetupDialog.js"), {
@@ -1943,7 +1947,7 @@ const openFormatCells = createOpenFormatCells({
   focusGrid: () => app.focus(),
 });
 
-function openOrganizeSheets(): void {
+async function openOrganizeSheets(): Promise<void> {
   const getStore = () => createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null);
   // Reuse the existing add-sheet command logic, but avoid restoring focus to the grid while the
   // dialog is open (the dialog will restore focus on close instead).
@@ -1953,6 +1957,7 @@ function openOrganizeSheets(): void {
     restoreFocusAfterSheetNavigation: () => {},
     showToast,
   });
+  const { openOrganizeSheetsDialog } = await loadOrganizeSheetsDialogModule();
   openOrganizeSheetsDialog({
     store: getStore(),
     getStore,
