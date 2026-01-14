@@ -639,6 +639,31 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    fn hex_decode(mut s: &str) -> Vec<u8> {
+        // Keep parsing permissive for readability in expected-value literals.
+        s = s.trim();
+        let mut compact = String::with_capacity(s.len());
+        for ch in s.chars() {
+            if ch.is_ascii_hexdigit() {
+                compact.push(ch);
+            }
+        }
+        assert!(
+            compact.len() % 2 == 0,
+            "hex string must have even length (got {})",
+            compact.len()
+        );
+
+        let mut out = Vec::with_capacity(compact.len() / 2);
+        let bytes = compact.as_bytes();
+        for i in (0..bytes.len()).step_by(2) {
+            let hi = (bytes[i] as char).to_digit(16).unwrap();
+            let lo = (bytes[i + 1] as char).to_digit(16).unwrap();
+            out.push(((hi << 4) | lo) as u8);
+        }
+        out
+    }
+
     #[test]
     fn md5_digest_len_is_16() {
         assert_eq!(HashAlgorithm::Md5.digest_len(), 16);
@@ -774,6 +799,51 @@ mod tests {
                 std::str::from_utf8(key).ok()
             );
         }
+    }
+
+    #[test]
+    fn standard_cryptoapi_rc4_sha1_derivation_vector() {
+        // Deterministic test vector from `docs/offcrypto-standard-cryptoapi-rc4.md`.
+        let password = "password";
+        let salt: Vec<u8> = (0u8..=0x0F).collect();
+        let spin_count = 50_000u32;
+        let key_bits = 128u32;
+
+        let pw = password_to_utf16le(password);
+        let h = hash_password(HashAlgorithm::Sha1, &salt, &pw, spin_count);
+        assert_eq!(
+            h.to_vec(),
+            hex_decode("1b5972284eab6481eb6565a0985b334b3e65e041")
+        );
+
+        let deriver = StandardKeyDeriver::new(
+            HashAlgorithm::Sha1,
+            key_bits,
+            &salt,
+            password,
+            StandardKeyDerivation::Rc4,
+        );
+        let key0 = deriver.derive_key_for_block(0).expect("key0");
+        let key1 = deriver.derive_key_for_block(1).expect("key1");
+        assert_eq!(
+            key0.as_slice(),
+            hex_decode("6ad7dedf2da3514b1d85eabee069d47d")
+        );
+        assert_eq!(
+            key1.as_slice(),
+            hex_decode("2ed4e8825cd48aa4a47994cda7415b4a")
+        );
+        assert_ne!(key0.as_slice(), key1.as_slice());
+
+        let plaintext = b"Hello, RC4 CryptoAPI!";
+        let mut ciphertext = plaintext.to_vec();
+        rc4_xor_in_place(&key0, &mut ciphertext).expect("rc4 encrypt");
+        assert_eq!(
+            ciphertext,
+            hex_decode("e7c9974140e69857dbdec656c7ccb4f9283d723236")
+        );
+        rc4_xor_in_place(&key0, &mut ciphertext).expect("rc4 decrypt");
+        assert_eq!(ciphertext, plaintext);
     }
 
     #[test]
