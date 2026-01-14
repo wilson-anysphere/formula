@@ -261,6 +261,25 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(webWriteText).not.toHaveBeenCalled();
   });
 
+  it("write() uses clipboard_write_text for oversized plain text when legacy writeText is unavailable", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    // Hardened builds do not expose the clipboard-manager plugin (`__TAURI__.clipboard.writeText`).
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const webWriteText = vi.fn().mockResolvedValue(undefined);
+    setMockNavigatorClipboard({ writeText: webWriteText });
+
+    const provider = await createClipboardProvider();
+    const largeText = "x".repeat(CLIPBOARD_LIMITS.maxRichTextBytes + 1);
+    await provider.write({ text: largeText, html: "<p>hello</p>" });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls[0]?.[0]).toBe("clipboard_write_text");
+    expect(invoke.mock.calls[0]?.[1]).toEqual({ text: largeText });
+
+    expect(webWriteText).not.toHaveBeenCalled();
+  });
+
   it("write() encodes imagePng bytes as pngBase64 for clipboard_write payload", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const legacyWriteText = vi.fn().mockResolvedValue(undefined);
