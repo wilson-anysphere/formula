@@ -305,7 +305,7 @@ mod tests {
         // Use lowercased identifiers throughout to ensure config parsing + pivot execution are
         // case-insensitive, while output headers preserve the model's original casing.
         let mut value_field = sum_amount_value_field();
-        value_field.source_field = "amount".to_string();
+        value_field.source_field = PivotFieldRef::CacheFieldName("amount".to_string());
 
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("category")],
