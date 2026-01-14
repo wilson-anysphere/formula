@@ -144,6 +144,42 @@ describe("startupMetrics", () => {
     expect(invoke).toHaveBeenCalledWith("report_startup_first_render");
   });
 
+  it("retries for a short period when bootstrapped and __TAURI__ is injected late", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+
+      // Force the bootstrap hint so markStartupFirstRender knows it's safe to retry.
+      (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = true;
+
+      // Make `nextFrame()` fast so we hit the retry path before we inject `__TAURI__`.
+      (globalThis as any).requestAnimationFrame = undefined;
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).__TAURI__;
+      } catch {
+        (globalThis as any).__TAURI__ = undefined;
+      }
+
+      const promise = markStartupFirstRender();
+
+      setTimeout(() => {
+        (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      }, 100);
+
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(invoke).toHaveBeenCalledWith("report_startup_first_render");
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
+    }
+  });
+
   it("boots startup metrics as early side effects (report -> install listeners -> report again)", async () => {
     const invoke = vi.fn().mockResolvedValue(null);
     const listen = vi.fn().mockResolvedValue(() => {});

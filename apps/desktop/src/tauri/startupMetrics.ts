@@ -33,6 +33,7 @@ export type StartupTimings = {
 
 const GLOBAL_KEY = "__FORMULA_STARTUP_TIMINGS__";
 const LISTENERS_KEY = "__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__";
+const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const FIRST_RENDER_REPORTED_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTED__";
 
 function getStore(): StartupTimings {
@@ -177,8 +178,25 @@ export async function markStartupFirstRender(): Promise<StartupTimings> {
   await nextFrame();
   await nextFrame();
 
-  const invoke = getTauriInvoke();
-  if (!invoke) return { ...store };
+  let invoke = getTauriInvoke();
+  if (!invoke) {
+    // In most environments `__TAURI__` is available immediately, but some host builds can delay
+    // injection until shortly after module evaluation begins. When the early bootstrap runs we
+    // set `__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__` as a low-risk signal that we're in a Tauri
+    // environment and should retry for a short bounded period.
+    const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
+    if (!shouldRetry) return { ...store };
+
+    const deadlineMs = Date.now() + 2_000;
+    let delayMs = 1;
+    while (!invoke && Date.now() < deadlineMs) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      delayMs = Math.min(50, delayMs * 2);
+      invoke = getTauriInvoke();
+    }
+
+    if (!invoke) return { ...store };
+  }
 
   // Mark as reported only once we're sure the host IPC surface exists; some Tauri builds may
   // inject `__TAURI__` slightly after the first JS tick.
