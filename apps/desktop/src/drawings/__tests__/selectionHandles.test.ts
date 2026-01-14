@@ -196,6 +196,67 @@ describe("drawings selection handles", () => {
     }
   });
 
+  it("DrawingInteractionController starts resize from transformed handles (pointerdown)", () => {
+    const listeners = new Map<string, (e: any) => void>();
+    const canvas: any = makeCanvas(listeners);
+
+    const geom: GridGeometry = {
+      cellOriginPx: () => ({ x: 0, y: 0 }),
+      cellSizePx: () => ({ width: 0, height: 0 }),
+    };
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
+
+    const transform = { rotationDeg: 90, flipH: false, flipV: false };
+
+    let objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(200) },
+          size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+        transform,
+      },
+    ];
+
+    const callbacks = {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next: DrawingObject[]) => {
+        objects = next;
+      },
+      onSelectionChange: vi.fn(),
+    };
+
+    new DrawingInteractionController(canvas as HTMLCanvasElement, geom, callbacks);
+
+    const pointerDown = listeners.get("pointerdown");
+    const pointerUp = listeners.get("pointerup");
+    expect(pointerDown).toBeTypeOf("function");
+    expect(pointerUp).toBeTypeOf("function");
+
+    // Select the object.
+    pointerDown!(makePointerEvent(140, 220, 1));
+    pointerUp!(makePointerEvent(140, 220, 1));
+    expect(callbacks.onSelectionChange).toHaveBeenCalledTimes(1);
+
+    // Each transformed handle center should be clickable to start a resize without changing selection.
+    const bounds = { x: 100, y: 200, width: 80, height: 40 };
+    const centers = getResizeHandleCenters(bounds, transform);
+    for (let i = 0; i < centers.length; i += 1) {
+      const c = centers[i]!;
+      const id = i + 2;
+      pointerDown!(makePointerEvent(c.x, c.y, id));
+      expect(callbacks.onSelectionChange).toHaveBeenCalledTimes(1);
+      expect(canvas.style.cursor).toBe(cursorForResizeHandle(c.handle, transform));
+      pointerUp!(makePointerEvent(c.x, c.y, id));
+    }
+  });
+
   it("allows starting a resize from handle hit areas outside the object bounds", () => {
     const listeners = new Map<string, (e: any) => void>();
     const canvas: any = makeCanvas(listeners);
