@@ -433,6 +433,17 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
         }
       });
 
+      // If the desktop shell threw during startup (uncaught exception), the app can partially
+      // mount while leaving other regions uninitialized. Surface those failures early so flaky
+      // "element not found" assertions are easier to debug.
+      if (pageErrors.length > 0) {
+        const diag = await formatStartupDiagnostics();
+        page.off("console", onConsole);
+        page.off("pageerror", onPageError);
+        page.off("requestfailed", onRequestFailed);
+        throw new Error(`Desktop startup failed with page errors.${diag}`);
+      }
+
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
       page.off("requestfailed", onRequestFailed);
