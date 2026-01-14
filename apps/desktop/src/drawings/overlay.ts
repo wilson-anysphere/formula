@@ -355,6 +355,7 @@ export class DrawingOverlay {
   private readonly chartSurfaceKeep = new Set<string>();
   private themeObserver: MutationObserver | null = null;
   private lastRenderArgs: { objects: DrawingObject[]; viewport: Viewport; options?: { drawObjects?: boolean } } | null = null;
+  private readonly lastRenderViewportScratch: Viewport = { scrollX: 0, scrollY: 0, width: 0, height: 0, dpr: 1 };
   private readonly pendingImageHydrations = new Map<string, Promise<ImageEntry | undefined>>();
   private readonly imageHydrationNegativeCache = new Map<string, number>();
   private imageHydrationEpoch = 0;
@@ -584,7 +585,28 @@ export class DrawingOverlay {
     const drawObjects = options?.drawObjects !== false;
     // Keep the latest render args around so async image hydration can trigger a follow-up render
     // once bytes are available (without relying on callers to poll/refresh).
-    this.lastRenderArgs = { objects, viewport: { ...viewport }, options };
+    const lastViewport = this.lastRenderViewportScratch;
+    lastViewport.scrollX = viewport.scrollX;
+    lastViewport.scrollY = viewport.scrollY;
+    lastViewport.width = viewport.width;
+    lastViewport.height = viewport.height;
+    lastViewport.dpr = viewport.dpr;
+    lastViewport.zoom = viewport.zoom;
+    lastViewport.frozenRows = viewport.frozenRows;
+    lastViewport.frozenCols = viewport.frozenCols;
+    lastViewport.frozenWidthPx = viewport.frozenWidthPx;
+    lastViewport.frozenHeightPx = viewport.frozenHeightPx;
+    lastViewport.headerOffsetX = viewport.headerOffsetX;
+    lastViewport.headerOffsetY = viewport.headerOffsetY;
+
+    const lastArgs = this.lastRenderArgs;
+    if (lastArgs) {
+      lastArgs.objects = objects;
+      lastArgs.options = options;
+    } else {
+      // Allocate once and reuse across renders to avoid per-frame `{ ...viewport }` cloning.
+      this.lastRenderArgs = { objects, viewport: lastViewport, options };
+    }
 
     const chartRenderer = this.chartRenderer;
     if (chartRenderer && typeof chartRenderer.pruneSurfaces === "function") {
