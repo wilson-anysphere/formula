@@ -9,13 +9,17 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-desktop-compliance-artifacts.mjs");
 
-function run(config) {
+function run(config, { writeLicense = true, writeNotice = true } = {}) {
   const tmpdir = mkdtempSync(path.join(os.tmpdir(), "formula-desktop-compliance-"));
   const confPath = path.join(tmpdir, "tauri.conf.json");
   // The validator resolves paths relative to the tauri.conf.json location. Create
   // dummy LICENSE/NOTICE files next to the temp config so existence checks pass.
-  writeFileSync(path.join(tmpdir, "LICENSE"), "LICENSE stub\n", "utf8");
-  writeFileSync(path.join(tmpdir, "NOTICE"), "NOTICE stub\n", "utf8");
+  if (writeLicense) {
+    writeFileSync(path.join(tmpdir, "LICENSE"), "LICENSE stub\n", "utf8");
+  }
+  if (writeNotice) {
+    writeFileSync(path.join(tmpdir, "NOTICE"), "NOTICE stub\n", "utf8");
+  }
   mkdirSync(path.join(tmpdir, "mime"), { recursive: true });
   writeFileSync(path.join(tmpdir, "mime", "app.formula.desktop.xml"), "<mime-info />\n", "utf8");
   // Some configs may reference the MIME definition file at repo root (basename-only); create
@@ -242,4 +246,39 @@ test("fails when Parquet association is configured but Linux package deps omit s
   });
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /shared-mime-info/i);
+});
+
+test("fails when LICENSE source file does not exist", () => {
+  const proc = run(
+    {
+      mainBinaryName: "formula-desktop",
+      bundle: {
+        resources: ["LICENSE", "NOTICE"],
+        linux: {
+          deb: {
+            files: {
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+          rpm: {
+            files: {
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+          appimage: {
+            files: {
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+        },
+      },
+    },
+    { writeLicense: false, writeNotice: true },
+  );
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /missing source file/i);
+  assert.match(proc.stderr, /LICENSE/i);
 });

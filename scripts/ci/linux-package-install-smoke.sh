@@ -7,7 +7,8 @@ usage() {
 usage: scripts/ci/linux-package-install-smoke.sh [deb|rpm|all]
 
 Installs the built Linux desktop packages into clean containers and validates that
-the installed binary has no missing shared libraries.
+the installed binary has no missing shared libraries and that compliance artifacts
+(LICENSE/NOTICE) are installed under /usr/share/doc/<mainBinaryName>/.
 
 This is intended for CI/release workflows to catch:
   - missing runtime dependencies in packaging metadata
