@@ -9,6 +9,33 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def strip_wrapping_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def strip_flow_mapping_trailing_brace(value: str) -> str:
+    """Remove a trailing `}` introduced by inline YAML flow mappings.
+
+    Some workflows use:
+
+        with: { path: ..., key: ... }
+
+    When we extract the `key:`/`path:` value by splitting on commas, the closing
+    `}` can end up attached to the final value. We want to drop *one* mapping
+    brace without clobbering GitHub expression braces (e.g. `${{ ... }}`).
+    """
+
+    value = value.strip()
+    if value.endswith("}}}"):
+        return value[:-1].rstrip()
+    if value.endswith("}") and not value.endswith("}}"):
+        return value[:-1].rstrip()
+    return value
+
+
 def extract_pyodide_version(ensure_script: Path) -> str:
     src = ensure_script.read_text(encoding="utf-8")
     m = re.search(r"const\s+PYODIDE_VERSION\s*=\s*['\"]([^'\"]+)['\"]", src)
@@ -107,14 +134,14 @@ def check_job(
     for ln, line in job_lines:
         if is_comment(line):
             continue
-        stripped = line.lstrip()
-        if not stripped.startswith("key:"):
-            continue
-        raw_value = stripped[len("key:") :].strip()
         # Strip trailing inline comments.
-        raw_value = raw_value.split("#", 1)[0].strip()
-        if raw_value.startswith("pyodide"):
-            pyodide_key_lines.append((ln, raw_value))
+        line = line.split("#", 1)[0]
+        for m in re.finditer(r"\bkey:\s*([^,]+)", line):
+            raw_value = m.group(1).strip()
+            raw_value = strip_flow_mapping_trailing_brace(raw_value)
+            raw_value = strip_wrapping_quotes(raw_value)
+            if raw_value.startswith("pyodide"):
+                pyodide_key_lines.append((ln, raw_value))
 
     if not pyodide_key_lines:
         errors.append("- Missing `key: pyodide-...` in cache configuration")
@@ -157,17 +184,6 @@ def check_job(
     #
     # Require a step that restores the tracked files back to HEAD after the cache is
     # restored while keeping the untracked downloaded assets intact.
-    caches_whole_pyodide_tree = any(
-        raw.strip().rstrip("/") == "apps/desktop/public/pyodide"
-        for _, line in job_lines
-        if not is_comment(line)
-        for raw in [
-            line.lstrip()[len("path:") :].split("#", 1)[0].strip()
-            if line.lstrip().startswith("path:")
-            else ""
-        ]
-        if raw
-    )
 
     def split_steps() -> list[list[tuple[int, str]]]:
         """Split a job block into step blocks using indentation heuristics.
@@ -224,6 +240,7 @@ def check_job(
         Returns (line_number_of_field, values) or None if field not present.
         """
 
+        block_markers = {"|", "|-", "|+", ">", ">-", ">+"}
         for i, (ln, line) in enumerate(step):
             if is_comment(line):
                 continue
@@ -232,8 +249,9 @@ def check_job(
                 continue
             indent = len(m.group(1))
             rest = m.group(2).strip()
-            if rest and rest != "|":
+            if rest and rest not in block_markers:
                 # Single-line value.
+                rest = strip_flow_mapping_trailing_brace(strip_wrapping_quotes(rest))
                 return (ln, [rest])
             values: list[str] = []
             for _, next_line in step[i + 1 :]:
@@ -243,9 +261,58 @@ def check_job(
                 if next_indent <= indent:
                     # Dedented; stop.
                     break
-                values.append(next_line.strip())
+                value = next_line.strip()
+                # Allow YAML list forms (`field:\n  - foo\n  - bar`).
+                if value.startswith("- "):
+                    value = value[2:].strip()
+                # Strip inline comments in value lines (best-effort).
+                value = value.split("#", 1)[0].strip()
+                value = strip_flow_mapping_trailing_brace(strip_wrapping_quotes(value))
+                if value:
+                    values.append(value)
             return (ln, values)
         return None
+
+    def extract_step_inline_field(step: list[tuple[int, str]], field: str) -> list[str]:
+        """Extract field values from inline `with: { ... }` flow mappings (best-effort)."""
+
+        out: list[str] = []
+        # Match `field: <value>` inside an inline mapping. Capture until the next comma
+        # or end-of-line; we'll strip the trailing `}` below if present.
+        pattern = re.compile(rf"\b{re.escape(field)}:\s*([^,]+)")
+        for _, line in step:
+            if is_comment(line):
+                continue
+            candidate = line.split("#", 1)[0]
+            for m in pattern.finditer(candidate):
+                value = m.group(1).strip()
+                value = strip_flow_mapping_trailing_brace(strip_wrapping_quotes(value))
+                if value:
+                    out.append(value)
+        return out
+
+    def step_caches_whole_pyodide_tree(step: list[tuple[int, str]] | None) -> bool:
+        if step is None:
+            return False
+        extracted = extract_multiline_value(step, "path")
+        paths: list[str] = []
+        if extracted is not None:
+            _, values = extracted
+            paths.extend(values)
+        paths.extend(extract_step_inline_field(step, "path"))
+        for raw in paths:
+            cleaned = strip_flow_mapping_trailing_brace(strip_wrapping_quotes(raw)).strip()
+            cleaned = cleaned.rstrip("/")
+            if cleaned == "apps/desktop/public/pyodide":
+                return True
+        return False
+
+    restore_step = find_step("Restore Pyodide asset cache")
+    save_step = find_step("Save Pyodide asset cache")
+    caches_whole_pyodide_tree = step_caches_whole_pyodide_tree(
+        restore_step
+    ) or step_caches_whole_pyodide_tree(save_step)
+
     if caches_whole_pyodide_tree:
         restore_tracked_line = next(
             (
@@ -269,7 +336,6 @@ def check_job(
         # Cross-OS restore requires both:
         # - `restore-keys` that can match a cache created on a different OS
         # - `enableCrossOsArchive: true` on restore/save
-        restore_step = find_step("Restore Pyodide asset cache")
         if restore_step is None:
             errors.append("- Missing 'Restore Pyodide asset cache' step block (unable to validate enableCrossOsArchive/restore-keys)")
         else:
@@ -297,7 +363,6 @@ def check_job(
                         "- Pyodide cache restore-keys is missing a cross-OS fallback prefix (expected a key that includes the Pyodide version but not runner.os)"
                     )
 
-        save_step = find_step("Save Pyodide asset cache")
         if save_step is None:
             errors.append("- Missing 'Save Pyodide asset cache' step block (unable to validate enableCrossOsArchive)")
         else:
