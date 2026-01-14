@@ -398,6 +398,9 @@ Notes:
 While this document’s success criteria is key derivation + verifier validation, engineers usually need the
 next step: decrypting the actual OOXML ZIP package.
 
+For additional `EncryptedPackage` edge cases and validation rules (particularly around final-segment
+padding and trailing bytes), see `docs/offcrypto-standard-encryptedpackage.md`.
+
 ### 7.1) Stream layout
 
 The `EncryptedPackage` stream begins with:
@@ -450,6 +453,9 @@ For segment index `i = 0, 1, 2, ...`:
    ciphertext.
 
 Concatenate segments and truncate to `OriginalPackageSize`.
+
+For a deeper Standard RC4 writeup (including test vectors and “0x200 vs 0x400 block size” gotchas),
+see `docs/offcrypto-standard-cryptoapi-rc4.md`.
 
 ---
 
