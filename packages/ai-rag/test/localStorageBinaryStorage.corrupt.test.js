@@ -35,6 +35,21 @@ class MemoryLocalStorage {
   }
 }
 
+class NoRemoveItemLocalStorage {
+  constructor() {
+    /** @type {Map<string, string>} */
+    this._data = new Map();
+  }
+
+  getItem(key) {
+    return this._data.has(key) ? this._data.get(key) : null;
+  }
+
+  setItem(key, value) {
+    this._data.set(key, value);
+  }
+}
+
 function withTempGlobalProp(name, value, fn) {
   const original = Object.getOwnPropertyDescriptor(globalThis, name);
   Object.defineProperty(globalThis, name, { value, configurable: true });
@@ -111,6 +126,20 @@ test("LocalStorageBinaryStorage clears invalid base64 payloads on load (Buffer p
     const loaded = await storage.load();
     assert.equal(loaded, null);
     assert.equal(globalThis.localStorage.getItem(storage.key), null, "expected invalid base64 key to be cleared");
+  });
+});
+
+test("LocalStorageBinaryStorage clears invalid base64 even when localStorage lacks removeItem", async () => {
+  await withTempGlobalProp("localStorage", new NoRemoveItemLocalStorage(), async () => {
+    const storage = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "bad-b64-no-remove" });
+    globalThis.localStorage.setItem(storage.key, "%%%not-base64%%%");
+    const loaded = await storage.load();
+    assert.equal(loaded, null);
+    // Key should be overwritten with a falsy value so future loads treat it as missing.
+    assert.equal(globalThis.localStorage.getItem(storage.key), "");
+
+    const loaded2 = await storage.load();
+    assert.equal(loaded2, null);
   });
 });
 

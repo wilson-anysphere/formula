@@ -44,9 +44,17 @@ export class LocalStorageBinaryStorage {
     } catch {
       // Corrupted base64 payload; clear it so future loads can recover.
       try {
-        storage.removeItem?.(this.key);
+        if (typeof storage.removeItem === "function") storage.removeItem(this.key);
+        else if (typeof storage.setItem === "function") storage.setItem(this.key, "");
       } catch {
-        // ignore
+        // If `removeItem` is unavailable or throws, fall back to overwriting the
+        // key with an empty string so subsequent `getItem()` returns a falsy
+        // value and callers treat the payload as missing.
+        try {
+          storage.setItem?.(this.key, "");
+        } catch {
+          // ignore
+        }
       }
       return null;
     }
@@ -61,7 +69,16 @@ export class LocalStorageBinaryStorage {
   async remove() {
     const storage = getLocalStorageOrNull();
     if (!storage) return;
-    storage.removeItem?.(this.key);
+    try {
+      if (typeof storage.removeItem === "function") storage.removeItem(this.key);
+      else if (typeof storage.setItem === "function") storage.setItem(this.key, "");
+    } catch {
+      try {
+        storage.setItem?.(this.key, "");
+      } catch {
+        // ignore
+      }
+    }
   }
 }
 
