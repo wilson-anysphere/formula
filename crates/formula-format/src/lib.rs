@@ -28,7 +28,7 @@ mod parse;
 pub use crate::builtin::builtin_format_code;
 pub use crate::builtin::builtin_format_code_with_locale;
 pub use crate::builtin::builtin_format_id;
-pub use crate::cell_format::cell_format_code;
+pub use crate::cell_format::{cell_format_code, cell_parentheses_flag};
 pub use crate::datetime::DateSystem;
 pub use crate::parse::{locale_for_lcid, FormatCode, ParseError};
 

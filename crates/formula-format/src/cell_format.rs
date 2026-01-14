@@ -56,6 +56,31 @@ pub fn cell_format_code(format_code: Option<&str>) -> String {
     format!("{kind}{decimals}")
 }
 
+/// Return Excel-compatible `CELL("parentheses")` flag for an Excel number format string.
+///
+/// Excel returns `1` when negative numbers are displayed using parentheses, and `0` otherwise.
+///
+/// This helper selects the section that Excel would use for a negative numeric value and then
+/// scans that section for parenthesis characters, ignoring:
+/// - quoted literals (`"..."`)
+/// - escaped characters (`\X`)
+/// - bracket tokens (`[...]`)
+/// - underscore (`_X`) and fill (`*X`) layout tokens whose operands are not rendered literally.
+pub fn cell_parentheses_flag(format_code: Option<&str>) -> u8 {
+    let code = format_code.unwrap_or("General");
+    let code = if code.trim().is_empty() { "General" } else { code };
+    let code = resolve_builtin_placeholder(code).unwrap_or(code);
+
+    let parsed = FormatCode::parse(code).unwrap_or_else(|_| FormatCode::general());
+    let negative = parsed.select_section_for_number(-1.0);
+
+    if pattern_contains_parentheses(negative.pattern) {
+        1
+    } else {
+        0
+    }
+}
+
 fn resolve_builtin_placeholder(code: &str) -> Option<&'static str> {
     let id = code
         .strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?
@@ -63,6 +88,49 @@ fn resolve_builtin_placeholder(code: &str) -> Option<&'static str> {
         .parse::<u16>()
         .ok()?;
     builtin_format_code(id)
+}
+
+fn pattern_contains_parentheses(pattern: &str) -> bool {
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut in_brackets = false;
+    let mut chars = pattern.chars();
+
+    while let Some(ch) = chars.next() {
+        if escape {
+            escape = false;
+            continue;
+        }
+
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => in_brackets = true,
+            // `_X` / `*X` layout tokens consume the following character. The operand is not a
+            // literal character for CELL("parentheses") purposes (even if it is '(' or ')').
+            '_' | '*' => {
+                let _ = chars.next();
+            }
+            '(' | ')' => return true,
+            _ => {}
+        }
+    }
+
+    false
 }
 
 fn count_decimal_places(pattern: &str) -> usize {
