@@ -445,6 +445,22 @@ export function registerBuiltinCommands(params: {
     input.click();
   };
 
+  const refresh = (): void => {
+    try {
+      refreshRibbonUiState?.();
+    } catch {
+      // ignore (best-effort only)
+    }
+  };
+
+  const focusApp = (): void => {
+    try {
+      (app as any)?.focus?.();
+    } catch {
+      // ignore (tests/minimal harnesses)
+    }
+  };
+
   const applyThemePreference = (preference: "system" | "light" | "dark" | "high-contrast"): void => {
     if (!themeController) return;
     try {
@@ -452,16 +468,8 @@ export function registerBuiltinCommands(params: {
     } catch {
       // Best-effort only.
     }
-    try {
-      refreshRibbonUiState?.();
-    } catch {
-      // ignore
-    }
-    try {
-      (app as any)?.focus?.();
-    } catch {
-      // ignore
-    }
+    refresh();
+    focusApp();
   };
   commandRegistry.registerBuiltinCommand(
     "edit.undo",
@@ -2111,7 +2119,15 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.system",
       t("command.view.theme.system"),
-      () => applyThemePreference("system"),
+      () => {
+        try {
+          themeController.setThemePreference("system");
+        } catch {
+          // Best-effort only.
+        }
+        refresh();
+        focusApp();
+      },
       {
         category: categoryView,
         icon: null,
@@ -2123,7 +2139,15 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.light",
       t("command.view.theme.light"),
-      () => applyThemePreference("light"),
+      () => {
+        try {
+          themeController.setThemePreference("light");
+        } catch {
+          // Best-effort only.
+        }
+        refresh();
+        focusApp();
+      },
       {
         category: categoryView,
         icon: null,
@@ -2135,7 +2159,15 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.dark",
       t("command.view.theme.dark"),
-      () => applyThemePreference("dark"),
+      () => {
+        try {
+          themeController.setThemePreference("dark");
+        } catch {
+          // Best-effort only.
+        }
+        refresh();
+        focusApp();
+      },
       {
         category: categoryView,
         icon: null,
@@ -2147,7 +2179,15 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.highContrast",
       t("command.view.theme.highContrast"),
-      () => applyThemePreference("high-contrast"),
+      () => {
+        try {
+          themeController.setThemePreference("high-contrast");
+        } catch {
+          // Best-effort only.
+        }
+        refresh();
+        focusApp();
+      },
       {
         category: categoryView,
         icon: null,
