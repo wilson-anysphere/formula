@@ -10734,15 +10734,26 @@ export class SpreadsheetApp {
         bounds.y = sheetRect.y - scrollY + headerOffsetY;
         bounds.width = sheetRect.width;
         bounds.height = sheetRect.height;
-        // Charts behave like Excel chart objects: movable/resizable but not rotatable.
-        const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
-        if (canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) {
-          return cursorForRotationHandle(false);
+
+        // Selection handles/rotation handle are clipped to the drawing's frozen pane quadrant. Avoid
+        // returning resize/rotation cursors when hovering the clipped-off portion in another pane.
+        if (x >= headerOffsetX && y >= headerOffsetY) {
+          const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
+          const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? (viewport.frozenHeightPx as number) : headerOffsetY;
+          const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+          const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
+          if (pointInFrozenCols === inFrozenCols && pointInFrozenRows === inFrozenRows) {
+            // Charts behave like Excel chart objects: movable/resizable but not rotatable.
+            const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
+            if (canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) {
+              return cursorForRotationHandle(false);
+            }
+            // When selected, handles can extend slightly outside the untransformed bounds. Check the selected
+            // object explicitly so hover feedback works even when the cursor lies just beyond the anchor rect.
+            const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
+            if (handle) return cursorForResizeHandleWithTransform(handle, selected.transform);
+          }
         }
-        // When selected, handles can extend slightly outside the untransformed bounds. Check the selected
-        // object explicitly so hover feedback works even when the cursor lies just beyond the anchor rect.
-        const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
-        if (handle) return cursorForResizeHandleWithTransform(handle, selected.transform);
       }
     }
 

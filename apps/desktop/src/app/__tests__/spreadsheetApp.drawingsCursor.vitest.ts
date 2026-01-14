@@ -275,4 +275,76 @@ describe("SpreadsheetApp drawing hover cursor", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("does not show a resize cursor when hovering a clipped selection handle in another frozen pane", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      // Freeze the first column so the selection handles for scrollable objects are clipped.
+      const docAny = (app as any).document as any;
+      docAny.setFrozen?.((app as any).sheetId, 0, 1, { label: "Freeze first column" });
+      (app as any).syncFrozenPanes?.();
+
+      expect(app.getFrozen().frozenCols).toBe(1);
+
+      const viewport = app.getDrawingInteractionViewport();
+      const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+      const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
+      expect(frozenBoundaryX).toBeGreaterThan(headerOffsetX);
+      // Place a drawing so it spans the frozen boundary, but the top-left handle lies inside the frozen pane.
+      const posX = viewport.scrollX + (frozenBoundaryX - headerOffsetX) - 10;
+
+      const drawing: DrawingObject = {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(posX), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      };
+      app.setDrawingObjects([drawing]);
+      app.selectDrawing(drawing.id);
+      (app as any).renderDrawings();
+
+      const bounds = drawingObjectToViewportRect(drawing, app.getDrawingInteractionViewport(), (app as any).drawingGeom);
+      expect(bounds.x).toBeGreaterThanOrEqual(headerOffsetX);
+      expect(bounds.x).toBeLessThan(frozenBoundaryX);
+      expect(bounds.x + bounds.width).toBeGreaterThan(frozenBoundaryX);
+
+      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+      const priorCanvasCursor = selectionCanvas.style.cursor;
+      root.style.cursor = "crosshair";
+
+      // Hover the top-left handle center, which is in the frozen pane and clipped away by the overlay.
+      (app as any).onSharedPointerMove({
+        clientX: bounds.x,
+        clientY: bounds.y,
+        offsetX: bounds.x,
+        offsetY: bounds.y,
+        buttons: 0,
+        pointerType: "mouse",
+        target: selectionCanvas,
+      } as any);
+
+      expect(root.style.cursor).toBe("");
+      expect(selectionCanvas.style.cursor).toBe(priorCanvasCursor);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
