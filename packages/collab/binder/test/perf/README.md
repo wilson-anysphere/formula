@@ -12,7 +12,7 @@ Recommended (uses the repo’s TypeScript-aware node:test harness):
 FORMULA_RUN_COLLAB_BINDER_PERF=1 \
 NODE_OPTIONS=--expose-gc \
 FORMULA_NODE_TEST_CONCURRENCY=1 \
-pnpm test:node binder-perf
+pnpm test:node packages/collab/binder/test/perf/binder-perf.test.js
 ```
 
 ## Useful env vars
@@ -41,4 +41,3 @@ Disabled unless set:
 
 - `PERF_TIMEOUT_MS` (default `600000`) — test timeout + internal wait timeouts
 - `PERF_INCLUDE_GUARDS=0` — disable `canReadCell/canEditCell` hooks (enabled by default to exercise session-like binder paths)
-

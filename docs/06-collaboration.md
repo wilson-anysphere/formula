@@ -56,7 +56,7 @@ These tests are **skipped by default** and only run when the relevant env var is
 
 ```bash
 # Binder perf
-FORMULA_RUN_COLLAB_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node binder-perf
+FORMULA_RUN_COLLAB_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node packages/collab/binder/test/perf/binder-perf.test.js
 
 # Session + binder perf
 FORMULA_RUN_COLLAB_SESSION_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node session-binder-perf

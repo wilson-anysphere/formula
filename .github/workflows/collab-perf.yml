@@ -94,7 +94,7 @@ jobs:
           FORMULA_RUN_COLLAB_BINDER_PERF: "1"
         run: |
           set -euo pipefail
-          pnpm test:node binder-perf | tee binder-perf.log
+          pnpm test:node packages/collab/binder/test/perf/binder-perf.test.js | tee binder-perf.log
 
       - name: Run session+binder perf
         if: inputs.suite == 'session' || inputs.suite == 'both'

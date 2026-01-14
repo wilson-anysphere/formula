@@ -10,7 +10,7 @@
  *   FORMULA_RUN_COLLAB_BINDER_PERF=1 \
  *     NODE_OPTIONS=--expose-gc \
  *     FORMULA_NODE_TEST_CONCURRENCY=1 \
- *     pnpm test:node binder-perf
+ *     pnpm test:node packages/collab/binder/test/perf/binder-perf.test.js
  *
  * Direct (works on Node versions/configs that can execute workspace TypeScript imports):
  *   FORMULA_RUN_COLLAB_BINDER_PERF=1 \
