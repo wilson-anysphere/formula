@@ -265,12 +265,11 @@ function detectRegions(sheet, predicate, opts) {
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    while (coords.size) {
+    for (const startKey of coords) {
       throwIfAborted(signal);
-      const startIter = coords.values();
-      const startKey = startIter.next().value;
-      if (startKey == null) break;
-      coords.delete(startKey);
+      // The frontier set is mutated during flood fill; a startKey can be deleted as
+      // part of a previous component. Skip if it's no longer present.
+      if (!coords.delete(startKey)) continue;
       const stack = [startKey];
 
       let r0 = Number.POSITIVE_INFINITY;
@@ -494,12 +493,9 @@ function detectRegions(sheet, predicate, opts) {
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    while (coords.size) {
+    for (const startKey of coords) {
       throwIfAborted(signal);
-      const startIter = coords.values();
-      const startKey = startIter.next().value;
-      if (startKey == null) break;
-      coords.delete(startKey);
+      if (!coords.delete(startKey)) continue;
       const stack = [startKey];
 
       let r0 = Number.POSITIVE_INFINITY;
