@@ -588,10 +588,15 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
             match ctx.eval_arg(&compiled) {
                 ArgValue::Reference(r) => {
-                    // Excel's INDIRECT does not support external workbook references. Keep engine
-                    // semantics consistent across backends by rejecting them here.
-                    if matches!(r.sheet_id, crate::functions::SheetId::External(_)) {
-                        return Value::Error(ErrorKind::Ref);
+                    if let crate::functions::SheetId::External(key) = &r.sheet_id {
+                        // Reject external-workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1`
+                        // until the engine can expand them using workbook sheet order.
+                        //
+                        // Single-sheet external keys like `[Book.xlsx]Sheet1!A1` are allowed and
+                        // will resolve through the external value provider (if configured).
+                        if !crate::eval::is_valid_external_sheet_key(key) {
+                            return Value::Error(ErrorKind::Ref);
+                        }
                     }
                     Value::Reference(r)
                 }
