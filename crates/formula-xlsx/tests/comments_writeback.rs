@@ -111,3 +111,110 @@ fn comments_writeback_updates_comment_xml_parts_and_preserves_unknown_parts() {
     }
 }
 
+#[test]
+fn comments_writeback_updates_legacy_only_preserves_threaded_part() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/comments.xlsx");
+    let bytes = fs::read(fixture_path).expect("fixture workbook should be readable");
+
+    let mut doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc
+        .workbook
+        .sheet_mut(sheet_id)
+        .expect("fixture sheet should exist");
+
+    let note_id = sheet
+        .iter_comments()
+        .find(|(_, c)| c.kind == CommentKind::Note)
+        .map(|(_, c)| c.id.clone())
+        .expect("fixture should contain legacy note");
+    sheet
+        .update_comment(
+            &note_id,
+            CommentPatch {
+                content: Some("Updated note only".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("update legacy note");
+
+    let saved = doc.save_to_vec().expect("save_to_vec");
+
+    let orig_pkg = XlsxPackage::from_bytes(&bytes).expect("fixture should parse as xlsx package");
+    let pkg = XlsxPackage::from_bytes(&saved).expect("roundtrip should parse as xlsx package");
+
+    let legacy = pkg
+        .part("xl/comments1.xml")
+        .expect("legacy comments part should exist");
+    let legacy = std::str::from_utf8(legacy).expect("comments xml should be utf-8");
+    assert!(
+        legacy.contains("Updated note only"),
+        "expected updated legacy note content, got:\n{legacy}"
+    );
+
+    // Threaded comment part should be preserved byte-for-byte when it is not edited.
+    let original_threaded = orig_pkg
+        .part("xl/threadedComments/threadedComments1.xml")
+        .expect("fixture threaded comments part should exist");
+    let roundtrip_threaded = pkg
+        .part("xl/threadedComments/threadedComments1.xml")
+        .expect("roundtrip threaded comments part should exist");
+    assert_eq!(
+        roundtrip_threaded, original_threaded,
+        "expected threaded comment part to be preserved byte-for-byte when only legacy notes changed"
+    );
+}
+
+#[test]
+fn comments_writeback_updates_threaded_only_preserves_legacy_part() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/comments.xlsx");
+    let bytes = fs::read(fixture_path).expect("fixture workbook should be readable");
+
+    let mut doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc
+        .workbook
+        .sheet_mut(sheet_id)
+        .expect("fixture sheet should exist");
+
+    let threaded_id = sheet
+        .iter_comments()
+        .find(|(_, c)| c.kind == CommentKind::Threaded)
+        .map(|(_, c)| c.id.clone())
+        .expect("fixture should contain threaded comment");
+    sheet
+        .update_comment(
+            &threaded_id,
+            CommentPatch {
+                content: Some("Updated thread only".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("update threaded comment");
+
+    let saved = doc.save_to_vec().expect("save_to_vec");
+
+    let orig_pkg = XlsxPackage::from_bytes(&bytes).expect("fixture should parse as xlsx package");
+    let pkg = XlsxPackage::from_bytes(&saved).expect("roundtrip should parse as xlsx package");
+
+    let threaded = pkg
+        .part("xl/threadedComments/threadedComments1.xml")
+        .expect("threaded comments part should exist");
+    let threaded = std::str::from_utf8(threaded).expect("threaded comments xml should be utf-8");
+    assert!(
+        threaded.contains("Updated thread only"),
+        "expected updated threaded comment content, got:\n{threaded}"
+    );
+
+    // Legacy comment part should be preserved byte-for-byte when it is not edited.
+    let original_legacy = orig_pkg
+        .part("xl/comments1.xml")
+        .expect("fixture legacy comments part should exist");
+    let roundtrip_legacy = pkg
+        .part("xl/comments1.xml")
+        .expect("roundtrip legacy comments part should exist");
+    assert_eq!(
+        roundtrip_legacy, original_legacy,
+        "expected legacy comment part to be preserved byte-for-byte when only threaded comments changed"
+    );
+}
