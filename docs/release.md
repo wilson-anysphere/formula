@@ -149,6 +149,12 @@ The release workflow runs a couple of lightweight preflight scripts before it sp
 bundles. These checks will fail the release workflow on a tagged push if the repo is not in a
 releasable state.
 
+Tip: for a one-liner that runs the key preflight checks **plus** GitHub Release asset/manifest verification for a tag, use:
+
+```bash
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z
+```
+
 Run them locally from the repo root:
 
 ```bash
