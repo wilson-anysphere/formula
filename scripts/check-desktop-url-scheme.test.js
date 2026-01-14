@@ -173,12 +173,28 @@ test("fails when Parquet shared-mime-info file mapping does not match identifier
   assert.match(proc.stderr, /mapping mismatch/i);
 });
 
+test("fails when Parquet shared-mime-info mapping is incorrect for RPM bundle files", () => {
+  const config = baseConfig();
+  config.bundle.linux.rpm.files[parquetMimeDest] = "mime/wrong.xml";
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /mapping mismatch/i);
+});
+
 test("fails when Parquet is configured but shared-mime-info is not declared as a DEB dependency", () => {
   const config = baseConfig();
   config.bundle.linux.deb.depends = ["libgtk-3-0"];
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /shared-mime-info is not declared as a DEB dependency/i);
+});
+
+test("fails when Parquet is configured but shared-mime-info is not declared as an RPM dependency", () => {
+  const config = baseConfig();
+  config.bundle.linux.rpm.depends = ["gtk3"];
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /shared-mime-info is not declared as an RPM dependency/i);
 });
 
 test("fails when Parquet is configured but the shared-mime-info definition file is missing", () => {
