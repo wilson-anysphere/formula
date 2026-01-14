@@ -8,7 +8,6 @@ const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const AES_BLOCK_LEN: usize = 16;
 
 const KEY: [u8; 16] = [0x42; 16];
-const SALT: [u8; 16] = [0x24; 16];
 
 fn padded_aes_len(len: usize) -> usize {
     let rem = len % AES_BLOCK_LEN;
@@ -43,7 +42,7 @@ fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
     }
 }
 
-fn encrypt_standard_encrypted_package_stream(plaintext: &[u8], key: &[u8], _salt: &[u8]) -> Vec<u8> {
+fn encrypt_standard_encrypted_package_stream(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
     let orig_size = plaintext.len() as u64;
     let mut out = Vec::new();
     out.extend_from_slice(&orig_size.to_le_bytes());
@@ -78,8 +77,8 @@ proptest! {
 
     #[test]
     fn prop_encryptedpackage_roundtrip(plaintext in proptest::collection::vec(any::<u8>(), 0..=20_000)) {
-        let ciphertext = encrypt_standard_encrypted_package_stream(&plaintext, &KEY, &SALT);
-        let decrypted = decrypt_standard_encrypted_package_stream(&ciphertext, &KEY, &SALT)
+        let ciphertext = encrypt_standard_encrypted_package_stream(&plaintext, &KEY);
+        let decrypted = decrypt_standard_encrypted_package_stream(&ciphertext, &KEY, &[])
             .expect("decrypt(encrypt(pt)) should succeed");
         prop_assert_eq!(decrypted, plaintext);
     }
@@ -109,7 +108,7 @@ proptest! {
             (proptest::collection::vec(any::<u8>(), ENCRYPTED_PACKAGE_SEGMENT_LEN..=20_000), Just(Corruption::RemoveBytesFromNonFinalSegment)),
         ]
     ) {
-        let mut ciphertext = encrypt_standard_encrypted_package_stream(&plaintext, &KEY, &SALT);
+        let mut ciphertext = encrypt_standard_encrypted_package_stream(&plaintext, &KEY);
 
         match corruption {
             Corruption::FlipHeaderLenHuge => {
@@ -132,7 +131,7 @@ proptest! {
             }
         }
 
-        let res = decrypt_standard_encrypted_package_stream(&ciphertext, &KEY, &SALT);
+        let res = decrypt_standard_encrypted_package_stream(&ciphertext, &KEY, &[]);
         prop_assert!(res.is_err(), "expected decrypt to fail for corruption={corruption:?}");
     }
 }

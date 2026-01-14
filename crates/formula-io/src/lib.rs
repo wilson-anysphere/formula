@@ -2688,12 +2688,12 @@ mod tests {
                 row,
                 col: 0,
                 new_value: crate::xlsb::CellValue::Error(code),
+                new_style: None,
                 clear_formula: false,
                 new_formula: None,
                 new_rgcb: None,
                 new_formula_flags: None,
                 shared_string_index: None,
-                new_style: None,
             });
 
             // Formula that evaluates to the error literal as a constant (PtgErr).
@@ -2701,12 +2701,12 @@ mod tests {
                 row,
                 col: 1,
                 new_value: crate::xlsb::CellValue::Error(code),
+                new_style: None,
                 clear_formula: false,
                 new_formula: Some(vec![0x1C, code]),
                 new_rgcb: None,
                 new_formula_flags: None,
                 shared_string_index: None,
-                new_style: None,
             });
 
             // Validate after conversion.
