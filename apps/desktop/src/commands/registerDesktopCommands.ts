@@ -817,34 +817,39 @@ export function registerDesktopCommands(params: {
     }
   };
  
-  commandRegistry.registerBuiltinCommand("file.new.new", "New", () => workbenchFileHandlers.newWorkbook(), {
+  commandRegistry.registerBuiltinCommand("file.new.new", "New", () => commandRegistry.executeCommand("workbench.newWorkbook"), {
     category: commandCategoryFile,
     when: "false",
   });
-  commandRegistry.registerBuiltinCommand("file.new.blankWorkbook", "Blank workbook", () => workbenchFileHandlers.newWorkbook(), {
+  commandRegistry.registerBuiltinCommand(
+    "file.new.blankWorkbook",
+    "Blank workbook",
+    () => commandRegistry.executeCommand("workbench.newWorkbook"),
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+  commandRegistry.registerBuiltinCommand("file.open.open", "Open…", () => commandRegistry.executeCommand("workbench.openWorkbook"), {
     category: commandCategoryFile,
     when: "false",
   });
-  commandRegistry.registerBuiltinCommand("file.open.open", "Open…", () => workbenchFileHandlers.openWorkbook(), {
+  commandRegistry.registerBuiltinCommand("file.save.save", "Save", () => commandRegistry.executeCommand("workbench.saveWorkbook"), {
     category: commandCategoryFile,
     when: "false",
   });
-  commandRegistry.registerBuiltinCommand("file.save.save", "Save", () => workbenchFileHandlers.saveWorkbook(), {
+  commandRegistry.registerBuiltinCommand("file.save.saveAs", "Save As…", () => commandRegistry.executeCommand("workbench.saveWorkbookAs"), {
     category: commandCategoryFile,
     when: "false",
   });
-  commandRegistry.registerBuiltinCommand("file.save.saveAs", "Save As…", () => workbenchFileHandlers.saveWorkbookAs(), {
-    category: commandCategoryFile,
-    when: "false",
-  });
-  commandRegistry.registerBuiltinCommand("file.save.saveAs.copy", "Save a Copy…", () => workbenchFileHandlers.saveWorkbookAs(), {
+  commandRegistry.registerBuiltinCommand("file.save.saveAs.copy", "Save a Copy…", () => commandRegistry.executeCommand("workbench.saveWorkbookAs"), {
     category: commandCategoryFile,
     when: "false",
   });
   commandRegistry.registerBuiltinCommand(
     "file.save.saveAs.download",
     "Download a Copy",
-    () => workbenchFileHandlers.saveWorkbookAs(),
+    () => commandRegistry.executeCommand("workbench.saveWorkbookAs"),
     {
       category: commandCategoryFile,
       when: "false",
@@ -856,7 +861,7 @@ export function registerDesktopCommands(params: {
     async (enabled?: boolean) => {
       try {
         // Allow both toggle-style invocation (no args) and ribbon toggle invocation (boolean arg).
-        await workbenchFileHandlers.setAutoSaveEnabled(enabled);
+        await commandRegistry.executeCommand("workbench.setAutoSaveEnabled", enabled);
       } finally {
         focusGrid();
       }
@@ -866,27 +871,37 @@ export function registerDesktopCommands(params: {
       when: "false",
     },
   );
-  commandRegistry.registerBuiltinCommand("file.print.print", "Print…", () => workbenchFileHandlers.print(), {
-    category: commandCategoryFile,
-    when: "false",
-  });
-  commandRegistry.registerBuiltinCommand("file.print.printPreview", "Print Preview", () => workbenchFileHandlers.printPreview(), {
-    category: commandCategoryFile,
-    when: "false",
-  });
-  commandRegistry.registerBuiltinCommand("file.options.close", "Close", () => workbenchFileHandlers.closeWorkbook(), {
-    category: commandCategoryFile,
-    when: "false",
-  });
- 
-  commandRegistry.registerBuiltinCommand("file.export.export.xlsx", "Excel Workbook", () => workbenchFileHandlers.saveWorkbookAs(), {
+  commandRegistry.registerBuiltinCommand("file.print.print", "Print…", () => commandRegistry.executeCommand("workbench.print"), {
     category: commandCategoryFile,
     when: "false",
   });
   commandRegistry.registerBuiltinCommand(
+    "file.print.printPreview",
+    "Print Preview",
+    () => commandRegistry.executeCommand("workbench.printPreview"),
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+  commandRegistry.registerBuiltinCommand("file.options.close", "Close", () => commandRegistry.executeCommand("workbench.closeWorkbook"), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+ 
+  commandRegistry.registerBuiltinCommand(
+    "file.export.export.xlsx",
+    "Excel Workbook",
+    () => commandRegistry.executeCommand("workbench.saveWorkbookAs"),
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
     "file.export.changeFileType.xlsx",
     "Change File Type: Excel Workbook",
-    () => workbenchFileHandlers.saveWorkbookAs(),
+    () => commandRegistry.executeCommand("workbench.saveWorkbookAs"),
     {
       category: commandCategoryFile,
       when: "false",
@@ -922,36 +937,56 @@ export function registerDesktopCommands(params: {
   );
  
   if (pageLayoutHandlers) {
-    commandRegistry.registerBuiltinCommand("file.print.pageSetup", "Page Setup…", () => pageLayoutHandlers.openPageSetupDialog(), {
-      category: commandCategoryFile,
-      when: "false",
-    });
     commandRegistry.registerBuiltinCommand(
-      "file.print.pageSetup.printTitles",
-      "Print Titles…",
-      () => pageLayoutHandlers.openPageSetupDialog(),
+      "file.print.pageSetup",
+      "Page Setup…",
+      () => commandRegistry.executeCommand("pageLayout.pageSetup.pageSetupDialog"),
       {
         category: commandCategoryFile,
         when: "false",
       },
     );
-    commandRegistry.registerBuiltinCommand("file.print.pageSetup.margins", "Margins", () => pageLayoutHandlers.openPageSetupDialog(), {
+    commandRegistry.registerBuiltinCommand(
+      "file.print.pageSetup.printTitles",
+      "Print Titles…",
+      () => commandRegistry.executeCommand("pageLayout.pageSetup.pageSetupDialog"),
+      {
+        category: commandCategoryFile,
+        when: "false",
+      },
+    );
+    commandRegistry.registerBuiltinCommand(
+      "file.print.pageSetup.margins",
+      "Margins",
+      () => commandRegistry.executeCommand("pageLayout.pageSetup.pageSetupDialog"),
+      {
+        category: commandCategoryFile,
+        when: "false",
+      },
+    );
+  
+    commandRegistry.registerBuiltinCommand(
+      "file.export.createPdf",
+      "Create PDF/XPS",
+      () => commandRegistry.executeCommand("pageLayout.export.exportPdf"),
+      {
+        category: commandCategoryFile,
+        when: "false",
+      },
+    );
+    commandRegistry.registerBuiltinCommand("file.export.export.pdf", "Export: PDF", () => commandRegistry.executeCommand("pageLayout.export.exportPdf"), {
       category: commandCategoryFile,
       when: "false",
     });
- 
-    commandRegistry.registerBuiltinCommand("file.export.createPdf", "Create PDF/XPS", () => pageLayoutHandlers.exportPdf(), {
-      category: commandCategoryFile,
-      when: "false",
-    });
-    commandRegistry.registerBuiltinCommand("file.export.export.pdf", "Export: PDF", () => pageLayoutHandlers.exportPdf(), {
-      category: commandCategoryFile,
-      when: "false",
-    });
-    commandRegistry.registerBuiltinCommand("file.export.changeFileType.pdf", "Change File Type: PDF", () => pageLayoutHandlers.exportPdf(), {
-      category: commandCategoryFile,
-      when: "false",
-    });
+    commandRegistry.registerBuiltinCommand(
+      "file.export.changeFileType.pdf",
+      "Change File Type: PDF",
+      () => commandRegistry.executeCommand("pageLayout.export.exportPdf"),
+      {
+        category: commandCategoryFile,
+        when: "false",
+      },
+    );
   }
  
   if (layoutController) {
