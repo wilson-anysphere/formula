@@ -63,7 +63,7 @@
 //! builder.append_row(&[Value::String(Arc::<str>::from("B")), Value::Number(2.0)]);
 //! let table = builder.finalize();
 //!
-//! let expr = FilterExpr::cmp(0, CmpOp::Eq, FilterValue::string("A"));
+//! let expr = FilterExpr::cmp(0, CmpOp::Eq, "A");
 //! let mask = table.filter_mask(&expr).unwrap();
 //! assert_eq!(mask.count_ones(), 1);
 //!

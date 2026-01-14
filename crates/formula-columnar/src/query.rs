@@ -396,6 +396,10 @@ pub fn filter_table(table: &ColumnarTable, mask: &BitVec) -> Result<ColumnarTabl
         return Err(QueryError::InternalInvariant("filter mask length must match table"));
     }
 
+    if mask.count_ones() == 0 {
+        return Ok(ColumnarTableBuilder::new(table.schema().to_vec(), table.options()).finalize());
+    }
+
     if mask.all_true() {
         return Ok(table.clone());
     }
