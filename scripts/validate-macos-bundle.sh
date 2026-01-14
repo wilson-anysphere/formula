@@ -119,7 +119,43 @@ PY
 
 APP_NAME="$(get_product_name)"
 EXPECTED_APP_BUNDLE="${APP_NAME}.app"
-EXPECTED_URL_SCHEME="formula"
+
+get_expected_url_scheme() {
+  # Keep this in sync with apps/desktop/src-tauri/Info.plist, which is merged into the generated
+  # app bundle Info.plist during packaging.
+  local config_plist="$REPO_ROOT/apps/desktop/src-tauri/Info.plist"
+  if [ -f "$config_plist" ]; then
+    local scheme
+    set +e
+    scheme="$(
+      python3 - "$config_plist" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as f:
+    data = plistlib.load(f)
+
+schemes = []
+for url_type in data.get("CFBundleURLTypes", []) or []:
+    for s in url_type.get("CFBundleURLSchemes", []) or []:
+        if isinstance(s, str):
+            schemes.append(s)
+
+print(schemes[0] if schemes else "")
+PY
+    )"
+    local status=$?
+    set -e
+    if [ "$status" -eq 0 ] && [ -n "$scheme" ]; then
+      echo "$scheme"
+      return 0
+    fi
+  fi
+
+  echo "formula"
+}
+
+EXPECTED_URL_SCHEME="$(get_expected_url_scheme)"
 
 validate_plist_url_scheme() {
   local plist_path="$1"
