@@ -353,9 +353,11 @@ export class DrawingOverlay {
     try {
       this.themeObserver?.disconnect();
       this.themeObserver = new MutationObserver(() => {
-        // Defer recomputing CSS vars until the next render; we only need to
-        // invalidate cached tokens here.
+        // Theme changes affect the colors used for placeholders + selection handles.
+        // Invalidate cached tokens and request a redraw using the most recent render
+        // arguments so overlays update immediately (without requiring a scroll).
         this.refreshThemeTokens();
+        this.scheduleHydrationRerender();
       });
       this.themeObserver.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
     } catch {
