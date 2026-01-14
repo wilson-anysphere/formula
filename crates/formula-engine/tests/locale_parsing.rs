@@ -462,13 +462,13 @@ fn locale_error_literal_maps_match_generated_error_tsvs() {
         for (idx, raw_line) in tsv.lines().enumerate() {
             let line_no = idx + 1;
             let trimmed = raw_line.trim();
+            // Error literals themselves start with `#`, so comments are `#` followed by whitespace.
             let is_comment = trimmed == "#"
                 || (trimmed.starts_with('#')
                     && trimmed
                         .chars()
                         .nth(1)
-                        .map(|ch| ch == ' ' || ch == '\t')
-                        .unwrap_or(true));
+                        .is_some_and(|ch| ch.is_whitespace()));
             if trimmed.is_empty() || is_comment {
                 continue;
             }
