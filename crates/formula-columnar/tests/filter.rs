@@ -433,6 +433,35 @@ fn filter_string_dictionary_and_case_sensitivity() {
 }
 
 #[test]
+fn filter_string_case_insensitive_optional() {
+    let table = build_table();
+
+    let eq_ci = table
+        .filter_mask(&FilterExpr::CmpStringCI {
+            col: 2,
+            op: CmpOp::Eq,
+            value: Arc::<str>::from("A"),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_ci),
+        vec![true, false, false, true, false, true]
+    );
+
+    let ne_ci = table
+        .filter_mask(&FilterExpr::CmpStringCI {
+            col: 2,
+            op: CmpOp::Ne,
+            value: Arc::<str>::from("A"),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&ne_ci),
+        vec![false, true, false, false, true, false]
+    );
+}
+
+#[test]
 fn filter_is_null_and_materialize_table() {
     let table = build_table();
 

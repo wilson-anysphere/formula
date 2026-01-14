@@ -259,6 +259,16 @@ pub enum FilterExpr {
         op: CmpOp,
         value: FilterValue,
     },
+    /// Case-insensitive string comparison (ASCII-only).
+    ///
+    /// This is an optional extension over the default case-sensitive dictionary comparisons.
+    /// Equality can match multiple dictionary entries (e.g. "A" and "a"), so evaluation uses a
+    /// precomputed set of matching dictionary indices.
+    CmpStringCI {
+        col: usize,
+        op: CmpOp,
+        value: Arc<str>,
+    },
     IsNull {
         col: usize,
     },
@@ -346,6 +356,7 @@ fn eval_filter_expr(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, 
             Ok(mask)
         }
         FilterExpr::Cmp { col, op, value } => eval_filter_cmp(table, *col, *op, value),
+        FilterExpr::CmpStringCI { col, op, value } => eval_filter_string_ci(table, *col, *op, value.as_ref()),
         FilterExpr::IsNull { col } => eval_filter_is_null(table, *col, true),
         FilterExpr::IsNotNull { col } => eval_filter_is_null(table, *col, false),
     }
@@ -797,6 +808,161 @@ fn eval_filter_string(
                     CmpOp::Ne => ix != target,
                     _ => false,
                 };
+                out.push(passed);
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn eval_filter_string_ci(
+    table: &ColumnarTable,
+    col: usize,
+    op: CmpOp,
+    rhs: &str,
+) -> Result<BitVec, QueryError> {
+    let column_type = table
+        .schema()
+        .get(col)
+        .map(|s| s.column_type)
+        .ok_or(QueryError::ColumnOutOfBounds {
+            col,
+            column_count: table.column_count(),
+        })?;
+    if column_type != ColumnType::String {
+        return Err(QueryError::UnsupportedColumnType {
+            col,
+            column_type,
+            operation: "filter case-insensitive string comparison",
+        });
+    }
+
+    if !matches!(op, CmpOp::Eq | CmpOp::Ne) {
+        return Err(QueryError::UnsupportedColumnType {
+            col,
+            column_type,
+            operation: "filter case-insensitive string comparison",
+        });
+    }
+
+    if let Some(stats) = table.stats(col) {
+        let rows = table.row_count();
+        let nulls = stats.null_count as usize;
+        if nulls == rows {
+            // Comparisons treat NULL as false.
+            return Ok(BitVec::with_len_all_false(rows));
+        }
+    }
+
+    let dict = table.dictionary(col).ok_or(QueryError::MissingDictionary { col })?;
+    let rows = table.row_count();
+    let page = table.page_size_rows();
+
+    // Build a membership bitmap of all dictionary indices that match `rhs` case-insensitively.
+    // We use ASCII-only folding to avoid per-entry allocations.
+    let mut targets = BitVec::with_len_all_false(dict.len());
+    for (idx, s) in dict.iter().enumerate() {
+        if s.as_ref().eq_ignore_ascii_case(rhs) {
+            targets.set(idx, true);
+        }
+    }
+
+    let target_count = targets.count_ones();
+    if target_count == 0 {
+        return match op {
+            CmpOp::Eq => Ok(BitVec::with_len_all_false(rows)),
+            CmpOp::Ne => eval_filter_is_null(table, col, false),
+            _ => unreachable!("checked op above"),
+        };
+    }
+
+    if target_count == dict.len() {
+        // All dictionary entries match; equality matches all non-null rows, inequality matches none.
+        return match op {
+            CmpOp::Eq => eval_filter_is_null(table, col, false),
+            CmpOp::Ne => Ok(BitVec::with_len_all_false(rows)),
+            _ => unreachable!("checked op above"),
+        };
+    }
+
+    let chunks = table
+        .encoded_chunks(col)
+        .ok_or(QueryError::ColumnOutOfBounds {
+            col,
+            column_count: table.column_count(),
+        })?;
+
+    let invert = matches!(op, CmpOp::Ne);
+
+    let mut out = BitVec::with_capacity_bits(rows);
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let base = chunk_idx * page;
+        if base >= rows {
+            break;
+        }
+        let chunk_rows = (rows - base).min(chunk.len());
+
+        let EncodedChunk::Dict(c) = chunk else {
+            return Err(QueryError::UnsupportedColumnType {
+                col,
+                column_type,
+                operation: "filter case-insensitive string comparison",
+            });
+        };
+
+        if c.validity.as_ref().is_some_and(|v| v.count_ones() == 0) {
+            out.extend_constant(false, chunk_rows);
+            continue;
+        }
+
+        let non_null_chunk = c.validity.is_none() || c.validity.as_ref().is_some_and(|v| v.all_true());
+
+        if non_null_chunk {
+            // Run-level fast path when indices are RLE.
+            if let U32SequenceEncoding::Rle(rle) = &c.indices {
+                let mut start: usize = 0;
+                for (&run_value, &end) in rle.values.iter().zip(rle.ends.iter()) {
+                    let end = end as usize;
+                    if start >= chunk_rows {
+                        break;
+                    }
+                    let run_len = end.saturating_sub(start).min(chunk_rows - start);
+                    let mut passed = targets.get(run_value as usize);
+                    if invert {
+                        passed = !passed;
+                    }
+                    out.extend_constant(passed, run_len);
+                    start = end;
+                }
+                continue;
+            }
+
+            let mut cursor = U32SeqCursor::new(&c.indices);
+            for _i in 0..chunk_rows {
+                let ix = cursor.next();
+                let mut passed = targets.get(ix as usize);
+                if invert {
+                    passed = !passed;
+                }
+                out.push(passed);
+            }
+        } else {
+            let validity = c
+                .validity
+                .as_ref()
+                .ok_or(QueryError::InternalInvariant("missing validity bitmap"))?;
+            let mut cursor = U32SeqCursor::new(&c.indices);
+            for i in 0..chunk_rows {
+                let ix = cursor.next();
+                if !validity.get(i) {
+                    out.push(false);
+                    continue;
+                }
+                let mut passed = targets.get(ix as usize);
+                if invert {
+                    passed = !passed;
+                }
                 out.push(passed);
             }
         }
