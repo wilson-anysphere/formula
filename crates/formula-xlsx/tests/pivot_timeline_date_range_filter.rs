@@ -2,6 +2,7 @@ use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotCache, PivotConfig, PivotField, PivotTable,
     PivotValue, SubtotalPosition, ValueField,
 };
+use chrono::NaiveDate;
 use formula_xlsx::pivots::engine_bridge::{pivot_cache_to_engine_source, timeline_selection_to_engine_filter};
 use formula_xlsx::{PivotCacheDefinition, PivotCacheField, PivotCacheRecordsReader, TimelineSelectionState};
 
@@ -60,6 +61,10 @@ fn timeline_date_range_filters_by_date_values_in_pivot_cache() {
 
     let pivot_all = PivotTable::new("PivotTable1", &source, cfg.clone()).expect("pivot");
     let result_all = pivot_all.calculate().expect("calculate");
+
+    let d1 = NaiveDate::from_ymd_opt(2024, 1, 1).expect("valid date");
+    let d2 = NaiveDate::from_ymd_opt(2024, 1, 2).expect("valid date");
+    let d3 = NaiveDate::from_ymd_opt(2024, 1, 3).expect("valid date");
     assert_eq!(
         result_all.data,
         vec![
@@ -67,9 +72,9 @@ fn timeline_date_range_filters_by_date_values_in_pivot_cache() {
                 PivotValue::Text("OrderDate".to_string()),
                 PivotValue::Text("Sum of Sales".to_string())
             ],
-            vec![PivotValue::Text("2024-01-01".to_string()), PivotValue::Number(100.0)],
-            vec![PivotValue::Text("2024-01-02".to_string()), PivotValue::Number(200.0)],
-            vec![PivotValue::Text("2024-01-03".to_string()), PivotValue::Number(300.0)],
+            vec![PivotValue::Date(d1), PivotValue::Number(100.0)],
+            vec![PivotValue::Date(d2), PivotValue::Number(200.0)],
+            vec![PivotValue::Date(d3), PivotValue::Number(300.0)],
             vec![PivotValue::Text("Grand Total".to_string()), PivotValue::Number(600.0)],
         ]
     );
@@ -96,7 +101,7 @@ fn timeline_date_range_filters_by_date_values_in_pivot_cache() {
                 PivotValue::Text("OrderDate".to_string()),
                 PivotValue::Text("Sum of Sales".to_string())
             ],
-            vec![PivotValue::Text("2024-01-02".to_string()), PivotValue::Number(200.0)],
+            vec![PivotValue::Date(d2), PivotValue::Number(200.0)],
             vec![PivotValue::Text("Grand Total".to_string()), PivotValue::Number(200.0)],
         ]
     );
