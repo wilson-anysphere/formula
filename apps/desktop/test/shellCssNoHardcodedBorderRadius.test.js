@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
@@ -14,8 +15,7 @@ function getLineNumber(text, index) {
 
 test("shell.css should not hardcode border-radius values (except 0)", () => {
   const css = fs.readFileSync(shellCssPath, "utf8");
-  // Avoid false positives in comments while keeping line numbers stable for error messages.
-  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+  const stripped = stripCssNonSemanticText(css);
 
   /** @type {string[]} */
   const violations = [];

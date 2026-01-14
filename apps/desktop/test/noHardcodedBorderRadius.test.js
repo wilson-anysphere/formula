@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
@@ -46,8 +47,7 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
 
   for (const file of files) {
     const css = fs.readFileSync(file, "utf8");
-    // Avoid false positives in comments while keeping line numbers stable for error messages.
-    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+    const stripped = stripCssNonSemanticText(css);
 
     const declRegex = /\bborder(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius\s*:\s*([^;}]*)/gi;
     let declMatch;
