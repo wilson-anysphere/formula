@@ -62,6 +62,9 @@ function buildBannedResForTauriAlias(root: string): RegExp[] {
   return [
     // Direct access via alias: tauri.core.invoke / tauri?.core?.invoke / etc.
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*core\\s*(?:\\?\\.|\\.)\\s*invoke\\b`),
+    // Mixed bracket/dot access: tauri["core"].invoke / tauri.core["invoke"].
+    new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]core['"]\\s*\\]\\s*(?:\\?\\.|\\.)\\s*invoke\\b`),
+    new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*core\\s*(?:\\?\\.)?\\s*\\[\\s*['"]invoke['"]\\s*\\]`),
     // Bracket access: tauri["core"]["invoke"] / tauri?.["core"]?.["invoke"]
     new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]core['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]invoke['"]\\s*\\]`),
   ];
@@ -74,15 +77,21 @@ describe("tauri/invoke guardrails", () => {
 
     // Keep this intentionally scoped to *direct* core.invoke property access so we don't ban other
     // legitimate `__TAURI__` uses (plugins, etc).
-    const bannedRes: RegExp[] = [
-      // __TAURI__.core.invoke / __TAURI__?.core?.invoke / mixed optional chaining.
-      /\b__TAURI__\s*(?:\?\.|\.)\s*core\s*(?:\?\.|\.)\s*invoke\b/,
-      // Bracket access variants: __TAURI__["core"]["invoke"] / __TAURI__?.["core"]?.["invoke"].
-      /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]core['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]invoke['"]\s*\]/,
-      // Bracket access to the __TAURI__ global itself (e.g. globalThis["__TAURI__"].core.invoke).
-      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*core\s*(?:\?\.|\.)\s*invoke\b/,
-      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]core['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]invoke['"]\s*\]/,
-    ];
+     const bannedRes: RegExp[] = [
+       // __TAURI__.core.invoke / __TAURI__?.core?.invoke / mixed optional chaining.
+       /\b__TAURI__\s*(?:\?\.|\.)\s*core\s*(?:\?\.|\.)\s*invoke\b/,
+       // Mixed bracket/dot variants: __TAURI__["core"].invoke / __TAURI__.core["invoke"].
+       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]core['"]\s*\]\s*(?:\?\.|\.)\s*invoke\b/,
+       /\b__TAURI__\s*(?:\?\.|\.)\s*core\s*(?:\?\.)?\s*\[\s*['"]invoke['"]\s*\]/,
+       // Bracket access variants: __TAURI__["core"]["invoke"] / __TAURI__?.["core"]?.["invoke"].
+       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]core['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]invoke['"]\s*\]/,
+       // Bracket access to the __TAURI__ global itself (e.g. globalThis["__TAURI__"].core.invoke).
+       /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*core\s*(?:\?\.|\.)\s*invoke\b/,
+       // Mixed bracket/dot access to globals: globalThis["__TAURI__"]["core"].invoke / globalThis["__TAURI__"].core["invoke"].
+       /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]core['"]\s*\]\s*(?:\?\.|\.)\s*invoke\b/,
+       /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*core\s*(?:\?\.)?\s*\[\s*['"]invoke['"]\s*\]/,
+       /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]core['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]invoke['"]\s*\]/,
+     ];
 
     for (const absPath of files) {
       const relPath = path.relative(SRC_ROOT, absPath);
@@ -124,4 +133,3 @@ describe("tauri/invoke guardrails", () => {
     }
   });
 });
-
