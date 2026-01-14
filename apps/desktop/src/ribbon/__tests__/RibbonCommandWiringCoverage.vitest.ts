@@ -218,11 +218,6 @@ function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry
       addToPrintArea: () => {},
       exportPdf: () => {},
     },
-    sheetStructureHandlers: {
-      openOrganizeSheets: () => {},
-      insertSheet: () => {},
-      deleteSheet: () => {},
-    },
     findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
     workbenchFileHandlers: {
       newWorkbook: () => {},
