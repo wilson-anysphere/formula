@@ -304,6 +304,14 @@ describe("Ribbon UI state overrides", () => {
       "data.sortFilter.advanced",
       "data.sortFilter.advanced.advancedFilter",
       "data.sortFilter.advanced.clearFilter",
+      "pageLayout.printArea.setPrintArea",
+      "pageLayout.printArea.clearPrintArea",
+      "pageLayout.pageSetup.printArea",
+      "pageLayout.pageSetup.printArea.set",
+      "pageLayout.pageSetup.printArea.clear",
+      "pageLayout.pageSetup.printArea.addTo",
+      "pageLayout.arrange.bringForward",
+      "pageLayout.arrange.sendBackward",
     ];
 
     for (const id of expected) {

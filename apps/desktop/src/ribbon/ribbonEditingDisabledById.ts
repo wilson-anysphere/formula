@@ -121,6 +121,15 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "data.sortFilter.advanced.advancedFilter": true,
   "data.sortFilter.advanced.clearFilter": true,
 
+  // --- Page Layout → Print Area ----------------------------------------------
+  // Print area mutations rely on selection state and should not run while editing.
+  "pageLayout.printArea.setPrintArea": true,
+  "pageLayout.printArea.clearPrintArea": true,
+  "pageLayout.pageSetup.printArea": true,
+  "pageLayout.pageSetup.printArea.set": true,
+  "pageLayout.pageSetup.printArea.clear": true,
+  "pageLayout.pageSetup.printArea.addTo": true,
+
   // --- Page Layout → Arrange --------------------------------------------------
   // Drawing order operations should not run while the user is editing text (cell editor / formula bar).
   "pageLayout.arrange.bringForward": true,
