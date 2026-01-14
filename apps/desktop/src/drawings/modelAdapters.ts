@@ -727,7 +727,7 @@ function convertDocumentDrawingSizeToEmu(sizeJson: unknown): EmuSize | undefined
 
 function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSize | undefined): Anchor | null {
   if (!isRecord(anchorJson)) return null;
-  const anchorType = readOptionalString(pick(anchorJson, ["type"])) ?? "";
+  const anchorType = normalizeEnumTag(readOptionalString(pick(anchorJson, ["type"])) ?? "");
 
   const resolveOffsetEmuFrom = (record: JsonRecord, axis: "x" | "y"): number => {
     const emuKeys =
@@ -794,7 +794,7 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
       };
     }
     // Back-compat: accept UI-like anchors persisted in a DocumentController snapshot.
-    case "oneCell": {
+    case "onecell": {
       const fromValue = pick(anchorJson, ["from"]);
       if (!isRecord(fromValue)) return null;
       const cellValue = pick(fromValue, ["cell"]);
@@ -823,7 +823,7 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
       const yEmu = (pos ? resolveOffsetEmuMaybeFrom(pos, "y") : undefined) ?? resolveOffsetEmu("y");
       return { type: "absolute", pos: { xEmu, yEmu }, size: resolvedSize };
     }
-    case "twoCell": {
+    case "twocell": {
       const fromValue = pick(anchorJson, ["from"]);
       const toValue = pick(anchorJson, ["to"]);
       if (!isRecord(fromValue) || !isRecord(toValue)) return null;
