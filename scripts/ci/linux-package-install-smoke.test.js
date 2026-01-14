@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "linux-package-install-smoke.sh");
@@ -63,4 +64,34 @@ test("linux-package-install-smoke: validates URL scheme handler(s) from tauri.co
   assert.match(script, /FORMULA_DEEP_LINK_SCHEMES/);
   // Validate that the script doesn't hardcode only the `formula` scheme in its desktop entry checks.
   assert.doesNotMatch(script, /x-scheme-handler\/formula/);
+});
+
+test("linux-package-install-smoke: can print --help without a working python3/node (sed fallback for identifier)", () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-smoke-help-"));
+  try {
+    const binDir = path.join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+    // Stub python3 so the script cannot JSON-parse via Python; it should fall back to `sed`
+    // for reading `identifier` (needed when Parquet association is configured).
+    writeFileSync(
+      path.join(binDir, "python3"),
+      `#!/usr/bin/env bash\nset -euo pipefail\ncat >/dev/null || true\nexit 0\n`,
+      "utf8",
+    );
+    chmodSync(path.join(binDir, "python3"), 0o755);
+
+    const proc = spawnSync("bash", [scriptPath, "--help"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH}`,
+      },
+    });
+    if (proc.error) throw proc.error;
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.match(proc.stdout, /usage:/i);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

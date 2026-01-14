@@ -52,6 +52,11 @@ PY
       node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); (conf.mainBinaryName ?? "").trim()' "${conf}" 2>/dev/null || true
     )"
   fi
+  if [[ -z "${val}" ]] && [[ -f "${conf}" ]]; then
+    val="$(
+      sed -nE 's/^[[:space:]]*"mainBinaryName"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "${conf}" | head -n 1
+    )"
+  fi
   if [[ -z "${val}" ]]; then
     val="formula-desktop"
   fi
@@ -76,6 +81,11 @@ PY
   elif [[ -f "${conf}" ]] && command -v node >/dev/null 2>&1; then
     val="$(
       node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); (conf.identifier ?? "").trim()' "${conf}" 2>/dev/null || true
+    )"
+  fi
+  if [[ -z "${val}" ]] && [[ -f "${conf}" ]]; then
+    val="$(
+      sed -nE 's/^[[:space:]]*"identifier"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "${conf}" | head -n 1
     )"
   fi
   printf '%s\n' "${val}"
