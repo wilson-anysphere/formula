@@ -996,7 +996,7 @@ fn verify_password_legacy(
             verifier_hash.len()
         )));
     }
-    if verifier_hash[..verifier_hash_size] != expected[..verifier_hash_size] {
+    if !ct_eq(&verifier_hash[..verifier_hash_size], &expected[..verifier_hash_size]) {
         return Err(DecryptError::WrongPassword);
     }
 
