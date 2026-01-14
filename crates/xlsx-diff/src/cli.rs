@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
@@ -39,9 +39,25 @@ pub struct Args {
     #[arg(long = "original-password")]
     original_password: Option<String>,
 
+    /// Read the password for the original workbook from a file. Overrides `--password-file`.
+    #[arg(
+        long = "original-password-file",
+        value_name = "PATH",
+        conflicts_with = "original_password"
+    )]
+    original_password_file: Option<PathBuf>,
+
     /// Password for the modified workbook (if encrypted). Overrides `--password`/`--password-file`.
     #[arg(long = "modified-password")]
     modified_password: Option<String>,
+
+    /// Read the password for the modified workbook from a file. Overrides `--password-file`.
+    #[arg(
+        long = "modified-password-file",
+        value_name = "PATH",
+        conflicts_with = "modified_password"
+    )]
+    modified_password_file: Option<PathBuf>,
 
     /// Exact part names to ignore (repeatable).
     #[arg(long = "ignore-part")]
@@ -185,20 +201,30 @@ pub fn run_with_args(args: Args) -> Result<()> {
     }
 
     let shared_password = if let Some(path) = args.password_file.as_deref() {
-        let value = std::fs::read_to_string(path)
-            .with_context(|| format!("read password file {}", path.display()))?;
-        Some(value.trim_end_matches(&['\r', '\n'][..]).to_string())
+        Some(read_password_file(path)?)
     } else {
         args.password.clone()
+    };
+
+    let original_password_file = match args.original_password_file.as_deref() {
+        Some(path) => Some(read_password_file(path)?),
+        None => None,
+    };
+
+    let modified_password_file = match args.modified_password_file.as_deref() {
+        Some(path) => Some(read_password_file(path)?),
+        None => None,
     };
 
     let original_pw = args
         .original_password
         .as_deref()
+        .or(original_password_file.as_deref())
         .or(shared_password.as_deref());
     let modified_pw = args
         .modified_password
         .as_deref()
+        .or(modified_password_file.as_deref())
         .or(shared_password.as_deref());
 
     let mut report = crate::diff_workbooks_with_inputs_and_options(
@@ -496,4 +522,10 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<IgnorePathRule>> {
     }
 
     Ok(rules)
+}
+
+fn read_password_file(path: &Path) -> Result<String> {
+    let value =
+        std::fs::read_to_string(path).with_context(|| format!("read password file {}", path.display()))?;
+    Ok(value.trim_end_matches(&['\r', '\n'][..]).to_string())
 }

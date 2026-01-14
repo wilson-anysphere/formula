@@ -84,6 +84,12 @@ fn cli_succeeds_with_password_file() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No differences."),
+        "expected output to indicate no differences, got:\n{stdout}"
+    );
 }
 
 #[test]
@@ -112,6 +118,37 @@ fn cli_original_password_overrides_shared_password() {
 }
 
 #[test]
+fn cli_original_password_file_overrides_shared_password_file() {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile.xlsx");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let wrong_path = tmp.path().join("wrong.txt");
+    let correct_path = tmp.path().join("correct.txt");
+    std::fs::write(&wrong_path, "wrong-password\n").expect("write wrong password file");
+    std::fs::write(&correct_path, format!("{PASSWORD}\n")).expect("write correct password file");
+
+    // Original is encrypted; modified is plain.
+    // Provide an incorrect shared password file, then override the original password file to be correct.
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&encrypted)
+        .arg(&plain)
+        .arg("--password-file")
+        .arg(&wrong_path)
+        .arg("--original-password-file")
+        .arg(&correct_path)
+        .output()
+        .expect("run xlsx-diff");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
 fn cli_modified_password_overrides_shared_password() {
     let plain = fixture_path("plaintext.xlsx");
     let encrypted = fixture_path("agile.xlsx");
@@ -125,6 +162,37 @@ fn cli_modified_password_overrides_shared_password() {
         .arg("wrong-password")
         .arg("--modified-password")
         .arg(PASSWORD)
+        .output()
+        .expect("run xlsx-diff");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
+fn cli_modified_password_file_overrides_shared_password_file() {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile.xlsx");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let wrong_path = tmp.path().join("wrong.txt");
+    let correct_path = tmp.path().join("correct.txt");
+    std::fs::write(&wrong_path, "wrong-password\n").expect("write wrong password file");
+    std::fs::write(&correct_path, format!("{PASSWORD}\n")).expect("write correct password file");
+
+    // Original is plain; modified is encrypted.
+    // Provide an incorrect shared password file, then override the modified password file to be correct.
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&plain)
+        .arg(&encrypted)
+        .arg("--password-file")
+        .arg(&wrong_path)
+        .arg("--modified-password-file")
+        .arg(&correct_path)
         .output()
         .expect("run xlsx-diff");
 
