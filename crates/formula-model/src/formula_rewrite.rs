@@ -633,6 +633,10 @@ fn rewrite_sheet_names_in_formula_impl(
 ///
 /// This routine is intentionally conservative: it only rewrites tokens that
 /// parse as sheet references and it does not touch string literals.
+///
+/// This does **not** rewrite references that include an explicit workbook prefix
+/// (e.g. `='[Book1.xlsx]Sheet1'!A1`), since those refer to an external workbook and
+/// should not change when deleting a sheet inside the current workbook.
 pub fn rewrite_deleted_sheet_references_in_formula(
     formula: &str,
     deleted_sheet: &str,
@@ -679,6 +683,12 @@ pub fn rewrite_deleted_sheet_references_in_formula(
 
         if bytes[i] == b'\'' {
             if let Some((next, raw, sheet_spec)) = parse_quoted_sheet_spec(formula, i) {
+                // Ignore external workbook references.
+                if split_workbook_prefix(&sheet_spec).0.is_some() {
+                    out.push_str(raw);
+                    i = next;
+                    continue;
+                }
                 match rewrite_sheet_spec_for_delete(&sheet_spec, deleted_sheet, sheet_order) {
                     DeleteSheetSpecRewrite::Unchanged => {
                         out.push_str(raw);
@@ -701,6 +711,12 @@ pub fn rewrite_deleted_sheet_references_in_formula(
         }
 
         if let Some((next, raw, sheet_spec)) = parse_unquoted_sheet_spec(formula, i) {
+            // Ignore external workbook references.
+            if split_workbook_prefix(sheet_spec).0.is_some() {
+                out.push_str(raw);
+                i = next;
+                continue;
+            }
             match rewrite_sheet_spec_for_delete(sheet_spec, deleted_sheet, sheet_order) {
                 DeleteSheetSpecRewrite::Unchanged => {
                     out.push_str(raw);
@@ -1154,6 +1170,27 @@ mod tests {
         assert_eq!(
             rewrite_deleted_sheet_references_in_formula("=SUM(Sheet1:Sheet3!A1)", "Sheet3", &order),
             "=SUM(Sheet1:Sheet2!A1)"
+        );
+    }
+
+    #[test]
+    fn delete_does_not_rewrite_external_workbook_refs() {
+        let order = vec!["Sheet1".to_string(), "Sheet2".to_string()];
+        assert_eq!(
+            rewrite_deleted_sheet_references_in_formula(
+                "='[Book.xlsx]Sheet1'!A1+Sheet1!A1",
+                "Sheet1",
+                &order
+            ),
+            "='[Book.xlsx]Sheet1'!A1+#REF!"
+        );
+        assert_eq!(
+            rewrite_deleted_sheet_references_in_formula(
+                "=[Book.xlsx]Sheet1!A1+Sheet1!A1",
+                "Sheet1",
+                &order
+            ),
+            "=[Book.xlsx]Sheet1!A1+#REF!"
         );
     }
 }
