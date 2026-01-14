@@ -191,7 +191,6 @@ import {
   type CellRange,
 } from "./formatting/toolbar.js";
 import { applyFormatAsTablePreset } from "./formatting/formatAsTablePresets.js";
-import { sortSelection } from "./sort-filter/sortSelection.js";
 import { computeFilterHiddenRows, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import { AutoFilterDropdown, type TableViewRow } from "./table/index.js";
