@@ -30,6 +30,7 @@ const DEFAULT_READ_RANGE_MAX_CELL_CHARS = 10_000;
 const UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER = "[Unserializable cell value]";
 const DEFAULT_RICH_VALUE_SAMPLE_ITEMS = 32;
 const DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS = 256;
+const DEFAULT_RICH_VALUE_MAX_OBJECT_KEYS = 256;
 
 function truncateCellString(value: string, maxChars: number): string {
   const limit = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : DEFAULT_READ_RANGE_MAX_CELL_CHARS;
@@ -108,6 +109,32 @@ function richValueJsonReplacer(_key: string, value: unknown): unknown {
     }
     if (typeof ArrayBuffer.isView === "function" && value && typeof value === "object" && ArrayBuffer.isView(value)) {
       return summarizeArrayBufferView(value as ArrayBufferView);
+    }
+  }
+
+  // Summarize large plain objects to avoid stringifying enormous key sets (e.g. rich value stores).
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    // Avoid summarizing array-like objects (handled above) and other exotic values.
+    const obj = value as Record<string, unknown>;
+    const sample: Record<string, unknown> = {};
+    const keys: string[] = [];
+    let keyCount = 0;
+    for (const key in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+      keyCount += 1;
+      if (keys.length < DEFAULT_RICH_VALUE_SAMPLE_ITEMS) {
+        keys.push(key);
+        try {
+          sample[key] = obj[key];
+        } catch {
+          sample[key] = UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER;
+        }
+      }
+      if (keyCount > DEFAULT_RICH_VALUE_MAX_OBJECT_KEYS) break;
+    }
+
+    if (keyCount > DEFAULT_RICH_VALUE_MAX_OBJECT_KEYS) {
+      return { __type: "Object", keys, sample, truncated: true };
     }
   }
 
