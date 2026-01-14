@@ -158,4 +158,61 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
     app.destroy();
     root.remove();
   });
+
+  it("keeps image ids referenced by in-cell images", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+    const doc: any = app.getDocument();
+
+    // An image referenced only via a stored cell value (Excel "place in cell" picture / IMAGE()).
+    doc.setCellValue(sheetId, { row: 0, col: 0 }, { type: "image", value: { imageId: "image_cell", altText: "Kitten" } });
+
+    const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
+
+    await app.garbageCollectDrawingImages();
+
+    expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
+    const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
+    const keepSet = new Set(Array.from(keep));
+    expect(keepSet.has("image_cell")).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("keeps image ids referenced by sheet background images", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    // An image referenced only as a sheet-level tiled background image.
+    app.setSheetBackgroundImageId(sheetId, "image_bg");
+
+    const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
+
+    await app.garbageCollectDrawingImages();
+
+    expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
+    const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
+    const keepSet = new Set(Array.from(keep));
+    expect(keepSet.has("image_bg")).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
 });

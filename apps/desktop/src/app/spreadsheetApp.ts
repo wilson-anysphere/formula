@@ -8567,6 +8567,11 @@ export class SpreadsheetApp {
       } catch {
         // ignore
       }
+
+      // Sheet-level tiled background images are stored on view metadata and can reference bytes that
+      // live only in IndexedDB. Keep these ids so persistence GC does not delete them.
+      const backgroundId = this.getSheetBackgroundImageId(sheetId);
+      if (backgroundId) keep.add(backgroundId);
     }
 
     // Include locally-cached drawings (e.g. drag/resize interactions) that may not yet be
@@ -8575,6 +8580,20 @@ export class SpreadsheetApp {
     const cachedObjects = this.drawingObjectsCache;
     if (cachedObjects && cachedObjects.sheetId === this.sheetId) {
       scanDrawings(cachedObjects.objects);
+    }
+
+    // In-cell images (Excel "place in cell" pictures / IMAGE() rich value caches) store their image ids
+    // in cell values, not the drawing layer. These ids are tracked by `workbookCellImageIds` for the
+    // workbook-level image manager; reuse that cache here so IndexedDB GC doesn't delete bytes still
+    // referenced by a cell value.
+    if (this.workbookCellImageIds.size === 0) {
+      // Best-effort: when the cache is empty, attempt to repopulate it from stored cells so we don't
+      // accidentally delete image bytes needed by in-cell images.
+      this.recomputeWorkbookCellImageIdsFromStoredCells();
+    }
+    for (const id of this.workbookCellImageIds) {
+      const normalized = typeof id === "string" ? id.trim() : "";
+      if (normalized) keep.add(normalized);
     }
 
     try {
