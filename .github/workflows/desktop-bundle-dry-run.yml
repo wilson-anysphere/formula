@@ -1021,6 +1021,15 @@ jobs:
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py
 
+      - name: Restore CI-only Tauri config patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `scripts/ci/prepare-tauri-signing-config.mjs` may patch `tauri.conf.json` in-place for
+          # fork-friendly unsigned builds. Reset it so the reproducibility guard below only fails on
+          # unexpected tracked file changes.
+          git restore --source=HEAD -- apps/desktop/src-tauri/tauri.conf.json
+
       - name: Fail if the build modified tracked files
         run: git diff --exit-code
 
