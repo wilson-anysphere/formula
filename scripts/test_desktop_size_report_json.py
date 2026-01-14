@@ -326,3 +326,73 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
             summary = summary_path.read_text(encoding="utf-8")
             self.assertIn("## Desktop size report", summary)
             self.assertIn(binary_path.relative_to(repo_root).as_posix(), summary)
+
+    def test_appends_error_to_github_step_summary_when_binary_missing(self) -> None:
+        repo_root = self._repo_root()
+        target_dir = repo_root / "target"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(dir=target_dir) as tmp:
+            tmp_dir = Path(tmp)
+            dist_dir = tmp_dir / "dist"
+            dist_dir.mkdir(parents=True, exist_ok=True)
+            (dist_dir / "a.txt").write_bytes(b"hello\n")
+
+            summary_path = tmp_dir / "step-summary.md"
+
+            proc = self._run(
+                repo_root,
+                [
+                    "--binary",
+                    "does-not-exist",
+                    "--dist",
+                    dist_dir.relative_to(repo_root).as_posix(),
+                    "--no-gzip",
+                ],
+                extra_env={"GITHUB_STEP_SUMMARY": str(summary_path)},
+            )
+            self.assertEqual(proc.returncode, 2)
+
+            self.assertTrue(summary_path.is_file())
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("## Desktop size report", summary)
+            self.assertIn("**ERROR:**", summary)
+            self.assertIn("binary not found", summary)
+
+    def test_over_limit_appends_exceeded_section_to_summary(self) -> None:
+        repo_root = self._repo_root()
+        target_dir = repo_root / "target"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(dir=target_dir) as tmp:
+            tmp_dir = Path(tmp)
+            binary_path = tmp_dir / "formula-desktop"
+            dist_dir = tmp_dir / "dist"
+            dist_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(binary_path, "wb") as f:
+                f.truncate(2_000_000)
+            (dist_dir / "a.txt").write_bytes(b"hello\n")
+
+            summary_path = tmp_dir / "step-summary.md"
+
+            proc = self._run(
+                repo_root,
+                [
+                    "--binary",
+                    binary_path.relative_to(repo_root).as_posix(),
+                    "--dist",
+                    dist_dir.relative_to(repo_root).as_posix(),
+                    "--no-gzip",
+                ],
+                extra_env={
+                    "FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB": "1",
+                    "GITHUB_STEP_SUMMARY": str(summary_path),
+                },
+            )
+            self.assertEqual(proc.returncode, 1)
+
+            self.assertTrue(summary_path.is_file())
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("## Desktop size report", summary)
+            self.assertIn("Size limits exceeded", summary)
