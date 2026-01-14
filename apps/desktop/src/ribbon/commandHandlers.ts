@@ -61,6 +61,7 @@ export type RibbonCommandHandlerContext = {
   executeCommand?: (commandId: string, ...args: any[]) => void;
   sortSelection?: (options: { order: "ascending" | "descending" }) => void;
   openCustomSort?: (commandId: string) => void;
+  promptCustomNumberFormat?: () => void;
   openFormatCells?: () => void;
   /**
    * Pass-through for app shell concerns. Not currently used by formatting handlers, but
@@ -868,6 +869,14 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
         }
         return applied;
       });
+      return true;
+    case "home.number.moreFormats.custom":
+      if (ctx.promptCustomNumberFormat) {
+        ctx.promptCustomNumberFormat();
+      } else {
+        ctx.showToast?.("Custom number formats are not available.", "error");
+        ctx.app.focus();
+      }
       return true;
     case "home.number.increaseDecimal": {
       const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(ctx), "increase");

@@ -110,4 +110,14 @@ describe("handleRibbonCommand", () => {
     expect(handleRibbonCommand(ctx, "data.sortFilter.sort.customSort")).toBe(true);
     expect(openCustomSort).toHaveBeenCalledWith("data.sortFilter.sort.customSort");
   });
+
+  it("routes custom number format through ctx.promptCustomNumberFormat", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+    const promptCustomNumberFormat = vi.fn();
+    ctx.promptCustomNumberFormat = promptCustomNumberFormat;
+
+    expect(handleRibbonCommand(ctx, "home.number.moreFormats.custom")).toBe(true);
+    expect(promptCustomNumberFormat).toHaveBeenCalledTimes(1);
+  });
 });
