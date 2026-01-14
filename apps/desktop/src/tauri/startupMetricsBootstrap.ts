@@ -1,4 +1,5 @@
 import { installStartupTimingsListeners, reportStartupWebviewLoaded } from "./startupMetrics.js";
+import { hasTauri as hasTauriRuntime } from "./api";
 
 // Startup performance instrumentation (no-op for web builds).
 //
@@ -9,13 +10,7 @@ import { installStartupTimingsListeners, reportStartupWebviewLoaded } from "./st
 const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const LISTENERS_KEY = "__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__";
 
-const hasTauri = (() => {
-  try {
-    return typeof (globalThis as any).__TAURI__ !== "undefined";
-  } catch {
-    return false;
-  }
-})();
+const hasTauri = hasTauriRuntime();
 
 const g = globalThis as any;
 if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
