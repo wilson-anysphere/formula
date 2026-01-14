@@ -2962,6 +2962,7 @@ const CURATED_FUNCTIONS = [
       { name: "array", type: "range" },
       { name: "row_num", type: "number" },
       { name: "column_num", type: "number", optional: true },
+      { name: "area_num", type: "number", optional: true },
     ],
   },
   {

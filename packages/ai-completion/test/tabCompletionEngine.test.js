@@ -2756,6 +2756,30 @@ test("HLOOKUP row_index_num suggests 2, 1, 3 (no 0)", async () => {
   );
 });
 
+test("INDEX area_num suggests 1, 2, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=INDEX(A1:B10, 1, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected INDEX to suggest area_num=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect INDEX to suggest area_num=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("CHOOSE index_num suggests 1, 2, 3 (no 0)", async () => {
   const engine = new TabCompletionEngine();
 

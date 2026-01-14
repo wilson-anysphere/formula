@@ -1428,6 +1428,12 @@ const HLOOKUP_ROW_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (3rd row)", confidence: 0.64 },
 ];
 
+const INDEX_AREA_NUM_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (1st area)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2nd area)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3rd area)", confidence: 0.64 },
+];
+
 const LARGE_K_ENUM_1_2_3 = [
   { replacement: "1", displayText: "1 (largest)", confidence: 0.66 },
   { replacement: "2", displayText: "2 (2nd largest)", confidence: 0.65 },
@@ -2366,6 +2372,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "FALSE", displayText: "FALSE (exact match)", confidence: 0.7 },
       { replacement: "TRUE", displayText: "TRUE (approximate match)", confidence: 0.69 },
     ],
+  },
+  INDEX: {
+    // area_num (in INDEX(reference, row_num, [column_num], [area_num]))
+    3: INDEX_AREA_NUM_ENUM_1_2_3,
   },
 };
 
