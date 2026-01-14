@@ -1283,10 +1283,30 @@ jobs:
             esac
           done
 
-      - name: Validate Windows bundles
+      - name: Validate Windows installer bundles (presence + Authenticode)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/validate-windows-bundles.ps1
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          if ([string]::IsNullOrWhiteSpace($target)) {
+            throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
+          }
+
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            $candidatesJoined = $bundleCandidates -join "`n"
+            throw "windows-bundle: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
+          }
+
+          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir
 
       - name: Verify Windows ARM64 binary architecture (AA64)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
@@ -1497,50 +1517,6 @@ jobs:
           name: updater-manifest-${{ matrix.cache_target }}
           path: updater-manifest/latest-${{ matrix.cache_target }}.json
           if-no-files-found: error
-
-      - name: Validate Windows installer bundles (presence + Authenticode)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $target = "${{ matrix.rust_target }}"
-          if ([string]::IsNullOrWhiteSpace($target)) {
-            throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
-          }
-
-          $bundleDir = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"
-          if (-not (Test-Path $bundleDir)) {
-            throw "windows-bundle: ERROR expected Tauri bundle dir not found at: $bundleDir`nThis should be produced by the release build for target '$target'."
-          }
-
-          # Lightweight post-build assertion: ensure we produced at least one Windows installer file
-          # (either MSI or EXE) under the per-target bundle directory.
-          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir
-
-      - name: Verify Windows installer signatures (signtool verify /pa /v)
-        if: runner.os == 'Windows' && ((secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '') || vars.FORMULA_REQUIRE_CODESIGN == '1')
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $target = "${{ matrix.rust_target }}"
-          if ([string]::IsNullOrWhiteSpace($target)) {
-            throw "windows-sigcheck: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
-          }
-
-          $bundleCandidates = @(
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
-          )
-          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $bundleDir) {
-            $candidatesJoined = $bundleCandidates -join "`n"
-            throw "windows-sigcheck: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
-          }
-
-          python scripts/ci/check-windows-installer-signatures.py --bundle-dir "$bundleDir"
 
       - name: Verify Windows ARM64 MSI targets ARM64 (template summary)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
