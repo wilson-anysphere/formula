@@ -170,3 +170,126 @@ fn xlsxdocument_writer_aggregates_dxfs_and_remaps_cf_rule_dxfid() {
     assert_eq!(extract_cf_rule_dxf_ids(sheet2_xml), vec![Some(1), Some(2)]);
 }
 
+#[test]
+fn xlsxdocument_roundtrip_injects_cf_and_remaps_cf_rule_dxfid() {
+    // Regression test: when saving an `XlsxDocument` loaded from an existing package, we may need
+    // to *inject* `<conditionalFormatting>` into an existing worksheet XML payload. In that case,
+    // `CfRule.dxf_id` values (worksheet-local indices) must be remapped to the workbook-global
+    // `styles.xml` `<dxfs>` index space.
+    let mut base = Workbook::new();
+    base.add_sheet("Sheet1").unwrap();
+    base.add_sheet("Sheet2").unwrap();
+
+    let mut cursor = Cursor::new(Vec::<u8>::new());
+    formula_xlsx::write_workbook_to_writer(&base, &mut cursor).expect("write base workbook");
+    let base_bytes = cursor.into_inner();
+
+    let mut doc = formula_xlsx::load_from_bytes(&base_bytes).expect("load xlsx document");
+    let sheet1_id = doc.workbook.sheets[0].id;
+    let sheet2_id = doc.workbook.sheets[1].id;
+
+    let dxf_red = CfStyleOverride {
+        fill: Some(Color::new_argb(0xFFFF0000)),
+        ..Default::default()
+    };
+    let dxf_blue = CfStyleOverride {
+        fill: Some(Color::new_argb(0xFF0000FF)),
+        ..Default::default()
+    };
+    let dxf_green_font = CfStyleOverride {
+        font_color: Some(Color::new_argb(0xFF00FF00)),
+        ..Default::default()
+    };
+
+    let s1_rules = vec![
+        CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![parse_range_a1("A1").unwrap()],
+            dxf_id: Some(0), // red
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "A1>0".to_string(),
+            },
+            dependencies: vec![],
+        },
+        CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 2,
+            applies_to: vec![parse_range_a1("B1").unwrap()],
+            dxf_id: None, // stays None
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "B1>0".to_string(),
+            },
+            dependencies: vec![],
+        },
+        CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 3,
+            applies_to: vec![parse_range_a1("C1").unwrap()],
+            dxf_id: Some(99), // out of bounds -> omitted
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "C1>0".to_string(),
+            },
+            dependencies: vec![],
+        },
+    ];
+    doc.workbook
+        .sheet_mut(sheet1_id)
+        .unwrap()
+        .set_conditional_formatting(s1_rules, vec![dxf_red.clone(), dxf_blue.clone()]);
+
+    let s2_rules = vec![
+        CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![parse_range_a1("A1").unwrap()],
+            dxf_id: Some(0), // blue (local) -> global 1
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "A1>0".to_string(),
+            },
+            dependencies: vec![],
+        },
+        CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 2,
+            applies_to: vec![parse_range_a1("B1").unwrap()],
+            dxf_id: Some(1), // green (local) -> global 2
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "B1>0".to_string(),
+            },
+            dependencies: vec![],
+        },
+    ];
+    doc.workbook
+        .sheet_mut(sheet2_id)
+        .unwrap()
+        .set_conditional_formatting(s2_rules, vec![dxf_blue.clone(), dxf_green_font.clone()]);
+
+    let bytes = doc.save_to_vec().expect("save updated xlsx document");
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("open updated workbook");
+
+    let styles_xml = std::str::from_utf8(pkg.part("xl/styles.xml").unwrap()).unwrap();
+    let styles = formula_xlsx::Styles::parse(styles_xml).unwrap();
+    assert_eq!(styles.dxfs.len(), 3);
+    assert_eq!(styles.dxfs[0].fill, Some(Color::new_argb(0xFFFF0000)));
+    assert_eq!(styles.dxfs[1].fill, Some(Color::new_argb(0xFF0000FF)));
+    assert_eq!(
+        styles.dxfs[2].font_color,
+        Some(Color::new_argb(0xFF00FF00))
+    );
+
+    let sheet1_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    let sheet2_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet2.xml").unwrap()).unwrap();
+    assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None]);
+    assert_eq!(extract_cf_rule_dxf_ids(sheet2_xml), vec![Some(1), Some(2)]);
+}
