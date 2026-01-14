@@ -218,6 +218,26 @@ test("parseGoTo throws for non-contiguous multi-column structured table referenc
   );
 });
 
+test("parseGoTo throws for unsupported structured reference selectors (e.g. #This Row)", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["Col1", "Col2"],
+  });
+
+  assert.throws(
+    () => parseGoTo("Table1[[#This Row],[Col2]]", { workbook: wb, currentSheetName: "Sheet1" }),
+    /unsupported structured reference selector/i,
+  );
+});
+
 test("parseGoTo throws for unknown sheet-qualified references when workbook.getSheet is available", () => {
   const wb = new InMemoryWorkbook();
   wb.addSheet("Sheet1");

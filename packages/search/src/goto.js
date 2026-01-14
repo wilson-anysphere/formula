@@ -243,6 +243,11 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
     const tableSheetName = resolveSheetName(table.sheetName, workbook);
 
     const selectorNorm = structured.selector ? normalizeName(structured.selector) : null;
+    if (selectorNorm && selectorNorm !== "#ALL" && selectorNorm !== "#HEADERS" && selectorNorm !== "#DATA" && selectorNorm !== "#TOTALS") {
+      // Selectors like `#This Row` are relative to an active row context, which `parseGoTo` does not have.
+      // Reject them explicitly rather than returning a misleading full-table range.
+      throw new Error(`Unsupported structured reference selector: ${structured.selector}`);
+    }
 
     const normalizeColumns = (names) =>
       Array.isArray(names)
