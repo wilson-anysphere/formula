@@ -12613,6 +12613,83 @@ fn build_shared_formula_sheet_scoped_name_sanitization_workbook_stream() -> Vec<
     globals
 }
 
+fn build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - Sheet 0: `Bad:Name` (invalid; will be sanitized on import)
+    // - Sheet 1: `Bad_Name` (valid, collides with the sanitized form)
+    // - Sheet 2: `Ref`, with a shared formula (A1:A2) whose rgce is `PtgName` referencing a
+    //   sheet-scoped defined name on sheet 0.
+    //
+    // This exercises the case where sheet-name sanitization causes a name collision and one of
+    // the sheets must be deduped. The `PtgName` scope sheet index must still resolve to the
+    // correct output sheet name.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records.
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Bad:Name", "Bad_Name", "Ref"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // Sheet-scoped defined name on `Bad:Name` (itab=1 => sheet index 0).
+    let name_rgce: Vec<u8> = vec![
+        0x24, // PtgRef
+        0x00, 0x00, // row = 0
+        0x00, 0x00, // col = 0 (absolute)
+    ];
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record(
+            "LocalName",
+            /*itab*/ 1,
+            /*hidden*/ false,
+            None,
+            &name_rgce,
+        ),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 ------------------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 111.0));
+
+    // -- Sheet 1 ------------------------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 222.0));
+
+    // -- Sheet 2 ------------------------------------------------------------------
+    let sheet2_offset = globals.len();
+    globals[boundsheet_offset_positions[2]..boundsheet_offset_positions[2] + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_ptgname_shrfmla_sheet_stream(xf_cell));
+
+    globals
+}
+
 fn build_calc_settings_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -14642,6 +14719,25 @@ fn build_shared_formula_ptgexp_missing_shrfmla_row_oob_sheet_stream(xf_cell: u16
 /// but the `SHRFMLA` definition record is missing.
 pub fn build_shared_formula_ptgexp_missing_shrfmla_row_oob_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_ptgexp_missing_shrfmla_row_oob_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where sheet-name sanitization causes a name collision (one sheet
+/// must be deduped), and a **shared formula** references a sheet-scoped defined name via `PtgName`.
+///
+/// The shared formula must resolve the sheet-scoped name to the correct final sheet name (the one
+/// corresponding to the `NAME.itab` scope), not the deduped collision sheet.
+pub fn build_shared_formula_sheet_scoped_name_dedup_collision_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
