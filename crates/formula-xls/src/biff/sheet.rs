@@ -2512,40 +2512,57 @@ fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usiz
         return Err("implausible UTF-16 string length".to_string());
     }
 
-    let mut candidates: Vec<(String, usize, bool)> = Vec::new();
+    #[derive(Clone, Copy)]
+    struct Candidate {
+        consumed: usize,
+        ends_with_nul: bool,
+    }
 
-    // Candidate A: `len` as byte length.
-    if len_as_bytes_ok && len % 2 == 0 && input.len() >= len {
-        let bytes = &input[..len];
+    let mut best: Option<Candidate> = None;
+
+    let mut consider = |consumed: usize| {
+        let bytes = &input[..consumed];
         let ends_with_nul = bytes
             .chunks_exact(2)
             .last()
             .is_some_and(|chunk| chunk[0] == 0 && chunk[1] == 0);
-        let s = decode_utf16le(bytes)?;
-        candidates.push((trim_trailing_nuls(s), len, ends_with_nul));
+        let cand = Candidate {
+            consumed,
+            ends_with_nul,
+        };
+        best = match best {
+            None => Some(cand),
+            Some(prev) => {
+                // Prefer NUL-terminated candidates; otherwise prefer the shorter byte length.
+                let cand_key = (!cand.ends_with_nul, cand.consumed);
+                let prev_key = (!prev.ends_with_nul, prev.consumed);
+                if cand_key < prev_key {
+                    Some(cand)
+                } else {
+                    Some(prev)
+                }
+            }
+        };
+    };
+
+    // Candidate A: `len` as byte length.
+    if len_as_bytes_ok && len % 2 == 0 && input.len() >= len {
+        consider(len);
     }
 
     // Candidate B: `len` as character count.
     if let Some(byte_len) = len_as_chars_bytes {
         if len_as_chars_ok && byte_len % 2 == 0 && input.len() >= byte_len {
-            let bytes = &input[..byte_len];
-            let ends_with_nul = bytes
-                .chunks_exact(2)
-                .last()
-                .is_some_and(|chunk| chunk[0] == 0 && chunk[1] == 0);
-            let s = decode_utf16le(bytes)?;
-            candidates.push((trim_trailing_nuls(s), byte_len, ends_with_nul));
+            consider(byte_len);
         }
     }
 
-    if candidates.is_empty() {
+    let Some(best) = best else {
         return Err("truncated UTF-16 string".to_string());
-    }
+    };
 
-    // Prefer NUL-terminated candidates; otherwise prefer the shorter byte length.
-    candidates.sort_by_key(|(_s, consumed, ends_with_nul)| (!*ends_with_nul, *consumed));
-    let (s, consumed, _nul) = candidates.into_iter().next().expect("non-empty candidates");
-    Ok((trim_at_first_nul(s), consumed))
+    let s = decode_utf16le(&input[..best.consumed])?;
+    Ok((trim_at_first_nul(trim_trailing_nuls(s)), best.consumed))
 }
 
 fn parse_hyperlink_string(input: &[u8], codepage: u16) -> Result<(String, usize), String> {
@@ -2676,6 +2693,26 @@ mod tests {
             err.contains("truncated"),
             "expected truncated error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn utf16_prefixed_string_prefers_nul_terminated_candidate_over_shorter_candidate() {
+        // `len=2` can be interpreted as 2 bytes ("A") or 2 UTF-16 code units ("A\\0"). Prefer the
+        // NUL-terminated interpretation because it's common in monikers.
+        let input = [0x41, 0x00, 0x00, 0x00];
+        let (s, consumed) = parse_utf16_prefixed_string(&input, 2).expect("parse");
+        assert_eq!(s, "A");
+        assert_eq!(consumed, 4);
+    }
+
+    #[test]
+    fn utf16_prefixed_string_falls_back_to_shorter_candidate_when_neither_is_nul_terminated() {
+        // `len=4` can be interpreted as 4 bytes ("AB") or 4 UTF-16 code units ("ABCD"). When
+        // neither candidate is NUL terminated, prefer the shorter one to avoid over-consuming.
+        let input = [0x41, 0x00, 0x42, 0x00, 0x43, 0x00, 0x44, 0x00];
+        let (s, consumed) = parse_utf16_prefixed_string(&input, 4).expect("parse");
+        assert_eq!(s, "AB");
+        assert_eq!(consumed, 4);
     }
 
     #[test]
