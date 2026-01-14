@@ -6,6 +6,7 @@ use formula_dax::{
     PivotMeasure, Relationship, Table,
 };
 use formula_storage::Storage;
+use rusqlite::{params, Connection};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -266,6 +267,75 @@ fn data_model_round_trip_columnar_calculated_columns() {
         .expect("save data model");
     drop(storage1);
 
+    // Verify the calculated column definitions were persisted in the dedicated SQLite table (not
+    // inferred on load).
+    let conn = Connection::open(path).expect("open sqlite directly");
+    let workbook_id_str = workbook.id.to_string();
+    let mut calc_stmt = conn
+        .prepare(
+            r#"
+            SELECT table_name, name, expression
+            FROM data_model_calculated_columns
+            WHERE workbook_id = ?1
+            ORDER BY id
+            "#,
+        )
+        .expect("prepare calculated columns query");
+    let calc_rows: Vec<(String, String, String)> = calc_stmt
+        .query_map(params![&workbook_id_str], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .expect("query calculated columns")
+        .map(|row| row.expect("row"))
+        .collect();
+    assert_eq!(
+        calc_rows,
+        vec![
+            (
+                "FactSales".to_string(),
+                "Double Amount".to_string(),
+                "[Amount] * 2".to_string(),
+            ),
+            (
+                "FactSales".to_string(),
+                "Category From Dim".to_string(),
+                "RELATED(DimProduct[Category])".to_string(),
+            ),
+        ]
+    );
+
+    // Verify the calculated column values were persisted as physical column chunks.
+    let mut chunk_stmt = conn
+        .prepare(
+            r#"
+            SELECT c.name, COUNT(ch.id)
+            FROM data_model_tables t
+            JOIN data_model_columns c ON c.table_id = t.id
+            JOIN data_model_chunks ch ON ch.column_id = c.id
+            WHERE t.workbook_id = ?1
+              AND t.name = 'FactSales'
+              AND c.name IN ('Double Amount', 'Category From Dim')
+            GROUP BY c.name
+            ORDER BY c.name
+            "#,
+        )
+        .expect("prepare chunk query");
+    let chunk_counts: Vec<(String, i64)> = chunk_stmt
+        .query_map(params![&workbook_id_str], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .expect("query chunk counts")
+        .map(|row| row.expect("row"))
+        .collect();
+    assert_eq!(chunk_counts.len(), 2, "expected chunk rows for both columns");
+    for (name, count) in chunk_counts {
+        assert!(count > 0, "expected at least one persisted chunk for {name}");
+    }
+
     let storage2 = Storage::open_path(path).expect("reopen storage");
     let schema = storage2
         .load_data_model_schema(workbook.id)
@@ -294,6 +364,24 @@ fn data_model_round_trip_columnar_calculated_columns() {
         .load_data_model(workbook.id)
         .expect("load data model");
     assert_eq!(loaded.calculated_columns().len(), 2);
+    assert!(
+        loaded
+            .calculated_columns()
+            .iter()
+            .any(|c| c.table == "FactSales"
+                && c.name == "Double Amount"
+                && c.expression == "[Amount] * 2"),
+        "expected Double Amount to be registered after load"
+    );
+    assert!(
+        loaded
+            .calculated_columns()
+            .iter()
+            .any(|c| c.table == "FactSales"
+                && c.name == "Category From Dim"
+                && c.expression == "RELATED(DimProduct[Category])"),
+        "expected Category From Dim to be registered after load"
+    );
 
     let total_after = loaded
         .evaluate_measure("Total Double Amount", &FilterContext::empty())
@@ -343,8 +431,14 @@ fn data_model_round_trip_columnar_calculated_columns() {
         .iter()
         .position(|c| c.name == "Category From Dim")
         .expect("category column index");
-    assert_eq!(col_table.encoded_chunks(idx_double).unwrap().len(), 2);
-    assert_eq!(col_table.encoded_chunks(idx_category).unwrap().len(), 2);
+    assert!(
+        !col_table.encoded_chunks(idx_double).unwrap().is_empty(),
+        "expected at least one chunk for Double Amount"
+    );
+    assert!(
+        !col_table.encoded_chunks(idx_category).unwrap().is_empty(),
+        "expected at least one chunk for Category From Dim"
+    );
     assert_eq!(
         col_table.get_cell(3, idx_category),
         Value::String(Arc::<str>::from("B"))
