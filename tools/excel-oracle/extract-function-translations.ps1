@@ -223,8 +223,18 @@ function Parse-LocalizedFunctionName {
   }
 
   # Some older Excel builds prefix unknown/new functions with `_xlfn.`.
-  if ($s.StartsWith("_xlfn.")) {
-    $s = $s.Substring(6)
+  while ($true) {
+    if ($s.StartsWith("_xlfn.")) {
+      $s = $s.Substring(6)
+      continue
+    }
+    # Some Excel builds use `_xlws.` in compatibility wrappers (commonly nested
+    # under `_xlfn.`, e.g. `_xlfn._xlws.WEBSERVICE(...)`).
+    if ($s.StartsWith("_xlws.")) {
+      $s = $s.Substring(6)
+      continue
+    }
+    break
   }
 
   # Some Excel builds use `_xludf.` for user-defined / unknown functions.
