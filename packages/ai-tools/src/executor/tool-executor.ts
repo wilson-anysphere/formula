@@ -76,7 +76,7 @@ function formatAltTextOrFallback(altText: unknown): string | null {
   if (typeof altText !== "string") return null;
   const trimmed = altText.trim();
   if (!trimmed) return null;
-  return altText;
+  return trimmed;
 }
 
 function looksLikeExcelRichTextValue(value: unknown): value is { text: string; runs?: unknown } {
