@@ -3989,6 +3989,25 @@ mod tests {
     }
 
     #[test]
+    fn materializes_shared_formula_ref_row_oob_to_referr_variants() {
+        // When a `PtgRef*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the 2D error ptg (`PtgRefErr*`), preserving token width.
+        let base_cell = CellCoord::new(0, 0);
+        let target_cell = CellCoord::new(1, 0); // delta_row=+1
+        let col_field = encode_col_field(0, false, true); // row-relative flag set
+        for &ptg_ref in &[0x24_u8, 0x44, 0x64] {
+            let mut rgce = Vec::new();
+            rgce.push(ptg_ref);
+            rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row=65535
+            rgce.extend_from_slice(&col_field.to_le_bytes());
+            let out =
+                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            assert_eq!(out[0], ptg_ref + 0x06, "ptg={ptg_ref:02X}");
+            assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
     fn materializes_shared_formula_area_col_oob_to_areaerr_variants() {
         // When a `PtgArea*` token shifts out of BIFF8 bounds during shared-formula materialization,
         // the materializer must emit the 2D error ptg (`PtgAreaErr*`), preserving token width.
@@ -4001,6 +4020,29 @@ mod tests {
             rgce.push(ptg_area);
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row1
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row2
+            rgce.extend_from_slice(&col1_field.to_le_bytes());
+            rgce.extend_from_slice(&col2_field.to_le_bytes());
+            let out =
+                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            assert_eq!(out[0], ptg_area + 0x06, "ptg={ptg_area:02X}");
+            assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
+    fn materializes_shared_formula_area_row_oob_to_areaerr_variants() {
+        // When a `PtgArea*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the 2D error ptg (`PtgAreaErr*`), preserving token width.
+        let base_cell = CellCoord::new(0, 0);
+        let target_cell = CellCoord::new(1, 0); // delta_row=+1
+        // Keep the first row fixed in-bounds; shift only the second endpoint out-of-bounds.
+        let col1_field = encode_col_field(0, false, false);
+        let col2_field = encode_col_field(0, false, true); // row-relative flag set on row2
+        for &ptg_area in &[0x25_u8, 0x45, 0x65] {
+            let mut rgce = Vec::new();
+            rgce.push(ptg_area);
+            rgce.extend_from_slice(&(u16::MAX - 1).to_le_bytes()); // row1=65534
+            rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row2=65535 (shifts OOB)
             rgce.extend_from_slice(&col1_field.to_le_bytes());
             rgce.extend_from_slice(&col2_field.to_le_bytes());
             let out =
@@ -4031,6 +4073,26 @@ mod tests {
     }
 
     #[test]
+    fn materializes_shared_formula_ref3d_row_oob_to_referr3d_variants() {
+        // When a `PtgRef3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the 3D error ptg (`PtgRefErr3d*`), preserving token width.
+        let base_cell = CellCoord::new(0, 0);
+        let target_cell = CellCoord::new(1, 0); // delta_row=+1
+        let col_field = encode_col_field(0, false, true); // row-relative flag set
+        for &ptg_ref3d in &[0x3A_u8, 0x5A, 0x7A] {
+            let mut rgce = Vec::new();
+            rgce.push(ptg_ref3d);
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
+            rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row=65535
+            rgce.extend_from_slice(&col_field.to_le_bytes());
+            let out =
+                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            assert_eq!(out[0], ptg_ref3d + 0x02, "ptg={ptg_ref3d:02X}");
+            assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
     fn materializes_shared_formula_area3d_col_oob_to_areaerr3d_variants() {
         // When a `PtgArea3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
         // the materializer must emit the 3D error ptg (`PtgAreaErr3d*`), preserving token width.
@@ -4044,6 +4106,30 @@ mod tests {
             rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row1
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row2
+            rgce.extend_from_slice(&col1_field.to_le_bytes());
+            rgce.extend_from_slice(&col2_field.to_le_bytes());
+            let out =
+                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            assert_eq!(out[0], ptg_area3d + 0x02, "ptg={ptg_area3d:02X}");
+            assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
+    fn materializes_shared_formula_area3d_row_oob_to_areaerr3d_variants() {
+        // When a `PtgArea3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the 3D error ptg (`PtgAreaErr3d*`), preserving token width.
+        let base_cell = CellCoord::new(0, 0);
+        let target_cell = CellCoord::new(1, 0); // delta_row=+1
+        // Keep the first row fixed in-bounds; shift only the second endpoint out-of-bounds.
+        let col1_field = encode_col_field(0, false, false);
+        let col2_field = encode_col_field(0, false, true); // row-relative flag set on row2
+        for &ptg_area3d in &[0x3B_u8, 0x5B, 0x7B] {
+            let mut rgce = Vec::new();
+            rgce.push(ptg_area3d);
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
+            rgce.extend_from_slice(&(u16::MAX - 1).to_le_bytes()); // row1=65534
+            rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row2=65535 (shifts OOB)
             rgce.extend_from_slice(&col1_field.to_le_bytes());
             rgce.extend_from_slice(&col2_field.to_le_bytes());
             let out =
