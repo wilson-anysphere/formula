@@ -563,6 +563,71 @@ test("binder: collab undo/redo reverts local row height changes when sheet.view.
   }
 });
 
+test("binder: collab undo/redo reverts local background image changes when sheet.view is a foreign Y.Map (CJS applyUpdate)", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  remote.transact(() => {
+    const sheets = remote.getArray("sheets");
+    const sheet = new Ycjs.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const view = new Ycjs.Map();
+    view.set("frozenRows", 0);
+    view.set("frozenCols", 0);
+    view.set("backgroundImageId", "bg1.png");
+    sheet.set("view", view);
+
+    sheets.push([sheet]);
+  });
+
+  const ydoc = new Y.Doc();
+  ydoc.getArray("sheets");
+  Ycjs.applyUpdate(ydoc, Ycjs.encodeStateAsUpdate(remote));
+
+  const sheets = ydoc.getArray("sheets");
+  const undo = createUndoService({ mode: "collab", doc: ydoc, scope: sheets });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    undoService: undo,
+    defaultSheetId: "Sheet1",
+  });
+
+  try {
+    await waitForCondition(() => documentController.getSheetView("Sheet1").backgroundImageId === "bg1.png");
+
+    const entry = findSheetEntry(ydoc, "Sheet1");
+    assert.ok(entry, "expected Sheet1 entry");
+    const rawView = entry.get("view");
+    assert.ok(rawView && typeof rawView === "object");
+    assert.equal(rawView instanceof Y.Map, false, "expected sheet.view to be a foreign (non-ESM) Y.Map");
+
+    documentController.setSheetBackgroundImageId("Sheet1", "bg2.png");
+
+    await waitForCondition(() => documentController.getSheetView("Sheet1").backgroundImageId === "bg2.png");
+
+    await waitForCondition(() => {
+      const entry = findSheetEntry(ydoc, "Sheet1");
+      const view = entry?.get?.("view");
+      const id = view?.get?.("backgroundImageId");
+      return id === "bg2.png";
+    });
+
+    undo.undo();
+
+    await waitForCondition(() => documentController.getSheetView("Sheet1").backgroundImageId === "bg1.png");
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0, backgroundImageId: "bg1.png" });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+    remote.destroy();
+  }
+});
+
 test("binder: applies view state when sheet id is set after view", async () => {
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");
