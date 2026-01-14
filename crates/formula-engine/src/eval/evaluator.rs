@@ -1781,6 +1781,15 @@ mod tests {
     }
 
     #[test]
+    fn split_external_sheet_span_key_uses_last_closing_bracket_for_workbook_id() {
+        let key = "[C:\\[foo]\\Book.xlsx]Sheet1:Sheet3";
+        let (workbook, start, end) = split_external_sheet_span_key(key).unwrap();
+        assert_eq!(workbook, "C:\\[foo]\\Book.xlsx");
+        assert_eq!(start, "Sheet1");
+        assert_eq!(end, "Sheet3");
+    }
+
+    #[test]
     fn split_external_sheet_key_uses_last_closing_bracket_for_workbook_id() {
         // Workbook ids can contain `[` / `]` in a path prefix, so we must locate the *last* `]`.
         let key = "[C:\\[foo]\\Book.xlsx]Sheet1";
@@ -1794,6 +1803,7 @@ mod tests {
         for key in [
             "Book.xlsx]Sheet1",  // missing leading '['
             "[Book.xlsxSheet1",  // missing closing ']'
+            "Sheet1",            // missing workbook prefix
             "[]Sheet1",          // empty workbook
             "[Book.xlsx]",       // empty sheet
         ] {
@@ -1806,7 +1816,7 @@ mod tests {
 
     #[test]
     fn split_external_sheet_span_key_rejects_missing_endpoints() {
-        for key in ["[Book.xlsx]Sheet1:", "[Book.xlsx]:Sheet2"] {
+        for key in ["[Book.xlsx]Sheet1", "[Book.xlsx]Sheet1:", "[Book.xlsx]:Sheet2"] {
             assert!(
                 split_external_sheet_span_key(key).is_none(),
                 "expected None for key {key:?}"
