@@ -345,6 +345,16 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("PROB", 1), "Expected PROB prob_range to be a range");
   assert.ok(registry.isRangeArg("SERIESSUM", 3), "Expected SERIESSUM coefficients to be a range");
 
+  // Common distribution functions: keep cumulative flags boolean while treating scalar inputs as value-like.
+  assert.equal(registry.getArgType("NORM.DIST", 0), "value", "Expected NORM.DIST x to be value-like");
+  assert.equal(registry.getArgType("NORM.DIST", 3), "boolean", "Expected NORM.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("NORM.S.DIST", 0), "value", "Expected NORM.S.DIST z to be value-like");
+  assert.equal(registry.getArgType("NORM.S.DIST", 1), "boolean", "Expected NORM.S.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("POISSON", 0), "value", "Expected POISSON x to be value-like");
+  assert.equal(registry.getArgType("POISSON", 2), "boolean", "Expected POISSON cumulative to be boolean");
+  assert.equal(registry.getArgType("WEIBULL", 0), "value", "Expected WEIBULL x to be value-like");
+  assert.equal(registry.getArgType("WEIBULL", 3), "boolean", "Expected WEIBULL cumulative to be boolean");
+
   // Time-series forecasting functions
   assert.ok(registry.isRangeArg("FORECAST.ETS", 1), "Expected FORECAST.ETS values to be a range");
   assert.ok(registry.isRangeArg("FORECAST.ETS", 2), "Expected FORECAST.ETS timeline to be a range");

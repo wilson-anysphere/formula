@@ -1556,6 +1556,78 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "NORM.DIST",
+    description: "Returns the normal cumulative distribution for the specified mean and standard deviation.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "NORM.S.DIST",
+    description: "Returns the standard normal cumulative distribution function.",
+    args: [
+      { name: "z", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "NORM.INV",
+    description: "Returns the inverse of the normal cumulative distribution for the specified mean and standard deviation.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+    ],
+  },
+  {
+    name: "NORM.S.INV",
+    description: "Returns the inverse of the standard normal cumulative distribution.",
+    args: [
+      { name: "probability", type: "value" },
+    ],
+  },
+  {
+    name: "POISSON",
+    description: "Returns the Poisson distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "POISSON.DIST",
+    description: "Returns the Poisson distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "WEIBULL",
+    description: "Returns the Weibull distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "WEIBULL.DIST",
+    description: "Returns the Weibull distribution.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "alpha", type: "value" },
+      { name: "beta", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
     name: "PROB",
     description: "Returns the probability that values in a range are between two limits.",
     args: [
