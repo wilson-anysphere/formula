@@ -242,6 +242,18 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
     }
 
     const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromDom(findFirstByLocalName(pPr ?? p, "defRPr")));
+    // Best-effort bullet handling: if the paragraph defines a bullet character, prepend it so lists
+    // (e.g. SmartArt/shape text) display with readable bullets.
+    //
+    // Note: DrawingML supports many bullet types (auto-numbering, picture bullets, etc). We only
+    // implement `<a:buChar char="…"/>` for now.
+    if (pPr && !findFirstByLocalName(pPr, "buNone")) {
+      const buChar = findFirstByLocalName(pPr, "buChar");
+      const bullet = buChar?.getAttribute("char")?.trim();
+      if (bullet) {
+        textRuns.push({ text: `${bullet} `, ...paraDefaultStyle });
+      }
+    }
 
     for (const child of Array.from(p.childNodes)) {
       if (child.nodeType !== 1) continue;
@@ -385,6 +397,17 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
     }
 
     const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromXmlSnippet(extractFirstElementXml(pPrXml ?? "", "defRPr")));
+    // Best-effort bullet handling (see DOMParser path above).
+    if (pPrXml && !extractFirstElementXml(pPrXml, "buNone")) {
+      const buCharXml = extractFirstElementXml(pPrXml, "buChar");
+      const buCharOpen = buCharXml ? /<[^>]+>/.exec(buCharXml)?.[0] ?? buCharXml : "";
+      const bulletRaw = getAttrFromTag(buCharOpen, "char");
+      const bullet = bulletRaw ? decodeXmlEntities(bulletRaw) : "";
+      const trimmedBullet = bullet.trim();
+      if (trimmedBullet) {
+        textRuns.push({ text: `${trimmedBullet} `, ...paraDefaultStyle });
+      }
+    }
 
     // Walk runs + breaks/tabs in order within the paragraph.
     const nodeRe =

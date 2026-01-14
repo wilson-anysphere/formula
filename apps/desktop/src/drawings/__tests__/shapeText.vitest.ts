@@ -58,6 +58,29 @@ describe("parseDrawingMLShapeText", () => {
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("Hello\tWorld");
   });
 
+  it("prepends <a:buChar> bullet characters to paragraph text", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:pPr><a:buChar char="•"/></a:pPr>
+            <a:r><a:t>Item 1</a:t></a:r>
+          </a:p>
+          <a:p>
+            <a:pPr><a:buChar char="•"/></a:pPr>
+            <a:r><a:t>Item 2</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("• Item 1\n• Item 2");
+  });
+
   it("decodes numeric XML entities (including code points > 0xFFFF)", () => {
     const rawXml = `
       <xdr:sp>
