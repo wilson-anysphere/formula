@@ -184,6 +184,21 @@ Notes:
   `fixtures/encrypted/ooxml/agile-unicode.xlsx` and the regression tests in
   `crates/formula-io/tests/encrypted_ooxml_decrypt.rs`.
 
+### Password edge cases (do not accidentally change semantics)
+
+- **Empty password is valid**: Excel can encrypt a workbook with an empty open password (`""`).
+  Treat this as a real password value (UTF-16LE empty byte string), distinct from “no password was
+  provided”.
+  - In `formula-io`, this typically means callers must distinguish `None` (prompt user) vs
+    `Some("")` (attempt empty-password decrypt).
+- **Unicode normalization matters**: the KDF operates on the exact UTF-16LE byte sequence. Different
+  Unicode normalization forms (e.g. NFC vs NFD) produce different derived keys, even if the
+  displayed password looks identical.
+  - This is a UI/input policy decision: Formula’s crypto expects the *exact* password string that
+    was used at encryption time.
+  - For debugging a “wrong password” report with a Unicode password, try NFC vs NFD variants before
+    assuming the file is corrupted.
+
 ### Verifier check (wrong password vs continue)
 
 To distinguish a wrong password from “corrupt/unsupported file”, Excel-style Agile encryption stores
@@ -321,6 +336,50 @@ Strings change over time, but these are the common ones you’ll see in logs/bug
 - Integrity failure (HMAC mismatch):  
   `encrypted workbook integrity check failed (HMAC mismatch); the file may be corrupted or the password is incorrect`
 
+## Debugging workflow (triage cookbook)
+
+When investigating a bug report (“Formula can’t open my password-protected `.xlsx`”), it helps to
+follow a consistent flow:
+
+1. **Classify the file quickly**
+   - Run:
+
+     ```bash
+     bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/file.xlsx
+     ```
+
+   - Results:
+     - `Agile (4.4)` ⇒ this document applies.
+     - `Standard (*.2)` ⇒ see `docs/offcrypto-standard-cryptoapi.md` +
+       `docs/offcrypto-standard-encryptedpackage.md`.
+     - `Extensible (*.3)` or `Unknown` ⇒ unsupported today.
+
+2. **Validate the password with an external oracle**
+   - Using Python `msoffcrypto-tool`:
+
+     ```bash
+     msoffcrypto-tool -p 'password' encrypted.xlsx decrypted.zip
+     unzip -l decrypted.zip | head
+     ```
+
+   - If `msoffcrypto-tool` can’t decrypt with the user’s password, the issue is likely the password
+     itself (or file corruption), not Formula.
+
+3. **Compare Formula’s decryptors**
+   - `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` both implement Agile
+     decryption + `dataIntegrity` validation.
+   - `crates/formula-offcrypto` provides parsing and low-level building blocks, but is intentionally
+     not yet a full end-to-end Agile decryptor.
+
+4. **Interpret errors**
+   - `WrongPassword` / `InvalidPassword`: verifier mismatch ⇒ password wrong (or normalization
+     mismatch).
+   - `IntegrityMismatch` / `IntegrityCheckFailed`: HMAC mismatch ⇒ tampering/corruption, or (if the
+     password is known correct) an implementation bug. Re-check:
+     - HMAC target bytes are the **raw `EncryptedPackage` stream bytes** (including the 8-byte
+       size header and any padding).
+     - Segment IV derivation uses `keyData/@saltValue` + LE32(segment_index).
+
 ## Test oracles / cross-validation
 
 When validating Agile encryption/decryption correctness, we rely on external “known good”
@@ -334,6 +393,12 @@ implementations as oracles:
     the hash digest length (e.g. **64 bytes for SHA-512**) even when `keyData/@saltSize` is 16.
 
 These tools are useful for answering “is our implementation wrong, or is the file weird?” quickly.
+
+Repository fixtures:
+
+- `fixtures/encrypted/ooxml/` contains synthetic encrypted OOXML workbooks (Agile + Standard, plus
+  empty-password + Unicode-password cases). See `fixtures/encrypted/ooxml/README.md` for passwords,
+  provenance, and regeneration notes.
 
 ## References (MS-OFFCRYPTO sections)
 

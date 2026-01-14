@@ -14,6 +14,7 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 - [xlsx-comments.md](./xlsx-comments.md) — legacy notes + threaded comments + persons parts (relationships, parsing, preservation)
 - [21-encrypted-workbooks.md](./21-encrypted-workbooks.md) — password-protected / encrypted Excel workbooks (OOXML `EncryptedPackage`, legacy `.xls` `FILEPASS`)
 - [21-offcrypto.md](./21-offcrypto.md) — MS-OFFCRYPTO details for encrypted OOXML workbooks (`EncryptionInfo` + `EncryptedPackage`)
+- [22-ooxml-encryption.md](./22-ooxml-encryption.md) — OOXML password decryption reference for MS-OFFCRYPTO Agile 4.4 (HMAC target bytes, IV/salt gotchas, error semantics)
 - [21-xlsx-pivots.md](./21-xlsx-pivots.md) — pivot tables/caches/slicers/timelines compatibility notes + roadmap
 
 ---
