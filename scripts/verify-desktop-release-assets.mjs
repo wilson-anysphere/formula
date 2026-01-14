@@ -86,7 +86,7 @@ function filenameFromUrl(maybeUrl) {
  * Note: `latest.json` is an updater manifest, not a "download the installer"
  * manifest. It can be structurally valid (and reference an existing asset) but
  * still be unusable if it points at a non-updater artifact type:
- * - macOS: `.dmg`/`.pkg` are installers; updater needs `.app.tar.gz`
+ * - macOS: `.dmg`/`.pkg` are installers; updater needs a tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`)
  * - Linux: `.deb`/`.rpm` are installers; updater needs `.AppImage`
  * - Windows: updater uses `.msi` (Windows Installer; NSIS `.exe` is a manual installer by default)
  *
@@ -98,7 +98,8 @@ function expectedUpdaterExtensions(platformKey, opts = {}) {
   const lower = platformKey.toLowerCase();
 
   if (lower.includes("darwin")) {
-    return [".app.tar.gz"];
+    // Keep this aligned with scripts/ci/validate-updater-manifest.mjs.
+    return [".app.tar.gz", ".tar.gz", ".tgz"];
   }
   if (lower.includes("linux")) {
     return [".AppImage"];
@@ -129,8 +130,12 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
     if (lowerFilename.endsWith(".dmg") || lowerFilename.endsWith(".pkg")) {
       return "macOS updater entries must not reference .dmg/.pkg installers.";
     }
-    if (!filename.endsWith(".app.tar.gz")) {
-      return "macOS updater entries must reference a .app.tar.gz updater archive (not the installer).";
+    // Guard against accidentally pointing macOS updater keys at Linux AppImage tarballs.
+    if (lowerFilename.endsWith(".appimage.tar.gz") || lowerFilename.endsWith(".appimage.tgz")) {
+      return "macOS updater entries must not reference Linux AppImage tarballs.";
+    }
+    if (!(lowerFilename.endsWith(".tar.gz") || lowerFilename.endsWith(".tgz"))) {
+      return "macOS updater entries must reference a tarball updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz).";
     }
     return null;
   }
