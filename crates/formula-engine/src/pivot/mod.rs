@@ -560,11 +560,12 @@ impl Accumulator {
 
 pub struct PivotEngine;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PivotRowKind {
     Header,
-    Leaf,
-    Subtotal,
+    Leaf { row_key_idx: usize },
+    /// A subtotal row for the prefix `prefix_key` (length = level + 1).
+    Subtotal { level: usize, prefix_key: PivotKey },
     GrandTotal,
 }
 
@@ -651,7 +652,7 @@ impl PivotEngine {
                 );
 
                 let mut prev_row_key: Option<PivotKey> = None;
-                for row_key in &row_keys {
+                for (row_key_idx, row_key) in row_keys.iter().enumerate() {
                     let common_prefix = prev_row_key
                         .as_ref()
                         .map(|prev| common_prefix_len(&prev.0, &row_key.0))
@@ -664,7 +665,7 @@ impl PivotEngine {
                             data.push(Self::render_subtotal_row(
                                 level, &row_key.0, totals, &col_keys, cfg,
                             ));
-                            row_kinds.push(PivotRowKind::Subtotal);
+                            row_kinds.push(PivotRowKind::Subtotal { level, prefix_key });
                         }
                     }
 
@@ -672,7 +673,7 @@ impl PivotEngine {
                     data.push(Self::render_row(
                         row_key, row_map, &col_keys, cfg, /*label*/ None,
                     ));
-                    row_kinds.push(PivotRowKind::Leaf);
+                    row_kinds.push(PivotRowKind::Leaf { row_key_idx });
 
                     if let Some(acc) = grand_acc.as_mut() {
                         acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
@@ -685,7 +686,7 @@ impl PivotEngine {
                 let mut group_accs: Vec<Option<GroupAccumulator>> = vec![None; subtotal_levels];
 
                 let mut prev_row_key: Option<PivotKey> = None;
-                for row_key in &row_keys {
+                for (row_key_idx, row_key) in row_keys.iter().enumerate() {
                     let common_prefix = prev_row_key
                         .as_ref()
                         .map(|prev| common_prefix_len(&prev.0, &row_key.0))
@@ -713,7 +714,7 @@ impl PivotEngine {
                     data.push(Self::render_row(
                         row_key, row_map, &col_keys, cfg, /*label*/ None,
                     ));
-                    row_kinds.push(PivotRowKind::Leaf);
+                    row_kinds.push(PivotRowKind::Leaf { row_key_idx });
 
                     // Update subtotal accumulators & grand accumulator.
                     for level in 0..subtotal_levels {
@@ -743,12 +744,12 @@ impl PivotEngine {
             }
             _ => {
                 // No subtotals (or not enough row fields).
-                for row_key in &row_keys {
+                for (row_key_idx, row_key) in row_keys.iter().enumerate() {
                     let row_map = cube.get(row_key);
                     data.push(Self::render_row(
                         row_key, row_map, &col_keys, cfg, /*label*/ None,
                     ));
-                    row_kinds.push(PivotRowKind::Leaf);
+                    row_kinds.push(PivotRowKind::Leaf { row_key_idx });
                     if let Some(acc) = grand_acc.as_mut() {
                         acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
                     }
@@ -1023,7 +1024,8 @@ impl PivotEngine {
                     col_keys,
                     cfg,
                 ));
-                row_kinds.push(PivotRowKind::Subtotal);
+                let prefix_key = PivotKey(prev_row_key.0[..=level].to_vec());
+                row_kinds.push(PivotRowKind::Subtotal { level, prefix_key });
             }
         }
     }
@@ -1053,16 +1055,30 @@ impl PivotEngine {
         let regular_column_count = col_keys.len() * value_field_count;
         let row_grand_total_start = row_label_width + regular_column_count;
 
-        let leaf_rows: Vec<usize> = row_kinds
+        let leaf_rows: Vec<(usize, usize)> = row_kinds
             .iter()
             .enumerate()
-            .filter_map(|(idx, kind)| (*kind == PivotRowKind::Leaf).then_some(idx))
+            .filter_map(|(idx, kind)| match kind {
+                PivotRowKind::Leaf { row_key_idx } => Some((idx, *row_key_idx)),
+                _ => None,
+            })
+            .collect();
+
+        let leaf_row_indices: Vec<usize> = leaf_rows.iter().map(|(r, _)| *r).collect();
+
+        let subtotal_rows: Vec<(usize, &PivotKey)> = row_kinds
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, kind)| match kind {
+                PivotRowKind::Subtotal { prefix_key, .. } => Some((idx, prefix_key)),
+                _ => None,
+            })
             .collect();
 
         let grand_total_row = row_kinds
             .iter()
             .enumerate()
-            .find_map(|(idx, kind)| (*kind == PivotRowKind::GrandTotal).then_some(idx));
+            .find_map(|(idx, kind)| matches!(kind, PivotRowKind::GrandTotal).then_some(idx));
 
         for vf_idx in 0..value_field_count {
             let show_as = cfg.value_fields[vf_idx]
@@ -1142,16 +1158,16 @@ impl PivotEngine {
                                 Self::group_ids_excluding_pos(col_keys, base_col_pos);
                             Self::apply_running_total_grouped_by_column(
                                 data,
-                                &leaf_rows,
+                                &leaf_row_indices,
                                 &cols[..col_keys.len()],
                                 &group_ids,
                                 group_count,
                             );
                         } else {
-                            Self::apply_running_total(data, &leaf_rows, &cols);
+                            Self::apply_running_total(data, &leaf_row_indices, &cols);
                         }
                     } else {
-                        Self::apply_running_total(data, &leaf_rows, &cols);
+                        Self::apply_running_total(data, &leaf_row_indices, &cols);
                     }
                 }
                 ShowAsType::RankAscending | ShowAsType::RankDescending => {
@@ -1181,17 +1197,17 @@ impl PivotEngine {
                                 Self::group_ids_excluding_pos(col_keys, base_col_pos);
                             Self::apply_rank_grouped_by_column(
                                 data,
-                                &leaf_rows,
+                                &leaf_row_indices,
                                 &cols[..col_keys.len()],
                                 &group_ids,
                                 group_count,
                                 descending,
                             );
                         } else {
-                            Self::apply_rank(data, &leaf_rows, &cols, descending);
+                            Self::apply_rank(data, &leaf_row_indices, &cols, descending);
                         }
                     } else {
-                        Self::apply_rank(data, &leaf_rows, &cols, descending);
+                        Self::apply_rank(data, &leaf_row_indices, &cols, descending);
                     }
                 }
                 ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {
@@ -1224,6 +1240,7 @@ impl PivotEngine {
                         Self::apply_percent_of_base_item_row_field(
                             data,
                             &leaf_rows,
+                            &subtotal_rows,
                             grand_total_row,
                             cube,
                             row_keys,
@@ -1252,6 +1269,7 @@ impl PivotEngine {
                         Self::apply_percent_of_base_item_column_field(
                             data,
                             &leaf_rows,
+                            &subtotal_rows,
                             grand_total_row,
                             cube,
                             row_keys,
@@ -1451,6 +1469,50 @@ impl PivotEngine {
         data[r][c] = PivotValue::Number(out);
     }
 
+    fn row_key_has_prefix(row_key: &PivotKey, prefix_key: &PivotKey) -> bool {
+        let prefix_len = prefix_key.0.len();
+        if prefix_len == 0 {
+            return true;
+        }
+        if row_key.0.len() < prefix_len {
+            return false;
+        }
+        row_key
+            .0
+            .iter()
+            .take(prefix_len)
+            .zip(prefix_key.0.iter())
+            .all(|(a, b)| a == b)
+    }
+
+    fn row_key_has_prefix_with_base_row_part(
+        row_key: &PivotKey,
+        prefix_key: &PivotKey,
+        base_row_pos: usize,
+        base_part: &PivotKeyPart,
+    ) -> bool {
+        let prefix_len = prefix_key.0.len();
+        if row_key.0.len() < prefix_len {
+            return false;
+        }
+
+        for idx in 0..prefix_len {
+            if idx == base_row_pos {
+                if row_key.0[idx] != *base_part {
+                    return false;
+                }
+            } else if row_key.0[idx] != prefix_key.0[idx] {
+                return false;
+            }
+        }
+
+        if base_row_pos >= prefix_len {
+            return row_key.0.get(base_row_pos) == Some(base_part);
+        }
+
+        true
+    }
+
     fn cube_cell_number(
         cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
         row_key: &PivotKey,
@@ -1614,7 +1676,8 @@ impl PivotEngine {
 
     fn apply_percent_of_base_item_row_field(
         data: &mut [Vec<PivotValue>],
-        leaf_rows: &[usize],
+        leaf_rows: &[(usize, usize)],
+        subtotal_rows: &[(usize, &PivotKey)],
         grand_total_row: Option<usize>,
         cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
         row_keys: &[PivotKey],
@@ -1627,8 +1690,8 @@ impl PivotEngine {
         base_part: &PivotKeyPart,
         difference: bool,
     ) {
-        for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
-            let Some(row_key) = row_keys.get(leaf_idx) else {
+        for &(r, row_key_idx) in leaf_rows {
+            let Some(row_key) = row_keys.get(row_key_idx) else {
                 continue;
             };
             if base_row_pos >= row_key.0.len() {
@@ -1653,6 +1716,64 @@ impl PivotEngine {
             if let Some(total_col) = row_total_col {
                 let denom =
                     Self::cube_row_total(cube, &base_row_key, col_keys, value_field_idx, agg);
+                Self::apply_percent_of_base_item_cell(data, r, total_col, denom, difference);
+            }
+        }
+
+        for &(r, prefix_key) in subtotal_rows {
+            for (col_idx, col_key) in col_keys.iter().enumerate() {
+                let mut acc = Accumulator::new();
+                let mut saw = false;
+                for row_key in row_keys {
+                    if !Self::row_key_has_prefix_with_base_row_part(
+                        row_key,
+                        prefix_key,
+                        base_row_pos,
+                        base_part,
+                    ) {
+                        continue;
+                    }
+                    let Some(row_map) = cube.get(row_key) else {
+                        continue;
+                    };
+                    if let Some(cell_accs) = row_map.get(col_key) {
+                        acc.merge(&cell_accs[value_field_idx]);
+                        saw = true;
+                    }
+                }
+                let denom = saw.then(|| acc.finalize(agg).as_number()).flatten();
+                Self::apply_percent_of_base_item_cell(
+                    data,
+                    r,
+                    regular_cols[col_idx],
+                    denom,
+                    difference,
+                );
+            }
+
+            if let Some(total_col) = row_total_col {
+                let mut acc = Accumulator::new();
+                let mut saw = false;
+                for row_key in row_keys {
+                    if !Self::row_key_has_prefix_with_base_row_part(
+                        row_key,
+                        prefix_key,
+                        base_row_pos,
+                        base_part,
+                    ) {
+                        continue;
+                    }
+                    let Some(row_map) = cube.get(row_key) else {
+                        continue;
+                    };
+                    for col_key in col_keys {
+                        if let Some(cell_accs) = row_map.get(col_key) {
+                            acc.merge(&cell_accs[value_field_idx]);
+                            saw = true;
+                        }
+                    }
+                }
+                let denom = saw.then(|| acc.finalize(agg).as_number()).flatten();
                 Self::apply_percent_of_base_item_cell(data, r, total_col, denom, difference);
             }
         }
@@ -1694,7 +1815,8 @@ impl PivotEngine {
 
     fn apply_percent_of_base_item_column_field(
         data: &mut [Vec<PivotValue>],
-        leaf_rows: &[usize],
+        leaf_rows: &[(usize, usize)],
+        subtotal_rows: &[(usize, &PivotKey)],
         grand_total_row: Option<usize>,
         cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
         row_keys: &[PivotKey],
@@ -1718,8 +1840,8 @@ impl PivotEngine {
             })
             .collect::<Vec<_>>();
 
-        for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
-            let Some(row_key) = row_keys.get(leaf_idx) else {
+        for &(r, row_key_idx) in leaf_rows {
+            let Some(row_key) = row_keys.get(row_key_idx) else {
                 continue;
             };
 
@@ -1750,6 +1872,57 @@ impl PivotEngine {
                     base_col_pos,
                     base_part,
                 );
+                Self::apply_percent_of_base_item_cell(data, r, total_col, denom, difference);
+            }
+        }
+
+        for &(r, prefix_key) in subtotal_rows {
+            for col_idx in 0..col_keys.len() {
+                let mut acc = Accumulator::new();
+                let mut saw = false;
+                for row_key in row_keys {
+                    if !Self::row_key_has_prefix(row_key, prefix_key) {
+                        continue;
+                    }
+                    let Some(row_map) = cube.get(row_key) else {
+                        continue;
+                    };
+                    if let Some(cell_accs) = row_map.get(&base_col_keys[col_idx]) {
+                        acc.merge(&cell_accs[value_field_idx]);
+                        saw = true;
+                    }
+                }
+                let denom = saw.then(|| acc.finalize(agg).as_number()).flatten();
+                Self::apply_percent_of_base_item_cell(
+                    data,
+                    r,
+                    regular_cols[col_idx],
+                    denom,
+                    difference,
+                );
+            }
+
+            if let Some(total_col) = row_total_col {
+                let mut acc = Accumulator::new();
+                let mut saw = false;
+                for row_key in row_keys {
+                    if !Self::row_key_has_prefix(row_key, prefix_key) {
+                        continue;
+                    }
+                    let Some(row_map) = cube.get(row_key) else {
+                        continue;
+                    };
+                    for col_key in col_keys {
+                        if col_key.0.get(base_col_pos) != Some(base_part) {
+                            continue;
+                        }
+                        if let Some(cell_accs) = row_map.get(col_key) {
+                            acc.merge(&cell_accs[value_field_idx]);
+                            saw = true;
+                        }
+                    }
+                }
+                let denom = saw.then(|| acc.finalize(agg).as_number()).flatten();
                 Self::apply_percent_of_base_item_cell(data, r, total_col, denom, difference);
             }
         }
@@ -1810,7 +1983,7 @@ impl PivotEngine {
 
     fn apply_running_total_grouped_by_row(
         data: &mut [Vec<PivotValue>],
-        leaf_rows: &[usize],
+        leaf_rows: &[(usize, usize)],
         cols: &[usize],
         row_group_ids: &[usize],
         group_count: usize,
@@ -1821,8 +1994,8 @@ impl PivotEngine {
 
         for &c in cols {
             let mut running_by_group = vec![0.0; group_count];
-            for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
-                let Some(group_id) = row_group_ids.get(leaf_idx).copied() else {
+            for &(r, row_key_idx) in leaf_rows {
+                let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
                     continue;
                 };
                 let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
@@ -1880,7 +2053,7 @@ impl PivotEngine {
 
     fn apply_rank_grouped_by_row(
         data: &mut [Vec<PivotValue>],
-        leaf_rows: &[usize],
+        leaf_rows: &[(usize, usize)],
         cols: &[usize],
         row_group_ids: &[usize],
         group_count: usize,
@@ -1892,8 +2065,8 @@ impl PivotEngine {
 
         for &c in cols {
             let mut values_by_group: Vec<Vec<(usize, f64)>> = vec![Vec::new(); group_count];
-            for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
-                let Some(group_id) = row_group_ids.get(leaf_idx).copied() else {
+            for &(r, row_key_idx) in leaf_rows {
+                let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
                     continue;
                 };
                 let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
@@ -3296,6 +3469,142 @@ mod tests {
                 ],
                 vec!["East".into(), 1.0.into(), 3.0.into()],
                 vec!["West".into(), 1.0.into(), 2.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_base_item_row_field_applies_to_subtotals() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 200.into()]),
+            pv_row(&["West".into(), "A".into(), 50.into()]),
+            pv_row(&["West".into(), "B".into(), 150.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentOf),
+                base_field: Some("Region".to_string()),
+                base_item: Some("East".to_string()),
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::Bottom,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Product".into(), "Sum of Sales".into()],
+                vec!["East".into(), "A".into(), 1.0.into()],
+                vec!["East".into(), "B".into(), 1.0.into()],
+                vec!["East Total".into(), PivotValue::Blank, 1.0.into()],
+                vec!["West".into(), "A".into(), 0.5.into()],
+                vec!["West".into(), "B".into(), 0.75.into()],
+                vec![
+                    "West Total".into(),
+                    PivotValue::Blank,
+                    (200.0 / 300.0).into()
+                ],
+                vec![
+                    "Grand Total".into(),
+                    PivotValue::Blank,
+                    (500.0 / 300.0).into()
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_base_item_column_field_applies_to_subtotals() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Year".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), "2019".into(), 10.into()]),
+            pv_row(&["East".into(), "A".into(), "2020".into(), 20.into()]),
+            pv_row(&["East".into(), "B".into(), "2019".into(), 30.into()]),
+            pv_row(&["East".into(), "B".into(), "2020".into(), 60.into()]),
+            pv_row(&["West".into(), "A".into(), "2019".into(), 5.into()]),
+            pv_row(&["West".into(), "A".into(), "2020".into(), 15.into()]),
+            pv_row(&["West".into(), "B".into(), "2019".into(), 25.into()]),
+            pv_row(&["West".into(), "B".into(), "2020".into(), 50.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
+            column_fields: vec![PivotField::new("Year")],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentOf),
+                base_field: Some("Year".to_string()),
+                base_item: Some("2019".to_string()),
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::Bottom,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: true,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "Product".into(),
+                    "2019 - Sum of Sales".into(),
+                    "2020 - Sum of Sales".into(),
+                    "Grand Total - Sum of Sales".into(),
+                ],
+                vec!["East".into(), "A".into(), 1.0.into(), 2.0.into(), 3.0.into()],
+                vec!["East".into(), "B".into(), 1.0.into(), 2.0.into(), 3.0.into()],
+                vec![
+                    "East Total".into(),
+                    PivotValue::Blank,
+                    1.0.into(),
+                    2.0.into(),
+                    3.0.into(),
+                ],
+                vec!["West".into(), "A".into(), 1.0.into(), 3.0.into(), 4.0.into()],
+                vec!["West".into(), "B".into(), 1.0.into(), 2.0.into(), 3.0.into()],
+                vec![
+                    "West Total".into(),
+                    PivotValue::Blank,
+                    1.0.into(),
+                    (65.0 / 30.0).into(),
+                    (95.0 / 30.0).into(),
+                ],
+                vec![
+                    "Grand Total".into(),
+                    PivotValue::Blank,
+                    1.0.into(),
+                    (145.0 / 70.0).into(),
+                    (215.0 / 70.0).into(),
+                ],
             ]
         );
     }

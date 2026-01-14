@@ -112,55 +112,6 @@ pub enum SortOrder {
     Manual,
 }
 
-/// Layout style used when rendering a pivot table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Outline,
-    Tabular,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        // Match Excel defaults.
-        Self::Tabular
-    }
-}
-
-/// Controls where subtotals appear for each pivot field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    Top,
-    Bottom,
-    None,
-}
-
-impl Default for SubtotalPosition {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-/// Enables/disables row/column grand totals in the rendered pivot output.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    pub rows: bool,
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        // Match Excel defaults.
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
 /// Value representation used for manual pivot-field ordering.
 ///
 /// This is intentionally lightweight and serde-friendly since it may cross IPC
