@@ -21,6 +21,8 @@ use ordered_float::OrderedFloat;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
 pub type DaxResult<T> = Result<T, DaxError>;
 
@@ -2209,7 +2211,6 @@ impl DaxEngine {
             row_ctx: &RowContext,
             env: &mut VarEnv,
             keep_filters: bool,
-            env: &mut VarEnv,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
         ) -> DaxResult<()> {
@@ -2375,7 +2376,6 @@ impl DaxEngine {
                     row_ctx,
                     env,
                     keep_filters,
-                    env,
                     &mut clear_columns,
                     &mut row_filters,
                 )?,
@@ -2392,7 +2392,6 @@ impl DaxEngine {
                         row_ctx,
                         env,
                         keep_filters,
-                        env,
                         &mut clear_columns,
                         &mut row_filters,
                     )?
@@ -4516,8 +4515,16 @@ fn resolve_row_sets(
         }
     }
 
+    let trace_enabled = resolve_row_sets_trace_enabled();
+    let mut iterations = 0usize;
+    let mut propagate_calls = 0usize;
+    let mut propagate_changes = 0usize;
+
     let mut changed = true;
     while changed {
+        if trace_enabled {
+            iterations += 1;
+        }
         changed = false;
         for (idx, relationship) in model.relationships().iter().enumerate() {
             let pair = (
@@ -4539,41 +4546,138 @@ fn resolve_row_sets(
 
             match override_state {
                 Some(RelationshipOverride::OneWayReverse) => {
-                    changed |=
+                    if trace_enabled {
+                        propagate_calls += 1;
+                    }
+                    let changed_to_one =
                         propagate_filter(model, &mut sets, relationship, Direction::ToOne, filter)?;
+                    if trace_enabled && changed_to_one {
+                        propagate_changes += 1;
+                    }
+                    changed |= changed_to_one;
                 }
                 Some(RelationshipOverride::Active(dir)) => {
-                    changed |=
-                        propagate_filter(model, &mut sets, relationship, Direction::ToMany, filter)?;
+                    if trace_enabled {
+                        propagate_calls += 1;
+                    }
+                    let changed_to_many = propagate_filter(
+                        model,
+                        &mut sets,
+                        relationship,
+                        Direction::ToMany,
+                        filter,
+                    )?;
+                    if trace_enabled && changed_to_many {
+                        propagate_changes += 1;
+                    }
+                    changed |= changed_to_many;
                     if dir == CrossFilterDirection::Both {
-                        changed |= propagate_filter(
+                        if trace_enabled {
+                            propagate_calls += 1;
+                        }
+                        let changed_to_one = propagate_filter(
                             model,
                             &mut sets,
                             relationship,
                             Direction::ToOne,
                             filter,
                         )?;
+                        if trace_enabled && changed_to_one {
+                            propagate_changes += 1;
+                        }
+                        changed |= changed_to_one;
                     }
                 }
                 Some(RelationshipOverride::Disabled) => unreachable!("checked above"),
                 None => {
-                    changed |=
-                        propagate_filter(model, &mut sets, relationship, Direction::ToMany, filter)?;
+                    if trace_enabled {
+                        propagate_calls += 1;
+                    }
+                    let changed_to_many = propagate_filter(
+                        model,
+                        &mut sets,
+                        relationship,
+                        Direction::ToMany,
+                        filter,
+                    )?;
+                    if trace_enabled && changed_to_many {
+                        propagate_changes += 1;
+                    }
+                    changed |= changed_to_many;
                     if relationship.rel.cross_filter_direction == CrossFilterDirection::Both {
-                        changed |= propagate_filter(
+                        if trace_enabled {
+                            propagate_calls += 1;
+                        }
+                        let changed_to_one = propagate_filter(
                             model,
                             &mut sets,
                             relationship,
                             Direction::ToOne,
                             filter,
                         )?;
+                        if trace_enabled && changed_to_one {
+                            propagate_changes += 1;
+                        }
+                        changed |= changed_to_one;
                     }
                 }
             }
         }
     }
 
+    if trace_enabled {
+        maybe_trace_resolve_row_sets(model, filter, &sets, iterations, propagate_calls, propagate_changes);
+    }
+
     Ok(sets)
+}
+
+fn resolve_row_sets_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FORMULA_DAX_RELATIONSHIP_TRACE").is_some())
+}
+
+fn maybe_trace_resolve_row_sets(
+    model: &DataModel,
+    filter: &FilterContext,
+    sets: &HashMap<String, Vec<bool>>,
+    iterations: usize,
+    propagate_calls: usize,
+    propagate_changes: usize,
+) {
+    static EMITTED: AtomicBool = AtomicBool::new(false);
+    if EMITTED.swap(true, AtomicOrdering::Relaxed) {
+        return;
+    }
+
+    let mut table_counts: Vec<(&str, usize, usize)> = sets
+        .iter()
+        .map(|(name, allowed)| {
+            (
+                name.as_str(),
+                allowed.iter().filter(|v| **v).count(),
+                allowed.len(),
+            )
+        })
+        .collect();
+    table_counts.sort_by_key(|(name, _, _)| *name);
+    let table_counts = table_counts
+        .into_iter()
+        .map(|(name, allowed, total)| format!("{name}={allowed}/{total}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    eprintln!(
+        "formula-dax resolve_row_sets: tables={} relationships={} filters(col={}, row={}) iterations={} propagate_calls={} propagate_changes={} sets=[{}]",
+        model.tables.len(),
+        model.relationships().len(),
+        filter.column_filters.len(),
+        filter.row_filters.len(),
+        iterations,
+        propagate_calls,
+        propagate_changes,
+        table_counts
+    );
 }
 
 enum Direction {
