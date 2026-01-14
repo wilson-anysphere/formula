@@ -785,6 +785,7 @@ fn eval_ast_inner(
                     Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
                     Function::XMatch => arg_idx == 1,
                     Function::XLookup => arg_idx == 1 || arg_idx == 2,
+                    Function::Offset => arg_idx == 0,
                     Function::Row | Function::Column | Function::Rows | Function::Columns => true,
                     _ => false,
                 };
@@ -5028,8 +5029,26 @@ fn fn_address(args: &[Value], grid: &dyn Grid, _base: CellCoord) -> Value {
 }
 
 fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
-    if !(3..=5).contains(&args.len()) {
+    if args.len() < 3 || args.len() > 5 {
         return Value::Error(ErrorKind::Value);
+    }
+
+    // Coerce scalar numeric arguments, matching the AST evaluator's `eval_scalar_arg` behavior:
+    // ranges are implicitly intersected, while array/lambda values are rejected.
+    fn scalar_i64_arg(v: &Value, grid: &dyn Grid, base: CellCoord) -> Result<i64, ErrorKind> {
+        let v = match v {
+            Value::Range(_) | Value::MultiRange(_) => {
+                apply_implicit_intersection(v.clone(), grid, base)
+            }
+            _ => v.clone(),
+        };
+        match v {
+            Value::Error(e) => Err(e),
+            Value::Array(_) | Value::Range(_) | Value::MultiRange(_) | Value::Lambda(_) => {
+                Err(ErrorKind::Value)
+            }
+            other => coerce_to_i64(&other),
+        }
     }
 
     let current_sheet = thread_current_sheet_id() as usize;
@@ -5045,64 +5064,34 @@ fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         _ => return Value::Error(ErrorKind::Value),
     };
 
-    let rows = match match &args[1] {
-        Value::Range(_) | Value::MultiRange(_) => {
-            apply_implicit_intersection(args[1].clone(), grid, base)
-        }
-        _ => args[1].clone(),
-    } {
-        Value::Error(e) => return Value::Error(e),
-        v => match coerce_to_i64(&v) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        },
-    };
-
-    let cols = match match &args[2] {
-        Value::Range(_) | Value::MultiRange(_) => {
-            apply_implicit_intersection(args[2].clone(), grid, base)
-        }
-        _ => args[2].clone(),
-    } {
-        Value::Error(e) => return Value::Error(e),
-        v => match coerce_to_i64(&v) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        },
-    };
+    if !range_in_bounds_on_sheet(grid, &sheet, base_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
 
     let default_height = i64::from(base_range.rows());
     let default_width = i64::from(base_range.cols());
 
-    let height = if let Some(arg) = args.get(3) {
-        match match arg {
-            Value::Range(_) | Value::MultiRange(_) => {
-                apply_implicit_intersection(arg.clone(), grid, base)
-            }
-            _ => arg.clone(),
-        } {
-            Value::Error(e) => return Value::Error(e),
-            v => match coerce_to_i64(&v) {
-                Ok(n) => n,
-                Err(e) => return Value::Error(e),
-            },
+    let rows = match scalar_i64_arg(&args[1], grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let cols = match scalar_i64_arg(&args[2], grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let height = if args.len() >= 4 && !matches!(args[3], Value::Missing) {
+        match scalar_i64_arg(&args[3], grid, base) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
         }
     } else {
         default_height
     };
-
-    let width = if let Some(arg) = args.get(4) {
-        match match arg {
-            Value::Range(_) | Value::MultiRange(_) => {
-                apply_implicit_intersection(arg.clone(), grid, base)
-            }
-            _ => arg.clone(),
-        } {
-            Value::Error(e) => return Value::Error(e),
-            v => match coerce_to_i64(&v) {
-                Ok(n) => n,
-                Err(e) => return Value::Error(e),
-            },
+    let width = if args.len() >= 5 && !matches!(args[4], Value::Missing) {
+        match scalar_i64_arg(&args[4], grid, base) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
         }
     } else {
         default_width
@@ -5112,24 +5101,48 @@ fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Ref);
     }
 
-    let start_row = (base_range.row_start as i64) + rows;
-    let start_col = (base_range.col_start as i64) + cols;
-    let end_row = start_row + height - 1;
-    let end_col = start_col + width - 1;
+    let start_row = i64::from(base_range.row_start).saturating_add(rows);
+    let start_col = i64::from(base_range.col_start).saturating_add(cols);
+    let end_row = match start_row.checked_add(height.saturating_sub(1)) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Ref),
+    };
+    let end_col = match start_col.checked_add(width.saturating_sub(1)) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Ref),
+    };
 
-    let within_i32 = |n: i64| n >= 0 && i32::try_from(n).is_ok();
-    if !within_i32(start_row)
-        || !within_i32(start_col)
-        || !within_i32(end_row)
-        || !within_i32(end_col)
+    let (sheet_rows, sheet_cols) = grid.bounds_on_sheet(&sheet);
+    let sheet_rows = i64::from(sheet_rows);
+    let sheet_cols = i64::from(sheet_cols);
+    if sheet_rows <= 0 || sheet_cols <= 0 {
+        return Value::Error(ErrorKind::Ref);
+    }
+    if start_row < 0
+        || start_col < 0
+        || end_row < 0
+        || end_col < 0
+        || start_row >= sheet_rows
+        || end_row >= sheet_rows
+        || start_col >= sheet_cols
+        || end_col >= sheet_cols
     {
         return Value::Error(ErrorKind::Ref);
     }
 
-    let start = Ref::new(start_row as i32, start_col as i32, true, true);
-    let end = Ref::new(end_row as i32, end_col as i32, true, true);
-    let range = RangeRef::new(start, end);
+    let (Ok(start_row), Ok(start_col), Ok(end_row), Ok(end_col)) = (
+        i32::try_from(start_row),
+        i32::try_from(start_col),
+        i32::try_from(end_row),
+        i32::try_from(end_col),
+    ) else {
+        return Value::Error(ErrorKind::Ref);
+    };
 
+    let range = RangeRef::new(
+        Ref::new(start_row, start_col, true, true),
+        Ref::new(end_row, end_col, true, true),
+    );
     match sheet {
         SheetId::Local(sheet_id) if sheet_id == current_sheet => Value::Range(range),
         other_sheet => Value::MultiRange(MultiRangeRef::new(
@@ -5149,20 +5162,38 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         }
         _ => args[0].clone(),
     };
+    if let Value::Error(e) = text_val {
+        return Value::Error(e);
+    }
+    if matches!(
+        text_val,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) | Value::Lambda(_)
+    ) {
+        return Value::Error(ErrorKind::Value);
+    }
     let text = match coerce_to_string(&text_val) {
-        Ok(s) => s,
+        Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
-    let a1 = if args.len() == 2 {
+    let a1 = if args.len() >= 2 && !matches!(args[1], Value::Missing) {
         let a1_val = match &args[1] {
             Value::Range(_) | Value::MultiRange(_) => {
                 apply_implicit_intersection(args[1].clone(), grid, base)
             }
             _ => args[1].clone(),
         };
+        if let Value::Error(e) = a1_val {
+            return Value::Error(e);
+        }
+        if matches!(
+            a1_val,
+            Value::Array(_) | Value::Range(_) | Value::MultiRange(_) | Value::Lambda(_)
+        ) {
+            return Value::Error(ErrorKind::Value);
+        }
         match coerce_to_bool(&a1_val) {
-            Ok(b) => b,
+            Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
     } else {
@@ -5190,7 +5221,6 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Err(_) => return Value::Error(ErrorKind::Ref),
     };
 
-    let current_sheet = thread_current_sheet_id() as usize;
     let Ok(origin_row) = u32::try_from(base.row) else {
         return Value::Error(ErrorKind::Ref);
     };
@@ -5202,9 +5232,9 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         row: origin_row,
         col: origin_col,
     };
-
     let lowered = crate::eval::lower_ast(&parsed, if a1 { None } else { Some(origin_ast) });
 
+    let current_sheet = thread_current_sheet_id() as usize;
     fn resolve_sheet(
         grid: &dyn Grid,
         sheet: &crate::eval::SheetReference<String>,
