@@ -257,6 +257,10 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(overhead, dict):
         overhead = {}
 
+    calc_cells = summary.get("calculate_cells") or {}
+    if not isinstance(calc_cells, dict):
+        calc_cells = {}
+
     part_change_ratio = summary.get("part_change_ratio") or {}
     if not isinstance(part_change_ratio, dict):
         part_change_ratio = {}
@@ -297,6 +301,9 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         "calc_ok": int(counts.get("calculate_ok") or 0),
         "calc_attempted": int(counts.get("calculate_attempted") or 0),
         "calc_rate": rates.get("calculate"),
+        "calc_cell_fidelity": calc_cells.get("fidelity"),
+        "calc_formula_cells_total": int(calc_cells.get("formula_cells") or 0),
+        "calc_mismatched_cells_total": int(calc_cells.get("mismatched_cells") or 0),
         "render_ok": int(counts.get("render_ok") or 0),
         "render_attempted": int(counts.get("render_attempted") or 0),
         "render_rate": rates.get("render"),
@@ -498,6 +505,9 @@ def _compute_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     failing_cellxfs: list[int] = []
     failing_cellxfs_by_workbook: list[tuple[int, str]] = []
     round_trip_fail_on_values: set[str] = set()
+    calc_cells_workbooks = 0
+    calc_formula_cells = 0
+    calc_mismatched_cells = 0
 
     for r in reports:
         res = r.get("result", {})
@@ -550,6 +560,19 @@ def _compute_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
         if r.get("failure_category") == "round_trip_diff":
             kind = _round_trip_failure_kind(r) or "round_trip_other"
             failures_by_round_trip_failure_kind[kind] += 1
+
+        # Aggregate calculation fidelity signals (cell-level) from successful recalc steps.
+        steps = r.get("steps")
+        recalc_step = steps.get("recalc") if isinstance(steps, dict) else None
+        if isinstance(recalc_step, dict) and recalc_step.get("status") == "ok":
+            details = recalc_step.get("details")
+            if isinstance(details, dict):
+                fc = details.get("formula_cell_count")
+                mm = details.get("mismatch_count")
+                if isinstance(fc, int) and isinstance(mm, int):
+                    calc_cells_workbooks += 1
+                    calc_formula_cells += fc
+                    calc_mismatched_cells += mm
 
         for key, out_key in [
             ("diff_critical_count", "critical"),
@@ -649,6 +672,13 @@ def _compute_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
         ]
 
     timings = _compute_timings(reports)
+
+    calc_cell_fidelity: float | None
+    if calc_formula_cells > 0:
+        calc_cell_fidelity = 1.0 - (calc_mismatched_cells / calc_formula_cells)
+    else:
+        calc_cell_fidelity = None
+
     summary: dict[str, Any] = {
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
@@ -678,6 +708,12 @@ def _compute_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "round_trip": _rate(rt_ok, total),
         },
         "round_trip_size_overhead": _round_trip_size_overhead(reports),
+        "calculate_cells": {
+            "workbooks": calc_cells_workbooks,
+            "formula_cells": calc_formula_cells,
+            "mismatched_cells": calc_mismatched_cells,
+            "fidelity": calc_cell_fidelity,
+        },
         "failures_by_category": dict(failures_by_category),
         "failures_by_round_trip_failure_kind": dict(failures_by_round_trip_failure_kind),
         "diff_totals": dict(diff_totals),
@@ -746,6 +782,24 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         if skipped > 0:
             extra = f"{extra}, {skipped} skipped"
         lines.append(f"- {label}: **{ok} / {attempted} attempted** ({extra})")
+
+    calc_cells = summary.get("calculate_cells") or {}
+    if isinstance(calc_cells, dict) and calc_cells.get("formula_cells"):
+        fidelity = calc_cells.get("fidelity")
+        mismatched = calc_cells.get("mismatched_cells")
+        total_cells = calc_cells.get("formula_cells")
+        if (
+            isinstance(fidelity, (int, float))
+            and not isinstance(fidelity, bool)
+            and isinstance(mismatched, int)
+            and isinstance(total_cells, int)
+            and total_cells > 0
+        ):
+            lines.append(
+                "- Calculate cell fidelity: "
+                f"**{float(fidelity):.3%}** "
+                f"({mismatched} mismatches / {total_cells} formula cells)"
+            )
 
     lines.append(
         f"- Round-trip: **{counts['round_trip_ok']} / {counts['total']}** ({rates['round_trip']:.1%})"

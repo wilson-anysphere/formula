@@ -15,6 +15,9 @@ class TrendDeltaTests(unittest.TestCase):
             "round_trip_p90_ms": 20,
             "calc_rate": 0.5,
             "calc_attempted": 10,
+            "calc_cell_fidelity": 0.99,
+            "calc_formula_cells_total": 100,
+            "calc_mismatched_cells_total": 1,
             "render_rate": None,
             "render_attempted": 0,
             "size_overhead_p90": 1.05,
@@ -35,6 +38,9 @@ class TrendDeltaTests(unittest.TestCase):
             "round_trip_p90_ms": 18,
             "calc_rate": 0.6,
             "calc_attempted": 10,
+            "calc_cell_fidelity": 0.995,
+            "calc_formula_cells_total": 200,
+            "calc_mismatched_cells_total": 1,
             "render_rate": None,
             "render_attempted": 0,
             "size_overhead_p90": 1.10,
@@ -63,6 +69,7 @@ class TrendDeltaTests(unittest.TestCase):
         self.assertIn("Top failure categories", md)
         self.assertIn("Top failing functions", md)
         self.assertIn("Top failing features", md)
+        self.assertIn("Calc cell fidelity", md)
 
     def test_trend_delta_markdown_skips_when_summary_timestamp_mismatch(self) -> None:
         prev = {"timestamp": "t0"}

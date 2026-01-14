@@ -189,6 +189,13 @@ def trend_delta_markdown(
     lines.append(
         f"- Calc rate (attempted): **{_pct(cur.get('calc_rate'))}** ({_delta_pct(prev.get('calc_rate'), cur.get('calc_rate'))}); attempted {cur.get('calc_attempted', 0)}"
     )
+    if cur.get("calc_cell_fidelity") is not None:
+        lines.append(
+            "- Calc cell fidelity: "
+            f"**{_pct(cur.get('calc_cell_fidelity'))}** "
+            f"({_delta_pct(prev.get('calc_cell_fidelity'), cur.get('calc_cell_fidelity'))}); "
+            f"mismatches {cur.get('calc_mismatched_cells_total', 0)} / {cur.get('calc_formula_cells_total', 0)}"
+        )
     lines.append(
         f"- Render rate (attempted): **{_pct(cur.get('render_rate'))}** ({_delta_pct(prev.get('render_rate'), cur.get('render_rate'))}); attempted {cur.get('render_attempted', 0)}"
     )

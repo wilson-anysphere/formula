@@ -43,6 +43,12 @@ class DashboardTrendTests(unittest.TestCase):
             "failures_by_round_trip_failure_kind": {"round_trip_styles": 1},
             # Size ratios: [110/100=1.1, 180/200=0.9]
             "round_trip_size_overhead": {"count": 2, "mean": 1.0, "p50": 1.0, "p90": 1.08},
+            "calculate_cells": {
+                "workbooks": 2,
+                "formula_cells": 1000,
+                "mismatched_cells": 1,
+                "fidelity": 0.999,
+            },
             "part_change_ratio": {"p90": 0.30},
             "part_change_ratio_critical": {"p90": 0.10},
             "timings": {
@@ -71,6 +77,9 @@ class DashboardTrendTests(unittest.TestCase):
         self.assertEqual(entry["calc_attempted"], 2)
         self.assertEqual(entry["calc_ok"], 1)
         self.assertAlmostEqual(entry["calc_rate"], 0.5)
+        self.assertAlmostEqual(entry["calc_cell_fidelity"], 0.999)
+        self.assertEqual(entry["calc_formula_cells_total"], 1000)
+        self.assertEqual(entry["calc_mismatched_cells_total"], 1)
 
         self.assertEqual(entry["render_attempted"], 2)
         self.assertEqual(entry["render_ok"], 1)
