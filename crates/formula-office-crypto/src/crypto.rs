@@ -578,14 +578,21 @@ impl StandardKeyDeriver {
         &self,
         block_index: u32,
     ) -> Result<Zeroizing<Vec<u8>>, OfficeCryptoError> {
-        let mut buf: Zeroizing<Vec<u8>> =
-            Zeroizing::new(Vec::with_capacity(self.password_hash.len() + 4));
-        buf.extend_from_slice(&self.password_hash);
-        buf.extend_from_slice(&block_index.to_le_bytes());
-        let h: Zeroizing<Vec<u8>> = Zeroizing::new(self.hash_alg.digest(&buf));
+        // Avoid allocating a temporary `H || LE32(blockIndex)` buffer for each block derivation.
+        // Standard (CryptoAPI) RC4 re-keys every 512 bytes, so this is a hot path.
+        let digest_len = self.hash_alg.digest_len();
+        debug_assert!(digest_len <= MAX_DIGEST_LEN);
+        let mut h_buf: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
+        let block_bytes = block_index.to_le_bytes();
+        self.hash_alg.digest_two_into(
+            &self.password_hash,
+            &block_bytes,
+            &mut h_buf[..digest_len],
+        );
+        let h = &h_buf[..digest_len];
 
         match self.derivation {
-            StandardKeyDerivation::Aes => crypt_derive_key_aes(self.hash_alg, &h, self.key_bytes),
+            StandardKeyDerivation::Aes => crypt_derive_key_aes(self.hash_alg, h, self.key_bytes),
             StandardKeyDerivation::Rc4 => {
                 if self.key_bytes > h.len() {
                     return Err(OfficeCryptoError::UnsupportedEncryption(format!(
