@@ -47,6 +47,12 @@ export interface EngineClient {
    * may first copy it to a compact buffer so only the view range is transferred.
    */
   loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void>;
+  /**
+   * Load a workbook from Office-encrypted `.xlsx` bytes and decrypt it using `password`.
+   *
+   * Additive API: older WASM builds / worker bundles may not support this call.
+   */
+  loadWorkbookFromEncryptedXlsxBytes?(bytes: Uint8Array, password: string, options?: RpcOptions): Promise<void>;
   toJson(): Promise<string>;
   /**
    * Return lightweight workbook metadata (sheet list + best-effort used ranges).
@@ -437,6 +443,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     loadWorkbookFromJson: async (json) => await withEngine((connected) => connected.loadWorkbookFromJson(json)),
     loadWorkbookFromXlsxBytes: async (bytes, rpcOptions) =>
       await withEngine((connected) => connected.loadWorkbookFromXlsxBytes(bytes, rpcOptions)),
+    loadWorkbookFromEncryptedXlsxBytes: async (bytes, password, rpcOptions) =>
+      await withEngine((connected) => connected.loadWorkbookFromEncryptedXlsxBytes(bytes, password, rpcOptions)),
     toJson: async () => await withEngine((connected) => connected.toJson()),
     getWorkbookInfo: async (rpcOptions) => await withEngine((connected) => connected.getWorkbookInfo(rpcOptions)),
     getCell: async (address, sheet, rpcOptions) =>

@@ -305,6 +305,34 @@ describe("EngineWorker RPC", () => {
     expect(call?.transfer?.[0]).toBe(bytes.buffer);
   });
 
+  it("transfers xlsx ArrayBuffer when loading encrypted workbooks from bytes", async () => {
+    const worker = new MockWorker();
+    const channel = createMockChannel();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: () => channel
+    });
+
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    await engine.loadWorkbookFromEncryptedXlsxBytes(bytes, "secret");
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "loadFromEncryptedXlsxBytes"
+    );
+    expect(requests).toHaveLength(1);
+
+    const clientPort = channel.port1 as unknown as MockMessagePort;
+    const call = clientPort.sent.find((entry) => {
+      const msg = entry.message as any;
+      return msg?.type === "request" && msg?.method === "loadFromEncryptedXlsxBytes";
+    });
+
+    expect(call?.transfer).toHaveLength(1);
+    expect(call?.transfer?.[0]).toBe(bytes.buffer);
+    expect((call?.message as any)?.params?.password).toBe("secret");
+  });
+
   it("transfers only the view range when loading xlsx bytes from a subarray", async () => {
     const worker = new MockWorker();
     const channel = createMockChannel();
@@ -354,6 +382,27 @@ describe("EngineWorker RPC", () => {
       .map((msg) => msg.method);
 
     expect(methods).toEqual(["setCells", "loadFromXlsxBytes"]);
+  });
+
+  it("flushes pending setCell batches before loading workbook from encrypted xlsx bytes", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Simulate a caller firing-and-forgetting setCell; loadWorkbookFromEncryptedXlsxBytes must
+    // flush the pending microtask-batched setCells before replacing the workbook.
+    void engine.setCell("A1", 1);
+
+    await engine.loadWorkbookFromEncryptedXlsxBytes(new Uint8Array([1, 2, 3, 4]), "secret");
+
+    const methods = worker.received
+      .filter((msg): msg is RpcRequest => msg.type === "request")
+      .map((msg) => msg.method);
+
+    expect(methods).toEqual(["setCells", "loadFromEncryptedXlsxBytes"]);
   });
 
   it("flushes pending setCell batches before setSheetDimensions", async () => {

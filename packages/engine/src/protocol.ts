@@ -577,6 +577,7 @@ export type RpcMethod =
   | "newWorkbook"
   | "loadFromJson"
   | "loadFromXlsxBytes"
+  | "loadFromEncryptedXlsxBytes"
   // Workbook reads/writes
   | "getWorkbookInfo"
   | "toJson"

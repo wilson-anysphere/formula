@@ -122,6 +122,7 @@ type WasmModule = {
     new (): WasmWorkbookInstance;
     fromJson(json: string): WasmWorkbookInstance;
     fromXlsxBytes?: (bytes: Uint8Array) => WasmWorkbookInstance;
+    fromEncryptedXlsxBytes?: (bytes: Uint8Array, password: string) => WasmWorkbookInstance;
   };
   lexFormulaPartial?: (formula: string, options?: unknown) => unknown;
 };
@@ -470,6 +471,40 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
           }
 
           const next = fromXlsxBytes(bytes);
+          freeWorkbook(workbook);
+          workbook = next;
+        }
+        result = null;
+        break;
+      case "loadFromEncryptedXlsxBytes":
+        {
+          const rawBytes = params.bytes as unknown;
+          let bytes: Uint8Array;
+          if (rawBytes instanceof Uint8Array) {
+            bytes = rawBytes;
+          } else if (rawBytes instanceof ArrayBuffer) {
+            bytes = new Uint8Array(rawBytes);
+          } else if (ArrayBuffer.isView(rawBytes) && rawBytes.buffer instanceof ArrayBuffer) {
+            bytes = new Uint8Array(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
+          } else {
+            throw new Error(
+              "loadFromEncryptedXlsxBytes: expected params.bytes to be a Uint8Array/ArrayBuffer/ArrayBufferView"
+            );
+          }
+
+          const password = (params as any).password as unknown;
+          if (typeof password !== "string") {
+            throw new Error("loadFromEncryptedXlsxBytes: expected params.password to be a string");
+          }
+
+          const fromEncryptedXlsxBytes = (mod.WasmWorkbook as any).fromEncryptedXlsxBytes;
+          if (typeof fromEncryptedXlsxBytes !== "function") {
+            throw new Error(
+              "loadFromEncryptedXlsxBytes: WasmWorkbook.fromEncryptedXlsxBytes is not available in this WASM build"
+            );
+          }
+
+          const next = fromEncryptedXlsxBytes(bytes, password);
           freeWorkbook(workbook);
           workbook = next;
         }

@@ -246,6 +246,24 @@ export class EngineWorker {
     await this.invoke("loadFromXlsxBytes", { bytes: payload }, options, [payload.buffer]);
   }
 
+  /**
+   * Load a workbook from Office-encrypted `.xlsx` bytes, decrypting it in WASM with `password`.
+   *
+   * Note: the payload is transferred to the worker to avoid an extra
+   * structured-clone copy (same semantics as `loadWorkbookFromXlsxBytes`).
+   */
+  async loadWorkbookFromEncryptedXlsxBytes(bytes: Uint8Array, password: string, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    if (typeof password !== "string") {
+      throw new Error("password must be a string");
+    }
+    let payload = bytes;
+    if (payload.byteOffset !== 0 || payload.byteLength !== payload.buffer.byteLength) {
+      payload = payload.slice();
+    }
+    await this.invoke("loadFromEncryptedXlsxBytes", { bytes: payload, password }, options, [payload.buffer]);
+  }
+
   async toJson(options?: RpcOptions): Promise<string> {
     await this.flush();
     return (await this.invoke("toJson", {}, options)) as string;
