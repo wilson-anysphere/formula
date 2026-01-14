@@ -1568,11 +1568,10 @@ pub async fn open_workbook(
     path: LimitedString<MAX_IPC_PATH_BYTES>,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "workbook opening",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "workbook opening", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "workbook opening", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "workbook opening", ipc_origin::Verb::Is)?;
 
     let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
@@ -1932,11 +1931,10 @@ pub async fn stat_file(
 ) -> Result<FileStat, String> {
     use std::time::UNIX_EPOCH;
 
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "filesystem access",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "filesystem access", ipc_origin::Verb::Is)?;
 
     let path = path.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
@@ -1972,11 +1970,10 @@ pub async fn read_binary_file(
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "filesystem access",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "filesystem access", ipc_origin::Verb::Is)?;
 
     let path = path.into_inner();
     let bytes = tauri::async_runtime::spawn_blocking(move || {
@@ -2057,11 +2054,10 @@ pub async fn read_binary_file_range(
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "filesystem access",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "filesystem access", ipc_origin::Verb::Is)?;
 
     let len =
         crate::ipc_file_limits::validate_read_range_length(length).map_err(|e| e.to_string())?;
@@ -2198,11 +2194,10 @@ pub async fn list_dir(
 ) -> Result<Vec<ListDirEntry>, String> {
     let recursive = recursive.unwrap_or(false);
 
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "filesystem access",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "filesystem access", ipc_origin::Verb::Is)?;
 
     let path = path.into_inner();
     tauri::async_runtime::spawn_blocking(move || list_dir_blocking(&path, recursive))
@@ -2220,11 +2215,18 @@ pub async fn list_dir(
 pub async fn power_query_cache_key_get_or_create(
     window: tauri::WebviewWindow,
 ) -> Result<PowerQueryCacheKey, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(
+        window.label(),
         "power query cache key access",
         ipc_origin::Verb::Is,
     )?;
+    ipc_origin::ensure_trusted_origin(
+        &url,
+        "power query cache key access",
+        ipc_origin::Verb::Is,
+    )?;
+    ipc_origin::ensure_stable_origin(&window, "power query cache key access", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCacheKeyStore::open_default();
@@ -2243,11 +2245,10 @@ pub async fn collab_token_get(
     window: tauri::WebviewWindow,
     token_key: String,
 ) -> Result<Option<CollabTokenEntry>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "collaboration tokens",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
@@ -2267,11 +2268,10 @@ pub async fn collab_token_set(
     token_key: String,
     entry: CollabTokenEntry,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "collaboration tokens",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
@@ -2288,11 +2288,10 @@ pub async fn collab_token_delete(
     window: tauri::WebviewWindow,
     token_key: String,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "collaboration tokens",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
@@ -2309,11 +2308,10 @@ pub async fn power_query_credential_get(
     window: tauri::WebviewWindow,
     scope_key: String,
 ) -> Result<Option<PowerQueryCredentialEntry>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query credentials",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
@@ -2331,11 +2329,10 @@ pub async fn power_query_credential_set(
     scope_key: String,
     secret: JsonValue,
 ) -> Result<PowerQueryCredentialEntry, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query credentials",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
     crate::power_query_validation::validate_power_query_credential_payload(&scope_key, &secret)
         .map_err(|e| e.to_string())?;
@@ -2354,11 +2351,10 @@ pub async fn power_query_credential_delete(
     window: tauri::WebviewWindow,
     scope_key: String,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query credentials",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
@@ -2374,11 +2370,10 @@ pub async fn power_query_credential_delete(
 pub async fn power_query_credential_list(
     window: tauri::WebviewWindow,
 ) -> Result<Vec<PowerQueryCredentialListEntry>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query credentials",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
@@ -2396,11 +2391,10 @@ pub async fn collab_encryption_key_get(
     doc_id: String,
     key_id: String,
 ) -> Result<Option<CollabEncryptionKeyEntry>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "collab encryption keys",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
@@ -2419,11 +2413,10 @@ pub async fn collab_encryption_key_set(
     key_id: String,
     key_bytes_base64: String,
 ) -> Result<CollabEncryptionKeyListEntry, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "collab encryption keys",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
@@ -2443,11 +2436,10 @@ pub async fn collab_encryption_key_delete(
     doc_id: String,
     key_id: String,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "collab encryption keys",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
@@ -2464,11 +2456,10 @@ pub async fn collab_encryption_key_list(
     window: tauri::WebviewWindow,
     doc_id: String,
 ) -> Result<Vec<CollabEncryptionKeyListEntry>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "collab encryption keys",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
@@ -2485,11 +2476,10 @@ pub async fn power_query_refresh_state_get(
     window: tauri::WebviewWindow,
     workbook_id: String,
 ) -> Result<Option<JsonValue>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query refresh state",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query refresh state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "power query refresh state", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
@@ -2507,11 +2497,10 @@ pub async fn power_query_refresh_state_set(
     workbook_id: String,
     state: JsonValue,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query refresh state",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query refresh state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "power query refresh state", ipc_origin::Verb::Is)?;
 
     crate::power_query_validation::validate_power_query_refresh_state_payload(&state)
         .map_err(|e| e.to_string())?;
@@ -2533,11 +2522,10 @@ pub fn power_query_state_get(
     window: tauri::WebviewWindow,
     state: State<'_, SharedAppState>,
 ) -> Result<Option<String>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query state",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "power query state", ipc_origin::Verb::Is)?;
 
     let state = state.inner().lock().unwrap();
     let Ok(workbook) = state.get_workbook() else {
@@ -2560,11 +2548,10 @@ pub fn power_query_state_set(
     xml: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "power query state",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "power query state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "power query state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "power query state", ipc_origin::Verb::Is)?;
 
     if let Some(xml) = xml.as_deref() {
         crate::power_query_validation::validate_power_query_xml_payload(xml)
@@ -2591,7 +2578,10 @@ pub async fn sql_query(
     params: Option<LimitedVec<JsonValue, { crate::ipc_limits::MAX_SQL_QUERY_PARAMS }>>,
     credentials: Option<JsonValue>,
 ) -> Result<crate::sql::SqlQueryResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(&window, "SQL queries", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "SQL queries", ipc_origin::Verb::Are)?;
 
     let sql = sql.into_inner();
     let params = params.map(|p| p.into_inner()).unwrap_or_default();
@@ -2609,7 +2599,10 @@ pub async fn sql_get_schema(
     sql: LimitedString<{ crate::ipc_limits::MAX_SQL_QUERY_TEXT_BYTES }>,
     credentials: Option<JsonValue>,
 ) -> Result<crate::sql::SqlSchemaResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(&window, "SQL queries", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "SQL queries", ipc_origin::Verb::Are)?;
 
     let sql = sql.into_inner();
     crate::sql::sql_get_schema(connection, sql, credentials)
@@ -3075,11 +3068,10 @@ pub async fn save_workbook(
     path: Option<LimitedString<MAX_IPC_PATH_BYTES>>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "workbook saving",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "workbook saving", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "workbook saving", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "workbook saving", ipc_origin::Verb::Is)?;
 
     let path = path.map(|p| p.into_inner());
     let (save_path, workbook, storage, memory, workbook_id, autosave) = {
@@ -4969,7 +4961,10 @@ pub async fn get_macro_security_status(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(&window, "macro trust", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_main_window(window.label(), "macro trust", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro trust", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro trust", ipc_origin::Verb::Is)?;
 
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -4994,7 +4989,10 @@ pub async fn set_macro_trust(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(&window, "macro trust", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_main_window(window.label(), "macro trust", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro trust", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro trust", ipc_origin::Verb::Is)?;
 
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -5024,11 +5022,10 @@ pub fn get_vba_project(
     workbook_id: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<Option<VbaProjectSummary>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
     let mut state = state.inner().lock().unwrap();
@@ -5069,11 +5066,10 @@ pub fn list_macros(
     workbook_id: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<MacroInfo>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
 
@@ -5092,11 +5088,10 @@ pub fn set_macro_ui_context(
     selection: Option<MacroSelectionRect>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
     let mut state = state.inner().lock().unwrap();
@@ -5123,11 +5118,10 @@ pub async fn run_macro(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
@@ -5170,11 +5164,10 @@ pub async fn run_python_script(
     context: Option<PythonRunContext>,
     state: State<'_, SharedAppState>,
 ) -> Result<PythonRunResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "python execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "python execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "python execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "python execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
 
@@ -6220,11 +6213,10 @@ pub async fn validate_vba_migration(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MigrationValidationReport, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     crate::ipc_limits::enforce_script_code_size(&code)?;
     let workbook_id_str = workbook_id.clone();
@@ -6478,11 +6470,10 @@ pub async fn fire_workbook_open(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
@@ -6522,11 +6513,10 @@ pub async fn fire_workbook_before_close(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
@@ -6571,11 +6561,10 @@ pub async fn fire_worksheet_change(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
@@ -6620,11 +6609,10 @@ pub async fn fire_selection_change(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "macro execution",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
@@ -6689,6 +6677,8 @@ pub async fn open_external_url(
         let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
             return Err("main webview window not available".to_string());
         };
+        let webview_url = webview.url().map_err(|err| err.to_string())?;
+        ipc_origin::ensure_trusted_origin(&webview_url, "external URL opening", ipc_origin::Verb::Is)?;
         ipc_origin::ensure_stable_origin(&webview, "external URL opening", ipc_origin::Verb::Is)?;
     }
 
@@ -6704,7 +6694,10 @@ pub async fn open_external_url(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn quit_app(window: tauri::WebviewWindow) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(&window, "app lifecycle", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "app lifecycle", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "app lifecycle", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "app lifecycle", ipc_origin::Verb::Is)?;
 
     // We intentionally use a hard process exit here. The desktop shell already delegates
     // "should we quit?" decisions (event macros + unsaved prompts) to the frontend.
@@ -6756,11 +6749,10 @@ pub fn restart_app(window: tauri::WebviewWindow) -> Result<(), String> {
 pub async fn read_clipboard(
     window: tauri::WebviewWindow,
 ) -> Result<crate::clipboard::ClipboardContent, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "clipboard access",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "clipboard access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "clipboard access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "clipboard access", ipc_origin::Verb::Is)?;
 
     // Clipboard APIs on macOS call into AppKit. AppKit is not thread-safe, and Tauri
     // commands can execute on a background thread, so we always dispatch to the main
@@ -6795,11 +6787,10 @@ pub async fn write_clipboard(
         crate::resource_limits::LimitedString<{ crate::clipboard::MAX_IMAGE_PNG_BASE64_BYTES }>,
     >,
 ) -> Result<(), String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "clipboard access",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "clipboard access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "clipboard access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "clipboard access", ipc_origin::Verb::Is)?;
 
     let payload = crate::clipboard::ClipboardWritePayload {
         text: Some(text.into_inner()),
@@ -6888,11 +6879,10 @@ pub async fn network_fetch(
     url: String,
     init: Option<JsonValue>,
 ) -> Result<NetworkFetchResult, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "network access",
-        ipc_origin::Verb::Is,
-    )?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "network access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "network access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "network access", ipc_origin::Verb::Is)?;
 
     let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid url: {e}"))?;
     ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
@@ -6932,11 +6922,10 @@ pub async fn marketplace_search(
     window: tauri::WebviewWindow,
     args: MarketplaceSearchArgs,
 ) -> Result<JsonValue, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "marketplace access",
-        ipc_origin::Verb::Is,
-    )?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "marketplace access", ipc_origin::Verb::Is)?;
 
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
@@ -7009,11 +6998,10 @@ pub async fn marketplace_get_extension(
     window: tauri::WebviewWindow,
     args: MarketplaceGetExtensionArgs,
 ) -> Result<Option<JsonValue>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "marketplace access",
-        ipc_origin::Verb::Is,
-    )?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "marketplace access", ipc_origin::Verb::Is)?;
 
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
@@ -7152,11 +7140,10 @@ pub async fn marketplace_download_package(
     window: tauri::WebviewWindow,
     args: MarketplaceDownloadArgs,
 ) -> Result<Option<MarketplaceDownloadPayload>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "marketplace access",
-        ipc_origin::Verb::Is,
-    )?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "marketplace access", ipc_origin::Verb::Is)?;
 
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {

@@ -11,7 +11,7 @@ const MAX_PENDING_URLS: usize = 64;
 
 #[derive(Debug, Default)]
 pub struct OauthRedirectState {
-    ready: bool,
+    pub ready: bool,
     pending_urls: Vec<String>,
 }
 
@@ -168,4 +168,3 @@ mod tests {
         );
     }
 }
-

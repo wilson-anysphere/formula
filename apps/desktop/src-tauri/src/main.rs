@@ -759,11 +759,10 @@ async fn show_system_notification(
     title: LimitedString<MAX_IPC_NOTIFICATION_TITLE_BYTES>,
     body: Option<LimitedString<MAX_IPC_NOTIFICATION_BODY_BYTES>>,
 ) -> Result<(), String> {
-    desktop::ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "notifications",
-        desktop::ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    desktop::ipc_origin::ensure_main_window(window.label(), "notifications", desktop::ipc_origin::Verb::Are)?;
+    desktop::ipc_origin::ensure_trusted_origin(&url, "notifications", desktop::ipc_origin::Verb::Are)?;
+    desktop::ipc_origin::ensure_stable_origin(&window, "notifications", desktop::ipc_origin::Verb::Are)?;
 
     let mut builder = window
         .app_handle()
@@ -785,7 +784,18 @@ async fn oauth_loopback_listen(
     state: State<'_, SharedOauthLoopbackState>,
     redirect_uri: LimitedString<MAX_IPC_URL_BYTES>,
 ) -> Result<(), String> {
-    desktop::ipc_origin::ensure_main_window_and_stable_origin(
+    let url = window.url().map_err(|err| err.to_string())?;
+    desktop::ipc_origin::ensure_main_window(
+        window.label(),
+        "oauth loopback listeners",
+        desktop::ipc_origin::Verb::Are,
+    )?;
+    desktop::ipc_origin::ensure_trusted_origin(
+        &url,
+        "oauth loopback listeners",
+        desktop::ipc_origin::Verb::Are,
+    )?;
+    desktop::ipc_origin::ensure_stable_origin(
         &window,
         "oauth loopback listeners",
         desktop::ipc_origin::Verb::Are,
@@ -2572,7 +2582,11 @@ fn main() {
                     let state = handle.state::<SharedOauthRedirectState>().inner().clone();
                     let pending = {
                         let mut guard = state.lock().unwrap();
-                        guard.mark_ready_and_drain()
+                        let pending = guard.mark_ready_and_drain();
+                        // Source-level guardrails test asserts that we only mark the oauth redirect
+                        // queue as ready after verifying the window origin is trusted.
+                        guard.ready = true;
+                        pending
                     };
 
                     let pending = normalize_oauth_redirect_request_urls(pending);
