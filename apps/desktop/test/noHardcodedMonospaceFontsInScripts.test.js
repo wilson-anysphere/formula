@@ -95,42 +95,42 @@ test("desktop UI scripts should not hardcode monospace font stacks in inline sty
     { re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\[\s*(?:["'`])font(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style['style'][font]" },
     // setProperty("font-family", "ui-monospace")
     {
-      re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(font-family)",
     },
     // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("font-family", "ui-monospace")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'][font-family]",
     },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("font-family", "ui-monospace")`)
     {
-      re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty[font-family]",
     },
     // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("font-family", "ui-monospace")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'][font-family-bracket]",
     },
     // setProperty("font", "12px ui-monospace")
     {
-      re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(font)",
     },
     // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("font", "12px ui-monospace")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'][font]",
     },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("font", "12px ui-monospace")`)
     {
-      re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty[font]",
     },
     // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("font", "12px ui-monospace")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|\.\s*call\s*\(\s*[^,]+,\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])font\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'][font-bracket]",
     },
   ];
