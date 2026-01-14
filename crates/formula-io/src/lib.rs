@@ -3271,7 +3271,10 @@ fn decrypt_encrypted_ooxml_package(
                         } else {
                             new_flags &= !0x0000_0020;
                         }
-                        let buf = patched_info.get_or_insert_with(|| encryption_info.clone());
+                        if patched_info.is_none() {
+                            patched_info = Some(encryption_info.clone());
+                        }
+                        let buf = patched_info.as_mut().unwrap();
                         buf[header_start..header_start + 4]
                             .copy_from_slice(&new_flags.to_le_bytes());
                         enc_info = buf.as_slice();
