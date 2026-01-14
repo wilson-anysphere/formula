@@ -1394,9 +1394,15 @@ app.getDocument().on("change", (payload: any) => {
   if (docSheetIds.includes(activeId)) return;
 
   const docIdSet = new Set(docSheetIds);
+  // Mirror Excel: when the active sheet disappears (undo/redo/applyState), prefer the next visible
+  // sheet to the right, otherwise the previous visible sheet. Use the sheet-store ordering snapshot
+  // (which is typically still pre-change at this point) so we choose a stable adjacent candidate.
+  const sheetsSnapshot = workbookSheetStore.listAll();
+  const preferred = pickAdjacentVisibleSheetId(sheetsSnapshot, activeId);
   const fallback =
+    (preferred && docIdSet.has(preferred) ? preferred : null) ??
     workbookSheetStore.listVisible().map((s) => s.id).find((id) => docIdSet.has(id)) ??
-    workbookSheetStore.listAll().map((s) => s.id).find((id) => docIdSet.has(id)) ??
+    sheetsSnapshot.map((s) => s.id).find((id) => docIdSet.has(id)) ??
     docSheetIds[0] ??
     null;
   if (!fallback || fallback === activeId) return;
