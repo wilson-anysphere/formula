@@ -10,7 +10,7 @@ import { defaultRibbonSchema, type RibbonSchema } from "./ribbonSchema.js";
  * NOTE: Keep this list small and focused — prefer registering real commands in `CommandRegistry`
  * when possible so other UI surfaces (e.g. command palette / keybindings) stay consistent.
  */
-export const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
+export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>([
   // --- File tab / backstage actions --------------------------------------------
   //
   // File operations are routed through `RibbonActions.fileActions` and/or special-cased
