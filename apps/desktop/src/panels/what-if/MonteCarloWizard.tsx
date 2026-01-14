@@ -14,11 +14,11 @@ export interface MonteCarloWizardProps {
   api: WhatIfApi;
 }
 
-type InputRow = InputDistribution & { distributionJson: string };
+type InputRow = InputDistribution & { distributionJson: string; distributionJsonValid: boolean };
 
 function defaultInputRow(): InputRow {
   const dist: Distribution = { type: "normal", mean: 0, stdDev: 1 };
-  return { cell: "A1", distribution: dist, distributionJson: JSON.stringify(dist) };
+  return { cell: "A1", distribution: dist, distributionJson: JSON.stringify(dist), distributionJsonValid: true };
 }
 
 export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
@@ -63,6 +63,11 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
     if (outputs.length === 0) {
       setError(t("whatIf.monteCarlo.error.enterOutputCell"));
       setInvalidField("outputCells");
+      return;
+    }
+
+    if (inputs.some((i) => !i.distributionJsonValid)) {
+      setError(t("whatIf.monteCarlo.error.invalidDistributionJson"));
       return;
     }
 
@@ -171,21 +176,41 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                   onChange={(e) => {
                     const type = e.target.value as Distribution["type"];
                     // Keep it simple: switching resets to a reasonable default.
-                    const distribution: Distribution =
-                      type === "normal"
-                        ? { type, mean: 0, stdDev: 1 }
-                        : type === "uniform"
-                          ? { type, min: 0, max: 1 }
-                          : type === "triangular"
-                            ? { type, min: 0, mode: 0.5, max: 1 }
-                            : type === "lognormal"
-                              ? { type, mean: 0, stdDev: 1 }
-                              : type === "exponential"
-                                ? { type, rate: 1 }
-                                : type === "poisson"
-                                  ? { type, lambda: 1 }
-                                  : { type: "normal", mean: 0, stdDev: 1 };
-                    updateInput(idx, { distribution, distributionJson: JSON.stringify(distribution) });
+                    let distribution: Distribution;
+                    switch (type) {
+                      case "normal":
+                        distribution = { type, mean: 0, stdDev: 1 };
+                        break;
+                      case "uniform":
+                        distribution = { type, min: 0, max: 1 };
+                        break;
+                      case "triangular":
+                        distribution = { type, min: 0, mode: 0.5, max: 1 };
+                        break;
+                      case "lognormal":
+                        distribution = { type, mean: 0, stdDev: 1 };
+                        break;
+                      case "exponential":
+                        distribution = { type, rate: 1 };
+                        break;
+                      case "poisson":
+                        distribution = { type, lambda: 1 };
+                        break;
+                      case "discrete":
+                        distribution = { type, values: [0, 1], probabilities: [0.5, 0.5] };
+                        break;
+                      case "beta":
+                        distribution = { type, alpha: 2, beta: 2, min: 0, max: 1 };
+                        break;
+                      default:
+                        distribution = { type: "normal", mean: 0, stdDev: 1 };
+                    }
+
+                    updateInput(idx, {
+                      distribution,
+                      distributionJson: JSON.stringify(distribution),
+                      distributionJsonValid: true,
+                    });
                   }}
                   disabled={running}
                   aria-label={t("whatIf.monteCarlo.inputs.distributionTypeAriaLabel")}
@@ -196,6 +221,8 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                   <option value="lognormal">{t("whatIf.distribution.lognormal")}</option>
                   <option value="exponential">{t("whatIf.distribution.exponential")}</option>
                   <option value="poisson">{t("whatIf.distribution.poisson")}</option>
+                  <option value="discrete">{t("whatIf.distribution.discrete")}</option>
+                  <option value="beta">{t("whatIf.distribution.beta")}</option>
                 </select>
               </div>
 
@@ -203,18 +230,19 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                 <input
                   className="what-if__input what-if__input--mono"
                   value={input.distributionJson}
+                  aria-invalid={input.distributionJsonValid ? undefined : true}
                   onChange={(e) => {
                     const raw = e.target.value;
                     try {
                       const parsed = JSON.parse(raw) as unknown;
                       if (parsed && typeof parsed === "object" && typeof (parsed as any).type === "string") {
-                        updateInput(idx, { distribution: parsed as Distribution, distributionJson: raw });
+                        updateInput(idx, { distribution: parsed as Distribution, distributionJson: raw, distributionJsonValid: true });
                         return;
                       }
                     } catch {
                       // Allow partial JSON edits.
                     }
-                    updateInput(idx, { distributionJson: raw });
+                    updateInput(idx, { distributionJson: raw, distributionJsonValid: false });
                   }}
                   disabled={running}
                   aria-label={t("whatIf.monteCarlo.inputs.distributionJsonAriaLabel")}
