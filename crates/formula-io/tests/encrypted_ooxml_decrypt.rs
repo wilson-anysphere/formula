@@ -293,10 +293,7 @@ fn open_workbook_with_options_decrypts_agile_and_standard_fixtures() {
                     .expect("parse decrypted workbook bytes");
                 assert_expected_contents(&model);
             }
-            Workbook::Model(workbook) => assert_expected_contents(&workbook),
-            other => panic!(
-                "expected Workbook::Xlsx or Workbook::Model for {fixture}, got {other:?}"
-            ),
+            other => panic!("expected Workbook::Xlsx for {fixture}, got {other:?}"),
         }
     }
 }

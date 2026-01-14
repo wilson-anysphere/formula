@@ -30,7 +30,7 @@ fn assert_expected_contents(workbook: &formula_model::Workbook) {
 }
 
 #[test]
-fn decrypts_standard_fixture_via_streaming_reader() {
+fn decrypts_standard_fixture_via_open_workbook_with_options() {
     let plaintext_path = fixture_path("plaintext.xlsx");
     let standard_path = fixture_path("standard.xlsx");
 
@@ -45,13 +45,7 @@ fn decrypts_standard_fixture_via_streaming_reader() {
     )
     .expect("open standard.xlsx with password");
 
-    // `open_workbook_with_options` may return either:
-    // - `Workbook::Model` for Standard/CryptoAPI AES (streaming decrypt open path), or
-    // - `Workbook::Xlsx` for other encrypted OOXML variants (in-memory decrypt to a preserved ZIP).
-    //
-    // Normalize to a model workbook so we can validate contents regardless of the internal open path.
     let decrypted_model = match decrypted {
-        Workbook::Model(workbook) => workbook,
         Workbook::Xlsx(package) => {
             let decrypted_bytes = package
                 .write_to_bytes()
@@ -59,9 +53,7 @@ fn decrypts_standard_fixture_via_streaming_reader() {
             formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes))
                 .expect("parse decrypted bytes to model workbook")
         }
-        other => panic!(
-            "expected Workbook::Model or Workbook::Xlsx for decrypted Standard workbook, got {other:?}"
-        ),
+        other => panic!("expected Workbook::Xlsx for decrypted Standard workbook, got {other:?}"),
     };
     assert_expected_contents(&decrypted_model);
 
