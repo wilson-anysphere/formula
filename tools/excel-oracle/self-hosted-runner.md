@@ -87,5 +87,23 @@ node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
 ```
 
+For `es-ES`, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+  -LocaleId es-ES `
+  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+```
+
+Verification checklist (especially for `es-ES`):
+
+- Ensure extraction covers the full catalog (i.e. the JSON contains one mapping per canonical
+  function in `shared/functionCatalog.json`, and the script did not skip large numbers of
+  functions).
+- Run `node scripts/generate-locale-function-tsv.js --check`.
+- Spot-check that Spanish-localized spellings are present in
+  `crates/formula-engine/src/locale/data/es-ES.tsv` (not silently falling back to English), including
+  financial functions like `NPV`/`IRR` (e.g. `VNA`/`TIR`).
+
 Important: the extracted spellings reflect the **active Excel UI language**. Install the relevant
 Office language pack and set Excel's display language before extracting.
