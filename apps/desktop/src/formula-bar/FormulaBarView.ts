@@ -1248,7 +1248,7 @@ export class FormulaBarView {
   #lastErrorShowRangesDisabled: boolean | null = null;
   #lastErrorShowRangesPressed: boolean | null = null;
   #lastErrorShowRangesText: string | null = null;
-  #referenceElsByIndex: Map<number, HTMLElement[]> | null = null;
+  #referenceElsByIndex: Array<HTMLElement[] | undefined> | null = null;
   #lastAdjustedHeightDraft: string | null = null;
   #lastAdjustedHeightIsEditing = false;
   #lastAdjustedHeightIsExpanded = false;
@@ -3598,23 +3598,20 @@ export class FormulaBarView {
     if (this.#referenceElsByIndex == null) {
       // When cursoring through a formula with many references, `querySelectorAll` per-ref-index
       // can become noticeable. Build a full index->elements map once per highlight DOM update.
-      const map = new Map<number, HTMLElement[]>();
+      const buckets: Array<HTMLElement[] | undefined> = [];
       const els = this.#highlightEl.querySelectorAll<HTMLElement>("[data-ref-index]");
       for (const el of els) {
         const raw = el.dataset.refIndex;
         if (!raw) continue;
         const parsed = Number(raw);
-        if (!Number.isFinite(parsed)) continue;
-        const bucket = map.get(parsed);
-        if (bucket) {
-          bucket.push(el);
-        } else {
-          map.set(parsed, [el]);
-        }
+        if (!Number.isInteger(parsed) || parsed < 0) continue;
+        const bucket = buckets[parsed];
+        if (bucket) bucket.push(el);
+        else buckets[parsed] = [el];
       }
-      this.#referenceElsByIndex = map;
+      this.#referenceElsByIndex = buckets;
     }
-    return this.#referenceElsByIndex.get(idx) ?? EMPTY_REFERENCE_ELS;
+    return this.#referenceElsByIndex[idx] ?? EMPTY_REFERENCE_ELS;
   }
 
   #clearArgumentPreviewState(): void {
