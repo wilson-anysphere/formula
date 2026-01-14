@@ -178,4 +178,11 @@ fn standard_cryptoapi_aes192_derivation_vector_decrypts_package() {
         decrypt_standard_encrypted_package(&encryption_info, &encrypted_package, "password")
             .expect("decrypt");
     assert_eq!(decrypted, plaintext);
+
+    // Regression guard: Standard AES fallback attempts an alternate key derivation; ensure a wrong
+    // password still reports `InvalidPassword` (and not an "unsupported" error due to key length).
+    let err =
+        decrypt_standard_encrypted_package(&encryption_info, &encrypted_package, "wrong-password")
+            .expect_err("wrong password");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
 }
