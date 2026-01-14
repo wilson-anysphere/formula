@@ -979,7 +979,7 @@ jobs:
           shopt -u nullglob
 
           if ((${#debs[@]} == 0)); then
-            echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/**/release/bundle/deb" >&2
+            echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/release/bundle/deb (or target/*/release/bundle/deb)" >&2
             exit 1
           fi
 
@@ -1059,9 +1059,9 @@ jobs:
  
           if ((${#rpms[@]} > 0)); then mapfile -t rpms < <(printf '%s\n' "${rpms[@]}" | sort -u); fi
           shopt -u nullglob
- 
+  
           if ((${#rpms[@]} == 0)); then
-            echo "::error::could not find any .rpm artifacts under apps/desktop/src-tauri/target/release/bundle/rpm or target/**/release/bundle/rpm" >&2
+            echo "::error::could not find any .rpm artifacts under apps/desktop/src-tauri/target/release/bundle/rpm or target/release/bundle/rpm (or target/*/release/bundle/rpm)" >&2
             exit 1
           fi
  

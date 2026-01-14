@@ -242,7 +242,7 @@ if [[ "${#bundle_dirs[@]}" -gt 0 ]]; then
 fi
 
 if [ "${#bundle_dirs[@]}" -eq 0 ]; then
-  echo "::error::verify-linux-package-deps: no Tauri bundle directories found (expected something like target/**/release/bundle)" >&2
+  echo "::error::verify-linux-package-deps: no Tauri bundle directories found (expected something like <target>/release/bundle or <target>/<triple>/release/bundle)" >&2
   echo "Searched target dirs:" >&2
   printf '  - %s\n' "${target_dirs[@]}" >&2
   debug_list_bundle_roots

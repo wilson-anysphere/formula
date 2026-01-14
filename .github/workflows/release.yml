@@ -1757,7 +1757,7 @@ jobs:
           fi
 
           if ((${#debs[@]} == 0)); then
-            echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/**/release/bundle/deb" >&2
+            echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/release/bundle/deb (or target/*/release/bundle/deb)" >&2
             echo "Debug: searched roots:" >&2
             echo "  - apps/desktop/src-tauri/target/release/bundle/deb/*.deb" >&2
             echo "  - CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<unset>}" >&2
@@ -2430,7 +2430,7 @@ jobs:
 
           deb="${debs[0]:-}"
           if [[ -z "${deb}" ]]; then
-            echo "::error::Could not find a .deb under any target root (expected **/release/bundle/deb/*.deb)" >&2
+            echo "::error::Could not find a .deb under any target root (expected <target>/release/bundle/deb/*.deb or <target>/<triple>/release/bundle/deb/*.deb)" >&2
             echo "Searched roots:" >&2
             printf '  - %s\n' "${roots[@]}" >&2
             exit 1
@@ -2453,7 +2453,7 @@ jobs:
 
           rpm_path="${rpms[0]:-}"
           if [[ -z "${rpm_path}" ]]; then
-            echo "::error::Could not find a .rpm under any target root (expected **/release/bundle/rpm/*.rpm)" >&2
+            echo "::error::Could not find a .rpm under any target root (expected <target>/release/bundle/rpm/*.rpm or <target>/<triple>/release/bundle/rpm/*.rpm)" >&2
             echo "Searched roots:" >&2
             printf '  - %s\n' "${roots[@]}" >&2
             exit 1

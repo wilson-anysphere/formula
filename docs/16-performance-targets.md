@@ -16,7 +16,7 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | Warm start | <0.5s | Time from launch with cached data |
 | Time to first render | <0.3s | Time from launch to grid visible |
 | Frontend asset download size (compressed JS/CSS/WASM) | <10MB | Brotli-compressed total of `dist/assets/**/*.{js,css,wasm}` (default; gzip optional via `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=gzip`; see `node scripts/frontend_asset_size_report.mjs`) |
-| Desktop installer artifact size (DMG/MSI/EXE/AppImage) | <50MB per artifact | `python scripts/desktop_bundle_size_report.py` on Tauri build output (`target/**/release/bundle`) |
+| Desktop installer artifact size (DMG/MSI/EXE/AppImage) | <50MB per artifact | `python scripts/desktop_bundle_size_report.py` on Tauri build output (`target/release/bundle` or `target/<triple>/release/bundle`) |
 
 ### File Operations
 
@@ -180,9 +180,9 @@ These scripts are designed to be safe to run locally:
   - Note: on **Windows**, we approximate this using the process tree **Working Set** (closest OS analogue to RSS).
 - **Size**:
   - `apps/desktop/dist` is the Vite-built frontend asset directory embedded/served by Tauri.
-  - `target/**/formula-desktop` is the built desktop executable.
+- `target/release/formula-desktop` (or `target/<triple>/release/formula-desktop`) is the built desktop executable.
   - `pnpm perf:desktop-size` also runs `python3 scripts/desktop_binary_size_report.py` (cargo-bloat + llvm-size fallback) to show which Rust crates/symbols dominate the desktop binary size.
-  - `target/**/release/bundle` contains installer artifacts when you run `cargo tauri build`.
+- `target/release/bundle` (or `target/<triple>/release/bundle`) contains installer artifacts when you run `cargo tauri build`.
 
 #### CI gating / overrides
 

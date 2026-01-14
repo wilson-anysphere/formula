@@ -32,10 +32,14 @@ Usage:
 Options:
   --deb <path>        Validate a specific .deb (or a directory containing .deb files).
                       If omitted, the script searches common Tauri output locations:
-                        - \$CARGO_TARGET_DIR/**/release/bundle/deb/*.deb (if set)
-                        - apps/desktop/src-tauri/target/**/release/bundle/deb/*.deb
-                        - apps/desktop/target/**/release/bundle/deb/*.deb
-                        - target/**/release/bundle/deb/*.deb
+                        - \$CARGO_TARGET_DIR/release/bundle/deb/*.deb (if set)
+                        - \$CARGO_TARGET_DIR/*/release/bundle/deb/*.deb (if set)
+                        - apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+                        - apps/desktop/src-tauri/target/*/release/bundle/deb/*.deb
+                        - apps/desktop/target/release/bundle/deb/*.deb
+                        - apps/desktop/target/*/release/bundle/deb/*.deb
+                        - target/release/bundle/deb/*.deb
+                        - target/*/release/bundle/deb/*.deb
   --no-container      Skip the Ubuntu container installability check.
   --image <image>     Ubuntu image to use for the container step (default: ubuntu:24.04).
   -h, --help          Show this help text.

@@ -306,14 +306,14 @@ jobs:
           if ((${#debs[@]} > 0)); then mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u); fi
           if ((${#rpms[@]} > 0)); then mapfile -t rpms < <(printf '%s\n' "${rpms[@]}" | sort -u); fi
  
-          if ((${#debs[@]} == 0)); then
-            echo "::error::Could not find a .deb under any target root (expected **/release/bundle/deb/*.deb)" >&2
+           if ((${#debs[@]} == 0)); then
+            echo "::error::Could not find a .deb under any target root (expected <target>/release/bundle/deb/*.deb or <target>/<triple>/release/bundle/deb/*.deb)" >&2
             echo "Searched roots:" >&2
             printf '  - %s\n' "${roots[@]}" >&2
             exit 1
           fi
           if ((${#rpms[@]} == 0)); then
-            echo "::error::Could not find a .rpm under any target root (expected **/release/bundle/rpm/*.rpm)" >&2
+            echo "::error::Could not find a .rpm under any target root (expected <target>/release/bundle/rpm/*.rpm or <target>/<triple>/release/bundle/rpm/*.rpm)" >&2
             echo "Searched roots:" >&2
             printf '  - %s\n' "${roots[@]}" >&2
             exit 1

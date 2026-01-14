@@ -567,7 +567,7 @@ function reportSize({ env }) {
   } else {
     // eslint-disable-next-line no-console
     console.log(
-      `\n[desktop-size] desktop binary not found (looked for target/**/formula-desktop).\n` +
+      `\n[desktop-size] desktop binary not found (expected target/(release|debug)/formula-desktop or apps/desktop/src-tauri/target/(release|debug)/formula-desktop).\n` +
         `Build it via: bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop\n` +
         `Or set FORMULA_DESKTOP_BIN=/path/to/formula-desktop`,
     );
@@ -587,7 +587,7 @@ function reportSize({ env }) {
   if (bundleDirs.length === 0) {
     // eslint-disable-next-line no-console
     console.log(
-      `\n[desktop-size] No installer artifacts found (target/**/release/bundle).\n` +
+      `\n[desktop-size] No installer artifacts found (expected <target>/release/bundle or <target>/<triple>/release/bundle).\n` +
         `To generate installers/bundles, run:\n` +
         `  (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)\n` +
         `Then re-run: pnpm perf:desktop-size\n`,

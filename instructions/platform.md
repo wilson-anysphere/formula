@@ -268,7 +268,7 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
 **What we measure / enforce**
 
 - **Desktop installer artifacts** (DMG/MSI/EXE/AppImage/etc):
-  - Measured by `python scripts/desktop_bundle_size_report.py` (scans `target/**/release/bundle` after `tauri build`).
+  - Measured by `python scripts/desktop_bundle_size_report.py` (scans `<target>/release/bundle` and `<target>/<triple>/release/bundle` after `tauri build`).
   - Guardrail: `python scripts/verify_desktop_binary_stripped.py` fails CI if the produced `formula-desktop` binary is not stripped
     (or if debug/symbol sidecar files like `.pdb`/`.dSYM` accidentally end up in `**/release/bundle/**`).
   - CI gate (tagged releases) in `.github/workflows/release.yml`: **enforced by default**; override via GitHub Actions variables

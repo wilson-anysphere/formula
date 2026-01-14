@@ -329,7 +329,7 @@ def main() -> int:
         action="append",
         default=None,
         help="Explicit bundle directory to scan (can be specified multiple times). "
-        "If omitted, the script will auto-detect bundle dirs under target/**/release/bundle.",
+        "If omitted, the script will auto-detect bundle dirs under <target>/release/bundle and <target>/*/release/bundle.",
     )
     parser.add_argument(
         "--limit-mb",
@@ -423,7 +423,7 @@ def main() -> int:
         )
         msg = (
             "bundle-size: ERROR No Tauri bundle directories found.\n"
-            f"Searched for: target/**/release/bundle (from {repo_root})\n"
+            f"Searched for: <target>/release/bundle and <target>/*/release/bundle (from {repo_root})\n"
             f"Candidate target dirs: {candidates_joined}\n"
             "Expected a directory like one of:\n"
             f"{expected_joined}\n"

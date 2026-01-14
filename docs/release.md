@@ -605,7 +605,7 @@ then revert the change—do not commit it).
 
    ```bash
    app="$(find apps/desktop/src-tauri/target -maxdepth 8 -type d -path '*/release/bundle/macos/*.app' 2>/dev/null | head -n 1 || true)"
-   test -n "$app" || { echo "No .app bundle found under apps/desktop/src-tauri/target/**/release/bundle/macos/*.app" >&2; exit 1; }
+   test -n "$app" || { echo "No .app bundle found under apps/desktop/src-tauri/target/release/bundle/macos/*.app (or apps/desktop/src-tauri/target/*/release/bundle/macos/*.app)" >&2; exit 1; }
    echo "Checking app at: $app"
    codesign --verify --deep --strict --verbose=2 "$app"
    codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory|network\\.client"
@@ -1037,12 +1037,12 @@ verify the dependency list and shared library resolution.
 Recommended (repo script; runs static `dpkg-deb` metadata checks + optional installability check in an Ubuntu container):
 
 ```bash
-# Auto-discovers DEB(s) under target/**/release/bundle/deb/*.deb
+# Auto-discovers DEB(s) under <target>/release/bundle/deb/*.deb (or <target>/<triple>/release/bundle/deb/*.deb)
 bash scripts/validate-linux-deb.sh
 
 # Or validate a specific .deb file:
 deb_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/deb/*.deb' 2>/dev/null | head -n 1 || true)"
-test -n "$deb_pkg" || { echo "No .deb found under target/**/release/bundle/deb/*.deb" >&2; exit 1; }
+test -n "$deb_pkg" || { echo "No .deb found under any target root (expected <target>/release/bundle/deb/*.deb or <target>/<triple>/release/bundle/deb/*.deb)" >&2; exit 1; }
 bash scripts/validate-linux-deb.sh --deb "$deb_pkg"
 
 # Skip the container step (static checks only):
@@ -1054,7 +1054,7 @@ From `apps/desktop/src-tauri`:
 ```bash
 # Inspect the control file (check Depends: ...)
 deb="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/deb/*.deb' 2>/dev/null | head -n 1 || true)"
-test -n "$deb" || { echo "No .deb found under target/**/release/bundle/deb/*.deb" >&2; exit 1; }
+test -n "$deb" || { echo "No .deb found under any target root (expected <target>/release/bundle/deb/*.deb or <target>/<triple>/release/bundle/deb/*.deb)" >&2; exit 1; }
 dpkg -I "$deb"
 
 # Extract and confirm all linked shared libraries resolve
@@ -1137,12 +1137,12 @@ verify the `Requires:` list and shared library resolution.
 Recommended (repo script; runs static RPM queries + an installability check in a Fedora container):
 
 ```bash
-# Auto-discovers RPM(s) under target/**/release/bundle/rpm/*.rpm
+# Auto-discovers RPM(s) under <target>/release/bundle/rpm/*.rpm (or <target>/<triple>/release/bundle/rpm/*.rpm)
 bash scripts/validate-linux-rpm.sh
 
 # Or validate a specific .rpm file:
 rpm_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/rpm/*.rpm' 2>/dev/null | head -n 1 || true)"
-test -n "$rpm_pkg" || { echo "No RPM found under target/**/release/bundle/rpm/*.rpm" >&2; exit 1; }
+test -n "$rpm_pkg" || { echo "No RPM found under any target root (expected <target>/release/bundle/rpm/*.rpm or <target>/<triple>/release/bundle/rpm/*.rpm)" >&2; exit 1; }
 bash scripts/validate-linux-rpm.sh --rpm "$rpm_pkg"
 
 # Skip the Fedora container step (static checks only):
@@ -1162,7 +1162,7 @@ From `apps/desktop/src-tauri`:
 ```bash
 # Inspect declared dependencies (check webkit2gtk/gtk3/appindicator/etc)
 rpm_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/rpm/*.rpm' 2>/dev/null | head -n 1 || true)"
-test -n "$rpm_pkg" || { echo "No RPM found under target/**/release/bundle/rpm/*.rpm" >&2; exit 1; }
+test -n "$rpm_pkg" || { echo "No RPM found under any target root (expected <target>/release/bundle/rpm/*.rpm or <target>/<triple>/release/bundle/rpm/*.rpm)" >&2; exit 1; }
 rpm -qpR "$rpm_pkg"
 
 # Extract and confirm all linked shared libraries resolve
@@ -1221,7 +1221,7 @@ the expected MIME/file associations.
 Recommended (repo scripts):
 
 ```bash
-# Auto-discovers AppImage(s) under target/**/release/bundle/appimage/*.AppImage
+# Auto-discovers AppImage(s) under <target>/release/bundle/appimage/*.AppImage (or <target>/<triple>/release/bundle/appimage/*.AppImage)
 bash scripts/validate-linux-appimage.sh
 
 # Optional: also run the CI smoke test locally (checks ELF arch + ldd "not found", no GUI).
@@ -1241,7 +1241,7 @@ Manual inspection (useful when debugging bundling issues):
 
 ```bash
 appimage="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/appimage/*.AppImage' 2>/dev/null | head -n 1 || true)"
-test -n "$appimage" || { echo "No AppImage found under target/**/release/bundle/appimage/*.AppImage" >&2; exit 1; }
+test -n "$appimage" || { echo "No AppImage found under any target root (expected <target>/release/bundle/appimage/*.AppImage or <target>/<triple>/release/bundle/appimage/*.AppImage)" >&2; exit 1; }
 appimage="$(realpath "$appimage")"
 chmod +x "$appimage"
 

@@ -128,7 +128,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--bundle-dir",
         required=False,
-        help="Path to a Tauri bundle output directory (…/release/bundle). Defaults to apps/desktop/src-tauri/target/**/release/bundle discovery.",
+        help="Path to a Tauri bundle output directory (…/release/bundle). Defaults to apps/desktop/src-tauri/target/release/bundle or apps/desktop/src-tauri/target/<triple>/release/bundle discovery.",
     )
     args = parser.parse_args(argv)
 

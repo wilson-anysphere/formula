@@ -10,7 +10,8 @@ usage() {
 usage: scripts/ci/check-appimage.sh [AppImage...]
 
 If no arguments are provided, this script searches for AppImages under the usual
-Cargo/Tauri output directories (e.g. target/**/release/bundle/appimage/*.AppImage).
+Cargo/Tauri output directories (e.g. <target>/release/bundle/appimage/*.AppImage or
+<target>/<triple>/release/bundle/appimage/*.AppImage).
 
 Environment overrides:
   FORMULA_APPIMAGE_MAIN_BINARY
@@ -62,7 +63,8 @@ fi
 # - `ldd` resolves all shared library dependencies (no "not found").
 #
 # This script is meant to be run after the Linux release build has produced:
-#   target/**/release/bundle/appimage/*.AppImage
+#   <target>/release/bundle/appimage/*.AppImage
+#   <target>/<triple>/release/bundle/appimage/*.AppImage
 ##
 
 die() {
@@ -356,7 +358,7 @@ main() {
     mapfile -t appimages < <(printf '%s\n' "${appimages[@]}" | sort -u)
   fi
   if [ "${#appimages[@]}" -eq 0 ]; then
-    die "no AppImage artifacts found (expected something like target/**/release/bundle/appimage/*.AppImage)"
+    die "no AppImage artifacts found (expected something like <target>/release/bundle/appimage/*.AppImage or <target>/<triple>/release/bundle/appimage/*.AppImage)"
   fi
   local f
   for f in "${appimages[@]}"; do

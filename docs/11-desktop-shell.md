@@ -232,9 +232,9 @@ This reports:
 
 - `apps/desktop/dist` total size (and largest assets)
 - frontend asset download size (compressed JS/CSS/WASM) via `scripts/frontend_asset_size_report.mjs`
-- the built desktop binary size (`target/**/formula-desktop`)
+- the built desktop binary size (e.g. `target/release/formula-desktop` or `target/<triple>/release/formula-desktop`)
 - the top Rust crates/symbols contributing to the desktop binary size via `scripts/desktop_binary_size_report.py` (cargo-bloat + llvm-size fallback)
-- if present, installer artifacts under `target/**/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
+- if present, installer artifacts under `target/release/bundle` or `target/<triple>/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
 
 Installer artifact size gating knobs (used by the release workflow; DMG/MSI/AppImage/etc):
 
@@ -255,7 +255,7 @@ Frontend asset download size gating knobs (compressed JS/CSS/WASM under `dist/as
 
 Optional size budgets (also used by `pnpm benchmark` size metrics):
 
-- `FORMULA_DESKTOP_BINARY_SIZE_TARGET_MB` — max size (decimal MB) for `target/**/formula-desktop`
+- `FORMULA_DESKTOP_BINARY_SIZE_TARGET_MB` — max size (decimal MB) for `target/release/formula-desktop` (or `target/<triple>/release/formula-desktop`)
 - `FORMULA_DESKTOP_DIST_SIZE_TARGET_MB` — max size (decimal MB) for `apps/desktop/dist`
 - `FORMULA_DESKTOP_DIST_GZIP_SIZE_TARGET_MB` — max size (decimal MB) for a `tar.gz` of `apps/desktop/dist`
 
@@ -1241,7 +1241,7 @@ Or build a normal debug binary (no `--release`) when you don't need full optimiz
 
 ### Inspecting bundle sizes
 
-After building a packaged desktop app (so that `target/**/release/bundle/**` exists), you can generate a local size report via:
+After building a packaged desktop app (so that `target/release/bundle/**` or `target/<triple>/release/bundle/**` exists), you can generate a local size report via:
 
 ```bash
 # Ensure the build matches the repo's Cargo.toml release profile (codegen-units=1).

@@ -764,7 +764,7 @@ async function main() {
         command: process.execPath,
         args: [],
         skipReason:
-          "No local Tauri bundles found (expected output under apps/desktop/src-tauri/target/**/release/bundle). Build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build",
+          "No local Tauri bundles found (expected output under <target>/release/bundle or <target>/<triple>/release/bundle). Build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build",
       });
     } else {
       const artifacts = await detectBundleArtifacts(bundleDirs);
@@ -789,29 +789,29 @@ async function main() {
 
           if (key === "linux" && lower.includes("appimage") && !artifacts.appimage) {
             skipReason =
-              "No local .AppImage bundles found under target/**/release/bundle/appimage/*.AppImage (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+              "No local .AppImage bundles found under <target>/release/bundle/appimage/*.AppImage or <target>/<triple>/release/bundle/appimage/*.AppImage (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (key === "linux" && lower.includes("rpm") && !artifacts.rpm) {
             skipReason =
-              "No local .rpm bundles found under target/**/release/bundle/rpm/*.rpm (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+              "No local .rpm bundles found under <target>/release/bundle/rpm/*.rpm or <target>/<triple>/release/bundle/rpm/*.rpm (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (key === "linux" && lower.includes("deb") && !artifacts.deb) {
             skipReason =
-              "No local .deb bundles found under target/**/release/bundle/deb/*.deb (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+              "No local .deb bundles found under <target>/release/bundle/deb/*.deb or <target>/<triple>/release/bundle/deb/*.deb (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (key === "macos" && (lower.includes("dmg") || lower.includes("macos")) && !artifacts.dmg) {
             skipReason =
-              "No local .dmg bundles found under target/**/release/bundle/dmg/*.dmg (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+              "No local .dmg bundles found under <target>/release/bundle/dmg/*.dmg or <target>/<triple>/release/bundle/dmg/*.dmg (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (key === "windows" && lower.includes("msi") && !artifacts.msi) {
             skipReason =
-              "No local .msi bundles found under target/**/release/bundle/msi/*.msi (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+              "No local .msi bundles found under <target>/release/bundle/msi/*.msi or <target>/<triple>/release/bundle/msi/*.msi (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (
             key === "windows" &&
             (lower.includes("nsis") || lower.includes("exe")) &&
             !artifacts.exe
           ) {
             skipReason =
-              "No local .exe installers found under target/**/release/bundle/nsis/*.exe (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+              "No local .exe installers found under <target>/release/bundle/nsis/*.exe or <target>/<triple>/release/bundle/nsis/*.exe (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (key === "windows" && lower.includes("windows") && !artifacts.exe && !artifacts.msi) {
             skipReason =
-              "No local Windows installer bundles found under target/**/release/bundle/(msi|nsis) (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+              "No local Windows installer bundles found under <target>/release/bundle/(msi|nsis) or <target>/<triple>/release/bundle/(msi|nsis) (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           }
 
           // validate-linux-appimage.sh relies on `--appimage-extract`, which uses `unsquashfs`

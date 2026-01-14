@@ -77,10 +77,13 @@ Options:
   -h, --help     Show help
 
 Artifact discovery (when --dmg is not provided):
-  - apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
-  - apps/desktop/target/**/release/bundle/dmg/*.dmg
-  - target/**/release/bundle/dmg/*.dmg
-  - plus CARGO_TARGET_DIR/** equivalents when CARGO_TARGET_DIR is set.
+  - apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+  - apps/desktop/src-tauri/target/*/release/bundle/dmg/*.dmg
+  - apps/desktop/target/release/bundle/dmg/*.dmg
+  - apps/desktop/target/*/release/bundle/dmg/*.dmg
+  - target/release/bundle/dmg/*.dmg
+  - target/*/release/bundle/dmg/*.dmg
+  - plus CARGO_TARGET_DIR equivalents when CARGO_TARGET_DIR is set (searched first).
 
 Environment:
   APPLE_CERTIFICATE  When non-empty, enable codesign + spctl verification.
@@ -1109,7 +1112,7 @@ main() {
       warn "found macOS updater tarball artifacts (but DMG is required for validation):"
       printf '  %s\n' "${app_tars[@]}" >&2
     fi
-    die "expected a DMG at apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg, apps/desktop/target/**/release/bundle/dmg/*.dmg, or target/**/release/bundle/dmg/*.dmg (or pass --dmg)"
+    die "expected a DMG at apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg, apps/desktop/src-tauri/target/*/release/bundle/dmg/*.dmg, apps/desktop/target/release/bundle/dmg/*.dmg, apps/desktop/target/*/release/bundle/dmg/*.dmg, target/release/bundle/dmg/*.dmg, or target/*/release/bundle/dmg/*.dmg (or pass --dmg)"
   fi
 
   if [ "${#app_tars[@]}" -gt 0 ]; then

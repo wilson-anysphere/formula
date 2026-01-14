@@ -46,9 +46,12 @@ Options:
 
 If --appimage is not provided, the script searches common Tauri bundle output
 locations:
-  - apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
-  - apps/desktop/target/**/release/bundle/appimage/*.AppImage
-  - target/**/release/bundle/appimage/*.AppImage
+  - apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+  - apps/desktop/src-tauri/target/*/release/bundle/appimage/*.AppImage
+  - apps/desktop/target/release/bundle/appimage/*.AppImage
+  - apps/desktop/target/*/release/bundle/appimage/*.AppImage
+  - target/release/bundle/appimage/*.AppImage
+  - target/*/release/bundle/appimage/*.AppImage
 
 If CARGO_TARGET_DIR is set, it is searched first.
 

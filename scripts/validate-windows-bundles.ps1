@@ -14,12 +14,14 @@
 
   By default this script searches common Tauri output locations (including
   workspace target roots and per-target-triple subdirectories):
-    - apps/desktop/src-tauri/target/**/release/bundle/nsis/*.exe
-    - apps/desktop/src-tauri/target/**/release/bundle/nsis-web/*.exe
-    - apps/desktop/src-tauri/target/**/release/bundle/msi/*.msi
-    - apps/desktop/target/**/release/bundle/(nsis|nsis-web|msi)/*
-    - target/**/release/bundle/(nsis|nsis-web|msi)/*
-    - $env:CARGO_TARGET_DIR/**/release/bundle/(nsis|nsis-web|msi)/* (when set)
+    - apps/desktop/src-tauri/target/release/bundle/(nsis|nsis-web|msi)/*
+    - apps/desktop/src-tauri/target/*/release/bundle/(nsis|nsis-web|msi)/*
+    - apps/desktop/target/release/bundle/(nsis|nsis-web|msi)/*
+    - apps/desktop/target/*/release/bundle/(nsis|nsis-web|msi)/*
+    - target/release/bundle/(nsis|nsis-web|msi)/*
+    - target/*/release/bundle/(nsis|nsis-web|msi)/*
+    - $env:CARGO_TARGET_DIR/release/bundle/(nsis|nsis-web|msi)/* (when set)
+    - $env:CARGO_TARGET_DIR/*/release/bundle/(nsis|nsis-web|msi)/* (when set)
 
   You can override discovery by providing -ExePath and/or -MsiPath.
 
