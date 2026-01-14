@@ -546,8 +546,12 @@ function validate(os, scan, opts) {
   const osReqs = requirementsForOs(os);
   if (os === "macos" && requireUpdaterSignatures) {
     osReqs.push({
-      label: "macOS updater archive (.app.tar.gz)",
-      matchBase: (p) => p.endsWith(".app.tar.gz"),
+      label: "macOS updater archive (.app.tar.gz preferred; allow .tar.gz/.tgz)",
+      matchBase: (p) => {
+        const base = path.basename(p).toLowerCase();
+        if (base.endsWith(".appimage.tar.gz") || base.endsWith(".appimage.tgz")) return false;
+        return base.endsWith(".tar.gz") || base.endsWith(".tgz");
+      },
     });
   }
 
