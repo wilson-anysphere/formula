@@ -993,3 +993,69 @@ fn delete_cols_at_table_left_edge_removes_column_and_causes_ref_error() {
     let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["Col2", "Col3", "Col4"]);
 }
+
+#[test]
+fn insert_cols_with_count_two_inserts_multiple_columns_and_preserves_refs() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col2])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    engine
+        .apply_operation(EditOp::InsertCols {
+            sheet: "Sheet1".into(),
+            col: 1, // Insert inside the table (between Col1 and Col2).
+            count: 2,
+        })
+        .expect("insert cols");
+    engine.recalculate_single_threaded();
+
+    // Col2 should still refer to the same shifted data after insertion.
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:F4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["Col1", "Column1", "Column2", "Col2", "Col3", "Col4"]
+    );
+    let ids: Vec<u32> = table.columns.iter().map(|c| c.id).collect();
+    assert_eq!(ids, vec![1, 5, 6, 2, 3, 4]);
+}
+
+#[test]
+fn delete_cols_overlapping_table_and_before_start_shifts_and_shrinks_table() {
+    let mut engine = setup_engine_with_table_shifted_right_one_col();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col2])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    // Delete a span that includes a column strictly before the table and the first table column.
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 0,
+            count: 2,
+        })
+        .expect("delete cols");
+    engine.recalculate_single_threaded();
+
+    // Col2 should still resolve to the same data (the table shifted + shrunk).
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:C4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Col2", "Col3", "Col4"]);
+}
