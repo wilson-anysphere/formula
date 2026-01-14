@@ -34,6 +34,7 @@ use crate::styles::StylesPart;
 use crate::tables::{parse_table, TABLE_REL_TYPE};
 use crate::theme::convert::to_model_theme_palette;
 use crate::theme::parse_theme_palette;
+use crate::zip_util::open_zip_part;
 use crate::WorkbookKind;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
@@ -3346,6 +3347,49 @@ fn parse_worksheet_into_model(
                 };
 
                 worksheet.set_formula(cell_ref, Some(display));
+            }
+        }
+    }
+
+    // Best-effort: parse outline (row/column grouping) metadata.
+    //
+    // Notes:
+    // - `RowProperties.hidden` / `ColProperties.hidden` represent *user-hidden* state (Hide Row/Col).
+    // - Outline-hidden state (collapsed groups) lives in `worksheet.outline.*.hidden.outline`.
+    //
+    // The main sheet reader above parses `row/@hidden` and `col/@hidden` as `set_*_hidden`, which
+    // (intentionally) maps to the model's user-hidden bit. However, in OOXML the same `hidden="1"`
+    // attribute is also used for outline-collapsed detail rows/cols. We therefore re-parse outline
+    // state using the dedicated outline parser and then sync the per-row/col "user hidden" bits to
+    // match the outline parser's `hidden.user` inference.
+    if let Ok(xml) = std::str::from_utf8(worksheet_xml) {
+        if let Ok(outline) = crate::outline::read_outline_from_worksheet_xml(xml) {
+            worksheet.outline = outline;
+
+            // Sync existing row/col properties entries so their `hidden` flags reflect only the
+            // user-hidden bit (not outline-hidden).
+            //
+            // Note: outline indices are 1-based, while row/col properties are 0-based.
+            let row_keys: Vec<u32> = worksheet.row_properties.keys().copied().collect();
+            for row_0based in row_keys {
+                let user_hidden = worksheet
+                    .outline
+                    .rows
+                    .entry(row_0based.saturating_add(1))
+                    .hidden
+                    .user;
+                worksheet.set_row_hidden(row_0based, user_hidden);
+            }
+
+            let col_keys: Vec<u32> = worksheet.col_properties.keys().copied().collect();
+            for col_0based in col_keys {
+                let user_hidden = worksheet
+                    .outline
+                    .cols
+                    .entry(col_0based.saturating_add(1))
+                    .hidden
+                    .user;
+                worksheet.set_col_hidden(col_0based, user_hidden);
             }
         }
     }
