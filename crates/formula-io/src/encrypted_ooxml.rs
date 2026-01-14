@@ -490,7 +490,7 @@ fn derive_standard_aes_key_truncate(
     password: &str,
 ) -> Result<Vec<u8>, DecryptError> {
     use crate::offcrypto::cryptoapi::{
-        crypt_derive_key, final_hash, hash_password_fixed_spin, password_to_utf16le, HashAlg,
+        final_hash, hash_password_fixed_spin, password_to_utf16le, HashAlg,
     };
 
     let hash_alg = HashAlg::from_calg_id(info.header.alg_id_hash).map_err(|err| {
@@ -505,7 +505,14 @@ fn derive_standard_aes_key_truncate(
     let h_block0 = final_hash(&h_final, 0, hash_alg);
 
     let key_len = (info.header.key_size / 8) as usize;
-    Ok(crypt_derive_key(&h_block0, key_len, hash_alg))
+    if key_len > h_block0.len() {
+        return Err(DecryptError::InvalidInfo(format!(
+            "invalid keySize {} bits for truncation-based Standard AES derivation: key_len={key_len} > digest_len={}",
+            info.header.key_size,
+            h_block0.len()
+        )));
+    }
+    Ok(h_block0[..key_len].to_vec())
 }
 
 fn is_valid_zip(bytes: &[u8]) -> bool {
@@ -856,6 +863,8 @@ fn parse_agile_encryption_info(xml: &str) -> Result<AgileEncryptionInfo, Decrypt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::offcrypto::standard::EncryptionHeaderFlags;
+    use crate::offcrypto::{EncryptionHeader, EncryptionVerifier, StandardEncryptionInfo, CALG_AES_128, CALG_SHA1};
 
     #[test]
     fn rejects_spin_count_above_default_max() {
@@ -883,6 +892,50 @@ mod tests {
             matches!(err, DecryptError::InvalidInfo(ref msg) if msg.contains("spinCount") && msg.contains("maximum")),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn derive_standard_aes_key_truncate_uses_hblock0_prefix_for_known_vector() {
+        // Some producers in the wild appear to derive the Standard AES-128 key by truncating the
+        // per-block hash value, instead of running the CryptoAPI `CryptDeriveKey` ipad/opad
+        // expansion. `decrypt_standard_encrypted_ooxml_package` keeps a compatibility fallback for
+        // this behavior.
+        //
+        // This test uses the vector from `docs/offcrypto-standard-cryptoapi.md` (§8.2) and asserts
+        // that the truncation variant yields `H_block0[0:16]`.
+        let salt: [u8; 16] = [
+            0xE8, 0x82, 0x66, 0x49, 0x0C, 0x5B, 0xD1, 0xEE, 0xBD, 0x2B, 0x43, 0x94, 0xE3, 0xF8,
+            0x30, 0xEF,
+        ];
+
+        let info = StandardEncryptionInfo {
+            header: EncryptionHeader {
+                flags: EncryptionHeaderFlags::from_raw(
+                    EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES,
+                ),
+                size_extra: 0,
+                alg_id: CALG_AES_128,
+                alg_id_hash: CALG_SHA1,
+                key_size: 128,
+                provider_type: 0,
+                reserved1: 0,
+                reserved2: 0,
+                csp_name: String::new(),
+            },
+            verifier: EncryptionVerifier {
+                salt: salt.to_vec(),
+                encrypted_verifier: [0u8; 16],
+                verifier_hash_size: 20,
+                encrypted_verifier_hash: Vec::new(),
+            },
+        };
+
+        let key = derive_standard_aes_key_truncate(&info, "Password1234_").unwrap();
+        let expected: [u8; 16] = [
+            0xE2, 0xF8, 0xCD, 0xE4, 0x57, 0xE5, 0xD4, 0x49, 0xEB, 0x20, 0x50, 0x57, 0xC8,
+            0x8D, 0x20, 0x1D,
+        ];
+        assert_eq!(key, expected);
     }
 }
 
