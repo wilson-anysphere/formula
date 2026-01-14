@@ -128,15 +128,17 @@ test("Formulas → Formula Auditing ribbon commands are registered in CommandReg
     "Expected removeArrows command to clear auditing + focus SpreadsheetApp",
   );
 
+  // `view.toggleShowFormulas` is a ribbon toggle. It should be registered as a builtin command
+  // that accepts an explicit boolean pressed state (Ribbon passes `true/false`).
   assert.match(
-    main,
-    // Ribbon toggles are handled via createRibbonActionsFromCommands toggleOverrides.
+    builtins,
     new RegExp(
-      `toggleOverrides:\\s*\\{[\\s\\S]*?["']view\\.toggleShowFormulas["']\\s*:\\s*(?:async\\s*)?\\(pressed\\)\\s*=>\\s*\\{` +
-        `[\\s\\S]*?commandRegistry\\.executeCommand\\(["']view\\.toggleShowFormulas["']`,
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']view\\.toggleShowFormulas["'][\\s\\S]*?\\(next\\?:\\s*boolean\\)\\s*=>\\s*\\{` +
+        `[\\s\\S]*?typeof\\s+next\\s*===\\s*["']boolean["']` +
+        `[\\s\\S]*?app\\.setShowFormulas\\(next\\)`,
       "m",
     ),
-    "Expected main.ts to handle view.toggleShowFormulas via the ribbon toggleOverrides hook",
+    "Expected view.toggleShowFormulas to be registered as a builtin command that accepts a boolean pressed state (Ribbon toggle)",
   );
 
   assert.match(
