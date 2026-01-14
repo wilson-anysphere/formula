@@ -2,6 +2,7 @@ use crate::calc_settings::CalculationMode;
 use crate::eval::{parse_a1, CellAddr};
 use crate::functions::{FunctionContext, Reference, SheetId};
 use crate::{ErrorKind, Value};
+use formula_format::cell_format_code;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InfoType {
@@ -94,6 +95,7 @@ enum CellInfoType {
     Width,
     Protect,
     Prefix,
+    Format,
     Filename,
     Unsupported,
 }
@@ -108,13 +110,34 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         "width" => Some(CellInfoType::Width),
         "protect" => Some(CellInfoType::Protect),
         "prefix" => Some(CellInfoType::Prefix),
+        "format" => Some(CellInfoType::Format),
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
         // This engine does not currently track workbook file metadata, so always return "".
         "filename" => Some(CellInfoType::Filename),
         // Valid Excel keys that are not implemented yet.
-        "color" | "format" | "parentheses" => Some(CellInfoType::Unsupported),
+        "color" | "parentheses" => Some(CellInfoType::Unsupported),
         _ => None,
     }
+}
+
+fn effective_style_id(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> u32 {
+    let style_id = ctx.cell_style_id(sheet_id, addr);
+    if style_id != 0 {
+        return style_id;
+    }
+
+    // If no cell-level style is present, fall back to row then column defaults (matching Excel
+    // style precedence).
+    if let Some(style_id) = ctx.row_style_id(sheet_id, addr.row) {
+        return style_id;
+    }
+    if let Some(props) = ctx.col_properties(sheet_id, addr.col) {
+        if let Some(style_id) = props.style_id {
+            return style_id;
+        }
+    }
+
+    0
 }
 
 fn is_ident_cont_char(c: char) -> bool {
@@ -272,6 +295,15 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // This engine does not currently track per-cell alignment/prefix formatting, so return
             // the empty string.
             Value::Text(String::new())
+        }
+        CellInfoType::Format => {
+            let cell_ref = record_explicit_cell(ctx);
+            let style_id = effective_style_id(ctx, &cell_ref.sheet_id, addr);
+            let fmt = ctx
+                .style_table()
+                .and_then(|styles| styles.get(style_id))
+                .and_then(|style| style.number_format.as_deref());
+            Value::Text(cell_format_code(fmt))
         }
         CellInfoType::Filename => Value::Text(String::new()),
         CellInfoType::Unsupported => Value::Error(ErrorKind::NA),

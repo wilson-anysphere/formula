@@ -1,4 +1,5 @@
 use formula_engine::{ErrorKind, Value};
+use formula_model::Style;
 
 use super::harness::{assert_number, TestSheet};
 
@@ -365,6 +366,56 @@ fn cell_address_quotes_sheet_names_when_needed() {
     assert_eq!(
         engine.get_cell_value("Sheet1", "B3"),
         Value::Text("'O''Brien'!$A$1".to_string())
+    );
+}
+
+#[test]
+fn cell_format_classifies_currency_formats() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    let style_currency_bracket = engine.intern_style(Style {
+        number_format: Some("[$€-407]#,##0.00".to_string()),
+        ..Default::default()
+    });
+    let style_currency_plain = engine.intern_style(Style {
+        number_format: Some("€#,##0.00".to_string()),
+        ..Default::default()
+    });
+    let style_locale_only = engine.intern_style(Style {
+        number_format: Some("[$-409]0.00".to_string()),
+        ..Default::default()
+    });
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_style_id("Sheet1", "A1", style_currency_bracket).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine.set_cell_style_id("Sheet1", "A2", style_currency_plain).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 1.0).unwrap();
+    engine.set_cell_style_id("Sheet1", "A3", style_locale_only).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"format\",A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"format\",A3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("C2".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("C2".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B3"),
+        Value::Text("F2".to_string())
     );
 }
 
