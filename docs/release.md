@@ -1315,6 +1315,12 @@ GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run \
   --expectations scripts/release-asset-expectations.json
 ```
 
+To also check that the draft release includes the supply-chain metadata assets (SBOM + provenance bundles), add:
+
+```bash
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run --check-supply-chain
+```
+
 If you have locally-built Tauri bundles and want to run any platform-specific bundle validators too:
 
 ```bash
