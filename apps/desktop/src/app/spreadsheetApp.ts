@@ -16673,7 +16673,6 @@ export class SpreadsheetApp {
 
       const objects = this.listDrawingObjectsForSheet();
       const base = objects.find((obj) => obj.id === gesture.objectId) ?? null;
-      const shouldCommit = e.type === "pointerup";
 
       const docAny: any = this.document as any;
       const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
