@@ -8842,6 +8842,11 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// Excel’s default sheet bounds (1,048,576 rows × 16,384 columns), which can result in a very large
 /// number of provider calls.
 ///
+/// External workbook sheet dimensions are not currently exposed to the engine. Aside from resolving
+/// whole-row/whole-column sentinels (`A:A`, `1:1`) against Excel’s default bounds, the engine does
+/// not bounds-check external addresses—providers may see large row/col indices if formulas refer to
+/// them.
+///
 /// Because provider-backed values may exist for addresses that are not present in the engine’s
 /// internal cell storage, enabling an `ExternalValueProvider` can also force the evaluator to use
 /// dense iteration for local range functions (e.g. `SUM(A:A)`), which may have performance
