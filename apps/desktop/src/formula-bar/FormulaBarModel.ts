@@ -472,7 +472,6 @@ export class FormulaBarModel {
 
     const highlightStable =
       this.#engineHighlightSpans != null &&
-      this.#engineToolingFormula === args.formula &&
       this.#engineLexTokens === args.lexResult.tokens &&
       this.#engineHighlightErrorSpanKey === errorSpanKey;
 
