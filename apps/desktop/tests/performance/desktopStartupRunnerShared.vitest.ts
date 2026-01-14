@@ -177,4 +177,13 @@ describe('desktopStartupUtil.runOnce reset guardrails', () => {
       /Refusing to reset unsafe desktop benchmark perf home dir/,
     );
   });
+
+  test('refuses to reset when FORMULA_PERF_HOME resolves to target/', async () => {
+    process.env.FORMULA_DESKTOP_BENCH_RESET_HOME = '1';
+    process.env.FORMULA_PERF_HOME = 'target';
+
+    await expect(runOnce({ binPath: 'ignored', timeoutMs: 1 })).rejects.toThrow(
+      /Refusing to reset FORMULA_PERF_HOME=.*target/,
+    );
+  });
 });

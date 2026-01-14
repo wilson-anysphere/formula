@@ -449,6 +449,16 @@ export async function runOnce({
     if (safeRoot === safeRootDir || safeRoot === repoRoot) {
       throw new Error(`Refusing to reset unsafe desktop benchmark perf home dir: ${safeRoot}`);
     }
+    // `target/` contains build outputs and other tooling state; deleting it is almost never intended.
+    // If the caller accidentally sets `FORMULA_PERF_HOME=target` (or a path that resolves to `target`),
+    // prevent wiping the entire directory when `profileDir` is omitted (defaults to `FORMULA_PERF_HOME`).
+    const safeTarget = resolve(repoRoot, 'target');
+    if (profileDir === safeRoot && safeRoot === safeTarget) {
+      throw new Error(
+        `Refusing to reset FORMULA_PERF_HOME=${safeRoot} because it points at target/ itself.\n` +
+          'Pick a subdirectory like target/perf-home (recommended).',
+      );
+    }
     if (profileDir !== safeRoot && !isSubpath(safeRoot, profileDir)) {
       throw new Error(
         `Refusing to reset desktop benchmark profile dir outside ${safeRoot} (got ${profileDir})`,
