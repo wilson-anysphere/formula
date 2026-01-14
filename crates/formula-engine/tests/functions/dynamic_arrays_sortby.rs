@@ -1,4 +1,5 @@
 use formula_engine::eval::parse_a1;
+use formula_engine::value::RecordValue;
 use formula_engine::{Engine, ErrorKind, Value};
 
 #[test]
@@ -119,3 +120,43 @@ fn sortby_rejects_invalid_sort_order() {
     );
 }
 
+#[test]
+fn sortby_uses_record_display_field_for_keying() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "first").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "second").unwrap();
+
+    let mut key_a = RecordValue::new("zzz").field("Name", "A");
+    // Use a different case from the stored field key to ensure display_field resolution is
+    // case-insensitive.
+    key_a.display_field = Some("name".to_string());
+    let mut key_b = RecordValue::new("aaa").field("Name", "B");
+    key_b.display_field = Some("NAME".to_string());
+
+    engine
+        .set_cell_value("Sheet1", "B1", Value::Record(key_a))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "B2", Value::Record(key_b))
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SORTBY(A1:A2,B1:B2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "D1").expect("spill range");
+    assert_eq!(start, parse_a1("D1").unwrap());
+    assert_eq!(end, parse_a1("D2").unwrap());
+
+    // Sort keys should be derived from the record display_field ("A"/"B"), not from fallback
+    // display values ("zzz"/"aaa").
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D1"),
+        Value::Text("first".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D2"),
+        Value::Text("second".to_string())
+    );
+}

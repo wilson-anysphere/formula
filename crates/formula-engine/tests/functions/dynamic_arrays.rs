@@ -148,11 +148,11 @@ fn sort_uses_record_display_field_for_keying() {
     let mut engine = Engine::new();
 
     let mut record_a = RecordValue::new("zzz").field("Name", "A");
-    record_a.display_field = Some("Name".to_string());
+    record_a.display_field = Some("name".to_string());
     let record_a = Value::Record(record_a);
 
     let mut record_b = RecordValue::new("aaa").field("Name", "B");
-    record_b.display_field = Some("Name".to_string());
+    record_b.display_field = Some("NAME".to_string());
     let record_b = Value::Record(record_b);
 
     engine
@@ -328,11 +328,11 @@ fn unique_uses_record_display_field_for_deduping() {
     let mut engine = Engine::new();
 
     let mut record_a = RecordValue::new("display_a").field("Name", "Same");
-    record_a.display_field = Some("Name".to_string());
+    record_a.display_field = Some("name".to_string());
     let record_a = Value::Record(record_a);
 
     let mut record_b = RecordValue::new("display_b").field("Name", "Same");
-    record_b.display_field = Some("Name".to_string());
+    record_b.display_field = Some("NAME".to_string());
     let record_b = Value::Record(record_b);
 
     engine
