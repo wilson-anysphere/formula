@@ -254,6 +254,9 @@ describe("keybindings", () => {
     const binding = parseKeybinding("cmd.test", "ctrl+option+shift+cmd+arrowup")!;
     expect(formatKeybindingForAria(binding)).toBe("Control+Alt+Shift+Meta+ArrowUp");
 
+    const plus = parseKeybinding("cmd.test", "ctrl+plus")!;
+    expect(formatKeybindingForAria(plus)).toBe("Control+Plus");
+
     const escape = parseKeybinding("cmd.test", "cmd+escape")!;
     expect(formatKeybindingForAria(escape)).toBe("Meta+Escape");
 
@@ -275,6 +278,10 @@ describe("keybindings", () => {
     const equal = parseKeybinding("cmd.test", "ctrl+shift+=")!;
     expect(formatKeybindingForDisplay(equal, "other")).toBe("Ctrl+Shift+=");
     expect(formatKeybindingForDisplay(equal, "mac")).toBe("⌃⇧=");
+
+    const plus = parseKeybinding("cmd.test", "ctrl+plus")!;
+    expect(formatKeybindingForDisplay(plus, "other")).toBe("Ctrl+Plus");
+    expect(formatKeybindingForDisplay(plus, "mac")).toBe("⌃+");
 
     const currency = parseKeybinding("cmd.test", "ctrl+shift+$")!;
     expect(formatKeybindingForDisplay(currency, "other")).toBe("Ctrl+Shift+$");

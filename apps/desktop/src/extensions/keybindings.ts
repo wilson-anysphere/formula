@@ -206,6 +206,10 @@ function formatKeyTokenForDisplay(keyToken: string, platform: "mac" | "other"): 
   const key = normalizeKeyToken(keyToken);
 
   switch (key) {
+    case "+":
+      // "+" is the keybinding token separator for non-mac display strings and aria-keyshortcuts.
+      // Render it as "Plus" in non-mac UIs to avoid confusing "Ctrl++" outputs.
+      return platform === "mac" ? "+" : "Plus";
     case "arrowup":
       return platform === "mac" ? "↑" : "Up";
     case "arrowdown":
@@ -277,6 +281,10 @@ function formatKeyTokenForAria(keyToken: string): string {
   //
   // See: https://w3c.github.io/aria/#aria-keyshortcuts
   switch (keyToken) {
+    case "+":
+      // `aria-keyshortcuts` uses "+" as a separator between modifiers and the key. Use "Plus"
+      // to represent the "+" key itself.
+      return "Plus";
     case "arrowup":
       return "ArrowUp";
     case "arrowdown":
