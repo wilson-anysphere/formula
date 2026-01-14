@@ -15519,6 +15519,72 @@ fn walk_external_dependencies(
         Expr::FunctionCall { name, args, .. } => {
             if let Some(spec) = crate::functions::lookup_function(name) {
                 match spec.name {
+                    "INDIRECT" => {
+                        // `INDIRECT` can dynamically produce references (including external workbook
+                        // references) from text. Most uses are not statically analyzable, but if the
+                        // ref_text and A1 flag are constant we can extract external dependencies up
+                        // front so external invalidation works even before the formula has been
+                        // evaluated.
+                        if let Some(Expr::Text(text)) = args.first() {
+                            // Only attempt static extraction when the optional A1 flag is either
+                            // omitted or a literal boolean; otherwise the reference style is runtime
+                            // dependent.
+                            let a1 = match args.get(1) {
+                                None => Some(true),
+                                Some(Expr::Bool(v)) => Some(*v),
+                                Some(_) => None,
+                            };
+                            if let Some(a1) = a1 {
+                                let ref_text = text.trim();
+                                if !ref_text.is_empty() {
+                                    // Mirror `functions::builtins_reference::indirect_fn` parsing behavior:
+                                    // parse the text as a standalone reference expression and only accept
+                                    // simple cell/range references.
+                                    if let Ok(parsed) = crate::parse_formula(
+                                        ref_text,
+                                        crate::ParseOptions {
+                                            locale: crate::LocaleConfig::en_us(),
+                                            reference_style: if a1 {
+                                                crate::ReferenceStyle::A1
+                                            } else {
+                                                crate::ReferenceStyle::R1C1
+                                            },
+                                            normalize_relative_to: None,
+                                        },
+                                    ) {
+                                        let origin_ast = crate::CellAddr::new(
+                                            current_cell.addr.row,
+                                            current_cell.addr.col,
+                                        );
+                                        let lowered = crate::eval::lower_ast(
+                                            &parsed,
+                                            if a1 { None } else { Some(origin_ast) },
+                                        );
+                                        let sheet_ref = match lowered {
+                                            crate::eval::Expr::CellRef(r) => Some(r.sheet),
+                                            crate::eval::Expr::RangeRef(r) => Some(r.sheet),
+                                            _ => None,
+                                        };
+                                        if let Some(crate::eval::SheetReference::External(key)) =
+                                            sheet_ref
+                                        {
+                                            // Match the runtime behavior: allow single-sheet external workbook
+                                            // references, but reject external 3D spans.
+                                            if crate::eval::is_valid_external_sheet_key(&key) {
+                                                if let Some((workbook_id, _sheet)) =
+                                                    crate::eval::split_external_sheet_key(&key)
+                                                {
+                                                    external_workbooks
+                                                        .insert(workbook_id.to_string());
+                                                }
+                                                external_sheets.insert(key);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     "LET" => {
                         if args.len() < 3 || args.len() % 2 == 0 {
                             return;
@@ -17654,6 +17720,52 @@ mod tests {
 
         engine.recalculate_single_threaded();
         assert_eq!(engine.get_cell_value("Å", "B1"), Value::Number(10.0));
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_for_invalidation() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                "=INDIRECT(\"[Book.xlsx]Sheet1!B2\")",
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+        assert!(
+            engine
+                .external_sheet_dependents
+                .get("[Book.xlsx]Sheet1")
+                .is_some_and(|deps| deps.contains(&key)),
+            "reverse index should include the formula cell"
+        );
+        assert!(
+            engine
+                .external_workbook_dependents
+                .get("Book.xlsx")
+                .is_some_and(|deps| deps.contains(&key)),
+            "workbook reverse index should include the formula cell"
+        );
     }
 
     #[test]
