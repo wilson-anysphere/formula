@@ -857,7 +857,6 @@ fn decrypt_standard_encrypted_package_rc4(
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 enum StandardScheme {
     /// Standard / ECMA-376: AES-ECB using the block-0 file key (no IV).
     ///
