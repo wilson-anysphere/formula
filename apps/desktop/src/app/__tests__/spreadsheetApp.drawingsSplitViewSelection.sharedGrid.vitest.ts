@@ -261,6 +261,38 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
     root.remove();
   });
 
+  it("preserves drawing selection on context-click misses in the secondary pane", () => {
+    const { app, root, secondaryView, secondaryContainer, selectionCanvas } = setup();
+
+    // Select the drawing first (e.g. via the selection pane).
+    app.selectDrawingById(1);
+    expect(app.getSelectedDrawingId()).toBe(1);
+
+    const headerOffsetX = secondaryView.grid.renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = secondaryView.grid.renderer.scroll.rows.totalSize(1);
+
+    const rect = secondaryContainer.getBoundingClientRect();
+    const missClientX = rect.left + headerOffsetX + 200;
+    const missClientY = rect.top + headerOffsetY + 200;
+    expect(app.hitTestDrawingAtClientPoint(missClientX, missClientY)).toBeNull();
+
+    const down = createPointerLikeMouseEvent("pointerdown", {
+      clientX: missClientX,
+      clientY: missClientY,
+      button: 2,
+    });
+    selectionCanvas.dispatchEvent(down);
+
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect((down as any).__formulaDrawingContextClick).toBeUndefined();
+    expect(down.defaultPrevented).toBe(false);
+
+    secondaryView.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
+
   it("selects the drawing on left click without moving the active cell", () => {
     const { app, root, secondaryView, secondaryContainer, selectionCanvas, beforeActive } = setup();
 
