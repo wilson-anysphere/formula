@@ -372,7 +372,9 @@ This section documents the “wiring points” for hosts.
   - `EngineClient.setSheetDefaultStyleId(sheet, styleId|null)`
   - `EngineClient.setRowStyleId(sheet, row, styleId|null)`
   - `EngineClient.setColStyleId(sheet, col, styleId|null)`
-  - `EngineClient.setFormatRunsByCol(sheet, col, runs)` (range-run formatting layer)
+  - range-run formatting layer (DocumentController `formatRunsByCol`):
+    - `EngineClient.setFormatRunsByCol(sheet, col, runs)` (preferred)
+    - `EngineClient.setColFormatRuns(sheet, col, runs)` (legacy alias used by some sync surfaces)
   - `EngineClient.setCellStyleId(address, styleId, sheet)`
 
   Notes:
