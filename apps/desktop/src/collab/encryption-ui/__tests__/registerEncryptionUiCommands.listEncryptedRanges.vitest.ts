@@ -144,7 +144,9 @@ describe("registerEncryptionUiCommands", () => {
       getEncryptedRangeManager: () => manager,
       // "Summary" is a real stable sheet id for a sheet whose display name is "Data".
       getSheetDisplayNameById: (id: string) => (id === "Summary" ? "Data" : id === "sheet-1" ? "Summary" : id),
-      getSheetIdByName: vi.fn((name: string) => (name === "Summary" ? "sheet-1" : null)),
+      // `Data` resolves to the stable id `Summary`. Note: this should not be called with the raw
+      // sheet id (`Summary`) as a *name*.
+      getSheetIdByName: vi.fn((name: string) => (name === "Data" ? "Summary" : name === "Summary" ? "sheet-1" : null)),
       selectRange: vi.fn(),
     };
 
@@ -152,7 +154,7 @@ describe("registerEncryptionUiCommands", () => {
 
     await commandRegistry.executeCommand("collab.listEncryptedRanges");
 
-    expect(app.getSheetIdByName).not.toHaveBeenCalled();
+    expect(app.getSheetIdByName).not.toHaveBeenCalledWith("Summary");
     expect(app.selectRange).toHaveBeenCalledWith(
       {
         sheetId: "Summary",

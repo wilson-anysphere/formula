@@ -449,26 +449,35 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         const raw = String(rangeSheetId ?? "").trim();
         if (!raw) return raw;
 
+        const getSheetIdByName = (app as any).getSheetIdByName;
+        const resolveByName = (name: string): string | null => {
+          if (typeof getSheetIdByName !== "function") return null;
+          try {
+            const resolved = getSheetIdByName.call(app, name);
+            const trimmed = typeof resolved === "string" ? resolved.trim() : "";
+            return trimmed || null;
+          } catch {
+            return null;
+          }
+        };
+
         // If this looks like a stable sheet id (it resolves to a different display name),
-        // prefer it as-is. This avoids sheet id/name ambiguity when a sheet id happens to
-        // equal another sheet's display name.
+        // prefer it as such and avoid interpreting it as a sheet *name*. For navigation,
+        // best-effort resolve the canonical stable id via the display name so we avoid
+        // case-mismatched ids in legacy data.
+        let displayName: string | null = null;
         try {
           const name = app.getSheetDisplayNameById(raw);
-          if (typeof name === "string" && name && name !== raw) return raw;
+          displayName = typeof name === "string" && name.trim() ? name.trim() : null;
         } catch {
           // ignore
         }
-
-        try {
-          const getSheetIdByName = (app as any).getSheetIdByName;
-          if (typeof getSheetIdByName !== "function") return raw;
-          const resolved = getSheetIdByName.call(app, raw);
-          if (typeof resolved === "string" && resolved.trim()) return resolved.trim();
-        } catch {
-          // ignore
+        if (displayName && displayName !== raw) {
+          return resolveByName(displayName) ?? raw;
         }
 
-        return raw;
+        // Legacy shape: sheet display name instead of stable id.
+        return resolveByName(raw) ?? raw;
       };
 
       const selected = await showQuickPick(
@@ -491,7 +500,7 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       }
 
       try {
-       selectRange.call(
+        selectRange.call(
           app,
           {
             sheetId: resolveSheetIdForRange(selected.sheetId),
