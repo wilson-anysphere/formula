@@ -10,6 +10,19 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   // Custom number format prompt (disabled while editing; selection/format mutations are blocked).
   "home.number.moreFormats.custom": true,
 
+  // --- Styles ----------------------------------------------------------------
+  "home.styles.formatAsTable": true,
+  "home.styles.formatAsTable.light": true,
+  "home.styles.formatAsTable.medium": true,
+  "home.styles.formatAsTable.dark": true,
+  "home.styles.formatAsTable.newStyle": true,
+  "home.styles.cellStyles": true,
+  "home.styles.cellStyles.goodBadNeutral": true,
+  "home.styles.cellStyles.dataModel": true,
+  "home.styles.cellStyles.titlesHeadings": true,
+  "home.styles.cellStyles.numberFormat": true,
+  "home.styles.cellStyles.newStyle": true,
+
   // --- Sheet structure -------------------------------------------------------
   "home.cells.format": true,
   "home.cells.format.rowHeight": true,
