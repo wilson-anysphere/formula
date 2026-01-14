@@ -586,6 +586,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     expect(dropdown?.hasAttribute("hidden")).toBe(true);
     expect(view.model.isEditing).toBe(false);
     expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(false);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("false");
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(false);
 
     host.remove();
   });
