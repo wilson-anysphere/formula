@@ -100,6 +100,8 @@ Verification checklist (especially for `es-ES`):
 - Ensure extraction covers the full catalog (i.e. the JSON contains one mapping per canonical
   function in `shared/functionCatalog.json`, and the script did not skip large numbers of
   functions).
+  - Quick sanity check (counts):
+    - `node --input-type=module -e "import fs from 'node:fs'; const cat=JSON.parse(fs.readFileSync('shared/functionCatalog.json','utf8')); const src=JSON.parse(fs.readFileSync('crates/formula-engine/src/locale/data/sources/es-ES.json','utf8')); console.log('es-ES translations:', Object.keys(src.translations).length, '/', cat.functions.length);"`
 - Run `node scripts/generate-locale-function-tsv.js --check`.
 - Spot-check that Spanish-localized spellings are present in
   `crates/formula-engine/src/locale/data/es-ES.tsv` (not silently falling back to English), including

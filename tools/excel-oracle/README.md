@@ -127,6 +127,8 @@ Notes / caveats:
   catalog.
 - For `es-ES`, treat a “complete” extraction as **one translation per canonical function** in
   `shared/functionCatalog.json` (i.e. the extractor should not report a large skipped set).
+- Quick sanity check (counts):
+  - `node --input-type=module -e "import fs from 'node:fs'; const cat=JSON.parse(fs.readFileSync('shared/functionCatalog.json','utf8')); const src=JSON.parse(fs.readFileSync('crates/formula-engine/src/locale/data/sources/es-ES.json','utf8')); console.log('es-ES translations:', Object.keys(src.translations).length, '/', cat.functions.length);"`
 - After extracting, regenerate + verify with:
   - `node scripts/generate-locale-function-tsv.js`
   - `node scripts/generate-locale-function-tsv.js --check`
