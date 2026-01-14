@@ -11484,13 +11484,13 @@ export class SpreadsheetApp {
       // Persist rotation/flips (or clear if the UI removed them).
       // Be conservative for move/resize commits: if the UI-layer `after` object does not include
       // `transform` (e.g. because the adapter couldn't parse a malformed raw transform payload),
-      // preserve the raw field rather than wiping it. Additionally, avoid writing a new `transform`
-      // field into drawings that did not previously store one unless this is a rotate commit.
-      // Only treat absence as authoritative during
-      // rotate commits (where the user explicitly edited rotation).
-      const rawHasTransform = Object.prototype.hasOwnProperty.call(drawing, "transform");
-      const afterHasTransform = Object.prototype.hasOwnProperty.call(after, "transform");
-      const shouldUpdateTransform = commitKind === "rotate" || (rawHasTransform && afterHasTransform);
+      // preserve the raw field rather than wiping it.
+      //
+      // We only update `transform` during rotate commits. Move/resize commits should not rewrite
+      // the persisted transform payload (which may have different key casing or omit optional
+      // fields), and drawing transforms can be derived from preserved DrawingML fragments when
+      // needed.
+      const shouldUpdateTransform = commitKind === "rotate";
       if (shouldUpdateTransform) {
         if (after.transform) next.transform = after.transform;
         else if ("transform" in next) delete next.transform;

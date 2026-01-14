@@ -422,9 +422,15 @@ function convertModelDrawingObjectKind(
   model: unknown,
   context?: { sheetId?: string; drawingObjectId?: number },
 ): DrawingObjectKind {
+  const labelMeta =
+    isRecord(model) && typeof (model as JsonRecord).label === "string" && String((model as JsonRecord).label).trim() !== ""
+      ? String((model as JsonRecord).label).trim()
+      : undefined;
   const { tag, value } = unwrapPossiblyTaggedEnum(model, "DrawingObjectKind", { tagKeys: ["kind", "type"] });
   if (!isRecord(value)) throw new Error(`DrawingObjectKind.${tag} must be an object`);
-  const normalized = normalizeEnumTag(tag);
+  let normalized = normalizeEnumTag(tag);
+  // Back-compat: tolerate tags that include a `Kind` suffix (e.g. `ShapeKind`).
+  if (normalized !== "kind" && normalized.endsWith("kind")) normalized = normalized.slice(0, -"kind".length);
 
   switch (normalized) {
     case "image": {
@@ -436,7 +442,7 @@ function convertModelDrawingObjectKind(
       const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
       const rawXml = readOptionalString(rawXmlValue);
       const label = extractDrawingObjectName(rawXml);
-      return { type: "shape", rawXml, raw_xml: rawXml, label };
+      return { type: "shape", rawXml, raw_xml: rawXml, label: labelMeta ?? label };
     }
     case "chartplaceholder": {
       const relIdValue = pick(value, ["rel_id", "relId", "chart_id", "chartId"]);
@@ -456,7 +462,7 @@ function convertModelDrawingObjectKind(
           type: "unknown",
           rawXml,
           raw_xml: rawXml,
-          label: label ?? graphicFramePlaceholderLabel(rawXml) ?? undefined,
+          label: labelMeta ?? label ?? graphicFramePlaceholderLabel(rawXml) ?? undefined,
         };
       }
 
@@ -468,14 +474,14 @@ function convertModelDrawingObjectKind(
           : // Back-compat: when the sheet context isn't available, fall back to the drawing rel id.
             relId;
 
-      return { type: "chart", chartId, label: label ?? `Chart (${relId})`, rawXml, raw_xml: rawXml };
+      return { type: "chart", chartId, label: labelMeta ?? (label ?? `Chart (${relId})`), rawXml, raw_xml: rawXml };
     }
     case "chart": {
       // UI/other internal representations may already use `{ type: "chart", chartId }`.
       const chartId = readOptionalString(pick(value, ["chart_id", "chartId", "rel_id", "relId"]));
       const rawXml = readOptionalString(pick(value, ["raw_xml", "rawXml"]));
       const label = readOptionalString(pick(value, ["label"])) ?? extractDrawingObjectName(rawXml);
-      return { type: "chart", chartId: chartId ?? undefined, rawXml, raw_xml: rawXml, label: label ?? undefined };
+      return { type: "chart", chartId: chartId ?? undefined, rawXml, raw_xml: rawXml, label: labelMeta ?? (label ?? undefined) };
     }
     case "unknown":
       {
@@ -484,7 +490,7 @@ function convertModelDrawingObjectKind(
           type: "unknown",
           rawXml,
           raw_xml: rawXml,
-          label: extractDrawingObjectName(rawXml),
+          label: labelMeta ?? extractDrawingObjectName(rawXml),
         };
       }
     default:
