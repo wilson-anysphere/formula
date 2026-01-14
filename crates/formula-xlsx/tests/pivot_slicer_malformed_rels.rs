@@ -174,3 +174,58 @@ fn pivot_slicer_parts_ignores_malformed_cache_rels() {
     assert!(slicer.connected_pivot_tables.is_empty());
 }
 
+#[test]
+fn pivot_slicer_parts_ignores_malformed_slicer_and_timeline_rels() {
+    let slicer_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer1">
+  <slicerCache id="rId1"/>
+</slicer>"#;
+
+    // Invalid attribute syntax (missing quote) in the slicer `.rels` file.
+    let broken_slicer_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2007/relationships/slicerCache" Target="../slicerCaches/slicerCache1.xml" TargetMode="External/>
+</Relationships>"#;
+
+    let timeline_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline1">
+  <timelineCache id="rId1"/>
+</timeline>"#;
+
+    // Invalid attribute syntax (missing quote) in the timeline `.rels` file.
+    let broken_timeline_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2007/relationships/timelineCacheDefinition" Target="../timelineCaches/timelineCacheDefinition1.xml" TargetMode="External/>
+</Relationships>"#;
+
+    let drawing_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2007/relationships/slicer" Target="../slicers/slicer1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2007/relationships/timeline" Target="../timelines/timeline1.xml"/>
+</Relationships>"#;
+
+    let bytes = build_package(&[
+        ("xl/slicers/slicer1.xml", slicer_xml),
+        ("xl/slicers/_rels/slicer1.xml.rels", broken_slicer_rels),
+        ("xl/timelines/timeline1.xml", timeline_xml),
+        ("xl/timelines/_rels/timeline1.xml.rels", broken_timeline_rels),
+        ("xl/drawings/_rels/drawing1.xml.rels", drawing_rels),
+    ]);
+
+    let package = XlsxPackage::from_bytes(&bytes).expect("read test pkg");
+    let parts = package
+        .pivot_slicer_parts()
+        .expect("pivot slicer discovery should be best-effort");
+
+    assert_eq!(parts.slicers.len(), 1);
+    let slicer = &parts.slicers[0];
+    assert!(slicer.cache_part.is_none());
+    assert!(slicer.connected_pivot_tables.is_empty());
+    assert_eq!(slicer.placed_on_drawings, vec!["xl/drawings/drawing1.xml"]);
+
+    assert_eq!(parts.timelines.len(), 1);
+    let timeline = &parts.timelines[0];
+    assert!(timeline.cache_part.is_none());
+    assert!(timeline.connected_pivot_tables.is_empty());
+    assert_eq!(timeline.placed_on_drawings, vec!["xl/drawings/drawing1.xml"]);
+}
