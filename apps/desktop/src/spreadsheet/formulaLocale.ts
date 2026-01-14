@@ -18,7 +18,7 @@ export type FormulaLocaleId =
  *
  * JS APIs like `Intl.NumberFormat` only accept BCP-47 tags, so we normalize inputs into
  * a simplified BCP-47 shape (`language` or `language-REGION`) and then, when needed,
- * map them onto the small set of formula locales the engine ships (`en-US`, `de-DE`, ...).
+ * map them onto the set of formula locales the engine ships (`en-US`, `de-DE`, `ja-JP`, ...).
  *
  * Keep this logic aligned with `crates/formula-engine/tests/locale_id_normalization.rs`.
  */

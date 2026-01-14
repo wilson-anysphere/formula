@@ -122,6 +122,7 @@ function getLocaleArgSeparator(localeId: string): FormulaArgSeparator {
   // The WASM engine currently only ships these locales. Their separators match Excel:
   // - en-US: `,` args + `.` decimals
   // - de-DE/fr-FR/es-ES: `;` args + `,` decimals
+  // - other engine locales (ja/zh/ko): currently share en-US punctuation
   //
   // Treat unknown locales as canonical `,` separator.
   switch (normalizeFormulaLocaleId(localeId)) {
