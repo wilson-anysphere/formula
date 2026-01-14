@@ -346,3 +346,96 @@ fn cannot_convert_to_formula_with_blank_cached_value() {
         "unexpected error message: {msg}"
     );
 }
+
+#[test]
+fn converting_value_cell_to_array_formula_requires_rgcb() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, builder.build_bytes()).expect("write xlsb fixture");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open xlsb fixture");
+    let encoded = encode_rgce_with_context(
+        "=SUM({4,5})",
+        wb.workbook_context(),
+        CellCoord::new(0, 0),
+    )
+    .expect("encode array formula");
+    assert!(
+        !encoded.rgcb.is_empty(),
+        "expected array formula encoding to produce rgcb bytes"
+    );
+
+    let edits_missing_rgcb = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(9.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(encoded.rgce.clone()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    fn assert_missing_rgcb_error(err: formula_xlsb::Error) {
+        match err {
+            formula_xlsb::Error::Io(io_err) => {
+                assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+                assert!(
+                    io_err.to_string().contains("set CellEdit.new_rgcb"),
+                    "expected error to instruct caller to set CellEdit.new_rgcb, got: {io_err}"
+                );
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    let out_path = tmpdir.path().join("out-in-memory.xlsb");
+    let err = wb
+        .save_with_cell_edits(&out_path, 0, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when rgcb is missing");
+    assert_missing_rgcb_error(err);
+
+    let out_path = tmpdir.path().join("out-streaming.xlsb");
+    let err = wb
+        .save_with_cell_edits_streaming(&out_path, 0, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when rgcb is missing");
+    assert_missing_rgcb_error(err);
+
+    let edits_with_rgcb = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(9.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(encoded.rgce.clone()),
+        new_rgcb: Some(encoded.rgcb.clone()),
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let in_memory_path = tmpdir.path().join("patched_in_memory.xlsb");
+    let streaming_path = tmpdir.path().join("patched_streaming.xlsb");
+    wb.save_with_cell_edits(&in_memory_path, 0, &edits_with_rgcb)
+        .expect("save_with_cell_edits");
+    wb.save_with_cell_edits_streaming(&streaming_path, 0, &edits_with_rgcb)
+        .expect("save_with_cell_edits_streaming");
+
+    for out_path in [&in_memory_path, &streaming_path] {
+        let patched = XlsbWorkbook::open(out_path).expect("open patched workbook");
+        let sheet = patched.read_sheet(0).expect("read sheet");
+        let cell = sheet
+            .cells
+            .iter()
+            .find(|c| c.row == 0 && c.col == 0)
+            .expect("cell exists");
+        assert_eq!(cell.value, CellValue::Number(9.0));
+
+        let formula = cell.formula.as_ref().expect("expected formula");
+        assert_eq!(formula.extra, encoded.rgcb);
+        assert_eq!(formula.text.as_deref(), Some("SUM({4,5})"));
+    }
+}
