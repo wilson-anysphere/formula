@@ -1348,6 +1348,13 @@ The choice affects how version history is persisted and whether it flows through
 
 Note: there are additional stores (e.g. `IndexedDBVersionStore`) under `packages/versioning/src/store/`, but the key deployment split is **in-doc (Yjs)** vs **out-of-doc (API/SQLite)**.
 
+#### Desktop wiring note
+
+The Formula desktop app renders the Version History panel via `createPanelBodyRenderer` (see `apps/desktop/src/panels/panelBodyRenderer.tsx`).
+To keep version history usable when `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED` is on, the desktop layer can inject an out-of-doc store by providing a factory on `PanelBodyRendererOptions`:
+
+- `createCollabVersioningStore?: (session) => VersionStore` (alias: `createVersionStore`)
+
 ### How history is stored (YjsVersionStore)
 
 By default, `createCollabVersioning` uses `YjsVersionStore`, which stores all versions **inside the same shared Y.Doc** under these roots:
@@ -1434,6 +1441,9 @@ Formula supports Git-like **branch + merge** workflows for collaborative spreads
 > `YjsBranchStore` writes to `branching:*` roots. When the sync-server reserved root mutation guard is enabled
 > (see [`services/sync-server/src/server.ts`](../services/sync-server/src/server.ts) / [`services/sync-server/src/ywsSecurity.ts`](../services/sync-server/src/ywsSecurity.ts)),
 > those updates will be rejected unless you disable `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED` (or use a non-Yjs store such as `SQLiteBranchStore`).
+
+> **Desktop wiring note:**
+> The Formula desktop app can inject a non-Yjs branch store into the Branch Manager panel via `PanelBodyRendererOptions.createCollabBranchStore` (alias: `createBranchStore`) in `apps/desktop/src/panels/panelBodyRenderer.tsx`.
 
 ### Required Yjs roots (default `rootName = "branching"`)
 
