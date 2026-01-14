@@ -27,13 +27,13 @@ This repo’s File I/O workstream uses the following shorthand (see [`instructio
 
 | Feature | L1 impact | L4 impact | Preservation / patching summary |
 |---|---:|---:|---|
-| Data validations (`<dataValidations>`) | Low (UI affordance) | High | Treat as an opaque worksheet subtree unless explicitly editing validations; preserve ordering/placement when patching nearby sections (e.g. `<mergeCells>`). |
-| Row/column default styles (`row/@s`, `col/@style`) | Medium (formatting/render) | High | Preserve attributes and any rows/cols that exist solely to carry defaults; only rewrite when explicitly changing row/col defaults. |
+| Data validations (`<dataValidations>`) | Low (UI affordance) | High | Preserve the `<dataValidations>` subtree byte-for-byte on round-trip; ensure schema-ordering when inserting/replacing nearby sections (e.g. `<mergeCells>` must come before `<dataValidations>`). |
+| Row/column default styles (`row/@s`, `col/@style`) | Medium (formatting/render) | High | Preserved byte-for-byte when we don’t rewrite the containing rows/cols; currently not fully modeled, so edits that regenerate `<cols>` or synthesize new `<row>` elements may drop style defaults unless the model is populated. |
 | Rich text (`sharedStrings` runs + `inlineStr`) | High (display fidelity) | High | Parse rich runs for display; preserve raw `<si>` records and unchanged inline `<is>` subtrees to avoid reserializing formatting. |
-| Sheet view state (`<sheetViews>` beyond zoom/freeze) | Medium (UI state) | Medium | Patch only the fields we own (zoom/freeze/etc); preserve unknown attributes/elements and additional view state (selection, gridlines/headings). |
+| Sheet view state (`<sheetViews>` beyond zoom/freeze) | Medium (UI state) | Medium | Preserve the full `<sheetViews>` block when unchanged; if we need to update zoom/freeze, we currently rewrite `<sheetViews>` as a minimal block (zoom + pane), which may drop other view state. |
 | Comments (legacy notes + threaded) | Medium (collab/review) | High | Parse comment text/authors into the model; preserve all comment-related OPC parts byte-for-byte unless explicitly rewriting comment XML. |
-| Outline metadata (`outlinePr`, row/col `outlineLevel`/`collapsed`/`hidden`) | Medium (grouping UX) | High | Parse into model `Outline`; when writing, update only outline-related attrs and keep all other row/col metadata intact. |
-| OPC robustness (path normalization) | High (open more files) | High | Normalize relationship targets for lookup (case/backslash/percent decoding); preserve original `.rels` bytes unless we must repair/append relationships. |
+| Outline metadata (`outlinePr`, row/col `outlineLevel`/`collapsed`/`hidden`) | Medium (grouping UX) | High | Outline can be parsed into `formula_model::Outline` via the `formula_xlsx::outline` helpers; on write, we preserve existing outline attrs when rows/cols are preserved, and we emit outline attrs for newly-written rows/cols based on `Worksheet.outline`. |
+| OPC robustness (path normalization) | High (open more files) | High | Normalize part lookup for leading `/`, Windows `\` separators, and ASCII case differences; relationship targets also strip `#fragment` / `?query`. `.rels` bytes are preserved unless we must explicitly repair/append relationships. |
 
 ---
 
@@ -47,8 +47,8 @@ Excel stores dropdown lists, custom validation formulas, and input/error prompts
 
 #### Preservation strategy
 
-- **Parsed into model:** best-effort *identification only* (ranges + presence) when needed for UI; full rule semantics are treated as a separate subsystem.
-- **Preserved byte-for-byte:** the original `<dataValidations>` subtree is preserved whenever we are not explicitly editing validations.
+- **Parsed into model:** currently **not** parsed into `Worksheet.data_validations` (future work).
+- **Preserved byte-for-byte:** the original `<dataValidations>` subtree is preserved on round-trip. (We do not currently generate validations from the model.)
 
 #### Patch/write rules
 
@@ -64,14 +64,16 @@ SpreadsheetML supports row/column-level default formatting:
 
 #### Preservation strategy
 
-- **Parsed into model:** row/col default style indices are captured as per-row/per-col metadata (so we can keep them even if the row/col has no cells).
-- **Preserved byte-for-byte:** if we are not editing row/col defaults, we preserve the original `row/@s` / `col/@style` attributes (and any companion attributes like `customFormat`) unchanged.
+- **Parsed into model:** the workbook model supports row/col default styles via `RowProperties.style_id` / `ColProperties.style_id`, but the current XLSX reader does **not** populate these from `row/@s` or `col/@style` yet.
+- **Preserved byte-for-byte:**
+  - `row/@s` + `row/@customFormat` are preserved as long as the original `<row>` element is preserved by the sheet-data patcher.
+  - `col/@style` is preserved as long as the original `<cols>` section is preserved. (Regenerating `<cols>` currently emits only width/hidden/outline-related attributes, and may drop `style`.)
 
 #### Patch/write rules
 
-- Do **not** delete “empty” rows/cols that exist only to carry default styles.
-- When emitting new rows/cols that carry defaults, write both the style index and its enabling flag (`customFormat="1"` for rows; Excel varies for cols).
-- Never renumber `xf` indices; only map stable `style_id` ↔ `xf` index through `styles.xml`.
+- Treat row/col default styles as **formatting-critical** round-trip metadata: avoid dropping rows/cols that exist solely to carry `row/@s` or `col/@style`.
+- When patching existing worksheet XML, prefer preserving the original `<row>` / `<cols>` elements rather than regenerating them.
+- When we *must* regenerate, we currently do not emit row/col default styles unless the writer gains explicit support for `RowProperties.style_id` / `ColProperties.style_id`.
 
 ### Rich text (shared strings `<r>` runs + `inlineStr`)
 
@@ -103,13 +105,18 @@ Excel can encode rich text in two places:
 
 #### Preservation strategy
 
-- **Parsed into model:** the subset we need to recreate Excel-like UX (zoom, panes/freeze, selection, basic show/hide flags).
-- **Preserved byte-for-byte:** any attributes/elements we do not model, including extension lists (`<extLst>`) and unknown view flags.
+- **Parsed into model:** currently limited to:
+  - `sheetView/@zoomScale` → `Worksheet.zoom`
+  - frozen panes (`<pane state="frozen|frozenSplit" xSplit="…" ySplit="…">`) → `Worksheet.frozen_rows` / `Worksheet.frozen_cols`
+- **Preserved byte-for-byte:** the full `<sheetViews>` subtree is preserved **only** when we do not need to update zoom/freeze. (If we update zoom/freeze, we currently rewrite the block as a minimal `sheetView` + `pane`.)
 
 #### Patch/write rules
 
-- Patch **in place** (attribute-level) rather than regenerating the entire `<sheetViews>` block.
-- When we only need to change zoom/freeze, preserve selections and unknown flags.
+- When `Worksheet.zoom` / frozen panes are unchanged, we keep the original `<sheetViews>` bytes unchanged.
+- When zoom/freeze changes, we replace `<sheetViews>` with a minimal block and do not currently attempt to merge/preserve:
+  - selections (`<selection>`)
+  - visibility flags (`showGridLines`, `showRowColHeaders`, etc.)
+  - extension payloads (`<extLst>`)
 
 ### Comments (legacy notes + threaded comments)
 
@@ -130,8 +137,8 @@ Outline/grouping state is split across:
 
 #### Preservation strategy
 
-- **Parsed into model:** outline preferences (`outlinePr`) and row/col outline entries (level/collapsed/hidden) are parsed into `formula_model::Outline`.
-- **Preserved byte-for-byte:** non-outline row/col attributes are not interpreted by the outline subsystem and should be preserved.
+- **Parsed into model:** outline metadata is represented as `formula_model::Outline` (`Worksheet.outline`). It can be parsed on-demand via `formula_xlsx::outline::{read_outline_from_xlsx_bytes, read_outline_from_worksheet_xml}`.
+- **Preserved byte-for-byte:** outline-related attributes remain byte-for-byte intact as long as we preserve the original `<row>` / `<cols>` elements. When we regenerate `<cols>` or synthesize new `<row>` elements, we only re-emit the outline attributes we model.
 
 #### Patch/write rules
 
@@ -155,7 +162,7 @@ Real-world XLSX producers sometimes emit relationship targets that diverge from 
 - Relationship target normalization is *lookup-only*:
   - tolerate Windows path separators (`\`)
   - ignore URI fragments/queries (`#…`, `?…`) when mapping to ZIP entry names
-  - fall back to case-insensitive and percent-decoded lookups when a target does not resolve as-is
+  - fall back to case-insensitive lookups (and tolerate a leading `/`) when a target does not resolve as-is
 - Never rewrite a relationship `Target` string just to “normalize” it; preserve original strings unless the relationship itself is being created/repaired.
 
 ## XLSX File Format Structure
