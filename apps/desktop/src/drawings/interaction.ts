@@ -118,11 +118,19 @@ export class DrawingInteractionController {
   private hitTestIndexObjects: readonly DrawingObject[] | null = null;
   private hitTestIndexZoom: number = 1;
   private dragging:
-    | { id: number; startSheetX: number; startSheetY: number; startObjects: DrawingObject[]; pointerId: number }
+    | {
+        id: number;
+        startIndex: number;
+        startSheetX: number;
+        startSheetY: number;
+        startObjects: DrawingObject[];
+        pointerId: number;
+      }
     | null = null;
   private resizing:
     | {
         id: number;
+        startIndex: number;
         handle: ResizeHandle;
         startSheetX: number;
         startSheetY: number;
@@ -138,6 +146,7 @@ export class DrawingInteractionController {
   private rotating:
     | {
         id: number;
+        startIndex: number;
         startAngleRad: number;
         centerX: number;
         centerY: number;
@@ -381,6 +390,7 @@ export class DrawingInteractionController {
           const centerY = selectedBounds.y + selectedBounds.height / 2;
           const startAngleRad = Math.atan2(y - centerY, x - centerX);
           const startRotationDeg = selectedObject.transform?.rotationDeg ?? 0;
+          const startIndex = findObjectIndex(startObjects, selectedObject.id);
           this.stopPointerEvent(e);
           this.callbacks.requestFocus?.();
           this.activeRect = rect;
@@ -389,6 +399,7 @@ export class DrawingInteractionController {
           this.attachEscapeListener();
           this.rotating = {
             id: selectedObject.id,
+            startIndex,
             startAngleRad,
             centerX,
             centerY,
@@ -420,8 +431,10 @@ export class DrawingInteractionController {
           this.trySetPointerCapture(e.pointerId);
           this.callbacks.beginBatch?.({ label: "Resize Picture" });
           this.attachEscapeListener();
+          const startIndex = findObjectIndex(startObjects, selectedObject.id);
           this.resizing = {
             id: selectedObject.id,
+            startIndex,
             handle,
             startSheetX,
             startSheetY,
@@ -469,8 +482,10 @@ export class DrawingInteractionController {
     if (handle) {
       this.callbacks.beginBatch?.({ label: "Resize Picture" });
       this.attachEscapeListener();
+      const startIndex = findObjectIndex(startObjects, hit.object.id);
       this.resizing = {
         id: hit.object.id,
+        startIndex,
         handle,
         startSheetX,
         startSheetY,
@@ -488,8 +503,10 @@ export class DrawingInteractionController {
     } else {
       this.callbacks.beginBatch?.({ label: "Move Picture" });
       this.attachEscapeListener();
+      const startIndex = findObjectIndex(startObjects, hit.object.id);
       this.dragging = {
         id: hit.object.id,
+        startIndex,
         startSheetX,
         startSheetY,
         startObjects,
@@ -512,14 +529,31 @@ export class DrawingInteractionController {
       const baseTransform = this.rotating.transform ?? { rotationDeg: 0, flipH: false, flipV: false };
       const nextTransform = { ...baseTransform, rotationDeg };
 
-      const next = this.rotating.startObjects.map((obj) => {
-        if (obj.id !== this.rotating!.id) return obj;
+      const startObjects = this.rotating.startObjects;
+      const startIndex = this.rotating.startIndex;
+      const base = startObjects[startIndex];
+      const next = startObjects.slice();
+      if (base && base.id === this.rotating.id) {
         if (rotationDeg === 0 && !nextTransform.flipH && !nextTransform.flipV) {
-          const { transform: _old, ...rest } = obj;
-          return rest;
+          const { transform: _old, ...rest } = base;
+          next[startIndex] = rest;
+        } else {
+          next[startIndex] = { ...base, transform: nextTransform };
         }
-        return { ...obj, transform: nextTransform };
-      });
+      } else {
+        // Defensive fallback: if the cached start index is invalid, fall back to a
+        // linear scan to locate the edited object.
+        const fallbackIndex = findObjectIndex(startObjects, this.rotating.id);
+        if (fallbackIndex >= 0) {
+          const fallbackBase = startObjects[fallbackIndex]!;
+          if (rotationDeg === 0 && !nextTransform.flipH && !nextTransform.flipV) {
+            const { transform: _old, ...rest } = fallbackBase;
+            next[fallbackIndex] = rest;
+          } else {
+            next[fallbackIndex] = { ...fallbackBase, transform: nextTransform };
+          }
+        }
+      }
       this.callbacks.setObjects(next);
       this.element.style.cursor = cursorForRotationHandle(true);
       return;
@@ -576,13 +610,25 @@ export class DrawingInteractionController {
         }
       }
 
-      const next = this.resizing.startObjects.map((obj) => {
-        if (obj.id !== this.resizing!.id) return obj;
-        return {
-          ...obj,
-          anchor: resizeAnchor(obj.anchor, this.resizing!.handle, dx, dy, this.geom, obj.transform, zoom),
+      const startObjects = this.resizing.startObjects;
+      const startIndex = this.resizing.startIndex;
+      const base = startObjects[startIndex];
+      const next = startObjects.slice();
+      if (base && base.id === this.resizing.id) {
+        next[startIndex] = {
+          ...base,
+          anchor: resizeAnchor(base.anchor, this.resizing.handle, dx, dy, this.geom, base.transform, zoom),
         };
-      });
+      } else {
+        const fallbackIndex = findObjectIndex(startObjects, this.resizing.id);
+        const fallbackBase = fallbackIndex >= 0 ? startObjects[fallbackIndex]! : null;
+        if (fallbackBase) {
+          next[fallbackIndex] = {
+            ...fallbackBase,
+            anchor: resizeAnchor(fallbackBase.anchor, this.resizing.handle, dx, dy, this.geom, fallbackBase.transform, zoom),
+          };
+        }
+      }
       this.callbacks.setObjects(next);
       this.element.style.cursor = cursorForResizeHandleWithTransform(this.resizing.handle, this.resizing.transform);
       return;
@@ -606,13 +652,25 @@ export class DrawingInteractionController {
       const dx = sheetX - this.dragging.startSheetX;
       const dy = sheetY - this.dragging.startSheetY;
 
-      const next = this.dragging.startObjects.map((obj) => {
-        if (obj.id !== this.dragging!.id) return obj;
-        return {
-          ...obj,
-          anchor: shiftAnchor(obj.anchor, dx, dy, this.geom, zoom),
+      const startObjects = this.dragging.startObjects;
+      const startIndex = this.dragging.startIndex;
+      const base = startObjects[startIndex];
+      const next = startObjects.slice();
+      if (base && base.id === this.dragging.id) {
+        next[startIndex] = {
+          ...base,
+          anchor: shiftAnchor(base.anchor, dx, dy, this.geom, zoom),
         };
-      });
+      } else {
+        const fallbackIndex = findObjectIndex(startObjects, this.dragging.id);
+        const fallbackBase = fallbackIndex >= 0 ? startObjects[fallbackIndex]! : null;
+        if (fallbackBase) {
+          next[fallbackIndex] = {
+            ...fallbackBase,
+            anchor: shiftAnchor(fallbackBase.anchor, dx, dy, this.geom, zoom),
+          };
+        }
+      }
       this.callbacks.setObjects(next);
       this.element.style.cursor = "move";
       return;
@@ -640,8 +698,12 @@ export class DrawingInteractionController {
     // so inner `<a:xfrm>` values (when present) stay consistent with the new anchor.
     const objects = this.callbacks.getObjects();
     let finalObjects = objects;
-    const startObj = active.startObjects.find((o) => o.id === active.id);
-    const currentObj = objects.find((o) => o.id === active.id);
+    const startObj =
+      active.startObjects[active.startIndex]?.id === active.id
+        ? active.startObjects[active.startIndex]
+        : active.startObjects.find((o) => o.id === active.id);
+    const currentObj =
+      objects[active.startIndex]?.id === active.id ? objects[active.startIndex] : objects.find((o) => o.id === active.id);
 
     if (startObj && currentObj) {
       const zoom = sanitizeZoom(this.callbacks.getViewport().zoom);
@@ -673,7 +735,6 @@ export class DrawingInteractionController {
         this.callbacks.setObjects(finalObjects);
       }
     }
-
     const rect = this.activeRect ?? this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
 
@@ -837,6 +898,13 @@ function ensureZOrderSorted(objects: DrawingObject[]): DrawingObject[] {
     }
   }
   return objects;
+}
+
+function findObjectIndex(objects: readonly DrawingObject[], id: number): number {
+  for (let i = 0; i < objects.length; i += 1) {
+    if (objects[i]!.id === id) return i;
+  }
+  return -1;
 }
 
 function anchorTopLeftEmu(

@@ -1194,6 +1194,7 @@ export class SpreadsheetApp {
   private splitViewDrawingHitTestIndexGrid: DesktopSharedGrid | null = null;
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
   private selectedDrawingId: DrawingObjectId | null = null;
+  private selectedDrawingIndex: number | null = null;
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
   private readonly drawingsListeners = new Set<() => void>();
   private readonly drawingSelectionListeners = new Set<(id: DrawingObjectId | null) => void>();
@@ -2553,10 +2554,27 @@ export class SpreadsheetApp {
         setObjects: (next) => {
           this.setDrawingObjectsForSheet(next);
           this.scheduleDrawingsRender();
-          const selected = this.selectedDrawingId != null ? next.find((obj) => obj.id === this.selectedDrawingId) : undefined;
-          if (selected?.kind.type === "chart") {
-            // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
-            this.renderCharts(false);
+          const selectedId = this.selectedDrawingId;
+          if (selectedId != null) {
+            // `setObjects` is on the pointer-move hot path during drag/resize/rotate interactions.
+            // Avoid an O(n) `find` scan by reusing the index computed on selection.
+            let idx = this.selectedDrawingIndex;
+            const hasCachedIndex =
+              typeof idx === "number" && idx >= 0 && idx < next.length && next[idx]?.id === selectedId;
+            if (!hasCachedIndex) {
+              idx = -1;
+              for (let i = 0; i < next.length; i += 1) {
+                if (next[i]!.id === selectedId) {
+                  idx = i;
+                  break;
+                }
+              }
+              this.selectedDrawingIndex = idx >= 0 ? idx : null;
+            }
+            if (idx >= 0 && next[idx]?.kind.type === "chart") {
+              // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
+              this.renderCharts(false);
+            }
           }
           this.emitDrawingsChanged();
         },
@@ -2588,6 +2606,20 @@ export class SpreadsheetApp {
         onSelectionChange: (selectedId) => {
           const prev = this.selectedDrawingId;
           this.selectedDrawingId = selectedId;
+          if (selectedId == null) {
+            this.selectedDrawingIndex = null;
+          } else {
+            // Cache the selected index so pointer-move updates avoid scanning.
+            const objects = this.listDrawingObjectsForSheet();
+            let idx = -1;
+            for (let i = 0; i < objects.length; i += 1) {
+              if (objects[i]!.id === selectedId) {
+                idx = i;
+                break;
+              }
+            }
+            this.selectedDrawingIndex = idx >= 0 ? idx : null;
+          }
           if (prev !== selectedId) {
             this.dispatchDrawingSelectionChanged();
           }
@@ -2781,6 +2813,7 @@ export class SpreadsheetApp {
               // should clear any drawing selection so selection handles don't double-render.
               if (nextChartId != null && this.selectedDrawingId != null) {
                 this.selectedDrawingId = null;
+                this.selectedDrawingIndex = null;
                 this.drawingInteractionController?.setSelectedId(null);
                 this.dispatchDrawingSelectionChanged();
               }
