@@ -97,3 +97,29 @@ test("applyExternalImageCacheDeltas ignores no-op deltas", () => {
   assert.equal(doc.isDirty, false);
 });
 
+test("encodeState includes persisted images but excludes cached images", () => {
+  const doc = new DocumentController();
+
+  doc.setImage("persisted.png", { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" });
+
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "cached.png",
+        before: null,
+        after: { bytes: new Uint8Array([9, 9, 9]), mimeType: "image/png" },
+      },
+    ],
+    { source: "hydration" },
+  );
+
+  // Both should be readable through the unified getter.
+  assert.ok(doc.getImage("persisted.png"));
+  assert.ok(doc.getImage("cached.png"));
+
+  const snapshot = JSON.parse(new TextDecoder().decode(doc.encodeState()));
+  assert.ok(Array.isArray(snapshot.images), "expected persisted images array in snapshot");
+  const ids = snapshot.images.map((i) => i.id);
+  assert.ok(ids.includes("persisted.png"));
+  assert.ok(!ids.includes("cached.png"), "cached images must not be serialized into snapshots");
+});

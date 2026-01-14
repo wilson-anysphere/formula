@@ -38,6 +38,11 @@ export class DocumentController {
   getSheetDrawings(sheetId: string): any[];
   setSheetDrawings(sheetId: string, drawings: any[] | null | undefined, options?: unknown): void;
 
+  getImage(imageId: string): any;
+  getImageBlob(imageId: string): Blob | null;
+  setImage(imageId: string, entry: { bytes: Uint8Array; mimeType?: string | null }, options?: unknown): void;
+  deleteImage(imageId: string, options?: unknown): void;
+
   getCell(sheetId: string, coord: unknown): any;
   getCellFormatStyleIds(sheetId: string, coord: unknown): [number, number, number, number, number];
   getSheetDefaultStyleId(sheetId: string): number;
@@ -59,6 +64,8 @@ export class DocumentController {
   applyExternalDeltas(deltas: any[], options?: unknown): void;
   applyExternalSheetViewDeltas(deltas: any[], options?: unknown): void;
   applyExternalDrawingDeltas(deltas: any[], options?: unknown): void;
+  applyExternalImageDeltas(deltas: any[], options?: unknown): void;
+  applyExternalImageCacheDeltas(deltas: any[], options?: unknown): void;
   applyExternalFormatDeltas(deltas: any[], options?: unknown): void;
   applyExternalRangeRunDeltas(deltas: any[], options?: unknown): void;
 }
