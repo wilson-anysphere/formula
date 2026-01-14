@@ -343,7 +343,8 @@ For **on-demand** cross-platform desktop perf checks on a PR, apply the `desktop
 
 This workflow runs the same startup (cold + warm) + idle-memory runners against the PR **head SHA**,
 uploads per-OS artifacts, and posts/updates a compact PR comment summary. Maintainers can opt into
-gating by setting the GitHub Actions variable `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=1` (and the
+gating by setting the GitHub Actions variable `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX` to a truthy
+value (`1`, `true`, `yes`, `on`) (and the
 existing target variables described above).
 
 ```yaml
