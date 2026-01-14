@@ -7412,6 +7412,12 @@ export class SpreadsheetApp {
     const next = Array.isArray(objects) ? objects : [];
     this.setDrawingObjectsForSheet(next);
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    // In legacy grid mode (without the dedicated DrawingInteractionController), drawing selection chrome
+    // is rendered on the selection canvas. Keep it in sync when callers replace the in-memory drawing
+    // list (primarily unit tests and ephemeral UI-only edits).
+    if (!this.sharedGrid && this.drawingInteractionController == null) {
+      this.renderSelection();
+    }
   }
 
   /**
