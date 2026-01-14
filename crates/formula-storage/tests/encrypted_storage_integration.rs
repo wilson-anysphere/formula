@@ -388,6 +388,7 @@ fn encrypted_model_workbook_round_trip() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -397,6 +398,7 @@ fn encrypted_model_workbook_round_trip() {
                 formula: Some("SUM(A1)".to_string()),
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
     }

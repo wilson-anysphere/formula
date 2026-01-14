@@ -1110,9 +1110,19 @@ impl Worksheet {
         self.cell(cell).and_then(|c| c.formula.as_deref())
     }
 
+    /// Get the phonetic metadata for a cell, if present.
+    pub fn phonetic(&self, cell: CellRef) -> Option<&str> {
+        self.cell(cell).and_then(|c| c.phonetic.as_deref())
+    }
+
     /// Get the formula text for a cell addressed by an A1 reference.
     pub fn formula_a1(&self, a1: &str) -> Result<Option<&str>, A1ParseError> {
         Ok(self.formula(CellRef::from_a1(a1)?))
+    }
+
+    /// Get the phonetic metadata for a cell addressed by an A1 reference.
+    pub fn phonetic_a1(&self, a1: &str) -> Result<Option<&str>, A1ParseError> {
+        Ok(self.phonetic(CellRef::from_a1(a1)?))
     }
 
     /// Set a cell formula.
@@ -1145,6 +1155,33 @@ impl Worksheet {
         self.invalidate_conditional_formatting_cells([anchor]);
     }
 
+    /// Set a cell's phonetic metadata.
+    ///
+    /// Phonetic metadata is treated as observable content: setting phonetic on an empty cell
+    /// creates a stored cell record, while clearing phonetic removes the cell record if it
+    /// becomes "truly empty".
+    pub fn set_phonetic(&mut self, cell_ref: CellRef, phonetic: Option<String>) {
+        let anchor = self.merged_regions.resolve_cell(cell_ref);
+        let key = CellKey::from(anchor);
+
+        match self.cells.get_mut(&key) {
+            Some(cell) => {
+                cell.phonetic = phonetic;
+                if cell.is_truly_empty() {
+                    self.cells.remove(&key);
+                    self.on_cell_removed(anchor);
+                }
+            }
+            None => {
+                let Some(phonetic) = phonetic else { return };
+                let mut cell = Cell::default();
+                cell.phonetic = Some(phonetic);
+                self.cells.insert(key, cell);
+                self.on_cell_inserted(anchor);
+            }
+        }
+    }
+
     /// Set a cell formula using an A1 reference.
     pub fn set_formula_a1(
         &mut self,
@@ -1153,6 +1190,17 @@ impl Worksheet {
     ) -> Result<(), A1ParseError> {
         let cell_ref = CellRef::from_a1(a1)?;
         self.set_formula(cell_ref, formula);
+        Ok(())
+    }
+
+    /// Set a cell's phonetic metadata using an A1 reference.
+    pub fn set_phonetic_a1(
+        &mut self,
+        a1: &str,
+        phonetic: Option<String>,
+    ) -> Result<(), A1ParseError> {
+        let cell_ref = CellRef::from_a1(a1)?;
+        self.set_phonetic(cell_ref, phonetic);
         Ok(())
     }
 
@@ -1757,6 +1805,36 @@ fn fill_from_columnar(dest: &mut [Vec<CellValue>], range: Range, backend: &Colum
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_phonetic_creates_and_removes_records() {
+        let mut sheet = Worksheet::new(1, "Sheet1");
+        let cell_ref = CellRef::new(0, 0);
+
+        assert!(sheet.cell(cell_ref).is_none());
+
+        sheet.set_phonetic(cell_ref, Some("PHO".to_string()));
+        assert_eq!(sheet.phonetic(cell_ref), Some("PHO"));
+        assert!(sheet.cell(cell_ref).is_some(), "phonetic should create a cell record");
+
+        sheet.set_phonetic(cell_ref, None);
+        assert!(
+            sheet.cell(cell_ref).is_none(),
+            "clearing phonetic on an otherwise-empty cell should remove the record"
+        );
+
+        // Clearing phonetic should not remove non-empty cells.
+        sheet.set_value(cell_ref, CellValue::Number(1.0));
+        sheet.set_phonetic(cell_ref, Some("PHO".to_string()));
+        sheet.set_phonetic(cell_ref, None);
+        assert!(sheet.cell(cell_ref).is_some());
+        assert_eq!(sheet.value(cell_ref), CellValue::Number(1.0));
     }
 }
 

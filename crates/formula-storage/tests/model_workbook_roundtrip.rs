@@ -193,6 +193,7 @@ fn model_workbook_import_export_round_trips() {
                 formula: None,
                 phonetic: None,
                 style_id: bold_id,
+                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -202,6 +203,7 @@ fn model_workbook_import_export_round_trips() {
                 formula: Some("SUM(A1)".to_string()),
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
         // Very sparse cell.
@@ -212,6 +214,7 @@ fn model_workbook_import_export_round_trips() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
     }
@@ -245,6 +248,7 @@ fn model_workbook_import_export_round_trips() {
                 formula: None,
                 phonetic: None,
                 style_id: plain_id,
+                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -254,6 +258,7 @@ fn model_workbook_import_export_round_trips() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -265,6 +270,7 @@ fn model_workbook_import_export_round_trips() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
         sheet.set_cell(
@@ -274,6 +280,7 @@ fn model_workbook_import_export_round_trips() {
                 formula: None,
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
     }

@@ -49,6 +49,7 @@ fn delete_sheet_rewrites_references_in_formulas_and_metadata() {
                 formula: Some("Data!A1".to_string()),
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
 

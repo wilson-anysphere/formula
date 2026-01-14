@@ -207,8 +207,8 @@ impl Cell {
     pub fn is_truly_empty(&self) -> bool {
         self.value == CellValue::Empty
             && self.formula.is_none()
-            && self.phonetic.is_none()
             && self.style_id == 0
+            && self.phonetic.is_none()
     }
 
     /// Returns the phonetic guide text (furigana) for this cell, if any.
@@ -269,5 +269,12 @@ mod tests {
             Some(CellKey::new(EXCEL_MAX_ROWS, 0))
         );
         assert!(CellKey::try_from_u64((((u32::MAX as u64) + 1) << COL_BITS) | 0).is_none());
+    }
+
+    #[test]
+    fn cell_with_only_phonetic_is_not_truly_empty() {
+        let mut cell = Cell::default();
+        cell.phonetic = Some("PHO".to_string());
+        assert!(!cell.is_truly_empty());
     }
 }

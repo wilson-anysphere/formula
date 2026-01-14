@@ -50,6 +50,7 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
                 formula: Some("Data!A1".to_string()),
                 phonetic: None,
                 style_id: 0,
+                phonetic: None,
             },
         );
 
