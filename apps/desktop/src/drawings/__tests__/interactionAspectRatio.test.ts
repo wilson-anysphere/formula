@@ -251,6 +251,32 @@ describe("DrawingInteractionController image resize aspect ratio", () => {
     });
   });
 
+  it("keeps the original aspect ratio for vertically flipped images (lock is applied in local coords)", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    let objects: DrawingObject[] = [
+      createImageObject({ transform: { rotationDeg: 0, flipH: false, flipV: true } }),
+    ];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    // For a 200x100 rect flipped vertically, the local "se" handle center maps to the top-right corner (200, 0).
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 200, clientY: 0, pointerId: 1 }));
+
+    // Drag right by 50px while holding Shift; the controller should derive a corresponding height change.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 250, clientY: 0, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+    });
+  });
+
   it("allows width/height to change independently when Shift is not held", () => {
     const el = new StubEventTarget({ left: 0, top: 0 });
     let objects: DrawingObject[] = [createImageObject()];
