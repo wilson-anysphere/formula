@@ -1631,9 +1631,10 @@ impl Engine {
     /// The engine uses stable sheet keys for persistence and public APIs (e.g. `set_cell_value`),
     /// but Excel formulas and worksheet-info functions emit/resolve the display name.
     ///
-    /// This is a metadata-only update: it does not rewrite stored formulas. Instead, it marks all
-    /// compiled formulas dirty so a subsequent recalculation can observe the updated display name
-    /// via functions like `CELL("address")` and runtime sheet-name resolution (e.g. `INDIRECT`).
+    /// This is a metadata-only update: it does not rewrite stored formulas. Display names are only
+    /// observed by volatile worksheet functions (e.g. `CELL("address")`) and runtime-parsed
+    /// references (e.g. `INDIRECT(...)`), so a recalculation tick is sufficient to refresh
+    /// dependents in automatic calculation modes (no full-workbook dirtying needed).
     pub fn set_sheet_display_name(&mut self, sheet_key: &str, display_name: &str) {
         let Some(sheet_id) = self.workbook.sheet_id_by_key(sheet_key) else {
             return;
@@ -1641,7 +1642,6 @@ impl Engine {
         if !self.workbook.set_sheet_display_name(sheet_id, display_name) {
             return;
         }
-        self.mark_all_compiled_cells_dirty();
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
