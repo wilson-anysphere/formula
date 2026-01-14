@@ -41,6 +41,14 @@
   Note: this is intended for debugging only; do not commit partial locale sources
   generated with `-MaxFunctions`.
 
+.PARAMETER FailOnSkipped
+  Fail the extraction if Excel rejects any functions (i.e. if any canonical functions are
+  skipped due to parsing/translation errors or being treated as `_xludf.`).
+
+  This is recommended when generating locale sources intended to be committed to the repo,
+  since missing translations silently fall back to identity mappings (English) during TSV
+  generation.
+
 .EXAMPLE
   # Generate the de-DE source JSON from a German Excel install (from repo root)
   powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
@@ -83,7 +91,9 @@ param(
 
   [switch]$Visible,
 
-  [int]$MaxFunctions = 0
+  [int]$MaxFunctions = 0,
+
+  [switch]$FailOnSkipped
 )
 
 Set-StrictMode -Version Latest
@@ -486,6 +496,11 @@ try {
   if ($skipped.Count -gt 0) {
     $skippedSorted = @($skipped | Sort-Object)
     Write-Warning ("Skipped {0} functions rejected by Excel: {1}" -f $skipped.Count, ($skippedSorted -join ", "))
+    if ($FailOnSkipped) {
+      throw ("Extraction failed because Excel rejected {0} functions (see warnings above). " -f $skipped.Count) +
+        "This usually indicates an unsupported/older Excel build or a missing language pack; " +
+        "retry on a modern Excel install configured for the requested locale."
+    }
   }
 } finally {
   if ($null -ne $workbook) {

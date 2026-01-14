@@ -21,6 +21,7 @@ class ExtractFunctionTranslationsScriptTests(unittest.TestCase):
         self.assertIn(".PARAMETER OutPath", text)
         self.assertIn(".PARAMETER Visible", text)
         self.assertIn(".PARAMETER MaxFunctions", text)
+        self.assertIn(".PARAMETER FailOnSkipped", text)
         # The extractor docs should mention how it ties into the repo's locale-data workflow.
         self.assertIn("normalize-locale-function-sources.js", text)
         self.assertIn("generate-locale-function-tsv.js --check", text)
@@ -32,6 +33,7 @@ class ExtractFunctionTranslationsScriptTests(unittest.TestCase):
         self.assertIn("[string]$OutPath", text)
         self.assertIn("[switch]$Visible", text)
         self.assertIn("[int]$MaxFunctions", text)
+        self.assertIn("[switch]$FailOnSkipped", text)
 
         # Core extraction mechanism should round-trip through FormulaLocal.
         self.assertIn(".FormulaLocal", text)
