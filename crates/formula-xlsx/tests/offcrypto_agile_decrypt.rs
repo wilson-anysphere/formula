@@ -556,7 +556,7 @@ fn agile_decrypt_matches_office_crypto_reference() {
     assert_eq!(decrypted, plain_zip);
 
     let office_crypto_decrypted =
-        office_crypto::decrypt_from_bytes(encrypted_cfb.clone(), password).unwrap();
+        office_crypto::decrypt_from_bytes(encrypted_cfb, password).unwrap();
     assert_eq!(office_crypto_decrypted, plain_zip);
     assert_eq!(office_crypto_decrypted, decrypted);
 }
