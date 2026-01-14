@@ -72,6 +72,7 @@ describe("Home → Cells dropdown commands", () => {
         { startRow: 1, endRow: 1, startCol: 1, endCol: 1 },
       ],
       insertCells: vi.fn(async () => {}),
+      getActiveCell: () => ({ row: 0, col: 0 }),
       focus: vi.fn(),
     } as any;
 
@@ -86,5 +87,31 @@ describe("Home → Cells dropdown commands", () => {
     expect(showQuickPick).not.toHaveBeenCalled();
     expect(showToast).toHaveBeenCalled();
   });
-});
 
+  it("defaults to active cell when selection ranges are empty", async () => {
+    const showQuickPick = vi.fn(async () => "down" as const);
+    const showToast = vi.fn();
+    const insertCells = vi.fn(async () => {});
+    const focus = vi.fn();
+
+    const app = {
+      isEditing: () => false,
+      getSelectionRanges: () => [],
+      getActiveCell: () => ({ row: 5, col: 7 }),
+      insertCells,
+      focus,
+    } as any;
+
+    const handled = await handleHomeCellsInsertDeleteCommand({
+      app,
+      commandId: "home.cells.insert.insertCells",
+      showQuickPick,
+      showToast,
+    });
+
+    expect(handled).toBe(true);
+    expect(showToast).not.toHaveBeenCalled();
+    expect(insertCells).toHaveBeenCalledWith({ startRow: 5, endRow: 5, startCol: 7, endCol: 7 }, "down");
+    expect(focus).toHaveBeenCalled();
+  });
+});

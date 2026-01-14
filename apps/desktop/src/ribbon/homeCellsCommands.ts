@@ -31,48 +31,60 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
 
   if (app.isEditing()) return true;
 
-  const ranges = app.getSelectionRanges();
-  if (ranges.length !== 1) {
-    showToast("Insert/Delete Cells currently supports only a single selection range.", "warning");
-    return true;
-  }
+  // Always restore focus to the grid after the command completes/cancels (ribbon commands
+  // otherwise leave focus on the trigger button).
+  try {
+    const ranges = app.getSelectionRanges();
+    const range: Range | null =
+      ranges.length === 0
+        ? (() => {
+            const active = app.getActiveCell();
+            return { startRow: active.row, endRow: active.row, startCol: active.col, endCol: active.col };
+          })()
+        : ranges.length === 1
+          ? normalizeSelectionRange(ranges[0]!)
+          : null;
 
-  const range = normalizeSelectionRange(ranges[0]!);
-  const cellCount = selectionCellCount(range);
-  if (cellCount > MAX_STRUCTURAL_CELL_SELECTION) {
-    showToast(
-      `Selection too large (>${MAX_STRUCTURAL_CELL_SELECTION.toLocaleString()} cells). Select fewer cells and try again.`,
-      "warning",
-    );
-    return true;
-  }
+    if (!range) {
+      showToast("Insert/Delete Cells currently supports only a single selection range.", "warning");
+      return true;
+    }
 
-  if (commandId === "home.cells.insert.insertCells") {
+    const cellCount = selectionCellCount(range);
+    if (cellCount > MAX_STRUCTURAL_CELL_SELECTION) {
+      showToast(
+        `Selection too large (>${MAX_STRUCTURAL_CELL_SELECTION.toLocaleString()} cells). Select fewer cells and try again.`,
+        "warning",
+      );
+      return true;
+    }
+
+    if (commandId === "home.cells.insert.insertCells") {
+      const choice = await showQuickPick(
+        [
+          { label: "Shift cells right", value: "right" as const },
+          { label: "Shift cells down", value: "down" as const },
+        ],
+        { placeHolder: "Insert Cells" },
+      );
+      if (!choice) return true;
+
+      await app.insertCells(range, choice);
+      return true;
+    }
+
     const choice = await showQuickPick(
       [
-        { label: "Shift cells right", value: "right" as const },
-        { label: "Shift cells down", value: "down" as const },
+        { label: "Shift cells left", value: "left" as const },
+        { label: "Shift cells up", value: "up" as const },
       ],
-      { placeHolder: "Insert Cells" },
+      { placeHolder: "Delete Cells" },
     );
     if (!choice) return true;
 
-    await app.insertCells(range, choice);
-    app.focus();
+    await app.deleteCells(range, choice);
     return true;
+  } finally {
+    app.focus();
   }
-
-  const choice = await showQuickPick(
-    [
-      { label: "Shift cells left", value: "left" as const },
-      { label: "Shift cells up", value: "up" as const },
-    ],
-    { placeHolder: "Delete Cells" },
-  );
-  if (!choice) return true;
-
-  await app.deleteCells(range, choice);
-  app.focus();
-  return true;
 }
-
