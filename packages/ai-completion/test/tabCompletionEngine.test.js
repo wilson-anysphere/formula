@@ -1834,6 +1834,22 @@ test('DATEDIF unit suggests "d", "m", "y", "ym", "yd"', async () => {
   }
 });
 
+test('DATEDIF unit is not suggested for an unquoted prefix (not a pure insertion)', async () => {
+  const engine = new TabCompletionEngine();
+
+  // The curated enum entries are quoted strings (e.g. "d"). If the user hasn't started
+  // the quote, inserting it would require modifying text before the caret.
+  const currentInput = "=DATEDIF(A1, B1, d";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(suggestions.length, 0);
+});
+
 test('CELL info_type suggests "address", "col", "row"', async () => {
   const engine = new TabCompletionEngine();
 
@@ -2127,6 +2143,22 @@ test("VLOOKUP range_lookup preserves typed casing for booleans (title-case prefi
     suggestions.some((s) => s.text === "=VLOOKUP(A1, A1:B10, 2, False"),
     `Expected VLOOKUP to complete \"Fa\" -> \"False\", got: ${suggestions.map((s) => s.text).join(", ")}`
   );
+});
+
+test("Argument value enum suggestions do not delete trailing whitespace (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  // User typed trailing whitespace after starting a boolean literal. Any completion
+  // would need to delete that whitespace, so the engine should return no suggestions.
+  const currentInput = "=VLOOKUP(A1, A1:B10, 2, F ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(suggestions.length, 0);
 });
 
 test("XMATCH match_mode suggests 0, -1, 1, 2", async () => {
