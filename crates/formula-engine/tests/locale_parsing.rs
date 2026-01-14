@@ -135,6 +135,12 @@ fn de_de_function_translation_table_covers_all_registered_functions() {
                 "invalid function translation line (too many columns) at line {line_no}: {raw_line:?}"
             );
         }
+        let canon_name = canon_name.trim();
+        let loc_name = loc_name.trim();
+        assert!(
+            !canon_name.is_empty() && !loc_name.is_empty(),
+            "invalid function translation line (empty entry) at line {line_no}: {raw_line:?}"
+        );
 
         assert!(
             canon.insert(canon_name.to_string()),
@@ -671,6 +677,11 @@ fn de_de_translation_table_covers_function_catalog() {
         if parts.next().is_some() {
             panic!("invalid TSV line in de-DE.tsv (too many columns) at line {line_no}: {raw_line:?}");
         }
+        let canon = canon.trim();
+        assert!(
+            !canon.is_empty(),
+            "invalid TSV line in de-DE.tsv (empty canonical key) at line {line_no}: {raw_line:?}"
+        );
         assert!(
             covered.insert(canon),
             "duplicate canonical entry in de-DE.tsv: {canon}"
@@ -711,6 +722,11 @@ fn fr_fr_translation_table_covers_function_catalog() {
         if parts.next().is_some() {
             panic!("invalid TSV line in fr-FR.tsv (too many columns) at line {line_no}: {raw_line:?}");
         }
+        let canon = canon.trim();
+        assert!(
+            !canon.is_empty(),
+            "invalid TSV line in fr-FR.tsv (empty canonical key) at line {line_no}: {raw_line:?}"
+        );
         assert!(
             covered.insert(canon),
             "duplicate canonical entry in fr-FR.tsv: {canon}"
@@ -751,6 +767,11 @@ fn es_es_translation_table_covers_function_catalog() {
         if parts.next().is_some() {
             panic!("invalid TSV line in es-ES.tsv (too many columns) at line {line_no}: {raw_line:?}");
         }
+        let canon = canon.trim();
+        assert!(
+            !canon.is_empty(),
+            "invalid TSV line in es-ES.tsv (empty canonical key) at line {line_no}: {raw_line:?}"
+        );
         assert!(
             covered.insert(canon),
             "duplicate canonical entry in es-ES.tsv: {canon}"

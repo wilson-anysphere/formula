@@ -218,6 +218,11 @@ fn locale_es_es_identity_mapping_rate_is_not_suspiciously_high() {
         if parts.next().is_some() {
             panic!("invalid TSV entry (too many columns) at line {line_no}: {raw_line}");
         }
+        let canonical = canonical.trim();
+        let localized = localized.trim();
+        if canonical.is_empty() || localized.is_empty() {
+            panic!("invalid TSV entry (empty field) at line {line_no}: {raw_line}");
+        }
 
         total += 1;
         if canonical == localized {
