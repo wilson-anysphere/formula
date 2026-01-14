@@ -8029,6 +8029,24 @@ export class SpreadsheetApp {
     } catch {
       // Best-effort.
     }
+
+    // Shared-grid selection/range-selection drags should also be canceled on sheet changes so a
+    // later pointerup cannot unexpectedly update selection state (or end formula range selection)
+    // on the newly activated sheet.
+    try {
+      const canceled = this.sharedGrid?.cancelSelectionDrag?.();
+      if (canceled) {
+        // If the user was selecting a range while editing a formula, end the formula bar's
+        // range selection mode without stealing focus.
+        try {
+          this.formulaBar?.endRangeSelection?.();
+        } catch {
+          // Best-effort.
+        }
+      }
+    } catch {
+      // Best-effort.
+    }
   }
 
   activateSheet(sheetId: string): void {

@@ -451,6 +451,37 @@ export class DesktopSharedGrid {
     return true;
   }
 
+  /**
+   * Cancel an in-progress selection drag (including formula range-selection drags).
+   *
+   * Returns true when a selection drag was active and was canceled.
+   */
+  cancelSelectionDrag(): boolean {
+    if (this.dragMode !== "selection") return false;
+    const pointerId = this.selectionPointerId;
+    if (pointerId == null) return false;
+
+    this.dragMode = null;
+    this.selectionPointerId = null;
+    this.selectionAnchor = null;
+    this.lastPointerViewport = null;
+    this.transientRange = null;
+    this.clearViewportOrigin();
+    this.stopAutoScroll();
+
+    // Clear any in-progress range-selection overlay (used while editing formulas).
+    this.renderer.setRangeSelection(null);
+    this.selectionCanvas.style.cursor = "default";
+
+    try {
+      this.selectionCanvas.releasePointerCapture?.(pointerId);
+    } catch {
+      // Ignore capture release failures.
+    }
+
+    return true;
+  }
+
   getScroll(): { x: number; y: number } {
     return this.renderer.scroll.getScroll();
   }
