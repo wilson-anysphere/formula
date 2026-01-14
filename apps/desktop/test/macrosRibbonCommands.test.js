@@ -122,4 +122,20 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
 
   assert.match(registration, /\bstartMacroRecorder\(\)/, "Expected record macro commands to start the macro recorder");
   assert.match(registration, /\bstopMacroRecorder\(\)/, "Expected stop recording commands to stop the macro recorder");
+
+  // The View and Developer ribbon tabs expose overlapping macro actions. Keep the Developer ids registered
+  // for ribbon coverage, but hide them from the command palette to avoid duplicate entries.
+  for (const commandId of [
+    "developer.code.macros.run",
+    "developer.code.macros.edit",
+    "developer.code.recordMacro",
+    "developer.code.recordMacro.stop",
+    "developer.code.useRelativeReferences",
+  ]) {
+    assert.match(
+      registration,
+      new RegExp(`\\bcommandId\\s*===\\s*["']${escapeRegExp(commandId)}["']`),
+      `Expected ${commandId} to be included in the when:\"false\" hide list for command palette de-duping`,
+    );
+  }
 });

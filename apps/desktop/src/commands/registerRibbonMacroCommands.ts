@@ -185,11 +185,24 @@ export function registerRibbonMacroCommands(params: {
   const category = t("commandCategory.macros");
 
   for (const commandId of RIBBON_MACRO_COMMAND_IDS) {
+    const when =
+      // Both the View and Developer ribbon tabs expose macro actions, but they are backed by
+      // the same Macros/Script Editor panels. Keep all ribbon ids registered for wiring
+      // coverage, but hide the Developer-tab aliases from the command palette to avoid
+      // duplicate entries (e.g. two identical \"Run Macro…\" commands).
+      commandId === "developer.code.macros.run" ||
+      commandId === "developer.code.macros.edit" ||
+      commandId === "developer.code.recordMacro" ||
+      commandId === "developer.code.recordMacro.stop" ||
+      commandId === "developer.code.useRelativeReferences"
+        ? "false"
+        : null;
     commandRegistry.registerBuiltinCommand(commandId, titleForCommand(commandId), () => runCommand(commandId), {
       category,
       icon: null,
       description: null,
       keywords: ["macros", "vba", "script"],
+      when,
     });
   }
 }

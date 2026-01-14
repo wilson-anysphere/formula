@@ -26,6 +26,18 @@ describe("registerRibbonMacroCommands", () => {
       expect(commandRegistry.getCommand(commandId)).toBeTruthy();
     }
 
+    // Developer tab macro ids are registered for ribbon coverage, but hidden from the command palette
+    // to avoid duplicate entries (View tab exposes the canonical palette-visible commands).
+    for (const commandId of [
+      "developer.code.macros.run",
+      "developer.code.macros.edit",
+      "developer.code.recordMacro",
+      "developer.code.recordMacro.stop",
+      "developer.code.useRelativeReferences",
+    ] as const) {
+      expect(commandRegistry.getCommand(commandId)?.when).toBe("false");
+    }
+
     // Spot-check a few titles so the command palette matches the ribbon labels.
     expect(commandRegistry.getCommand("view.macros.recordMacro")?.title).toBe("Record Macro…");
     expect(commandRegistry.getCommand("developer.code.macroSecurity")?.title).toBe("Macro Security…");

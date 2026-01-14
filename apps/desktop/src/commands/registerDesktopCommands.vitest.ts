@@ -39,6 +39,15 @@ describe("registerDesktopCommands", () => {
         addToPrintArea: vi.fn(),
         exportPdf: vi.fn(),
       },
+      ribbonMacroHandlers: {
+        openPanel: vi.fn(),
+        focusScriptEditorPanel: vi.fn(),
+        focusVbaMigratePanel: vi.fn(),
+        setPendingMacrosPanelFocus: vi.fn(),
+        startMacroRecorder: vi.fn(),
+        stopMacroRecorder: vi.fn(),
+        isTauri: () => false,
+      },
     });
 
     // Treat `when: "false"` as "hidden from context-aware surfaces (command palette)".
