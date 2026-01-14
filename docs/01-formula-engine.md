@@ -378,8 +378,10 @@ restrictions (notably: no `]`), so this split is unambiguous.
     order is available (via `ExternalValueProvider::workbook_sheet_names` /
     `ExternalValueProvider::sheet_order`), external 3D spans (e.g. `[Book.xlsx]Sheet1:Sheet3!A1`) are
     expanded for invalidation so `mark_external_sheet_dirty("[Book.xlsx]Sheet2")` will refresh
-    dependents. Without external sheet order (or when span endpoints are missing), invalidating the
-    whole workbook may still be required.
+    dependents. Without external sheet order (or when span endpoints are missing), the raw span key
+    (e.g. `"[Book.xlsx]Sheet1:Sheet3"`) is tracked as a single dependency and can be invalidated
+    directly via `mark_external_sheet_dirty(...)`; if you need to invalidate by a component sheet
+    change you may still need to fall back to `mark_external_workbook_dirty(...)`.
   * External structured refs (table refs) respect `set_external_refs_volatile(...)` and participate
     in explicit invalidation. Workbook-only structured refs like `[Book.xlsx]Table1[Col]` are
     indexed at the workbook level (since there is no explicit sheet key).
