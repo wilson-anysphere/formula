@@ -1783,6 +1783,18 @@ fn decode_rgce_impl(
 
     if stack.len() == 1 {
         Ok(stack.pop().expect("len checked").text)
+    } else if warnings.is_some() {
+        // Best-effort mode: keep the decode parseable for diagnostics by returning the
+        // top-of-stack fragment, even if the token stream left extra items on the stack.
+        // Surface the mismatch via a structured warning so callers can detect partial output.
+        if let Some(w) = warnings.as_deref_mut() {
+            w.push(DecodeWarning::DecodeFailed {
+                kind: DecodeFailureKind::StackNotSingular,
+                offset: last_ptg_offset,
+                ptg: last_ptg,
+            });
+        }
+        Ok(stack.pop().map(|v| v.text).unwrap_or_default())
     } else {
         Err(DecodeError::StackNotSingular {
             offset: last_ptg_offset,

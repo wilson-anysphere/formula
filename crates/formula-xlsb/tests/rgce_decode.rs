@@ -389,3 +389,29 @@ fn surfaces_unexpected_eof_as_structured_warning() {
         }]
     );
 }
+
+#[test]
+fn best_effort_returns_top_expression_when_stack_not_singular() {
+    // Two ints in a row: "1 2" (RPN) leaves stack depth 2 at end.
+    let rgce = [0x1E, 0x01, 0x00, 0x1E, 0x02, 0x00];
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text.as_deref(), Some("2"));
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::DecodeFailed {
+            kind: DecodeFailureKind::StackNotSingular,
+            offset: 3,
+            ptg: 0x1E
+        }]
+    );
+
+    let err = decode_rgce(&rgce).expect_err("expected error");
+    assert!(matches!(
+        err,
+        DecodeError::StackNotSingular {
+            offset: 3,
+            ptg: 0x1E,
+            stack_len: 2
+        }
+    ));
+}
