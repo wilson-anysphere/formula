@@ -257,7 +257,7 @@ test(
 );
 
 test(
-  "validate-macos-bundle fails when xlsx appears only in UT*TypeDeclarations",
+  "validate-macos-bundle accepts extensions present via UT*TypeDeclarations",
   { skip: !hasBash },
   () => {
     const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
@@ -276,16 +276,23 @@ test(
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
     writeComplianceResources(appRoot);
 
-    const infoPlistContent = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleIdentifier</key>\n  <string>${expectedIdentifier}</string>\n  <key>CFBundleShortVersionString</key>\n  <string>${expectedVersion}</string>\n  <key>CFBundleExecutable</key>\n  <string>formula-desktop</string>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeName</key>\n      <string>Some Other File</string>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>txt</string>\n      </array>\n      <key>CFBundleTypeRole</key>\n      <string>Editor</string>\n    </dict>\n  </array>\n  <key>UTImportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeIdentifier</key>\n      <string>org.openxmlformats.spreadsheetml.sheet</string>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
+    if (!expectedFileExtensions.includes("xlsx")) {
+      throw new Error(
+        `expected tauri.conf.json bundle.fileAssociations to include xlsx; got: ${expectedFileExtensions.join(", ")}`,
+      );
+    }
+
+    const docExtensions = expectedFileExtensions.filter((ext) => ext !== "xlsx");
+    const docExtXml = docExtensions.map((ext) => `        <string>${ext}</string>`).join("\n");
+
+    const infoPlistContent = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleIdentifier</key>\n  <string>${expectedIdentifier}</string>\n  <key>CFBundleShortVersionString</key>\n  <string>${expectedVersion}</string>\n  <key>CFBundleExecutable</key>\n  <string>formula-desktop</string>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeName</key>\n      <string>Formula Documents</string>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n${docExtXml}\n      </array>\n      <key>CFBundleTypeRole</key>\n      <string>Editor</string>\n    </dict>\n  </array>\n  <key>UTImportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeIdentifier</key>\n      <string>org.openxmlformats.spreadsheetml.sheet</string>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
     writeFileSync(join(appRoot, "Info.plist"), infoPlistContent, { encoding: "utf8" });
 
     const dmgPath = join(tmp, "Formula.dmg");
     writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
 
     const proc = runValidator({ dmgPath, binDir });
-    assert.notEqual(proc.status, 0, "expected non-zero exit status");
-    assert.match(proc.stderr, /UT\*TypeDeclarations/i);
-    assert.match(proc.stderr, /CFBundleDocumentTypes/i);
+    assert.equal(proc.status, 0, proc.stderr);
   },
 );
 
