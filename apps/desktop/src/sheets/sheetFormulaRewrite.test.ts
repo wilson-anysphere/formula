@@ -35,6 +35,14 @@ describe("sheetFormulaRewrite", () => {
       );
     });
 
+    it("does not truncate structured refs that contain escaped brackets followed by operator characters", () => {
+      // Regression: structured reference items can contain escaped `]]` sequences, after which
+      // operator characters (like `+`) are still part of the column name. When a sheet-qualified
+      // reference is invalidated to `#REF!`, we must skip the *entire* reference tail.
+      const input = "='Sheet1'!Table1[[#Headers],[A]]+B]]+1";
+      expect(rewriteDeletedSheetReferencesInFormula(input, "Sheet1", ["Sheet1"])).toBe("=#REF!+1");
+    });
+
     it("rewrites sheet-qualified refs using Unicode NFKC matching (e.g. Å == Å)", () => {
       expect(rewriteDeletedSheetReferencesInFormula("='Å'!A1+1", "Å", ["Å"])).toBe("=#REF!+1");
     });

@@ -500,7 +500,6 @@ function parseErrorLiteral(formula: string, startIndex: number): { nextIndex: nu
 
 function sheetRefTailEnd(formula: string, startIndex: number): number {
   let i = startIndex;
-  let bracketDepth = 0;
   let parenDepth = 0;
   let inString = false;
 
@@ -525,12 +524,11 @@ function sheetRefTailEnd(formula: string, startIndex: number): number {
         i += 1;
         continue;
       case "[":
-        bracketDepth += 1;
-        i += 1;
-        continue;
-      case "]":
-        bracketDepth = Math.max(0, bracketDepth - 1);
-        i += 1;
+        {
+          const end = findMatchingBracketEnd(formula, i);
+          if (!end) return formula.length;
+          i = end;
+        }
         continue;
       case "(":
         parenDepth += 1;
@@ -545,7 +543,7 @@ function sheetRefTailEnd(formula: string, startIndex: number): number {
         break;
     }
 
-    if (bracketDepth === 0 && parenDepth === 0) {
+    if (parenDepth === 0) {
       if (
         ch === " " ||
         ch === "\t" ||
@@ -574,4 +572,67 @@ function sheetRefTailEnd(formula: string, startIndex: number): number {
   }
 
   return i;
+}
+
+function findMatchingBracketEnd(formulaText: string, start: number): number | null {
+  // Structured references escape closing brackets inside items by doubling: `]]` -> literal `]`.
+  // That makes naive depth counting incorrect (it will pop twice for an escaped bracket).
+  //
+  // Match the span using a small backtracking parser, similar to the editor/tokenizer logic:
+  // - On `[` increase depth.
+  // - On `]]`, prefer treating it as an escape (consume both, depth unchanged), but remember
+  //   a choice point. If we later fail to close all brackets, backtrack and reinterpret that
+  //   `]]` as a real closing bracket.
+  if (formulaText[start] !== "[") return null;
+
+  let i = start;
+  let depth = 0;
+  const escapeChoices: Array<{ i: number; depth: number }> = [];
+
+  const backtrack = (): boolean => {
+    const choice = escapeChoices.pop();
+    if (!choice) return false;
+    i = choice.i;
+    depth = choice.depth;
+    // Reinterpret the first `]` of the `]]` pair as a real closing bracket.
+    depth -= 1;
+    i += 1;
+    return true;
+  };
+
+  while (true) {
+    if (i >= formulaText.length) {
+      // Unclosed bracket span.
+      if (!backtrack()) return null;
+      continue;
+    }
+
+    const ch = formulaText[i] ?? "";
+    if (ch === "[") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "]") {
+      if (formulaText[i + 1] === "]" && depth > 0) {
+        // Prefer treating `]]` as an escaped literal `]` inside an item. Record a choice point
+        // so we can reinterpret it as a closing bracket if needed.
+        escapeChoices.push({ i, depth });
+        i += 2;
+        continue;
+      }
+
+      depth -= 1;
+      i += 1;
+      if (depth === 0) return i;
+      if (depth < 0) {
+        // Too many closing brackets - try reinterpreting an earlier escape.
+        if (!backtrack()) return null;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
 }
