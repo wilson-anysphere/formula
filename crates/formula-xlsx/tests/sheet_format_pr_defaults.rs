@@ -341,3 +341,80 @@ fn semantic_export_emits_sheet_format_pr_outline_levels() {
     assert_eq!(sheet_format.attribute("outlineLevelRow"), Some("2"));
     assert_eq!(sheet_format.attribute("outlineLevelCol"), Some("1"));
 }
+
+#[test]
+fn patching_sheet_format_pr_negative_zero_defaults_do_not_emit_negative_zero() {
+    // The patching writer (`XlsxDocument::save_to_vec`) should normalize `-0.0` to `0`
+    // to avoid emitting `-0` in XML.
+    let sheet_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x14ac="{X14AC_NS}">
+  <sheetData/>
+</worksheet>"#
+    );
+    let bytes = build_minimal_xlsx_with_sheet1(&sheet_xml);
+
+    let mut doc = load_from_bytes(&bytes).expect("load xlsx");
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet_mut(sheet_id).unwrap();
+    sheet.default_row_height = Some(-0.0);
+    sheet.default_col_width = Some(-0.0);
+
+    let saved = doc.save_to_vec().expect("save");
+    let out_xml = zip_part(&saved, "xl/worksheets/sheet1.xml");
+
+    assert!(
+        !out_xml.contains(r#"defaultRowHeight="-0""#) && !out_xml.contains(r#"defaultColWidth="-0""#),
+        "expected no negative-zero in sheetFormatPr attrs: {out_xml}"
+    );
+
+    let parsed = roxmltree::Document::parse(&out_xml).expect("parse sheet xml");
+    let sheet_format = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "sheetFormatPr")
+        .expect("expected sheetFormatPr element");
+    assert_eq!(sheet_format.attribute("defaultRowHeight"), Some("0"));
+    assert_eq!(sheet_format.attribute("defaultColWidth"), Some("0"));
+}
+
+#[test]
+fn patching_row_height_and_col_width_negative_zero_do_not_emit_negative_zero() {
+    let sheet_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x14ac="{X14AC_NS}">
+  <sheetData/>
+</worksheet>"#
+    );
+    let bytes = build_minimal_xlsx_with_sheet1(&sheet_xml);
+
+    let mut doc = load_from_bytes(&bytes).expect("load xlsx");
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet_mut(sheet_id).unwrap();
+    sheet.set_row_height(0, Some(-0.0));
+    sheet.set_col_width(0, Some(-0.0));
+
+    let saved = doc.save_to_vec().expect("save");
+    let out_xml = zip_part(&saved, "xl/worksheets/sheet1.xml");
+
+    assert!(
+        !out_xml.contains(r#"width="-0""#),
+        "expected no negative-zero in column width attrs: {out_xml}"
+    );
+    assert!(
+        !out_xml.contains(r#"ht="-0""#),
+        "expected no negative-zero in row height attrs: {out_xml}"
+    );
+
+    let parsed = roxmltree::Document::parse(&out_xml).expect("parse sheet xml");
+    let col = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "col")
+        .expect("expected col element");
+    assert_eq!(col.attribute("width"), Some("0"));
+
+    let row = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("1"))
+        .expect("expected first row element");
+    assert_eq!(row.attribute("ht"), Some("0"));
+}

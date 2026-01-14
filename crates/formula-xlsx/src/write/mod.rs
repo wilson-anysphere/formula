@@ -2031,9 +2031,13 @@ fn render_pane_element(pane: &formula_model::SheetPane, prefix: Option<&str>) ->
     }
 
     if let Some(x) = pane.x_split {
+        // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+        let x = if x == 0.0 { 0.0 } else { x };
         out.push_str(&format!(r#" xSplit="{x}""#));
     }
     if let Some(y) = pane.y_split {
+        // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+        let y = if y == 0.0 { 0.0 } else { y };
         out.push_str(&format!(r#" ySplit="{y}""#));
     }
     if let Some(cell) = pane.top_left_cell {
@@ -2427,12 +2431,20 @@ fn patch_pane_start(
     let desired_x_split = if desired_is_frozen {
         (desired.frozen_cols > 0).then(|| desired.frozen_cols.to_string())
     } else {
-        desired.x_split.map(|v| v.to_string())
+        desired.x_split.map(|v| {
+            // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+            let v = if v == 0.0 { 0.0 } else { v };
+            v.to_string()
+        })
     };
     let desired_y_split = if desired_is_frozen {
         (desired.frozen_rows > 0).then(|| desired.frozen_rows.to_string())
     } else {
-        desired.y_split.map(|v| v.to_string())
+        desired.y_split.map(|v| {
+            // `f32::to_string()` prints `-0.0` as `-0`; normalize for XML stability.
+            let v = if v == 0.0 { 0.0 } else { v };
+            v.to_string()
+        })
     };
     let desired_top_left_cell = desired.top_left_cell.map(|c| c.to_a1());
 
