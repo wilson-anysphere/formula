@@ -96,6 +96,12 @@ class WasmBackedWorker implements WorkerLike {
       try {
         let result: unknown;
         switch (req.method) {
+          case "supportedLocaleIds":
+            result = this.wasm.supportedLocaleIds();
+            break;
+          case "getLocaleInfo":
+            result = this.wasm.getLocaleInfo(params.localeId);
+            break;
           case "lexFormula":
             result = this.wasm.lexFormula(params.formula, params.options);
             break;
@@ -136,6 +142,54 @@ const skipWasmBuild = process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env
 const describeWasm = skipWasmBuild ? describe.skip : describe;
 
 describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
+  it("supportedLocaleIds returns the engine-supported locale id list", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const ids = await engine.supportedLocaleIds();
+      expect(ids).toEqual([...ids].sort());
+      expect(ids).toContain("en-US");
+      expect(ids).toContain("de-DE");
+      expect(ids).toContain("fr-FR");
+      expect(ids).toContain("es-ES");
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("getLocaleInfo returns formula punctuation and boolean literals", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const info = await engine.getLocaleInfo("de-DE");
+      expect(info).toEqual({
+        localeId: "de-DE",
+        decimalSeparator: ",",
+        argSeparator: ";",
+        arrayRowSeparator: ";",
+        arrayColSeparator: "\\",
+        thousandsSeparator: ".",
+        isRtl: false,
+        booleanTrue: "WAHR",
+        booleanFalse: "FALSCH"
+      });
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("lexFormula returns token DTOs with UTF-16 spans", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
