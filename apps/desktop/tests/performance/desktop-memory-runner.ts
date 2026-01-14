@@ -8,12 +8,15 @@ import {
   buildDesktopMemoryProfileRoot,
   formatPerfPath,
   repoRoot,
+  installEpipeHandler,
   resolveDesktopMemoryBenchEnv,
   resolvePerfHome,
   runOnce as runDesktopOnce,
   sampleDesktopProcessTreeRssMbLinux,
   sleep,
 } from './desktopStartupUtil.ts';
+
+installEpipeHandler();
 
 type Summary = {
   runs: number;

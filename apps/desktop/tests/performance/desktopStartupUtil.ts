@@ -7,6 +7,7 @@
 // `sleep.ts` provides a shared AbortSignal-aware sleep helper used across perf scripts.
 // `desktopMemoryUtil.ts` provides shared env parsing for the idle memory benchmark.
 // `benchmark.ts` provides the generic benchmark harness + statistic helpers.
+// `cliUtil.ts` provides small CLI runner helpers (e.g. EPIPE handling when piping output).
 //
 // Keeping this stable `desktopStartupUtil.ts` entrypoint avoids copy/paste drift across
 // standalone runners + integrated benchmarks.
@@ -16,3 +17,4 @@ export * from './linuxProcUtil.ts';
 export * from './sleep.ts';
 export * from './desktopMemoryUtil.ts';
 export * from './benchmark.ts';
+export * from './cliUtil.ts';

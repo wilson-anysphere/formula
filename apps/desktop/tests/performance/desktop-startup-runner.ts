@@ -5,6 +5,7 @@ import {
   buildBenchmarkResultFromValues,
   defaultDesktopBinPath,
   buildDesktopStartupProfileRoot,
+  installEpipeHandler,
   parseDesktopStartupMode,
   formatPerfPath,
   runDesktopStartupIterations,
@@ -19,6 +20,8 @@ import {
   type DesktopStartupMode,
   type StartupMetrics,
 } from "./desktopStartupUtil.ts";
+
+installEpipeHandler();
 
 // Benchmark environment knobs:
 // - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
