@@ -234,6 +234,39 @@ describe("ImageBitmapCache", () => {
     await expect(cache.get(entry)).resolves.toBe(bitmap);
   });
 
+  it("keeps decoded bitmaps when a non-abort consumer is present even if another waiter aborts", async () => {
+    const cache = new ImageBitmapCache({ negativeCacheMs: 0 });
+    const entry = makeEntry();
+
+    let resolveDecode!: (bitmap: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+
+    const createImageBitmapMock = vi.fn().mockReturnValue(inflightDecode);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const controller = new AbortController();
+    const aborting = cache.get(entry, { signal: controller.signal });
+    const pinned = cache.get(entry);
+
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+    controller.abort();
+    await expect(aborting).rejects.toMatchObject({ name: "AbortError" });
+
+    resolveDecode(bitmap);
+    await expect(pinned).resolves.toBe(bitmap);
+    expect(close).not.toHaveBeenCalled();
+
+    // The decode should not have been restarted, and the bitmap should be cached.
+    await expect(cache.get(entry)).resolves.toBe(bitmap);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+  });
+
   it("closes decoded bitmaps from stale in-flight decodes when all waiters abort and the entry is invalidated", async () => {
     const cache = new ImageBitmapCache({ negativeCacheMs: 0 });
     const entry = makeEntry();
