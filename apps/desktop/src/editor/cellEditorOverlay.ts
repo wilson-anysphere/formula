@@ -137,11 +137,18 @@ export class CellEditorOverlay {
   private onKeyDown(e: KeyboardEvent): void {
     if (!this.editingCell) return;
 
-    if (
-      (this.isComposing || e.isComposing) &&
-      (e.key === "Enter" || e.key === "Escape" || e.key === "Tab" || e.key === "F4")
-    ) {
-      return;
+    if (this.isComposing || e.isComposing) {
+      // While IME composition is active, avoid committing/canceling, but still prevent
+      // browser focus traversal on Tab so the editor doesn't lose focus mid-composition.
+      if (e.key === "Tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      if (e.key === "Enter" || e.key === "Escape" || e.key === "F4") {
+        return;
+      }
     }
 
     if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.element.value.trim().startsWith("=")) {

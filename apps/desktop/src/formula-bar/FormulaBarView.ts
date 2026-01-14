@@ -1532,16 +1532,19 @@ export class FormulaBarView {
   #onKeyDown(e: KeyboardEvent): void {
     if (!this.model.isEditing) return;
 
-    if (
-      (this.#isComposing || e.isComposing) &&
-      (e.key === "Enter" ||
-        e.key === "Escape" ||
-        e.key === "Tab" ||
-        e.key === "F4" ||
-        e.key === "ArrowDown" ||
-        e.key === "ArrowUp")
-    ) {
-      return;
+    if (this.#isComposing || e.isComposing) {
+      // While IME composition is active, avoid interpreting navigation/commit keys.
+      // However, we still need to prevent browser focus traversal on Tab so composition
+      // isn't interrupted by moving focus away from the formula bar.
+      if (e.key === "Tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      if (e.key === "Enter" || e.key === "Escape" || e.key === "F4" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+        return;
+      }
     }
 
     if (this.#functionAutocomplete.handleKeyDown(e)) return;
@@ -1580,8 +1583,8 @@ export class FormulaBarView {
       // Excel-like behavior: Tab/Shift+Tab commits the edit (and the app navigates selection).
       // Exception: plain Tab accepts an AI suggestion if one is available.
       //
-      // Never allow default browser focus traversal while editing (except while IME composition
-      // is active, where we intentionally avoid special handling and let the browser/IME decide).
+      // Never allow default browser focus traversal while editing. (During IME composition we
+      // also prevent focus traversal, but avoid committing so the IME can finish composing.)
       if (!e.shiftKey) {
         const accepted = this.model.acceptAiSuggestion();
         if (accepted) {
