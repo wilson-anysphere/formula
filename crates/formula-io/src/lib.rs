@@ -1565,7 +1565,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                 path: path.to_path_buf(),
             });
         }
-        if zip_contains_workbook_bin(package_bytes) {
+        if matches!(
+            sniff_ooxml_zip_workbook_kind(package_bytes),
+            Some(WorkbookFormat::Xlsb)
+        ) {
             return Err(Error::UnsupportedEncryptedWorkbookKind {
                 path: path.to_path_buf(),
                 kind: "xlsb",
