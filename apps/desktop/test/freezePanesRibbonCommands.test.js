@@ -141,6 +141,16 @@ test("Desktop main.ts does not handle legacy Freeze Panes ribbon ids directly", 
     assert.doesNotMatch(main, new RegExp(escapeRegExp(id)), `Expected main.ts to not mention legacy id ${id}`);
   }
 
+  // Canonical ids should be dispatched via the CommandRegistry bridge (`createRibbonActionsFromCommands`),
+  // not handled by `handleRibbonCommand` switch cases.
+  for (const id of CANONICAL_FREEZE_PANES_IDS) {
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcase\\s+[\"']${escapeRegExp(id)}[\"']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+    );
+  }
+
   // Ribbon Freeze Panes actions should be executed through CommandRegistry so command-palette recents tracking sees them.
   assert.doesNotMatch(main, /\bapp\.freezePanes\(/, "Expected ribbon Freeze Panes actions to not call app.freezePanes() directly in main.ts");
   assert.doesNotMatch(main, /\bapp\.freezeTopRow\(/, "Expected ribbon Freeze Top Row action to not call app.freezeTopRow() directly in main.ts");

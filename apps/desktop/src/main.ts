@@ -8881,21 +8881,6 @@ function handleRibbonCommand(commandId: string): void {
           app.focus();
         })();
         return;
-      case "edit.find":
-        executeBuiltinCommand("edit.find");
-        return;
-      case "edit.replace":
-        executeBuiltinCommand("edit.replace");
-        return;
-      case "navigation.goTo":
-        executeBuiltinCommand("navigation.goTo");
-        return;
-      case "view.freezePanes":
-      case "view.freezeTopRow":
-      case "view.freezeFirstColumn":
-      case "view.unfreezePanes":
-        executeBuiltinCommand(commandId);
-        return;
       default:
         if (commandId.startsWith("file.")) {
           showToast(`File command not implemented: ${commandId}`);

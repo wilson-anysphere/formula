@@ -1,0 +1,52 @@
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+
+import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+test("Ribbon schema includes Home → Find & Select command ids", () => {
+  const schema = readRibbonSchemaSource("homeTab.ts");
+
+  // The Home → Find dropdown should dispatch the canonical CommandRegistry ids so ribbon, command palette,
+  // and keybindings share the same execution path.
+  const requiredIds = ["edit.find", "edit.replace", "navigation.goTo"];
+  for (const id of requiredIds) {
+    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected homeTab.ts to include ${id}`);
+  }
+});
+
+test("Desktop main.ts routes Find/Replace ribbon commands through the CommandRegistry", () => {
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+
+  const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
+  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+
+  // Find/Replace/Go To are registered as commands in registerDesktopCommands (overriding the builtin no-op
+  // registrations) and should not be handled by `handleRibbonCommand` switch cases.
+  const ids = ["edit.find", "edit.replace", "navigation.goTo"];
+  for (const id of ids) {
+    assert.match(
+      desktopCommands,
+      new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerDesktopCommands.ts to register ${id}`,
+    );
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+    );
+  }
+
+  // Sanity check: the ribbon should be mounted through the CommandRegistry bridge.
+  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+});
+
