@@ -47,10 +47,15 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
 
   const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
   const borderRadiusProp = /^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/i;
+  const cssVarRef = /\bvar\(\s*(--[-\w]+)\b/g;
+  const unitRegex = /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
 
   for (const file of files) {
     const css = fs.readFileSync(file, "utf8");
     const stripped = stripCssNonSemanticText(css);
+
+    /** @type {Set<string>} */
+    const borderRadiusVarRefs = new Set();
 
     let decl;
     while ((decl = cssDeclaration.exec(stripped))) {
@@ -61,8 +66,14 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
       // `decl[0]` ends with the captured group, so this points at the first character of the value.
       const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
 
-      const unitRegex =
-        /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
+      // Capture any CSS custom properties referenced by border-radius declarations so we can also
+      // prevent hardcoded units from being hidden behind a local variable.
+      let varMatch;
+      while ((varMatch = cssVarRef.exec(value))) {
+        borderRadiusVarRefs.add(varMatch[1]);
+      }
+      cssVarRef.lastIndex = 0;
+
       let unitMatch;
       while ((unitMatch = unitRegex.exec(value))) {
         const numeric = unitMatch[1];
@@ -77,6 +88,37 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
           `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${numeric}${unit}`,
         );
       }
+
+      unitRegex.lastIndex = 0;
+    }
+
+    // Second pass: if this file defines any custom properties that are used by border-radius declarations,
+    // ensure those variables also stay token-based (no hardcoded units).
+    cssDeclaration.lastIndex = 0;
+    while ((decl = cssDeclaration.exec(stripped))) {
+      const prop = decl?.groups?.prop ?? "";
+      if (!prop.startsWith("--")) continue;
+      if (!borderRadiusVarRefs.has(prop)) continue;
+
+      const value = decl?.groups?.value ?? "";
+      const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
+
+      let unitMatch;
+      while ((unitMatch = unitRegex.exec(value))) {
+        const numeric = unitMatch[1];
+        const unit = unitMatch[2] ?? "";
+        const n = Number(numeric);
+        if (!Number.isFinite(n)) continue;
+        if (n === 0) continue;
+
+        const absIndex = valueStart + unitMatch.index;
+        const line = getLineNumber(stripped, absIndex);
+        violations.push(
+          `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${numeric}${unit}`,
+        );
+      }
+
+      unitRegex.lastIndex = 0;
     }
 
     cssDeclaration.lastIndex = 0;
