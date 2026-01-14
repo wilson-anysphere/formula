@@ -210,24 +210,9 @@ jobs:
             echo "linux-validate: ERROR: No .deb bundles found." >&2
             exit 1
           fi
-
-          rpm_count=0
-          for root in "${roots[@]}"; do
-            while IFS= read -r rpm_path; do
-              rpm_count=$((rpm_count + 1))
-              echo "linux-validate: RPM -> $rpm_path"
-              rpm -qp "$rpm_path" >/dev/null
-              if ! rpm -qpl "$rpm_path" | grep -q '^/usr/bin/formula-desktop$'; then
-                echo "linux-validate: ERROR: RPM payload does not include /usr/bin/formula-desktop" >&2
-                exit 1
-              fi
-            done < <(find "$root" -type f -path '*/release/bundle/rpm/*.rpm' -print)
-          done
-
-          if [ "$rpm_count" -eq 0 ]; then
-            echo "linux-validate: ERROR: No .rpm bundles found." >&2
-            exit 1
-          fi
+          # Validate RPM payload structure (static `rpm -qp` checks). Skip the Fedora container
+          # install check here; the tagged release workflow runs the full container smoke test.
+          bash scripts/validate-linux-rpm.sh --no-container
 
       - name: Validate macOS DMG
         if: matrix.platform == 'macos-latest'
