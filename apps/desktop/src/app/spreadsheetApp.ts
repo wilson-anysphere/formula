@@ -22030,6 +22030,11 @@ export class SpreadsheetApp {
       // avoids surprising (and potentially destructive) behavior like cutting cell contents while
       // a chart is selected.
       if (this.selectedChartId != null) {
+        try {
+          showToast("Copy chart not supported yet.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
         return;
       }
 
@@ -22729,6 +22734,11 @@ export class SpreadsheetApp {
       // See `copySelectionToClipboard` for rationale: charts are object-level selections, so we
       // should not cut the active cell range while a chart is selected.
       if (this.selectedChartId != null) {
+        try {
+          showToast("Cut chart not supported yet.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
         return;
       }
 
