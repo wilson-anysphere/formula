@@ -191,8 +191,11 @@ node scripts/ci/check-windows-wix-upgrade-code.mjs
 # Ensures the Tauri updater signing secrets are present for *uploading* release assets (tag pushes
 # and `workflow_dispatch` runs with `upload=true`). (CI reads these from GitHub Actions secrets;
 # locally requires env vars to be set.)
-TAURI_PRIVATE_KEY=... node scripts/ci/check-tauri-updater-secrets.mjs
+TAURI_PRIVATE_KEY=... node scripts/check-updater-signing-secrets.mjs
 # (Optional) If you're using an encrypted PKCS#8 key instead of a minisign secret key:
+TAURI_PRIVATE_KEY=... TAURI_KEY_PASSWORD=... node scripts/check-updater-signing-secrets.mjs
+
+# (Advanced) The wrapper above delegates to the CI validator:
 TAURI_PRIVATE_KEY=... TAURI_KEY_PASSWORD=... node scripts/ci/check-tauri-updater-secrets.mjs
 
 # Ensures macOS hardened-runtime entitlements include the WKWebView JIT keys
