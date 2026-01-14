@@ -647,6 +647,23 @@ struct ColXmlProps {
     style_xf: Option<u32>,
 }
 
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    let mut attrs = String::new();
+    if let Some(base) = sheet.base_col_width {
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+    if attrs.is_empty() {
+        return String::new();
+    }
+    format!(r#"<sheetFormatPr{attrs}/>"#)
+}
+
 #[cfg(test)]
 mod sheet_format_pr_tests {
     use super::sheet_format_pr_xml;
