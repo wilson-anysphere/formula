@@ -8903,7 +8903,9 @@ export class SpreadsheetApp {
 
   deleteDrawingById(id: DrawingObjectId): void {
     if (this.isReadOnly()) {
-      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
+      const idNum = typeof id === "number" ? id : null;
+      const isChart = this.useCanvasCharts && idNum != null && isChartStoreDrawingId(idNum);
+      showCollabEditRejectedToast([{ rejectionKind: isChart ? "chart" : "drawing", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;

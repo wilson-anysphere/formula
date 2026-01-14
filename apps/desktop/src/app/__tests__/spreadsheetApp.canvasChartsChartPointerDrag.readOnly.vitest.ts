@@ -232,5 +232,35 @@ describe("SpreadsheetApp canvas chart pointer drag (read-only)", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("shows a chart read-only toast when deleting a chart via deleteDrawingById", () => {
+    const root = createRoot();
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    const { chart_id: chartId } = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Read-only Delete Chart",
+      position: "A1",
+    });
+
+    const drawingId = chartIdToDrawingId(chartId);
+    app.deleteDrawingById(drawingId);
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("edit charts");
+    expect(app.listCharts().some((c) => c.id === chartId)).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+});
