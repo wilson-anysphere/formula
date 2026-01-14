@@ -7902,6 +7902,7 @@ mod tests {
                 source_field: "Amount".to_string(),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
+                number_format: None,
                 show_as: None,
                 base_field: None,
                 base_item: None,

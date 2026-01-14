@@ -328,8 +328,6 @@ pub enum XlsxError {
     MissingAttr(&'static str),
     #[error("missing xlsx part: {0}")]
     MissingPart(String),
-    #[error("xlsx part '{part}' is too large ({size} bytes, max {max} bytes)")]
-    PartTooLarge { part: String, size: u64, max: u64 },
     #[error("invalid xlsx: {0}")]
     Invalid(String),
     #[error(
