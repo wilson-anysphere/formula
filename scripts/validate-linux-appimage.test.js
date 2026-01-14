@@ -53,6 +53,7 @@ function writeFakeAppImage(
     withMimeTypeEntry = true,
     withSchemeMime = true,
     withParquetMimeDefinition = true,
+    parquetMimeDefinitionContents = "",
     execLine = `${expectedMainBinaryName} %U`,
     withLicense = true,
     withNotice = true,
@@ -84,10 +85,21 @@ function writeFakeAppImage(
       ].join("\n")
     : "mkdir -p squashfs-root/usr/share/applications";
 
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
+  const defaultParquetMimeDefinitionContents = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+    '  <mime-type type="application/vnd.apache.parquet">',
+    "    <comment>Parquet File</comment>",
+    '    <glob pattern="*.parquet"/>',
+    "  </mime-type>",
+    "</mime-info>",
+  ].join("\n");
+  const parquetMimeContents = parquetMimeDefinitionContents || defaultParquetMimeDefinitionContents;
 
-if [[ "\${1:-}" == "--appimage-extract" ]]; then
+  const script = `#!/usr/bin/env bash
+ set -euo pipefail
+ 
+ if [[ "\${1:-}" == "--appimage-extract" ]]; then
   mkdir -p squashfs-root/usr/bin
   mkdir -p squashfs-root/usr/share/doc/${expectedMainBinaryName}
   mkdir -p squashfs-root/usr/share/mime/packages
@@ -104,24 +116,16 @@ echo "${expectedMainBinaryName} stub"
 BIN
   chmod +x squashfs-root/usr/bin/${expectedMainBinaryName}
 
-  ${withLicense ? 'echo "LICENSE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/LICENSE' : ":"}
-  ${withNotice ? 'echo "NOTICE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/NOTICE' : ":"}
-  ${
-    withParquetMimeDefinition
-      ? "cat > squashfs-root/usr/share/mime/packages/app.formula.desktop.xml <<'MIME'\n" +
-        '<?xml version="1.0" encoding="UTF-8"?>\n' +
-        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n' +
-        '  <mime-type type="application/vnd.apache.parquet">\n' +
-        "    <comment>Parquet File</comment>\n" +
-        '    <glob pattern="*.parquet"/>\n' +
-        "  </mime-type>\n" +
-        "</mime-info>\n" +
-        "MIME"
+   ${withLicense ? 'echo "LICENSE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/LICENSE' : ":"}
+   ${withNotice ? 'echo "NOTICE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/NOTICE' : ":"}
+   ${
+     withParquetMimeDefinition
+      ? `cat > squashfs-root/usr/share/mime/packages/app.formula.desktop.xml <<'MIME'\n${parquetMimeContents}\nMIME`
       : ":"
-  }
-
-  ${desktopBlock}
-  exit 0
+   }
+ 
+   ${desktopBlock}
+   exit 0
 fi
 
 echo "unsupported args: $*" >&2
@@ -363,6 +367,35 @@ test("validate-linux-appimage fails when Parquet shared-mime-info definition is 
   assert.match(proc.stderr, /Parquet/i);
   assert.match(proc.stderr, /shared-mime-info/i);
 });
+
+test(
+  "validate-linux-appimage fails when Parquet shared-mime-info definition is missing expected content",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+    const appImagePath = join(tmp, "Formula.AppImage");
+    writeFakeAppImage(appImagePath, {
+      withDesktopFile: true,
+      withXlsxMime: true,
+      withParquetMimeDefinition: true,
+      parquetMimeDefinitionContents: [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+        '  <mime-type type="application/vnd.apache.parquet">',
+        "    <comment>Parquet File</comment>",
+        // Intentionally omit the `*.parquet` glob mapping.
+        "  </mime-type>",
+        "</mime-info>",
+      ].join("\n"),
+      appImageVersion: expectedVersion,
+    });
+
+    const proc = runValidator(appImagePath);
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /Parquet/i);
+    assert.match(proc.stderr, /expected content/i);
+  },
+);
 
 test("validate-linux-appimage fails when X-AppImage-Version does not match tauri.conf.json", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));

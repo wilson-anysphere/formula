@@ -458,6 +458,9 @@ validate_appimage() {
   if [ ! -f "$parquet_mime_def" ]; then
     die "Missing Parquet shared-mime-info definition in AppImage: squashfs-root/usr/share/mime/packages/app.formula.desktop.xml"
   fi
+  if ! grep -Fq 'application/vnd.apache.parquet' "$parquet_mime_def" || ! grep -Fq '*.parquet' "$parquet_mime_def"; then
+    die "Parquet shared-mime-info definition file is missing expected content in AppImage: squashfs-root/usr/share/mime/packages/app.formula.desktop.xml"
+  fi
 
   local applications_dir
   applications_dir="$appdir/usr/share/applications"
