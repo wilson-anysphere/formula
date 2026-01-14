@@ -20,11 +20,16 @@ test("shell.css should not hardcode border-radius values (except 0)", () => {
   /** @type {string[]} */
   const violations = [];
 
-  const declRegex = /\bborder(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius\s*:\s*([^;}]*)/gi;
-  let declMatch;
-  while ((declMatch = declRegex.exec(stripped))) {
-    const value = declMatch[1] ?? "";
-    const valueStart = declMatch.index + declMatch[0].length - value.length;
+  const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
+  const borderRadiusProp = /^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/i;
+
+  let decl;
+  while ((decl = cssDeclaration.exec(stripped))) {
+    const prop = decl?.groups?.prop ?? "";
+    if (!borderRadiusProp.test(prop)) continue;
+
+    const value = decl?.groups?.value ?? "";
+    const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
 
     const unitRegex =
       /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;

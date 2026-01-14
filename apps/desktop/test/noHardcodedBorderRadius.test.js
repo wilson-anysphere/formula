@@ -45,16 +45,21 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
   /** @type {string[]} */
   const violations = [];
 
+  const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
+  const borderRadiusProp = /^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/i;
+
   for (const file of files) {
     const css = fs.readFileSync(file, "utf8");
     const stripped = stripCssNonSemanticText(css);
 
-    const declRegex = /\bborder(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius\s*:\s*([^;}]*)/gi;
-    let declMatch;
-    while ((declMatch = declRegex.exec(stripped))) {
-      const value = declMatch[1] ?? "";
-      // `declMatch[0]` ends with the captured group, so this points at the first character of the value.
-      const valueStart = declMatch.index + declMatch[0].length - value.length;
+    let decl;
+    while ((decl = cssDeclaration.exec(stripped))) {
+      const prop = decl?.groups?.prop ?? "";
+      if (!borderRadiusProp.test(prop)) continue;
+
+      const value = decl?.groups?.value ?? "";
+      // `decl[0]` ends with the captured group, so this points at the first character of the value.
+      const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
 
       const unitRegex =
         /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
@@ -73,6 +78,8 @@ test("desktop UI should not hardcode border-radius values (use radius tokens)", 
         );
       }
     }
+
+    cssDeclaration.lastIndex = 0;
   }
 
   assert.deepEqual(
