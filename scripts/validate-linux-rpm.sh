@@ -125,7 +125,6 @@ detect_docker_platform() {
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-$(detect_docker_platform)}"
 
 require_cmd rpm
-require_cmd python3
 
 TAURI_CONF="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
 if [[ ! -f "$TAURI_CONF" ]]; then
@@ -134,7 +133,8 @@ fi
 
 read_tauri_conf_value() {
   local key="$1"
-  python3 - "$TAURI_CONF" "$key" <<'PY'
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$TAURI_CONF" "$key" <<'PY'
 import json
 import sys
 
@@ -146,6 +146,22 @@ val = conf.get(key, "")
 if isinstance(val, str):
     print(val.strip())
 PY
+    return 0
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node -e '
+      const fs = require("fs");
+      const path = process.argv[1];
+      const key = process.argv[2];
+      const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+      const val = conf?.[key];
+      if (typeof val === "string") process.stdout.write(val.trim());
+    ' "$TAURI_CONF" "$key"
+    return 0
+  fi
+
+  die "Neither python3 nor node is available to parse ${TAURI_CONF} (required for version/name checks)."
 }
 
 EXPECTED_VERSION="$(read_tauri_conf_value version)"
