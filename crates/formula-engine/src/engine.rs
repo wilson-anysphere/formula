@@ -1677,9 +1677,28 @@ impl Engine {
         let Some(sheet_id) = self.workbook.sheet_id_by_key(sheet_key) else {
             return;
         };
+        let Some(old_display_name) = self.workbook.sheet_name(sheet_id).map(|s| s.to_string())
+        else {
+            return;
+        };
         if !self.workbook.set_sheet_display_name(sheet_id, display_name) {
             return;
         }
+
+        // Pivot definitions store sheet names as raw strings. If we leave stale references behind,
+        // refreshing a pivot can silently resurrect the old display name via `ensure_sheet`.
+        for pivot in self.workbook.pivots.values_mut() {
+            if formula_model::sheet_name_eq_case_insensitive(&pivot.destination.sheet, &old_display_name)
+            {
+                pivot.destination.sheet = display_name.to_string();
+            }
+            if let PivotSource::Range { sheet, .. } = &mut pivot.source {
+                if formula_model::sheet_name_eq_case_insensitive(sheet, &old_display_name) {
+                    *sheet = display_name.to_string();
+                }
+            }
+        }
+
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }

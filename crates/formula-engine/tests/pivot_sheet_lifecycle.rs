@@ -124,3 +124,49 @@ fn pivot_sheet_rename_and_delete_update_pivot_metadata_and_prevent_resurrection(
     assert!(engine.pivot_table(pivot_id).is_none());
     assert_eq!(engine.pivot_registry_entries().len(), 0);
 }
+
+#[test]
+fn pivot_sheet_display_name_change_updates_pivot_metadata_and_prevent_resurrection() {
+    let mut engine = Engine::new();
+    seed_sales_data(&mut engine, "sheet1_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+
+    let cfg = sum_sales_by_region_config();
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: cfg,
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    // Metadata-only tab rename (stable sheet key unchanged) should still rewrite pivots so a refresh
+    // cannot resurrect the old tab name via `ensure_sheet`.
+    engine.set_sheet_display_name("sheet1_key", "Renamed");
+
+    let pivot = engine.pivot_table(pivot_id).unwrap();
+    assert_eq!(pivot.destination.sheet, "Renamed");
+    assert_eq!(
+        pivot.source,
+        PivotSource::Range {
+            sheet: "Renamed".to_string(),
+            range: Some(range("A1:B5")),
+        }
+    );
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+    assert_eq!(engine.sheet_id("Sheet1"), None);
+    assert_eq!(
+        engine.get_cell_value("Renamed", "D1"),
+        Value::Text("Region".to_string())
+    );
+}
