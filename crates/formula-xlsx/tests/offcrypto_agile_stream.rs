@@ -12,6 +12,7 @@ use formula_xlsx::offcrypto::{
     derive_iv, derive_key, hash_password, HashAlgorithm, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
     VERIFIER_HASH_VALUE_BLOCK,
 };
+use formula_xlsx::OffCryptoError;
 use ms_offcrypto_writer::Ecma376AgileWriter;
 use rand::{rngs::StdRng, SeedableRng as _};
 use sha1::Digest as _;
@@ -76,6 +77,108 @@ fn decrypts_agile_encrypted_package_streaming() {
 
     assert_eq!(declared_len as usize, plaintext.len());
     assert_eq!(out, plaintext);
+}
+
+#[test]
+fn decrypts_agile_encrypted_package_streaming_tampered_size_header_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plaintext = make_zip_bytes(12_345);
+
+    let mut rng = StdRng::seed_from_u64(0xD15EA5E_u64);
+    let cursor = Cursor::new(Vec::new());
+    let mut writer =
+        Ecma376AgileWriter::create(&mut rng, password, cursor).expect("create agile writer");
+    writer
+        .write_all(&plaintext)
+        .expect("write plaintext package bytes");
+    let cursor = writer.into_inner().expect("finalize agile writer");
+    let encrypted_ole_bytes = cursor.into_inner();
+
+    let mut ole = cfb::CompoundFile::open(Cursor::new(encrypted_ole_bytes)).expect("open cfb");
+
+    let mut encryption_info_stream = open_stream(&mut ole, "EncryptionInfo");
+    let mut encryption_info = Vec::new();
+    encryption_info_stream
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package_stream = open_stream(&mut ole, "EncryptedPackage");
+    let mut encrypted_package = Vec::new();
+    encrypted_package_stream
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    assert!(encrypted_package.len() >= 8, "EncryptedPackage too short");
+    let original_size = u64::from_le_bytes(
+        encrypted_package[..8]
+            .try_into()
+            .expect("EncryptedPackage header is 8 bytes"),
+    );
+    assert!(original_size > 0, "unexpected empty EncryptedPackage payload");
+    let tampered_size = original_size - 1;
+    encrypted_package[..8].copy_from_slice(&tampered_size.to_le_bytes());
+
+    let mut cursor = Cursor::new(encrypted_package);
+    let mut out = Vec::new();
+    let err = decrypt_agile_encrypted_package_stream(
+        &encryption_info,
+        &mut cursor,
+        password,
+        &mut out,
+    )
+    .expect_err("expected integrity failure");
+    assert!(
+        matches!(err, OffCryptoError::IntegrityMismatch),
+        "expected IntegrityMismatch, got {err:?}"
+    );
+}
+
+#[test]
+fn decrypts_agile_encrypted_package_streaming_appended_ciphertext_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plaintext = make_zip_bytes(12_345);
+
+    let mut rng = StdRng::seed_from_u64(0xD15EA5E_u64);
+    let cursor = Cursor::new(Vec::new());
+    let mut writer =
+        Ecma376AgileWriter::create(&mut rng, password, cursor).expect("create agile writer");
+    writer
+        .write_all(&plaintext)
+        .expect("write plaintext package bytes");
+    let cursor = writer.into_inner().expect("finalize agile writer");
+    let encrypted_ole_bytes = cursor.into_inner();
+
+    let mut ole = cfb::CompoundFile::open(Cursor::new(encrypted_ole_bytes)).expect("open cfb");
+
+    let mut encryption_info_stream = open_stream(&mut ole, "EncryptionInfo");
+    let mut encryption_info = Vec::new();
+    encryption_info_stream
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package_stream = open_stream(&mut ole, "EncryptedPackage");
+    let mut encrypted_package = Vec::new();
+    encrypted_package_stream
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    // Append an extra AES block to simulate trailing bytes stored in the stream. `dataIntegrity`
+    // authenticates the entire EncryptedPackage stream bytes, so this should be detected.
+    encrypted_package.extend_from_slice(&[0xA5u8; 16]);
+
+    let mut cursor = Cursor::new(encrypted_package);
+    let mut out = Vec::new();
+    let err = decrypt_agile_encrypted_package_stream(
+        &encryption_info,
+        &mut cursor,
+        password,
+        &mut out,
+    )
+    .expect_err("expected integrity failure");
+    assert!(
+        matches!(err, OffCryptoError::IntegrityMismatch),
+        "expected IntegrityMismatch, got {err:?}"
+    );
 }
 
 fn encrypt_aes128_cbc_no_padding(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
