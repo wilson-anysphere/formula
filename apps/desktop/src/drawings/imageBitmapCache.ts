@@ -478,20 +478,75 @@ export class ImageBitmapCache {
     return Math.max(0, Math.floor(value));
   }
 
-  private static decode(entry: ImageEntry): Promise<ImageBitmap> {
+  private static async decode(entry: ImageEntry): Promise<ImageBitmap> {
     if (typeof createImageBitmap !== "function") {
-      return Promise.reject(new Error("createImageBitmap is not available in this environment"));
+      throw new Error("createImageBitmap is not available in this environment");
     }
 
+    // Blob construction already clones ArrayBufferView bytes; avoid a second manual copy.
+    const blob = new Blob([entry.bytes], { type: entry.mimeType });
+
     try {
-      // Blob construction already clones ArrayBufferView bytes; avoid a second manual copy.
-      const blob = new Blob([entry.bytes], { type: entry.mimeType });
       // `createImageBitmap` should always return a promise, but tests and
       // polyfills are not always well-behaved. Normalize to a promise so our
       // callers and internal bookkeeping remain predictable.
-      return Promise.resolve(createImageBitmap(blob));
+      return await Promise.resolve(createImageBitmap(blob));
     } catch (err) {
-      return Promise.reject(err);
+      // Chrome can successfully decode certain malformed PNGs via `<img>`, but
+      // rejects them via `createImageBitmap(blob)` (e.g. our real Excel fixtures).
+      // Fall back to decoding through an `<img>` + canvas when we detect this
+      // class of decode failure.
+      const name = (err as any)?.name;
+      if (name !== "InvalidStateError") throw err;
+
+      const fallback = await ImageBitmapCache.decodeViaImageElement(blob).catch(() => null);
+      if (fallback) return fallback;
+      throw err;
+    }
+  }
+
+  private static async decodeViaImageElement(blob: Blob): Promise<ImageBitmap> {
+    // This fallback requires DOM APIs; if we're in a non-DOM environment, just
+    // fail and let the caller surface the original decode error.
+    if (typeof document === "undefined") {
+      throw new Error("Image decode fallback requires DOM APIs (missing document)");
+    }
+    if (typeof Image !== "function") {
+      throw new Error("Image decode fallback requires DOM APIs (missing Image)");
+    }
+    if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+      throw new Error("Image decode fallback requires URL.createObjectURL");
+    }
+
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      img.src = url;
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Image decode fallback failed to load <img>"));
+      });
+
+      const canvas = document.createElement("canvas");
+      const width = (img as any).naturalWidth ?? img.width;
+      const height = (img as any).naturalHeight ?? img.height;
+      canvas.width = Number.isFinite(width) && width > 0 ? width : 1;
+      canvas.height = Number.isFinite(height) && height > 0 ? height : 1;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Image decode fallback missing 2D canvas context");
+      ctx.drawImage(img, 0, 0);
+
+      // `createImageBitmap(img)` can still fail for the same malformed inputs even
+      // if the image element decodes successfully. Converting through an
+      // intermediate canvas is more robust.
+      return await Promise.resolve(createImageBitmap(canvas));
+    } finally {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // Ignore revoke failures (best-effort).
+      }
     }
   }
 

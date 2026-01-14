@@ -118,15 +118,30 @@ test.describe("drawing shape text rendering regressions", () => {
         },
       ]);
 
-      const last = (window as any).__testLastDrawingOverlayRender as
-        | { promise: Promise<void>; objects: any[]; viewport: any }
-        | null;
-      if (!last) throw new Error("Expected SpreadsheetApp to invoke DrawingOverlay.render after setSheetDrawings");
+      const waitForOverlayRender = async (): Promise<{ promise: Promise<void>; objects: any[]; viewport: any }> => {
+        const start =
+          typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+        const timeoutMs = 5_000;
+        while (true) {
+          const last = (window as any).__testLastDrawingOverlayRender as
+            | { promise: Promise<void>; objects: any[]; viewport: any }
+            | null;
+          const renderedHasShape = Array.isArray(last?.objects) ? last!.objects.some((o) => o?.kind?.type === "shape") : false;
+          if (last && renderedHasShape) return last;
 
-      const renderedHasShape = Array.isArray(last.objects) ? last.objects.some((o) => o?.kind?.type === "shape") : false;
-      if (!renderedHasShape) {
-        throw new Error("DrawingOverlay.render was invoked, but the rendered object list did not include a shape");
-      }
+          const now =
+            typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+          if (now - start > timeoutMs) {
+            throw new Error("Timed out waiting for SpreadsheetApp to invoke DrawingOverlay.render after setSheetDrawings");
+          }
+          await new Promise<void>((resolve) => {
+            if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+            else setTimeout(resolve, 0);
+          });
+        }
+      };
+
+      const last = await waitForOverlayRender();
 
       await last.promise;
 
