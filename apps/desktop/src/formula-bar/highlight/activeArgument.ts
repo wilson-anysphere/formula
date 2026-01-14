@@ -287,10 +287,14 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
       while (i < cursor && isIdentifierPart(formulaText[i])) i += 1;
       const name = formulaText.slice(start, i).toUpperCase();
 
-      const next = formulaText[i];
-      if (next === "(" && i < cursor) {
-        stack.push({ kind: "function", name, argIndex: 0, argStart: i + 1, parenIndex: i });
-        i += 1;
+      // Excel permits whitespace between a function name and the opening paren, e.g. `SUM (A1)`.
+      // Skip whitespace so argument hints and previews remain stable even when users insert spaces/newlines.
+      let scan = i;
+      while (scan < cursor && isWhitespace(formulaText[scan] ?? "")) scan += 1;
+      const next = formulaText[scan];
+      if (next === "(" && scan < cursor) {
+        stack.push({ kind: "function", name, argIndex: 0, argStart: scan + 1, parenIndex: scan });
+        i = scan + 1;
         continue;
       }
 

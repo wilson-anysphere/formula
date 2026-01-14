@@ -27,6 +27,23 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("treats whitespace between function name and '(' as part of the call (Excel-style)", () => {
+    const formula = "=SUM ( A1 , B1 )";
+    const insideA1 = formula.indexOf("A1") + 1;
+    expect(getActiveArgumentSpan(formula, insideA1)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 0,
+      argText: "A1",
+    });
+
+    const insideB1 = formula.indexOf("B1") + 1;
+    expect(getActiveArgumentSpan(formula, insideB1)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "B1",
+    });
+  });
+
   it("ignores commas inside string literals", () => {
     const formula = '=CONCAT("a,b", "c")';
     const insideFirstString = formula.indexOf("a,b") + 1;
