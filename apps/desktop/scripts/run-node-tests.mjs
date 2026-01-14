@@ -203,7 +203,7 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   const out = [];
   const extGroup = extensions.join("|");
   const tsImportRe = new RegExp(
-    `from\\s+["'][^"']+\\.(${extGroup})["']|import\\(\\s*["'][^"']+\\.(${extGroup})["']\\s*\\)`,
+    `from\\s+["'\`][^"'\`]+\\.(${extGroup})["'\`]|import\\(\\s*["'\`][^"'\`]+\\.(${extGroup})["'\`]\\s*\\)`,
   );
 
   // In environments without TS/TSX execution, we also need to skip tests that import
@@ -213,7 +213,11 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   const disallowedEntrypointExtensions = new Set(extensions.map((ext) => `.${ext}`));
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
-  const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  // Template literal dynamic imports (used for cache-busting query strings, etc.). We capture
+  // only the static prefix up to the first unescaped `${...}` so we can still resolve the
+  // underlying module path (e.g. `./foo.js?x=${Date.now()}` -> `./foo.js`).
+  const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
 
   /**
@@ -298,6 +302,7 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
     for (const match of text.matchAll(importFromRe)) specifiers.push(match[2]);
     for (const match of text.matchAll(sideEffectImportRe)) specifiers.push(match[1]);
     for (const match of text.matchAll(dynamicImportRe)) specifiers.push(match[1]);
+    for (const match of text.matchAll(dynamicImportTemplateRe)) specifiers.push(match[1]);
     for (const match of text.matchAll(requireCallRe)) specifiers.push(match[1]);
 
     for (const rawSpecifier of specifiers) {
@@ -560,7 +565,8 @@ async function filterExternalDependencyTests(files, opts) {
   // module dependencies.
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
-  const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
   const requireResolveRe = /\brequire\.resolve\(\s*["']([^"']+)["']\s*\)/g;
   // Some modules are loaded indirectly via Worker thread entrypoints:
@@ -864,6 +870,9 @@ async function filterExternalDependencyTests(files, opts) {
     for (const match of text.matchAll(dynamicImportRe)) {
       specifiers.push(match[1]);
     }
+    for (const match of text.matchAll(dynamicImportTemplateRe)) {
+      specifiers.push(match[1]);
+    }
     for (const match of text.matchAll(requireCallRe)) {
       specifiers.push(match[1]);
     }
@@ -1038,7 +1047,8 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
 
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
-  const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   const requireRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
   const candidateExtensions = opts.canExecuteTsx
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
@@ -1439,6 +1449,10 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
       if (specifier) imports.push({ specifier, typeOnly: false });
     }
     for (const match of text.matchAll(dynamicImportRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+    for (const match of text.matchAll(dynamicImportTemplateRe)) {
       const specifier = match[1];
       if (specifier) imports.push({ specifier, typeOnly: false });
     }
