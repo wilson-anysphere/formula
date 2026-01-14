@@ -9,7 +9,7 @@
 export const MAX_PNG_DIMENSION = 10_000;
 export const MAX_PNG_PIXELS = 50_000_000;
 
-export type ImageHeaderFormat = "png" | "jpeg" | "gif" | "webp" | "bmp";
+export type ImageHeaderFormat = "png" | "jpeg" | "gif" | "webp" | "bmp" | "svg";
 export type ImageHeaderDimensions = { format: ImageHeaderFormat; width: number; height: number };
 
 export function readPngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
@@ -235,6 +235,169 @@ export function readBmpDimensions(bytes: Uint8Array): { width: number; height: n
   return null;
 }
 
+export function readSvgDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 4) return null;
+
+  const maxRead = Math.min(bytes.byteLength, 8 * 1024);
+
+  // Fast-path: SVGs are text-based and should start with `<` (optionally after a UTF-8 BOM/whitespace)
+  // or a UTF-16 BOM. If we don't see that, don't spend time decoding bytes into a string.
+  const utf16Bom =
+    maxRead >= 2 && ((bytes[0] === 0xfe && bytes[1] === 0xff) || (bytes[0] === 0xff && bytes[1] === 0xfe));
+  if (!utf16Bom) {
+    let idx = 0;
+    if (maxRead >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) idx = 3; // UTF-8 BOM
+    while (idx < maxRead) {
+      const b = bytes[idx]!;
+      if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d) {
+        idx += 1;
+        continue;
+      }
+      break;
+    }
+    if (idx >= maxRead || bytes[idx] !== 0x3c) return null; // '<'
+  }
+
+  const decodeUtf16 = (view: Uint8Array, littleEndian: boolean): string | null => {
+    const len = view.byteLength - (view.byteLength % 2);
+    if (len <= 0) return null;
+    let bytesToDecode = view.subarray(0, len);
+
+    if (!littleEndian) {
+      // Convert BE -> LE so we can decode via TextDecoder("utf-16le") in environments that
+      // do not support "utf-16be".
+      const swapped = new Uint8Array(len);
+      for (let i = 0; i < len; i += 2) {
+        swapped[i] = bytesToDecode[i + 1]!;
+        swapped[i + 1] = bytesToDecode[i]!;
+      }
+      bytesToDecode = swapped;
+    }
+
+    try {
+      if (typeof TextDecoder !== "undefined") {
+        return new TextDecoder("utf-16le", { fatal: false }).decode(bytesToDecode);
+      }
+    } catch {
+      // Fall through to manual decoding.
+    }
+
+    try {
+      let out = "";
+      for (let i = 0; i < bytesToDecode.length; i += 2) {
+        out += String.fromCharCode(bytesToDecode[i]! | (bytesToDecode[i + 1]! << 8));
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  };
+
+  const decodeUtf8 = (view: Uint8Array): string | null => {
+    try {
+      if (typeof TextDecoder !== "undefined") {
+        return new TextDecoder("utf-8", { fatal: false }).decode(view);
+      }
+    } catch {
+      // Fall through to manual decoding.
+    }
+    try {
+      let out = "";
+      for (let i = 0; i < view.length; i += 1) out += String.fromCharCode(view[i]!);
+      return out;
+    } catch {
+      return null;
+    }
+  };
+
+  const text = (() => {
+    if (utf16Bom) {
+      const littleEndian = bytes[0] === 0xff && bytes[1] === 0xfe;
+      return decodeUtf16(bytes.subarray(2, maxRead), littleEndian);
+    }
+    return decodeUtf8(bytes.subarray(0, maxRead));
+  })();
+
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  const svgStart = lower.indexOf("<svg");
+  if (svgStart === -1) return null;
+  const tagEnd = lower.indexOf(">", svgStart);
+  if (tagEnd === -1) return null;
+  const tag = text.slice(svgStart, tagEnd + 1);
+
+  const getAttr = (name: string): string | null => {
+    const re = new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "i");
+    const match = re.exec(tag);
+    return match ? String(match[2] ?? "").trim() : null;
+  };
+
+  const parseLength = (raw: string | null): number | null => {
+    if (!raw) return null;
+    const m =
+      /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(raw);
+    if (!m) return null;
+    const value = Number(m[1]);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    const unit = String(m[2] ?? "").toLowerCase();
+    switch (unit) {
+      case "":
+      case "px":
+        return value;
+      case "%":
+        return null;
+      case "pt":
+        return (value * 96) / 72;
+      case "pc":
+        return value * 16;
+      case "in":
+        return value * 96;
+      case "cm":
+        return (value * 96) / 2.54;
+      case "mm":
+        return (value * 96) / 25.4;
+      case "q":
+        return (value * 96) / 101.6;
+      case "em":
+        return value * 16;
+      case "ex":
+        return value * 8;
+      default:
+        // Unknown units: treat as user units (best-effort). This is more conservative than returning
+        // null because it prevents bypassing dimension guards via unusual unit strings.
+        return value;
+    }
+  };
+
+  const widthAttr = parseLength(getAttr("width"));
+  const heightAttr = parseLength(getAttr("height"));
+
+  let width = widthAttr;
+  let height = heightAttr;
+
+  if (width == null || height == null) {
+    const viewBox = getAttr("viewBox");
+    if (viewBox) {
+      const parts = viewBox
+        .trim()
+        .split(/[\s,]+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length >= 4) {
+        const vbWidth = Number(parts[2]);
+        const vbHeight = Number(parts[3]);
+        if (width == null && Number.isFinite(vbWidth) && vbWidth > 0) width = vbWidth;
+        if (height == null && Number.isFinite(vbHeight) && vbHeight > 0) height = vbHeight;
+      }
+    }
+  }
+
+  if (width == null || height == null) return null;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
 export function readImageDimensions(bytes: Uint8Array): ImageHeaderDimensions | null {
   const png = readPngDimensions(bytes);
   if (png) return { format: "png", ...png };
@@ -246,5 +409,7 @@ export function readImageDimensions(bytes: Uint8Array): ImageHeaderDimensions | 
   if (webp) return { format: "webp", ...webp };
   const bmp = readBmpDimensions(bytes);
   if (bmp) return { format: "bmp", ...bmp };
+  const svg = readSvgDimensions(bytes);
+  if (svg) return { format: "svg", ...svg };
   return null;
 }

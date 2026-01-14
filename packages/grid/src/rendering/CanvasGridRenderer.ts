@@ -294,12 +294,39 @@ async function guardPngBlob(blob: Blob): Promise<void> {
 
   const isJpeg =
     initial.byteLength >= 3 && initial[0] === 0xff && initial[1] === 0xd8 && initial[2] === 0xff;
+  const isSvgLike = (() => {
+    // SVG is text-based. It typically starts with `<` (possibly after a UTF-8 BOM/whitespace) or a UTF-16 BOM.
+    const len = initial.byteLength;
+    if (len >= 2 && ((initial[0] === 0xfe && initial[1] === 0xff) || (initial[0] === 0xff && initial[1] === 0xfe))) {
+      return true;
+    }
+    let idx = 0;
+    if (len >= 3 && initial[0] === 0xef && initial[1] === 0xbb && initial[2] === 0xbf) idx = 3; // UTF-8 BOM
+    while (idx < len) {
+      const b = initial[idx]!;
+      if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d) {
+        idx += 1;
+        continue;
+      }
+      break;
+    }
+    return idx < len && initial[idx] === 0x3c; // '<'
+  })();
   let headerBytes = initial;
 
   if (isJpeg && blob.size > initial.byteLength) {
     // JPEG dimensions can occur after variable-length metadata segments, so allow a larger sniff.
     const MAX_JPEG_SNIFF_BYTES = 256 * 1024;
     const toRead = Math.min(blob.size, MAX_JPEG_SNIFF_BYTES);
+    if (toRead > initial.byteLength) {
+      const larger = await readSlice(blob.slice(0, toRead));
+      if (larger) headerBytes = larger;
+    }
+  } else if (isSvgLike && blob.size > initial.byteLength) {
+    // SVG needs more than the initial signature bytes because the `<svg ...>` tag (and width/height)
+    // can appear after an XML declaration and comments.
+    const MAX_SVG_SNIFF_BYTES = 8 * 1024;
+    const toRead = Math.min(blob.size, MAX_SVG_SNIFF_BYTES);
     if (toRead > initial.byteLength) {
       const larger = await readSlice(blob.slice(0, toRead));
       if (larger) headerBytes = larger;

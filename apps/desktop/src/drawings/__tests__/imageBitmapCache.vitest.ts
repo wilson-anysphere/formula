@@ -135,6 +135,21 @@ function createBmpHeaderBytes(width: number, height: number): Uint8Array {
   return bytes;
 }
 
+function createSvgBytes(svg: string): Uint8Array {
+  try {
+    if (typeof TextEncoder !== "undefined") {
+      return new TextEncoder().encode(svg);
+    }
+  } catch {
+    // Fall through to manual encoding.
+  }
+
+  // ASCII-only fallback (our test fixtures don't require full UTF-8 support).
+  const bytes = new Uint8Array(svg.length);
+  for (let i = 0; i < svg.length; i += 1) bytes[i] = svg.charCodeAt(i) & 0xff;
+  return bytes;
+}
+
 describe("ImageBitmapCache", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -474,6 +489,18 @@ describe("ImageBitmapCache", () => {
 
     const cache = new ImageBitmapCache({ maxEntries: 10 });
     const entry: ImageEntry = { id: "bmp_bomb", bytes: createBmpHeaderBytes(10_001, 1), mimeType: "image/bmp" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects SVG images with huge dimensions without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
+    const entry: ImageEntry = { id: "svg_bomb", bytes: createSvgBytes(svg), mimeType: "image/svg+xml" };
 
     await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
     expect(createImageBitmapMock).not.toHaveBeenCalled();
