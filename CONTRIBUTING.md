@@ -52,6 +52,20 @@ For details (metrics, tuning knobs, and CI gating env vars), see:
 - Include screenshots for UI changes.
 - Add/update documentation when changing architecture (`docs/adr/*`).
 
+## Formula engine generators (common gotchas)
+
+If you add/rename a built-in Excel-like function in `crates/formula-engine`, there are a few
+generated artifacts that must stay in sync:
+
+- Function catalog (`shared/functionCatalog.json`):
+  - `pnpm generate:function-catalog`
+- Locale function-name translation TSVs (`crates/formula-engine/src/locale/data/*.tsv`):
+  - `pnpm generate:locale-function-tsv`
+  - `pnpm check:locale-function-tsv`
+  - For Spanish (`es-ES`), locale sources must come from a full-catalog Excel extraction (do not
+    replace with partial online translation tables); see
+    [`crates/formula-engine/src/locale/data/README.md`](./crates/formula-engine/src/locale/data/README.md).
+
 ## Code of Conduct
 
 This project follows the Contributor Covenant. See [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).

@@ -56,8 +56,21 @@ To regenerate after adding/removing Rust functions (requires a Rust toolchain; p
 pnpm generate:function-catalog
 ```
 
+### Locale function-name translations (localized formula editing)
+
+The engine persists formulas in canonical en-US form, but supports translating function names and
+separators to/from locale display forms (`de-DE`, `fr-FR`, `es-ES`) using committed translation
+tables under:
+
+- `crates/formula-engine/src/locale/data/`
+
+These tables are generated from locale source JSON files (ideally extracted from a real Excel
+install). For generation steps, completeness requirements, and `es-ES` verification guidance, see:
+
+- [`crates/formula-engine/src/locale/data/README.md`](./crates/formula-engine/src/locale/data/README.md)
+
 ### AI tab-completion latency benchmark
- 
+  
 To guard against performance regressions in the JavaScript tab-completion engine (`TabCompletionEngine`),
 you can run a lightweight micro-benchmark locally:
 
