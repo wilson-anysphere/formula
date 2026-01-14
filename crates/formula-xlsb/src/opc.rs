@@ -41,6 +41,13 @@ const MAX_XLSB_ZIP_PART_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
 /// This bounds memory usage when `preserve_unknown_parts=true` and a package contains many parts.
 const MAX_XLSB_PRESERVED_TOTAL_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 
+/// Maximum total bytes allowed when opening an XLSB package from a `Read`er.
+///
+/// `open_from_reader_with_options` materializes the full ZIP container into memory so the
+/// workbook can lazily re-open parts later. Avoid unbounded reads / allocations for attacker
+/// controlled streams.
+const MAX_XLSB_PACKAGE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+
 /// Maximum number of ZIP entries we will process when opening an XLSB file.
 ///
 /// This prevents pathological packages with millions of tiny entries from causing excessive CPU
@@ -53,6 +60,7 @@ const ZIP_ENTRY_READ_PREALLOC_BYTES: usize = 64 * 1024; // 64 KiB
 const ENV_MAX_XLSB_ZIP_PART_BYTES: &str = "FORMULA_XLSB_MAX_ZIP_PART_BYTES";
 const ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES: &str = "FORMULA_XLSB_MAX_PRESERVED_TOTAL_BYTES";
 const ENV_MAX_XLSB_ZIP_ENTRIES: &str = "FORMULA_XLSB_MAX_ZIP_ENTRIES";
+const ENV_MAX_XLSB_PACKAGE_BYTES: &str = "FORMULA_XLSB_MAX_PACKAGE_BYTES";
 
 const OFFICE_DOCUMENT_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
@@ -85,6 +93,13 @@ fn max_xlsb_zip_entries() -> usize {
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(MAX_XLSB_ZIP_ENTRIES)
+}
+
+fn max_xlsb_package_bytes() -> u64 {
+    std::env::var(ENV_MAX_XLSB_PACKAGE_BYTES)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(MAX_XLSB_PACKAGE_BYTES)
 }
 
 /// Controls how much of the original package we keep around for round-trip preservation.
@@ -234,9 +249,31 @@ impl XlsbWorkbook {
         mut reader: R,
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
+        let max = max_xlsb_package_bytes();
+
+        // Avoid unbounded reads/allocation for attacker-controlled input streams. We still
+        // materialize the package into memory so the workbook can lazily re-open the ZIP later.
         reader.seek(SeekFrom::Start(0))?;
+        let len = reader.seek(SeekFrom::End(0))?;
+        if len > max {
+            return Err(ParseError::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("XLSB package too large: {len} bytes exceeds limit {max} bytes"),
+            )));
+        }
+        reader.seek(SeekFrom::Start(0))?;
+
         let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
+        reader.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > max {
+            return Err(ParseError::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "XLSB package too large: {} bytes exceeds limit {max} bytes",
+                    bytes.len()
+                ),
+            )));
+        }
         let bytes: Arc<[u8]> = bytes.into();
         Self::open_from_owned_bytes(bytes, options)
     }
@@ -2143,6 +2180,125 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
         preserve_parsed_parts: options.preserve_parsed_parts,
         decode_formulas: options.decode_formulas,
     })
+}
+
+#[cfg(test)]
+mod zip_guardrail_tests {
+    use super::*;
+    use std::io::Cursor;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.old.take() {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn build_minimal_xlsb_zip(extra_parts: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+
+        // Minimal workbook plumbing required by `parse_xlsb_from_zip`.
+        writer
+            .start_file(DEFAULT_WORKBOOK_PART, options.clone())
+            .unwrap();
+        writer.write_all(&[]).unwrap();
+
+        writer
+            .start_file(DEFAULT_WORKBOOK_RELS_PART, options.clone())
+            .unwrap();
+        writer.write_all(&[]).unwrap();
+
+        for (name, bytes) in extra_parts {
+            writer.start_file(*name, options.clone()).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+
+        writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn rejects_oversized_unknown_zip_part() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "10");
+        let _max_preserved = EnvVarGuard::set(ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES, "1024");
+
+        let oversized = [0u8; 11];
+        let bytes = build_minimal_xlsb_zip(&[("xl/unknown.bin", &oversized)]);
+
+        let options = OpenOptions {
+            preserve_unknown_parts: true,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+
+        let err = XlsbWorkbook::open_from_vec_with_options(bytes, options)
+            .err()
+            .expect("expected oversized part error");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/unknown.bin");
+                assert_eq!(size, 11);
+                assert_eq!(max, 10);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn enforces_total_preserved_parts_budget() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "100");
+        let _max_preserved = EnvVarGuard::set(ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES, "50");
+
+        let part_a = [0u8; 20];
+        let part_b = [0u8; 20];
+        let part_c = [0u8; 20];
+        let bytes = build_minimal_xlsb_zip(&[
+            ("xl/unk_a.bin", &part_a),
+            ("xl/unk_b.bin", &part_b),
+            ("xl/unk_c.bin", &part_c),
+        ]);
+
+        let options = OpenOptions {
+            preserve_unknown_parts: true,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+
+        let err = XlsbWorkbook::open_from_vec_with_options(bytes, options)
+            .err()
+            .expect("expected preserved parts budget error");
+
+        match err {
+            ParseError::PreservedPartsTooLarge { total, max } => {
+                assert!(total > max);
+                assert_eq!(max, 50);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
 }
 
 fn parse_relationships(xml_bytes: &[u8]) -> Result<HashMap<String, String>, ParseError> {
