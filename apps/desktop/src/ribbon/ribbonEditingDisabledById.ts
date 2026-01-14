@@ -7,6 +7,8 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "home.alignment.mergeCenter.mergeAcross": true,
   "home.alignment.mergeCenter.mergeCells": true,
   "home.alignment.mergeCenter.unmergeCells": true,
+  // Custom number format prompt (disabled while editing; selection/format mutations are blocked).
+  "home.number.moreFormats.custom": true,
 
   // --- Sheet structure -------------------------------------------------------
   "home.cells.format.rowHeight": true,

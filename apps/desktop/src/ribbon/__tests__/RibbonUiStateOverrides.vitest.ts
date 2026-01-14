@@ -186,6 +186,7 @@ describe("Ribbon UI state overrides", () => {
       "home.alignment.mergeCenter.mergeAcross",
       "home.alignment.mergeCenter.mergeCells",
       "home.alignment.mergeCenter.unmergeCells",
+      "home.number.moreFormats.custom",
       "home.font.subscript",
       "home.font.superscript",
       "home.editing.sortFilter.sortAtoZ",
