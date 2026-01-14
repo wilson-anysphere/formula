@@ -108,3 +108,21 @@ jobs:
   assert.match(proc.stderr, /missing.*toolchain/i);
 });
 
+test("fails when workflow uses cargo but does not install pinned toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Run cargo without installing toolchain
+        run: cargo test --locked
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /use rust tooling but does not install the pinned toolchain/i);
+});
