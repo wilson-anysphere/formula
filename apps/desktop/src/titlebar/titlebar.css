@@ -8,9 +8,9 @@
 .formula-titlebar.formula-titlebar--component {
   display: flex;
   align-items: center;
-  height: 32px;
-  padding: var(--space-0) calc(var(--space-4) + var(--space-1));
-  gap: calc(var(--space-4) + var(--space-1));
+  height: 28px;
+  padding: var(--space-0) var(--space-4);
+  gap: var(--space-4);
   box-sizing: border-box;
   cursor: default;
 
@@ -39,19 +39,13 @@
   gap: var(--space-2);
 }
 
-.formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  border: 1px solid var(--border);
+.formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button,
+.formula-titlebar.formula-titlebar--component .formula-titlebar__action-button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
   border-radius: var(--radius-sm);
-  background: var(--bg-surface);
   color: var(--text-secondary);
-
   cursor: pointer;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
@@ -59,8 +53,18 @@
     color var(--motion-duration-fast) var(--motion-ease);
 }
 
+.formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:hover:not(:disabled) {
   background: var(--bg-hover);
+  border-color: var(--border);
   color: var(--text-primary);
 }
 
@@ -70,9 +74,8 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:disabled {
-  color: var(--text-secondary);
-  cursor: default;
-  opacity: 0.6;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button svg {
@@ -84,7 +87,7 @@
   width: 11px;
   height: 11px;
   padding: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius);
 
   border: none;
   background: var(--bg-tertiary);
@@ -157,28 +160,19 @@
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button {
   height: 22px;
-  padding: var(--space-0) calc(var(--space-4) + var(--space-1));
+  padding: var(--space-0) var(--space-4);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
   white-space: nowrap;
-
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
   font-size: 11px;
-
-  cursor: pointer;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease),
-    border-color var(--motion-duration-fast) var(--motion-ease),
-    color var(--motion-duration-fast) var(--motion-ease);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:hover:not(:disabled) {
   background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:focus-visible {
@@ -187,8 +181,8 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:disabled {
-  cursor: default;
-  opacity: 0.6;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary {
@@ -207,32 +201,24 @@
   border-color: var(--accent-active);
 }
 
-:root[data-theme="high-contrast"] .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary {
-  filter: none;
+.formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:focus-visible {
+  outline-color: var(--text-on-accent);
 }
 
 :root[data-theme="high-contrast"]
   .formula-titlebar.formula-titlebar--component
-  .formula-titlebar__action-button--primary:hover:not(:disabled) {
-  border-color: var(--text-on-accent);
-}
-
+  .formula-titlebar__action-button--primary:hover:not(:disabled),
 :root[data-theme="high-contrast"]
   .formula-titlebar.formula-titlebar--component
   .formula-titlebar__action-button--primary:active:not(:disabled) {
+  background: var(--accent);
   border-color: var(--text-on-accent);
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {
-  .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary {
-    filter: none;
-  }
-
-  .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:hover:not(:disabled) {
-    border-color: var(--text-on-accent);
-  }
-
+  .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:hover:not(:disabled),
   .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary:active:not(:disabled) {
+    background: var(--accent);
     border-color: var(--text-on-accent);
   }
 }

@@ -2331,6 +2331,11 @@ const buildTitlebarProps = () => ({
 const titlebar = mountTitlebar(titlebarRootEl, buildTitlebarProps());
 
 const syncTitlebar = () => {
+  // Titlebar undo/redo state is computed by `SpreadsheetApp.getUndoRedoState`, which relies on the
+  // desktop-shell-owned `__formulaSpreadsheetIsEditing` flag (to include split-view secondary edits).
+  // Ensure the flag is up-to-date before reading undo/redo state so we don't render stale disabled
+  // controls when edit mode transitions (e.g. Escape to exit formula-bar editing).
+  emitSpreadsheetEditingChanged();
   titlebar.update(buildTitlebarProps());
 };
 
