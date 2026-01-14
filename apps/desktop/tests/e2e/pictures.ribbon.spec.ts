@@ -144,7 +144,7 @@ test.describe("Insert → Pictures", () => {
         selectedFiles = fileChooser.isMultiple() ? multiFiles : singleFile;
         await fileChooser.setFiles(selectedFiles);
       } else {
-        const input = page.locator('input[type="file"][accept*="image"]').last();
+        const input = page.locator('input[type="file"]:not([disabled])[accept*="image"]').last();
         try {
           await expect(input).toBeAttached({ timeout: 2_000 });
         } catch {
