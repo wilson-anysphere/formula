@@ -577,7 +577,7 @@ describe("Selection Pane panel", () => {
 
     const remainingItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
     expect(remainingItemEls.length).toBe(1);
-    expect(remainingItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+    expect(Array.from(remainingItemEls).map((el) => el.getAttribute("data-testid"))).toContain("selection-pane-item-1");
 
     const raw = (app.getDocument() as any).getSheetDrawings(sheetId);
     expect(Array.isArray(raw)).toBe(true);

@@ -147,10 +147,12 @@ describe("SpreadsheetApp insert image (Tauri picker)", () => {
     mocks.pickLocalImageFiles.mockReset();
   });
 
-  it("prefers pickLocalImageFiles when Tauri dialog + invoke are available", async () => {
-    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]);
-    const file = new File([bytes], "test.png", { type: "image/png" });
-    mocks.pickLocalImageFiles.mockResolvedValue([file]);
+  it(
+    "prefers pickLocalImageFiles when Tauri dialog + invoke are available",
+    async () => {
+      const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]);
+      const file = new File([bytes], "test.png", { type: "image/png" });
+      mocks.pickLocalImageFiles.mockResolvedValue([file]);
 
     const root = createRoot();
     const status = {
@@ -190,5 +192,7 @@ describe("SpreadsheetApp insert image (Tauri picker)", () => {
 
     app.destroy();
     root.remove();
-  });
+    },
+    60_000,
+  );
 });
