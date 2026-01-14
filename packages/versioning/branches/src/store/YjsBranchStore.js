@@ -976,7 +976,7 @@ export class YjsBranchStore {
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
-      if (!this.#isCommitComplete(commitMap) && !hasPayload) return;
+      if (!hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
       const isComplete = this.#isCommitComplete(commitMap);
       if (typeof key === "string" && key.length > 0) {
@@ -1007,7 +1007,7 @@ export class YjsBranchStore {
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
-      if (!this.#isCommitComplete(commitMap) && !hasPayload) return;
+      if (!hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
       const isComplete = this.#isCommitComplete(commitMap);
       if (typeof key === "string" && key.length > 0) {
