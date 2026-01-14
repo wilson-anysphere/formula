@@ -1195,23 +1195,26 @@ function installCollabStatusIndicator(app: SpreadsheetApp, element: HTMLElement)
       const sessionForWait = session;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const whenLoaded = (s as any).whenLocalPersistenceLoaded as (() => Promise<void>) | undefined;
-      if (typeof whenLoaded === "function") {
-        void Promise.resolve()
-          .then(() => whenLoaded.call(s))
-          .catch(() => {
-            // Local persistence load failures should not crash the UI; CollabSession
-            // can still operate in online mode.
-          })
-          .finally(() => {
-            if (currentPersistenceSession !== sessionForWait) return;
-            localPersistenceLoaded = true;
-            if (!abortController.signal.aborted) render();
-          });
-      } else {
-        // No explicit signal; treat persistence as ready.
-        localPersistenceLoaded = true;
+        if (typeof whenLoaded === "function") {
+          void Promise.resolve()
+            .then(() => whenLoaded.call(s))
+            .catch(() => {
+              // Local persistence load failures should not crash the UI; CollabSession
+              // can still operate in online mode.
+            })
+            .finally(() => {
+              if (currentPersistenceSession !== sessionForWait) return;
+              localPersistenceLoaded = true;
+              if (!abortController.signal.aborted) render();
+            })
+            .catch(() => {
+              // Best-effort: avoid unhandled rejections if the `.finally` bookkeeping throws.
+            });
+        } else {
+          // No explicit signal; treat persistence as ready.
+          localPersistenceLoaded = true;
+        }
       }
-    }
 
     const provider = (s?.provider as unknown) ?? null;
     if (provider !== currentProvider) {
