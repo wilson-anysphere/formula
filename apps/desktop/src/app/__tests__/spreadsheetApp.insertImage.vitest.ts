@@ -183,6 +183,63 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     root.remove();
   });
 
+  it("inserts into the original sheet even if the user switches sheets mid-insert", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+    const sheet1 = app.getCurrentSheetId();
+
+    // Ensure Sheet2 exists so we can switch away while bytes are still loading.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    let resolveBytes: ((buf: ArrayBuffer) => void) | null = null;
+    const arrayBuffer = new Promise<ArrayBuffer>((resolve) => {
+      resolveBytes = resolve;
+    });
+    const file = {
+      name: "slow.png",
+      type: "image/png",
+      size: 4,
+      arrayBuffer: () => arrayBuffer,
+    } as any as File;
+
+    app.insertImageFromLocalFile();
+    const input = root.querySelector<HTMLInputElement>('input[data-testid="insert-image-input"]');
+    expect(input).not.toBeNull();
+    Object.defineProperty(input!, "files", { configurable: true, value: [file] });
+    input!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    // Switch sheets while `insertImageFromPickedFile` is awaiting the file bytes.
+    app.activateSheet("Sheet2");
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+
+    resolveBytes?.(new Uint8Array([1, 2, 3, 4]).buffer);
+
+    await waitFor(() => {
+      const drawings = doc.getSheetDrawings?.(sheet1) ?? [];
+      return Array.isArray(drawings) && drawings.length === 1;
+    });
+
+    const sheet1Drawings = Array.isArray(doc.getSheetDrawings(sheet1)) ? doc.getSheetDrawings(sheet1) : [];
+    expect(sheet1Drawings).toHaveLength(1);
+    expect(Array.isArray(doc.getSheetDrawings("Sheet2")) ? doc.getSheetDrawings("Sheet2") : []).toHaveLength(0);
+
+    // Inserting on a non-active sheet should not disrupt the current sheet's drawing selection.
+    const state = app.getDrawingsDebugState();
+    expect(state.sheetId).toBe("Sheet2");
+    expect(state.drawings).toHaveLength(0);
+    expect(state.selectedId).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("does not merge unrelated edits into the image insertion undo step while bytes are loading", async () => {
     const root = createRoot();
     const status = {

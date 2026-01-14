@@ -9563,6 +9563,7 @@ export class SpreadsheetApp {
 
   private async insertImageFromPickedFile(file: File): Promise<void> {
     if (this.isReadOnly()) return;
+    const sheetId = this.sheetId;
     const size = typeof (file as any)?.size === "number" ? (file as any).size : null;
     if (size == null || size > MAX_INSERT_IMAGE_BYTES) {
       const mb = Math.round(MAX_INSERT_IMAGE_BYTES / 1024 / 1024);
@@ -9602,7 +9603,7 @@ export class SpreadsheetApp {
       size: { cx: pxToEmu(200), cy: pxToEmu(150) },
     };
 
-    const existingObjects = this.listDrawingObjectsForSheet();
+    const existingObjects = this.listDrawingObjectsForSheet(sheetId);
     const maxZOrder = existingObjects.reduce((max, obj) => Math.max(max, obj.zOrder), -1);
 
     const docAny = this.document as any;
@@ -9702,7 +9703,7 @@ export class SpreadsheetApp {
       const nextZOrder = (() => {
         if (typeof docAny.getSheetDrawings !== "function") return maxZOrder + 1;
         try {
-          const raw = docAny.getSheetDrawings(this.sheetId);
+          const raw = docAny.getSheetDrawings(sheetId);
           const list = Array.isArray(raw) ? raw : [];
           let max = -1;
           for (const entry of list) {
@@ -9722,7 +9723,7 @@ export class SpreadsheetApp {
           // Persist the drawing id as a string for compatibility with existing document-schema
           // expectations (some integrations treat drawing ids as JSON-friendly string keys).
           // The overlay adapters normalize ids back to numbers for rendering/interaction.
-          docAny.insertDrawing(this.sheetId, { ...inserted, id: String(inserted.id) }, { label: "Insert Image" });
+          docAny.insertDrawing(sheetId, { ...inserted, id: String(inserted.id) }, { label: "Insert Image" });
           persistedToDocument = true;
         } catch (err) {
           // Best-effort: if inserting into the document fails, fall back to the in-memory cache below.
@@ -9737,7 +9738,7 @@ export class SpreadsheetApp {
       } else {
         // Update the cache immediately so the first re-render includes the inserted object even
         // if the DocumentController does not publish drawing changes synchronously.
-        this.drawingObjectsCache = { sheetId: this.sheetId, objects: combinedObjects, source: drawingsGetter };
+        this.drawingObjectsCache = { sheetId, objects: combinedObjects, source: drawingsGetter };
       }
 
       // Preload the bitmap so the first overlay render can reuse the decode promise.
@@ -9751,32 +9752,36 @@ export class SpreadsheetApp {
         // Best-effort: never fail insertion due to collab image propagation.
       }
 
-      const prevSelected = this.selectedDrawingId;
-      this.selectedDrawingId = inserted.id;
-      // Cache the selected index so the next drag gesture avoids scanning.
-      {
-        let idx = -1;
-        for (let i = 0; i < combinedObjects.length; i += 1) {
-          if (combinedObjects[i]!.id === inserted.id) {
-            idx = i;
-            break;
+      const stillOnSheet = this.sheetId === sheetId;
+      if (stillOnSheet) {
+        const prevSelected = this.selectedDrawingId;
+        this.selectedDrawingId = inserted.id;
+        // Cache the selected index so the next drag gesture avoids scanning.
+        {
+          const objects = this.listDrawingObjectsForSheet(sheetId);
+          let idx = -1;
+          for (let i = 0; i < objects.length; i += 1) {
+            if (objects[i]!.id === inserted.id) {
+              idx = i;
+              break;
+            }
           }
+          this.selectedDrawingIndex = idx >= 0 ? idx : null;
         }
-        this.selectedDrawingIndex = idx >= 0 ? idx : null;
+        if (this.selectedChartId != null) {
+          this.setSelectedChartId(null);
+        }
+        this.drawingOverlay.setSelectedId(inserted.id);
+        if (this.gridMode === "shared") {
+          this.ensureDrawingInteractionController().setSelectedId(inserted.id);
+        }
+        if (prevSelected !== inserted.id) {
+          this.dispatchDrawingSelectionChanged();
+        }
+        this.renderDrawings();
+        this.renderSelection();
+        this.dispatchDrawingsChanged();
       }
-      if (this.selectedChartId != null) {
-        this.setSelectedChartId(null);
-      }
-      this.drawingOverlay.setSelectedId(inserted.id);
-      if (this.gridMode === "shared") {
-        this.ensureDrawingInteractionController().setSelectedId(inserted.id);
-      }
-      if (prevSelected !== inserted.id) {
-        this.dispatchDrawingSelectionChanged();
-      }
-      this.renderDrawings();
-      this.renderSelection();
-      this.dispatchDrawingsChanged();
       this.focus();
     } catch (err) {
       throw err;
