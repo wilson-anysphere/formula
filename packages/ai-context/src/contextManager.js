@@ -570,57 +570,43 @@ export class ContextManager {
     const sheetName = typeof sheet?.name === "string" ? sheet.name : String(sheet?.name ?? "");
 
     return await this._withSheetIndexLock(sheetName, signal, async () => {
-      throwIfAborted(signal);
-
-      if (!this.cacheSheetIndex) {
-        const indexStats = await this.ragIndex.indexSheet(sheet, {
-          signal,
-          maxChunkRows,
-          splitRegions,
-          chunkRowOverlap,
-          maxChunksPerRegion,
-        });
-        const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
-        return { schema };
-      }
-
-      const valuesHash = stableHashValue(sheet?.values ?? [], { signal });
-      const cacheKey = sheetIndexCacheKey(sheet);
-      const signature = computeSheetIndexSignature(sheet, {
+      return await this._ensureSheetIndexedLocked(sheet, {
         signal,
         maxChunkRows,
         splitRegions,
         chunkRowOverlap,
         maxChunksPerRegion,
-        valuesHash,
       });
-      const schemaSignature = computeSheetSchemaSignature(sheet, { signal, valuesHash });
+    });
+  }
 
-      const cached = this._sheetIndexCache.get(cacheKey);
-      if (cached) {
-        // Refresh LRU on access.
-        this._sheetIndexCache.delete(cacheKey);
-        this._sheetIndexCache.set(cacheKey, cached);
-      }
+  /**
+   * Like `_ensureSheetIndexed()`, but assumes the per-sheet index lock is already held.
+   *
+   * This allows callers to keep the lock across multiple operations (e.g. indexing + search)
+   * so other concurrent calls cannot swap out the underlying in-memory RAG store between
+   * steps.
+   *
+   * @param {{ name: string, values: unknown[][], origin?: any }} sheet
+   * @param {{
+   *   signal?: AbortSignal,
+   *   maxChunkRows?: number,
+   *   splitRegions?: boolean,
+   *   chunkRowOverlap?: number,
+   *   maxChunksPerRegion?: number,
+   * }} [options]
+   * @returns {Promise<{ schema: any }>}
+   */
+  async _ensureSheetIndexedLocked(sheet, options = {}) {
+    const signal = options.signal;
+    const maxChunkRows = options.maxChunkRows;
+    const splitRegions = options.splitRegions === true;
+    const chunkRowOverlap = splitRegions ? options.chunkRowOverlap : undefined;
+    const maxChunksPerRegion = splitRegions ? options.maxChunksPerRegion : undefined;
+    throwIfAborted(signal);
+    const sheetName = typeof sheet?.name === "string" ? sheet.name : String(sheet?.name ?? "");
 
-      const activeKey = this._sheetNameToActiveCacheKey.get(sheetName);
-      const upToDate = cached?.signature === signature && activeKey === cacheKey;
-      if (upToDate) {
-        if (cached?.schemaSignature === schemaSignature) return { schema: cached.schema };
-        // Schema-only metadata changed (e.g. named ranges / tables). Recompute schema without
-        // re-indexing/embedding.
-        const schema = extractSheetSchema(sheet, { signal });
-        const nextCached = {
-          signature,
-          schemaSignature,
-          schema,
-          sheetName,
-        };
-        this._sheetIndexCache.delete(cacheKey);
-        this._sheetIndexCache.set(cacheKey, nextCached);
-        return { schema };
-      }
-
+    if (!this.cacheSheetIndex) {
       const indexStats = await this.ragIndex.indexSheet(sheet, {
         signal,
         maxChunkRows,
@@ -629,33 +615,80 @@ export class ContextManager {
         maxChunksPerRegion,
       });
       const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
+      return { schema };
+    }
 
-      // Update caches after successful indexing.
-      this._sheetNameToActiveCacheKey.set(sheetName, cacheKey);
+    const valuesHash = stableHashValue(sheet?.values ?? [], { signal });
+    const cacheKey = sheetIndexCacheKey(sheet);
+    const signature = computeSheetIndexSignature(sheet, {
+      signal,
+      maxChunkRows,
+      splitRegions,
+      chunkRowOverlap,
+      maxChunksPerRegion,
+      valuesHash,
+    });
+    const schemaSignature = computeSheetSchemaSignature(sheet, { signal, valuesHash });
+
+    const cached = this._sheetIndexCache.get(cacheKey);
+    if (cached) {
+      // Refresh LRU on access.
       this._sheetIndexCache.delete(cacheKey);
-      this._sheetIndexCache.set(cacheKey, { signature, schemaSignature, schema, sheetName });
-      while (this._sheetIndexCache.size > this._sheetIndexCacheLimit) {
-        const oldestKey = this._sheetIndexCache.keys().next().value;
-        if (oldestKey === undefined) break;
-        const oldestEntry = this._sheetIndexCache.get(oldestKey);
-        this._sheetIndexCache.delete(oldestKey);
-        if (oldestEntry?.sheetName) {
-          const evictedSheetName = oldestEntry.sheetName;
-          const activeKeyForSheet = this._sheetNameToActiveCacheKey.get(evictedSheetName);
-          if (activeKeyForSheet === oldestKey) {
-            this._sheetNameToActiveCacheKey.delete(evictedSheetName);
+      this._sheetIndexCache.set(cacheKey, cached);
+    }
 
-            // Bound in-memory RAG storage as well as the signature cache. When a sheet's active
-            // index entry is evicted from the LRU, delete the sheet's chunks from the vector
-            // store so `RagIndex.search()` doesn't keep considering stale sheets forever.
-            throwIfAborted(signal);
-            await deleteSheetRegionChunks(this.ragIndex?.store, evictedSheetName, { signal });
-          }
+    const activeKey = this._sheetNameToActiveCacheKey.get(sheetName);
+    const upToDate = cached?.signature === signature && activeKey === cacheKey;
+    if (upToDate) {
+      if (cached?.schemaSignature === schemaSignature) return { schema: cached.schema };
+      // Schema-only metadata changed (e.g. named ranges / tables). Recompute schema without
+      // re-indexing/embedding.
+      const schema = extractSheetSchema(sheet, { signal });
+      const nextCached = {
+        signature,
+        schemaSignature,
+        schema,
+        sheetName,
+      };
+      this._sheetIndexCache.delete(cacheKey);
+      this._sheetIndexCache.set(cacheKey, nextCached);
+      return { schema };
+    }
+
+    const indexStats = await this.ragIndex.indexSheet(sheet, {
+      signal,
+      maxChunkRows,
+      splitRegions,
+      chunkRowOverlap,
+      maxChunksPerRegion,
+    });
+    const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
+
+    // Update caches after successful indexing.
+    this._sheetNameToActiveCacheKey.set(sheetName, cacheKey);
+    this._sheetIndexCache.delete(cacheKey);
+    this._sheetIndexCache.set(cacheKey, { signature, schemaSignature, schema, sheetName });
+    while (this._sheetIndexCache.size > this._sheetIndexCacheLimit) {
+      const oldestKey = this._sheetIndexCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      const oldestEntry = this._sheetIndexCache.get(oldestKey);
+      this._sheetIndexCache.delete(oldestKey);
+      if (oldestEntry?.sheetName) {
+        const evictedSheetName = oldestEntry.sheetName;
+        const activeKeyForSheet = this._sheetNameToActiveCacheKey.get(evictedSheetName);
+        if (activeKeyForSheet === oldestKey) {
+          this._sheetNameToActiveCacheKey.delete(evictedSheetName);
+
+          // Bound in-memory RAG storage as well as the signature cache. When a sheet's active
+          // index entry is evicted from the LRU, delete the sheet's chunks from the vector
+          // store so `RagIndex.search()` doesn't keep considering stale sheets forever.
+          throwIfAborted(signal);
+          await deleteSheetRegionChunks(this.ragIndex?.store, evictedSheetName, { signal });
         }
       }
+    }
 
-      return { schema };
-    });
+    return { schema };
   }
 
   /**
@@ -930,18 +963,6 @@ export class ContextManager {
     }
 
     throwIfAborted(signal);
-    // Index sheet into the in-memory RAG store (cached by content signature).
-    //
-    // `RagIndex.indexSheet()` extracts the schema as part of chunking; `_ensureSheetIndexed()`
-    // reuses that work (or cached results) so we don't run schema extraction twice.
-    const { schema } = await this._ensureSheetIndexed(sheetForContext, {
-      signal,
-      maxChunkRows,
-      splitRegions,
-      chunkRowOverlap,
-      maxChunksPerRegion,
-    });
-    throwIfAborted(signal);
     let queryForRag = params.query;
     if (dlp) {
       const queryHeuristic = classifyTextForDlp(params.query);
@@ -960,7 +981,24 @@ export class ContextManager {
         }
       }
     }
-    const retrieved = await this.ragIndex.search(queryForRag, this.sheetRagTopK, { signal });
+
+    // Index sheet into the in-memory RAG store (cached by content signature) and retrieve
+    // relevant chunks. Both steps must run under the per-sheet lock so concurrent calls
+    // cannot swap out the underlying store between indexing and retrieval (which could
+    // otherwise leak unredacted content under DLP REDACT decisions).
+    const sheetName = typeof sheetForContext?.name === "string" ? sheetForContext.name : String(sheetForContext?.name ?? "");
+    const { schema, retrieved } = await this._withSheetIndexLock(sheetName, signal, async () => {
+      const { schema } = await this._ensureSheetIndexedLocked(sheetForContext, {
+        signal,
+        maxChunkRows,
+        splitRegions,
+        chunkRowOverlap,
+        maxChunksPerRegion,
+      });
+      throwIfAborted(signal);
+      const retrieved = await this.ragIndex.search(queryForRag, this.sheetRagTopK, { signal });
+      return { schema, retrieved };
+    });
     throwIfAborted(signal);
 
     const sampleRows = params.sampleRows ?? 20;
