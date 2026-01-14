@@ -314,11 +314,15 @@ fn read_xl_wide_string(data: &[u8], offset: &mut usize) -> Option<String> {
     let bytes = &data[*offset..*offset + byte_len];
     *offset += byte_len;
 
-    let mut units = Vec::with_capacity(cch);
-    for chunk in bytes.chunks_exact(2) {
-        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    // Strict decode: return `None` on invalid surrogate sequences.
+    let mut out = String::with_capacity(bytes.len());
+    let iter = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+    for decoded in std::char::decode_utf16(iter) {
+        out.push(decoded.ok()?);
     }
-    String::from_utf16(&units).ok()
+    Some(out)
 }
 
 fn write_xl_wide_string(out: &mut Vec<u8>, s: &str) {

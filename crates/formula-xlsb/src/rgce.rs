@@ -793,13 +793,17 @@ fn decode_rgce_impl(
                 let raw = &rgce[i..i + needed];
                 i += needed;
 
-                let mut units = Vec::with_capacity(cch);
-                for chunk in raw.chunks_exact(2) {
-                    units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-                }
-
                 // Excel escapes embedded quotes by doubling them inside the literal.
-                let s = String::from_utf16_lossy(&units);
+                let mut s = String::with_capacity(raw.len());
+                let iter = raw
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+                for decoded in std::char::decode_utf16(iter) {
+                    match decoded {
+                        Ok(ch) => s.push(ch),
+                        Err(_) => s.push('\u{FFFD}'),
+                    }
+                }
                 let escaped = escape_excel_string_literal(&s);
                 stack.push(ExprFragment::new(format!("\"{escaped}\"")));
             }
@@ -1864,11 +1868,16 @@ fn decode_array_constant(
                     let raw = &rgcb[i..i + byte_len];
                     i += byte_len;
 
-                    let mut units = Vec::with_capacity(cch);
-                    for chunk in raw.chunks_exact(2) {
-                        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    let mut s = String::with_capacity(raw.len());
+                    let iter = raw
+                        .chunks_exact(2)
+                        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+                    for decoded in std::char::decode_utf16(iter) {
+                        match decoded {
+                            Ok(ch) => s.push(ch),
+                            Err(_) => s.push('\u{FFFD}'),
+                        }
                     }
-                    let s = String::from_utf16_lossy(&units);
                     col_texts.push(format!("\"{}\"", escape_excel_string(&s)));
                 }
                 0x04 => {

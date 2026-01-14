@@ -401,13 +401,22 @@ impl SharedStringsWriterStreaming {
 
 fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
     let utf16_end = reusable_plain_si_utf16_end(payload)?;
-    let cch = u32::from_le_bytes(payload.get(1..5)?.try_into().ok()?) as usize;
+    let _cch = u32::from_le_bytes(payload.get(1..5)?.try_into().ok()?) as usize;
     let raw = payload.get(5..utf16_end)?;
-    let mut units = Vec::with_capacity(cch);
-    for chunk in raw.chunks_exact(2) {
-        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+
+    // Avoid allocating an intermediate `Vec<u16>` for attacker-controlled strings; decode
+    // UTF-16LE directly into a `String`.
+    let mut out = String::with_capacity(raw.len());
+    let iter = raw
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+    for decoded in std::char::decode_utf16(iter) {
+        match decoded {
+            Ok(ch) => out.push(ch),
+            Err(_) => out.push('\u{FFFD}'),
+        }
     }
-    Some(String::from_utf16_lossy(&units))
+    Some(out)
 }
 
 /// Return the end offset (in bytes) of the UTF-16 text payload for a reusable "plain" `BrtSI`.

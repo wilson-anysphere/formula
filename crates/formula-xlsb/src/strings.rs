@@ -159,11 +159,19 @@ fn decode_utf16le_lossy(raw: &[u8]) -> Option<String> {
     if raw.len() % 2 != 0 {
         return None;
     }
-    let mut units = Vec::with_capacity(raw.len() / 2);
-    for chunk in raw.chunks_exact(2) {
-        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    // Avoid allocating an intermediate `Vec<u16>` for attacker-controlled inputs; decode
+    // directly into a `String`.
+    let mut out = String::with_capacity(raw.len());
+    let iter = raw
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+    for decoded in std::char::decode_utf16(iter) {
+        match decoded {
+            Ok(ch) => out.push(ch),
+            Err(_) => out.push('\u{FFFD}'),
+        }
     }
-    Some(String::from_utf16_lossy(&units))
+    Some(out)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
