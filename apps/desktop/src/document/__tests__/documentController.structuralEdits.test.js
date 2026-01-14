@@ -119,3 +119,22 @@ test("structural edits apply engine-provided formulaRewrites when present", () =
   assert.equal(doc.getCell("Sheet1", "B2").formula, "=Z99");
   assert.equal(doc.getCell("Sheet2", "A1").formula, "='Sheet1'!A2");
 });
+
+test("engine formulaRewrites can target sheets by display name (not stable id)", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", 123);
+
+  // Create a second sheet with a stable id that differs from its display name.
+  doc.addSheet({ sheetId: "sheet_2", name: "Budget" });
+  doc.setCellFormula("sheet_2", "B1", "=Sheet1!A1");
+
+  doc.insertRows("Sheet1", 0, 1, {
+    label: "Insert Rows",
+    formulaRewrites: [{ sheet: "Budget", address: "B1", before: "=Sheet1!A1", after: "=Sheet1!A2" }],
+  });
+
+  assert.equal(doc.getCell("sheet_2", "B1").formula, "=Sheet1!A2");
+  // Defensive: ensure we didn't accidentally create a new sheet with id "Budget".
+  assert.equal(doc.model.sheets.has("Budget"), false);
+});

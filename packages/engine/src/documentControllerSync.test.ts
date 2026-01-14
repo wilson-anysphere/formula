@@ -38,6 +38,21 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     });
   });
 
+  it("uses sheet display names (sheet meta) as engine sheet ids when they differ from stable ids", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", 1);
+
+    doc.addSheet({ sheetId: "sheet_2", name: "Budget" });
+    doc.setCellValue("sheet_2", "A1", 2);
+
+    expect(exportDocumentToEngineWorkbookJson(doc)).toEqual({
+      sheets: {
+        Sheet1: { cells: { A1: 1 } },
+        Budget: { cells: { A1: 2 } },
+      },
+    });
+  });
+
   it("hydrates an engine from exported JSON in a single load+recalc step", async () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", 1);
@@ -94,6 +109,32 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     expect(engine.setCells).toHaveBeenCalledTimes(1);
     expect(engine.setCells).toHaveBeenCalledWith([{ address: "A1", value: 1, sheet: "Sheet1" }]);
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports mapping DocumentController sheet ids to engine sheet names when applying deltas", async () => {
+    const engine = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+    };
+
+    await engineApplyDeltas(
+      engine,
+      [
+        {
+          sheetId: "sheet_2",
+          row: 0,
+          col: 0,
+          before: { value: null, formula: null, styleId: 0 },
+          after: { value: 1, formula: null, styleId: 0 },
+        },
+      ],
+      { sheetIdToSheet: (sheetId) => (sheetId === "sheet_2" ? "Budget" : sheetId) },
+    );
+
+    expect(engine.setCells).toHaveBeenCalledTimes(1);
+    expect(engine.setCells).toHaveBeenCalledWith([{ address: "A1", value: 1, sheet: "Budget" }]);
   });
 
   it("propagates cleared cells as null inputs (sparse clears)", async () => {

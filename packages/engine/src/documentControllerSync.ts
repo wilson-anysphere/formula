@@ -32,6 +32,12 @@ export type EngineSheetJson = {
 };
 
 export type EngineWorkbookJson = {
+  /**
+   * Worksheet map keyed by sheet identifier.
+   *
+   * In the desktop app, this should match the user-facing sheet display name
+   * (what appears in formulas like `Sheet2!A1`), not an internal stable id.
+   */
   sheets: Record<string, EngineSheetJson>;
 };
 
@@ -109,6 +115,14 @@ export type EngineApplyDocumentChangeOptions = {
    * If not provided, style deltas are ignored (backwards compatible).
    */
   getStyleById?: (styleId: number) => unknown;
+  /**
+   * Optional sheet-id resolver.
+   *
+   * DocumentController uses stable sheet ids internally, but formulas (and the WASM engine)
+   * refer to sheets by their user-facing display names. When provided, this function maps a
+   * DocumentController `sheetId` to the sheet identifier used by the engine.
+   */
+  sheetIdToSheet?: (sheetId: string) => string | null | undefined;
 };
 
 type StyleTableLike = { get(styleId: number): unknown };
@@ -127,6 +141,42 @@ type EngineStyleSyncContext = {
 
 // WeakMap ensures we don't leak engine instances in long-lived apps.
 const STYLE_SYNC_BY_ENGINE = new WeakMap<EngineSyncTarget, EngineStyleSyncContext>();
+
+function getDocumentSheetIds(doc: any): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (raw: unknown) => {
+    const id = typeof raw === "string" ? raw.trim() : "";
+    if (!id) return;
+    if (seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+
+  // Prefer sheet metadata ordering when available (it can include empty/unmaterialized sheets).
+  const meta: unknown = doc?.sheetMeta;
+  if (meta instanceof Map) {
+    for (const id of meta.keys()) push(id);
+  }
+
+  const sheetIds: unknown =
+    typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
+  if (Array.isArray(sheetIds)) {
+    for (const id of sheetIds) push(id);
+  }
+
+  return ids.length > 0 ? ids : ["Sheet1"];
+}
+
+function resolveEngineSheetNameForDocumentSheetId(doc: any, sheetId: string): string {
+  const rawId = typeof sheetId === "string" ? sheetId.trim() : "";
+  if (!rawId) return "Sheet1";
+
+  const meta = typeof doc?.getSheetMeta === "function" ? doc.getSheetMeta(rawId) : null;
+  const name = typeof meta?.name === "string" ? meta.name.trim() : "";
+  return name || rawId;
+}
 
 function getOrCreateStyleSyncContext(
   engine: EngineSyncTarget,
@@ -221,11 +271,10 @@ function isAxisValueEqual(a: number | null, b: number | null): boolean {
 export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson {
   const sheets: Record<string, EngineSheetJson> = {};
 
-  const sheetIds: string[] =
-    typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
-  const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+  const ids = getDocumentSheetIds(doc);
 
   for (const sheetId of ids) {
+    const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
     const cells: Record<string, EngineCellScalar> = {};
     const sheet = doc?.model?.sheets?.get?.(sheetId);
 
@@ -260,7 +309,7 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
     const colWidths = sanitizeAxisMap(view?.colWidths);
     const rowHeights = sanitizeAxisMap(view?.rowHeights);
 
-    sheets[sheetId] = {
+    sheets[engineSheetId] = {
       cells,
       ...(colWidths ? { colWidths } : {}),
       ...(rowHeights ? { rowHeights } : {}),
@@ -302,11 +351,10 @@ export async function engineHydrateFromDocument(
         : null;
 
   if (setColWidthChars && typeof doc?.getSheetView === "function") {
-    const sheetIds: string[] =
-      typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
-    const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+    const ids = getDocumentSheetIds(doc);
 
     for (const sheetId of ids) {
+      const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
       const view = doc.getSheetView(sheetId) as { colWidths?: Record<string, number> } | null;
       const colWidths = view?.colWidths ?? null;
       if (!colWidths) continue;
@@ -317,7 +365,7 @@ export async function engineHydrateFromDocument(
         const widthPx = Number(rawWidth);
         if (!Number.isFinite(widthPx) || widthPx <= 0) continue;
         const widthChars = docColWidthPxToExcelChars(widthPx);
-        await setColWidthChars(sheetId, col, widthChars);
+        await setColWidthChars(engineSheetId, col, widthChars);
       }
     }
   }
@@ -327,13 +375,12 @@ export async function engineHydrateFromDocument(
     const ctx: EngineStyleSyncContext = { styleTable, docStyleIdToEngineStyleId: new Map() };
     STYLE_SYNC_BY_ENGINE.set(engine, ctx);
 
-    const sheetIds: string[] =
-      typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
-    const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+    const ids = getDocumentSheetIds(doc);
 
     // Sync sheet/row/col formatting layers when the engine exposes the optional hooks.
     if (engine.internStyle) {
       for (const sheetId of ids) {
+        const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
         // Ensure sheet model is materialized (DocumentController is lazily sheet-creating).
         doc?.model?.getCell?.(sheetId, 0, 0);
         const sheet = doc?.model?.sheets?.get?.(sheetId);
@@ -343,7 +390,7 @@ export async function engineHydrateFromDocument(
           const docStyleId = typeof sheet?.defaultStyleId === "number" ? sheet.defaultStyleId : 0;
           if (Number.isInteger(docStyleId) && docStyleId !== 0) {
             const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
-            await engine.setSheetDefaultStyleId(engineStyleId, sheetId);
+            await engine.setSheetDefaultStyleId(engineStyleId, engineSheetId);
           }
         }
 
@@ -353,7 +400,7 @@ export async function engineHydrateFromDocument(
             const docStyleId = typeof rawDocStyleId === "number" ? rawDocStyleId : 0;
             if (!Number.isInteger(docStyleId) || docStyleId === 0) continue;
             const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
-            await engine.setRowStyleId(row, engineStyleId, sheetId);
+            await engine.setRowStyleId(row, engineStyleId, engineSheetId);
           }
         }
 
@@ -363,7 +410,7 @@ export async function engineHydrateFromDocument(
             const docStyleId = typeof rawDocStyleId === "number" ? rawDocStyleId : 0;
             if (!Number.isInteger(docStyleId) || docStyleId === 0) continue;
             const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
-            await engine.setColStyleId(col, engineStyleId, sheetId);
+            await engine.setColStyleId(col, engineStyleId, engineSheetId);
           }
         }
       }
@@ -372,6 +419,7 @@ export async function engineHydrateFromDocument(
     // Only attempt to sync per-cell style ids if the engine exposes the optional formatting hooks.
     if (engine.setCellStyleId && engine.internStyle) {
       for (const sheetId of ids) {
+        const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
         const sheet = doc?.model?.sheets?.get?.(sheetId);
         if (!sheet?.cells?.entries) continue;
 
@@ -387,7 +435,7 @@ export async function engineHydrateFromDocument(
           const address = toA1(coord.row, coord.col);
 
           const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
-          styleUpdates.push(engine.setCellStyleId(sheetId, address, engineStyleId));
+          styleUpdates.push(engine.setCellStyleId(engineSheetId, address, engineStyleId));
         }
         // Apply per-sheet to keep memory bounded for large workbooks.
         if (styleUpdates.length > 0) await Promise.all(styleUpdates);
@@ -406,12 +454,19 @@ export async function engineHydrateFromDocument(
 export async function engineApplyDeltas(
   engine: EngineSyncTarget,
   deltas: readonly DocumentCellDelta[],
-  options: { recalculate?: boolean } = {},
+  options: { recalculate?: boolean; sheetIdToSheet?: (sheetId: string) => string | null | undefined } = {},
 ): Promise<CellChange[]> {
   const shouldRecalculate = options.recalculate ?? true;
   const updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }> = [];
   const styleUpdates: Array<{ address: string; docStyleId: number; sheet?: string }> = [];
   let didApply = false;
+
+  const resolveSheet = (sheetId: string | undefined): string | undefined => {
+    if (!sheetId) return sheetId;
+    const resolved = options.sheetIdToSheet?.(sheetId);
+    const trimmed = typeof resolved === "string" ? resolved.trim() : "";
+    return trimmed ? trimmed : sheetId;
+  };
 
   for (const delta of deltas) {
     const beforeInput = cellStateToEngineInput(delta.before);
@@ -421,12 +476,12 @@ export async function engineApplyDeltas(
 
     // Track value/formula edits (including rich-text run edits that change plain text).
     if (beforeInput !== afterInput) {
-      updates.push({ address, value: afterInput, sheet: delta.sheetId });
+      updates.push({ address, value: afterInput, sheet: resolveSheet(delta.sheetId) });
     }
 
     // Track formatting-only edits when the engine supports style metadata.
     if (engine.setCellStyleId && delta.before.styleId !== delta.after.styleId) {
-      styleUpdates.push({ address, docStyleId: delta.after.styleId, sheet: delta.sheetId });
+      styleUpdates.push({ address, docStyleId: delta.after.styleId, sheet: resolveSheet(delta.sheetId) });
     }
   }
 
@@ -514,7 +569,7 @@ export async function engineApplyDocumentChange(
   // Apply cell deltas first (value/formula + per-cell style ids), but defer recalculation so we
   // only recalc once per DocumentController change payload.
   if (deltas.length > 0) {
-    await engineApplyDeltas(engine, deltas, { recalculate: false });
+    await engineApplyDeltas(engine, deltas, { recalculate: false, sheetIdToSheet: options.sheetIdToSheet });
   }
 
   let didApplyAnyLayerStyles = false;
@@ -526,7 +581,9 @@ export async function engineApplyDocumentChange(
       if (docStyleId !== 0 && !canResolveNonZeroStyles) continue;
 
       const engineStyleId = docStyleId === 0 ? 0 : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
-      await engine.setRowStyleId(d.row, engineStyleId, d.sheetId);
+      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
+      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
+      await engine.setRowStyleId(d.row, engineStyleId, sheet);
       didApplyAnyLayerStyles = true;
     }
   }
@@ -538,7 +595,9 @@ export async function engineApplyDocumentChange(
       if (docStyleId !== 0 && !canResolveNonZeroStyles) continue;
 
       const engineStyleId = docStyleId === 0 ? 0 : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
-      await engine.setColStyleId(d.col, engineStyleId, d.sheetId);
+      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
+      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
+      await engine.setColStyleId(d.col, engineStyleId, sheet);
       didApplyAnyLayerStyles = true;
     }
   }
@@ -550,7 +609,9 @@ export async function engineApplyDocumentChange(
       if (docStyleId !== 0 && !canResolveNonZeroStyles) continue;
 
       const engineStyleId = docStyleId === 0 ? 0 : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
-      await engine.setSheetDefaultStyleId(engineStyleId, d.sheetId);
+      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
+      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
+      await engine.setSheetDefaultStyleId(engineStyleId, sheet);
       didApplyAnyLayerStyles = true;
     }
   }
@@ -571,6 +632,8 @@ export async function engineApplyDocumentChange(
     for (const delta of sheetViewDeltas) {
       const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : "";
       if (!sheetId) continue;
+      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(sheetId) : null;
+      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : sheetId;
 
       const beforeColWidths = delta?.before?.colWidths ?? null;
       const afterColWidths = delta?.after?.colWidths ?? null;
@@ -594,7 +657,7 @@ export async function engineApplyDocumentChange(
 
         didApplyAnyColWidths = true;
         const widthChars = after == null ? null : docColWidthPxToExcelChars(after);
-        await setColWidthChars(sheetId, col, widthChars);
+        await setColWidthChars(sheet, col, widthChars);
       }
     }
   }

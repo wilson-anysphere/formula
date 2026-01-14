@@ -4219,6 +4219,63 @@ export class DocumentController {
   }
 
   /**
+   * Resolve a sheet token from an engine `formulaRewrites` entry into a DocumentController sheet id.
+   *
+   * The WASM engine speaks in terms of **sheet display names** (the same tokens that appear in
+   * formulas, e.g. `Budget!A1`). DocumentController APIs operate on stable sheet ids instead.
+   *
+   * Prefer matching by sheet display name (case-insensitive) and fall back to matching by id.
+   * Never creates sheets as a side effect: unknown tokens resolve to null.
+   *
+   * @param {string} token
+   * @returns {string | null}
+   */
+  #resolveSheetIdForFormulaRewriteToken(token) {
+    const raw = (() => {
+      const text = String(token ?? "").trim();
+      if (!text) return "";
+      // Unquote `'My Sheet'` style tokens when the engine surfaces them.
+      const quoted = /^'((?:[^']|'')+)'$/.exec(text);
+      if (quoted) return quoted[1].replace(/''/g, "'").trim();
+      return text;
+    })();
+    if (!raw) return null;
+
+    const needleNameCi = normalizeSheetNameForCaseInsensitiveCompare(raw);
+    const needleIdCi = raw.toLowerCase();
+
+    /** @type {string[]} */
+    const candidates = [];
+    const seen = new Set();
+    for (const id of this.model.sheets.keys()) {
+      const key = typeof id === "string" ? id : String(id ?? "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(key);
+    }
+    for (const id of this.sheetMeta.keys()) {
+      const key = typeof id === "string" ? id : String(id ?? "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(key);
+    }
+
+    // 1) Prefer display-name matches (Excel semantics).
+    for (const id of candidates) {
+      const meta = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
+      const name = typeof meta?.name === "string" ? meta.name.trim() : id;
+      if (normalizeSheetNameForCaseInsensitiveCompare(name) === needleNameCi) return id;
+    }
+
+    // 2) Fall back to id matches (case-insensitive) so legacy stable-id tokens still work.
+    for (const id of candidates) {
+      if (typeof id === "string" && id.toLowerCase() === needleIdCi) return id;
+    }
+
+    return null;
+  }
+
+  /**
    * Core structural edit implementation (rows/cols insert/delete).
    *
    * @param {{ sheetId: string, axis: "row" | "col", mode: "insert" | "delete", index0: number, count: number }} edit
@@ -4350,7 +4407,7 @@ export class DocumentController {
     if (engineRewrites) {
       rewriteAfterBySheet = new Map();
       for (const rewrite of engineRewrites) {
-        const targetSheetId = String(rewrite?.sheet ?? rewrite?.sheetId ?? "").trim();
+        const targetSheetId = this.#resolveSheetIdForFormulaRewriteToken(rewrite?.sheet ?? rewrite?.sheetId);
         if (!targetSheetId) continue;
         if (typeof rewrite?.after !== "string") continue;
         const address = typeof rewrite?.address === "string" ? rewrite.address : "";
@@ -4772,7 +4829,7 @@ export class DocumentController {
     const rewriteAfterBySheet = new Map();
     const formulaRewrites = Array.isArray(options.formulaRewrites) ? options.formulaRewrites : [];
     for (const rewrite of formulaRewrites) {
-      const targetSheetId = String(rewrite?.sheet ?? rewrite?.sheetId ?? "").trim();
+      const targetSheetId = this.#resolveSheetIdForFormulaRewriteToken(rewrite?.sheet ?? rewrite?.sheetId);
       if (!targetSheetId) continue;
       const address = typeof rewrite?.address === "string" ? rewrite.address : "";
       if (!address) continue;

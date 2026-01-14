@@ -6421,6 +6421,28 @@ export class SpreadsheetApp {
               return;
             }
 
+            const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+            const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
+              if (!delta) return false;
+              // Sheet add/delete.
+              if (delta.before == null || delta.after == null) return true;
+              // Sheet rename.
+              const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
+              const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
+              return beforeName !== afterName;
+            });
+
+            if (sheetMetaRequiresHydrate) {
+              this.clearComputedValuesByCoord();
+              void this.enqueueWasmSync(async (worker) => {
+                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                  workbookFileMetadata: this.workbookFileMetadata,
+                });
+                this.applyComputedChanges(changes);
+              });
+              return;
+            }
+
             const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
             const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
             const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
@@ -6444,9 +6466,24 @@ export class SpreadsheetApp {
               return;
             }
 
+            const sheetNameCache = new Map<string, string>();
+            const sheetIdToSheet = (sheetId: string): string => {
+              const key = String(sheetId ?? "").trim();
+              if (!key) return "Sheet1";
+              const cached = sheetNameCache.get(key);
+              if (cached) return cached;
+
+              const meta = (this.document as any)?.getSheetMeta?.(key) ?? null;
+              const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
+              const resolved = metaName || key;
+              sheetNameCache.set(key, resolved);
+              return resolved;
+            };
+
             void this.enqueueWasmSync(async (worker) => {
               const changes = await engineApplyDocumentChange(engineClientAsSyncTarget(worker), payload, {
                 getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
+                sheetIdToSheet,
               });
               this.applyComputedChanges(changes);
             });
@@ -8595,7 +8632,16 @@ export class SpreadsheetApp {
 
       await this.enqueueWasmSync(async (worker) => {
         try {
-          result = await worker.applyOperation(op);
+          const sheetId = op.sheet;
+          const metaName = (() => {
+            if (!sheetId) return null;
+            const meta = (this.document as any)?.getSheetMeta?.(sheetId) ?? null;
+            const name = typeof meta?.name === "string" ? meta.name.trim() : "";
+            return name || null;
+          })();
+          const resolvedSheetName = metaName ?? this.sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+          const engineOp = { ...op, sheet: resolvedSheetName } as EditOp;
+          result = await worker.applyOperation(engineOp);
         } catch (err) {
           opError = err;
           throw err;
@@ -18698,9 +18744,9 @@ export class SpreadsheetApp {
   }
 
   private getCellComputedValueForSheetInternal(sheetId: string, cell: CellCoord): SpreadsheetValue {
-    // The WASM engine currently cannot resolve sheet-qualified references (e.g. `Sheet2!A1`),
-    // so when multiple sheets exist we fall back to the in-process evaluator for *all* formulas
-    // to keep dependent values consistent.
+    // Today we only use the WASM engine's computed-value cache for single-sheet workbooks.
+    // Multi-sheet workbooks continue to use the in-process evaluator for compatibility
+    // while the engine integration matures (sheet metadata, cross-sheet refs, etc).
     // Hot path: avoid allocating a fresh `string[]` on every render-time lookup.
     const sheetCount = (this.document as any)?.model?.sheets?.size;
     const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
