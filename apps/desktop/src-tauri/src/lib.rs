@@ -28,8 +28,7 @@ pub mod opened_urls;
 pub mod oauth_loopback;
 pub mod oauth_redirect;
 pub mod persistence;
-#[cfg(any(feature = "desktop", test))]
-mod power_query_validation;
+pub mod power_query_validation;
 pub mod python;
 #[cfg(any(feature = "desktop", test))]
 pub mod pyodide_assets;

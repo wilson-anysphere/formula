@@ -77,6 +77,22 @@ fn decrypt_agile_package_key_from_password(
     package_key_len: usize,
     iv_derivation: PasswordKeyIvDerivation,
 ) -> Result<Vec<u8>> {
+    decrypt_agile_package_key_from_password_with_iv_derivation(
+        info,
+        password_hash,
+        key_encrypt_key_len,
+        package_key_len,
+        iv_derivation,
+    )
+}
+
+fn decrypt_agile_package_key_from_password_with_iv_derivation(
+    info: &AgileEncryptionInfo,
+    password_hash: &[u8],
+    key_encrypt_key_len: usize,
+    package_key_len: usize,
+    iv_derivation: PasswordKeyIvDerivation,
+) -> Result<Vec<u8>> {
     let password_key = &info.password_key;
     // MS-OFFCRYPTO: for the password key encryptor (`p:encryptedKey`), the AES-CBC IV used for
     // `encryptedVerifierHashInput`, `encryptedVerifierHashValue`, and `encryptedKeyValue` is the

@@ -1857,6 +1857,39 @@ mod tests {
     }
 
     #[test]
+    fn read_part_from_reader_limited_rejects_oversized_part() {
+        let max_bytes = 10u64;
+        let payload = vec![0u8; (max_bytes + 1) as usize];
+        let bytes = build_package(&[("xl/vbaProject.bin", payload.as_slice())]);
+
+        let err = read_part_from_reader_limited(Cursor::new(bytes), "xl/vbaProject.bin", max_bytes)
+            .unwrap_err();
+
+        match err {
+            XlsxError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/vbaProject.bin");
+                assert_eq!(size, max_bytes + 1);
+                assert_eq!(max, max_bytes);
+            }
+            other => panic!("expected PartTooLarge error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_part_from_reader_limited_reads_part_within_limit() {
+        let max_bytes = 10u64;
+        let payload = b"0123456789";
+        let bytes = build_package(&[("xl/vbaProject.bin", payload.as_slice())]);
+
+        let extracted =
+            read_part_from_reader_limited(Cursor::new(bytes), "xl/vbaProject.bin", max_bytes)
+                .expect("read part")
+                .expect("part exists");
+
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
     fn extract_cell_images_resolves_media_relationships() {
         let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">

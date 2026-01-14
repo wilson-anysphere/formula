@@ -109,6 +109,17 @@ pub fn max_workbook_open_bytes() -> u64 {
     }
 }
 
+/// Maximum size (in bytes) of the optional `xl/vbaProject.bin` payload extracted when opening
+/// workbooks.
+///
+/// This guards against memory-DoS from oversized optional ZIP parts, while still allowing
+/// legitimate macro-enabled workbooks to round-trip with macros preserved.
+pub const MAX_VBA_PROJECT_BIN_BYTES: usize = 16 * 1024 * 1024; // 16 MiB
+
+/// Maximum size (in bytes) of the optional `xl/vbaProjectSignature.bin` payload extracted when
+/// opening workbooks.
+pub const MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES: usize = 1024 * 1024; // 1 MiB
+
 /// Maximum number of bytes allowed for `Workbook::origin_xlsx_bytes`.
 ///
 /// This reads the `FORMULA_MAX_ORIGIN_XLSX_BYTES` environment variable.

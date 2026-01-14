@@ -1,4 +1,6 @@
 use crate::atomic_write::write_file_atomic;
+use crate::power_query_validation::MAX_POWER_QUERY_XML_BYTES;
+use crate::resource_limits::{MAX_VBA_PROJECT_BIN_BYTES, MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES};
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
@@ -40,14 +42,6 @@ trait ReadSeek: Read + std::io::Seek {}
 impl<T: Read + std::io::Seek> ReadSeek for T {}
 
 const FORMULA_POWER_QUERY_PART: &str = "xl/formula/power-query.xml";
-/// Maximum uncompressed size to preserve for optional workbook parts that we round-trip
-/// opportunistically (e.g. Power Query XML, VBA signatures).
-///
-/// These parts are not required to open the workbook in Formula, so if they're larger than this
-/// limit we skip preserving them instead of risking backend OOM on crafted ZIP bombs.
-///
-/// Note: some macro-related parts (e.g. `xl/vbaProject.bin`) have larger dedicated limits.
-const MAX_OPTIONAL_PRESERVE_PART_BYTES: u64 = 32 * 1024 * 1024; // 32MiB
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PASSWORD_REQUIRED_PREFIX: &str = "PASSWORD_REQUIRED:";
 const INVALID_PASSWORD_PREFIX: &str = "INVALID_PASSWORD:";
@@ -87,9 +81,6 @@ const XLSX_CONTENT_TYPES_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const XLSX_WORKBOOK_XML_MAX_BYTES: u64 = 16 * 1024 * 1024;
 const XLSX_WORKSHEET_XML_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const XLSX_THEME_XML_MAX_BYTES: u64 = 8 * 1024 * 1024;
-const XLSX_POWER_QUERY_XML_MAX_BYTES: u64 = MAX_OPTIONAL_PRESERVE_PART_BYTES;
-const XLSX_VBA_PROJECT_MAX_BYTES: u64 = 128 * 1024 * 1024;
-const XLSX_VBA_SIGNATURE_MAX_BYTES: u64 = MAX_OPTIONAL_PRESERVE_PART_BYTES;
 
 #[derive(Clone, Debug)]
 pub struct Sheet {
@@ -680,6 +671,20 @@ pub(crate) fn looks_like_workbook(path: &Path) -> bool {
 }
 
 fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    read_xlsx_or_xlsm_blocking_with_limits(
+        path,
+        MAX_VBA_PROJECT_BIN_BYTES as u64,
+        MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES as u64,
+        MAX_POWER_QUERY_XML_BYTES as u64,
+    )
+}
+
+fn read_xlsx_or_xlsm_blocking_with_limits(
+    path: &Path,
+    max_vba_project_bin_bytes: u64,
+    max_vba_project_signature_bin_bytes: u64,
+    max_power_query_xml_bytes: u64,
+) -> anyhow::Result<Workbook> {
     let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
     let file_size = std::fs::metadata(path)
         .with_context(|| format!("stat workbook {:?}", path))?
@@ -709,13 +714,23 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         }
     };
 
-    read_xlsx_or_xlsm_from_open_reader(path, origin_xlsx_bytes, open_reader)
+    read_xlsx_or_xlsm_from_open_reader(
+        path,
+        origin_xlsx_bytes,
+        open_reader,
+        max_vba_project_bin_bytes,
+        max_vba_project_signature_bin_bytes,
+        max_power_query_xml_bytes,
+    )
 }
 
 fn read_xlsx_or_xlsm_from_open_reader<F>(
     path: &Path,
     origin_xlsx_bytes: Option<Arc<[u8]>>,
     open_reader: F,
+    max_vba_project_bin_bytes: u64,
+    max_vba_project_signature_bin_bytes: u64,
+    max_power_query_xml_bytes: u64,
 ) -> anyhow::Result<Workbook>
 where
     F: Fn() -> anyhow::Result<Box<dyn ReadSeek>>,
@@ -757,33 +772,39 @@ where
     //
     // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
     let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
-    let read_optional_part = |part: &str, max_bytes: u64| -> Option<Vec<u8>> {
+    fn read_optional_part_limited(
+        open_reader: &dyn Fn() -> anyhow::Result<Box<dyn ReadSeek>>,
+        part_name: &str,
+        max_bytes: u64,
+    ) -> Option<Vec<u8>> {
         let reader = open_reader().ok()?;
-        match formula_xlsx::read_part_from_reader_limited(reader, part, max_bytes) {
+        match formula_xlsx::read_part_from_reader_limited(reader, part_name, max_bytes) {
             Ok(bytes) => bytes,
-            Err(err @ formula_xlsx::XlsxError::PartTooLarge { .. }) => {
+            Err(formula_xlsx::XlsxError::PartTooLarge { part, size, max }) => {
                 eprintln!(
-                    "[xlsx] skipping optional part {part} (exceeds size limit): {err}"
+                    "warning: dropped oversized xlsx part `{part}` ({size} bytes, max {max})"
                 );
                 None
             }
             Err(_) => None,
         }
-    };
+    }
 
-    out.vba_project_bin = read_optional_part(
+    out.vba_project_bin = read_optional_part_limited(
+        &open_reader,
         "xl/vbaProject.bin",
-        XLSX_VBA_PROJECT_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
+        max_vba_project_bin_bytes,
     );
-    out.vba_project_signature_bin = read_optional_part(
+    out.vba_project_signature_bin = read_optional_part_limited(
+        &open_reader,
         "xl/vbaProjectSignature.bin",
-        XLSX_VBA_SIGNATURE_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
+        max_vba_project_signature_bin_bytes,
     );
-
-    if let Some(power_query_xml) = read_optional_part(
-            FORMULA_POWER_QUERY_PART,
-            XLSX_POWER_QUERY_XML_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
-        ) {
+    if let Some(power_query_xml) = read_optional_part_limited(
+        &open_reader,
+        FORMULA_POWER_QUERY_PART,
+        max_power_query_xml_bytes,
+    ) {
         out.power_query_xml = Some(power_query_xml.clone());
         out.original_power_query_xml = Some(power_query_xml);
     }
@@ -1009,7 +1030,14 @@ fn read_encrypted_ooxml_workbook_blocking(
         Ok(Box::new(Cursor::new(decrypted_zip_for_reader.clone())))
     };
 
-    read_xlsx_or_xlsm_from_open_reader(path, origin_xlsx_bytes, open_reader)
+    read_xlsx_or_xlsm_from_open_reader(
+        path,
+        origin_xlsx_bytes,
+        open_reader,
+        MAX_VBA_PROJECT_BIN_BYTES as u64,
+        MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES as u64,
+        MAX_POWER_QUERY_XML_BYTES as u64,
+    )
 }
 
 fn validate_workbook_open_size(path: &Path) -> anyhow::Result<u64> {
@@ -3687,6 +3715,43 @@ mod tests {
         output.finish().expect("finish zip").into_inner()
     }
 
+    fn upsert_zip_entry(bytes: &[u8], target: &str, replacement: &[u8]) -> Vec<u8> {
+        let mut input = ZipArchive::new(Cursor::new(bytes)).expect("open zip");
+
+        let mut output = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+
+        let mut wrote_target = false;
+        for i in 0..input.len() {
+            let mut entry = input.by_index(i).expect("open zip entry");
+            let name = entry.name().to_string();
+
+            if entry.is_dir() {
+                output
+                    .add_directory(name, options)
+                    .expect("write directory");
+                continue;
+            }
+
+            output.start_file(name.clone(), options).expect("start file");
+            if zip_entry_name_matches(&name, target) {
+                output.write_all(replacement).expect("write replacement");
+                wrote_target = true;
+            } else {
+                std::io::copy(&mut entry, &mut output).expect("copy zip entry");
+            }
+        }
+
+        if !wrote_target {
+            output
+                .start_file(target, options)
+                .expect("start missing target file");
+            output.write_all(replacement).expect("write missing target");
+        }
+
+        output.finish().expect("finish zip").into_inner()
+    }
+
     fn assert_no_critical_diffs(expected: &Path, actual: &Path) {
         let report = diff_workbooks(expected, actual).expect("diff workbooks");
         let critical = report.count(Severity::Critical);
@@ -4014,6 +4079,74 @@ mod tests {
         assert!(
             zip_part_exists(&rewritten, "xl/vbaProject.bin"),
             "expected xl/vbaProject.bin to be discovered even when ZIP entry names have leading '/'"
+        );
+    }
+
+    #[test]
+    fn read_xlsx_or_xlsm_drops_oversized_vba_project_bin() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let bytes = std::fs::read(fixture).expect("read xlsm fixture");
+
+        let vba_limit = 64u64;
+        let oversized_vba = vec![0u8; (vba_limit + 1) as usize];
+        let rewritten = upsert_zip_entry(&bytes, "xl/vbaProject.bin", &oversized_vba);
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let workbook_path = tmp.path().join("oversized.xlsm");
+        std::fs::write(&workbook_path, rewritten).expect("write workbook");
+
+        let workbook = read_xlsx_or_xlsm_blocking_with_limits(
+            &workbook_path,
+            vba_limit,
+            1024 * 1024,
+            1024 * 1024,
+        )
+        .expect("open workbook");
+
+        assert!(
+            workbook.vba_project_bin.is_none(),
+            "expected oversized VBA project bin to be dropped"
+        );
+        assert!(
+            workbook.macro_fingerprint.is_none(),
+            "expected macro fingerprint to be absent when VBA project is absent"
+        );
+    }
+
+    #[test]
+    fn read_xlsx_or_xlsm_drops_oversized_power_query_xml() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let bytes = std::fs::read(fixture).expect("read xlsm fixture");
+
+        let power_query_limit = 64u64;
+        let oversized_xml = vec![b'a'; (power_query_limit + 1) as usize];
+        let rewritten = upsert_zip_entry(&bytes, FORMULA_POWER_QUERY_PART, &oversized_xml);
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let workbook_path = tmp.path().join("oversized-power-query.xlsm");
+        std::fs::write(&workbook_path, rewritten).expect("write workbook");
+
+        let workbook = read_xlsx_or_xlsm_blocking_with_limits(
+            &workbook_path,
+            1024 * 1024,
+            1024 * 1024,
+            power_query_limit,
+        )
+        .expect("open workbook");
+
+        assert!(
+            workbook.power_query_xml.is_none(),
+            "expected oversized Power Query XML to be dropped"
+        );
+        assert!(
+            workbook.original_power_query_xml.is_none(),
+            "expected original Power Query XML to be unset when part was dropped"
         );
     }
 
