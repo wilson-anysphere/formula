@@ -44,7 +44,7 @@ const MAX_XLSB_PRESERVED_TOTAL_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 
 /// Maximum total bytes allowed when opening an XLSB package from a `Read`er.
 ///
-/// `open_from_reader_with_options` materializes the full ZIP container into memory so the
+/// [`XlsbWorkbook::open_from_reader`] materializes the full ZIP container into memory so the
 /// workbook can lazily re-open parts later. Avoid unbounded reads / allocations for attacker
 /// controlled streams.
 const MAX_XLSB_PACKAGE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
@@ -255,6 +255,12 @@ impl XlsbWorkbook {
     ///
     /// This is primarily intended for decrypted Office-encrypted XLSB files, where the decrypted
     /// OPC/ZIP package exists only in memory.
+    ///
+    /// `options` mirrors [`Self::open_with_options`], controlling which parts are preserved and
+    /// whether formulas are decoded.
+    ///
+    /// Note: this implementation buffers the full ZIP container into memory so worksheet parts
+    /// can be streamed on demand.
     pub fn open_from_reader<R: Read + Seek>(
         mut reader: R,
         options: OpenOptions,
