@@ -539,6 +539,19 @@ fn hash_bytes(hash_alg: HashAlgorithm, bytes: &[u8]) -> Vec<u8> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasswordKeyIvDerivation {
+    /// Use the password `saltValue` (truncated to `blockSize`) as the AES-CBC IV.
+    SaltValue,
+    /// Derive the AES-CBC IV using the standard MS-OFFCRYPTO `derive_iv(salt, blockKey, blockSize)`
+    /// algorithm.
+    ///
+    /// While this is not the behavior described by MS-OFFCRYPTO for `p:encryptedKey`, some
+    /// producers appear to use it; we support it as a best-effort fallback to match
+    /// `agile_decrypt.rs`.
+    Derived,
+}
+
 fn decrypt_key_encryptor_blob(
     password_hash: &[u8],
     key_encryptor: &AgilePasswordKeyEncryptor,
@@ -601,6 +614,66 @@ fn decrypt_key_encryptor_blob(
     Ok(buf)
 }
 
+fn decrypt_key_encryptor_blob_derived_iv(
+    password_hash: &[u8],
+    key_encryptor: &AgilePasswordKeyEncryptor,
+    block_key: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>> {
+    let key_len = (key_encryptor.key_bits / 8) as usize;
+    let iv_len = key_encryptor.block_size as usize;
+
+    let key =
+        derive_key(password_hash, block_key, key_len, key_encryptor.hash_algorithm).map_err(|e| match e {
+            crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+                OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+            }
+            crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+                element: "encryptedKey".to_string(),
+                attr: "keyBits".to_string(),
+                reason: reason.to_string(),
+            },
+        })?;
+    let iv = derive_iv(
+        &key_encryptor.salt_value,
+        block_key,
+        iv_len,
+        key_encryptor.hash_algorithm,
+    )
+    .map_err(|e| match e {
+        crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+            OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+        }
+        crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+            element: "encryptedKey".to_string(),
+            attr: "saltValue".to_string(),
+            reason: reason.to_string(),
+        },
+    })?;
+
+    let mut buf = ciphertext.to_vec();
+    decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut buf).map_err(|err| match err {
+        AesCbcDecryptError::UnsupportedKeyLength(key_len) => OffCryptoError::InvalidAttribute {
+            element: "encryptedKey".to_string(),
+            attr: "keyBits".to_string(),
+            reason: format!("derived key length {key_len} is not a supported AES key size"),
+        },
+        AesCbcDecryptError::InvalidIvLength(iv_len) => OffCryptoError::InvalidAttribute {
+            element: "encryptedKey".to_string(),
+            attr: "blockSize".to_string(),
+            reason: format!("derived IV length {iv_len} does not match AES block size"),
+        },
+        AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
+            OffCryptoError::CiphertextNotBlockAligned {
+                field: "ciphertext",
+                len: ciphertext_len,
+            }
+        }
+    })?;
+
+    Ok(buf)
+}
+
 fn validate_ciphertext_block_aligned(field: &'static str, ciphertext: &[u8]) -> Result<()> {
     if ciphertext.len() % AES_BLOCK_SIZE != 0 {
         return Err(OffCryptoError::CiphertextNotBlockAligned {
@@ -638,54 +711,86 @@ pub fn decrypt_agile_keys(
     })?;
 
     // Decrypt verifierHashInput and verifierHashValue for password verification.
+    //
+    // MS-OFFCRYPTO specifies that password key-encryptor blobs (`p:encryptedKey`) use the raw
+    // `saltValue` as the AES-CBC IV, but some producers appear to derive per-blob IVs using the
+    // standard `derive_iv` algorithm. Try both strategies for compatibility (mirrors
+    // `agile_decrypt.rs`).
     validate_ciphertext_block_aligned(
         "encryptedVerifierHashInput",
         &key_encryptor.encrypted_verifier_hash_input,
     )?;
-    let verifier_hash_input = decrypt_key_encryptor_blob(
-        &password_hash,
-        key_encryptor,
-        &VERIFIER_HASH_INPUT_BLOCK,
-        &key_encryptor.encrypted_verifier_hash_input,
-    )?;
-    let verifier_hash_input = verifier_hash_input
-        .get(..AES_BLOCK_SIZE)
-        .ok_or_else(|| OffCryptoError::WrongPassword)?
-        .to_vec();
-
     validate_ciphertext_block_aligned(
         "encryptedVerifierHashValue",
         &key_encryptor.encrypted_verifier_hash_value,
     )?;
-    let verifier_hash_value = decrypt_key_encryptor_blob(
-        &password_hash,
-        key_encryptor,
-        &VERIFIER_HASH_VALUE_BLOCK,
-        &key_encryptor.encrypted_verifier_hash_value,
-    )?;
-    let verifier_hash_value = verifier_hash_value
-        .get(..key_encryptor.hash_size as usize)
-        .ok_or_else(|| OffCryptoError::WrongPassword)?
-        .to_vec();
-
-    let computed = hash_bytes(key_encryptor.hash_algorithm, &verifier_hash_input);
-    if computed.get(..verifier_hash_value.len()) != Some(verifier_hash_value.as_slice()) {
-        return Err(OffCryptoError::WrongPassword);
-    }
-
-    // Decrypt the package key (`keyValue`).
     validate_ciphertext_block_aligned("encryptedKeyValue", &key_encryptor.encrypted_key_value)?;
-    let key_value = decrypt_key_encryptor_blob(
-        &password_hash,
-        key_encryptor,
-        &KEY_VALUE_BLOCK,
-        &key_encryptor.encrypted_key_value,
-    )?;
+
     let package_key_len = (info.key_data.key_bits / 8) as usize;
-    let package_key = key_value
-        .get(..package_key_len)
-        .ok_or_else(|| OffCryptoError::WrongPassword)?
-        .to_vec();
+
+    let decrypt_package_key = |iv_derivation: PasswordKeyIvDerivation| -> Result<Vec<u8>> {
+        let decrypt_blob = |block_key: &[u8], ciphertext: &[u8]| -> Result<Vec<u8>> {
+            match iv_derivation {
+                PasswordKeyIvDerivation::SaltValue => {
+                    decrypt_key_encryptor_blob(&password_hash, key_encryptor, block_key, ciphertext)
+                }
+                PasswordKeyIvDerivation::Derived => decrypt_key_encryptor_blob_derived_iv(
+                    &password_hash,
+                    key_encryptor,
+                    block_key,
+                    ciphertext,
+                ),
+            }
+        };
+
+        let verifier_hash_input = decrypt_blob(
+            &VERIFIER_HASH_INPUT_BLOCK,
+            &key_encryptor.encrypted_verifier_hash_input,
+        )?;
+        let verifier_hash_input = verifier_hash_input
+            .get(..key_encryptor.block_size as usize)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "encryptedKey".to_string(),
+                attr: "encryptedVerifierHashInput".to_string(),
+                reason: "decrypted verifierHashInput shorter than blockSize".to_string(),
+            })?
+            .to_vec();
+
+        let verifier_hash_value = decrypt_blob(
+            &VERIFIER_HASH_VALUE_BLOCK,
+            &key_encryptor.encrypted_verifier_hash_value,
+        )?;
+        let verifier_hash_value = verifier_hash_value
+            .get(..key_encryptor.hash_size as usize)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "encryptedKey".to_string(),
+                attr: "encryptedVerifierHashValue".to_string(),
+                reason: "decrypted verifierHashValue shorter than hashSize".to_string(),
+            })?
+            .to_vec();
+
+        let computed = hash_bytes(key_encryptor.hash_algorithm, &verifier_hash_input);
+        if computed.get(..verifier_hash_value.len()) != Some(verifier_hash_value.as_slice()) {
+            return Err(OffCryptoError::WrongPassword);
+        }
+
+        // Decrypt the package key (`keyValue`).
+        let key_value = decrypt_blob(&KEY_VALUE_BLOCK, &key_encryptor.encrypted_key_value)?;
+        Ok(key_value
+            .get(..package_key_len)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "encryptedKey".to_string(),
+                attr: "encryptedKeyValue".to_string(),
+                reason: "decrypted keyValue shorter than keyData.keyBits".to_string(),
+            })?
+            .to_vec())
+    };
+
+    let package_key = match decrypt_package_key(PasswordKeyIvDerivation::SaltValue) {
+        Ok(key) => key,
+        Err(OffCryptoError::WrongPassword) => decrypt_package_key(PasswordKeyIvDerivation::Derived)?,
+        Err(other) => return Err(other),
+    };
 
     // Decrypt HMAC key/value (if present).
     let (hmac_key, hmac_value) = match info.data_integrity.as_ref() {
@@ -1481,6 +1586,158 @@ mod tests {
             matches!(err, OffCryptoError::WrongPassword),
             "expected WrongPassword, got {err:?}"
         );
+    }
+
+    #[test]
+    fn agile_roundtrip_accepts_derived_password_key_encryptor_ivs() {
+        // Some producers derive per-blob IVs for password key-encryptor fields instead of using the
+        // raw `saltValue`. `decrypt_agile_keys` supports this as a best-effort fallback.
+        let password = "password";
+
+        // keyData (package encryption parameters).
+        let key_data_salt = (0u8..=15).collect::<Vec<_>>();
+        let key_data_key_bits = 128u32;
+        let key_data_block_size = 16u32;
+        let key_data_hash_alg = HashAlgorithm::Sha1;
+        let key_data_hash_size = 20u32;
+
+        // password key encryptor parameters.
+        let ke_salt = (16u8..=31).collect::<Vec<_>>();
+        let ke_spin = 10u32;
+        let ke_key_bits = 128u32;
+        let ke_block_size = 16u32;
+        let ke_hash_alg = HashAlgorithm::Sha1;
+        let ke_hash_size = 20u32;
+
+        // Generate a deterministic package key and plaintext.
+        let package_key = b"0123456789ABCDEF".to_vec(); // 16 bytes
+        let plaintext = (0..5000u32).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+
+        // --- Encrypt EncryptedPackage stream (segment-wise) -----------------------------------
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+
+        let padded_plaintext = zero_pad(plaintext.clone());
+        for (i, chunk) in padded_plaintext.chunks(0x1000).enumerate() {
+            let iv =
+                derive_segment_iv(&key_data_salt, i as u32, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
+            let ct = encrypt_aes_cbc_no_padding(&package_key, &iv, chunk);
+            encrypted_package.extend_from_slice(&ct);
+        }
+
+        // --- Encrypt password key-encryptor blobs (derived IV compatibility mode) --------------
+        let pw_hash = hash_password(password, &ke_salt, ke_spin, ke_hash_alg).unwrap();
+
+        let verifier_hash_input = b"abcdefghijklmnop".to_vec(); // 16 bytes
+        let verifier_hash_value = hash_bytes(ke_hash_alg, &verifier_hash_input); // 20 bytes for SHA1
+
+        fn encrypt_ke_blob_derived_iv(
+            pw_hash: &[u8],
+            ke_salt: &[u8],
+            ke_key_bits: u32,
+            ke_block_size: u32,
+            ke_hash_alg: HashAlgorithm,
+            block_key: &[u8],
+            plaintext: &[u8],
+        ) -> Vec<u8> {
+            let key_len = (ke_key_bits / 8) as usize;
+            let iv_len = ke_block_size as usize;
+            let key = derive_key(pw_hash, block_key, key_len, ke_hash_alg).unwrap();
+            let iv = derive_iv(ke_salt, block_key, iv_len, ke_hash_alg).unwrap();
+            let padded = zero_pad(plaintext.to_vec());
+            encrypt_aes_cbc_no_padding(&key, &iv, &padded)
+        }
+
+        let encrypted_verifier_hash_input = encrypt_ke_blob_derived_iv(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &VERIFIER_HASH_INPUT_BLOCK,
+            &verifier_hash_input,
+        );
+        let encrypted_verifier_hash_value = encrypt_ke_blob_derived_iv(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &VERIFIER_HASH_VALUE_BLOCK,
+            &verifier_hash_value,
+        );
+        let encrypted_key_value = encrypt_ke_blob_derived_iv(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &KEY_VALUE_BLOCK,
+            &package_key,
+        );
+
+        // dataIntegrity blobs encrypted using the *package key* and IVs derived from keyData salt.
+        let hmac_key_plain = (100u8..120).collect::<Vec<_>>(); // 20 bytes
+        let hmac_value_plain = (200u8..220).collect::<Vec<_>>(); // 20 bytes
+        let iv_hmac_key =
+            derive_iv(&key_data_salt, &HMAC_KEY_BLOCK, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
+        let encrypted_hmac_key =
+            encrypt_aes_cbc_no_padding(&package_key, &iv_hmac_key, &zero_pad(hmac_key_plain.clone()));
+        let iv_hmac_val =
+            derive_iv(&key_data_salt, &HMAC_VALUE_BLOCK, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
+        let encrypted_hmac_value = encrypt_aes_cbc_no_padding(
+            &package_key,
+            &iv_hmac_val,
+            &zero_pad(hmac_value_plain.clone()),
+        );
+
+        // Build the EncryptionInfo XML.
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltSize="16" blockSize="{key_data_block_size}" keyBits="{key_data_key_bits}" hashSize="{key_data_hash_size}"
+           cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+           saltValue="{key_data_salt_b64}"/>
+  <dataIntegrity encryptedHmacKey="{ehk_b64}" encryptedHmacValue="{ehv_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+      <p:encryptedKey saltSize="16" blockSize="{ke_block_size}" keyBits="{ke_key_bits}" hashSize="{ke_hash_size}"
+                      spinCount="{ke_spin}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                      saltValue="{ke_salt_b64}"
+                      encryptedVerifierHashInput="{evhi_b64}"
+                      encryptedVerifierHashValue="{evhv_b64}"
+                      encryptedKeyValue="{ekv_b64}"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#,
+            key_data_salt_b64 = BASE64.encode(&key_data_salt),
+            ke_salt_b64 = BASE64.encode(&ke_salt),
+            evhi_b64 = BASE64.encode(&encrypted_verifier_hash_input),
+            evhv_b64 = BASE64.encode(&encrypted_verifier_hash_value),
+            ekv_b64 = BASE64.encode(&encrypted_key_value),
+            ehk_b64 = BASE64.encode(&encrypted_hmac_key),
+            ehv_b64 = BASE64.encode(&encrypted_hmac_value),
+        );
+
+        let mut encryption_info_stream = Vec::new();
+        encryption_info_stream.extend_from_slice(&4u16.to_le_bytes()); // major
+        encryption_info_stream.extend_from_slice(&4u16.to_le_bytes()); // minor
+        encryption_info_stream.extend_from_slice(&0u32.to_le_bytes()); // flags
+        encryption_info_stream.extend_from_slice(xml.as_bytes());
+
+        let parsed = parse_agile_encryption_info_stream(&encryption_info_stream).expect("parse");
+        assert_eq!(parsed.key_data.block_size, key_data_block_size);
+
+        let keys = decrypt_agile_keys(&parsed, password).expect("decrypt keys");
+        assert_eq!(keys.package_key, package_key);
+        assert_eq!(keys.hmac_key.as_deref(), Some(hmac_key_plain.as_slice()));
+        assert_eq!(keys.hmac_value.as_deref(), Some(hmac_value_plain.as_slice()));
+
+        let decrypted =
+            decrypt_agile_encrypted_package_stream(&encryption_info_stream, &encrypted_package, password)
+                .expect("decrypt package");
+        assert_eq!(decrypted, plaintext);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
