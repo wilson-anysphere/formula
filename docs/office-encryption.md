@@ -266,8 +266,10 @@ Implementation status:
 
 - `crates/formula-xlsx::offcrypto` validates `dataIntegrity` and returns `IntegrityMismatch` on
   failure.
-- `crates/formula-office-crypto` validates `dataIntegrity` and returns `IntegrityCheckFailed` on
-  failure.
+- `crates/formula-office-crypto` validates `dataIntegrity` and returns:
+  - `IntegrityCheckFailed` on HMAC mismatch
+  - `InvalidFormat` when the `<dataIntegrity>` element is missing (it currently requires integrity
+    metadata)
 - `formula-io` (behind the `encrypted-workbooks` feature):
   - The legacy `_with_password` APIs use the `formula-xlsx` Agile decryptor and validate
     `dataIntegrity` when it is present.
