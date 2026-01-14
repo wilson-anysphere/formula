@@ -1007,6 +1007,7 @@ The UI drawing overlay requires a stable numeric key (`DrawingObject.id: number`
 - **Positive safe integers** (`> 0`) are passed through unchanged.
   - For string ids, this only applies to **canonical base-10 integer strings** (e.g. `"42"`). Non-canonical numeric strings like `"001"`, `"1e3"`, or `"+1"` are treated as opaque ids and hashed to avoid collisions.
 - Any other id (missing, non-numeric, non-positive, or unsafe integer) is mapped into a **reserved hashed namespace**: `id <= -2^33`.
+  - String ids are **trimmed** before hashing to match `DocumentController` normalization.
 
 In addition, ChartStore “canvas charts” are rendered as drawing objects with ids in a separate negative namespace:
 

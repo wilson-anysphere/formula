@@ -198,6 +198,25 @@ describe("drawings/modelAdapters", () => {
     expect(uiExponent.id).not.toBe(1000);
   });
 
+  it("trims non-numeric string ids before hashing (stable across DocumentController normalization)", () => {
+    const makeModel = (id: string) => ({
+      id,
+      kind: { Image: { image_id: "image1.png" } },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 10, cy: 20 },
+        },
+      },
+      z_order: 0,
+    });
+
+    const uiTrimmed = convertModelDrawingObjectToUiDrawingObject(makeModel("foo"));
+    const uiWithWhitespace = convertModelDrawingObjectToUiDrawingObject(makeModel("  foo  "));
+    expect(uiWithWhitespace.id).toBe(uiTrimmed.id);
+    expect(uiWithWhitespace.id).toBeLessThanOrEqual(-(2 ** 33));
+  });
+
   it("does not crash when drawing object ids are missing/undefined", () => {
     const model = {
       // Intentionally omit `id`.

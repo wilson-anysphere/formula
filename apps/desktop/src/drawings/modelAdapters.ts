@@ -212,6 +212,28 @@ function stableStringify(value: unknown): string {
   }
 }
 
+function normalizeDrawingIdForHash(unwrapped: unknown): unknown {
+  if (typeof unwrapped === "string") {
+    // DocumentController trims string ids before persisting; mirror that normalization here so
+    // UI-layer hashed ids stay stable even if upstream snapshots include accidental whitespace.
+    const trimmed = unwrapped.trim();
+    // Defensive guard: avoid hashing arbitrarily-large strings (potential collab DoS vector).
+    // For long ids we hash a stable summary (prefix/suffix + length) instead of the full value.
+    const MAX_LEN = 4096;
+    if (trimmed.length > MAX_LEN) {
+      const SAMPLE = 1024;
+      return {
+        kind: "drawingId:longString",
+        len: trimmed.length,
+        prefix: trimmed.slice(0, SAMPLE),
+        suffix: trimmed.slice(-SAMPLE),
+      };
+    }
+    return trimmed;
+  }
+  return unwrapped;
+}
+
 function parseDrawingObjectId(value: unknown): number {
   const unwrapped = unwrapSingletonId(value);
   const parsed = (() => {
@@ -244,7 +266,8 @@ function parseDrawingObjectId(value: unknown): number {
   // - chart overlay ids (which use smaller-magnitude negative ids; see `chartIdToDrawingId`)
   const HASH_NAMESPACE_OFFSET = 0x200000000; // 2^33
   const maxHash = Number.MAX_SAFE_INTEGER - HASH_NAMESPACE_OFFSET;
-  const hashed = stableHash53(stableStringify(value)) % maxHash;
+  const normalizedForHash = normalizeDrawingIdForHash(unwrapped);
+  const hashed = stableHash53(stableStringify(normalizedForHash)) % maxHash;
   return -(HASH_NAMESPACE_OFFSET + hashed);
 }
 
