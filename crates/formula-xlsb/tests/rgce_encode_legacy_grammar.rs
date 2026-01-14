@@ -92,6 +92,36 @@ fn legacy_encoder_roundtrips_implicit_intersection_on_area() {
 }
 
 #[test]
+fn legacy_encoder_encodes_reordered_area_and_preserves_absolute_flags() {
+    let ctx = WorkbookContext::default();
+
+    // Excel stores areas in canonical top-left:bottom-right order, even if the formula text is not.
+    // Ensure we preserve absolute markers when the corners are written in reverse order.
+    let encoded =
+        encode_rgce_with_context("=B$1:$A2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "$A$1:B2");
+}
+
+#[test]
+fn legacy_encoder_encodes_reordered_column_range_and_preserves_absolute_flags() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context("=$C:A", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "A:$C");
+}
+
+#[test]
+fn legacy_encoder_encodes_reordered_row_range_and_preserves_absolute_flags() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context("=$3:1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "1:$3");
+}
+
+#[test]
 fn legacy_encoder_roundtrips_implicit_intersection_on_name() {
     let mut ctx = WorkbookContext::default();
     ctx.add_workbook_name("MyNamedRange", 1);
@@ -116,6 +146,24 @@ fn legacy_encoder_roundtrips_implicit_intersection_on_row_range() {
     let encoded = encode_rgce_with_context("=@1:1", &ctx, CellCoord::new(0, 0)).expect("encode");
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(normalize("@1:1"), normalize(&decoded));
+}
+
+#[test]
+fn legacy_encoder_roundtrips_implicit_intersection_on_absolute_column_range() {
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("=@$A:$C", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("@$A:$C"), normalize(&decoded));
+}
+
+#[test]
+fn legacy_encoder_roundtrips_implicit_intersection_on_absolute_row_range() {
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("=@$1:$3", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("@$1:$3"), normalize(&decoded));
 }
 
 #[test]

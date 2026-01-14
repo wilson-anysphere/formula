@@ -4663,10 +4663,24 @@ fn emit_area_fields(a: &CellRef, b: &CellRef, out: &mut Vec<u8>) {
     let col_first = a.col.min(b.col);
     let col_last = a.col.max(b.col);
 
+    // `rgce` stores row/col absolute flags on the corner payloads (in the `colFirst`/`colLast`
+    // fields). When a range is written in non-canonical order (e.g. `B$1:$A2`) the "first" corner
+    // in the token stream is still the top-left corner (min row/col) and the "last" corner is the
+    // bottom-right (max row/col).
+    //
+    // Preserve absolute flags by selecting them from whichever input corner contributed the
+    // corresponding row/col coordinate, independently for row and col.
+    let abs_row_first = if a.row <= b.row { a.abs_row } else { b.abs_row };
+    let abs_row_last = if a.row >= b.row { a.abs_row } else { b.abs_row };
+    let abs_col_first = if a.col <= b.col { a.abs_col } else { b.abs_col };
+    let abs_col_last = if a.col >= b.col { a.abs_col } else { b.abs_col };
+
     out.extend_from_slice(&row_first.to_le_bytes());
     out.extend_from_slice(&row_last.to_le_bytes());
-    out.extend_from_slice(&encode_col_field(col_first, a.abs_row, a.abs_col).to_le_bytes());
-    out.extend_from_slice(&encode_col_field(col_last, b.abs_row, b.abs_col).to_le_bytes());
+    out.extend_from_slice(
+        &encode_col_field(col_first, abs_row_first, abs_col_first).to_le_bytes(),
+    );
+    out.extend_from_slice(&encode_col_field(col_last, abs_row_last, abs_col_last).to_le_bytes());
 }
 
 fn encode_col_field(col: u32, abs_row: bool, abs_col: bool) -> u16 {
