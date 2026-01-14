@@ -252,6 +252,32 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not begin or update range selection while read-only", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "=SUM(", value: null });
+
+    view.setReadOnly(true);
+    expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
+    expect(view.model.isEditing).toBe(false);
+
+    view.beginRangeSelection(parseA1Range("A1")!, "Sheet1");
+    view.updateRangeSelection(parseA1Range("B2:C3")!, "Sheet1");
+
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("=SUM(");
+    expect(view.textarea.value).toBe("=SUM(");
+    expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
+    expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
+
+    host.remove();
+  });
+
   it("setReadOnly(false) re-enables focus-to-edit behavior after being read-only", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
