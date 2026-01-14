@@ -41,6 +41,10 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
         self.assertIsInstance(report["limit_mb"], int)
         self.assertIn("enforce", report)
         self.assertIsInstance(report["enforce"], bool)
+        self.assertIn("bundle_dirs", report)
+        self.assertIsInstance(report["bundle_dirs"], list)
+        for d in report["bundle_dirs"]:
+            self.assertIsInstance(d, str)
         self.assertIn("artifacts", report)
         self.assertIsInstance(report["artifacts"], list)
         self.assertIn("total_artifacts", report)
@@ -62,6 +66,7 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             report = self._read_report(repo_root, json_rel)
             self._assert_basic_schema(report)
             self.assertEqual(report["limit_mb"], 12)
+            self.assertEqual(report["bundle_dirs"], [])
             self.assertEqual(report["total_artifacts"], 0)
             self.assertEqual(report["over_limit_count"], 0)
             self.assertEqual(report["artifacts"], [])
@@ -77,6 +82,7 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             report = self._read_report(repo_root, default_path)
             self._assert_basic_schema(report)
             self.assertEqual(report["limit_mb"], 12)
+            self.assertEqual(report["bundle_dirs"], [])
 
     def test_json_schema_contains_artifacts_and_over_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -99,6 +105,7 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             self._assert_basic_schema(report)
             self.assertEqual(report["limit_mb"], 1)
             self.assertFalse(report["enforce"])
+            self.assertEqual(report["bundle_dirs"], ["apps/desktop/src-tauri/target/release/bundle"])
 
             self.assertEqual(report["total_artifacts"], 1)
             self.assertEqual(report["over_limit_count"], 1)
@@ -126,4 +133,5 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             report = self._read_report(repo_root, json_rel)
             self._assert_basic_schema(report)
             self.assertTrue(report["enforce"])
+            self.assertEqual(report["bundle_dirs"], ["apps/desktop/src-tauri/target/release/bundle"])
             self.assertEqual(report["over_limit_count"], 1)
