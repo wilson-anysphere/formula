@@ -39,8 +39,12 @@ fn parse_pivot_chart_parts(package: &XlsxPackage) -> Result<Vec<PivotChartPart>,
             .part(&part_name)
             .ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
 
-        let parsed = parse_chart_xml(xml)?;
-        let pivot_source_part = match parsed.pivot_source_rid.as_deref() {
+        let parsed = match parse_chart_xml(xml) {
+            Ok(parsed) => Some(parsed),
+            Err(_) => None,
+        };
+
+        let pivot_source_part = match parsed.as_ref().and_then(|parsed| parsed.pivot_source_rid.as_deref()) {
             Some(rid) => match resolve_relationship_target(package, &part_name, rid) {
                 Ok(target) => target,
                 Err(_) => None,
@@ -50,7 +54,7 @@ fn parse_pivot_chart_parts(package: &XlsxPackage) -> Result<Vec<PivotChartPart>,
 
         parts.push(PivotChartPart {
             part_name,
-            pivot_source_name: parsed.pivot_source_name,
+            pivot_source_name: parsed.and_then(|parsed| parsed.pivot_source_name),
             pivot_source_part,
         });
     }
@@ -146,6 +150,24 @@ mod tests {
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].part_name, "xl/charts/chart1.xml");
         assert_eq!(parts[0].pivot_source_name.as_deref(), Some("PivotTable1"));
+        assert_eq!(parts[0].pivot_source_part, None);
+    }
+
+    #[test]
+    fn pivot_chart_parts_is_best_effort_when_chart_xml_is_malformed() {
+        // Intentionally malformed chart XML so `parse_chart_xml` fails.
+        let malformed_chart_xml = br#"<c:chartSpace"#;
+        assert!(
+            parse_chart_xml(malformed_chart_xml).is_err(),
+            "expected malformed chart xml to fail parsing"
+        );
+
+        let pkg = build_package(&[("xl/charts/chart1.xml", malformed_chart_xml)]);
+
+        let parts = pkg.pivot_chart_parts().expect("pivot chart parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].part_name, "xl/charts/chart1.xml");
+        assert_eq!(parts[0].pivot_source_name, None);
         assert_eq!(parts[0].pivot_source_part, None);
     }
 }
