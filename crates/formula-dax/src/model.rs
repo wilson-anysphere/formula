@@ -2093,6 +2093,36 @@ mod tests {
     use std::time::Instant;
 
     #[test]
+    fn unmatched_fact_rows_builder_switches_to_dense_when_more_efficient() {
+        // Threshold is `row_count / 64`, and we switch when `unmatched_count > threshold`.
+        // For 128 rows, this becomes `> 2`.
+        let mut builder = UnmatchedFactRowsBuilder::new(128);
+        builder.push(0);
+        builder.push(1);
+        assert!(matches!(builder.rows, UnmatchedFactRows::Sparse(_)));
+
+        builder.push(2);
+        match &builder.rows {
+            UnmatchedFactRows::Dense { len, count, bits } => {
+                assert_eq!(*len, 128);
+                assert_eq!(*count, 3);
+                assert_eq!(bits.len(), 2); // 128 rows => 2 u64 words.
+            }
+            UnmatchedFactRows::Sparse(_) => panic!("expected dense representation"),
+        }
+
+        let dense = builder.finish();
+        let mut rows = Vec::new();
+        dense.extend_into(&mut rows);
+        rows.sort_unstable();
+        assert_eq!(rows, vec![0, 1, 2]);
+
+        let mut allowed = BitVec::with_len_all_false(128);
+        allowed.set(1, true);
+        assert!(dense.any_row_allowed(&allowed));
+    }
+
+    #[test]
     fn relationship_large_columnar_does_not_explode_memory() {
         if std::env::var_os("FORMULA_DAX_REL_BENCH").is_none() {
             return;
