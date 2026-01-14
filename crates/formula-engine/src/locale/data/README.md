@@ -46,6 +46,18 @@ Locale-specific function translations are sourced from deterministic JSON files 
 
 Missing entries are treated as identity mappings (canonical == localized).
 
+**Important:** `sources/<locale>.json` should be generated from a **real Excel install** via
+[`tools/excel-oracle/extract-function-translations.ps1`](../../../../../tools/excel-oracle/extract-function-translations.ps1)
+whenever possible. Hand-maintained or web-scraped translation tables are frequently incomplete, and
+any missing entry will silently fall back to English in the generated TSVs.
+
+#### `es-ES` (Spanish) source requirements
+
+`es-ES` must be backed by a **complete Excel-extracted** mapping that covers the engine’s full
+function catalog. Do **not** replace `sources/es-ES.json` with partial online translation tables:
+those commonly omit large parts of Excel’s function surface area, causing many Spanish spellings to
+degrade to canonical (English) names.
+
 #### Generating `sources/<locale>.json` from a real Excel install (Windows)
 
 The most reliable way to obtain a complete translation mapping for a locale is to ask
@@ -81,6 +93,15 @@ After updating the source JSON, regenerate and verify the generated TSVs:
 node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
 ```
+
+Quick verification checklist (especially for `es-ES`):
+
+- `node scripts/generate-locale-function-tsv.js --check` passes.
+- Spot-check that a few functions known to be localized in Spanish are **not** falling back to
+  English in `crates/formula-engine/src/locale/data/es-ES.tsv`, e.g.:
+  - `SUM` → `SUMA`
+  - `IF` → `SI`
+  - financial functions like `NPV`/`IRR` should also localize (e.g. `NPV` → `VNA`, `IRR` → `TIR`).
 
 ### Error translations (`<locale>.errors.tsv`)
 

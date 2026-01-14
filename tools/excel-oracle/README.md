@@ -106,6 +106,13 @@ Notes / caveats:
 - The script warns if Excel maps multiple canonical functions to the same localized spelling (this
   would later cause `scripts/generate-locale-function-tsv.js` to fail).
 - Use `-Visible`, `-MaxFunctions N`, and/or PowerShell’s `-Verbose` switch for debugging.
+- `sources/<locale>.json` is expected to come from this extractor whenever possible. Avoid replacing
+  `sources/es-ES.json` with partial online translation tables; missing entries silently fall back to
+  English in the generated TSVs.
+- After extracting, regenerate + verify with:
+  - `node scripts/generate-locale-function-tsv.js`
+  - `node scripts/generate-locale-function-tsv.js --check`
+  - and spot-check that Spanish financial functions like `NPV`/`IRR` localize (e.g. `VNA`/`TIR`).
 
 ## CI note (Excel availability)
 
