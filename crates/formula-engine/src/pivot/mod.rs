@@ -3150,44 +3150,48 @@ impl FieldIndices {
     ) -> Result<Self, PivotError> {
         let mut row_indices = Vec::new();
         for f in &cfg.row_fields {
-            let Some(source_field) = f.source_field.as_cache_field_name() else {
-                return Err(PivotError::MissingField(f.source_field.to_string()));
-            };
+            let field_name = f
+                .source_field
+                .as_cache_field_name()
+                .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
             row_indices.push(
                 source
-                    .field_index(source_field)
+                    .field_index(field_name)
                     .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
         let mut col_indices = Vec::new();
         for f in &cfg.column_fields {
-            let Some(source_field) = f.source_field.as_cache_field_name() else {
-                return Err(PivotError::MissingField(f.source_field.to_string()));
-            };
+            let field_name = f
+                .source_field
+                .as_cache_field_name()
+                .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
             col_indices.push(
                 source
-                    .field_index(source_field)
+                    .field_index(field_name)
                     .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
         let mut value_indices = Vec::new();
         for f in &cfg.value_fields {
-            let Some(source_field) = f.source_field.as_cache_field_name() else {
-                return Err(PivotError::MissingField(f.source_field.to_string()));
-            };
+            let field_name = f
+                .source_field
+                .as_cache_field_name()
+                .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
             value_indices.push(
                 source
-                    .field_index(source_field)
+                    .field_index(field_name)
                     .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
             );
         }
         let mut filter_indices = Vec::new();
         for f in &cfg.filter_fields {
-            let Some(source_field) = f.source_field.as_cache_field_name() else {
-                return Err(PivotError::MissingField(f.source_field.to_string()));
-            };
+            let field_name = f
+                .source_field
+                .as_cache_field_name()
+                .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
             let idx = source
-                .field_index(source_field)
+                .field_index(field_name)
                 .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
             filter_indices.push((idx, f.allowed.clone()));
         }
