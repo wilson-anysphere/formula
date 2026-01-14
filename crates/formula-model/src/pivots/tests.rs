@@ -20,7 +20,7 @@ fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
         }],
         filter_fields: vec![FilterField {
             source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
-            allowed: Some(HashSet::from([PivotKeyPart::Text("East".to_string())])),
+            allowed: Some(std::collections::HashSet::from([PivotKeyPart::Text("East".to_string())])),
         }],
         calculated_fields: vec![CalculatedField {
             name: "Profit".to_string(),
