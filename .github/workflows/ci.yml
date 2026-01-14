@@ -315,7 +315,15 @@ jobs:
 
       - name: Build desktop binary (Rust, release)
         id: build_desktop_binary
-        run: cargo build -p formula-desktop-tauri --features desktop --release --locked
+        run: |
+          # The desktop shell package has historically been named both `desktop` and
+          # `formula-desktop-tauri`. Build whichever exists so CI keeps reporting size
+          # without depending on an exact package rename history.
+          if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
+            cargo build -p formula-desktop-tauri --bin formula-desktop --features desktop --release --locked
+          else
+            cargo build -p desktop --bin formula-desktop --features desktop --release --locked
+          fi
 
       - name: Cache cargo-bloat binary
         if: always() && steps.build_desktop_binary.outcome == 'success'
