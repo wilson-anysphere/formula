@@ -53,6 +53,23 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
     "expected COI smoke-check script to respect CARGO_TARGET_DIR when locating the built binary",
   );
 
+  // CI optimization: allow reusing already-built artifacts.
+  assert.match(
+    src,
+    /--no-build/,
+    "expected COI smoke-check script to support a --no-build run-only mode",
+  );
+  assert.match(
+    src,
+    /FORMULA_COI_NO_BUILD/,
+    "expected COI smoke-check script to support FORMULA_COI_NO_BUILD=1 to skip rebuilds",
+  );
+  assert.match(
+    src,
+    /--bin/,
+    "expected COI smoke-check script to support an explicit --bin override path",
+  );
+
   // Some build setups (including certain CI invocations) emit to `apps/desktop/target`.
   assert.match(
     src,
