@@ -2,7 +2,6 @@ use std::fs::File;
 use std::io::{Cursor, Read, Write};
 
 use formula_xlsb::XlsbWorkbook;
-use pretty_assertions::assert_eq;
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -111,17 +110,20 @@ fn rewrite_zip_with_leading_slash_entry_names_and_calc_chain(bytes: &[u8]) -> Ve
     output.finish().expect("finish zip").into_inner()
 }
 
-#[test]
-fn opens_xlsb_with_leading_slash_zip_entry_names_and_loads_tables() {
-    let mut builder = XlsbFixtureBuilder::new();
+mod leading_slash_zip_entries_tests {
+    use super::*;
 
-    // Cell A1: formula token stream containing a single structured reference.
-    builder.set_cell_formula_num(0, 0, 0.0, ptg_list(1, 0x0000, 2, 2, 0x18), Vec::new());
+    #[test]
+    fn opens_xlsb_with_leading_slash_zip_entry_names_and_loads_tables() {
+        let mut builder = XlsbFixtureBuilder::new();
 
-    // Provide a table definition XML part. The XLSB reader should opportunistically parse these
-    // and register (table id -> name, column id -> name) mappings for structured refs, even when
-    // ZIP entry names are malformed with a leading `/`.
-    let table_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        // Cell A1: formula token stream containing a single structured reference.
+        builder.set_cell_formula_num(0, 0, 0.0, ptg_list(1, 0x0000, 2, 2, 0x18), Vec::new());
+
+        // Provide a table definition XML part. The XLSB reader should opportunistically parse these
+        // and register (table id -> name, column id -> name) mappings for structured refs, even when
+        // ZIP entry names are malformed with a leading `/`.
+        let table_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
        id="1"
        name="Table1"
@@ -133,108 +135,109 @@ fn opens_xlsb_with_leading_slash_zip_entry_names_and_loads_tables() {
   </tableColumns>
 </table>
 "#;
-    builder.add_extra_zip_part("xl/tables/table1.xml", table_xml.as_bytes().to_vec());
+        builder.add_extra_zip_part("xl/tables/table1.xml", table_xml.as_bytes().to_vec());
 
-    let bytes = builder.build_bytes();
-    let bytes = rewrite_zip_with_leading_slash_entry_names(&bytes);
+        let bytes = builder.build_bytes();
+        let bytes = rewrite_zip_with_leading_slash_entry_names(&bytes);
 
-    let mut tmp = tempfile::Builder::new()
-        .prefix("formula_xlsb_leading_slash_zip_entries_")
-        .suffix(".xlsb")
-        .tempfile()
-        .expect("create temp xlsb");
-    tmp.write_all(&bytes).expect("write temp xlsb");
-    tmp.flush().expect("flush temp xlsb");
+        let mut tmp = tempfile::Builder::new()
+            .prefix("formula_xlsb_leading_slash_zip_entries_")
+            .suffix(".xlsb")
+            .tempfile()
+            .expect("create temp xlsb");
+        tmp.write_all(&bytes).expect("write temp xlsb");
+        tmp.flush().expect("flush temp xlsb");
 
-    let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
-    let sheet = wb.read_sheet(0).expect("read sheet");
-    let cell = sheet
-        .cells
-        .iter()
-        .find(|c| c.row == 0 && c.col == 0)
-        .expect("cell");
-    let formula = cell.formula.as_ref().expect("formula");
-
-    assert_eq!(formula.text.as_deref(), Some("Table1[Qty]"));
-}
-
-#[test]
-fn edited_save_rewrites_content_types_even_when_zip_entry_names_have_leading_slash() {
-    let mut builder = XlsbFixtureBuilder::new();
-    builder.set_cell_number(0, 0, 1.0);
-
-    // Include a calcChain part and references so the edited-save path must rewrite plumbing.
-    builder.add_extra_zip_part("xl/calcChain.bin", vec![0xCA, 0x1C, 0x00, 0x00]);
-
-    let bytes = builder.build_bytes();
-    let bytes = rewrite_zip_with_leading_slash_entry_names_and_calc_chain(&bytes);
-
-    let mut src = tempfile::Builder::new()
-        .prefix("formula_xlsb_leading_slash_src_")
-        .suffix(".xlsb")
-        .tempfile()
-        .expect("create temp xlsb");
-    src.write_all(&bytes).expect("write temp xlsb");
-    src.flush().expect("flush temp xlsb");
-
-    let wb = XlsbWorkbook::open(src.path()).expect("open xlsb");
-
-    let dest = tempfile::Builder::new()
-        .prefix("formula_xlsb_leading_slash_dest_")
-        .suffix(".xlsb")
-        .tempfile()
-        .expect("create dest xlsb");
-
-    wb.save_with_edits(dest.path(), 0, 0, 0, 2.0)
-        .expect("save with edits");
-
-    let mut zip = ZipArchive::new(File::open(dest.path()).expect("open dest"))
-        .expect("read dest zip");
-    let names: Vec<String> = zip.file_names().map(str::to_string).collect();
-
-    assert!(
-        names
+        let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
+        let sheet = wb.read_sheet(0).expect("read sheet");
+        let cell = sheet
+            .cells
             .iter()
-            .all(|name| name.trim_start_matches('/').to_ascii_lowercase() != "xl/calcchain.bin"),
-        "expected edited save to remove calcChain entry"
-    );
+            .find(|c| c.row == 0 && c.col == 0)
+            .expect("cell");
+        let formula = cell.formula.as_ref().expect("formula");
 
-    let content_types_entry = names
-        .iter()
-        .find(|name| {
-            name.trim_start_matches('/')
-                .eq_ignore_ascii_case("[Content_Types].xml")
-        })
-        .expect("[Content_Types].xml entry exists");
-    assert!(
-        content_types_entry.starts_with('/'),
-        "test should cover malformed ZIP entry names (expected /[Content_Types].xml)"
-    );
+        assert_eq!(formula.text.as_deref(), Some("Table1[Qty]"));
+    }
 
-    let mut content_types = String::new();
-    zip.by_name(content_types_entry)
-        .expect("open [Content_Types].xml")
-        .read_to_string(&mut content_types)
-        .expect("read [Content_Types].xml");
-    assert!(
-        !content_types.to_ascii_lowercase().contains("calcchain.bin"),
-        "expected edited save to remove calcChain content type override"
-    );
+    #[test]
+    fn edited_save_rewrites_content_types_even_when_zip_entry_names_have_leading_slash() {
+        let mut builder = XlsbFixtureBuilder::new();
+        builder.set_cell_number(0, 0, 1.0);
 
-    let workbook_rels_entry = names
-        .iter()
-        .find(|name| {
-            name.trim_start_matches('/')
-                .eq_ignore_ascii_case("xl/_rels/workbook.bin.rels")
-        })
-        .expect("workbook rels entry exists");
-    let mut workbook_rels = String::new();
-    zip.by_name(workbook_rels_entry)
-        .expect("open workbook rels")
-        .read_to_string(&mut workbook_rels)
-        .expect("read workbook rels");
-    assert!(
-        !workbook_rels.to_ascii_lowercase().contains("calcchain"),
-        "expected edited save to remove calcChain relationship"
-    );
+        // Include a calcChain part and references so the edited-save path must rewrite plumbing.
+        builder.add_extra_zip_part("xl/calcChain.bin", vec![0xCA, 0x1C, 0x00, 0x00]);
+
+        let bytes = builder.build_bytes();
+        let bytes = rewrite_zip_with_leading_slash_entry_names_and_calc_chain(&bytes);
+
+        let mut src = tempfile::Builder::new()
+            .prefix("formula_xlsb_leading_slash_src_")
+            .suffix(".xlsb")
+            .tempfile()
+            .expect("create temp xlsb");
+        src.write_all(&bytes).expect("write temp xlsb");
+        src.flush().expect("flush temp xlsb");
+
+        let wb = XlsbWorkbook::open(src.path()).expect("open xlsb");
+
+        let dest = tempfile::Builder::new()
+            .prefix("formula_xlsb_leading_slash_dest_")
+            .suffix(".xlsb")
+            .tempfile()
+            .expect("create dest xlsb");
+
+        wb.save_with_edits(dest.path(), 0, 0, 0, 2.0)
+            .expect("save with edits");
+
+        let mut zip = ZipArchive::new(File::open(dest.path()).expect("open dest"))
+            .expect("read dest zip");
+        let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+
+        assert!(
+            names.iter().all(|name| {
+                name.trim_start_matches('/').to_ascii_lowercase() != "xl/calcchain.bin"
+            }),
+            "expected edited save to remove calcChain entry"
+        );
+
+        let content_types_entry = names
+            .iter()
+            .find(|name| {
+                name.trim_start_matches('/')
+                    .eq_ignore_ascii_case("[Content_Types].xml")
+            })
+            .expect("[Content_Types].xml entry exists");
+        assert!(
+            content_types_entry.starts_with('/'),
+            "test should cover malformed ZIP entry names (expected /[Content_Types].xml)"
+        );
+
+        let mut content_types = String::new();
+        zip.by_name(content_types_entry)
+            .expect("open [Content_Types].xml")
+            .read_to_string(&mut content_types)
+            .expect("read [Content_Types].xml");
+        assert!(
+            !content_types.to_ascii_lowercase().contains("calcchain.bin"),
+            "expected edited save to remove calcChain content type override"
+        );
+
+        let workbook_rels_entry = names
+            .iter()
+            .find(|name| {
+                name.trim_start_matches('/')
+                    .eq_ignore_ascii_case("xl/_rels/workbook.bin.rels")
+            })
+            .expect("workbook rels entry exists");
+        let mut workbook_rels = String::new();
+        zip.by_name(workbook_rels_entry)
+            .expect("open workbook rels")
+            .read_to_string(&mut workbook_rels)
+            .expect("read workbook rels");
+        assert!(
+            !workbook_rels.to_ascii_lowercase().contains("calcchain"),
+            "expected edited save to remove calcChain relationship"
+        );
+    }
 }
