@@ -120,6 +120,11 @@ export class DrawingInteractionController {
     const rect = this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
 
+    // Mouse UX: only start drag/resize on the primary mouse button. Secondary
+    // buttons (right/middle click) should still select the drawing, but must not
+    // prevent context menus (or start moving/resizing).
+    const isNonPrimaryMouseButton = e.pointerType === "mouse" && e.button !== 0;
+
     const viewport = this.callbacks.getViewport();
     const zoom = sanitizeZoom(viewport.zoom);
     const objects = this.callbacks.getObjects();
@@ -147,7 +152,7 @@ export class DrawingInteractionController {
           this.scratchRect,
         );
         const handle = hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform);
-        if (handle) {
+        if (handle && !isNonPrimaryMouseButton) {
           this.stopPointerEvent(e);
           this.activeRect = rect;
           try {
@@ -180,6 +185,13 @@ export class DrawingInteractionController {
     this.callbacks.onSelectionChange?.(this.selectedId);
     if (!hit) {
       this.element.style.cursor = "default";
+      return;
+    }
+
+    // Secondary mouse buttons should not initiate drag/resize or capture the
+    // pointer; we only update selection above and let the event bubble (so the
+    // app can show a context menu).
+    if (isNonPrimaryMouseButton) {
       return;
     }
 
