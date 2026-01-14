@@ -42,11 +42,11 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
       when no password is provided.
     - Use `open_workbook_with_options(OpenOptions { password: ... })` (or the `_with_password`
       helpers) to decrypt and open supported encrypted workbooks in memory:
-      - **Agile (4.4)** encrypted `.xlsx`/`.xlsm` workbooks (validates Agile `dataIntegrity`
+      - **Agile (4.4)** encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks (validates Agile `dataIntegrity`
         (HMAC) when present; some producers omit it).
         - Wrong password *or* integrity mismatch surfaces as `formula_io::Error::InvalidPassword`.
       - **Standard/CryptoAPI** (`versionMinor == 2` with `versionMajor ∈ {2,3,4}`; commonly `3.2`/`4.2`)
-        encrypted `.xlsx`/`.xlsm` workbooks (wrong password surfaces as
+        encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks (wrong password surfaces as
         `formula_io::Error::InvalidPassword`).
       - Note: encrypted `.xlsb` workbooks decrypt to an OOXML ZIP containing `xl/workbook.bin` and
         are opened as `Workbook::Xlsb` (or converted to a model workbook via the password APIs).
