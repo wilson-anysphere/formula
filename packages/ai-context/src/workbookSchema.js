@@ -447,7 +447,8 @@ export function extractWorkbookSchema(workbook, options = {}) {
     const rect = normalizeRect(table?.rect ?? table);
     if (!name || !sheetName || !rect) continue;
     const sheet = sheetByName.get(sheetName) ?? null;
-    const analysis = sheet
+    const hasCellData = Boolean(sheet && (getSheetMatrix(sheet) || getSheetCellMap(sheet) || typeof sheet.getCell === "function"));
+    const analysis = hasCellData
       ? analyzeTableRect(sheet, rect, { maxAnalyzeRows, maxAnalyzeCols, signal })
       : {
           headers: [],

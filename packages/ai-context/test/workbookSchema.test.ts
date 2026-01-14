@@ -113,6 +113,27 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].inferredColumnTypes).toEqual(["number"]);
   });
 
+  it("accepts sheet name lists (string entries) even without cell data", () => {
+    const workbook = {
+      id: "wb-sheet-names",
+      sheets: ["Sheet1", "Sheet2"],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 9, c1: 1 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.sheets).toEqual([{ name: "Sheet1" }, { name: "Sheet2" }]);
+    expect(schema.tables).toHaveLength(1);
+    expect(schema.tables[0]).toMatchObject({
+      name: "T",
+      sheetName: "Sheet1",
+      rangeA1: "Sheet1!A1:B10",
+      rowCount: 10,
+      columnCount: 2,
+    });
+    expect(schema.tables[0].headers).toEqual([]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual([]);
+  });
+
   it("bounds sampling work for very large table rects", () => {
     let readCount = 0;
     const sheet = {
