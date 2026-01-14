@@ -234,6 +234,11 @@ describe("engine sync helpers", () => {
       col: number;
       runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
     }> = [];
+    readonly colFormatRunsCalls: Array<{
+      sheet: string;
+      col: number;
+      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+    }> = [];
     readonly colWidthCalls: Array<{ sheet: string; col: number; widthChars: number | null }> = [];
     readonly renameSheetCalls: Array<{ oldName: string; newName: string }> = [];
     readonly recalcCalls: Array<string | undefined> = [];
@@ -278,6 +283,14 @@ describe("engine sync helpers", () => {
       runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
     ): Promise<void> {
       this.formatRunsByColCalls.push({ sheet, col, runs });
+    }
+
+    async setColFormatRuns(
+      sheet: string,
+      col: number,
+      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    ): Promise<void> {
+      this.colFormatRunsCalls.push({ sheet, col, runs });
     }
 
     async setColWidth(sheet: string, col: number, widthChars: number | null): Promise<void> {
@@ -395,6 +408,8 @@ describe("engine sync helpers", () => {
     expect(col0?.runs).toEqual(
       expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]),
     );
+    // Prefer the modern API when available.
+    expect(engine.colFormatRunsCalls).toEqual([]);
   });
 
   it("engineHydrateFromDocument syncs sheet view column widths into engine metadata", async () => {
@@ -873,8 +888,48 @@ describe("engine sync helpers", () => {
     const col0 = engine.formatRunsByColCalls.find((call) => call.sheet === "Sheet1" && call.col === 0);
     expect(col0).toBeTruthy();
     expect(col0?.runs).toEqual(expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]));
+    // Prefer the modern API when available.
+    expect(engine.colFormatRunsCalls).toEqual([]);
 
     // Range-run formatting edits are metadata-only; they should still advance the engine's recalc tick.
     expect(engine.recalcCalls).toEqual([undefined]);
+  });
+
+  it("engineApplyDocumentChange falls back to setColFormatRuns when setFormatRunsByCol is unavailable", async () => {
+    const doc = new DocumentController();
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+    doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
+    unsubscribe();
+
+    const engine = new FakeEngine([]);
+    // Shadow the prototype method so `typeof engine.setFormatRunsByCol` is not "function".
+    (engine as any).setFormatRunsByCol = undefined;
+
+    await engineApplyDocumentChange(engine, payload, {
+      getStyleById: (styleId) => doc.styleTable.get(styleId),
+    });
+
+    expect(engine.formatRunsByColCalls).toEqual([]);
+    const col0 = engine.colFormatRunsCalls.find((call) => call.sheet === "Sheet1" && call.col === 0);
+    expect(col0).toBeTruthy();
+    expect(col0?.runs).toEqual(expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]));
+  });
+
+  it("engineHydrateFromDocument falls back to setColFormatRuns when setFormatRunsByCol is unavailable", async () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
+
+    const engine = new FakeEngine([]);
+    (engine as any).setFormatRunsByCol = undefined;
+
+    await engineHydrateFromDocument(engine, doc);
+
+    expect(engine.formatRunsByColCalls).toEqual([]);
+    const col0 = engine.colFormatRunsCalls.find((call) => call.sheet === "Sheet1" && call.col === 0);
+    expect(col0).toBeTruthy();
+    expect(col0?.runs).toEqual(expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]));
   });
 });
