@@ -2962,43 +2962,158 @@ impl DaxEngine {
                 }
             }
 
-            let mut allowed_rows = HashSet::new();
-            let row_sets = (!base_filter.is_empty())
-                .then(|| resolve_row_sets(model, &base_filter))
-                .transpose()?;
             let table_ref = model
                 .table(&table)
                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-            let candidate_count: usize;
+            let row_count = table_ref.row_count();
+            let sparse_to_dense_threshold = row_count / 64;
+
+            // Fast path: boolean predicates that are true for *all* candidate rows should not
+            // materialize a huge `HashSet<usize>` just so we can throw it away again when we
+            // detect `allowed == candidates`.
+            //
+            // We implement this with a small-prefix buffer:
+            // - Before we see the first failing row, we only buffer up to `threshold` passing
+            //   row indices.
+            // - If we see a failure after we've exceeded `threshold`, we switch directly to the
+            //   dense bitmask representation, seeded from the candidate row mask (all-true when
+            //   unfiltered, or the `resolve_row_sets` bitmask when filtered) and clear failing
+            //   rows as we go.
+            //
+            // If the predicate never fails, we return `RowFilter::All`.
+            let mut prefix_passes: Vec<usize> = Vec::new();
+            let mut prefix_dense = false;
+            let mut sparse_passes: Vec<usize> = Vec::new();
+            enum DenseMode {
+                CandidateMask(BitVec),
+                PassMask(BitVec),
+            }
+            let mut dense: Option<DenseMode> = None;
+
+            let mut any_fail = false;
+            let row_sets = (!base_filter.is_empty())
+                .then(|| resolve_row_sets(model, &base_filter))
+                .transpose()?;
             if let Some(sets) = row_sets.as_ref() {
                 let allowed = sets
                     .get(&table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                candidate_count = allowed.count_ones();
                 for row in allowed.iter_ones() {
                     let mut inner_ctx = row_ctx.clone();
                     inner_ctx.push(&table, row);
                     let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx, env)?;
-                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
-                        allowed_rows.insert(row);
+                    let keep = pred.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                    match &mut dense {
+                        Some(DenseMode::CandidateMask(mask)) => {
+                            if !keep {
+                                mask.set(row, false);
+                            }
+                        }
+                        Some(DenseMode::PassMask(mask)) => {
+                            if keep {
+                                mask.set(row, true);
+                            }
+                        }
+                        None => {
+                            if keep {
+                                if any_fail {
+                                    sparse_passes.push(row);
+                                    if sparse_passes.len() > sparse_to_dense_threshold {
+                                        let mut mask = BitVec::with_len_all_false(row_count);
+                                        for &row in &sparse_passes {
+                                            mask.set(row, true);
+                                        }
+                                        sparse_passes.clear();
+                                        dense = Some(DenseMode::PassMask(mask));
+                                    }
+                                } else if !prefix_dense {
+                                    prefix_passes.push(row);
+                                    if prefix_passes.len() > sparse_to_dense_threshold {
+                                        prefix_dense = true;
+                                        prefix_passes.clear();
+                                    }
+                                }
+                            } else {
+                                any_fail = true;
+                                if prefix_dense {
+                                    let mut mask = allowed.clone();
+                                    mask.set(row, false);
+                                    dense = Some(DenseMode::CandidateMask(mask));
+                                } else {
+                                    sparse_passes = std::mem::take(&mut prefix_passes);
+                                }
+                            }
+                        }
                     }
                 }
             } else {
-                candidate_count = table_ref.row_count();
-                for row in 0..table_ref.row_count() {
+                for row in 0..row_count {
                     let mut inner_ctx = row_ctx.clone();
                     inner_ctx.push(&table, row);
                     let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx, env)?;
-                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
-                        allowed_rows.insert(row);
+                    let keep = pred.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                    match &mut dense {
+                        Some(DenseMode::CandidateMask(mask)) => {
+                            if !keep {
+                                mask.set(row, false);
+                            }
+                        }
+                        Some(DenseMode::PassMask(mask)) => {
+                            if keep {
+                                mask.set(row, true);
+                            }
+                        }
+                        None => {
+                            if keep {
+                                if any_fail {
+                                    sparse_passes.push(row);
+                                    if sparse_passes.len() > sparse_to_dense_threshold {
+                                        let mut mask = BitVec::with_len_all_false(row_count);
+                                        for &row in &sparse_passes {
+                                            mask.set(row, true);
+                                        }
+                                        sparse_passes.clear();
+                                        dense = Some(DenseMode::PassMask(mask));
+                                    }
+                                } else if !prefix_dense {
+                                    prefix_passes.push(row);
+                                    if prefix_passes.len() > sparse_to_dense_threshold {
+                                        prefix_dense = true;
+                                        prefix_passes.clear();
+                                    }
+                                }
+                            } else {
+                                any_fail = true;
+                                if prefix_dense {
+                                    let mut mask = BitVec::with_len_all_true(row_count);
+                                    mask.set(row, false);
+                                    dense = Some(DenseMode::CandidateMask(mask));
+                                } else {
+                                    sparse_passes = std::mem::take(&mut prefix_passes);
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            if allowed_rows.len() == candidate_count {
+            if !any_fail {
                 row_filters.push((table, RowFilter::All));
             } else {
-                row_filters.push((table, RowFilter::Rows(allowed_rows)));
+                match dense {
+                    Some(DenseMode::CandidateMask(mask)) | Some(DenseMode::PassMask(mask)) => {
+                        let visible = mask.count_ones();
+                        if visible <= sparse_to_dense_threshold {
+                            row_filters.push((table, RowFilter::Rows(mask.iter_ones().collect())));
+                        } else {
+                            row_filters.push((table, RowFilter::Mask(Arc::new(mask))));
+                        }
+                    }
+                    None => {
+                        row_filters
+                            .push((table, RowFilter::Rows(sparse_passes.into_iter().collect())));
+                    }
+                }
             }
             Ok(())
         }
