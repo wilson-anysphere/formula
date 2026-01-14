@@ -7612,6 +7612,83 @@ mod tests {
     }
 
     #[test]
+    fn mark_saved_updates_engine_workbook_file_metadata_for_info_directory() {
+        fn workbook_dir_for_excel(dir: &str) -> String {
+            if dir.is_empty() {
+                return String::new();
+            }
+            if dir.ends_with('/') || dir.ends_with('\\') {
+                return dir.to_string();
+            }
+
+            // Excel returns directory strings with a trailing path separator. We don't want to probe
+            // the OS, so infer the separator from the host-supplied directory string.
+            let last_slash = dir.rfind('/');
+            let last_backslash = dir.rfind('\\');
+            let sep = match (last_slash, last_backslash) {
+                (Some(i), Some(j)) => {
+                    if i > j {
+                        '/'
+                    } else {
+                        '\\'
+                    }
+                }
+                (Some(_), None) => '/',
+                (None, Some(_)) => '\\',
+                (None, None) => '/',
+            };
+
+            let mut out = String::with_capacity(dir.len() + 1);
+            out.push_str(dir);
+            out.push(sep);
+            out
+        }
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_formula("=INFO(\"directory\")".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        assert_eq!(
+            state.engine.get_cell_value("Sheet1", "A1"),
+            EngineValue::Error(ErrorKind::NA)
+        );
+
+        let saved_path = std::env::temp_dir().join("foo.xlsx");
+        let saved_path = saved_path.to_string_lossy().to_string();
+
+        state
+            .mark_saved(Some(saved_path.clone()), None)
+            .expect("mark_saved succeeds");
+
+        let dir = std::path::Path::new(&saved_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .to_string_lossy()
+            .to_string();
+        let expected_dir = workbook_dir_for_excel(&dir);
+
+        assert_eq!(
+            state.engine.get_cell_value("Sheet1", "A1"),
+            EngineValue::Text(expected_dir.clone())
+        );
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let cell = workbook
+            .sheet(&sheet_id)
+            .expect("sheet exists")
+            .get_cell(0, 0);
+        assert_eq!(cell.computed_value, CellScalar::Text(expected_dir));
+    }
+
+    #[test]
     fn mark_saved_sets_engine_filename_metadata_without_directory() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
