@@ -285,7 +285,10 @@ mod tests {
         assert_eq!(cache[3], "");
 
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message, "ctx: strCache missing 2 of 4 points");
+        assert_eq!(
+            diagnostics[0].message,
+            "ctx: strCache missing 2 of 4 points"
+        );
     }
 
     #[test]
@@ -338,6 +341,64 @@ mod tests {
         assert_eq!(
             diagnostics[0].message,
             "ctx: invalid numeric cache value \"abc\""
+        );
+    }
+
+    #[test]
+    fn num_cache_pt_count_shorter_than_points_truncates_and_warns() {
+        let xml = r#"
+            <root>
+              <numCache>
+                <ptCount val="2"/>
+                <pt idx="0"><v>1</v></pt>
+                <pt idx="1"><v>2</v></pt>
+                <pt idx="2"><v>3</v></pt>
+              </numCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "numCache");
+        let mut diagnostics = Vec::new();
+        let (cache, _format_code) = parse_num_cache(node, &mut diagnostics, "ctx");
+        let cache = cache.expect("cache");
+
+        assert_eq!(cache, vec![1.0, 2.0]);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "ctx: cache point idx=2 exceeds ptCount=2"
+        );
+    }
+
+    #[test]
+    fn num_cache_pt_count_longer_than_points_warns_missing_and_fills_nan() {
+        let xml = r#"
+            <root>
+              <numCache>
+                <ptCount val="4"/>
+                <pt idx="2"><v>3</v></pt>
+                <pt idx="0"><v>1</v></pt>
+              </numCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "numCache");
+        let mut diagnostics = Vec::new();
+        let (cache, _format_code) = parse_num_cache(node, &mut diagnostics, "ctx");
+        let cache = cache.expect("cache");
+
+        assert_eq!(cache.len(), 4);
+        assert_eq!(cache[0], 1.0);
+        assert!(cache[1].is_nan());
+        assert_eq!(cache[2], 3.0);
+        assert!(cache[3].is_nan());
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "ctx: numCache missing 2 of 4 points"
         );
     }
 
