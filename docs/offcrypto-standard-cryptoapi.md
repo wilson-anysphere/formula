@@ -228,8 +228,8 @@ Terminology used below:
 * `block` – a 32-bit unsigned “block key” (`u32`), encoded as `LE32(block)`.
   * `block = 0` is used to derive the **file key** (and to validate the password using the verifier).
   * For `EncryptedPackage`:
-    * **AES** uses the same derived file key (`block = 0`) for all segments and varies the **IV** by
-      `segmentIndex` (see §7.2.1).
+    * **AES** uses the same derived file key (`block = 0`) for the entire stream and decrypts the
+      ciphertext with **AES-ECB** (no IV) (see §7.2.1).
     * **RC4** varies the **key** by `segmentIndex` (see §7.2.2).
 
 ### 5.1) Per-block hash input (key material)
@@ -305,18 +305,28 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
 (AES-256), and `SHA1(inner||outer)` yields 40 bytes.
 
-### 5.3) `EncryptedPackage` decryption (AES-ECB)
+### 5.3) IV derivation: none for Standard AES-ECB (compatibility notes)
 
 RC4 is a stream cipher and has no IV.
 
-For **AES** Standard encryption, the `EncryptedPackage` stream is decrypted with **AES-ECB** using
-the derived file key (no IV). See §7 for details.
+For the most common **Standard AES** files (including the repo’s `msoffcrypto-tool`-generated
+fixtures), both:
 
-Important:
+* the password verifier fields, and
+* the `EncryptedPackage` ciphertext
 
-* This applies to **`EncryptedPackage`** decryption.
-* The **password verifier** fields (`EncryptedVerifier` / `EncryptedVerifierHash`) are also decrypted
-  with AES-ECB (see §6.2).
+are decrypted with **AES-ECB**, which uses **no IV**.
+
+Some third-party producers and internal tooling use **non-standard AES-CBC** layouts for
+`EncryptedPackage` (segmented or stream-CBC). If you need maximum compatibility, one commonly
+encountered IV derivation for CBC-segmented variants is:
+
+```text
+IV_full = Hash( Salt || LE32(segmentIndex) )
+IV = IV_full[0:16]   // AES block size
+```
+
+This IV derivation is **not used** by the baseline Standard AES-ECB algorithm described in §7.2.1.
 
 ---
 
@@ -404,9 +414,6 @@ Notes:
 While this document’s success criteria is key derivation + verifier validation, engineers usually need the
 next step: decrypting the actual OOXML ZIP package.
 
-For additional `EncryptedPackage` edge cases and validation rules (particularly around final-segment
-padding and trailing bytes), see `docs/offcrypto-standard-encryptedpackage.md`.
-
 ### 7.1) Stream layout
 
 The `EncryptedPackage` stream begins with:
@@ -418,29 +425,29 @@ u8    EncryptedBytes[...]
 
 After decryption, truncate the plaintext to exactly `OriginalPackageSize` bytes (the ciphertext is padded).
 
-### 7.2) Decryption model by cipher
+### 7.2) Encryption model (AES vs RC4)
 
-The `EncryptedPackage` stream is decrypted differently depending on the cipher:
+#### 7.2.1) AES (`CALG_AES_*`): AES-ECB (no IV, no segmenting)
 
-* **AES**: AES-ECB over the ciphertext blocks (no IV). Chunking is optional and can be any
-  block-aligned size.
-* **RC4**: 0x200 (512) byte segments with per-segment RC4 keys.
-
-#### 7.2.1) AES (`CALG_AES_*`)
-
-AES-based Standard encryption decrypts the `EncryptedPackage` ciphertext with **AES-ECB** using the
-derived file key (`block = 0`) from §6.1.
+For baseline Standard/CryptoAPI AES encryption, the `EncryptedPackage` ciphertext (after the 8-byte
+size prefix) is **AES-ECB** encrypted with the derived `fileKey` (`block = 0`).
 
 Algorithm:
 
-1. Read `origSize = U64LE(encPkgBytes[0:8])`.
-2. Let `ciphertext = encPkgBytes[8:]` and require `len(ciphertext) % 16 == 0`.
-3. Decrypt all ciphertext blocks with AES-ECB using `fileKey` (no IV, no padding at the crypto layer).
-4. If the decrypted plaintext is shorter than `origSize`, treat as truncated/corrupt; otherwise
-   return `plaintext[0:origSize]`.
+1. Read `OriginalPackageSize` (`u64le`).
+2. Let `C = EncryptedBytes` (all remaining bytes).
+3. Require `len(C) % 16 == 0`.
+4. `P = AES-ECB-Decrypt(fileKey, C)`.
+5. Return `P[0:OriginalPackageSize]` (truncate to the declared size).
 
-Note: some producers pad the ciphertext to sizes larger than `origSize` (e.g. to 4096 bytes for tiny
-packages). Truncation handles this.
+Notes:
+
+* The `EncryptedPackage` stream can be larger than `OriginalPackageSize` due to block padding and/or
+  OLE sector slack. **Always truncate** to the declared size after decrypting.
+* Some producers pad the ciphertext to a fixed size (e.g. to 4096 bytes for very small packages).
+  Truncation handles this.
+* AES-ECB has no IV. If you see per-segment IV derivation in other code, that is for an alternative
+  (non-ECB) scheme (see §5.3 compatibility note).
 
 #### 7.2.2) RC4 (`CALG_RC4`)
 
@@ -501,6 +508,15 @@ rc4_key_block0_40bit = 6ad7dedf2d0000000000000000000000
 key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3
   0795c2705e075039407199f7d299b6e4
+
+`EncryptedPackage` for baseline Standard AES is decrypted with **AES-ECB** and uses **no IV**.
+
+Optional (CBC-segmented variant only): if you encounter an `EncryptedPackage` encrypted with a
+per-segment IV derived as `IV = SHA1(salt || LE32(segmentIndex))[0:16]`, then:
+
+```text
+iv0 (segmentIndex=0) =
+  719ea750a65a93d80e1e0ba33a2ba0e7
 ```
 
 ### 8.1) AES-128 key derivation sanity check (shows `CryptDeriveKey` is not truncation)
@@ -536,6 +552,12 @@ H_block0 = e2f8cde457e5d449eb205057c88d201d14531ff3
 
 key (AES-128, 16 bytes; CryptDeriveKey result) =
   40b13a71f90b966e375408f2d181a1aa
+
+Optional (CBC-segmented variant only): with `IV = SHA1(salt || LE32(segmentIndex))[0:16]`:
+
+```text
+iv0 (segmentIndex=0) =
+  a1cdc25336964d314dd968da998d05b8
 ```
 
 Sanity check:
@@ -680,12 +702,12 @@ function decrypt_standard_ooxml(ole, password):
     if origSize == 0:
       return []
     if len(ciphertext) % 16 != 0:
-      error("ciphertext not block-aligned")
+      error("invalid ciphertext length")
 
-    plain = AES_ECB_Decrypt(fileKey, ciphertext)
-    if len(plain) < origSize:
+    out = AES_ECB_Decrypt(fileKey, ciphertext)
+    if len(out) < origSize:
       error("truncated ciphertext")
-    return plain[0:origSize]
+    return out[0:origSize]
 
   else if algId == CALG_RC4:
     // RC4 has no padding; decrypt exactly origSize bytes.
