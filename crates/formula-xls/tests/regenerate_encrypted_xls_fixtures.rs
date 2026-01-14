@@ -901,13 +901,25 @@ fn build_rc4_standard_encrypted_xls_from_plain_stream(
     build_xls_bytes(&workbook_stream)
 }
 
-fn build_xor_encrypted_xls_bytes(password: &str) -> Vec<u8> {
-    use encoding_rs::WINDOWS_1252;
+fn xor_password_bytes_method2(password: &str) -> Vec<u8> {
+    // MS-OFFCRYPTO 2.3.7.4 "method 2": copy low byte unless zero, else high byte.
+    //
+    // This encoding is used by some BIFF8 XOR writers when deriving the Method-1 key/verifier.
+    let mut bytes = Vec::with_capacity(15);
+    for ch in password.encode_utf16() {
+        if bytes.len() >= 15 {
+            break;
+        }
+        let lo = (ch & 0x00FF) as u8;
+        let hi = (ch >> 8) as u8;
+        bytes.push(if lo != 0 { lo } else { hi });
+    }
+    bytes
+}
 
+fn build_xor_encrypted_xls_bytes_with_password_bytes(mut pw_bytes: Vec<u8>) -> Vec<u8> {
     // BIFF8 XOR obfuscation fixture using the MS-OFFCRYPTO/MS-XLS "Method 1" algorithm (the real
     // Excel-compatible scheme).
-    let (pw_bytes, _, _) = WINDOWS_1252.encode(password);
-    let mut pw_bytes = pw_bytes.into_owned();
     pw_bytes.truncate(15);
 
     let key = create_xor_key_method1(&pw_bytes);
@@ -939,6 +951,17 @@ fn build_xor_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     encrypt_payloads_after_filepass_xor_method1(&mut workbook_stream, filepass_data_end, &xor_array);
 
     build_xls_bytes(&workbook_stream)
+}
+
+fn build_xor_encrypted_xls_bytes(password: &str) -> Vec<u8> {
+    use encoding_rs::WINDOWS_1252;
+
+    let (pw_bytes, _, _) = WINDOWS_1252.encode(password);
+    build_xor_encrypted_xls_bytes_with_password_bytes(pw_bytes.into_owned())
+}
+
+fn build_xor_encrypted_xls_bytes_method2(password: &str) -> Vec<u8> {
+    build_xor_encrypted_xls_bytes_with_password_bytes(xor_password_bytes_method2(password))
 }
 
 fn build_rc4_standard_encrypted_xls_bytes(password: &str) -> Vec<u8> {
@@ -1068,6 +1091,15 @@ fn regenerate_encrypted_xls_fixtures() {
     let xor_long_bytes = build_xor_encrypted_xls_bytes("0123456789abcdef");
     std::fs::write(&xor_long_path, xor_long_bytes).unwrap_or_else(|err| {
         panic!("write encrypted fixture {xor_long_path:?} failed: {err}");
+    });
+
+    // XOR Method-1 password derivation method-2 fixture: uses a Unicode password that is not
+    // representable in Windows-1252, so decryptors must fall back to MS-OFFCRYPTO 2.3.7.4 "method 2"
+    // password bytes.
+    let xor_unicode_method2_path = fixtures_dir.join("biff8_xor_pw_open_unicode_method2.xls");
+    let xor_unicode_method2_bytes = build_xor_encrypted_xls_bytes_method2("Ā");
+    std::fs::write(&xor_unicode_method2_path, xor_unicode_method2_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {xor_unicode_method2_path:?} failed: {err}");
     });
 
     // Empty-password XOR fixture (some writers can emit this; Excel UI may refuse to create it).

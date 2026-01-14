@@ -62,6 +62,7 @@ Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` fi
 |---|---|---:|---|---|
 | `biff8_xor_pw_open.xls` | XOR (legacy obfuscation) | BIFF8 | `cargo test -p formula-xls --test regenerate_encrypted_xls_fixtures -- --ignored` (this repo; writes a tiny CFB/BIFF stream via `cfb` `0.10`) | `password` |
 | `biff8_xor_pw_open_long_password.xls` | XOR (legacy obfuscation) | BIFF8 | same as above | `0123456789abcdef` (effective: `0123456789abcde`) |
+| `biff8_xor_pw_open_unicode_method2.xls` | XOR (legacy obfuscation) | BIFF8 | same as above | `Ā` |
 | `biff8_xor_pw_open_empty_password.xls` | XOR (legacy obfuscation) | BIFF8 | same as above | `""` |
 | `biff8_rc4_standard_pw_open.xls` | RC4 “standard” | BIFF8 | same as above | `password` |
 | `biff8_rc4_standard_pw_open_long_password.xls` | RC4 “standard” | BIFF8 | generated from `basic.xls` (this repo) | `0123456789abcdef` (effective: `0123456789abcde`) |

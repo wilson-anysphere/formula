@@ -152,3 +152,29 @@ fn decrypts_xor_with_long_password_truncation() {
         "expected ImportError::InvalidPassword, got {err:?}"
     );
 }
+
+#[test]
+fn decrypts_xor_with_unicode_password_via_method2_bytes() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_xor_pw_open_unicode_method2.xls");
+
+    let password = "Ā";
+    let result = formula_xls::import_xls_path_with_password(&fixture_path, Some(password))
+        .expect("decrypt and import");
+    let sheet1 = result
+        .workbook
+        .sheet_by_name("Sheet1")
+        .expect("Sheet1 missing");
+    assert_eq!(sheet1.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    // The Windows-1252 encoding of "Ā" is "?" (replacement), which must not decrypt the file.
+    let err = formula_xls::import_xls_path_with_password(&fixture_path, Some("?"))
+        .expect_err("expected wrong password to fail");
+    assert!(
+        matches!(&err, formula_xls::ImportError::InvalidPassword),
+        "expected ImportError::InvalidPassword, got {err:?}"
+    );
+}
