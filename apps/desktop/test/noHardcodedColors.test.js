@@ -159,6 +159,11 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     String.raw`\b(?:fillStyle|strokeStyle)\b\s*=\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
+  const setPropertyStyleColor = new RegExp(
+    // DOM style setProperty assignments (e.g. `el.style.setProperty("color", "red")` or `setProperty("--foo", "red")`)
+    String.raw`\.style\.setProperty\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    "gi",
+  );
   const setAttributeColor = new RegExp(
     // SVG/DOM attribute assignments (e.g. `el.setAttribute("fill", "red")`)
     String.raw`\bsetAttribute\(\s*(["'])(?:fill|stroke|color|stop-color|flood-color|lighting-color)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
@@ -228,19 +233,22 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         jsStyleColor.exec(stripped) ??
         domStyleColor.exec(stripped) ??
         canvasStyleColor.exec(stripped) ??
+        setPropertyStyleColor.exec(stripped) ??
         setAttributeColor.exec(stripped) ??
         jsxAttributeColor.exec(stripped) ??
         jsxAttributeColorExpr.exec(stripped);
       jsStyleColor.lastIndex = 0;
       domStyleColor.lastIndex = 0;
       canvasStyleColor.lastIndex = 0;
+      setPropertyStyleColor.lastIndex = 0;
       setAttributeColor.lastIndex = 0;
       jsxAttributeColor.lastIndex = 0;
       jsxAttributeColorExpr.lastIndex = 0;
       named = match?.groups?.color ?? null;
       if (named) {
         namedIndex = (match?.index ?? 0) + (match?.[0]?.indexOf(named) ?? 0);
-        namedContext = "named-color";
+        const prop = match?.groups?.prop;
+        namedContext = prop ? `setProperty(${prop})` : "named-color";
       }
     }
     if (named && !allowedColorKeywords.has(named.toLowerCase())) {
