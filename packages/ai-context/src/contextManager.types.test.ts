@@ -13,9 +13,9 @@ describe("ContextManager types", () => {
     const entryFile = fileURLToPath(new URL(`./.__contextManager-typecheck.${process.pid}.${Date.now()}.ts`, import.meta.url));
 
     const source = `\
-import {
-  ContextManager,
-  RagIndex,
+ import {
+   ContextManager,
+   RagIndex,
   type BuildContextResult,
   type BuildWorkbookContextResult,
   type ContextSheet,
@@ -34,12 +34,14 @@ import {
   type WorkbookRagVectorStore,
   type WorkbookRagWorkbook,
   type VectorStoreItem,
-  type VectorStoreSearchResult,
-} from "./index.js";
-import type { SheetSchema } from "./schema.js";
-
-type IsAny<T> = 0 extends (1 & T) ? true : false;
-type Assert<T extends true> = T;
+   type VectorStoreSearchResult,
+ } from "./index.js";
+ import type { SheetSchema } from "./schema.js";
+ import { deleteSheetRegionChunks } from "./ragIds.js";
+ import type { LegacySheetRegionChunkStoreLike } from "./ragIds.js";
+ 
+ type IsAny<T> = 0 extends (1 & T) ? true : false;
+ type Assert<T extends true> = T;
 
 type _SchemaIsSheetSchema = Assert<BuildContextResult["schema"] extends SheetSchema ? true : false>;
 type _SchemaNotAny = Assert<IsAny<BuildContextResult["schema"]> extends false ? true : false>;
@@ -67,13 +69,20 @@ type _DlpOptionsInputNotAny = Assert<IsAny<DlpOptionsInput> extends false ? true
 type _SheetNameResolverNotAny = Assert<IsAny<SheetNameResolverLike> extends false ? true : false>;
 type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true : false>;
 type _SpreadsheetWithCellsNotAny = Assert<IsAny<SpreadsheetApiWithNonEmptyCells> extends false ? true : false>;
-type _WorkbookRagTableNotAny = Assert<IsAny<WorkbookRagTable> extends false ? true : false>;
-type _WorkbookRagNamedRangeNotAny = Assert<IsAny<WorkbookRagNamedRange> extends false ? true : false>;
-type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
-type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;
-type _VectorStoreListContentHashesShape = Assert<
-  WorkbookRagVectorStore["listContentHashes"] extends
-    | ((opts?: { workbookId?: string; signal?: AbortSignal }) => Promise<
+ type _WorkbookRagTableNotAny = Assert<IsAny<WorkbookRagTable> extends false ? true : false>;
+ type _WorkbookRagNamedRangeNotAny = Assert<IsAny<WorkbookRagNamedRange> extends false ? true : false>;
+ type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
+ type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;
+ type _LegacyStoreNotAny = Assert<IsAny<LegacySheetRegionChunkStoreLike> extends false ? true : false>;
+ type _DeleteSheetRegionStoreNotAny = Assert<
+   IsAny<Parameters<typeof deleteSheetRegionChunks>[0]> extends false ? true : false
+ >;
+ type _DeleteSheetRegionStoreShape = Assert<
+   Parameters<typeof deleteSheetRegionChunks>[0] extends LegacySheetRegionChunkStoreLike ? true : false
+ >;
+ type _VectorStoreListContentHashesShape = Assert<
+   WorkbookRagVectorStore["listContentHashes"] extends
+     | ((opts?: { workbookId?: string; signal?: AbortSignal }) => Promise<
         Array<{ id: string; contentHash: string | null; metadataHash: string | null }>
       >)
     | undefined
