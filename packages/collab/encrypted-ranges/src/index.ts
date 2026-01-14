@@ -758,6 +758,17 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
     if (!normalized) return null;
 
     const { sheetId, row, col } = normalized;
+    const sheetNameByIdCi = new Map<string, string | null>();
+    const resolveSheetNameCached = (id: string): string | null => {
+      const trimmed = String(id ?? "").trim();
+      if (!trimmed) return null;
+      const key = trimmed.toLowerCase();
+      if (sheetNameByIdCi.has(key)) return sheetNameByIdCi.get(key) ?? null;
+      const resolved = resolveSheetName(trimmed);
+      sheetNameByIdCi.set(key, resolved);
+      return resolved;
+    };
+
     // Cache the resolved display name for the *cell's* sheet id so we avoid
     // repeatedly scanning the sheets metadata when a caller passes an unknown
     // sheet id (or a sheet display name instead of the stable id).
@@ -770,8 +781,8 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
       if (rangeId === sheetId) return true;
       if (rangeId.toLowerCase() === sheetId.toLowerCase()) return true;
 
-      if (sheetName === undefined) sheetName = resolveSheetName(sheetId);
-      const rangeName = resolveSheetName(rangeId);
+      if (sheetName === undefined) sheetName = resolveSheetNameCached(sheetId);
+      const rangeName = resolveSheetNameCached(rangeId);
 
       // If both references are recognized sheet ids in workbook metadata (i.e. both have
       // resolvable display names) and the ids don't match, do not treat either as a sheet name.
