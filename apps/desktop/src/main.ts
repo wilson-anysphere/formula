@@ -2533,18 +2533,28 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       }
 
       const compact = normalized.toLowerCase().replace(/\s+/g, "");
+      // The ribbon needs to map Excel number format codes to one of the built-in labels (Currency,
+      // Date, Percent, etc). Excel format strings often include extra characters for alignment/padding:
+      // - quotes around currency symbols
+      // - underscores for padding
+      // - unmatched parentheses (e.g. `_)`) for aligning negative numbers
+      // - separate positive/negative sections delimited by `;`
+      //
+      // Strip the most common “noise” so we can reliably detect standard formats even when they
+      // were applied via the full Format Cells UI.
+      const signature = (compact.split(";")[0] ?? compact).replace(/[_()"]/g, "").replace(/\*/g, "");
 
-      if (/^[$€£¥](?:#,##0|0)(\.[0]+)?$/.test(compact)) return t("command.format.numberFormat.currency");
-      if (compact.includes("yyyy-mm-dd")) return t("command.format.numberFormat.longDate");
-      if (compact.includes("m/d/yyyy")) return t("command.format.numberFormat.shortDate");
-      if (compact === NUMBER_FORMATS.date.toLowerCase()) return t("command.format.numberFormat.shortDate");
-      if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return t("command.format.numberFormat.time");
-      if (compact.includes("%")) return t("command.format.numberFormat.percent");
-      if (/^#,##0(\.[0]+)?$/.test(compact)) return t("ribbon.label.comma");
-      if (/^0(\.[0]+)?$/.test(compact)) return t("command.format.numberFormat.number");
-      if (compact.includes("e")) return t("command.format.numberFormat.scientific");
-      if (compact.includes("/")) return t("command.format.numberFormat.fraction");
-      if (compact === "@") return t("command.format.numberFormat.text");
+      if (/^[$€£¥](?:#,##0|0)(\.[0]+)?$/.test(signature)) return t("command.format.numberFormat.currency");
+      if (signature.includes("yyyy-mm-dd")) return t("command.format.numberFormat.longDate");
+      if (signature.includes("m/d/yyyy")) return t("command.format.numberFormat.shortDate");
+      if (signature === NUMBER_FORMATS.date.toLowerCase()) return t("command.format.numberFormat.shortDate");
+      if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(signature)) return t("command.format.numberFormat.time");
+      if (signature.includes("%")) return t("command.format.numberFormat.percent");
+      if (/^#,##0(\.[0]+)?$/.test(signature)) return t("ribbon.label.comma");
+      if (/^0(\.[0]+)?$/.test(signature)) return t("command.format.numberFormat.number");
+      if (signature.includes("e")) return t("command.format.numberFormat.scientific");
+      if (signature.includes("/")) return t("command.format.numberFormat.fraction");
+      if (signature === "@") return t("command.format.numberFormat.text");
 
       return t("ribbon.label.custom");
     })();
