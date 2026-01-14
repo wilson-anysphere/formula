@@ -1,7 +1,6 @@
 import * as Y from "yjs";
-import { isYAbstractType } from "@formula/collab-yjs-utils";
+import { isYAbstractType, patchForeignItemConstructor } from "@formula/collab-yjs-utils";
 
-const patchedItemConstructors = new WeakSet();
 const patchedAbstractTypeConstructors = new WeakSet();
 function patchForeignAbstractTypeConstructor(type) {
   if (!type || typeof type !== "object") return;
@@ -34,45 +33,6 @@ function patchForeignAbstractTypeConstructor(type) {
     // Best-effort: if we can't patch (frozen prototypes, etc), UndoManager will
     // behave like upstream Yjs in mixed-module environments.
   }
-}
-
-function isYjsItemStruct(value) {
-  if (!value || typeof value !== "object") return false;
-  const maybe = value;
-  // Yjs internal `Item` structs have these fields (see yjs/src/structs/Item).
-  if (!("id" in maybe)) return false;
-  if (typeof maybe.length !== "number") return false;
-  if (!("content" in maybe)) return false;
-  if (!("parent" in maybe)) return false;
-  if (!("parentSub" in maybe)) return false;
-  if (typeof maybe.content?.getContent !== "function") return false;
-  return true;
-}
-
-function patchForeignItemConstructor(item) {
-  if (!item || typeof item !== "object") return false;
-  if (!isYjsItemStruct(item)) return false;
-  if (item instanceof Y.Item) return false;
-  const ctor = item.constructor;
-  if (!ctor || ctor === Y.Item) return false;
-  if (patchedItemConstructors.has(ctor)) return false;
-  patchedItemConstructors.add(ctor);
-
-  // When Yjs is loaded more than once (e.g. ESM + CJS in Node), documents can
-  // contain Item instances created by a different module instance. Yjs'
-  // UndoManager uses `instanceof Item` checks, so it will refuse to undo
-  // transactions that touch those foreign items.
-  //
-  // Patch the foreign constructor prototype chain so foreign Item instances pass
-  // `instanceof Y.Item` checks in this module.
-  try {
-    Object.setPrototypeOf(ctor.prototype, Y.Item.prototype);
-    ctor.prototype.constructor = Y.Item;
-  } catch {
-    // Best-effort: if we can't patch (frozen prototypes, etc), undo will behave
-    // like upstream Yjs in mixed-module environments.
-  }
-  return true;
 }
 
 function patchForeignItemsInType(type) {

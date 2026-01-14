@@ -77,7 +77,7 @@ function isYjsItemStruct(value: unknown): value is any {
   return true;
 }
 
-function patchForeignItemConstructor(item: unknown): void {
+export function patchForeignItemConstructor(item: unknown): void {
   if (!isYjsItemStruct(item)) return;
   if (item instanceof Y.Item) return;
   const ctor = (item as any).constructor as Function | undefined;
