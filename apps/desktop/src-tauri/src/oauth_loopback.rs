@@ -19,6 +19,35 @@ pub struct LoopbackRedirectUri {
     pub normalized_redirect_uri: String,
 }
 
+fn raw_url_has_explicit_port(raw: &str) -> bool {
+    let Some(after_scheme) = raw.splitn(2, "://").nth(1) else {
+        return false;
+    };
+    let authority_end = after_scheme
+        .find(&['/', '?', '#'][..])
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    // Strip any userinfo (`user:pass@`) portion so we only scan host[:port].
+    let host_port = authority.rsplit('@').next().unwrap_or(authority);
+
+    // IPv6 literals are bracketed: `[::1]:1234`.
+    if let Some(rest) = host_port.strip_prefix('[') {
+        let Some(close) = rest.find(']') else {
+            return false;
+        };
+        let after_bracket = &rest[close + 1..];
+        if let Some(port_text) = after_bracket.strip_prefix(':') {
+            return !port_text.is_empty();
+        }
+        return false;
+    }
+
+    if let Some((_host, port_text)) = host_port.split_once(':') {
+        return !port_text.is_empty();
+    }
+    false
+}
+
 pub fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirectUri, String> {
     let raw = redirect_uri.trim();
     let parsed = Url::parse(raw).map_err(|err| format!("Invalid OAuth redirect URI {raw:?}: {err}"))?;
@@ -38,9 +67,14 @@ pub fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirec
         ));
     }
 
-    let port = parsed
-        .port()
-        .ok_or_else(|| format!("Invalid loopback OAuth redirect URI {raw:?}: must include an explicit port"))?;
+    if !raw_url_has_explicit_port(raw) {
+        return Err(format!(
+            "Invalid loopback OAuth redirect URI {raw:?}: must include an explicit port"
+        ));
+    }
+    let port = parsed.port_or_known_default().ok_or_else(|| {
+        format!("Invalid loopback OAuth redirect URI {raw:?}: must include an explicit port")
+    })?;
     if port == 0 {
         return Err(format!(
             "Invalid loopback OAuth redirect URI {raw:?}: port must not be 0"
@@ -61,11 +95,26 @@ pub fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirec
         }
     };
 
+    // URL canonicalization drops the default `http` port (80) during `Url::to_string()`, but for
+    // loopback redirect capture we require an explicit port and must preserve it so the frontend's
+    // redirect matching logic (which compares `URL.port`) continues to work.
+    let host = match host_kind {
+        LoopbackHostKind::Ipv4Loopback => "127.0.0.1",
+        LoopbackHostKind::Ipv6Loopback => "[::1]",
+        LoopbackHostKind::Localhost => "localhost",
+    };
+    let path = parsed.path().to_string();
+    let mut normalized_redirect_uri = format!("http://{host}:{port}{path}");
+    if let Some(query) = parsed.query() {
+        normalized_redirect_uri.push('?');
+        normalized_redirect_uri.push_str(query);
+    }
+
     Ok(LoopbackRedirectUri {
         host_kind,
         port,
-        path: parsed.path().to_string(),
-        normalized_redirect_uri: parsed.to_string(),
+        path,
+        normalized_redirect_uri,
     })
 }
 
@@ -179,12 +228,34 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_localhost_case() {
+        let parsed = parse_loopback_redirect_uri("http://LOCALHOST:4242/callback").unwrap();
+        assert_eq!(parsed.host_kind, LoopbackHostKind::Localhost);
+        assert_eq!(parsed.normalized_redirect_uri, "http://localhost:4242/callback");
+    }
+
+    #[test]
     fn parses_ipv6_loopback() {
         let parsed = parse_loopback_redirect_uri("http://[::1]:4242/callback").unwrap();
         assert_eq!(parsed.host_kind, LoopbackHostKind::Ipv6Loopback);
         assert_eq!(parsed.port, 4242);
         assert_eq!(parsed.path, "/callback");
         assert_eq!(parsed.normalized_redirect_uri, "http://[::1]:4242/callback");
+    }
+
+    #[test]
+    fn preserves_explicit_default_port_in_normalized_uri() {
+        let parsed = parse_loopback_redirect_uri("http://localhost:80/callback").unwrap();
+        assert_eq!(parsed.port, 80);
+        assert_eq!(parsed.normalized_redirect_uri, "http://localhost:80/callback");
+
+        let parsed = parse_loopback_redirect_uri("http://127.0.0.1:80/callback").unwrap();
+        assert_eq!(parsed.port, 80);
+        assert_eq!(parsed.normalized_redirect_uri, "http://127.0.0.1:80/callback");
+
+        let parsed = parse_loopback_redirect_uri("http://[::1]:80/callback").unwrap();
+        assert_eq!(parsed.port, 80);
+        assert_eq!(parsed.normalized_redirect_uri, "http://[::1]:80/callback");
     }
 
     #[test]
