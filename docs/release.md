@@ -181,6 +181,9 @@ cargo metadata --locked --format-version=1 --manifest-path apps/desktop/src-taur
 # Cargo.lock is consistent for that target too.
 cargo metadata --locked --format-version=1 --filter-platform wasm32-unknown-unknown >/dev/null
 
+# (Equivalent) Run the same Cargo.lock reproducibility check CI uses for all desktop release targets.
+bash scripts/ci/check-cargo-lock-reproducible.sh
+
 # Ensures Windows installers will install WebView2 if it is missing.
 node scripts/ci/check-webview2-install-mode.mjs
 
