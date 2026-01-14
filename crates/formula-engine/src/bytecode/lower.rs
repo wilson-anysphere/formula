@@ -119,11 +119,16 @@ impl RectRef {
 
 fn validate_prefix(
     prefix: &RefPrefix,
-    _current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    _current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Result<(), LowerError> {
     if prefix.workbook.is_some() {
-        return Err(LowerError::ExternalReference);
+        // External workbook reference.
+        // Validate that the canonical external sheet key is representable.
+        // This rejects external 3D sheet spans (`[Book]Sheet1:Sheet3!A1`) which the engine cannot
+        // currently represent via `ExternalValueProvider`.
+        let _ = external_sheet_id(prefix)?;
+        return Ok(());
     }
     if let Some(sheet) = prefix.sheet.as_ref() {
         match sheet {
@@ -144,12 +149,38 @@ fn validate_prefix(
     Ok(())
 }
 
+fn external_sheet_id(prefix: &RefPrefix) -> Result<SheetId, LowerError> {
+    let Some(book) = prefix.workbook.as_ref() else {
+        return Err(LowerError::ExternalReference);
+    };
+
+    // Mirror `eval::compiler::lower_sheet_reference` so we build the same canonical key string
+    // that `ValueResolver::get_external_value` expects.
+    let key = match prefix.sheet.as_ref() {
+        Some(crate::SheetRef::Sheet(sheet)) => format!("[{book}]{sheet}"),
+        Some(crate::SheetRef::SheetRange { start, end }) => {
+            if start.eq_ignore_ascii_case(end) {
+                format!("[{book}]{start}")
+            } else {
+                format!("[{book}]{start}:{end}")
+            }
+        }
+        None => format!("[{book}]"),
+    };
+
+    if !crate::eval::is_valid_external_sheet_key(&key) {
+        return Err(LowerError::ExternalReference);
+    }
+
+    Ok(SheetId::External(Arc::from(key)))
+}
+
 fn expand_sheet_span(
     start: &str,
     end: &str,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
-) -> Result<Vec<SheetId>, LowerError> {
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
+) -> Result<Vec<usize>, LowerError> {
     let Some(a) = resolve_sheet_id(start) else {
         return Err(LowerError::UnknownSheet);
     };
@@ -177,8 +208,8 @@ fn lower_coord(coord: &crate::Coord, origin: u32) -> Result<(i32, bool), LowerEr
 fn lower_cell_ref(
     r: &crate::CellRef,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Result<Ref, LowerError> {
     validate_prefix(
         &RefPrefix::from_parts(&r.workbook, &r.sheet),
@@ -193,16 +224,20 @@ fn lower_cell_ref(
 fn lower_cell_ref_expr(
     r: &crate::CellRef,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
 ) -> Result<BytecodeExpr, LowerError> {
     let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
-    if prefix.workbook.is_some() {
-        return Err(LowerError::ExternalReference);
-    }
-
     let cell = lower_cell_ref(r, origin, current_sheet, resolve_sheet_id)?;
+
+    if prefix.workbook.is_some() {
+        let sheet = external_sheet_id(&prefix)?;
+        let range = RangeRef::new(cell, cell);
+        return Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+            vec![SheetRangeRef::new(sheet, range)].into(),
+        )));
+    }
 
     match prefix.sheet.as_ref() {
         None => Ok(BytecodeExpr::CellRef(cell)),
@@ -214,7 +249,7 @@ fn lower_cell_ref_expr(
                 Ok(BytecodeExpr::CellRef(cell))
             } else {
                 let range = RangeRef::new(cell, cell);
-                let areas = vec![SheetRangeRef::new(sheet_id, range)];
+                let areas = vec![SheetRangeRef::new(SheetId::Local(sheet_id), range)];
                 Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                     areas.into(),
                 )))
@@ -225,7 +260,7 @@ fn lower_cell_ref_expr(
             let range = RangeRef::new(cell, cell);
             let areas: Vec<SheetRangeRef> = sheets
                 .into_iter()
-                .map(|sheet| SheetRangeRef::new(sheet, range))
+                .map(|sheet| SheetRangeRef::new(SheetId::Local(sheet), range))
                 .collect();
             Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                 areas.into(),
@@ -237,8 +272,8 @@ fn lower_cell_ref_expr(
 fn lower_rect_ref(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Result<(RefPrefix, RectRef), LowerError> {
     match expr {
         crate::Expr::CellRef(r) => {
@@ -306,9 +341,9 @@ fn lower_range_ref(
     left: &crate::Expr,
     right: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
 ) -> Result<BytecodeExpr, LowerError> {
     let (left_prefix, left_rect) =
         lower_rect_ref(left, origin, current_sheet, resolve_sheet_id)?;
@@ -346,6 +381,13 @@ fn lower_range_ref(
         Ref::new(end_row, end_col, end_row_abs, end_col_abs),
     );
 
+    if merged_prefix.workbook.is_some() {
+        let sheet = external_sheet_id(&merged_prefix)?;
+        return Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+            vec![SheetRangeRef::new(sheet, range)].into(),
+        )));
+    }
+
     match merged_prefix.sheet.as_ref() {
         Some(crate::SheetRef::Sheet(name)) => {
             let Some(sheet_id) = resolve_sheet_id(name) else {
@@ -354,7 +396,7 @@ fn lower_range_ref(
             if sheet_id == current_sheet {
                 Ok(BytecodeExpr::RangeRef(range))
             } else {
-                let areas = vec![SheetRangeRef::new(sheet_id, range)];
+                let areas = vec![SheetRangeRef::new(SheetId::Local(sheet_id), range)];
                 Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                     areas.into(),
                 )))
@@ -364,7 +406,7 @@ fn lower_range_ref(
             let sheets = expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
             let areas: Vec<SheetRangeRef> = sheets
                 .into_iter()
-                .map(|sheet| SheetRangeRef::new(sheet, range))
+                .map(|sheet| SheetRangeRef::new(SheetId::Local(sheet), range))
                 .collect();
             Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                 areas.into(),
@@ -487,9 +529,9 @@ fn bare_identifier(expr: &crate::Expr) -> Option<&str> {
 fn lower_canonical_reference_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -579,9 +621,9 @@ fn lower_canonical_reference_expr(
 pub fn lower_canonical_expr_with_sheet_span(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
 ) -> Result<BytecodeExpr, LowerError> {
     let mut scopes = LexicalScopes::default();
     lower_canonical_expr_inner(
@@ -598,10 +640,10 @@ pub fn lower_canonical_expr_with_sheet_span(
 pub fn lower_canonical_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Result<BytecodeExpr, LowerError> {
-    let mut expand_numeric = |a: SheetId, b: SheetId| {
+    let mut expand_numeric = |a: usize, b: usize| {
         let (start, end) = if a <= b { (a, b) } else { (b, a) };
         Some((start..=end).collect())
     };
@@ -617,9 +659,9 @@ pub fn lower_canonical_expr(
 fn lower_canonical_expr_inner(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -640,6 +682,12 @@ fn lower_canonical_expr_inner(
         crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => {
             let (prefix, rect) = lower_rect_ref(expr, origin, current_sheet, resolve_sheet_id)?;
             let range = RangeRef::new(rect.start, rect.end);
+            if prefix.workbook.is_some() {
+                let sheet = external_sheet_id(&prefix)?;
+                return Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+                    vec![SheetRangeRef::new(sheet, range)].into(),
+                )));
+            }
             match prefix.sheet.as_ref() {
                 Some(crate::SheetRef::Sheet(name)) => {
                     let Some(sheet_id) = resolve_sheet_id(name) else {
@@ -648,7 +696,7 @@ fn lower_canonical_expr_inner(
                     if sheet_id == current_sheet {
                         Ok(BytecodeExpr::RangeRef(range))
                     } else {
-                        let areas = vec![SheetRangeRef::new(sheet_id, range)];
+                        let areas = vec![SheetRangeRef::new(SheetId::Local(sheet_id), range)];
                         Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                             areas.into(),
                         )))
@@ -659,7 +707,7 @@ fn lower_canonical_expr_inner(
                         expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
                     let areas: Vec<SheetRangeRef> = sheets
                         .into_iter()
-                        .map(|sheet| SheetRangeRef::new(sheet, range))
+                        .map(|sheet| SheetRangeRef::new(SheetId::Local(sheet), range))
                         .collect();
                     Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                         areas.into(),
@@ -985,9 +1033,9 @@ fn lower_canonical_expr_inner(
 fn lower_let(
     call: &crate::FunctionCall,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
     scopes: &mut LexicalScopes,
 ) -> Result<BytecodeExpr, LowerError> {
     scopes.push_scope();
@@ -1072,9 +1120,9 @@ fn lower_let(
 fn lower_lambda(
     call: &crate::FunctionCall,
     origin: crate::CellAddr,
-    current_sheet: SheetId,
-    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
-    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+    current_sheet: usize,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {

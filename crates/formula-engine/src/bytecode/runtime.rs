@@ -2,7 +2,7 @@ use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{
     Array as ArrayValue, CellCoord, ErrorKind, MultiRangeRef, RangeRef, Ref, ResolvedRange,
-    SheetRangeRef, Value,
+    SheetId, SheetRangeRef, Value,
 };
 use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
@@ -34,9 +34,9 @@ thread_local! {
     static BYTECODE_RNG_COUNTER: Cell<u64> = Cell::new(0);
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct ResolvedSheetRange {
-    sheet: usize,
+    sheet: SheetId,
     range: ResolvedRange,
     /// Index of the originating area in the source [`MultiRangeRef`].
     ///
@@ -130,13 +130,13 @@ fn subtract_resolved_range(a: ResolvedRange, b: ResolvedRange) -> Vec<ResolvedRa
 /// subtracting overlaps in input order.
 fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSheetRange> {
     let mut out = Vec::new();
-    let mut seen_by_sheet: HashMap<usize, Vec<ResolvedRange>> = HashMap::new();
+    let mut seen_by_sheet: HashMap<SheetId, Vec<ResolvedRange>> = HashMap::new();
 
     for (area_idx, area) in r.areas.iter().enumerate() {
-        let sheet = area.sheet;
+        let sheet = area.sheet.clone();
         let resolved = area.range.resolve(base);
 
-        let seen = seen_by_sheet.entry(sheet).or_default();
+        let seen = seen_by_sheet.entry(sheet.clone()).or_default();
 
         let mut pieces = vec![resolved];
         for prev in seen.iter().copied() {
@@ -152,7 +152,7 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
 
         seen.extend(pieces.iter().copied());
         out.extend(pieces.into_iter().map(|range| ResolvedSheetRange {
-            sheet,
+            sheet: sheet.clone(),
             range,
             area_idx,
         }));
@@ -812,10 +812,12 @@ pub(crate) fn apply_spill_range(
                 row: start.row as u32,
                 col: start.col as u32,
             };
-            let Some(origin) = grid.spill_origin(sheet_id, addr) else {
+            let Some(origin) = grid.spill_origin(&SheetId::Local(sheet_id), addr) else {
                 return Value::Error(ErrorKind::Ref);
             };
-            let Some((spill_start, spill_end)) = grid.spill_range(sheet_id, origin) else {
+            let Some((spill_start, spill_end)) =
+                grid.spill_range(&SheetId::Local(sheet_id), origin)
+            else {
                 return Value::Error(ErrorKind::Ref);
             };
 
@@ -1070,7 +1072,7 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
             // by succeeding only when exactly one area intersects.
             let mut hit: Option<Value> = None;
             for area in r.areas.iter() {
-                let v = apply_implicit_intersection_sheet_range(*area, grid, base);
+                let v = apply_implicit_intersection_sheet_range(area, grid, base);
                 if matches!(v, Value::Error(ErrorKind::Value)) {
                     continue;
                 }
@@ -1086,12 +1088,12 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
 }
 
 fn apply_implicit_intersection_sheet_range(
-    area: SheetRangeRef,
+    area: &SheetRangeRef,
     grid: &dyn Grid,
     base: CellCoord,
 ) -> Value {
     let range = area.range.resolve(base);
-    if !range_in_bounds_on_sheet(grid, area.sheet, range) {
+    if !range_in_bounds_on_sheet(grid, &area.sheet, range) {
         return Value::Error(ErrorKind::Ref);
     }
 
@@ -1101,11 +1103,10 @@ fn apply_implicit_intersection_sheet_range(
             row: range.row_start,
             col: range.col_start,
         };
-        grid.record_reference(area.sheet, coord, coord);
-        return grid.get_value_on_sheet(
-            area.sheet,
-            coord,
-        );
+        if let SheetId::Local(sheet_id) = &area.sheet {
+            grid.record_reference(*sheet_id, coord, coord);
+        }
+        return grid.get_value_on_sheet(&area.sheet, coord);
     }
 
     // 1D ranges intersect on the matching row/column.
@@ -1115,11 +1116,10 @@ fn apply_implicit_intersection_sheet_range(
                 row: base.row,
                 col: range.col_start,
             };
-            grid.record_reference(area.sheet, coord, coord);
-            return grid.get_value_on_sheet(
-                area.sheet,
-                coord,
-            );
+            if let SheetId::Local(sheet_id) = &area.sheet {
+                grid.record_reference(*sheet_id, coord, coord);
+            }
+            return grid.get_value_on_sheet(&area.sheet, coord);
         }
         return Value::Error(ErrorKind::Value);
     }
@@ -1130,11 +1130,10 @@ fn apply_implicit_intersection_sheet_range(
                 row: range.row_start,
                 col: base.col,
             };
-            grid.record_reference(area.sheet, coord, coord);
-            return grid.get_value_on_sheet(
-                area.sheet,
-                coord,
-            );
+            if let SheetId::Local(sheet_id) = &area.sheet {
+                grid.record_reference(*sheet_id, coord, coord);
+            }
+            return grid.get_value_on_sheet(&area.sheet, coord);
         }
         return Value::Error(ErrorKind::Value);
     }
@@ -1145,8 +1144,10 @@ fn apply_implicit_intersection_sheet_range(
         && base.col >= range.col_start
         && base.col <= range.col_end
     {
-        grid.record_reference(area.sheet, base, base);
-        return grid.get_value_on_sheet(area.sheet, base);
+        if let SheetId::Local(sheet_id) = &area.sheet {
+            grid.record_reference(*sheet_id, base, base);
+        }
+        return grid.get_value_on_sheet(&area.sheet, base);
     }
 
     Value::Error(ErrorKind::Value)
@@ -1472,22 +1473,24 @@ fn deref_range_dynamic(grid: &dyn Grid, range: ResolvedRange) -> Value {
     Value::Array(ArrayValue::new(rows, cols, values))
 }
 
-fn deref_range_dynamic_on_sheet(grid: &dyn Grid, sheet: usize, range: ResolvedRange) -> Value {
+fn deref_range_dynamic_on_sheet(grid: &dyn Grid, sheet: &SheetId, range: ResolvedRange) -> Value {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Value::Error(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range.rows() == 1 && range.cols() == 1 {
         return grid.get_value_on_sheet(
@@ -1531,7 +1534,7 @@ pub(crate) fn deref_value_dynamic(v: Value, grid: &dyn Grid, base: CellCoord) ->
         Value::Range(r) => deref_range_dynamic(grid, r.resolve(base)),
         Value::MultiRange(r) => match r.areas.as_ref() {
             [] => Value::Error(ErrorKind::Ref),
-            [only] => deref_range_dynamic_on_sheet(grid, only.sheet, only.range.resolve(base)),
+            [only] => deref_range_dynamic_on_sheet(grid, &only.sheet, only.range.resolve(base)),
             // Discontiguous unions cannot be represented as a single rectangular spill.
             _ => Value::Error(ErrorKind::Value),
         },
@@ -1570,8 +1573,8 @@ pub fn apply_binary(
 
 fn value_into_reference_areas(value: Value, sheet_id: usize) -> Result<Vec<SheetRangeRef>, Value> {
     match value {
-        Value::Range(r) => Ok(vec![SheetRangeRef::new(sheet_id, r)]),
-        Value::MultiRange(r) => Ok(r.areas.iter().copied().collect()),
+        Value::Range(r) => Ok(vec![SheetRangeRef::new(SheetId::Local(sheet_id), r)]),
+        Value::MultiRange(r) => Ok(r.areas.iter().cloned().collect()),
         Value::Error(e) => Err(Value::Error(e)),
         _ => Err(Value::Error(ErrorKind::Value)),
     }
@@ -1605,7 +1608,7 @@ fn reference_union(left: Value, right: Value, sheet_id: usize, base: CellCoord) 
     let Some(first) = left.first() else {
         return Value::Error(ErrorKind::Ref);
     };
-    let expected_sheet = first.sheet;
+    let expected_sheet = first.sheet.clone();
     if left.iter().any(|r| r.sheet != expected_sheet)
         || right.iter().any(|r| r.sheet != expected_sheet)
     {
@@ -1617,8 +1620,10 @@ fn reference_union(left: Value, right: Value, sheet_id: usize, base: CellCoord) 
 
     match left.as_slice() {
         [] => Value::Error(ErrorKind::Ref),
-        [only] if only.sheet == sheet_id => Value::Range(only.range),
-        [only] => Value::MultiRange(MultiRangeRef::new(vec![*only].into())),
+        [only] if matches!(&only.sheet, SheetId::Local(id) if *id == sheet_id) => {
+            Value::Range(only.range)
+        }
+        [only] => Value::MultiRange(MultiRangeRef::new(vec![only.clone()].into())),
         _ => Value::MultiRange(MultiRangeRef::new(left.into())),
     }
 }
@@ -1636,7 +1641,7 @@ fn reference_intersect(left: Value, right: Value, sheet_id: usize, base: CellCoo
     let Some(first) = left.first() else {
         return Value::Error(ErrorKind::Ref);
     };
-    let expected_sheet = first.sheet;
+    let expected_sheet = first.sheet.clone();
     if left.iter().any(|r| r.sheet != expected_sheet)
         || right.iter().any(|r| r.sheet != expected_sheet)
     {
@@ -1654,7 +1659,7 @@ fn reference_intersect(left: Value, right: Value, sheet_id: usize, base: CellCoo
             let start = Ref::new(intersection.row_start, intersection.col_start, true, true);
             let end = Ref::new(intersection.row_end, intersection.col_end, true, true);
             out.push(SheetRangeRef::new(
-                expected_sheet,
+                expected_sheet.clone(),
                 RangeRef::new(start, end),
             ));
         }
@@ -1666,8 +1671,10 @@ fn reference_intersect(left: Value, right: Value, sheet_id: usize, base: CellCoo
     sort_reference_areas(&mut out, base);
 
     match out.as_slice() {
-        [only] if only.sheet == sheet_id => Value::Range(only.range),
-        [only] => Value::MultiRange(MultiRangeRef::new(vec![*only].into())),
+        [only] if matches!(&only.sheet, SheetId::Local(id) if *id == sheet_id) => {
+            Value::Range(only.range)
+        }
+        [only] => Value::MultiRange(MultiRangeRef::new(vec![only.clone()].into())),
         _ => Value::MultiRange(MultiRangeRef::new(out.into())),
     }
 }
@@ -4057,7 +4064,7 @@ fn and_multi_range(
 ) -> Option<ErrorKind> {
     for area in range.areas.iter() {
         if let Some(e) =
-            and_range_on_sheet(grid, area.sheet, area.range.resolve(base), all_true, any)
+            and_range_on_sheet(grid, &area.sheet, area.range.resolve(base), all_true, any)
         {
             return Some(e);
         }
@@ -4067,7 +4074,7 @@ fn and_multi_range(
 
 fn and_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
     all_true: &mut bool,
     any: &mut bool,
@@ -4076,17 +4083,19 @@ fn and_range_on_sheet(
         return Some(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -4169,7 +4178,7 @@ fn or_multi_range(
 ) -> Option<ErrorKind> {
     for area in range.areas.iter() {
         if let Some(e) =
-            or_range_on_sheet(grid, area.sheet, area.range.resolve(base), any_true, any)
+            or_range_on_sheet(grid, &area.sheet, area.range.resolve(base), any_true, any)
         {
             return Some(e);
         }
@@ -4179,7 +4188,7 @@ fn or_multi_range(
 
 fn or_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
     any_true: &mut bool,
     any: &mut bool,
@@ -4188,17 +4197,19 @@ fn or_range_on_sheet(
         return Some(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -4368,26 +4379,28 @@ where
             };
 
             let resolved = area.range.resolve(base);
-            if !range_in_bounds_on_sheet(grid, area.sheet, resolved) {
+            if !range_in_bounds_on_sheet(grid, &area.sheet, resolved) {
                 return map_value(&Value::Error(ErrorKind::Ref), f);
             }
 
             // Record the referenced rectangle once for dynamic dependency tracing.
-            grid.record_reference(
-                area.sheet,
-                CellCoord {
-                    row: resolved.row_start,
-                    col: resolved.col_start,
-                },
-                CellCoord {
-                    row: resolved.row_end,
-                    col: resolved.col_end,
-                },
-            );
+            if let SheetId::Local(sheet) = &area.sheet {
+                grid.record_reference(
+                    *sheet,
+                    CellCoord {
+                        row: resolved.row_start,
+                        col: resolved.col_start,
+                    },
+                    CellCoord {
+                        row: resolved.row_end,
+                        col: resolved.col_end,
+                    },
+                );
+            }
 
             if resolved.rows() == 1 && resolved.cols() == 1 {
                 let v = grid.get_value_on_sheet(
-                    area.sheet,
+                    &area.sheet,
                     CellCoord {
                         row: resolved.row_start,
                         col: resolved.col_start,
@@ -4417,7 +4430,7 @@ where
             }
             for row in resolved.row_start..=resolved.row_end {
                 for col in resolved.col_start..=resolved.col_end {
-                    let v = grid.get_value_on_sheet(area.sheet, CellCoord { row, col });
+                    let v = grid.get_value_on_sheet(&area.sheet, CellCoord { row, col });
                     values.push(f(&v));
                 }
             }
@@ -4517,13 +4530,12 @@ fn fn_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                         row: resolved.row_start,
                         col: resolved.col_start,
                     };
-                    if grid.in_bounds_on_sheet(only.sheet, coord) {
-                        grid.record_reference(only.sheet, coord, coord);
+                    if grid.in_bounds_on_sheet(&only.sheet, coord) {
+                        if let SheetId::Local(sheet_id) = &only.sheet {
+                            grid.record_reference(*sheet_id, coord, coord);
+                        }
                     }
-                    let v = grid.get_value_on_sheet(
-                        only.sheet,
-                        coord,
-                    );
+                    let v = grid.get_value_on_sheet(&only.sheet, coord);
                     type_code_for_scalar(&v)
                 } else {
                     64
@@ -4837,10 +4849,10 @@ fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let current_sheet = thread_current_sheet_id() as usize;
 
     let (sheet, base_range) = match &args[0] {
-        Value::Range(r) => (current_sheet, r.resolve(base)),
+        Value::Range(r) => (SheetId::Local(current_sheet), r.resolve(base)),
         Value::MultiRange(r) => match r.areas.as_ref() {
             [] => return Value::Error(ErrorKind::Ref),
-            [only] => (only.sheet, only.range.resolve(base)),
+            [only] => (only.sheet.clone(), only.range.resolve(base)),
             _ => return Value::Error(ErrorKind::Value),
         },
         Value::Error(e) => return Value::Error(*e),
@@ -4928,12 +4940,11 @@ fn fn_offset(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let end = Ref::new(end_row as i32, end_col as i32, true, true);
     let range = RangeRef::new(start, end);
 
-    if sheet == current_sheet {
-        Value::Range(range)
-    } else {
-        Value::MultiRange(MultiRangeRef::new(
-            vec![SheetRangeRef::new(sheet, range)].into(),
-        ))
+    match sheet {
+        SheetId::Local(sheet_id) if sheet_id == current_sheet => Value::Range(range),
+        other_sheet => Value::MultiRange(MultiRangeRef::new(
+            vec![SheetRangeRef::new(other_sheet, range)].into(),
+        )),
     }
 }
 
@@ -5029,7 +5040,7 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let make_range_value =
         |sheet: usize, start: crate::eval::CellAddr, end: crate::eval::CellAddr| -> Value {
-            let (rows, cols) = grid.bounds_on_sheet(sheet);
+            let (rows, cols) = grid.bounds_on_sheet(&SheetId::Local(sheet));
             if rows <= 0 || cols <= 0 {
                 return Value::Error(ErrorKind::Ref);
             }
@@ -5062,7 +5073,7 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Value::Range(range)
             } else {
                 Value::MultiRange(MultiRangeRef::new(
-                    vec![SheetRangeRef::new(sheet, range)].into(),
+                    vec![SheetRangeRef::new(SheetId::Local(sheet), range)].into(),
                 ))
             }
         };
@@ -5255,7 +5266,7 @@ fn xor_multi_range(
             best_error_in_area = None;
         }
 
-        if let Some((coord, err)) = xor_range_on_sheet(grid, area.sheet, area.range, acc) {
+        if let Some((coord, err)) = xor_range_on_sheet(grid, &area.sheet, area.range, acc) {
             record_error_row_major(&mut best_error_in_area, coord, err);
         }
     }
@@ -5265,7 +5276,7 @@ fn xor_multi_range(
 
 fn xor_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
     acc: &mut bool,
 ) -> Option<(CellCoord, ErrorKind)> {
@@ -5279,17 +5290,19 @@ fn xor_range_on_sheet(
         ));
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -5513,7 +5526,7 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = r
                     .areas
                     .iter()
-                    .copied()
+                    .cloned()
                     .map(|area| {
                         let resolved = area.range.resolve(base);
                         (area, resolved)
@@ -5530,24 +5543,26 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 });
 
                 for (area, range) in areas {
-                    if !range_in_bounds_on_sheet(grid, area.sheet, range) {
+                    if !range_in_bounds_on_sheet(grid, &area.sheet, range) {
                         return Value::Error(ErrorKind::Ref);
                     }
-                    grid.record_reference(
-                        area.sheet,
-                        CellCoord {
-                            row: range.row_start,
-                            col: range.col_start,
-                        },
-                        CellCoord {
-                            row: range.row_end,
-                            col: range.col_end,
-                        },
-                    );
+                    if let SheetId::Local(sheet) = &area.sheet {
+                        grid.record_reference(
+                            *sheet,
+                            CellCoord {
+                                row: range.row_start,
+                                col: range.col_start,
+                            },
+                            CellCoord {
+                                row: range.row_end,
+                                col: range.col_end,
+                            },
+                        );
+                    }
 
                     for row in range.row_start..=range.row_end {
                         for col in range.col_start..=range.col_end {
-                            let v = grid.get_value_on_sheet(area.sheet, CellCoord { row, col });
+                            let v = grid.get_value_on_sheet(&area.sheet, CellCoord { row, col });
                             let s = match coerce_to_cow_str(&v) {
                                 Ok(s) => s,
                                 Err(e) => return Value::Error(e),
@@ -5661,7 +5676,7 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::MultiRange(r) => {
                 for area in multirange_unique_areas(r, base) {
-                    match sum_range_on_sheet(grid, area.sheet, area.range) {
+                    match sum_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(v) => sum += v,
                         Err(e) => return Value::Error(e),
                     }
@@ -5784,7 +5799,7 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::MultiRange(r) => {
                 for area in multirange_unique_areas(r, base) {
-                    match sum_count_range_on_sheet(grid, area.sheet, area.range) {
+                    match sum_count_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok((s, c)) => {
                             if !saw_nan {
                                 sum += s;
@@ -5919,7 +5934,7 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::MultiRange(r) => {
                 for area in multirange_unique_areas(r, base) {
-                    match min_range_on_sheet(grid, area.sheet, area.range) {
+                    match min_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
                         Ok(None) => {}
                         Err(e) => return Value::Error(e),
@@ -6045,7 +6060,7 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::MultiRange(r) => {
                 for area in multirange_unique_areas(r, base) {
-                    match max_range_on_sheet(grid, area.sheet, area.range) {
+                    match max_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.max(m))),
                         Ok(None) => {}
                         Err(e) => return Value::Error(e),
@@ -6112,7 +6127,7 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::MultiRange(r) => {
                 for area in multirange_unique_areas(r, base) {
-                    match count_range_on_sheet(grid, area.sheet, area.range) {
+                    match count_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(c) => count += c,
                         Err(e) => return Value::Error(e),
                     }
@@ -6157,7 +6172,7 @@ fn fn_counta(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::MultiRange(r) => {
                 for area in multirange_unique_areas(r, base) {
-                    match counta_range_on_sheet(grid, area.sheet, area.range) {
+                    match counta_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(c) => total += c,
                         Err(e) => return Value::Error(e),
                     }
@@ -6196,7 +6211,7 @@ fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::MultiRange(r) => {
                 for area in multirange_unique_areas(r, base) {
-                    match countblank_range_on_sheet(grid, area.sheet, area.range) {
+                    match countblank_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(c) => total += c,
                         Err(e) => return Value::Error(e),
                     }
@@ -6244,7 +6259,7 @@ fn fn_countif(
             RangeArg::MultiRange(r) => {
                 let mut count = 0usize;
                 for area in multirange_unique_areas(r, base) {
-                    match count_if_range_on_sheet(grid, area.sheet, area.range, numeric) {
+                    match count_if_range_on_sheet(grid, &area.sheet, area.range, numeric) {
                         Ok(c) => count += c,
                         Err(e) => return Value::Error(e),
                     }
@@ -6264,7 +6279,7 @@ fn fn_countif(
         RangeArg::MultiRange(r) => {
             let mut count = 0usize;
             for area in multirange_unique_areas(r, base) {
-                match count_if_range_criteria_on_sheet(grid, area.sheet, area.range, &criteria) {
+                match count_if_range_criteria_on_sheet(grid, &area.sheet, area.range, &criteria) {
                     Ok(c) => count += c,
                     Err(e) => return Value::Error(e),
                 }
@@ -10358,7 +10373,7 @@ fn count_if_range_criteria(
 
 fn count_if_range_criteria_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
     criteria: &EngineCriteria,
 ) -> Result<usize, ErrorKind> {
@@ -10366,17 +10381,19 @@ fn count_if_range_criteria_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -10627,7 +10644,7 @@ fn record_error_sumproduct_offset(
 }
 
 #[inline]
-fn range_in_bounds_on_sheet(grid: &dyn Grid, sheet: usize, range: ResolvedRange) -> bool {
+fn range_in_bounds_on_sheet(grid: &dyn Grid, sheet: &SheetId, range: ResolvedRange) -> bool {
     grid.in_bounds_on_sheet(
         sheet,
         CellCoord {
@@ -10726,24 +10743,26 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
 
 fn sum_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
 ) -> Result<f64, ErrorKind> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -10903,24 +10922,26 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
 
 fn sum_count_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
 ) -> Result<(f64, usize), ErrorKind> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -11046,24 +11067,26 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind
 
 fn count_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
 ) -> Result<usize, ErrorKind> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -11154,24 +11177,26 @@ fn counta_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKin
 
 fn counta_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
 ) -> Result<usize, ErrorKind> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -11270,24 +11295,26 @@ fn countblank_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, Erro
 
 fn countblank_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
 ) -> Result<usize, ErrorKind> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
 
@@ -11416,24 +11443,26 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
 
 fn min_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
 ) -> Result<Option<f64>, ErrorKind> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -11583,24 +11612,26 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
 
 fn max_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
 ) -> Result<Option<f64>, ErrorKind> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -11736,7 +11767,7 @@ fn count_if_range(
 
 fn count_if_range_on_sheet(
     grid: &dyn Grid,
-    sheet: usize,
+    sheet: &SheetId,
     range: ResolvedRange,
     criteria: NumericCriteria,
 ) -> Result<usize, ErrorKind> {
@@ -11744,17 +11775,19 @@ fn count_if_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
-    grid.record_reference(
-        sheet,
-        CellCoord {
-            row: range.row_start,
-            col: range.col_start,
-        },
-        CellCoord {
-            row: range.row_end,
-            col: range.col_end,
-        },
-    );
+    if let SheetId::Local(sheet_id) = sheet {
+        grid.record_reference(
+            *sheet_id,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
+    }
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -12342,7 +12375,7 @@ mod tests {
             panic!("unexpected get_value call (expected sparse iteration)");
         }
 
-        fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+        fn get_value_on_sheet(&self, _sheet: &SheetId, _coord: CellCoord) -> Value {
             panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
         }
 
@@ -12352,7 +12385,7 @@ mod tests {
 
         fn column_slice_on_sheet(
             &self,
-            _sheet: usize,
+            _sheet: &SheetId,
             _col: i32,
             _row_start: i32,
             _row_end: i32,
@@ -12366,16 +12399,21 @@ mod tests {
 
         fn iter_cells_on_sheet(
             &self,
-            sheet: usize,
+            sheet: &SheetId,
         ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
-            Some(Box::new(self.cells_by_sheet.get(&sheet)?.iter().cloned()))
+            match sheet {
+                SheetId::Local(sheet) => {
+                    Some(Box::new(self.cells_by_sheet.get(sheet)?.iter().cloned()))
+                }
+                SheetId::External(_) => None,
+            }
         }
 
         fn bounds(&self) -> (i32, i32) {
             self.bounds
         }
 
-        fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+        fn bounds_on_sheet(&self, _sheet: &SheetId) -> (i32, i32) {
             self.bounds
         }
     }
@@ -12505,8 +12543,11 @@ mod tests {
                     .unwrap_or(Value::Empty)
             }
 
-            fn get_value_on_sheet(&self, _sheet: usize, coord: CellCoord) -> Value {
-                self.get_value(coord)
+            fn get_value_on_sheet(&self, sheet: &SheetId, coord: CellCoord) -> Value {
+                match sheet {
+                    SheetId::Local(_) => self.get_value(coord),
+                    SheetId::External(_) => Value::Error(ErrorKind::Ref),
+                }
             }
 
             fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
@@ -12566,8 +12607,11 @@ mod tests {
                     .unwrap_or(Value::Empty)
             }
 
-            fn get_value_on_sheet(&self, _sheet: usize, coord: CellCoord) -> Value {
-                self.get_value(coord)
+            fn get_value_on_sheet(&self, sheet: &SheetId, coord: CellCoord) -> Value {
+                match sheet {
+                    SheetId::Local(_) => self.get_value(coord),
+                    SheetId::External(_) => Value::Error(ErrorKind::Ref),
+                }
             }
 
             fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
@@ -12681,7 +12725,7 @@ mod tests {
         let mut all_true = true;
         let mut any = false;
         assert_eq!(
-            and_range_on_sheet(&grid, 0, range, &mut all_true, &mut any),
+            and_range_on_sheet(&grid, &SheetId::Local(0), range, &mut all_true, &mut any),
             None
         );
         assert_eq!(all_true, true);
@@ -12710,7 +12754,7 @@ mod tests {
         let mut any_true = false;
         let mut any = false;
         assert_eq!(
-            or_range_on_sheet(&grid, 0, range, &mut any_true, &mut any),
+            or_range_on_sheet(&grid, &SheetId::Local(0), range, &mut any_true, &mut any),
             None
         );
         assert_eq!(any_true, false);
@@ -12731,7 +12775,7 @@ mod tests {
                 panic!("unexpected get_value call (expected sparse iteration)");
             }
 
-            fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+            fn get_value_on_sheet(&self, _sheet: &SheetId, _coord: CellCoord) -> Value {
                 panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
             }
 
@@ -12741,7 +12785,7 @@ mod tests {
 
             fn column_slice_on_sheet(
                 &self,
-                _sheet: usize,
+                _sheet: &SheetId,
                 _col: i32,
                 _row_start: i32,
                 _row_end: i32,
@@ -12751,16 +12795,21 @@ mod tests {
 
             fn iter_cells_on_sheet(
                 &self,
-                sheet: usize,
+                sheet: &SheetId,
             ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
-                Some(Box::new(self.cells_by_sheet.get(&sheet)?.iter().cloned()))
+                match sheet {
+                    SheetId::Local(sheet) => {
+                        Some(Box::new(self.cells_by_sheet.get(sheet)?.iter().cloned()))
+                    }
+                    SheetId::External(_) => None,
+                }
             }
 
             fn bounds(&self) -> (i32, i32) {
                 self.bounds
             }
 
-            fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+            fn bounds_on_sheet(&self, _sheet: &SheetId) -> (i32, i32) {
                 self.bounds
             }
         }
@@ -12789,9 +12838,12 @@ mod tests {
             )]),
         };
 
-        assert_eq!(counta_range_on_sheet(&grid, 0, range), Ok(3));
         assert_eq!(
-            countblank_range_on_sheet(&grid, 0, range),
+            counta_range_on_sheet(&grid, &SheetId::Local(0), range),
+            Ok(3)
+        );
+        assert_eq!(
+            countblank_range_on_sheet(&grid, &SheetId::Local(0), range),
             Ok((range.rows() as usize).saturating_sub(2))
         );
     }
@@ -12810,7 +12862,7 @@ mod tests {
                 panic!("unexpected get_value call (expected sparse iteration)");
             }
 
-            fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+            fn get_value_on_sheet(&self, _sheet: &SheetId, _coord: CellCoord) -> Value {
                 panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
             }
 
@@ -12820,7 +12872,7 @@ mod tests {
 
             fn column_slice_on_sheet(
                 &self,
-                _sheet: usize,
+                _sheet: &SheetId,
                 _col: i32,
                 _row_start: i32,
                 _row_end: i32,
@@ -12830,16 +12882,21 @@ mod tests {
 
             fn iter_cells_on_sheet(
                 &self,
-                sheet: usize,
+                sheet: &SheetId,
             ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
-                Some(Box::new(self.cells_by_sheet.get(&sheet)?.iter().cloned()))
+                match sheet {
+                    SheetId::Local(sheet) => {
+                        Some(Box::new(self.cells_by_sheet.get(sheet)?.iter().cloned()))
+                    }
+                    SheetId::External(_) => None,
+                }
             }
 
             fn bounds(&self) -> (i32, i32) {
                 self.bounds
             }
 
-            fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+            fn bounds_on_sheet(&self, _sheet: &SheetId) -> (i32, i32) {
                 self.bounds
             }
         }
@@ -12877,12 +12934,15 @@ mod tests {
         let criteria_zero = NumericCriteria::new(CmpOp::Eq, 0.0);
         let expected_zero = explicit_zero_matches + total_cells.saturating_sub(seen_in_range);
         assert_eq!(
-            count_if_range_on_sheet(&grid, 0, range, criteria_zero),
+            count_if_range_on_sheet(&grid, &SheetId::Local(0), range, criteria_zero),
             Ok(expected_zero)
         );
 
         let criteria_gt = NumericCriteria::new(CmpOp::Gt, 0.0);
-        assert_eq!(count_if_range_on_sheet(&grid, 0, range, criteria_gt), Ok(2));
+        assert_eq!(
+            count_if_range_on_sheet(&grid, &SheetId::Local(0), range, criteria_gt),
+            Ok(2)
+        );
     }
 
     #[test]
@@ -13159,7 +13219,7 @@ mod tests {
                 panic!("unexpected get_value call (expected sparse iteration)");
             }
 
-            fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+            fn get_value_on_sheet(&self, _sheet: &SheetId, _coord: CellCoord) -> Value {
                 panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
             }
 
@@ -13173,12 +13233,11 @@ mod tests {
 
             fn iter_cells_on_sheet(
                 &self,
-                sheet: usize,
+                sheet: &SheetId,
             ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
-                if sheet == 0 {
-                    Some(Box::new(self.cells.iter().cloned()))
-                } else {
-                    None
+                match sheet {
+                    SheetId::Local(0) => Some(Box::new(self.cells.iter().cloned())),
+                    _ => None,
                 }
             }
 
@@ -13186,7 +13245,7 @@ mod tests {
                 self.bounds
             }
 
-            fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+            fn bounds_on_sheet(&self, _sheet: &SheetId) -> (i32, i32) {
                 self.bounds
             }
         }
@@ -13226,7 +13285,7 @@ mod tests {
         let mut any_true = false;
         let mut any = false;
         assert_eq!(
-            or_range_on_sheet(&grid, 0, range, &mut any_true, &mut any),
+            or_range_on_sheet(&grid, &SheetId::Local(0), range, &mut any_true, &mut any),
             None
         );
         assert!(any_true);
@@ -13241,7 +13300,10 @@ mod tests {
             ],
         };
         let mut acc = false;
-        assert_eq!(xor_range_on_sheet(&grid, 0, range, &mut acc), None);
+        assert_eq!(
+            xor_range_on_sheet(&grid, &SheetId::Local(0), range, &mut acc),
+            None
+        );
         assert!(!acc, "TRUE XOR 1 should yield FALSE");
 
         // Error precedence: row-major (smaller row wins) regardless of iteration order.
@@ -13255,7 +13317,7 @@ mod tests {
         let mut all_true = true;
         let mut any = false;
         assert_eq!(
-            and_range_on_sheet(&grid, 0, range, &mut all_true, &mut any),
+            and_range_on_sheet(&grid, &SheetId::Local(0), range, &mut all_true, &mut any),
             Some(ErrorKind::Num)
         );
     }

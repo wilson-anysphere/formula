@@ -4,8 +4,19 @@ use std::sync::Arc;
 
 use crate::value::{EntityValue, RecordValue};
 
-/// Engine sheet id (0-indexed).
-pub type SheetId = usize;
+/// Worksheet identifier used by the bytecode backend.
+///
+/// This must be stable and uniquely identify the sheet for bytecode program caching.
+/// In particular, external sheet references are keyed by a canonical string
+/// (e.g. `"[Book.xlsx]Sheet1"`) so that cached programs do not collide across different external
+/// workbooks/sheets.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SheetId {
+    /// 0-indexed sheet id within the current workbook/engine snapshot.
+    Local(usize),
+    /// Canonical external sheet key string (e.g. `"[Book.xlsx]Sheet1"`).
+    External(Arc<str>),
+}
 
 /// 0-indexed cell coordinate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -79,7 +90,7 @@ impl RangeRef {
 }
 
 /// A range on a specific sheet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SheetRangeRef {
     pub sheet: SheetId,
     pub range: RangeRef,
@@ -87,7 +98,7 @@ pub struct SheetRangeRef {
 
 impl SheetRangeRef {
     #[inline]
-    pub const fn new(sheet: SheetId, range: RangeRef) -> Self {
+    pub fn new(sheet: SheetId, range: RangeRef) -> Self {
         Self { sheet, range }
     }
 }

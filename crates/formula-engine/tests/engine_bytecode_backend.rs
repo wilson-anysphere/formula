@@ -7650,7 +7650,7 @@ fn bytecode_compile_diagnostics_accepts_indirect() {
     assert!(stats.fallback_reasons.is_empty());
 
     let report = engine.bytecode_compile_report(10);
-    assert!(report.is_empty());
+    assert!(report.is_empty(), "unexpected bytecode fallback report: {report:?}");
 }
 
 #[test]
@@ -7667,7 +7667,7 @@ fn bytecode_compile_diagnostics_accepts_offset() {
     assert!(stats.fallback_reasons.is_empty());
 
     let report = engine.bytecode_compile_report(10);
-    assert!(report.is_empty());
+    assert!(report.is_empty(), "unexpected bytecode fallback report: {report:?}");
 }
 
 #[test]
@@ -7796,9 +7796,11 @@ fn bytecode_compile_diagnostics_reports_unknown_sheet_reason() {
 fn bytecode_compile_diagnostics_reports_external_reference_reason() {
     let mut engine = Engine::new();
 
-    // External workbook references are not supported by the bytecode backend.
+    // External workbook references are supported by the bytecode backend, but external 3D sheet
+    // spans (`[Book]Sheet1:Sheet3!A1`) cannot be represented via `ExternalValueProvider`, so they
+    // should still fall back to the AST evaluator with an ExternalReference lowering error.
     engine
-        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
@@ -7818,7 +7820,7 @@ fn bytecode_compile_diagnostics_reports_external_reference_reason() {
 }
 
 #[test]
-fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name() {
+fn bytecode_compile_diagnostics_allows_external_reference_through_defined_name() {
     let mut engine = Engine::new();
     engine
         .define_name(
@@ -7832,22 +7834,17 @@ fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name(
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 1);
     assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::LowerError(
-                bytecode::LowerError::ExternalReference,
-            ))
-            .copied()
-            .unwrap_or(0),
-        1
+        stats.compiled,
+        1,
+        "expected defined-name external workbook refs to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(32)
     );
+    assert_eq!(stats.fallback, 0);
 }
 
 #[test]
-fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name_in_field_access() {
+fn bytecode_compile_diagnostics_allows_external_reference_through_defined_name_in_field_access() {
     let mut engine = Engine::new();
     engine
         .define_name(
@@ -7857,30 +7854,24 @@ fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name_
         )
         .unwrap();
 
-    // Field access expressions like `(EXT).Price` should still be classified as external references
-    // for bytecode compilation when the base name expands to an external workbook reference.
+    // Field access expressions like `(EXT).Price` should still compile to bytecode when the base
+    // defined name expands to an external workbook reference.
     //
-    // Note: Without parentheses, `EXT.Price` is currently tokenized as a single dotted identifier
-    // (e.g. to support `_xlfn.` prefixes), so use `(EXT).Price` to ensure we exercise the field
-    // access operator.
+    // Note: Without parentheses, `EXT.Price` is currently tokenized as a single dotted identifier,
+    // so use `(EXT).Price` to ensure we exercise the field access operator.
     engine
         .set_cell_formula("Sheet1", "A1", "=(EXT).Price")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 1);
     assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::LowerError(
-                bytecode::LowerError::ExternalReference,
-            ))
-            .copied()
-            .unwrap_or(0),
-        1
+        stats.compiled,
+        1,
+        "expected field access over external workbook refs to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(32)
     );
+    assert_eq!(stats.fallback, 0);
 }
 
 #[test]

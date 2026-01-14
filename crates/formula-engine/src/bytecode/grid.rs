@@ -1,5 +1,9 @@
-use super::value::{CellCoord, ErrorKind, Value};
+use super::value::{CellCoord, ErrorKind, SheetId, Value};
 use ahash::AHashMap;
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+
+const EXCEL_MAX_ROWS_I32: i32 = EXCEL_MAX_ROWS as i32;
+const EXCEL_MAX_COLS_I32: i32 = EXCEL_MAX_COLS as i32;
 
 pub trait Grid: Sync {
     fn get_value(&self, coord: CellCoord) -> Value;
@@ -9,9 +13,11 @@ pub trait Grid: Sync {
     /// Bytecode formulas that don't use explicit sheet-qualified references can ignore the sheet
     /// id. Multi-sheet backends (like the engine) should override this to support 3D references.
     #[inline]
-    fn get_value_on_sheet(&self, sheet: usize, coord: CellCoord) -> Value {
-        let _ = sheet;
-        self.get_value(coord)
+    fn get_value_on_sheet(&self, sheet: &SheetId, coord: CellCoord) -> Value {
+        match sheet {
+            SheetId::Local(_) => self.get_value(coord),
+            SheetId::External(_) => Value::Error(ErrorKind::Ref),
+        }
     }
 
     /// Record that a cell/range reference was dereferenced during evaluation.
@@ -86,23 +92,27 @@ pub trait Grid: Sync {
     #[inline]
     fn iter_cells_on_sheet(
         &self,
-        sheet: usize,
+        sheet: &SheetId,
     ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
-        let _ = sheet;
-        self.iter_cells()
+        match sheet {
+            SheetId::Local(_) => self.iter_cells(),
+            SheetId::External(_) => None,
+        }
     }
 
     /// Sheet-aware variant of [`Grid::column_slice`].
     #[inline]
     fn column_slice_on_sheet(
         &self,
-        sheet: usize,
+        sheet: &SheetId,
         col: i32,
         row_start: i32,
         row_end: i32,
     ) -> Option<&[f64]> {
-        let _ = sheet;
-        self.column_slice(col, row_start, row_end)
+        match sheet {
+            SheetId::Local(_) => self.column_slice(col, row_start, row_end),
+            SheetId::External(_) => None,
+        }
     }
 
     /// Sheet-aware variant of [`Grid::column_slice_strict_numeric`].
@@ -112,7 +122,7 @@ pub trait Grid: Sync {
     #[inline]
     fn column_slice_on_sheet_strict_numeric(
         &self,
-        sheet: usize,
+        sheet: &SheetId,
         col: i32,
         row_start: i32,
         row_end: i32,
@@ -123,9 +133,14 @@ pub trait Grid: Sync {
 
     /// Sheet-aware variant of [`Grid::bounds`].
     #[inline]
-    fn bounds_on_sheet(&self, sheet: usize) -> (i32, i32) {
-        let _ = sheet;
-        self.bounds()
+    fn bounds_on_sheet(&self, sheet: &SheetId) -> (i32, i32) {
+        match sheet {
+            SheetId::Local(_) => self.bounds(),
+            // External sheets do not expose true dimensions, but references are still valid within
+            // Excel's fixed maximum grid. This matches the AST evaluator which treats external
+            // bounds as unknown/valid.
+            SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
+        }
     }
 
     /// Resolve a worksheet display name to an internal sheet id.
@@ -149,7 +164,7 @@ pub trait Grid: Sync {
     }
 
     #[inline]
-    fn in_bounds_on_sheet(&self, sheet: usize, coord: CellCoord) -> bool {
+    fn in_bounds_on_sheet(&self, sheet: &SheetId, coord: CellCoord) -> bool {
         let (rows, cols) = self.bounds_on_sheet(sheet);
         coord.row >= 0 && coord.col >= 0 && coord.row < rows && coord.col < cols
     }
@@ -160,7 +175,11 @@ pub trait Grid: Sync {
     /// backends that don't support dynamic arrays can leave the default implementation, which
     /// behaves as if there are no spills.
     #[inline]
-    fn spill_origin(&self, _sheet_id: usize, _addr: crate::eval::CellAddr) -> Option<crate::eval::CellAddr> {
+    fn spill_origin(
+        &self,
+        _sheet_id: &SheetId,
+        _addr: crate::eval::CellAddr,
+    ) -> Option<crate::eval::CellAddr> {
         None
     }
 
@@ -172,7 +191,7 @@ pub trait Grid: Sync {
     #[inline]
     fn spill_range(
         &self,
-        _sheet_id: usize,
+        _sheet_id: &SheetId,
         _origin: crate::eval::CellAddr,
     ) -> Option<(crate::eval::CellAddr, crate::eval::CellAddr)> {
         None

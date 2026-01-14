@@ -1,6 +1,6 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::program::{Capture, ConstValue, Instruction, LambdaTemplate, OpCode, Program};
-use super::value::{ErrorKind, RangeRef, SheetRangeRef, Value};
+use super::value::{ErrorKind, RangeRef, SheetId, SheetRangeRef, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -1001,7 +1001,7 @@ fn value_to_key(v: &Value, out: &mut String) {
             out.push_str(&r.areas.len().to_string());
             out.push(':');
             for area in r.areas.iter() {
-                sheet_range_to_key(*area, out);
+                sheet_range_to_key(area, out);
                 out.push(',');
             }
             out.push(')');
@@ -1051,7 +1051,7 @@ fn expr_to_key(expr: &Expr, out: &mut String) {
             out.push_str(&r.areas.len().to_string());
             out.push(':');
             for area in r.areas.iter() {
-                sheet_range_to_key(*area, out);
+                sheet_range_to_key(area, out);
                 out.push(',');
             }
             out.push(')');
@@ -1141,9 +1141,23 @@ fn ref_to_key(r: super::value::Ref, out: &mut String) {
     out.push_str(&r.col.to_string());
 }
 
-fn sheet_range_to_key(r: SheetRangeRef, out: &mut String) {
+fn sheet_id_to_key(sheet: &SheetId, out: &mut String) {
+    match sheet {
+        SheetId::Local(id) => {
+            out.push('L');
+            out.push_str(&id.to_string());
+        }
+        SheetId::External(key) => {
+            out.push('E');
+            out.push_str(key);
+            out.push('\0');
+        }
+    }
+}
+
+fn sheet_range_to_key(r: &SheetRangeRef, out: &mut String) {
     out.push_str("S");
-    out.push_str(&r.sheet.to_string());
+    sheet_id_to_key(&r.sheet, out);
     out.push(':');
     ref_to_key(r.range.start, out);
     out.push(',');

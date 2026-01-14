@@ -425,6 +425,21 @@ impl Workbook {
         self.sheet_order.iter().position(|&id| id == sheet)
     }
 
+    fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
+        if new_index >= self.sheet_order.len() {
+            return false;
+        }
+        let Some(current) = self.sheet_order.iter().position(|&id| id == sheet) else {
+            return false;
+        };
+        if current == new_index {
+            return true;
+        }
+        let sheet_id = self.sheet_order.remove(current);
+        self.sheet_order.insert(new_index, sheet_id);
+        true
+    }
+
     /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
     ///
     /// This respects the current workbook tab order and supports reversed spans.
@@ -3137,7 +3152,7 @@ impl Engine {
                                 let slice_mode = slice_mode_for_program(&bc.program);
                                 let grid = EngineBytecodeGrid {
                                     snapshot: &snapshot,
-                                    sheet: k.sheet,
+                                    sheet_id: k.sheet,
                                     cols,
                                     cols_by_sheet: &column_cache.by_sheet,
                                     slice_mode,
@@ -3217,7 +3232,7 @@ impl Engine {
                                                     let slice_mode = slice_mode_for_program(&bc.program);
                                                     let grid = EngineBytecodeGrid {
                                                         snapshot: &snapshot,
-                                                        sheet: k.sheet,
+                                                        sheet_id: k.sheet,
                                                         cols,
                                                         cols_by_sheet: &column_cache.by_sheet,
                                                         slice_mode,
@@ -3309,7 +3324,7 @@ impl Engine {
                             let slice_mode = slice_mode_for_program(&bc.program);
                             let grid = EngineBytecodeGrid {
                                 snapshot: &snapshot,
-                                sheet: k.sheet,
+                                sheet_id: k.sheet,
                                 cols,
                                 cols_by_sheet: &column_cache.by_sheet,
                                 slice_mode,
@@ -3391,7 +3406,7 @@ impl Engine {
                             let slice_mode = slice_mode_for_program(&bc.program);
                             let grid = EngineBytecodeGrid {
                                 snapshot: &snapshot,
-                                sheet: k.sheet,
+                                sheet_id: k.sheet,
                                 cols,
                                 cols_by_sheet: &column_cache.by_sheet,
                                 slice_mode,
@@ -5244,9 +5259,6 @@ impl Engine {
     ) -> Option<crate::Expr> {
         match expr {
             crate::Expr::CellRef(r) => {
-                if r.workbook.is_some() {
-                    return None;
-                }
                 let col = match r.col {
                     crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
                     crate::Coord::Offset(_) => return None,
@@ -5256,36 +5268,30 @@ impl Engine {
                     crate::Coord::Offset(_) => return None,
                 };
                 Some(crate::Expr::CellRef(crate::CellRef {
-                    workbook: None,
+                    workbook: r.workbook.clone(),
                     sheet: r.sheet.clone(),
                     col,
                     row,
                 }))
             }
             crate::Expr::ColRef(r) => {
-                if r.workbook.is_some() {
-                    return None;
-                }
                 let col = match r.col {
                     crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
                     crate::Coord::Offset(_) => return None,
                 };
                 Some(crate::Expr::ColRef(crate::ColRef {
-                    workbook: None,
+                    workbook: r.workbook.clone(),
                     sheet: r.sheet.clone(),
                     col,
                 }))
             }
             crate::Expr::RowRef(r) => {
-                if r.workbook.is_some() {
-                    return None;
-                }
                 let row = match r.row {
                     crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
                     crate::Coord::Offset(_) => return None,
                 };
                 Some(crate::Expr::RowRef(crate::RowRef {
-                    workbook: None,
+                    workbook: r.workbook.clone(),
                     sheet: r.sheet.clone(),
                     row,
                 }))
@@ -5313,13 +5319,20 @@ impl Engine {
         r: &crate::CellRef,
         current_sheet: SheetId,
     ) -> Option<crate::CellRef> {
-        if r.workbook.is_some() {
-            return None;
-        }
+        let workbook = r.workbook.clone();
         let sheet = match r.sheet.as_ref() {
-            None => Some(crate::SheetRef::Sheet(
-                self.workbook.sheet_name(current_sheet)?.to_string(),
-            )),
+            None => {
+                // Unqualified references in defined-name definitions are evaluated relative to the
+                // sheet where the name is *used*. When we inline for bytecode, make that context
+                // explicit by filling the current sheet name.
+                if workbook.is_none() {
+                    Some(crate::SheetRef::Sheet(
+                        self.workbook.sheet_name(current_sheet)?.to_string(),
+                    ))
+                } else {
+                    None
+                }
+            }
             Some(crate::SheetRef::Sheet(name)) => Some(crate::SheetRef::Sheet(name.clone())),
             Some(crate::SheetRef::SheetRange { start, end }) => Some(crate::SheetRef::SheetRange {
                 start: start.clone(),
@@ -5337,7 +5350,7 @@ impl Engine {
         };
 
         Some(crate::CellRef {
-            workbook: None,
+            workbook,
             sheet,
             col,
             row,
@@ -6959,46 +6972,6 @@ fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
     }
 }
 
-fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
-    match expr {
-        crate::Expr::NameRef(r) => r.workbook.is_some(),
-        crate::Expr::CellRef(r) => r.workbook.is_some(),
-        crate::Expr::ColRef(r) => r.workbook.is_some(),
-        crate::Expr::RowRef(r) => r.workbook.is_some(),
-        crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => {
-            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
-        }
-        crate::Expr::FunctionCall(call) => call
-            .args
-            .iter()
-            .any(|arg| canonical_expr_contains_external_workbook_refs(arg)),
-        crate::Expr::Call(call) => {
-            canonical_expr_contains_external_workbook_refs(call.callee.as_ref())
-                || call
-                    .args
-                    .iter()
-                    .any(|arg| canonical_expr_contains_external_workbook_refs(arg))
-        }
-        crate::Expr::Unary(u) => canonical_expr_contains_external_workbook_refs(&u.expr),
-        crate::Expr::Postfix(p) => canonical_expr_contains_external_workbook_refs(&p.expr),
-        crate::Expr::Binary(b) => {
-            canonical_expr_contains_external_workbook_refs(&b.left)
-                || canonical_expr_contains_external_workbook_refs(&b.right)
-        }
-        crate::Expr::Array(arr) => arr
-            .rows
-            .iter()
-            .flat_map(|row| row.iter())
-            .any(|el| canonical_expr_contains_external_workbook_refs(el)),
-        crate::Expr::Number(_)
-        | crate::Expr::String(_)
-        | crate::Expr::Boolean(_)
-        | crate::Expr::Error(_)
-        | crate::Expr::Missing => false,
-    }
-}
-
 fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
     match expr {
         crate::Expr::FunctionCall(call) => {
@@ -7044,7 +7017,6 @@ fn canonical_expr_depends_on_lowering_prefix_error(
     workbook: &Workbook,
 ) -> Option<bytecode::LowerError> {
     let mut flags = PrefixLowerErrorFlags::default();
-    flags.external_reference |= canonical_expr_contains_external_workbook_refs(expr);
     canonical_expr_collect_sheet_prefix_errors(expr, current_sheet, workbook, &mut flags);
 
     if flags.external_reference {
@@ -7168,8 +7140,28 @@ fn update_sheet_prefix_flags(
     workbook: &Workbook,
     flags: &mut PrefixLowerErrorFlags,
 ) {
-    if workbook_prefix.is_some() {
-        flags.external_reference = true;
+    if let Some(book) = workbook_prefix.as_ref() {
+        // External workbook reference. This is supported by the bytecode backend as long as we can
+        // construct a canonical external sheet key that matches what `ExternalValueProvider`
+        // expects (e.g. `"[Book.xlsx]Sheet1"`).
+        //
+        // External 3D sheet spans (`[Book]Sheet1:Sheet3!A1`) cannot be represented via
+        // `ExternalValueProvider`, so treat them as a lowering error to surface `#REF!` rather than
+        // silently querying the provider with a misleading key.
+        let key = match sheet {
+            Some(crate::SheetRef::Sheet(sheet)) => format!("[{book}]{sheet}"),
+            Some(crate::SheetRef::SheetRange { start, end }) => {
+                if start.eq_ignore_ascii_case(end) {
+                    format!("[{book}]{start}")
+                } else {
+                    format!("[{book}]{start}:{end}")
+                }
+            }
+            None => format!("[{book}]"),
+        };
+        if !crate::eval::is_valid_external_sheet_key(&key) {
+            flags.external_reference = true;
+        }
         return;
     }
 
@@ -7349,8 +7341,6 @@ fn canonical_expr_collect_defined_name_prefix_errors_for_name(
         NameDefinition::Constant(_) => {}
         NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
             if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
-                flags.external_reference |=
-                    canonical_expr_contains_external_workbook_refs(&ast.expr);
                 canonical_expr_collect_sheet_prefix_errors(&ast.expr, sheet_id, workbook, flags);
 
                 if !flags.external_reference && !canonical_expr_contains_let_or_lambda(&ast.expr) {
@@ -8966,13 +8956,19 @@ impl BytecodeColumnCache {
 
             for multi in &bc.program.multi_range_refs {
                 for area in multi.areas.iter() {
-                    if area.sheet >= sheet_count {
+                    let sheet_id = match &area.sheet {
+                        bytecode::SheetId::Local(sheet_id) => *sheet_id,
+                        // External workbook ranges cannot be cached in the columnar local-sheet
+                        // buffers, and we don't know their true dimensions anyway.
+                        bytecode::SheetId::External(_) => continue,
+                    };
+                    if sheet_id >= sheet_count {
                         continue;
                     }
                     let resolved = area.range.resolve(base);
                     let (sheet_rows, sheet_cols) = snapshot
                         .sheet_dimensions
-                        .get(area.sheet)
+                        .get(sheet_id)
                         .copied()
                         .unwrap_or((0, 0));
                     let sheet_rows = i32::try_from(sheet_rows).unwrap_or(i32::MAX);
@@ -9003,7 +8999,7 @@ impl BytecodeColumnCache {
                         continue;
                     }
                     for col in resolved.col_start..=resolved.col_end {
-                        row_ranges_by_col[area.sheet]
+                        row_ranges_by_col[sheet_id]
                             .entry(col)
                             .or_default()
                             .push((resolved.row_start, resolved.row_end));
@@ -9173,7 +9169,7 @@ fn has_blocked_row(blocked_rows: &[i32], row_start: i32, row_end: i32) -> bool {
 
 struct EngineBytecodeGrid<'a> {
     snapshot: &'a Snapshot,
-    sheet: SheetId,
+    sheet_id: SheetId,
     cols: &'a HashMap<i32, BytecodeColumn>,
     cols_by_sheet: &'a [HashMap<i32, BytecodeColumn>],
     slice_mode: ColumnSliceMode,
@@ -9181,9 +9177,11 @@ struct EngineBytecodeGrid<'a> {
     /// Per-evaluation mapping for external workbook sheet keys (e.g. `"[Book.xlsx]Sheet1"`) to
     /// synthetic sheet ids used by the bytecode runtime for `INDIRECT`.
     ///
-    /// Direct external references are ineligible for bytecode lowering, but `INDIRECT` parses
-    /// references at runtime, so we need a way to represent an external sheet inside the
-    /// bytecode-only `usize` sheet id model.
+    /// The bytecode value model represents explicit external workbook references using
+    /// [`bytecode::SheetId::External`], but `INDIRECT` parses sheet names at runtime via
+    /// [`bytecode::grid::Grid::resolve_sheet_name`], which currently returns a `usize`. To let
+    /// runtime-parsed external sheet keys flow through the bytecode runtime, we intern them as
+    /// synthetic ids and treat them as external during reads/bounds checks.
     external_sheets: Mutex<ExternalSheetResolver>,
 }
 
@@ -9266,67 +9264,108 @@ impl<'a> EngineBytecodeGrid<'a> {
 
 impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn get_value(&self, coord: bytecode::CellCoord) -> bytecode::Value {
-        self.get_value_on_sheet(self.sheet, coord)
+        self.get_value_on_sheet(&bytecode::SheetId::Local(self.sheet_id), coord)
     }
 
-    fn get_value_on_sheet(&self, sheet: usize, coord: bytecode::CellCoord) -> bytecode::Value {
-        if !self.snapshot.sheets.contains(&sheet) {
-            // Synthetic external sheet id (allocated via `resolve_sheet_name` below).
-            let key = {
-                let guard = match self.external_sheets.lock() {
-                    Ok(g) => g,
-                    Err(poisoned) => poisoned.into_inner(),
+    fn get_value_on_sheet(
+        &self,
+        sheet: &bytecode::SheetId,
+        coord: bytecode::CellCoord,
+    ) -> bytecode::Value {
+        match sheet {
+            bytecode::SheetId::Local(sheet_id) => {
+                let sheet_id = *sheet_id;
+                if !self.snapshot.sheets.contains(&sheet_id) {
+                    // Synthetic external sheet id produced by `INDIRECT` runtime parsing.
+                    let sheet_key = {
+                        let guard = match self.external_sheets.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        guard.key_for_id(sheet_id)
+                    };
+                    let Some(sheet_key) = sheet_key else {
+                        return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+                    };
+
+                    if coord.row < 0
+                        || coord.col < 0
+                        || coord.row >= EXCEL_MAX_ROWS_I32
+                        || coord.col >= EXCEL_MAX_COLS_I32
+                    {
+                        return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+                    }
+                    let addr = CellAddr {
+                        row: coord.row as u32,
+                        col: coord.col as u32,
+                    };
+
+                    let Some(provider) = self.snapshot.external_value_provider.as_ref() else {
+                        return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+                    };
+                    return provider
+                        .get(sheet_key.as_ref(), addr)
+                        .as_ref()
+                        .map(engine_value_to_bytecode)
+                        .unwrap_or(bytecode::Value::Error(bytecode::ErrorKind::Ref));
+                }
+
+                let (rows, cols) = self.bounds_on_sheet(sheet);
+                if coord.row < 0 || coord.col < 0 || coord.row >= rows || coord.col >= cols {
+                    return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+                }
+                let addr = CellAddr {
+                    row: coord.row as u32,
+                    col: coord.col as u32,
                 };
-                guard.key_for_id(sheet)
-            };
-            let Some(key) = key else {
-                return bytecode::Value::Error(bytecode::ErrorKind::Ref);
-            };
-            let Some(provider) = self.snapshot.external_value_provider.as_ref() else {
-                return bytecode::Value::Error(bytecode::ErrorKind::Ref);
-            };
 
-            // Treat external workbook sheets as having Excel-compatible bounds.
-            if coord.row < 0
-                || coord.col < 0
-                || coord.row >= EXCEL_MAX_ROWS_I32
-                || coord.col >= EXCEL_MAX_COLS_I32
-            {
-                return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+                self.snapshot
+                    .values
+                    .get(&CellKey {
+                        sheet: sheet_id,
+                        addr,
+                    })
+                    .map(engine_value_to_bytecode)
+                    .or_else(|| {
+                        let provider = self.snapshot.external_value_provider.as_ref()?;
+                        let sheet_name = self
+                            .snapshot
+                            .sheet_names_by_id
+                            .get(sheet_id)?
+                            .as_deref()?;
+                        provider
+                            .get(sheet_name, addr)
+                            .as_ref()
+                            .map(engine_value_to_bytecode)
+                    })
+                    .unwrap_or(bytecode::Value::Empty)
             }
-            let addr = CellAddr {
-                row: coord.row as u32,
-                col: coord.col as u32,
-            };
+            bytecode::SheetId::External(sheet_key) => {
+                // External workbooks do not expose dimensions via the provider interface.
+                // Treat bounds as unknown/valid (within Excel's fixed max grid) and rely on the
+                // provider returning `None` to surface `#REF!`.
+                if coord.row < 0
+                    || coord.col < 0
+                    || coord.row >= EXCEL_MAX_ROWS_I32
+                    || coord.col >= EXCEL_MAX_COLS_I32
+                {
+                    return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+                }
+                let addr = CellAddr {
+                    row: coord.row as u32,
+                    col: coord.col as u32,
+                };
 
-            return provider
-                .get(key.as_ref(), addr)
-                .as_ref()
-                .map(engine_value_to_bytecode)
-                // `None` means "unresolvable external reference", not a blank cell.
-                .unwrap_or(bytecode::Value::Error(bytecode::ErrorKind::Ref));
-        }
-        let (rows, cols) = self.bounds_on_sheet(sheet);
-        if coord.row < 0 || coord.col < 0 || coord.row >= rows || coord.col >= cols {
-            return bytecode::Value::Error(bytecode::ErrorKind::Ref);
-        }
-        let addr = CellAddr {
-            row: coord.row as u32,
-            col: coord.col as u32,
-        };
-        self.snapshot
-            .values
-            .get(&CellKey { sheet, addr })
-            .map(engine_value_to_bytecode)
-            .or_else(|| {
-                let provider = self.snapshot.external_value_provider.as_ref()?;
-                let sheet_name = self.snapshot.sheet_names_by_id.get(sheet)?.as_deref()?;
+                let Some(provider) = self.snapshot.external_value_provider.as_ref() else {
+                    return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+                };
                 provider
-                    .get(sheet_name, addr)
+                    .get(sheet_key, addr)
                     .as_ref()
                     .map(engine_value_to_bytecode)
-            })
-            .unwrap_or(bytecode::Value::Empty)
+                    .unwrap_or(bytecode::Value::Error(bytecode::ErrorKind::Ref))
+            }
+        }
     }
 
     fn record_reference(
@@ -9375,7 +9414,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn sheet_id(&self) -> usize {
-        self.sheet
+        self.sheet_id
     }
 
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
@@ -9400,29 +9439,33 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn iter_cells(
         &self,
     ) -> Option<Box<dyn Iterator<Item = (bytecode::CellCoord, bytecode::Value)> + '_>> {
-        self.iter_cells_on_sheet(self.sheet)
+        self.iter_cells_on_sheet(&bytecode::SheetId::Local(self.sheet_id))
     }
 
     fn iter_cells_on_sheet(
         &self,
-        sheet: usize,
+        sheet: &bytecode::SheetId,
     ) -> Option<Box<dyn Iterator<Item = (bytecode::CellCoord, bytecode::Value)> + '_>> {
+        let sheet_id = match sheet {
+            bytecode::SheetId::Local(id) => *id,
+            bytecode::SheetId::External(_) => return None,
+        };
         // When external values are provided out-of-band, we cannot safely iterate just the
         // snapshot's stored cells because we'd miss provider-backed cells that should contribute
         // to aggregates.
         if self.snapshot.external_value_provider.is_some() {
             return None;
         }
-        if !self.snapshot.sheets.contains(&sheet) {
+        if !self.snapshot.sheets.contains(&sheet_id) {
             return None;
         }
 
         let start = CellKey {
-            sheet,
+            sheet: sheet_id,
             addr: CellAddr { row: 0, col: 0 },
         };
         let end = CellKey {
-            sheet,
+            sheet: sheet_id,
             addr: CellAddr {
                 row: u32::MAX,
                 col: u32::MAX,
@@ -9448,29 +9491,37 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
 
     fn column_slice_on_sheet(
         &self,
-        sheet: usize,
+        sheet: &bytecode::SheetId,
         col: i32,
         row_start: i32,
         row_end: i32,
     ) -> Option<&[f64]> {
-        if !self.snapshot.sheets.contains(&sheet) {
+        let sheet_id = match sheet {
+            bytecode::SheetId::Local(id) => *id,
+            bytecode::SheetId::External(_) => return None,
+        };
+        if !self.snapshot.sheets.contains(&sheet_id) {
             return None;
         }
-        let sheet_cols = self.cols_by_sheet.get(sheet)?;
+        let sheet_cols = self.cols_by_sheet.get(sheet_id)?;
         self.column_slice_impl(sheet_cols, col, row_start, row_end, self.slice_mode)
     }
 
     fn column_slice_on_sheet_strict_numeric(
         &self,
-        sheet: usize,
+        sheet: &bytecode::SheetId,
         col: i32,
         row_start: i32,
         row_end: i32,
     ) -> Option<&[f64]> {
-        if !self.snapshot.sheets.contains(&sheet) {
+        let sheet_id = match sheet {
+            bytecode::SheetId::Local(id) => *id,
+            bytecode::SheetId::External(_) => return None,
+        };
+        if !self.snapshot.sheets.contains(&sheet_id) {
             return None;
         }
-        let sheet_cols = self.cols_by_sheet.get(sheet)?;
+        let sheet_cols = self.cols_by_sheet.get(sheet_id)?;
         self.column_slice_impl(
             sheet_cols,
             col,
@@ -9484,7 +9535,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         let (rows, cols) = self
             .snapshot
             .sheet_dimensions
-            .get(self.sheet)
+            .get(self.sheet_id)
             .copied()
             .unwrap_or((0, 0));
         let rows = i32::try_from(rows).unwrap_or(i32::MAX);
@@ -9492,30 +9543,38 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         (rows, cols)
     }
 
-    fn bounds_on_sheet(&self, sheet: usize) -> (i32, i32) {
-        if !self.snapshot.sheets.contains(&sheet) {
-            // External pseudo-sheet: treat as Excel default bounds.
-            let key = {
-                let guard = match self.external_sheets.lock() {
-                    Ok(g) => g,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                guard.key_for_id(sheet)
-            };
-            if key.is_some() {
-                return (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32);
+    fn bounds_on_sheet(&self, sheet: &bytecode::SheetId) -> (i32, i32) {
+        match sheet {
+            bytecode::SheetId::Local(sheet_id) => {
+                let sheet_id = *sheet_id;
+                if self.snapshot.sheets.contains(&sheet_id) {
+                    let (rows, cols) = self
+                        .snapshot
+                        .sheet_dimensions
+                        .get(sheet_id)
+                        .copied()
+                        .unwrap_or((0, 0));
+                    let rows = i32::try_from(rows).unwrap_or(i32::MAX);
+                    let cols = i32::try_from(cols).unwrap_or(i32::MAX);
+                    (rows, cols)
+                } else {
+                    // Synthetic external sheet id (from INDIRECT): treat as Excel default bounds.
+                    let key = {
+                        let guard = match self.external_sheets.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        guard.key_for_id(sheet_id)
+                    };
+                    if key.is_some() {
+                        (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
+                    } else {
+                        (0, 0)
+                    }
+                }
             }
-            return (0, 0);
+            bytecode::SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
         }
-        let (rows, cols) = self
-            .snapshot
-            .sheet_dimensions
-            .get(sheet)
-            .copied()
-            .unwrap_or((0, 0));
-        let rows = i32::try_from(rows).unwrap_or(i32::MAX);
-        let cols = i32::try_from(cols).unwrap_or(i32::MAX);
-        (rows, cols)
     }
 
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
@@ -9560,12 +9619,22 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         None
     }
 
-    fn spill_origin(&self, sheet_id: usize, addr: CellAddr) -> Option<CellAddr> {
-        self.snapshot.spill_origin(sheet_id, addr)
+    fn spill_origin(&self, sheet_id: &bytecode::SheetId, addr: CellAddr) -> Option<CellAddr> {
+        match sheet_id {
+            bytecode::SheetId::Local(sheet_id) => self.snapshot.spill_origin(*sheet_id, addr),
+            bytecode::SheetId::External(_) => None,
+        }
     }
 
-    fn spill_range(&self, sheet_id: usize, origin: CellAddr) -> Option<(CellAddr, CellAddr)> {
-        self.snapshot.spill_range(sheet_id, origin)
+    fn spill_range(
+        &self,
+        sheet_id: &bytecode::SheetId,
+        origin: CellAddr,
+    ) -> Option<(CellAddr, CellAddr)> {
+        match sheet_id {
+            bytecode::SheetId::Local(sheet_id) => self.snapshot.spill_range(*sheet_id, origin),
+            bytecode::SheetId::External(_) => None,
+        }
     }
 }
 
@@ -15908,7 +15977,7 @@ mod tests {
 
         let grid = EngineBytecodeGrid {
             snapshot: &snapshot,
-            sheet: 0,
+            sheet_id: 0,
             cols: &cols,
             cols_by_sheet: std::slice::from_ref(&cols),
             slice_mode: ColumnSliceMode::IgnoreNonNumeric,
