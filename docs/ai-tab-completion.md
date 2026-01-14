@@ -38,7 +38,8 @@ The core engine’s built-in `parsePartialFormula()` is intentionally lightweigh
 Desktop wires a locale-aware parser by injecting `parsePartialFormula` when constructing `TabCompletionEngine`:
 - Baseline span calculation comes from the JS parser (`@formula/ai-completion`).
 - When available, the desktop adapter calls the WASM engine’s `engine.parseFormulaPartial(...)` (with a small timeout budget) to recover accurate function/arg context in non-en-US locales.
-- Localized function names (e.g. `SUMME`, `ZÄHLENWENN`) are canonicalized back to the engine’s canonical (English) names so range-arg metadata lookup works against the `FunctionRegistry`.
+- The WASM partial parser returns **canonical (English)** function names in its `context` (even when the user types a localized name).
+  - Desktop also canonicalizes the JS fallback parse so range-arg metadata lookup stays correct when WASM is unavailable.
 
 See: `apps/desktop/src/ai/completion/parsePartialFormula.ts`.
 
