@@ -14,6 +14,13 @@ const WEBVIEW_REPORTED_KEY = "__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__";
 const hasTauri = (() => {
   if (hasTauriRuntime()) return true;
 
+  try {
+    const invoke = (globalThis as any).__TAURI_INTERNALS__?.invoke;
+    if (typeof invoke === "function") return true;
+  } catch {
+    // ignore
+  }
+
   // If accessing `__TAURI__` throws (e.g. hardened environment or tests), treat that as "not Tauri"
   // and skip all bootstrap work. We intentionally avoid falling back to the user-agent heuristic in
   // this case to keep behavior a no-op outside of real desktop builds.

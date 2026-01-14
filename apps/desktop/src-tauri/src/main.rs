@@ -418,14 +418,6 @@ struct CloseRequestedPayload {
     updates: Vec<commands::CellUpdate>,
 }
 
-fn current_window_url<R: tauri::Runtime>(window: &tauri::Window<R>) -> Result<Url, String> {
-    let label = window.label();
-    let Some(webview_window) = window.app_handle().get_webview_window(label) else {
-        return Err(format!("missing webview window for label {label}"));
-    };
-    webview_window.url().map_err(|err| err.to_string())
-}
-
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -1489,6 +1481,8 @@ fn main() {
         Arc::new(Mutex::new(OauthLoopbackState::default()));
     let initial_argv: Vec<String> = std::env::args().collect();
     let startup_bench = initial_argv.iter().any(|arg| arg == "--startup-bench");
+    let startup_bench_injected = Arc::new(AtomicBool::new(false));
+    let startup_bench_injected_for_page_load = startup_bench_injected.clone();
     if startup_bench {
         // In production builds we normally gate startup metrics logging behind
         // `FORMULA_STARTUP_METRICS=1`. The `--startup-bench` mode is explicitly for CI
@@ -1536,13 +1530,9 @@ fn main() {
             // Lightweight shell-startup benchmark: serve a tiny inline HTML document instead of
             // the real bundled frontend (which may not be present, and is expensive to build).
             if startup_bench && (path == "/" || path == "/index.html") {
-                let mut builder = Response::builder()
+                let builder = Response::builder()
                     .status(StatusCode::OK)
                     .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8");
-
-                if let Some(csp) = _ctx.app_handle().config().app.security.csp.as_ref() {
-                    builder = builder.header("Content-Security-Policy", csp.to_string());
-                }
 
                 let mut response = builder
                     .body(STARTUP_BENCH_HTML.as_bytes().to_vec())
@@ -1557,8 +1547,18 @@ fn main() {
                 return response;
             }
 
-            let path = path.to_string();
-            match _ctx.app_handle().asset_resolver().get(path) {
+            // Tauri's `AssetResolver` expects a relative path (no leading `/`). Normalize here so
+            // requests like `tauri://localhost/` and `tauri://localhost/assets/...` resolve
+            // correctly even though `Request::uri().path()` always includes a leading slash.
+            let raw_path = path;
+            let resolved_path = raw_path.trim_start_matches('/');
+            let key = if resolved_path.is_empty() {
+                "index.html".to_string()
+            } else {
+                resolved_path.to_string()
+            };
+
+            match _ctx.app_handle().asset_resolver().get(key.clone()) {
                 Some(asset) => {
                     let mut builder = Response::builder()
                         .status(StatusCode::OK)
@@ -1579,11 +1579,20 @@ fn main() {
                     apply_cross_origin_isolation_headers(&mut response);
                     response
                 }
-                None => Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                    .body(b"asset not found".to_vec())
-                    .expect("build not-found response"),
+                None => {
+                    if startup_bench || should_log_startup_metrics() {
+                        eprintln!(
+                            "[formula][startup-bench] missing tauri asset for path {:?} (normalized {:?})",
+                            raw_path,
+                            key
+                        );
+                    }
+                    Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+                        .body(b"asset not found".to_vec())
+                        .expect("build not-found response")
+                }
             }
         })
         // Core platform plugins used by the frontend (dialog, clipboard, shell).
@@ -1649,6 +1658,109 @@ fn main() {
             let url = payload.url().to_string();
             if url.starts_with("about:blank") {
                 return;
+            }
+
+            if startup_bench
+                && !startup_bench_injected_for_page_load.swap(true, Ordering::SeqCst)
+                && window.label() == "main"
+            {
+                // Inject the startup benchmark script *after* the first real navigation finishes.
+                //
+                // Some platforms temporarily load `about:blank` (or other placeholder pages) during
+                // WebView creation. If we `eval` the benchmark script in that initial document,
+                // it can be discarded when the WebView navigates to the real `tauri://` page,
+                // leaving the benchmark hung until the watchdog fires.
+                let Some(webview_window) = window.app_handle().get_webview_window("main") else {
+                    eprintln!("[formula][startup-bench] missing main window");
+                    std::process::exit(2);
+                };
+
+                webview_window
+                    .eval(
+                        r#"
+(() => {
+  try {
+    const probe = {
+      ua: globalThis.navigator?.userAgent ?? null,
+      hasCrypto: typeof globalThis.crypto === "object" && globalThis.crypto !== null,
+      hasGetRandomValues: typeof globalThis.crypto?.getRandomValues === "function",
+      hasInternals: typeof globalThis.__TAURI_INTERNALS__ === "object" && globalThis.__TAURI_INTERNALS__ !== null,
+      hasInternalsInvoke: typeof globalThis.__TAURI_INTERNALS__?.invoke === "function",
+      hasInternalsIpc: typeof globalThis.__TAURI_INTERNALS__?.ipc === "function",
+      hasWindowIpc: typeof globalThis.ipc?.postMessage === "function",
+      hasGlobalTauri: typeof globalThis.__TAURI__ === "object" && globalThis.__TAURI__ !== null,
+      hasGlobalInvoke: typeof globalThis.__TAURI__?.core?.invoke === "function",
+    };
+    const encoded = encodeURIComponent(JSON.stringify(probe));
+    // Encode the probe data in the URL hash so the Rust watchdog can print it even if IPC is broken.
+    globalThis.location.hash = `probe=${encoded}`;
+  } catch {}
+
+  const deadline = Date.now() + 12_000;
+
+  const raf = () =>
+    new Promise((resolve) => {
+      // Some headless environments can throttle or pause rAF; keep a short timeout fallback so
+      // `--startup-bench` doesn't hang waiting for a frame that never arrives.
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve(null);
+      };
+      const timeout = setTimeout(finish, 100);
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => {
+          clearTimeout(timeout);
+          finish();
+        });
+      } else {
+        setTimeout(() => {
+          clearTimeout(timeout);
+          finish();
+        }, 0);
+      }
+    });
+
+  let started = false;
+  const tick = async () => {
+    if (started) return;
+
+    const invoke = globalThis.__TAURI__?.core?.invoke ?? globalThis.__TAURI_INTERNALS__?.invoke;
+    if (typeof invoke !== "function") {
+      if (Date.now() > deadline) return;
+      setTimeout(tick, 10);
+      return;
+    }
+
+    started = true;
+
+    // Notify the Rust host that the JS bridge is ready to invoke commands. This is idempotent
+    // and (in the real app) allows the host to re-emit cached startup timing events once the
+    // frontend has installed listeners.
+    await invoke("report_startup_webview_loaded");
+
+    // Approximate "time to interactive": a microtask + first frame later.
+    await Promise.resolve();
+    await raf();
+
+    await invoke("report_startup_tti");
+
+    // Hard-exit after the `[startup] ...` line is printed. Add a tiny delay so stdout is
+    // reliably flushed when captured via pipes.
+    setTimeout(() => {
+      invoke("quit_app").catch(() => {});
+    }, 25);
+  };
+
+  tick().catch(() => {});
+})();
+"#,
+                    )
+                    .unwrap_or_else(|err| {
+                        eprintln!("[formula][startup-bench] failed to eval script: {err}");
+                        std::process::exit(2);
+                    });
             }
 
             let (webview_loaded_ms, snapshot) = {
@@ -2174,94 +2286,19 @@ fn main() {
                 // CI benchmark: measure desktop shell startup without requiring built frontend
                 // assets. This mode should be lightweight and exit quickly.
                 const TIMEOUT_SECS: u64 = 20;
-                std::thread::spawn(|| {
+                let window_for_timeout = app.get_webview_window("main");
+                std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
+                    if let Some(window) = window_for_timeout {
+                        if let Ok(url) = window.url() {
+                            eprintln!("[formula][startup-bench] debug url={url}");
+                        }
+                    }
                     eprintln!(
                         "[formula][startup-bench] timed out after {TIMEOUT_SECS}s (webview did not report)"
                     );
                     std::process::exit(2);
                 });
-
-                let Some(window) = app.get_webview_window("main") else {
-                    eprintln!("[formula][startup-bench] missing main window");
-                    std::process::exit(2);
-                };
-
-                window
-                    .eval(
-                        r#"
-(() => {
-  const deadline = Date.now() + 10_000;
-
-  const raf = () =>
-    new Promise((resolve) => {
-      // Some headless environments can throttle or pause rAF; keep a short timeout fallback so
-      // `--startup-bench` doesn't hang waiting for a frame that never arrives.
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        resolve(null);
-      };
-      const timeout = setTimeout(finish, 100);
-      if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(() => {
-          clearTimeout(timeout);
-          finish();
-        });
-      } else {
-        setTimeout(() => {
-          clearTimeout(timeout);
-          finish();
-        }, 0);
-      }
-    });
-
-  let started = false;
-  const tick = async () => {
-    if (started) return;
-
-    let invoke = null;
-    try {
-      const tauri = globalThis.__TAURI__;
-      invoke = tauri?.core?.invoke ?? null;
-    } catch {
-      invoke = null;
-    }
-    if (typeof invoke !== "function") {
-      if (Date.now() > deadline) return;
-      setTimeout(tick, 10);
-      return;
-    }
-
-    started = true;
-
-    // Notify the Rust host that the JS bridge is ready to invoke commands. This is idempotent
-    // and (in the real app) allows the host to re-emit cached startup timing events once the
-    // frontend has installed listeners.
-    await invoke("report_startup_webview_loaded");
-
-    // Approximate "time to interactive": a microtask + first frame later.
-    await Promise.resolve();
-    await raf();
-
-    await invoke("report_startup_tti");
-
-    // Hard-exit after the `[startup] ...` line is printed. Add a tiny delay so stdout is
-    // reliably flushed when captured via pipes.
-    setTimeout(() => {
-      invoke("quit_app").catch(() => {});
-    }, 25);
-  };
-
-  tick().catch(() => {});
-})();
-"#,
-                    )
-                    .unwrap_or_else(|err| {
-                        eprintln!("[formula][startup-bench] failed to eval script: {err}");
-                        std::process::exit(2);
-                    });
 
                 // Skip the rest of normal app setup (tray icon, updater, open-file wiring, etc).
                 // The benchmark mode should be as lightweight as possible so it can run in CI and
@@ -2655,11 +2692,9 @@ fn main() {
                     let state = handle.state::<SharedOauthRedirectState>().inner().clone();
                     let pending = {
                         let mut guard = state.lock().unwrap();
-                        let pending = guard.mark_ready_and_drain();
                         // Source-level guardrails test asserts that we only mark the oauth redirect
                         // queue as ready after verifying the window origin is trusted.
-                        guard.ready = true;
-                        pending
+                        guard.mark_ready_and_drain()
                     };
 
                     let pending = normalize_oauth_redirect_request_urls(pending);

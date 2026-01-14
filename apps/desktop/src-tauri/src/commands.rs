@@ -2276,7 +2276,7 @@ pub async fn open_workbook(
     let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
     let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
-        std::path::Path::new(path.as_ref()),
+        std::path::Path::new(&path),
         &allowed_roots,
     )
     .map_err(|e| e.to_string())?;
