@@ -812,6 +812,72 @@ fn patch_sheet_bin_can_clear_rgcb_when_replacing_rgce_for_formula_with_existing_
 }
 
 #[test]
+fn patch_sheet_bin_errors_when_replacing_rgce_for_formula_with_existing_rgcb_without_new_rgcb() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded_sum =
+        encode_rgce_with_context("=SUM({1,2,3})", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert!(
+        !encoded_sum.rgcb.is_empty(),
+        "expected rgcb for array formula"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("ArrayRgcb");
+    builder.set_cell_formula_num(
+        0,
+        0,
+        6.0,
+        encoded_sum.rgce.clone(),
+        encoded_sum.rgcb.clone(),
+    );
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+    // advertise enormous uncompressed sizes (zip-bomb style OOM).
+    let mut sheet_bin = Vec::new();
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let encoded_no_rgcb =
+        encode_rgce_with_context("=SUM(1,2,3)", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert!(
+        encoded_no_rgcb.rgcb.is_empty(),
+        "expected SUM(1,2,3) encoding to not require rgcb bytes"
+    );
+
+    let err = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(6.0),
+            clear_formula: false,
+            new_formula: Some(encoded_no_rgcb.rgce.clone()),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+            new_style: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when replacing rgce without new_rgcb");
+
+    match err {
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains("provide CellEdit.new_rgcb"),
+                "expected error to instruct caller to provide CellEdit.new_rgcb, got: {io_err}"
+            );
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[test]
 fn save_with_edits_can_patch_rk_number_cells() {
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_sheet_name("Sheet1");

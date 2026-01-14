@@ -294,6 +294,74 @@ fn patch_sheet_bin_streaming_errors_when_formula_requires_rgcb_but_new_rgcb_is_n
 }
 
 #[test]
+fn patch_sheet_bin_rejects_converting_value_cell_to_formula_that_requires_rgcb_without_new_rgcb() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(1.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(fixture_builder::rgce::array_placeholder()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let err = patch_sheet_bin(&sheet_bin, &edits).expect_err(
+        "expected InvalidInput when converting value cell to formula without rgcb bytes",
+    );
+    match err {
+        Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains("set CellEdit.new_rgcb"),
+                "unexpected error message: {io_err}"
+            );
+        }
+        other => panic!("expected Error::Io, got {other:?}"),
+    }
+}
+
+#[test]
+fn patch_sheet_bin_streaming_rejects_converting_value_cell_to_formula_that_requires_rgcb_without_new_rgcb(
+) {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(1.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(fixture_builder::rgce::array_placeholder()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut out, &edits).expect_err(
+        "expected InvalidInput when streaming convert value cell to formula without rgcb bytes",
+    );
+    match err {
+        Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains("set CellEdit.new_rgcb"),
+                "unexpected error message: {io_err}"
+            );
+        }
+        other => panic!("expected Error::Io, got {other:?}"),
+    }
+}
+
+#[test]
 fn patch_sheet_bin_streaming_allows_missing_rgcb_when_ptgarray_bytes_only_in_attr_choose_payload() {
     assert_streaming_patch_does_not_require_rgcb(rgce_attr_choose_with_ptgarray_bytes_in_jump_table());
     assert_streaming_patch_does_not_require_rgcb(rgce_str_literal_with_ptgarray_byte_sequence());
