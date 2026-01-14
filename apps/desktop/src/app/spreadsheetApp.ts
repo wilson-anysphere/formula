@@ -8223,6 +8223,27 @@ export class SpreadsheetApp {
         }
       }
 
+      // Persist any commit-time DrawingML patching stored on the kind object (e.g. `kind.rawXml` for shapes).
+      //
+      // DrawingInteractionController updates `kind.rawXml` for non-image objects so inner `<a:xfrm>` values
+      // stay consistent with the new anchor/transform. If we only persist anchors, exports that rely on the
+      // preserved XML payload can drift.
+      const afterKind: any = (after as any).kind;
+      const afterRawXml =
+        afterKind && typeof afterKind === "object"
+          ? typeof afterKind.rawXml === "string"
+            ? afterKind.rawXml
+            : typeof afterKind.raw_xml === "string"
+              ? afterKind.raw_xml
+              : null
+          : null;
+      if (afterRawXml != null) {
+        const kindValue: any = (drawing as any).kind;
+        if (kindValue && typeof kindValue === "object") {
+          next.kind = { ...kindValue, rawXml: afterRawXml, raw_xml: afterRawXml };
+        }
+      }
+
       // Ensure stable identity + z-order even if callers accidentally include them in `after`.
       if (stableId != null) next.id = stableId;
       if (stableZOrder != null) {
