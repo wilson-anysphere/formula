@@ -129,6 +129,10 @@ describe("DesktopSharedGrid a11y", () => {
     expect(activeCell?.getAttribute("aria-hidden")).toBe("true");
 
     grid.destroy();
+    expect(container.getAttribute("aria-activedescendant")).toBeNull();
+    expect(container.getAttribute("aria-describedby")).toBeNull();
+    expect(container.querySelector('[data-testid="canvas-grid-a11y-status"]')).toBeNull();
+    expect(container.querySelector('[data-testid="canvas-grid-a11y-active-cell"]')).toBeNull();
   });
 
   it("does not interfere with focus management when updating aria-activedescendant", () => {
