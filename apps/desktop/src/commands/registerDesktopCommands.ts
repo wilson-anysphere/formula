@@ -16,6 +16,7 @@ import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdown
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";
+import { registerSortFilterCommands } from "./registerSortFilterCommands.js";
 
 export type ApplyFormattingToSelection = (
   label: string,
@@ -164,6 +165,8 @@ export function registerDesktopCommands(params: {
     app,
     applyFormattingToSelection,
   });
+
+  registerSortFilterCommands({ commandRegistry, app });
 
   registerFormatAlignmentCommands({
     commandRegistry,
