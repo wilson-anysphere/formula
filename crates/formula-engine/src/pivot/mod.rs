@@ -3489,6 +3489,44 @@ mod tests {
     }
 
     #[test]
+    fn create_pivot_table_request_parses_legacy_pivot_field_refs() {
+        let req = CreatePivotTableRequest {
+            name: None,
+            row_fields: vec!["Sales[Amount]".to_string()],
+            column_fields: vec![],
+            value_fields: vec![CreatePivotValueSpec {
+                field: "[Total Sales]".to_string(),
+                aggregation: AggregationType::Sum,
+                name: None,
+            }],
+            filter_fields: vec![CreatePivotFilterSpec {
+                field: "Region".to_string(),
+                allowed: None,
+            }],
+            calculated_fields: None,
+            calculated_items: None,
+            layout: None,
+            subtotals: None,
+            grand_totals: None,
+        };
+
+        let cfg = req.into_config();
+
+        assert_eq!(
+            cfg.row_fields[0].source_field,
+            PivotFieldRef::DataModelColumn {
+                table: "Sales".to_string(),
+                column: "Amount".to_string(),
+            }
+        );
+        assert_eq!(
+            cfg.value_fields[0].source_field,
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+        assert_eq!(cfg.filter_fields[0].source_field, cache_field("Region"));
+    }
+
+    #[test]
     fn calculates_sum_by_single_row_field_with_grand_total() {
         let data = vec![
             pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
