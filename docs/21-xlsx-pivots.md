@@ -279,5 +279,5 @@ The following fixtures cover different parts of the pivot subsystem:
 | `timeline-selection.xlsx` | `crates/formula-xlsx/tests/fixtures/timeline-selection.xlsx` | Timeline selection parsing (`start`/`end` extraction + normalization). |
 
 If you add new pivot parsing/writing behavior, prefer extending these fixtures (or adding a new
-targeted fixture) and asserting on the parsed structs **and** on byte-for-byte round-trip when
-applicable.
+targeted fixture) and asserting on the parsed structs **and** on byte-for-byte round-trip (OPC part
+payload bytes) when applicable.
