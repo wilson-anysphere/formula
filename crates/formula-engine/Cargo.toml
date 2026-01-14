@@ -15,6 +15,7 @@ parallel = ["dep:rayon", "dep:dashmap"]
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 formula-model = { path = "../formula-model" }
+formula-columnar = { path = "../formula-columnar" }
 rstar = "0.12"
 inventory = "0.3"
 serde = { version = "1.0", features = ["derive"] }

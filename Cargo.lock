@@ -2148,6 +2148,7 @@ dependencies = [
  "chrono",
  "criterion",
  "dashmap",
+ "formula-columnar",
  "formula-format",
  "formula-model",
  "getrandom 0.2.17",

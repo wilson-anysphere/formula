@@ -12,6 +12,7 @@
 
 #[cfg(test)]
 use chrono::NaiveDate;
+use formula_columnar::{ColumnarTable, Value as ColumnarValue};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -47,6 +48,8 @@ pub enum PivotError {
     CalculatedFieldNameConflictsWithSource(String),
     #[error("calculated item field not in layout: {0}")]
     CalculatedItemFieldNotInLayout(String),
+    #[error("calculated items require a PivotCache-backed record source")]
+    CalculatedItemsRequirePivotCache,
     #[error("calculated item name conflicts with existing item in field {field}: {item}")]
     CalculatedItemNameConflictsWithExistingItem { field: String, item: String },
     #[error("invalid calculated field formula for {field}: {message}")]
@@ -267,6 +270,114 @@ impl PivotCache {
             fields,
             record_count: self.records.len(),
         }
+    }
+}
+
+/// A lightweight pivot value view returned by [`PivotRecordSource`].
+///
+/// The pivot engine only needs short-lived access to each cell to build grouping keys and update
+/// aggregations. Returning a `PivotValueRef` lets sources either:
+/// - borrow values from an in-memory cache (`Borrowed`)
+/// - synthesize values on demand from a columnar/streaming source (`Owned`)
+#[derive(Debug)]
+pub enum PivotValueRef<'a> {
+    Borrowed(&'a PivotValue),
+    Owned(PivotValue),
+}
+
+impl PivotValueRef<'_> {
+    fn as_value(&self) -> &PivotValue {
+        match self {
+            PivotValueRef::Borrowed(v) => v,
+            PivotValueRef::Owned(v) => v,
+        }
+    }
+
+    fn to_key_part(self) -> PivotKeyPart {
+        match self {
+            PivotValueRef::Borrowed(v) => v.to_key_part(),
+            PivotValueRef::Owned(v) => match v {
+                PivotValue::Blank => PivotKeyPart::Blank,
+                PivotValue::Number(n) => PivotKeyPart::Number(PivotValue::canonical_number_bits(n)),
+                PivotValue::Date(d) => PivotKeyPart::Date(d),
+                PivotValue::Text(s) => PivotKeyPart::Text(s),
+                PivotValue::Bool(b) => PivotKeyPart::Bool(b),
+            },
+        }
+    }
+}
+
+/// Abstraction over pivot cache record storage.
+///
+/// This allows the pivot engine to aggregate large datasets without requiring a full
+/// `Vec<Vec<PivotValue>>` materialization. Implementations can be backed by either the existing
+/// row-wise [`PivotCache`] or a columnar store like [`ColumnarTable`].
+pub trait PivotRecordSource {
+    fn row_count(&self) -> usize;
+    fn column_count(&self) -> usize;
+    fn field_index(&self, name: &str) -> Option<usize>;
+    fn value(&self, row: usize, col: usize) -> PivotValueRef<'_>;
+    #[inline]
+    fn as_pivot_cache(&self) -> Option<&PivotCache> {
+        None
+    }
+}
+
+impl PivotRecordSource for PivotCache {
+    fn row_count(&self) -> usize {
+        self.records.len()
+    }
+
+    fn column_count(&self) -> usize {
+        self.fields.len()
+    }
+
+    fn field_index(&self, name: &str) -> Option<usize> {
+        PivotCache::field_index(self, name)
+    }
+
+    fn value(&self, row: usize, col: usize) -> PivotValueRef<'_> {
+        self.records
+            .get(row)
+            .and_then(|r| r.get(col))
+            .map(PivotValueRef::Borrowed)
+            .unwrap_or_else(|| PivotValueRef::Owned(PivotValue::Blank))
+    }
+
+    fn as_pivot_cache(&self) -> Option<&PivotCache> {
+        Some(self)
+    }
+}
+
+fn columnar_value_to_pivot(value: ColumnarValue) -> PivotValue {
+    match value {
+        ColumnarValue::Null => PivotValue::Blank,
+        ColumnarValue::Number(n) => PivotValue::Number(n),
+        ColumnarValue::Boolean(b) => PivotValue::Bool(b),
+        ColumnarValue::String(s) => PivotValue::Text(s.to_string()),
+        // `ColumnarTable` stores datetime/currency/percentage as i64; render them as numbers for
+        // now (matching the worksheet layer's default rendering).
+        ColumnarValue::DateTime(v) | ColumnarValue::Currency(v) | ColumnarValue::Percentage(v) => {
+            PivotValue::Number(v as f64)
+        }
+    }
+}
+
+impl PivotRecordSource for ColumnarTable {
+    fn row_count(&self) -> usize {
+        ColumnarTable::row_count(self)
+    }
+
+    fn column_count(&self) -> usize {
+        ColumnarTable::column_count(self)
+    }
+
+    fn field_index(&self, name: &str) -> Option<usize> {
+        self.schema().iter().position(|c| c.name == name)
+    }
+
+    fn value(&self, row: usize, col: usize) -> PivotValueRef<'_> {
+        PivotValueRef::Owned(columnar_value_to_pivot(self.get_cell(row, col)))
     }
 }
 
@@ -1017,23 +1128,34 @@ enum CalculatedItemPlacement {
 
 impl PivotEngine {
     pub fn calculate(cache: &PivotCache, cfg: &PivotConfig) -> Result<PivotResult, PivotError> {
+        Self::calculate_streaming(cache, cfg)
+    }
+
+    /// Compute a pivot table by scanning a [`PivotRecordSource`].
+    ///
+    /// This enables a streaming/columnar-backed execution path for large datasets where
+    /// materializing a `Vec<Vec<PivotValue>>` would be prohibitively expensive.
+    pub fn calculate_streaming<S: PivotRecordSource + ?Sized>(
+        source: &S,
+        cfg: &PivotConfig,
+    ) -> Result<PivotResult, PivotError> {
         if cfg.value_fields.is_empty() {
             return Err(PivotError::NoValueFields);
         }
 
-        let indices = FieldIndices::new(cache, cfg)?;
+        let indices = FieldIndices::new(source, cfg)?;
 
         let mut cube: HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>> = HashMap::new();
         let mut row_keys: HashSet<PivotKey> = HashSet::new();
         let mut col_keys: HashSet<PivotKey> = HashSet::new();
 
-        for record in &cache.records {
-            if !indices.passes_filters(record, cfg) {
+        for row in 0..source.row_count() {
+            if !indices.passes_filters(source, row) {
                 continue;
             }
 
-            let row_key = indices.build_key(record, &indices.row_indices);
-            let col_key = indices.build_key(record, &indices.col_indices);
+            let row_key = indices.build_key(source, row, &indices.row_indices);
+            let col_key = indices.build_key(source, row, &indices.col_indices);
 
             row_keys.insert(row_key.clone());
             col_keys.insert(col_key.clone());
@@ -1046,14 +1168,17 @@ impl PivotEngine {
             });
 
             for (vf_idx, _vf) in cfg.value_fields.iter().enumerate() {
-                let val = record
-                    .get(indices.value_indices[vf_idx])
-                    .unwrap_or(&PivotValue::Blank);
-                cell[vf_idx].update(val);
+                let val = source.value(row, indices.value_indices[vf_idx]);
+                cell[vf_idx].update(val.as_value());
             }
         }
 
-        Self::apply_calculated_items(cache, cfg, &mut cube, &mut row_keys, &mut col_keys)?;
+        if !cfg.calculated_items.is_empty() {
+            let Some(cache) = source.as_pivot_cache() else {
+                return Err(PivotError::CalculatedItemsRequirePivotCache);
+            };
+            Self::apply_calculated_items(cache, cfg, &mut cube, &mut row_keys, &mut col_keys)?;
+        }
 
         let mut row_keys: Vec<PivotKey> = row_keys.into_iter().collect();
         let row_sort_specs = cfg
@@ -2994,11 +3119,11 @@ struct FieldIndices {
 }
 
 impl FieldIndices {
-    fn new(cache: &PivotCache, cfg: &PivotConfig) -> Result<Self, PivotError> {
+    fn new<S: PivotRecordSource + ?Sized>(source: &S, cfg: &PivotConfig) -> Result<Self, PivotError> {
         let mut row_indices = Vec::new();
         for f in &cfg.row_fields {
             row_indices.push(
-                cache
+                source
                     .field_index(&f.source_field)
                     .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
             );
@@ -3006,7 +3131,7 @@ impl FieldIndices {
         let mut col_indices = Vec::new();
         for f in &cfg.column_fields {
             col_indices.push(
-                cache
+                source
                     .field_index(&f.source_field)
                     .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
             );
@@ -3014,14 +3139,14 @@ impl FieldIndices {
         let mut value_indices = Vec::new();
         for f in &cfg.value_fields {
             value_indices.push(
-                cache
+                source
                     .field_index(&f.source_field)
                     .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
             );
         }
         let mut filter_indices = Vec::new();
         for f in &cfg.filter_fields {
-            let idx = cache
+            let idx = source
                 .field_index(&f.source_field)
                 .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?;
             filter_indices.push((idx, f.allowed.clone()));
@@ -3034,19 +3159,19 @@ impl FieldIndices {
         })
     }
 
-    fn build_key(&self, record: &[PivotValue], indices: &[usize]) -> PivotKey {
+    fn build_key<S: PivotRecordSource + ?Sized>(&self, source: &S, row: usize, indices: &[usize]) -> PivotKey {
         PivotKey(
             indices
                 .iter()
-                .map(|idx| record.get(*idx).unwrap_or(&PivotValue::Blank).to_key_part())
+                .map(|idx| source.value(row, *idx).to_key_part())
                 .collect(),
         )
     }
 
-    fn passes_filters(&self, record: &[PivotValue], _cfg: &PivotConfig) -> bool {
+    fn passes_filters<S: PivotRecordSource + ?Sized>(&self, source: &S, row: usize) -> bool {
         for (idx, allowed) in &self.filter_indices {
             if let Some(set) = allowed {
-                let val = record.get(*idx).unwrap_or(&PivotValue::Blank).to_key_part();
+                let val = source.value(row, *idx).to_key_part();
                 if !set.contains(&val) {
                     return false;
                 }
@@ -3146,7 +3271,9 @@ fn common_prefix_len(a: &[PivotKeyPart], b: &[PivotKeyPart]) -> usize {
 mod tests {
     use super::*;
 
+    use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions, Value};
     use pretty_assertions::assert_eq;
+    use std::sync::Arc;
 
     fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
         values.to_vec()
@@ -5121,6 +5248,206 @@ mod tests {
                 vec!["West".into(), 300.into(), 400.into()],
                 vec!["Grand Total".into(), 400.into(), 600.into()],
             ]
+        );
+    }
+    #[test]
+    fn calculates_from_columnar_table_source() {
+        let schema = vec![
+            ColumnSchema {
+                name: "Region".to_string(),
+                column_type: ColumnType::String,
+            },
+            ColumnSchema {
+                name: "Product".to_string(),
+                column_type: ColumnType::String,
+            },
+            ColumnSchema {
+                name: "Sales".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let options = TableOptions {
+            page_size_rows: 1024,
+            cache: PageCacheConfig { max_entries: 8 },
+        };
+
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        let east = Arc::<str>::from("East");
+        let west = Arc::<str>::from("West");
+        let a = Arc::<str>::from("A");
+        let b = Arc::<str>::from("B");
+        builder.append_row(&[
+            Value::String(east.clone()),
+            Value::String(a.clone()),
+            Value::Number(100.0),
+        ]);
+        builder.append_row(&[
+            Value::String(east.clone()),
+            Value::String(b.clone()),
+            Value::Number(150.0),
+        ]);
+        builder.append_row(&[
+            Value::String(west.clone()),
+            Value::String(a.clone()),
+            Value::Number(200.0),
+        ]);
+        builder.append_row(&[
+            Value::String(west.clone()),
+            Value::String(b.clone()),
+            Value::Number(250.0),
+        ]);
+
+        let table = builder.finalize();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Product")],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: true,
+            },
+        };
+
+        let result = PivotEngine::calculate_streaming(&table, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "A - Sum of Sales".into(),
+                    "B - Sum of Sales".into(),
+                    "Grand Total - Sum of Sales".into()
+                ],
+                vec!["East".into(), 100.into(), 150.into(), 250.into()],
+                vec!["West".into(), 200.into(), 250.into(), 450.into()],
+                vec!["Grand Total".into(), 300.into(), 400.into(), 700.into()],
+            ]
+        );
+    }
+
+    /// This is a manual benchmark/test intended for investigating performance/memory
+    /// characteristics on large datasets.
+    ///
+    /// Run with:
+    /// `cargo test -p formula-engine pivot::tests::pivot_streaming_large_dataset_bench -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pivot_streaming_large_dataset_bench() {
+        use std::time::Instant;
+
+        let rows: usize = std::env::var("FORMULA_PIVOT_BENCH_ROWS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1_000_000);
+
+        let schema = vec![
+            ColumnSchema {
+                name: "Cat".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Amount".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let options = TableOptions {
+            page_size_rows: 65_536,
+            cache: PageCacheConfig { max_entries: 16 },
+        };
+
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        for i in 0..rows {
+            builder.append_row(&[
+                Value::Number((i % 1000) as f64),
+                Value::Number((i % 100) as f64),
+            ]);
+        }
+        let table = builder.finalize();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Cat")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Amount".to_string(),
+                name: "Sum of Amount".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let start = Instant::now();
+        let result = PivotEngine::calculate_streaming(&table, &cfg).unwrap();
+        let elapsed = start.elapsed();
+        println!(
+            "columnar streaming: rows={rows} output_rows={} table_compressed_bytes={} elapsed_ms={:.2}",
+            result.data.len(),
+            table.compressed_size_bytes(),
+            elapsed.as_secs_f64() * 1000.0
+        );
+
+        // Optional baseline: build the existing row-backed cache and compute the same pivot.
+        // This can be memory-heavy; use a smaller `FORMULA_PIVOT_BENCH_ROWS` if it OOMs.
+        let baseline = std::env::var("FORMULA_PIVOT_BENCH_ROW_BACKED")
+            .ok()
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(true);
+        if !baseline {
+            return;
+        }
+
+        let start = Instant::now();
+        let mut range: Vec<Vec<PivotValue>> = Vec::with_capacity(rows + 1);
+        range.push(vec!["Cat".into(), "Amount".into()]);
+        for i in 0..rows {
+            range.push(vec![((i % 1000) as i64).into(), ((i % 100) as i64).into()]);
+        }
+        let cache = PivotCache::from_range(&range).unwrap();
+        drop(range);
+        let build_elapsed = start.elapsed();
+
+        let estimated_bytes = cache.records.capacity() * std::mem::size_of::<Vec<PivotValue>>()
+            + cache
+                .records
+                .iter()
+                .map(|r| r.capacity() * std::mem::size_of::<PivotValue>())
+                .sum::<usize>();
+
+        let start = Instant::now();
+        let result2 = PivotEngine::calculate(&cache, &cfg).unwrap();
+        let calc_elapsed = start.elapsed();
+
+        assert_eq!(result2.data.len(), result.data.len());
+        println!(
+            "row-backed cache: rows={rows} estimated_record_bytes={} build_ms={:.2} calc_ms={:.2}",
+            estimated_bytes,
+            build_elapsed.as_secs_f64() * 1000.0,
+            calc_elapsed.as_secs_f64() * 1000.0
         );
     }
 }
