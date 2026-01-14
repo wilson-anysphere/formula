@@ -208,7 +208,7 @@ impl<'de> Deserialize<'de> for PivotFieldRef {
 }
 
 impl fmt::Display for PivotFieldRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
@@ -225,40 +225,15 @@ impl fmt::Display for PivotFieldRef {
 }
 
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
-    if raw.is_empty() {
+    let Some(first) = raw.chars().next() else {
         return Cow::Borrowed("''");
-    }
-    if dax_identifier_requires_quotes(raw) {
-        return Cow::Owned(quote_dax_identifier(raw));
-    }
-    Cow::Borrowed(raw)
-}
-
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
     };
-
-    // Best-effort DAX identifier heuristic: unquoted table identifiers should be simple
-    // alphanumeric tokens (plus `_`) and must not start with a digit.
-    //
-    // Anything outside this "simple" set is rendered as a quoted identifier to produce
-    // an unambiguous DAX-like string (e.g. `Table Name` -> `'Table Name'`).
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return true;
+    let is_simple = (first.is_ascii_alphabetic() || first == '_')
+        && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if is_simple {
+        return Cow::Borrowed(raw);
     }
-    for c in chars {
-        if !(c.is_ascii_alphanumeric() || c == '_') {
-            return true;
-        }
-    }
-    false
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // DAX escapes embedded `'` by doubling within `'...'`.
-    format!("'{}'", raw.replace('\'', "''"))
+    Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
 }
 
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
@@ -313,7 +288,6 @@ fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
 }
-
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
 ///
 /// Parsing is best-effort:
