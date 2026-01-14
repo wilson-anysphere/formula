@@ -3019,6 +3019,31 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "DOLLAR",
+    description: "Converts a number to text using currency format.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "decimals", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "FIXED",
+    description: "Rounds a number to the specified number of decimals and formats it as text.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "decimals", type: "number", optional: true },
+      { name: "no_commas", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "REPT",
+    description: "Repeats text a given number of times.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "number_times", type: "number" },
+    ],
+  },
+  {
     name: "TEXTAFTER",
     description: "Returns text that occurs after a given delimiter.",
     minArgs: 2,
