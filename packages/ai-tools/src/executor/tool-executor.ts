@@ -1116,7 +1116,7 @@ export class ToolExecutor {
           }
         }
         if (cell.formula && !includeFormulaValues) return null;
-        return cell.value ?? null;
+        return normalizeCellOutput(cell.value);
       })
     );
 
@@ -2421,7 +2421,7 @@ export class ToolExecutor {
           if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) return null;
         }
         if (cell.formula && !includeFormulaValues) return null;
-        return cell.value ?? null;
+        return normalizeCellOutput(cell.value);
       })
     );
 
@@ -3001,10 +3001,10 @@ function compareCellForSort(left: CellData, right: CellData, opts: { includeForm
 
 function cellComparableValue(cell: CellData, opts: { includeFormulaValues?: boolean } = {}): string | number | boolean | null {
   if (cell.formula) {
-    if (opts.includeFormulaValues) return cell.value ?? null;
+    if (opts.includeFormulaValues) return normalizeCellOutput(cell.value);
     return cell.formula;
   }
-  return cell.value ?? null;
+  return normalizeCellOutput(cell.value);
 }
 
 function compareScalars(left: CellScalar | string, right: CellScalar | string): number {
