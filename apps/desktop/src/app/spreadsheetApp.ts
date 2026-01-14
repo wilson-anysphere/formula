@@ -15105,6 +15105,25 @@ export class SpreadsheetApp {
       throw new Error("Selected drawing is not an image");
     }
 
+    const dlp = this.dlpContext;
+    if (dlp) {
+      const fallback = this.selection.active;
+      const anchor: any = selected.anchor;
+      const fromCell =
+        anchor && (anchor.type === "oneCell" || anchor.type === "twoCell") ? anchor.from?.cell : null;
+      const row = Number(fromCell?.row);
+      const col = Number(fromCell?.col);
+      const cell =
+        Number.isInteger(row) && row >= 0 && Number.isInteger(col) && col >= 0 ? { row, col } : fallback;
+      enforceClipboardCopy({
+        documentId: dlp.documentId,
+        sheetId: this.sheetId,
+        range: { start: { row: cell.row, col: cell.col }, end: { row: cell.row, col: cell.col } },
+        classificationStore: dlp.classificationStore,
+        policy: dlp.policy
+      });
+    }
+
     const imageId = selected.kind.imageId;
     let entry = this.drawingImages.get(imageId);
     const getAsync = (this.drawingImages as any)?.getAsync;
@@ -15131,6 +15150,8 @@ export class SpreadsheetApp {
 
     const provider = await this.getClipboardProvider();
     await provider.write({ text: "", imagePng: pngBytes });
+    // The system clipboard now contains an image; clear any stale "internal range copy" context.
+    this.clipboardCopyContext = null;
   }
 
   private async cutSelectedDrawingToClipboard(): Promise<void> {
