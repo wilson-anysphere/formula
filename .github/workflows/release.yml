@@ -2745,6 +2745,36 @@ jobs:
           mapfile -t asset_names < <(echo "$assets_json" | jq -r '.[].name' | sort)
           printf '%s\n' "${asset_names[@]}"
 
+          # Supply-chain metadata (SBOM + provenance) is uploaded by separate jobs/steps. GitHub
+          # Release assets can be eventually consistent (upload succeeded but assets aren't visible
+          # via API immediately), so retry briefly before warning.
+          sbom_present="false"
+          provenance_count="0"
+
+          check_supply_chain_assets() {
+            if printf '%s\n' "${asset_names[@]}" | grep -qx 'sbom.spdx.json'; then
+              sbom_present="true"
+            else
+              sbom_present="false"
+            fi
+
+            provenance_count="$(printf '%s\n' "${asset_names[@]}" | grep -E '^provenance-.*\\.intoto\\.jsonl$' | wc -l | tr -d ' ')"
+          }
+
+          check_supply_chain_assets
+          if [[ "${sbom_present}" != "true" || "${provenance_count}" -eq 0 ]]; then
+            for delay in "${retry_delays[@]}"; do
+              echo "Supply-chain assets not fully visible yet; retrying in ${delay}s..." >&2
+              sleep "$delay"
+              assets_json="$(fetch_assets "$release_id")"
+              mapfile -t asset_names < <(echo "$assets_json" | jq -r '.[].name' | sort)
+              check_supply_chain_assets
+              if [[ "${sbom_present}" == "true" && "${provenance_count}" -gt 0 ]]; then
+                break
+              fi
+            done
+          fi
+
           dup_names="$(printf '%s\n' "${asset_names[@]}" | sort | uniq -d || true)"
           if [[ -n "${dup_names}" ]]; then
             echo "::error::Duplicate asset names found on the release (unexpected):"
@@ -2752,14 +2782,10 @@ jobs:
             exit 1
           fi
 
-          # Supply-chain metadata (SBOM + provenance) is uploaded by separate jobs/steps. These are
-          # initially warnings-only so releases can proceed even if the metadata generation/upload
-          # fails, but we still surface the absence loudly for visibility.
-          if ! printf '%s\n' "${asset_names[@]}" | grep -qx 'sbom.spdx.json'; then
+          if [[ "${sbom_present}" != "true" ]]; then
             echo "::warning::SBOM asset sbom.spdx.json not found on the draft release."
           fi
 
-          provenance_count="$(printf '%s\n' "${asset_names[@]}" | grep -E '^provenance-.*\\.intoto\\.jsonl$' | wc -l | tr -d ' ')"
           if [[ "${provenance_count}" -eq 0 ]]; then
             echo "::warning::No provenance-*.intoto.jsonl attestation bundles found on the draft release."
           fi
@@ -2772,6 +2798,8 @@ jobs:
             shopt -s nocasematch
             if [[ "$base" == "latest.json" ]]; then
               echo "updater-manifest"
+            elif [[ "$base" == "sbom.spdx.json" || "$base" == "SHA256SUMS.txt" || "$base" == provenance-*.intoto.jsonl ]]; then
+              echo "supply-chain"
             elif [[ "$base" == *.msi || "$base" == *.exe ]]; then
               if [[ "$base" =~ (arm64|aarch64) ]]; then
                 echo "windows-arm64"
@@ -2813,7 +2841,7 @@ jobs:
           render_table() {
             echo "| Bucket | Asset |"
             echo "| --- | --- |"
-            for bucket in macos-universal windows-x64 windows-arm64 linux-x64 updater-manifest other macos-unknown windows-unknown linux-unknown macos-x64 macos-arm64 linux-arm64; do
+            for bucket in macos-universal windows-x64 windows-arm64 linux-x64 updater-manifest supply-chain other macos-unknown windows-unknown linux-unknown macos-x64 macos-arm64 linux-arm64; do
               [[ -z "${bucket_assets[$bucket]+x}" ]] && continue
               while IFS= read -r name; do
                 [[ -z "$name" ]] && continue
