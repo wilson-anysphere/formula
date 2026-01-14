@@ -43,7 +43,8 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
     a `Read + Seek` stream.
 - **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification when present):**
   `crates/formula-xlsx/src/offcrypto/*`
-- **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
+- **End-to-end decrypt helpers + OOXML encryption writer (OLE wrapper → decrypted ZIP bytes; Agile by
+  default; Standard/CryptoAPI AES is also supported):**
   `crates/formula-office-crypto`
   - Note: `formula-office-crypto` validates `dataIntegrity` (HMAC) when present and returns
     `OfficeCryptoError::IntegrityCheckFailed` on mismatch. If the `<dataIntegrity>` element is

@@ -167,7 +167,8 @@ Implementation notes:
   ```
 - `crates/formula-office-crypto` is the primary end-to-end MS-OFFCRYPTO implementation in this repo:
   - parses `EncryptionInfo` for Agile (4.4) and Standard/CryptoAPI (`versionMinor == 2`), and
-  - decrypts `EncryptedPackage` to the plaintext OOXML ZIP bytes (and also includes an Agile writer).
+  - decrypts `EncryptedPackage` to the plaintext OOXML ZIP bytes (and also includes an OOXML
+    encryption writer: Agile by default; Standard/CryptoAPI AES is also supported).
 - `crates/formula-offcrypto` provides MS-OFFCRYPTO parsing helpers and standalone decrypt primitives
   (useful for inspection tooling, and for some Standard/CryptoAPI helper APIs).
 - Standard/CryptoAPI `EncryptedPackage` decryption differs by cipher:
@@ -288,7 +289,7 @@ Useful entrypoints when working on encrypted workbook support:
 - **OOXML decrypt helpers (Agile + Standard/CryptoAPI):**
   - End-to-end decrypt (OLE wrapper → decrypted ZIP bytes):
     - `crates/formula-office-crypto` (end-to-end decrypt; supports Agile + Standard/CryptoAPI, plus an
-      Agile writer)
+      OOXML encryption writer: Agile by default; Standard/CryptoAPI AES is also supported)
   - MS-OFFCRYPTO parsing helpers + standalone decrypt primitives:
     - `crates/formula-offcrypto` (also used by `formula-xlsx`’s Standard path)
   - Standard/CryptoAPI specifics:

@@ -107,7 +107,8 @@ spreadsheets you will most commonly see:
 Current state in this repo (important nuance):
 
   - Decryption primitives exist in multiple crates:
-  - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes) and an Agile encryption writer:
+  - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes) and an OOXML encryption writer
+    (Agile by default; Standard/CryptoAPI AES is also supported — Standard RC4 writing is not):
     `crates/formula-office-crypto`
     - Note: `formula-office-crypto`'s Agile (4.4) decrypt path validates `<dataIntegrity>` when
       present (mismatch ⇒ `OfficeCryptoError::IntegrityCheckFailed`). Some real-world producers omit
