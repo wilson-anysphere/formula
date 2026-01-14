@@ -4131,6 +4131,7 @@ fn import_biff8_shared_formulas(
         for (row, col, anchor_row, anchor_col) in ptgexp_cells {
             let cell_ref = CellRef::new(row as u32, col as u32);
             let anchor_cell = sheet.merged_regions.resolve_cell(cell_ref);
+            let existing = sheet.formula(anchor_cell);
 
             // Best-effort: allow overriding formulas for PtgExp-backed cells when we can resolve the
             // backing SHRFMLA token stream.
@@ -4138,17 +4139,13 @@ fn import_biff8_shared_formulas(
             // For merged regions, only overwrite the anchor when it is currently unset or just a
             // placeholder (`#UNKNOWN!`); otherwise preserve the existing anchor formula.
             if anchor_cell != cell_ref
-                && sheet
-                    .formula(anchor_cell)
-                    .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+                && existing.is_some_and(|f| f != ErrorValue::Unknown.as_str())
             {
                 continue;
             }
-
             let Some(shared_rgce) = shared_by_anchor.get(&(anchor_row, anchor_col)) else {
                 continue;
             };
-
             let materialized = if row == anchor_row && col == anchor_col {
                 None
             } else {
@@ -4179,7 +4176,37 @@ fn import_biff8_shared_formulas(
                 );
             }
 
-            sheet.set_formula(anchor_cell, Some(decoded.text));
+            if decoded.text.is_empty() {
+                continue;
+            }
+
+            // Prefer our BIFF-derived shared formula materialization over calamine’s worksheet
+            // formula string for `PtgExp` cells, but avoid overwriting an existing non-unknown
+            // formula with our own `#UNKNOWN!` best-effort output.
+            let decoded_is_unknown = decoded
+                .text
+                .trim_start()
+                .starts_with(ErrorValue::Unknown.as_str());
+            let should_set = match existing {
+                None => true,
+                Some(existing) => {
+                    if existing == decoded.text {
+                        false
+                    } else if decoded_is_unknown
+                        && !existing
+                            .trim_start()
+                            .starts_with(ErrorValue::Unknown.as_str())
+                    {
+                        false
+                    } else {
+                        true
+                    }
+                }
+            };
+
+            if should_set {
+                sheet.set_formula(anchor_cell, Some(decoded.text));
+            }
         }
     }
 }

@@ -744,6 +744,35 @@ pub fn build_defined_name_sheet_name_sanitization_calamine_fixture_xls() -> Vec<
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that contains a shared formula range that uses a 3D reference
+/// token (`PtgRef3d`) with relative row/column flags.
+///
+/// The fixture contains two sheets:
+/// - `Sheet1`: contains a value in A1 (not required for formula text import, but keeps the sheet
+///   non-empty for calamine).
+/// - `Shared3D`: contains a shared formula over `B1:C2`.
+///
+/// The shared formula definition is stored in a `SHRFMLA` record with base `rgce`:
+///   `Sheet1!A1 + 1`
+/// where the `PtgRef3d` token sets both row and column *relative* flags so the reference is
+/// materialized across the shared range.
+///
+/// All cells in the range have `FORMULA` records; non-base cells use `PtgExp` to reference the
+/// base cell.
+pub fn build_shared_formula_ref3d_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ref3d_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing workbook-scoped defined names that mimic print
 /// settings:
 /// - `_xlnm.Print_Area` referencing Sheet1,
@@ -6711,6 +6740,134 @@ fn build_defined_name_sheet_name_sanitization_calamine_workbook_stream() -> Vec<
     globals
 }
 
+fn build_shared_formula_ref3d_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Sheet1", "Shared3D"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables used by 3D formula tokens.
+    // Use a single internal SUPBOOK so ixti=0 refers to Sheet1.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0: Sheet1 ---------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
+
+    // -- Sheet 1: Shared3D -------------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_ref3d_shared_formula_sheet_stream(xf_cell));
+
+    globals
+}
+
+fn build_shared_ref3d_shared_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 3) => A1:C2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Shared formula base cell is B1 (row=0,col=1).
+    let base_row: u16 = 0;
+    let base_col: u16 = 1;
+    // FORMULA.grbit bit indicating the formula is part of a shared-formula group.
+    // [MS-XLS] 2.4.127 (FORMULA), fShrFmla.
+    let grbit_shared: u16 = 0x0008;
+
+    // Base cell FORMULA record stores the full rgce.
+    //
+    // The shared formula definition is also stored in the following SHRFMLA record so that
+    // follower cells (PtgExp) can be materialized.
+    let mut base_formula = Vec::<u8>::new();
+    base_formula.extend_from_slice(&ptg_ref3d(0, 0, 0xC000)); // ixti=0 => Sheet1, A1, relative row/col
+    base_formula.push(0x1E); // PtgInt
+    base_formula.extend_from_slice(&1u16.to_le_bytes());
+    base_formula.push(0x03); // PtgAdd
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(
+            base_row,
+            base_col,
+            xf_cell,
+            0.0,
+            grbit_shared,
+            &base_formula,
+        ),
+    );
+
+    // SHRFMLA: shared formula over B1:C2.
+    // Base rgce: Sheet1!A1 + 1, where the PtgRef3d token sets both row+col relative flags.
+    let shrfmla = shrfmla_record(0, 1, 1, 2, &base_formula);
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla);
+
+    // Non-base cells use PtgExp pointing at the base cell.
+    let follower = ptg_exp(base_row, base_col);
+    // C1
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(0, 2, xf_cell, 0.0, grbit_shared, &follower),
+    );
+    // B2
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, 1, xf_cell, 0.0, grbit_shared, &follower),
+    );
+    // C2
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, 2, xf_cell, 0.0, grbit_shared, &follower),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
 fn build_print_settings_calamine_workbook_stream() -> Vec<u8> {
     // Similar to `build_defined_names_builtins_workbook_stream`, but encodes print built-ins as
     // regular defined name strings so calamine surfaces them via `Reader::defined_names()`.
@@ -11343,9 +11500,6 @@ fn externname_record(name: &str) -> Vec<u8> {
 }
 
 fn formula_cell(row: u16, col: u16, xf: u16, cached_result: f64, rgce: &[u8]) -> Vec<u8> {
-    // FORMULA record payload (BIFF8) [MS-XLS 2.4.127].
-    //
-    // This is a minimal encoding sufficient for calamine to surface the formula text.
     formula_cell_with_grbit(row, col, xf, cached_result, 0, rgce)
 }
 

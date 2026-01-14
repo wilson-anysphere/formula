@@ -66,11 +66,10 @@ const RECORD_BOTTOMMARGIN: u16 = 0x0029;
 // WSBOOL [MS-XLS 2.4.376] stores worksheet boolean properties; we only care about fFitToPage
 // (bit 8 / mask 0x0100).
 const RECORD_WSBOOL: u16 = 0x0081;
-
-// WSBOOL options.
+// WSBOOL options ([MS-XLS] 2.4.376).
 //
-// In BIFF8 WSBOOL.fFitToPage controls whether SETUP.iFitWidth/iFitHeight apply. When unset, Excel
-// uses SETUP.iScale percent scaling instead.
+// In BIFF8, `WSBOOL.fFitToPage` controls whether SETUP.iFitWidth/iFitHeight apply. When unset,
+// Excel uses SETUP.iScale percent scaling instead.
 const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 
 // SETUP grbit flags.
