@@ -3883,7 +3883,7 @@ impl WasmWorkbook {
             Ok(n as u32)
         }
 
-        let mut parsed: Vec<FormatRun> = Vec::new();
+        let mut parsed: Vec<EngineFormatRun> = Vec::new();
 
         // Accept null/undefined as clearing the column's runs.
         if !(runs.is_null() || runs.is_undefined()) {
@@ -3930,7 +3930,7 @@ impl WasmWorkbook {
                     )));
                 }
 
-                parsed.push(FormatRun {
+                parsed.push(EngineFormatRun {
                     start_row,
                     end_row_exclusive,
                     style_id,
