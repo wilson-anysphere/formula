@@ -113,6 +113,8 @@ fn classify_numeric_section(pattern: &str) -> Option<String> {
         'S'
     } else if analysis.has_currency {
         'C'
+    } else if analysis.has_grouping {
+        'N'
     } else {
         'F'
     };
@@ -127,6 +129,7 @@ struct NumericPatternAnalysis {
     has_percent: bool,
     is_scientific: bool,
     has_currency: bool,
+    has_grouping: bool,
     is_fraction: bool,
 }
 
@@ -171,6 +174,7 @@ fn analyze_numeric_pattern(pattern: &str) -> NumericPatternAnalysis {
                 }
             }
             '%' => out.has_percent = true,
+            ',' => out.has_grouping = true,
             // Heuristic: treat a slash in a numeric pattern as a fraction.
             '/' if out.has_placeholders => out.is_fraction = true,
             '$' | '€' | '£' | '¥' => out.has_currency = true,

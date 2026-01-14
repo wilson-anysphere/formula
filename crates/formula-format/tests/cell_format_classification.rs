@@ -93,8 +93,8 @@ fn builtin_numeric_formats_0_11_map_to_expected_cell_format_codes() {
         (0, "G"),
         (1, "F0"),
         (2, "F2"),
-        (3, "F0"),
-        (4, "F2"),
+        (3, "N0"),
+        (4, "N2"),
         (5, "C0"),
         (6, "C0"),
         (7, "C2"),
@@ -126,10 +126,10 @@ fn builtin_numeric_formats_0_11_map_to_expected_cell_format_codes() {
 fn accounting_formats_detect_parentheses_and_negative_color() {
     // Built-in accounting-style negatives (no currency symbol): 23–26.
     let cases: &[(u16, &str, bool)] = &[
-        (23, "F0", false),
-        (24, "F0", true),
-        (25, "F2", false),
-        (26, "F2", true),
+        (23, "N0", false),
+        (24, "N0", true),
+        (25, "N2", false),
+        (26, "N2", true),
     ];
 
     for &(id, expected_code, expects_color) in cases {
@@ -195,6 +195,15 @@ fn custom_numeric_formats_compute_decimal_counts() {
         assert_eq!(info.cell_format_code, expected, "fmt {fmt}");
         assert!(!info.negative_in_color, "fmt {fmt}");
         assert!(!info.negative_in_parentheses, "fmt {fmt}");
+    }
+}
+
+#[test]
+fn custom_grouped_numeric_formats_map_to_n_codes() {
+    let cases: &[(&str, &str)] = &[("#,##0", "N0"), ("#,##0.00", "N2")];
+    for &(fmt, expected) in cases {
+        let info = classify_cell_format(Some(fmt));
+        assert_eq!(info.cell_format_code, expected, "fmt {fmt}");
     }
 }
 
