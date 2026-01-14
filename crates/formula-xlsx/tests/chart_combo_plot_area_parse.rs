@@ -90,13 +90,13 @@ fn combo_plot_area_warns_only_for_unknown_chart_types() {
         <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
           <c:chart>
             <c:plotArea>
-              <c:areaChart>
+              <c:madeUpChart>
                 <c:ser>
                   <c:tx><c:v>Area Series</c:v></c:tx>
                   <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$3</c:f></c:strRef></c:cat>
                   <c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f></c:numRef></c:val>
                 </c:ser>
-              </c:areaChart>
+              </c:madeUpChart>
               <c:barChart>
                 <c:ser>
                   <c:tx><c:v>Bar Series</c:v></c:tx>
@@ -124,7 +124,7 @@ fn combo_plot_area_warns_only_for_unknown_chart_types() {
     assert!(
         model.diagnostics[0]
             .message
-            .contains("unsupported chart type areaChart"),
+            .contains("unsupported chart type madeUpChart"),
         "diagnostic was {:?}",
         model.diagnostics[0]
     );
