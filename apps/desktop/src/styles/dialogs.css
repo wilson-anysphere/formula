@@ -243,7 +243,7 @@ dialog.custom-sort-dialog::backdrop {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-height: min(480px, calc(100vh - 240px));
+  max-height: min(480px, calc(100vh - (var(--space-6) * 15)));
   overflow: auto;
   padding: var(--space-2);
   border: 1px solid var(--border);

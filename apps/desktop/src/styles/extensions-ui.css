@@ -47,7 +47,7 @@ dialog.extensions-ui {
   flex-direction: column;
   gap: var(--space-1);
   margin-top: var(--space-4);
-  max-height: min(340px, calc(100vh - 220px));
+  max-height: min(340px, calc(100vh - ((var(--space-6) * 13) + var(--space-5))));
   overflow: auto;
 }
 

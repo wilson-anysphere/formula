@@ -101,7 +101,7 @@ function badge(text, { tone = "neutral", title = null } = {}) {
       style: [
         "display:inline-flex",
         "align-items:center",
-        "padding:2px 8px",
+        "padding:var(--space-1) var(--space-4)",
         "border-radius:var(--radius-pill)",
         "font-size:11px",
         "font-weight:600",
@@ -197,7 +197,10 @@ async function renderSearchResults({
         ? details.versions.find((v) => String(v.version) === String(latestVersion))?.scanStatus || null
         : null;
 
-    const badges = el("div", { className: "badges", style: "display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;" });
+    const badges = el("div", {
+      className: "badges",
+      style: "display:flex; gap:var(--space-3); flex-wrap:wrap; margin-top:var(--space-3);",
+    });
     const verified = Boolean(item.verified ?? details?.verified);
     const featured = Boolean(item.featured ?? details?.featured);
     const deprecated = Boolean(details?.deprecated ?? item.deprecated);
