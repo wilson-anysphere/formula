@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
 use formula_model::rich_text::RichText;
@@ -2637,6 +2637,14 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     part_overrides: &HashMap<String, PartOverride>,
     recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
+    let repair_overrides = plan_package_repair_overrides(
+        archive,
+        pre_read_parts,
+        updated_parts,
+        part_overrides,
+        recalc_policy,
+    )?;
+
     let (shared_strings_part, shared_string_indices, shared_strings_updated) =
         plan_shared_strings(archive, patches_by_part, pre_read_parts)?;
 
@@ -2737,6 +2745,20 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             continue;
         }
 
+        if let Some(override_op) = repair_overrides.get(canonical_name) {
+            applied_part_overrides.insert(canonical_name.to_string());
+            match override_op {
+                PartOverride::Remove => {
+                    continue;
+                }
+                PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
+                    zip.start_file(name.clone(), options)?;
+                    zip.write_all(bytes)?;
+                    continue;
+                }
+            }
+        }
+
         if let Some(override_op) = part_overrides.get(canonical_name) {
             applied_part_overrides.insert(canonical_name.to_string());
             match override_op {
@@ -2809,23 +2831,34 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     }
 
     // Append any missing override parts deterministically.
-    if !part_overrides.is_empty() {
-        let mut to_append: Vec<(&String, &PartOverride)> = part_overrides
-            .iter()
-            .filter(|(name, override_op)| {
-                if applied_part_overrides.contains(*name) {
-                    return false;
-                }
-                matches!(override_op, PartOverride::Add(_) | PartOverride::Replace(_))
-            })
-            .collect();
-        to_append.sort_by_key(|(name, _)| *name);
-        for (name, override_op) in to_append {
+    if !part_overrides.is_empty() || !repair_overrides.is_empty() {
+        let mut names: BTreeSet<&str> = BTreeSet::new();
+        for (name, op) in part_overrides.iter() {
+            if matches!(op, PartOverride::Add(_) | PartOverride::Replace(_)) {
+                names.insert(name.as_str());
+            }
+        }
+        for (name, op) in repair_overrides.iter() {
+            if matches!(op, PartOverride::Add(_) | PartOverride::Replace(_)) {
+                names.insert(name.as_str());
+            }
+        }
+
+        for name in names {
+            if applied_part_overrides.contains(name) {
+                continue;
+            }
+            let override_op = repair_overrides
+                .get(name)
+                .or_else(|| part_overrides.get(name));
+            let Some(override_op) = override_op else {
+                continue;
+            };
             let bytes = match override_op {
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => bytes,
                 PartOverride::Remove => continue,
             };
-            zip.start_file(name.clone(), options)?;
+            zip.start_file(name.to_string(), options)?;
             zip.write_all(bytes)?;
         }
     }
@@ -2836,6 +2869,228 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
 
     zip.finish()?;
     Ok(())
+}
+
+fn plan_package_repair_overrides<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    pre_read_parts: &HashMap<String, Vec<u8>>,
+    updated_parts: &HashMap<String, Vec<u8>>,
+    part_overrides: &HashMap<String, PartOverride>,
+    recalc_policy: RecalcPolicy,
+) -> Result<HashMap<String, PartOverride>, StreamingPatchError> {
+    fn effective_part_bytes<R: Read + Seek>(
+        archive: &mut ZipArchive<R>,
+        name: &str,
+        pre_read_parts: &HashMap<String, Vec<u8>>,
+        updated_parts: &HashMap<String, Vec<u8>>,
+        part_overrides: &HashMap<String, PartOverride>,
+        recalc_policy: RecalcPolicy,
+    ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
+        if let Some(op) = part_overrides.get(name) {
+            match op {
+                PartOverride::Remove => return Ok(None),
+                PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
+                    let mut bytes = bytes.clone();
+                    if should_patch_recalc_part(name, recalc_policy) {
+                        bytes = maybe_patch_recalc_part(name, &bytes, recalc_policy)?;
+                    }
+                    return Ok(Some(bytes));
+                }
+            }
+        }
+
+        if let Some(bytes) = updated_parts.get(name) {
+            let mut bytes = bytes.clone();
+            if should_patch_recalc_part(name, recalc_policy) {
+                bytes = maybe_patch_recalc_part(name, &bytes, recalc_policy)?;
+            }
+            return Ok(Some(bytes));
+        }
+
+        if let Some(bytes) = pre_read_parts.get(name) {
+            let mut bytes = bytes.clone();
+            if should_patch_recalc_part(name, recalc_policy) {
+                bytes = maybe_patch_recalc_part(name, &bytes, recalc_policy)?;
+            }
+            return Ok(Some(bytes));
+        }
+
+        let Some(mut bytes) = read_zip_part_optional(archive, name)? else {
+            return Ok(None);
+        };
+        if should_patch_recalc_part(name, recalc_policy) {
+            bytes = maybe_patch_recalc_part(name, &bytes, recalc_policy)?;
+        }
+        Ok(Some(bytes))
+    }
+
+    // Determine the effective part name set after applying part overrides.
+    let mut part_names: HashSet<String> = HashSet::new();
+    for name in archive.file_names() {
+        // `file_names()` includes directory entries; ignore them for content detection.
+        if name.ends_with('/') {
+            continue;
+        }
+        let canonical = name.strip_prefix('/').unwrap_or(name);
+        part_names.insert(canonical.to_string());
+    }
+    for (name, op) in part_overrides {
+        let canonical = name.strip_prefix('/').unwrap_or(name);
+        match op {
+            PartOverride::Remove => {
+                part_names.remove(canonical);
+            }
+            PartOverride::Replace(_) | PartOverride::Add(_) => {
+                part_names.insert(canonical.to_string());
+            }
+        }
+    }
+
+    let has_vba_project = part_names.contains("xl/vbaProject.bin");
+    let has_vba_signature = part_names.contains("xl/vbaProjectSignature.bin");
+    let has_vba_data = part_names.contains("xl/vbaData.xml");
+
+    // Detect whether the package contains image payloads that require `<Default>` entries in
+    // `[Content_Types].xml`. This matches the conservative behavior of
+    // `XlsxPackage::write_to(...)`: only add defaults for extensions that appear in the package.
+    let mut needs_png = false;
+    let mut needs_jpg = false;
+    let mut needs_jpeg = false;
+    let mut needs_gif = false;
+    let mut needs_webp = false;
+    for name in &part_names {
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with(".png") {
+            needs_png = true;
+        } else if lower.ends_with(".jpg") {
+            needs_jpg = true;
+        } else if lower.ends_with(".jpeg") {
+            needs_jpeg = true;
+        } else if lower.ends_with(".gif") {
+            needs_gif = true;
+        } else if lower.ends_with(".webp") {
+            needs_webp = true;
+        }
+    }
+
+    if !has_vba_project && !(needs_png || needs_jpg || needs_jpeg || needs_gif || needs_webp) {
+        return Ok(HashMap::new());
+    }
+
+    let content_types_original = effective_part_bytes(
+        archive,
+        "[Content_Types].xml",
+        pre_read_parts,
+        updated_parts,
+        part_overrides,
+        recalc_policy,
+    )?;
+    let workbook_rels_original = if has_vba_project {
+        effective_part_bytes(
+            archive,
+            "xl/_rels/workbook.xml.rels",
+            pre_read_parts,
+            updated_parts,
+            part_overrides,
+            recalc_policy,
+        )?
+    } else {
+        None
+    };
+    let vba_project_rels_original = if has_vba_project && has_vba_signature {
+        effective_part_bytes(
+            archive,
+            "xl/_rels/vbaProject.bin.rels",
+            pre_read_parts,
+            updated_parts,
+            part_overrides,
+            recalc_policy,
+        )?
+    } else {
+        None
+    };
+
+    // Run the existing in-memory repair logic on a minimal part map and convert the modified parts
+    // into streaming part overrides.
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    if let Some(bytes) = content_types_original.clone() {
+        parts.insert("[Content_Types].xml".to_string(), bytes);
+    }
+    if let Some(bytes) = workbook_rels_original.clone() {
+        parts.insert("xl/_rels/workbook.xml.rels".to_string(), bytes);
+    }
+    if let Some(bytes) = vba_project_rels_original.clone() {
+        parts.insert("xl/_rels/vbaProject.bin.rels".to_string(), bytes);
+    }
+
+    if has_vba_project {
+        // Stub out macro payloads so `macro_repair` can check presence without inflating them.
+        parts.insert("xl/vbaProject.bin".to_string(), Vec::new());
+        if has_vba_signature {
+            parts.insert("xl/vbaProjectSignature.bin".to_string(), Vec::new());
+        }
+        if has_vba_data {
+            parts.insert("xl/vbaData.xml".to_string(), Vec::new());
+        }
+
+        crate::macro_repair::ensure_xlsm_content_types(&mut parts)?;
+        crate::macro_repair::ensure_workbook_rels_has_vba(&mut parts)?;
+        crate::macro_repair::ensure_vba_project_rels_has_signature(&mut parts)?;
+    }
+
+    if needs_png {
+        crate::package::ensure_content_types_default(&mut parts, "png", "image/png")?;
+    }
+    if needs_jpg {
+        crate::package::ensure_content_types_default(&mut parts, "jpg", "image/jpeg")?;
+    }
+    if needs_jpeg {
+        crate::package::ensure_content_types_default(&mut parts, "jpeg", "image/jpeg")?;
+    }
+    if needs_gif {
+        crate::package::ensure_content_types_default(&mut parts, "gif", "image/gif")?;
+    }
+    if needs_webp {
+        crate::package::ensure_content_types_default(&mut parts, "webp", "image/webp")?;
+    }
+
+    let mut overrides: HashMap<String, PartOverride> = HashMap::new();
+
+    if let Some(original) = content_types_original {
+        if let Some(updated) = parts.get("[Content_Types].xml") {
+            if updated.as_slice() != original.as_slice() {
+                overrides.insert(
+                    "[Content_Types].xml".to_string(),
+                    PartOverride::Replace(updated.clone()),
+                );
+            }
+        }
+    }
+
+    if let Some(original) = workbook_rels_original {
+        if let Some(updated) = parts.get("xl/_rels/workbook.xml.rels") {
+            if updated.as_slice() != original.as_slice() {
+                overrides.insert(
+                    "xl/_rels/workbook.xml.rels".to_string(),
+                    PartOverride::Replace(updated.clone()),
+                );
+            }
+        }
+    }
+
+    if has_vba_project && has_vba_signature {
+        if let Some(updated) = parts.get("xl/_rels/vbaProject.bin.rels") {
+            let original = vba_project_rels_original.as_deref();
+            if original != Some(updated.as_slice()) {
+                overrides.insert(
+                    "xl/_rels/vbaProject.bin.rels".to_string(),
+                    PartOverride::Replace(updated.clone()),
+                );
+            }
+        }
+    }
+
+    Ok(overrides)
 }
 
 fn streaming_patches_remove_existing_formulas<R: Read + Seek>(
