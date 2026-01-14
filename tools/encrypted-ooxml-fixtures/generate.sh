@@ -25,6 +25,9 @@ Usage: generate.sh <mode> <password> <in_plaintext_xlsx> <out_encrypted_xlsx>
 
 Example:
   tools/encrypted-ooxml-fixtures/generate.sh agile password fixtures/xlsx/basic/basic.xlsx fixtures/encrypted/ooxml/agile.xlsx
+
+Empty password example:
+  tools/encrypted-ooxml-fixtures/generate.sh agile "" fixtures/xlsx/basic/basic.xlsx /tmp/agile-empty-password.xlsx
 EOF
 }
 
