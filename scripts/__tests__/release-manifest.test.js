@@ -257,7 +257,58 @@ test("verify-desktop-release-assets: validateLatestJson accepts signature-only-a
   }
 
   // Should not throw.
-  validateLatestJson(manifest, "0.1.0", assetsByName, { allowWindowsMsi: true });
+  validateLatestJson(manifest, "0.1.0", assetsByName);
+});
+
+test("verify-desktop-release-assets: validateLatestJson accepts a complete multi-platform manifest fixture", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  const assetsByName = assetsMapFromManifest(manifest);
+
+  validateLatestJson(manifest, "0.1.0", assetsByName);
+});
+
+test("verify-desktop-release-assets: validateLatestJson rejects raw Windows .exe updater entries by default", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  manifest.platforms["windows-x86_64"].url = "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x64_en-US.exe";
+  manifest.platforms["windows-aarch64"].url =
+    "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_arm64_en-US.exe";
+  const assetsByName = assetsMapFromManifest(manifest);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assetsByName),
+    (err) => {
+      assert.ok(err instanceof ActionableError);
+      assert.match(err.message, /allow-windows-exe/i);
+      return true;
+    },
+  );
+});
+
+test("verify-desktop-release-assets: validateLatestJson allows raw Windows .exe updater entries when --allow-windows-exe is set", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  manifest.platforms["windows-x86_64"].url = "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x64_en-US.exe";
+  manifest.platforms["windows-aarch64"].url =
+    "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_arm64_en-US.exe";
+  const assetsByName = assetsMapFromManifest(manifest);
+
+  validateLatestJson(manifest, "0.1.0", assetsByName, { allowWindowsExe: true });
+});
+
+test("verify-desktop-release-assets: validateLatestJson enforces per-OS updater artifact types (no DMG/DEB)", async () => {
+  const manifest = await readJsonFixture("latest.wrong-artifacts.json");
+  const assetsByName = assetsMapFromManifest(manifest);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assetsByName),
+    (err) => {
+      assert.ok(err instanceof ActionableError);
+      assert.ok(
+        err.message.includes(".dmg") || err.message.includes(".deb"),
+        `expected error message to mention .dmg or .deb, got:\n${err.message}`,
+      );
+      return true;
+    },
+  );
 });
 
 test("verify-desktop-release-assets: validateLatestJson fails on missing required platforms", async () => {
