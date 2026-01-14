@@ -2399,7 +2399,18 @@ export function bindYjsToDocumentController(options) {
               const keys = Object.keys(found.entry).sort();
               for (const key of keys) {
                 if (key === "id" || key === "name") continue;
-                sheetMap.set(key, cloneJson(found.entry[key]));
+                const value = found.entry[key];
+                if (key === "view") {
+                  sheetMap.set(key, sanitizeSheetViewForPreservation(value));
+                  continue;
+                }
+                if (key === "drawings") {
+                  const sanitized = sanitizeDrawingsForPreservation(value);
+                  if (Array.isArray(sanitized) && sanitized.length === 0) continue;
+                  sheetMap.set(key, sanitized);
+                  continue;
+                }
+                sheetMap.set(key, cloneJson(value));
               }
             }
 

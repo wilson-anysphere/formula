@@ -67,6 +67,21 @@ class TestDocumentController {
       formatDeltas: [{ sheetId, layer: "sheet", beforeStyleId: 0, afterStyleId }],
     });
   }
+
+  /**
+   * @param {string} sheetId
+   */
+  setRangeRuns(sheetId) {
+    this._emitter.emit("change", {
+      rangeRunDeltas: [
+        {
+          sheetId,
+          col: 0,
+          afterRuns: [{ startRow: 0, endRowExclusive: 1, styleId: 1 }],
+        },
+      ],
+    });
+  }
 }
 
 test("binder filters oversized drawing ids when upgrading plain-object sheets during sheet view writes", async () => {
@@ -182,3 +197,60 @@ test("binder filters oversized drawing ids when upgrading plain-object sheets du
   }
 });
 
+test("binder filters oversized drawing ids when upgrading plain-object sheets during range-run writes", async () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  const oversizedViewId = "x".repeat(5000);
+  const oversizedTopId = "y".repeat(5000);
+
+  doc.transact(() => {
+    sheets.push([
+      {
+        id: "Sheet1",
+        name: "Sheet1",
+        view: {
+          frozenRows: 0,
+          frozenCols: 0,
+          drawings: [{ id: oversizedViewId }, { id: "ok-view" }],
+        },
+        drawings: [{ id: oversizedTopId }, { id: "ok-top" }],
+      },
+    ]);
+  });
+
+  const documentController = new TestDocumentController();
+  const binder = bindYjsToDocumentController({ ydoc: doc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    await flushAsync(5);
+
+    documentController.setRangeRuns("Sheet1");
+    await flushAsync(5);
+
+    const sheet = sheets.get(0);
+    assert.ok(sheet instanceof Y.Map);
+
+    const view = sheet.get("view");
+    assert.ok(view && typeof view === "object");
+    assert.ok(Array.isArray(view.drawings));
+    assert.deepEqual(
+      view.drawings.map((d) => d.id),
+      ["ok-view"],
+    );
+
+    const topDrawings = sheet.get("drawings");
+    assert.ok(Array.isArray(topDrawings));
+    assert.deepEqual(
+      topDrawings.map((d) => d.id),
+      ["ok-top"],
+    );
+
+    const formatRunsByCol = sheet.get("formatRunsByCol");
+    assert.ok(formatRunsByCol instanceof Y.Map);
+    assert.deepEqual(formatRunsByCol.get("0"), [{ startRow: 0, endRowExclusive: 1, format: { style: "ok" } }]);
+  } finally {
+    binder.destroy();
+    doc.destroy();
+  }
+});
