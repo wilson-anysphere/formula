@@ -164,6 +164,18 @@ function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry
     closePanel(panelId: string) {
       this.layout = closePanel(this.layout, panelId);
     },
+    // Some registered commands reference split APIs; keep them present so registrations
+    // don't drift when invoked from unit tests.
+    setSplitDirection(direction: string, ratio?: number) {
+      this.layout = {
+        ...this.layout,
+        splitView: {
+          ...(this.layout as any).splitView,
+          direction,
+          ratio: typeof ratio === "number" ? ratio : (this.layout as any)?.splitView?.ratio ?? 0.5,
+        },
+      };
+    },
   } as any;
 
   registerDesktopCommands({
