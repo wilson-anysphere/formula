@@ -2086,14 +2086,24 @@ fn array_1d_with_shape(arr: Array) -> Result<(XlookupVectorShape, Vec<Value>), E
     Err(ErrorKind::Value)
 }
 
-fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
-    let Value::Text(pattern) = lookup else {
-        return None;
+fn wildcard_pattern_for_lookup(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+) -> Option<WildcardPattern> {
+    // Excel applies wildcard matching to text patterns. Rich values (entities/records) behave
+    // like text by using their display string, including `Record.display_field` semantics.
+    let pattern = match lookup {
+        Value::Text(pattern) => Cow::Borrowed(pattern.as_str()),
+        other => match other.coerce_to_string_with_ctx(ctx) {
+            Ok(s) => Cow::Owned(s),
+            Err(_) => return None,
+        },
     };
+
     if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('~') {
         return None;
     }
-    Some(WildcardPattern::new(pattern))
+    Some(WildcardPattern::new(pattern.as_ref()))
 }
 
 fn exact_match_values(
@@ -2101,7 +2111,7 @@ fn exact_match_values(
     lookup: &Value,
     values: &[Value],
 ) -> Option<usize> {
-    if let Some(pattern) = wildcard_pattern_for_lookup(lookup) {
+    if let Some(pattern) = wildcard_pattern_for_lookup(ctx, lookup) {
         for (idx, candidate) in values.iter().enumerate() {
             let text = match candidate {
                 Value::Error(_) => continue,
@@ -2154,7 +2164,7 @@ fn exact_match_in_first_col(
     lookup: &Value,
     table: &Reference,
 ) -> Option<u32> {
-    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    let wildcard_pattern = wildcard_pattern_for_lookup(ctx, lookup);
     let rows = table.start.row..=table.end.row;
     for (idx, row) in rows.enumerate() {
         let addr = crate::eval::CellAddr {
@@ -2186,7 +2196,7 @@ fn exact_match_in_first_col_array(
     lookup: &Value,
     table: &Array,
 ) -> Option<u32> {
-    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    let wildcard_pattern = wildcard_pattern_for_lookup(ctx, lookup);
     for row in 0..table.rows {
         let key = table.get(row, 0).unwrap_or(&Value::Blank);
         if let Some(pattern) = &wildcard_pattern {
@@ -2213,7 +2223,7 @@ fn exact_match_in_first_row(
     lookup: &Value,
     table: &Reference,
 ) -> Option<u32> {
-    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    let wildcard_pattern = wildcard_pattern_for_lookup(ctx, lookup);
     let cols = table.start.col..=table.end.col;
     for (idx, col) in cols.enumerate() {
         let addr = crate::eval::CellAddr {
@@ -2245,7 +2255,7 @@ fn exact_match_in_first_row_array(
     lookup: &Value,
     table: &Array,
 ) -> Option<u32> {
-    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    let wildcard_pattern = wildcard_pattern_for_lookup(ctx, lookup);
     for col in 0..table.cols {
         let key = table.get(0, col).unwrap_or(&Value::Blank);
         if let Some(pattern) = &wildcard_pattern {

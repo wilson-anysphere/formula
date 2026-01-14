@@ -10084,15 +10084,18 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
 fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
     let pattern = match lookup {
-        Value::Text(pattern) => pattern.as_ref(),
-        Value::Entity(v) => v.display.as_str(),
-        Value::Record(v) => v.display.as_str(),
+        Value::Text(pattern) => Cow::Borrowed(pattern.as_ref()),
+        Value::Entity(v) => Cow::Borrowed(v.display.as_str()),
+        Value::Record(v) => match coerce_to_cow_str(lookup) {
+            Ok(pattern) => pattern,
+            Err(_) => Cow::Borrowed(v.display.as_str()),
+        },
         _ => return None,
     };
     if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('~') {
         return None;
     }
-    Some(WildcardPattern::new(pattern))
+    Some(WildcardPattern::new(pattern.as_ref()))
 }
 
 fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
