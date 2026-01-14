@@ -416,13 +416,25 @@ fn bool_attr(value: bool) -> &'static str {
 }
 
 fn trim_float(value: f64) -> String {
+    // Prefer human-friendly decimal representations while keeping output deterministic.
+    //
+    // `Worksheet` stores some values as `f32` (e.g. default column width). When those are cast to
+    // `f64`, printing with high precision can expose binary rounding noise
+    // (`8.43f32 -> 8.430000305175781`). Detect values that round-trip through `f32` unchanged and
+    // format them via `f32::to_string()` so common Excel defaults serialize cleanly.
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    if value.is_finite() {
+        let as_f32 = value as f32;
+        if as_f32.is_finite() && (as_f32 as f64) == value {
+            return as_f32.to_string();
+        }
+    }
+
     let s = format!("{value:.15}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() {
-        "0".to_string()
-    } else {
-        s.to_string()
-    }
+    if s.is_empty() { "0".to_string() } else { s.to_string() }
 }
 
 fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
