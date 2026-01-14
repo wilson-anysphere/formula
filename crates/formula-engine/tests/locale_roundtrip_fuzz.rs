@@ -3,12 +3,81 @@
 use formula_engine::locale;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use std::path::Path;
+use std::sync::OnceLock;
 
 const CASES: u32 = 64;
 const LOCALE_ROUNDTRIP_SEED: [u8; 32] = [0x23; 32];
 
+fn discover_translated_locale_ids() -> Vec<String> {
+    let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/locale/data");
+    let entries = std::fs::read_dir(&data_dir)
+        .unwrap_or_else(|err| panic!("failed to read locale data dir {data_dir:?}: {err}"));
+
+    let mut ids = Vec::new();
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|err| {
+            panic!("failed to read directory entry under locale data dir {data_dir:?}: {err}")
+        });
+        if !entry
+            .file_type()
+            .unwrap_or_else(|err| {
+                panic!("failed to read file type for {entry:?} under {data_dir:?}: {err}")
+            })
+            .is_file()
+        {
+            continue;
+        }
+
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if file_name == "README.md" {
+            continue;
+        }
+        if !file_name.ends_with(".tsv") {
+            continue;
+        }
+        if file_name.ends_with(".errors.tsv") {
+            continue;
+        }
+
+        let id = file_name
+            .strip_suffix(".tsv")
+            .expect("checked .tsv suffix");
+        ids.push(id.to_string());
+    }
+
+    // Keep stable ordering so failures are deterministic.
+    ids.sort();
+    ids
+}
+
+fn translated_locales() -> &'static [&'static locale::FormulaLocale] {
+    static LOCALES: OnceLock<Box<[&'static locale::FormulaLocale]>> = OnceLock::new();
+    LOCALES.get_or_init(|| {
+        let ids = discover_translated_locale_ids();
+        assert!(
+            ids.iter().any(|id| id == "de-DE")
+                && ids.iter().any(|id| id == "fr-FR")
+                && ids.iter().any(|id| id == "es-ES"),
+            "expected translated locale TSVs to include de-DE, fr-FR, and es-ES; found {ids:?}"
+        );
+
+        ids.iter()
+            .map(|id| {
+                locale::get_locale(id).unwrap_or_else(|| {
+                    panic!(
+                        "found locale TSV {id:?} but formula_engine::locale::get_locale returned None (is it registered?)"
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    })
+}
+
 fn assert_locale_roundtrip(canonical: &str) -> Result<(), TestCaseError> {
-    for loc in [&locale::DE_DE, &locale::FR_FR, &locale::ES_ES] {
+    for &loc in translated_locales() {
         let localized = locale::localize_formula(canonical, loc).map_err(|e| {
             TestCaseError::fail(format!(
                 "localize_formula failed: locale={} canonical={canonical:?} err={e:?}",
