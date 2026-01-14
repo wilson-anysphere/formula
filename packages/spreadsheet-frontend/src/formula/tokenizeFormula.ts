@@ -378,72 +378,29 @@ function tryReadStructuredReference(input: string, start: number): { text: strin
   }
   if (input[i] !== "[") return null;
 
-  // Bracket matching: structured references can contain nested brackets (e.g.
-  // `Table1[[#All],[Amount]]`).
-  let depth = 0;
-  let j = i;
-  while (j < input.length) {
-    const ch = input[j] ?? "";
-    if (ch === "[") {
-      depth += 1;
-      j += 1;
-      continue;
-    }
-    if (ch === "]") {
-      // Excel escapes `]` inside structured reference items (column names) by doubling: `]]`.
-      // We need to disambiguate between:
-      //   - an escaped literal `]` inside a bracket group, and
-      //   - adjacent closing brackets from nested groups (`]` to close an item, then `]` to close the outer group).
-      //
-      // Heuristic:
-      // - `]]]` (or more) implies at least one escaped `]` inside the group.
-      // - For `]]`, treat it as an escaped `]` when the next non-whitespace character is not a delimiter
-      //   that normally follows a closed structured reference group (`,`, `]`, `)`, `;`).
-      if (input[j + 1] === "]") {
-        if (input[j + 2] === "]") {
-          // `]]]...` -> consume the escaped `]]` and keep the group open.
-          j += 2;
-          continue;
-        }
-
-        let k = j + 2;
-        while (k < input.length && isWhitespace(input[k] ?? "")) k += 1;
-        const after = input[k] ?? "";
-        // After a structured reference closes, we can see a wide range of delimiters/operators:
-        // - argument separators: `,` / `;`
-        // - closing parens/brackets: `)` / `]`
-        // - operators: `+`, `-`, `*`, `/`, `^`, `&`, comparisons, `%`, spill `#`, etc.
-        //
-        // Treating these as delimiters prevents us from incorrectly classifying the final `]]`
-        // in `Table1[[#All],[Amount]]+1` as an escaped `]` sequence.
-        const isDelimiterAfterClose =
-          after === "" ||
-          "+-*/^&=><%@".includes(after) ||
-          "(),;:[]{}.!".includes(after) ||
-          after === "#";
-        if (!isDelimiterAfterClose) {
-          // Treat as escaped `]` inside the group.
-          j += 2;
-          continue;
-        }
-      }
-
-      depth -= 1;
-      j += 1;
-      if (depth === 0) {
-        const end = j;
-        const text = input.slice(start, end);
-        // Only claim this token when it matches a supported structured ref pattern.
-        if (!parseStructuredReferenceText(text)) return null;
-        return { text, end };
-      }
-      continue;
-    }
-
-    j += 1;
+  // Structured reference tokenization is tricky because Excel escapes `]` inside
+  // structured reference items by doubling it (`]]`). That makes raw bracket
+  // matching ambiguous (two consecutive `]` can either be an escape or the close
+  // of nested groups).
+  //
+  // Instead of trying to fully parse the bracket nesting here, scan forward to
+  // the longest `]`-terminated substring that `parseStructuredReferenceText`
+  // recognizes. This stays in sync with the structured-reference parser and
+  // correctly handles cases like:
+  // - escaped `]` inside column names (`A]]B` => `A]B`)
+  // - structured refs followed by operators (`...]]+1`)
+  // - escaped `]` followed by operator characters inside the column name (`A]]+B`)
+  let bestEnd: number | null = null;
+  for (let j = i; j < input.length; j += 1) {
+    if (input[j] !== "]") continue;
+    const end = j + 1;
+    const text = input.slice(start, end);
+    if (!parseStructuredReferenceText(text)) continue;
+    bestEnd = end;
   }
 
-  return null;
+  if (bestEnd == null) return null;
+  return { text: input.slice(start, bestEnd), end: bestEnd };
 }
 
 export function tokenizeFormula(input: string): FormulaToken[] {

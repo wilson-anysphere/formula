@@ -79,4 +79,17 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(sharedRefs).toEqual(["Table1[[#Headers],[A]]B]]"]);
     expect(desktopRefs).toEqual(sharedRefs);
   });
+
+  it("matches between packages for structured refs with escaped `]` followed by operator characters in column names", () => {
+    const input = "=COUNTA(Table1[[#Headers],[A]]+B]])";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const desktopRefs = desktopTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["Table1[[#Headers],[A]]+B]]"]);
+    expect(desktopRefs).toEqual(sharedRefs);
+  });
 });

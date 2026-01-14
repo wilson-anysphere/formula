@@ -165,4 +165,11 @@ describe("tokenizeFormula", () => {
       end: input.indexOf("Table1") + "Table1[[#Headers],[A]]B]]".length,
     });
   });
+
+  it("tokenizes structured references where escaped `]` is followed by operator characters inside the column name", () => {
+    const input = "=COUNTA(Table1[[#Headers],[A]]+B]])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference");
+    expect(refs.map((t) => t.text)).toEqual(["Table1[[#Headers],[A]]+B]]"]);
+  });
 });
