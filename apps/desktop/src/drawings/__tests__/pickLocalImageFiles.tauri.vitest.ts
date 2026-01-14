@@ -128,7 +128,6 @@ describe("pickLocalImageFiles (Tauri)", () => {
     (globalThis as any).__TAURI__ = { dialog: { open }, core: { invoke } };
 
     const files = await pickLocalImageFiles({ multiple: true });
-
     expect(open).toHaveBeenCalledTimes(1);
     expect(calls.map((c) => c.cmd)).toEqual(["stat_file"]);
     expect(calls[0]?.args).toEqual({ path: "/tmp/huge.png" });
