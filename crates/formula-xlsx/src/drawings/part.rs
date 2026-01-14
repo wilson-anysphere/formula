@@ -203,19 +203,10 @@ impl DrawingPart {
         let root_xmlns = extract_root_xmlns(doc.root_element());
         let mut objects = Vec::new();
 
-        for (z, anchor_node) in doc
-            .root_element()
-            .children()
-            .filter(|n| n.is_element())
+        for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(doc.root_element())
+            .into_iter()
             .enumerate()
         {
-            let anchor_tag = anchor_node.tag_name().name();
-            if anchor_tag != "oneCellAnchor"
-                && anchor_tag != "twoCellAnchor"
-                && anchor_tag != "absoluteAnchor"
-            {
-                continue;
-            }
 
             // Preserve the anchor XML for best-effort/unknown objects.
             let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
@@ -441,19 +432,10 @@ impl DrawingPart {
         let root_xmlns = extract_root_xmlns(doc.root_element());
         let mut objects = Vec::new();
 
-        for (z, anchor_node) in doc
-            .root_element()
-            .children()
-            .filter(|n| n.is_element())
+        for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(doc.root_element())
+            .into_iter()
             .enumerate()
         {
-            let anchor_tag = anchor_node.tag_name().name();
-            if anchor_tag != "oneCellAnchor"
-                && anchor_tag != "twoCellAnchor"
-                && anchor_tag != "absoluteAnchor"
-            {
-                continue;
-            }
 
             let anchor = match parse_anchor(&anchor_node) {
                 Ok(a) => a,

@@ -213,3 +213,62 @@ fn parses_absolute_anchor_and_trims_attribute_values() {
     };
     assert_anchor_parses_consistently(&drawing_xml, expected);
 }
+
+#[test]
+fn parses_anchor_wrapped_in_mc_alternate_content_choice_branch() {
+    // Some producers wrap anchors in `mc:AlternateContent`, with both Choice + Fallback branches.
+    // We should pick the first Choice branch that contains an anchor and avoid duplicating refs.
+    let choice_anchor = format!(
+        r#"<xdr:twoCellAnchor>
+  <xdr:from><xdr:col>1</xdr:col><xdr:row>2</xdr:row></xdr:from>
+  <xdr:to><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:to>
+  {}
+  <xdr:clientData/>
+</xdr:twoCellAnchor>"#,
+        chart_frame_xml()
+    );
+
+    let fallback_anchor = choice_anchor.replace("rId1", "rId2");
+
+    let anchor_xml = format!(
+        r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:Choice Requires="c14">{choice_anchor}</mc:Choice>
+  <mc:Fallback>{fallback_anchor}</mc:Fallback>
+</mc:AlternateContent>"#
+    );
+    let drawing_xml = wrap_wsdr(&anchor_xml);
+
+    let expected = Anchor::TwoCell {
+        from: AnchorPoint::new(CellRef::new(2, 1), CellOffset::new(0, 0)),
+        to: AnchorPoint::new(CellRef::new(4, 3), CellOffset::new(0, 0)),
+    };
+    assert_anchor_parses_consistently(&drawing_xml, expected);
+}
+
+#[test]
+fn parses_anchor_wrapped_in_mc_alternate_content_fallback_branch() {
+    // When Choice branches do not contain anchors, fall back to the first Fallback branch that does.
+    let fallback_anchor = format!(
+        r#"<xdr:twoCellAnchor>
+  <xdr:from><xdr:col>1</xdr:col><xdr:row>2</xdr:row></xdr:from>
+  <xdr:to><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:to>
+  {}
+  <xdr:clientData/>
+</xdr:twoCellAnchor>"#,
+        chart_frame_xml()
+    );
+
+    let anchor_xml = format!(
+        r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:Choice Requires="c14"><xdr:sp/></mc:Choice>
+  <mc:Fallback>{fallback_anchor}</mc:Fallback>
+</mc:AlternateContent>"#
+    );
+    let drawing_xml = wrap_wsdr(&anchor_xml);
+
+    let expected = Anchor::TwoCell {
+        from: AnchorPoint::new(CellRef::new(2, 1), CellOffset::new(0, 0)),
+        to: AnchorPoint::new(CellRef::new(4, 3), CellOffset::new(0, 0)),
+    };
+    assert_anchor_parses_consistently(&drawing_xml, expected);
+}

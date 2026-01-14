@@ -94,14 +94,7 @@ pub fn extract_chart_object_refs(
         .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
 
     let mut out = Vec::new();
-    for anchor in doc.descendants().filter(|n| n.is_element()) {
-        let anchor_kind = anchor.tag_name().name();
-        if anchor_kind != "twoCellAnchor"
-            && anchor_kind != "absoluteAnchor"
-            && anchor_kind != "oneCellAnchor"
-        {
-            continue;
-        }
+    for anchor in super::anchor::wsdr_anchor_nodes(doc.root_element()) {
 
         let Some(anchor_model) = super::anchor::parse_anchor(&anchor) else {
             continue;
