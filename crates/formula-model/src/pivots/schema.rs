@@ -48,15 +48,16 @@ impl PivotFieldRef {
 
     /// Returns the underlying worksheet/pivot-cache field name if this reference is backed by a
     /// cache field header.
-    pub fn cache_field_name(&self) -> Option<&str> {
+    pub fn as_cache_field_name(&self) -> Option<&str> {
         match self {
             PivotFieldRef::CacheFieldName(name) => Some(name.as_str()),
             _ => None,
         }
     }
-    /// Backward-compatible alias for [`Self::cache_field_name`].
-    pub fn as_cache_field_name(&self) -> Option<&str> {
-        self.cache_field_name()
+
+    /// Backward-compatible alias for [`Self::as_cache_field_name`].
+    pub fn cache_field_name(&self) -> Option<&str> {
+        self.as_cache_field_name()
     }
     /// Best-effort, human-friendly string representation of this ref.
     ///

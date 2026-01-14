@@ -1540,6 +1540,9 @@ mod tests {
         .concat();
 
         let res = decrypt_biff_workbook_stream(&stream, "pw");
-        assert!(matches!(res, Err(DecryptError::UnsupportedEncryption)), "res={res:?}");
+        assert!(
+            matches!(res, Err(DecryptError::UnsupportedEncryption(_))),
+            "res={res:?}"
+        );
     }
 }
