@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { parseStartupLine, repoRoot, runOnce } from './desktopStartupRunnerShared.ts';
+import { parseStartupLine, repoRoot, runOnce } from './desktopStartupUtil.ts';
 
-describe('desktopStartupRunnerShared.parseStartupLine', () => {
+describe('desktopStartupUtil.parseStartupLine', () => {
   test('parses a full startup metrics line', () => {
     expect(
       parseStartupLine(
@@ -76,7 +76,7 @@ describe('desktopStartupRunnerShared.parseStartupLine', () => {
   });
 });
 
-describe('desktopStartupRunnerShared.runOnce reset guardrails', () => {
+describe('desktopStartupUtil.runOnce reset guardrails', () => {
   const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
   const prevPerfHome = process.env.FORMULA_PERF_HOME;
 
