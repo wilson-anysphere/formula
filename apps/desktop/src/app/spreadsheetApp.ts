@@ -3442,7 +3442,7 @@ export class SpreadsheetApp {
               // Only treat pointerdown events originating from the grid surface (canvases/root) as
               // chart selection/drags. This avoids interfering with interactive DOM overlays
               // (scrollbars, outline buttons, comments panel, etc) even when a chart extends underneath them.
-              return (
+              const isGridSurface =
                 target === this.root ||
                 target === this.selectionCanvas ||
                 target === this.gridCanvas ||
@@ -3452,7 +3452,24 @@ export class SpreadsheetApp {
                 target === this.referenceCanvas ||
                 target === this.auditingCanvas ||
                 target === this.presenceCanvas
-              );
+              ;
+              if (!isGridSurface) return false;
+
+              // ChartStore charts render above workbook drawings, but drawing selection handles are
+              // rendered above *all* objects. If a workbook drawing is selected, allow interactions
+              // on its visible selection chrome to win even when a chart lies underneath.
+              //
+              // This is particularly important in shared-grid mode where the drawings controller
+              // runs before the chart controller: context-clicks on drawing handles should not
+              // be stolen by an overlapping chart.
+              if (this.selectedDrawingId != null) {
+                const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
+                if (hit && hit.id === this.selectedDrawingId) {
+                  return false;
+                }
+              }
+
+              return true;
             },
             setObjects: (next) => {
               const obj = getSelectedCanvasChartObject(next);
