@@ -13525,6 +13525,34 @@ mod tests {
     }
 
     #[test]
+    fn workbook_sheet_ids_are_not_reused_after_sheet_delete() {
+        let mut engine = Engine::new();
+        let sheet1 = engine.workbook.ensure_sheet("Sheet1");
+        let sheet2 = engine.workbook.ensure_sheet("Sheet2");
+        let sheet3 = engine.workbook.ensure_sheet("Sheet3");
+
+        engine.delete_sheet("Sheet2").unwrap();
+
+        assert!(engine.workbook.sheet_exists(sheet1));
+        assert!(!engine.workbook.sheet_exists(sheet2));
+        assert!(engine.workbook.sheet_exists(sheet3));
+        assert_eq!(engine.workbook.sheet_id("Sheet2"), None);
+        assert_eq!(engine.workbook.sheet_name(sheet2), None);
+        assert_eq!(engine.workbook.sheet_ids_in_order(), &[sheet1, sheet3]);
+
+        let sheet4 = engine.workbook.ensure_sheet("Sheet4");
+        assert_eq!(sheet4, 3, "deleted sheet ids should not be reused");
+        assert_eq!(engine.workbook.sheet_ids_in_order(), &[sheet1, sheet3, sheet4]);
+
+        // 3D spans are driven by the current tab order and ignore deleted sheets.
+        assert_eq!(
+            engine.workbook.sheet_span_ids(sheet1, sheet3),
+            Some(vec![sheet1, sheet3])
+        );
+        assert_eq!(engine.workbook.sheet_span_ids(sheet2, sheet3), None);
+    }
+
+    #[test]
     fn bytecode_dynamic_deref_matches_ast_for_sheet_spans() {
         fn setup(engine: &mut Engine) {
             for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
