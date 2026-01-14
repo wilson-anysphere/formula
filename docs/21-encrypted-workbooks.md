@@ -150,7 +150,7 @@ Implementation notes:
   - Agile (4.4) XML (password key-encryptor subset),
   and implements Standard password→key derivation + verifier checks.
 - Standard/CryptoAPI AES `EncryptedPackage` decryption (ECMA-376 baseline) uses **AES-ECB** (no IV),
-  with plaintext truncated to the `u64` size prefix. In this repo, see `crates/formula-offcrypto`
+  with plaintext truncated to the 8-byte plaintext size prefix. In this repo, see `crates/formula-offcrypto`
   (`decrypt_standard_ooxml_from_bytes` / `decrypt_encrypted_package_ecb`) and
   `docs/offcrypto-standard-encryptedpackage.md`.
 - For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
@@ -176,8 +176,12 @@ Everything else should fail with a specific “unsupported encryption scheme” 
 
 For both Standard and Agile encryption, the OLE stream `EncryptedPackage` begins with:
 
-- **8 bytes**: `original_package_size` (`u64`, little-endian)
+- **8 bytes**: `original_package_size` (8-byte plaintext size prefix; see note below)
 - remaining bytes: encrypted OPC package data (ciphertext + padding)
+
+Compatibility note: while the spec describes this prefix as a `u64le`, some producers/libraries treat
+it as `u32 totalSize` + `u32 reserved` (often 0). For compatibility, parse it as two little-endian
+DWORDs and recombine: `size = lo as u64 | ((hi as u64) << 32)`.
 
 After decrypting the ciphertext, the plaintext bytes should be truncated to `original_package_size`
 to recover the real workbook package (a normal ZIP/OPC archive for `.xlsx`/`.xlsm`, or a ZIP/OPC

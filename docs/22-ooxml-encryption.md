@@ -281,9 +281,14 @@ contrast, `crates/formula-office-crypto` uses `saltValue` directly as the IV.
 The `EncryptedPackage` stream layout (on disk / as stored) is:
 
 ```text
-8B   original_package_size (u64 little-endian, *not encrypted*)
+8B   original_package_size (8-byte plaintext size prefix; see note below)
 ...  ciphertext bytes (AES-CBC, block-aligned)
 ```
+
+Compatibility note: while the spec describes this as a `u64le`, some producers/libraries treat the
+8-byte prefix as `u32 totalSize` + `u32 reserved` (often 0). To avoid truncation or “huge size”
+misreads, parse it as `lo=u32le(bytes[0..4])`, `hi=u32le(bytes[4..8])`, then
+`size = lo as u64 | ((hi as u64) << 32)`.
 
 Decryption rules:
 
@@ -336,7 +341,7 @@ may successfully open some inputs that the strict decryptors reject.
 
 The HMAC is computed over the **raw bytes of the `EncryptedPackage` stream as stored**, i.e.:
 
-> **HMAC target = `EncryptedPackage` stream bytes = header (u64 size) + ciphertext + padding**
+> **HMAC target = `EncryptedPackage` stream bytes = header (8-byte size prefix) + ciphertext + padding**
 
 Notably:
 

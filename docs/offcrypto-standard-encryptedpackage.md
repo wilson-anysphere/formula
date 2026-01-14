@@ -45,16 +45,27 @@ For Agile (4.4) OOXML decryption details (and `dataIntegrity` gotchas), see
 
 `EncryptedPackage` is an OLE stream with:
 
-1. `orig_size: u64le` (`StreamSize` in the spec): **plaintext** (unencrypted) package size in bytes.
+1. `orig_size` (8-byte plaintext size prefix; `StreamSize` in the spec): decrypted package size in
+   bytes.
 2. `ciphertext: [u8]` (`EncryptedData` in the spec): encrypted bytes of the underlying OPC package
    (the `.xlsx` ZIP bytes).
+
+Compatibility note: while MS-OFFCRYPTO describes the 8-byte prefix as a `u64le`, some
+producers/libraries treat it as `u32 totalSize` + `u32 reserved` (often 0). To be compatible, parse
+as two little-endian DWORDs and recombine:
+
+```text
+lo = u32le(prefix[0..4])
+hi = u32le(prefix[4..8])
+orig_size = lo as u64 | ((hi as u64) << 32)
+```
 
 Spec note (MS-OFFCRYPTO §2.3.4.4): the *physical* stream length can be **larger** than `orig_size`
 because the encrypted data is padded to a cipher block boundary.
 
 ## AES decryption (Standard/CryptoAPI AES is AES-ECB, no IV)
 
-Decrypt the ciphertext bytes (everything after the `u64` prefix) with **AES-ECB(key)**:
+Decrypt the ciphertext bytes (everything after the 8-byte size prefix) with **AES-ECB(key)**:
 
 * AES key: derived from the password and `EncryptionInfo` (out of scope for this note).
 * Mode: ECB (no IV).

@@ -418,8 +418,19 @@ next step: decrypting the actual OOXML ZIP package.
 The `EncryptedPackage` stream begins with:
 
 ```text
-u64le OriginalPackageSize
+u32le OriginalPackageSizeLo
+u32le OriginalPackageSizeHiOrReserved
 u8    EncryptedBytes[...]
+```
+
+Compatibility note: while MS-OFFCRYPTO describes the size prefix as a `u64le`, some
+producers/libraries treat it as `u32 totalSize` + `u32 reserved` (often 0). To avoid truncation or
+“huge size” misreads, parse it as two little-endian DWORDs and recombine:
+
+```text
+lo = u32le(bytes[0..4])
+hi = u32le(bytes[4..8])
+OriginalPackageSize = lo as u64 | ((hi as u64) << 32)
 ```
 
 After decryption, truncate the plaintext to exactly `OriginalPackageSize` bytes (the ciphertext is padded).
@@ -436,7 +447,7 @@ size prefix) is **AES-ECB** encrypted with the derived `fileKey` (`block = 0`).
 
 Algorithm:
 
-1. Read `OriginalPackageSize` (`u64le`).
+1. Read `OriginalPackageSize` (8-byte plaintext size prefix; see note above).
 2. Let `C = EncryptedBytes` (all remaining bytes).
 3. Require `len(C) % 16 == 0`.
 4. `P = AES-ECB-Decrypt(fileKey, C)`.
@@ -549,7 +560,7 @@ key (AES-128, 16 bytes) =
 `EncryptedPackage` bytes:
 
 ```text
-origSize (u64le) = 6b 0c 00 00 00 00 00 00   // 3179 bytes
+origSize (8-byte LE) = 6b 0c 00 00 00 00 00 00   // 3179 bytes
 
 ciphertext[0:32] =
   dcb1367fc380378657fc11e7b968b3a6
@@ -736,7 +747,9 @@ function decrypt_standard_ooxml(ole, password):
     error("invalid password")
 
   // ---------- decrypt EncryptedPackage ----------
-  origSize = U64LE(encPkgBytes[0:8])
+  origSizeLo = U32LE(encPkgBytes[0:4])
+  origSizeHi = U32LE(encPkgBytes[4:8])
+  origSize = origSizeLo | (origSizeHi << 32)
   ciphertext = encPkgBytes[8:]
 
   if algId is AES:

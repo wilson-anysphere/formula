@@ -42,7 +42,7 @@ Instead, they are an **OLE Compound File Binary** (CFB) container with two relev
 The `EncryptedPackage` stream layout is:
 
 ```text
-8 bytes   original_size (u64 little-endian)
+8 bytes   original_size header (plaintext; see note below)
 N bytes   ciphertext (encrypted OPC/ZIP bytes)
 ...       optional trailing bytes / padding (OLE sector slack, producer quirks)
 ```
@@ -50,6 +50,18 @@ N bytes   ciphertext (encrypted OPC/ZIP bytes)
 Important details:
 
 - `original_size` is the size **of the decrypted package bytes** (the ZIP payload).
+- In the wild, different implementations interpret the 8-byte prefix either as:
+  - `u32 totalSize` + `u32 reserved` (where `reserved` is often `0`), or
+  - a single `u64` little-endian size.
+
+  To be compatible with both, parse the prefix as two little-endian DWORDs and combine into a
+  64-bit value:
+
+  ```text
+  lo = u32le(bytes[0..4])
+  hi = u32le(bytes[4..8])
+  original_size = lo as u64 | ((hi as u64) << 32)
+  ```
 - The ciphertext may contain extra trailing bytes beyond `original_size` (e.g. OLE sector padding).
   Callers should decrypt and then **truncate to `original_size`**.
 - `original_size` is *not* a crypto padding indicator (RC4 is a stream cipher; there is no PKCS#7).

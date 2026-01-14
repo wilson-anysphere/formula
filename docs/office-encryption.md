@@ -124,12 +124,19 @@ The version pair is used to dispatch:
 * **4.4** ⇒ Agile
 
 ### `EncryptedPackage` stream framing
-`EncryptedPackage` begins with an **8-byte little-endian** unsigned integer:
+`EncryptedPackage` begins with an **8-byte plaintext size prefix** (little-endian), followed by the
+ciphertext bytes:
 
 ```text
-u64 original_size
-u8  encrypted_bytes[...]
+u32le original_size_lo
+u32le original_size_hi_or_reserved
+u8    encrypted_bytes[...]
 ```
+
+Compatibility note: while MS-OFFCRYPTO describes the prefix as a `u64le`, some producers/libraries
+treat it as `u32 totalSize` + `u32 reserved` (often 0). To avoid truncation or “huge size” misreads,
+parse as `lo=u32le(bytes[0..4])`, `hi=u32le(bytes[4..8])`, then
+`original_size = lo as u64 | ((hi as u64) << 32)`.
 
 After decryption, the plaintext stream is truncated to `original_size`.
 
