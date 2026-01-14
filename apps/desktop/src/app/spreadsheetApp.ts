@@ -1778,8 +1778,6 @@ export class SpreadsheetApp {
         }
       }
 
-      this.encryptedRangeManager = createEncryptedRangeManagerForSession(this.collabSession);
-
       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
       // (used by some conflict resolution + versioning flows) and ensure downstream
       // conflict UX can attribute local edits correctly.
@@ -1848,6 +1846,24 @@ export class SpreadsheetApp {
       for (const origin of undoService.localOrigins ?? []) {
         this.collabSession.localOrigins.add(origin);
       }
+
+      // Ensure encrypted range edits participate in the same collaborative undo scope as
+      // cell edits by using the binder-origin UndoManager transaction helper.
+      //
+      // (Using `session.transactLocal` here would use the session's origin token, which
+      // differs from the desktop binder origin in this integration and would not be tracked
+      // by the desktop's Yjs UndoManager.)
+      this.encryptedRangeManager = createEncryptedRangeManagerForSession({
+        doc: this.collabSession.doc,
+        transactLocal: (fn) => {
+          const transact = (undoService as any)?.transact;
+          if (typeof transact === "function") {
+            transact(fn);
+            return;
+          }
+          this.collabSession?.transactLocal(fn);
+        },
+      });
 
       // Comments sync through the shared collaborative Y.Doc when collab is enabled.
       this.commentsDoc = this.collabSession.doc;

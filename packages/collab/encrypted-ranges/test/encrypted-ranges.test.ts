@@ -5,6 +5,28 @@ import { ensureWorkbookSchema } from "@formula/collab-workbook";
 import { EncryptedRangeManager, createEncryptionPolicyFromDoc } from "../src/index.ts";
 
 describe("@formula/collab-encrypted-ranges", () => {
+  it("manager mutations can participate in an external collaborative UndoManager via custom transact", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const origin = { type: "test-encrypted-range-undo" };
+    const undoManager = new Y.UndoManager(metadata, { trackedOrigins: new Set([origin]) });
+
+    const mgr = new EncryptedRangeManager({ doc, transact: (fn) => doc.transact(fn, origin) });
+
+    const id = mgr.add({ sheetId: "s1", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k1" });
+    expect(mgr.list().map((r) => r.id)).toEqual([id]);
+    expect(undoManager.canUndo()).toBe(true);
+
+    undoManager.undo();
+    expect(mgr.list()).toHaveLength(0);
+    expect(undoManager.canRedo()).toBe(true);
+
+    undoManager.redo();
+    expect(mgr.list().map((r) => r.id)).toEqual([id]);
+  });
+
   it("manager add/list/remove is deterministic and dedupes identical ranges", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
