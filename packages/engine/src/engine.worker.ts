@@ -820,12 +820,18 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               }
               break;
             case "setSheetOrigin":
-              if (typeof (wb as any).setSheetOrigin !== "function") {
-                throw new Error("setSheetOrigin: not available in this WASM build");
-              }
               {
                 const sheet = sheetNameOrDefault(params.sheet);
-                (wb as any).setSheetOrigin(sheet, params.origin);
+                const origin = (params as any).origin ?? null;
+                if (typeof (wb as any).setSheetOrigin === "function") {
+                  (wb as any).setSheetOrigin(sheet, origin);
+                } else if (typeof (wb as any).setInfoOriginForSheet === "function") {
+                  // Backward compatibility: older WASM builds exposed `setInfoOriginForSheet` as
+                  // the per-sheet origin setter.
+                  (wb as any).setInfoOriginForSheet(sheet, origin);
+                } else {
+                  throw new Error("setSheetOrigin: not available in this WASM build");
+                }
               }
               result = null;
               break;
@@ -916,14 +922,18 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               result = null;
               break;
             case "setInfoOriginForSheet":
-              if (typeof (wb as any).setInfoOriginForSheet !== "function") {
-                throw new Error(
-                  "setInfoOriginForSheet: WasmWorkbook.setInfoOriginForSheet is not available in this WASM build"
-                );
-              }
               {
                 const sheet = sheetNameOrDefault(params.sheet);
-                (wb as any).setInfoOriginForSheet(sheet, params.origin ?? null);
+                const origin = (params as any).origin ?? null;
+                if (typeof (wb as any).setInfoOriginForSheet === "function") {
+                  (wb as any).setInfoOriginForSheet(sheet, origin);
+                } else if (typeof (wb as any).setSheetOrigin === "function") {
+                  // Forward compatibility: some WASM builds may expose only the modern
+                  // `setSheetOrigin` API. Treat the legacy RPC as an alias.
+                  (wb as any).setSheetOrigin(sheet, origin);
+                } else {
+                  throw new Error("setInfoOriginForSheet: not available in this WASM build");
+                }
               }
               result = null;
               break;
