@@ -8,13 +8,14 @@
  * - This keeps caches deterministic on CI runners (and avoids polluting developer machines).
  *
  * Environment isolation:
- * - All platforms: `HOME` + `USERPROFILE` => `target/perf-home`
- * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `target/perf-home/xdg-*`
- * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `target/perf-home/*`
- * - macOS/Linux: `TMPDIR` => `target/perf-home/tmp`
+ * - All platforms: `HOME` + `USERPROFILE` => a per-run directory under `target/perf-home`
+ * - Linux: `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` => `${HOME}/xdg-*`
+ * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `${HOME}/*`
+ * - macOS/Linux: `TMPDIR` => `${HOME}/tmp`
  *
  * Reset behavior:
- * - Set `FORMULA_DESKTOP_BENCH_RESET_HOME=1` to delete `target/perf-home` before *each* iteration.
+ * - Set `FORMULA_DESKTOP_BENCH_RESET_HOME=1` to delete the benchmark profile directory (HOME)
+ *   before *each* iteration.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -46,13 +47,28 @@ function resolvePerfHome(): string {
 
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
 const perfHome = resolvePerfHome();
-const perfTmp = resolve(perfHome, 'tmp');
-const perfXdgConfig = resolve(perfHome, 'xdg-config');
-const perfXdgCache = resolve(perfHome, 'xdg-cache');
-const perfXdgState = resolve(perfHome, 'xdg-state');
-const perfXdgData = resolve(perfHome, 'xdg-data');
-const perfAppData = resolve(perfHome, 'AppData', 'Roaming');
-const perfLocalAppData = resolve(perfHome, 'AppData', 'Local');
+
+function resolveProfileDirs(profileDir: string): {
+  home: string;
+  tmp: string;
+  xdgConfig: string;
+  xdgCache: string;
+  xdgState: string;
+  xdgData: string;
+  appData: string;
+  localAppData: string;
+} {
+  return {
+    home: profileDir,
+    tmp: resolve(profileDir, 'tmp'),
+    xdgConfig: resolve(profileDir, 'xdg-config'),
+    xdgCache: resolve(profileDir, 'xdg-cache'),
+    xdgState: resolve(profileDir, 'xdg-state'),
+    xdgData: resolve(profileDir, 'xdg-data'),
+    appData: resolve(profileDir, 'AppData', 'Roaming'),
+    localAppData: resolve(profileDir, 'AppData', 'Local'),
+  };
+}
 
 // Benchmark environment knobs:
 // - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
@@ -349,11 +365,17 @@ function defangChild(child: ChildProcess): void {
   }
 }
 
-async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Promise<number> {
+async function runOnce(
+  binPath: string,
+  timeoutMs: number,
+  settleMs: number,
+  profileDir: string,
+): Promise<number> {
   const useXvfb = shouldUseXvfb();
   const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
   const command = useXvfb ? 'bash' : binPath;
   const args = useXvfb ? [xvfbPath, binPath] : [];
+  const dirs = resolveProfileDirs(profileDir);
 
   // Optionally, force a clean state between iterations to avoid cache pollution.
   if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
@@ -361,17 +383,17 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
     if (perfHome === rootDir || perfHome === repoRoot) {
       throw new Error(`Refusing to reset unsafe desktop benchmark home dir: ${perfHome}`);
     }
-    rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(dirs.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
-  mkdirSync(perfHome, { recursive: true });
-  mkdirSync(perfTmp, { recursive: true });
-  mkdirSync(perfXdgConfig, { recursive: true });
-  mkdirSync(perfXdgCache, { recursive: true });
-  mkdirSync(perfXdgState, { recursive: true });
-  mkdirSync(perfXdgData, { recursive: true });
-  mkdirSync(perfAppData, { recursive: true });
-  mkdirSync(perfLocalAppData, { recursive: true });
+  mkdirSync(dirs.home, { recursive: true });
+  mkdirSync(dirs.tmp, { recursive: true });
+  mkdirSync(dirs.xdgConfig, { recursive: true });
+  mkdirSync(dirs.xdgCache, { recursive: true });
+  mkdirSync(dirs.xdgState, { recursive: true });
+  mkdirSync(dirs.xdgData, { recursive: true });
+  mkdirSync(dirs.appData, { recursive: true });
+  mkdirSync(dirs.localAppData, { recursive: true });
 
   const child = spawn(command, args, {
     cwd: repoRoot,
@@ -383,17 +405,17 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
       // Enable the Rust-side single-line log in release builds.
       FORMULA_STARTUP_METRICS: '1',
       // In case the app reads $HOME for config, keep per-run caches out of the real home dir.
-      HOME: perfHome,
-      USERPROFILE: perfHome,
-      XDG_CONFIG_HOME: perfXdgConfig,
-      XDG_CACHE_HOME: perfXdgCache,
-      XDG_STATE_HOME: perfXdgState,
-      XDG_DATA_HOME: perfXdgData,
-      APPDATA: perfAppData,
-      LOCALAPPDATA: perfLocalAppData,
-      TMPDIR: perfTmp,
-      TEMP: perfTmp,
-      TMP: perfTmp,
+      HOME: dirs.home,
+      USERPROFILE: dirs.home,
+      XDG_CONFIG_HOME: dirs.xdgConfig,
+      XDG_CACHE_HOME: dirs.xdgCache,
+      XDG_STATE_HOME: dirs.xdgState,
+      XDG_DATA_HOME: dirs.xdgData,
+      APPDATA: dirs.appData,
+      LOCALAPPDATA: dirs.localAppData,
+      TMPDIR: dirs.tmp,
+      TEMP: dirs.tmp,
+      TMP: dirs.tmp,
     },
     // On POSIX, start the app in its own process group so we can signal the entire tree.
     // Even though this benchmark currently runs on Linux only, keeping this consistent
@@ -507,16 +529,18 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
     );
   }
 
+  const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
+
   // eslint-disable-next-line no-console
   console.log(
-    `[desktop-memory] idle RSS benchmark: runs=${runs} settleMs=${settleMs} timeoutMs=${timeoutMs} targetMb=${targetMb}`,
+    `[desktop-memory] idle RSS benchmark: runs=${runs} settleMs=${settleMs} timeoutMs=${timeoutMs} targetMb=${targetMb} profile=${profileRoot}`,
   );
 
   const values: number[] = [];
   for (let i = 0; i < runs; i += 1) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory] run ${i + 1}/${runs}...`);
-    const rssMb = await runOnce(binPath, timeoutMs, settleMs);
+    const rssMb = await runOnce(binPath, timeoutMs, settleMs, profileRoot);
     values.push(rssMb);
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory]   idleRssMb=${rssMb.toFixed(1)}mb`);
