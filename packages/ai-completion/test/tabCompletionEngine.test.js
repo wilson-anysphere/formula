@@ -225,6 +225,24 @@ test("Typing =Forecast.Et suggests Forecast.Ets( (segment title-style casing)", 
   );
 });
 
+test("Typing =Zä suggests Zählenwenn( (Unicode title-style casing)", async () => {
+  const functionRegistry = new FunctionRegistry([{ name: "ZÄHLENWENN", args: [] }]);
+  const engine = new TabCompletionEngine({ functionRegistry });
+
+  const currentInput = "=Zä";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=Zählenwenn("),
+    `Expected a Zählenwenn suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("FunctionSpec.completionBoost biases function-name completion ranking", async () => {
   const functionRegistry = new FunctionRegistry([
     { name: "SUMIF", args: [] },

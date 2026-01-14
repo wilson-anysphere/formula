@@ -1867,6 +1867,17 @@ function functionCouldBeCompleteAfterArg(fnSpec, argIndex) {
   return !requiredAfter;
 }
 
+const LETTER_SEGMENT_SPLIT_RE = (() => {
+  try {
+    // Match Unicode letters when supported (Node/browsers with `\p{...}`), so we can
+    // infer casing for localized function names like "ZÄHLENWENN".
+    return new RegExp("[^\\p{Alphabetic}]+", "u");
+  } catch {
+    // Fallback for older JS engines without Unicode property escapes.
+    return /[^A-Za-z]+/;
+  }
+})();
+
 function applyNameCase(name, typedPrefix) {
   if (!typedPrefix) return name;
   // Support Excel `_xlfn.` function qualifier prefixes by applying casing rules
@@ -1890,7 +1901,7 @@ function applyNameCase(name, typedPrefix) {
   //   "=VLO"          -> "=VLOOKUP("
   //   "=Vlo"          -> "=Vlookup("
   //   "=Forecast.Et"  -> "=Forecast.Ets("
-  const segments = typedPrefix.split(/[^A-Za-z]+/g).filter((s) => s.length > 0);
+  const segments = typedPrefix.split(LETTER_SEGMENT_SPLIT_RE).filter((s) => s.length > 0);
   if (segments.length === 0) return name;
 
   const isAllLower = segments.every((s) => s === s.toLowerCase());
