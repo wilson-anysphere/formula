@@ -32,6 +32,12 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "insert.illustrations.pictures.onlinePictures": true,
   "insert.illustrations.onlinePictures": true,
 
+  // --- Data Queries ----------------------------------------------------------
+  "data.queriesConnections.refreshAll": true,
+  "data.queriesConnections.refreshAll.refresh": true,
+  "data.queriesConnections.refreshAll.refreshAllConnections": true,
+  "data.queriesConnections.refreshAll.refreshAllQueries": true,
+
   // --- What-If Analysis / Solver ---------------------------------------------
   "data.forecast.whatIfAnalysis": true,
   "data.forecast.whatIfAnalysis.scenarioManager": true,
