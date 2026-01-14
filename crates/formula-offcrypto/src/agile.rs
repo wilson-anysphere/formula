@@ -24,7 +24,7 @@ use sha1::Digest as _;
 use zeroize::Zeroizing;
 
 #[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 /// MS-OFFCRYPTO Agile: block key used for deriving the "verifierHashInput" key.
 const VERIFIER_HASH_INPUT_BLOCK: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
@@ -36,7 +36,24 @@ const KEY_VALUE_BLOCK: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6
 const VERIFIER_HASH_INPUT_LEN: usize = 16;
 
 #[cfg(test)]
-static ITERATED_HASH_CALLS: AtomicUsize = AtomicUsize::new(0);
+std::thread_local! {
+    static ITERATED_HASH_CALLS: Cell<usize> = Cell::new(0);
+}
+
+#[cfg(test)]
+fn inc_iterated_hash_calls() {
+    ITERATED_HASH_CALLS.with(|calls| calls.set(calls.get() + 1));
+}
+
+#[cfg(test)]
+fn reset_iterated_hash_calls() {
+    ITERATED_HASH_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+fn iterated_hash_call_count() -> usize {
+    ITERATED_HASH_CALLS.with(|calls| calls.get())
+}
 
 /// Verify the decrypted Agile verifier fields for a candidate password.
 ///
@@ -88,7 +105,7 @@ pub fn agile_iterated_hash(
     spin_count: u32,
 ) -> Zeroizing<Vec<u8>> {
     #[cfg(test)]
-    ITERATED_HASH_CALLS.fetch_add(1, Ordering::Relaxed);
+    inc_iterated_hash_calls();
 
     let digest_len = hash_alg.digest_len();
     debug_assert!(digest_len <= crate::MAX_DIGEST_LEN);
@@ -368,11 +385,11 @@ mod tests {
         };
 
         // Setup above called `agile_iterated_hash`.
-        ITERATED_HASH_CALLS.store(0, Ordering::Relaxed);
+        reset_iterated_hash_calls();
 
         let out = agile_secret_key_from_password(&info, password).unwrap();
         assert_eq!(out.as_slice(), secret_key_plain.as_slice());
-        assert_eq!(ITERATED_HASH_CALLS.load(Ordering::Relaxed), 1);
+        assert_eq!(iterated_hash_call_count(), 1);
     }
 
     #[test]
@@ -406,7 +423,7 @@ mod tests {
             },
         };
 
-        ITERATED_HASH_CALLS.store(0, Ordering::Relaxed);
+        reset_iterated_hash_calls();
 
         let err = agile_secret_key_from_password_with_options(&info, password, &options)
             .expect_err("expected spinCount over limit to error");
@@ -418,7 +435,7 @@ mod tests {
             }
         );
         assert_eq!(
-            ITERATED_HASH_CALLS.load(Ordering::Relaxed),
+            iterated_hash_call_count(),
             0,
             "expected iterated hash to not run when spinCount is over the limit"
         );
