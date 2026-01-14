@@ -268,6 +268,19 @@ pub trait FunctionContext {
     fn sheet_count(&self) -> usize {
         1
     }
+    /// Returns the current worksheet tab order index for `sheet_id` (0-based).
+    ///
+    /// Excel defines the ordering of multi-area references (e.g. 3D sheet spans like
+    /// `Sheet1:Sheet3!A1`, or `INDEX(..., area_num)`) based on workbook sheet tab order, not the
+    /// internal numeric sheet id.
+    ///
+    /// Most resolvers historically used sheet ids that matched tab order, so the default
+    /// implementation preserves the old behavior by treating the sheet id itself as the order
+    /// index. Resolvers with stable sheet ids should override this to return the current tab
+    /// position.
+    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
+        Some(sheet_id)
+    }
     /// Convenience wrapper around [`FunctionContext::sheet_name`] for the current sheet.
     fn current_sheet_name(&self) -> Option<&str> {
         self.sheet_name(self.current_sheet_id())

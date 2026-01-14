@@ -1940,6 +1940,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         self.resolver.sheet_count()
     }
 
+    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
+        self.resolver.sheet_order_index(sheet_id)
+    }
+
     fn info_system(&self) -> Option<&str> {
         self.resolver.info_system()
     }

@@ -36,7 +36,7 @@ fn sheet_number_value(ctx: &dyn FunctionContext, sheet_id: &SheetId) -> Value {
             Some(idx) => Value::Number((idx + 1) as f64),
             None => Value::Error(ErrorKind::NA),
         },
-        _ => match workbook_info::sheet_number(sheet_id) {
+        _ => match workbook_info::sheet_number(ctx, sheet_id) {
             Ok(n) => Value::Number(n),
             Err(e) => Value::Error(e),
         },
@@ -44,7 +44,7 @@ fn sheet_number_value(ctx: &dyn FunctionContext, sheet_id: &SheetId) -> Value {
 }
 
 fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Reference]) -> Value {
-    match workbook_info::sheet_number_for_references(references) {
+    match workbook_info::sheet_number_for_references(ctx, references) {
         Ok(n) => Value::Number(n),
         Err(_e) => {
             // If there are no local sheets in the reference union, attempt to resolve the sheet
@@ -97,7 +97,10 @@ fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Re
 
 fn sheet_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if args.is_empty() {
-        return Value::Number((ctx.current_sheet_id() + 1) as f64);
+        let Some(idx) = ctx.sheet_order_index(ctx.current_sheet_id()) else {
+            return Value::Error(ErrorKind::NA);
+        };
+        return Value::Number((idx + 1) as f64);
     }
 
     match ctx.eval_arg(&args[0]) {
@@ -113,7 +116,10 @@ fn sheet_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(ErrorKind::NA);
             }
             match ctx.resolve_sheet_name(name) {
-                Some(id) => Value::Number((id + 1) as f64),
+                Some(id) => match ctx.sheet_order_index(id) {
+                    Some(idx) => Value::Number((idx + 1) as f64),
+                    None => Value::Error(ErrorKind::NA),
+                },
                 None => Value::Error(ErrorKind::NA),
             }
         }
