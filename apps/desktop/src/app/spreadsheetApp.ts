@@ -20310,6 +20310,9 @@ export class SpreadsheetApp {
         button.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
+          // Avoid outline mutations while any spreadsheet editor is active, including split-view
+          // secondary editors reported via the desktop-shell-owned global flag.
+          if (this.isSpreadsheetEditingIncludingSecondary()) return;
           this.getOutlineForSheet(this.sheetId).toggleRowGroup(summaryIndex);
           this.onOutlineUpdated();
         }, { signal: this.domAbort.signal });
@@ -20351,6 +20354,9 @@ export class SpreadsheetApp {
         button.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
+          // Avoid outline mutations while any spreadsheet editor is active, including split-view
+          // secondary editors reported via the desktop-shell-owned global flag.
+          if (this.isSpreadsheetEditingIncludingSecondary()) return;
           this.getOutlineForSheet(this.sheetId).toggleColGroup(summaryIndex);
           this.onOutlineUpdated();
         }, { signal: this.domAbort.signal });
