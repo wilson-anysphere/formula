@@ -28,6 +28,15 @@ function bytesToHex(bytes) {
   return out;
 }
 
+function safeGetProp(obj, prop) {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 async function sha256Hex(bytes) {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle || typeof subtle.digest !== "function") {
@@ -77,8 +86,14 @@ function isEd25519NotSupportedError(error) {
 function getTauriInvoke() {
   try {
     const tauri = globalThis.__TAURI__;
-    const invoke = tauri?.core?.invoke;
-    return typeof invoke === "function" ? invoke : null;
+    const core = safeGetProp(tauri, "core");
+    const coreInvoke = safeGetProp(core, "invoke");
+    if (typeof coreInvoke === "function") {
+      return coreInvoke.bind(core);
+    }
+    const invoke = safeGetProp(tauri, "invoke");
+    if (typeof invoke !== "function") return null;
+    return invoke.bind(tauri);
   } catch {
     // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
     // Treat that as "unavailable" so browser verification can fall back cleanly.

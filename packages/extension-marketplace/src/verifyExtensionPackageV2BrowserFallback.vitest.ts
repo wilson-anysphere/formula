@@ -87,4 +87,45 @@ describe("verifyExtensionPackageV2Browser (desktop Ed25519 fallback)", () => {
     expect(result.manifest).toEqual(manifest);
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+
+  it("falls back to legacy __TAURI__.invoke when __TAURI__.core is blocked (throwing getter)", async () => {
+    if (!subtle || typeof originalImportKey !== "function") {
+      throw new Error("Test requires WebCrypto subtle.importKey to exist");
+    }
+
+    const keys = generateEd25519KeyPair();
+    const { dir, manifest } = await createTempExtensionDir({ version: "1.0.0" });
+    tmpDir = dir;
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+
+    const tauri: any = {};
+    const invoke = vi.fn(async function (cmd: string, args?: Record<string, unknown>) {
+      expect(this).toBe(tauri);
+      expect(cmd).toBe("verify_ed25519_signature");
+      expect(args).toBeTruthy();
+      expect(Array.isArray(args!.payload)).toBe(true);
+      expect(args!.signature_base64).toBeTypeOf("string");
+      expect(args!.public_key_pem).toBe(keys.publicKeyPem);
+      return true;
+    });
+    tauri.invoke = invoke;
+    Object.defineProperty(tauri, "core", {
+      configurable: true,
+      get() {
+        throw new Error("Blocked core access");
+      },
+    });
+
+    (globalThis as any).__TAURI__ = tauri;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (subtle as any).importKey = vi.fn(async () => {
+      throw { name: "NotSupportedError", message: "Ed25519 not supported" };
+    });
+
+    const result = await verifyExtensionPackageV2Browser(new Uint8Array(pkgBytes), keys.publicKeyPem);
+    expect(result.manifest).toEqual(manifest);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
 });
