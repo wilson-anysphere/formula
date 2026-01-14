@@ -571,7 +571,7 @@ fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
     // Advance the internal RC4 state without caring about the output bytes. This is used by the
     // absolute-offset BIFF8 CryptoAPI RC4 variant to jump to `pos_in_block` within a 1024-byte
     // rekey segment.
-    let mut scratch = [0u8; 64];
+    let mut scratch = Zeroizing::new([0u8; 64]);
     while n > 0 {
         let take = n.min(scratch.len());
         rc4.apply_keystream(&mut scratch[..take]);
