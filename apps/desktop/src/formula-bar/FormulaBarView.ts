@@ -1235,6 +1235,8 @@ export class FormulaBarView {
   #lastHighlightPreviewText: string | null = null;
   #lastHighlightNeedsEscapeDraft: string | null = null;
   #lastHighlightNeedsEscape: boolean = false;
+  #lastAiPreviewRaw: unknown | undefined = undefined;
+  #lastAiPreviewText: string = "";
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
@@ -3132,7 +3134,27 @@ export class FormulaBarView {
     const cursor = this.model.cursorStart;
     const ghost = this.model.isEditing ? this.model.aiGhostText() : "";
     const previewRaw = this.model.isEditing ? this.model.aiSuggestionPreview() : null;
-    const previewText = ghost && previewRaw != null ? formatPreview(previewRaw) : "";
+    let previewText = "";
+    if (ghost && previewRaw != null) {
+      const previewType = typeof previewRaw;
+      const canCachePreview = previewType !== "object" && previewType !== "function";
+      if (canCachePreview && previewRaw === this.#lastAiPreviewRaw) {
+        previewText = this.#lastAiPreviewText;
+      } else {
+        previewText = formatPreview(previewRaw);
+        if (canCachePreview) {
+          this.#lastAiPreviewRaw = previewRaw;
+          this.#lastAiPreviewText = previewText;
+        } else {
+          this.#lastAiPreviewRaw = undefined;
+          this.#lastAiPreviewText = "";
+        }
+      }
+    } else {
+      // Avoid holding onto large preview values once the ghost suggestion is dismissed.
+      this.#lastAiPreviewRaw = undefined;
+      this.#lastAiPreviewText = "";
+    }
     const draft = this.model.draft;
     const draftVersion = this.model.draftVersion;
 
