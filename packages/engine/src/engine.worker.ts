@@ -396,9 +396,36 @@ async function ensureWorkbook(moduleUrl: string, generation: number): Promise<Wa
 function postMessageToMain(msg: WorkerOutboundMessage): void {
   try {
     port?.postMessage(msg);
-  } catch {
+  } catch (err) {
     // Ignore; the port can be closed/terminated while requests are in-flight, and we still need to
     // clean up request tracking state (pending/cancelled/completed ids) to avoid leaks.
+    //
+    // If the failure is a structured-clone/DataCloneError for a response message, try to deliver a
+    // minimal error response instead so the caller doesn't hang forever waiting for a reply.
+    const errName = (err as any)?.name;
+    if (errName !== "DataCloneError") {
+      return;
+    }
+
+    if (!msg || typeof msg !== "object" || (msg as any).type !== "response") {
+      return;
+    }
+
+    const id = (msg as any).id;
+    if (typeof id !== "number") {
+      return;
+    }
+
+    try {
+      port?.postMessage({
+        type: "response",
+        id,
+        ok: false,
+        error: "failed to serialize worker response (DataCloneError)",
+      } satisfies WorkerOutboundMessage);
+    } catch {
+      // ignore
+    }
   }
 }
 

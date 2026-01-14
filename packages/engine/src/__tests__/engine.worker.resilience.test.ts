@@ -120,6 +120,44 @@ describe("engine.worker resilience", () => {
     (globalThis as any).self = previousSelf;
   });
 
+  it("responds with an error when a response cannot be structured-cloned (DataCloneError)", async () => {
+    await loadWorkerModule();
+
+    const channel = createMockChannel();
+    const originalPostMessage = channel.port2.postMessage.bind(channel.port2);
+    let responseAttempts = 0;
+    channel.port2.postMessage = (message: unknown) => {
+      if ((message as any)?.type === "response") {
+        responseAttempts += 1;
+        if (responseAttempts === 1) {
+          const err = new Error("DataCloneError");
+          (err as any).name = "DataCloneError";
+          throw err;
+        }
+      }
+      originalPostMessage(message);
+    };
+
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    workerGlobal.dispatchMessage({
+      type: "init",
+      port: channel.port2 as unknown as MessagePort,
+      wasmModuleUrl,
+    } satisfies InitMessage);
+
+    await waitForMessage(channel.port1, (msg) => msg.type === "ready");
+
+    const response1 = await sendRequest(channel.port1, { type: "request", id: 1, method: "ping", params: {} });
+    expect((response1 as RpcResponseErr).ok).toBe(false);
+    expect((response1 as RpcResponseErr).error).toMatch(/datacloneerror/i);
+
+    const response2 = await sendRequest(channel.port1, { type: "request", id: 2, method: "ping", params: {} });
+    expect((response2 as RpcResponseOk).ok).toBe(true);
+    expect((response2 as RpcResponseOk).result).toBe("pong");
+
+    channel.port1.close();
+  });
+
   it("does not leak cancellation state when posting a response throws", async () => {
     await loadWorkerModule();
 
