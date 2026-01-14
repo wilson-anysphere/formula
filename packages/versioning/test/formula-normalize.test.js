@@ -37,3 +37,13 @@ test("normalizeFormula handles workbook prefixes containing '[' (non-nesting) an
   assert.equal(withSpace, "=SUM([A1[NAME.XLSX]SHEET1!A1,1)");
   assert.equal(withSpace, withoutSpace);
 });
+
+test("normalizeFormula handles workbook-scoped external defined names (no '!') and continues normalization after the prefix", () => {
+  // Workbook-scoped external defined names do not use `!`, but we still need to detect the end of
+  // the workbook prefix (which is non-nesting) so we can keep normalizing the rest of the formula.
+  const withSpace = normalizeFormula("=SUM([A1[Name.xlsx]MyName, 1)");
+  const withoutSpace = normalizeFormula("=SUM([A1[Name.xlsx]MyName,1)");
+
+  assert.equal(withSpace, "=SUM([A1[NAME.XLSX]MYNAME,1)");
+  assert.equal(withSpace, withoutSpace);
+});
