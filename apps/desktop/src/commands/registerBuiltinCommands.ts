@@ -781,6 +781,42 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.solver",
+    t("command.view.togglePanel.solver"),
+    () => toggleDockPanel(PanelIds.SOLVER),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.togglePanel.solver"),
+      keywords: ["solver", "optimization", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.scenarioManager",
+    t("command.view.togglePanel.scenarioManager"),
+    () => toggleDockPanel(PanelIds.SCENARIO_MANAGER),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.togglePanel.scenarioManager"),
+      keywords: ["what-if", "scenario", "manager", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.monteCarlo",
+    t("command.view.togglePanel.monteCarlo"),
+    () => toggleDockPanel(PanelIds.MONTE_CARLO),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.togglePanel.monteCarlo"),
+      keywords: ["what-if", "monte carlo", "simulation", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "view.togglePanel.scriptEditor",
     t("command.view.togglePanel.scriptEditor"),
     () => toggleDockPanel(PanelIds.SCRIPT_EDITOR),
