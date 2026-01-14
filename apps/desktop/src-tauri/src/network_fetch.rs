@@ -68,6 +68,7 @@ fn apply_request_init(
 /// feature enabled.
 pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFetchResult, String> {
     use reqwest::Method;
+    use reqwest::header::LOCATION;
 
     let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid url: {e}"))?;
     crate::commands::ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
@@ -107,6 +108,25 @@ pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFe
 
     let mut response = req.send().await.map_err(|e| e.to_string())?;
     let status = response.status();
+
+    // If redirect following was stopped (e.g. because a hop would violate the IPC URL policy), make
+    // the failure explicit rather than returning the raw 3xx response. This keeps behavior aligned
+    // with browser `fetch` (which follows redirects by default) while still enforcing our stricter
+    // release-mode http allowlist.
+    if status.is_redirection() {
+        if let Some(location) = response.headers().get(LOCATION).and_then(|v| v.to_str().ok()) {
+            if let Ok(target) = response.url().join(location) {
+                if let Err(err) = crate::commands::ensure_ipc_network_url_allowed(
+                    &target,
+                    "network_fetch redirect",
+                    debug_assertions,
+                ) {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     let status_text = status.canonical_reason().unwrap_or("").to_string();
     let final_url = response.url().to_string();
 
@@ -187,6 +207,111 @@ mod tests {
         });
 
         format!("http://{addr}/")
+    }
+
+    async fn spawn_redirect_server() -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let mut served = 0usize;
+            while served < 2 {
+                let Ok((mut socket, _peer)) = listener.accept().await else {
+                    break;
+                };
+
+                // Best-effort: read request headers so the client doesn't get a connection reset.
+                let mut buf = [0u8; 1024];
+                let mut req = Vec::new();
+                loop {
+                    match socket.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            req.extend_from_slice(&buf[..n]);
+                            if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                            if req.len() > 16 * 1024 {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+
+                let req_line = req
+                    .split(|b| *b == b'\n')
+                    .next()
+                    .map(|l| String::from_utf8_lossy(l).to_string())
+                    .unwrap_or_default();
+                let path = req_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .trim()
+                    .to_string();
+
+                if path == "/" {
+                    let response =
+                        "HTTP/1.1 302 Found\r\nLocation: /final\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+                    let _ = socket.write_all(response.as_bytes()).await;
+                } else {
+                    let body = b"redirect ok";
+                    let headers = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = socket.write_all(headers.as_bytes()).await;
+                    let _ = socket.write_all(body).await;
+                }
+
+                let _ = socket.shutdown().await;
+                served += 1;
+            }
+        });
+
+        format!("http://{addr}/")
+    }
+
+    #[tokio::test]
+    async fn follows_allowed_redirects() {
+        let url = spawn_redirect_server().await;
+        let result = network_fetch_impl(&url, &JsonValue::Null).await.unwrap();
+        assert!(result.ok);
+        assert_eq!(result.status, 200);
+        assert_eq!(result.body_text, "redirect ok");
+        assert!(
+            result.url.ends_with("/final"),
+            "expected final url to end with /final, got: {}",
+            result.url
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_redirect_to_disallowed_scheme() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let Ok((mut socket, _peer)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await;
+
+            let response = "HTTP/1.1 302 Found\r\nLocation: ftp://example.com/\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+
+        let url = format!("http://{addr}/");
+        let err = network_fetch_impl(&url, &JsonValue::Null).await.unwrap_err();
+        assert!(
+            err.contains("network_fetch redirect") && err.contains("only http/https allowed"),
+            "unexpected error: {err}"
+        );
+
+        server.await.expect("server task");
     }
 
     #[tokio::test]

@@ -6986,6 +6986,17 @@ pub async fn marketplace_search(
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if response.status().is_redirection() {
+        if let Some(location) = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+        {
+            if let Ok(target) = response.url().join(location) {
+                ensure_ipc_network_url_allowed(&target, "Marketplace redirect", debug_assertions)?;
+            }
+        }
+    }
     if !response.status().is_success() {
         return Err(format!("Marketplace search failed ({})", response.status()));
     }
@@ -7045,6 +7056,17 @@ pub async fn marketplace_get_extension(
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if response.status().is_redirection() {
+        if let Some(location) = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+        {
+            if let Ok(target) = response.url().join(location) {
+                ensure_ipc_network_url_allowed(&target, "Marketplace redirect", debug_assertions)?;
+            }
+        }
+    }
     if response.status().as_u16() == 404 {
         return Ok(None);
     }
@@ -7202,6 +7224,17 @@ pub async fn marketplace_download_package(
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if response.status().is_redirection() {
+        if let Some(location) = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+        {
+            if let Ok(target) = response.url().join(location) {
+                ensure_ipc_network_url_allowed(&target, "Marketplace redirect", debug_assertions)?;
+            }
+        }
+    }
     if response.status().as_u16() == 404 {
         return Ok(None);
     }
