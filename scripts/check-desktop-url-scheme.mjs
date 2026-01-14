@@ -36,7 +36,11 @@ const parquetMimeDefinitionPath = path.join(
 );
 
 const REQUIRED_SCHEME = "formula";
-const REQUIRED_FILE_EXT = "xlsx";
+// Desktop builds are expected to open common spreadsheet/data file formats.
+// Keep this list stable and explicit so CI fails if we accidentally drop
+// associations from `bundle.fileAssociations` (packaging regressions are
+// high-impact for end-user UX).
+const REQUIRED_FILE_EXTS = ["xlsx", "csv", "parquet"];
 
 /**
  * @param {string} value
@@ -322,16 +326,15 @@ function main() {
       "Expected apps/desktop/src-tauri/tauri.conf.json to include bundle.fileAssociations so Linux .desktop metadata can include file MIME types.",
     ]);
   } else {
-    const hasRequiredExt = fileAssociations.some((assoc) => {
-      const rawExt = /** @type {any} */ (assoc)?.ext;
-      const exts = Array.isArray(rawExt) ? rawExt : typeof rawExt === "string" ? [rawExt] : [];
-      return exts.some((e) => String(e).trim().toLowerCase().replace(/^\./, "") === REQUIRED_FILE_EXT);
-    });
+    const configuredExts = new Set(collectFileAssociationExtensions(config));
+    const missingRequiredExts = REQUIRED_FILE_EXTS.filter((ext) => !configuredExts.has(ext));
 
-    if (!hasRequiredExt) {
-      errBlock("Missing desktop file association configuration (tauri.conf.json)", [
-        `Expected apps/desktop/src-tauri/tauri.conf.json bundle.fileAssociations to include an entry for .${REQUIRED_FILE_EXT}.`,
-        `Fix: add { ext: [\"${REQUIRED_FILE_EXT}\"], mimeType: \"...\" } to bundle.fileAssociations.`,
+    if (missingRequiredExts.length > 0) {
+      errBlock("Missing required desktop file associations (tauri.conf.json)", [
+        "Expected apps/desktop/src-tauri/tauri.conf.json bundle.fileAssociations to include entries for:",
+        ...REQUIRED_FILE_EXTS.map((ext) => `  - .${ext}`),
+        `Missing extension(s): ${missingRequiredExts.join(", ")}`,
+        "Fix: add/update bundle.fileAssociations so these types are registered with the OS.",
       ]);
     }
 
@@ -361,7 +364,7 @@ function main() {
   }
 
   console.log(
-    `Desktop URL scheme + file association preflight passed: ${REQUIRED_SCHEME}:// is configured for installers (and Info.plist declares it), and bundle.fileAssociations includes .${REQUIRED_FILE_EXT}.`,
+    `Desktop URL scheme + file association preflight passed: ${REQUIRED_SCHEME}:// is configured for installers (and Info.plist declares it), and bundle.fileAssociations includes required extensions (${REQUIRED_FILE_EXTS.join(", ")}).`,
   );
 }
 

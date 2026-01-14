@@ -34,12 +34,32 @@ function runWithConfigAndPlist(config, plistContents) {
   return proc;
 }
 
-function basePlistWithFormulaScheme(fileExtensions = ["xlsx"]) {
+function basePlistWithFormulaScheme(fileExtensions = ["xlsx", "csv", "parquet"]) {
   const extsXml = fileExtensions.map((ext) => `        <string>${ext}</string>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n${extsXml}\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
 }
 
-function baseConfig({ fileAssociations }) {
+const defaultFileAssociations = [
+  { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  { ext: ["csv"], mimeType: "text/csv" },
+  { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
+];
+
+const defaultLinuxBundle = {
+  deb: {
+    depends: ["shared-mime-info"],
+    files: { "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml" },
+  },
+  rpm: {
+    depends: ["shared-mime-info"],
+    files: { "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml" },
+  },
+  appimage: {
+    files: { "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml" },
+  },
+};
+
+function baseConfig({ fileAssociations } = {}) {
   return {
     plugins: {
       "deep-link": {
@@ -47,7 +67,8 @@ function baseConfig({ fileAssociations }) {
       },
     },
     bundle: {
-      fileAssociations,
+      fileAssociations: fileAssociations ?? defaultFileAssociations,
+      linux: defaultLinuxBundle,
     },
   };
 }
@@ -57,65 +78,45 @@ test("passes when bundle.fileAssociations includes .xlsx and all entries have mi
     fileAssociations: [
       { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
       { ext: ["csv"], mimeType: "text/csv" },
+      { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
     ],
   });
-  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme(["xlsx", "csv"]));
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme(["xlsx", "csv", "parquet"]));
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /preflight passed/i);
 });
 
 test("passes when deep-link schemes is configured as a string", () => {
-  const config = {
-    plugins: {
-      "deep-link": {
-        desktop: { schemes: "formula" },
-      },
-    },
-    bundle: {
-      fileAssociations: [
-        { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-      ],
-    },
-  };
+  const config = baseConfig();
+  config.plugins["deep-link"].desktop.schemes = "formula";
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /preflight passed/i);
 });
 
 test("passes when deep-link schemes includes 'formula://' (normalized)", () => {
-  const config = {
-    plugins: {
-      "deep-link": {
-        desktop: { schemes: ["formula://"] },
-      },
-    },
-    bundle: {
-      fileAssociations: [
-        { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-      ],
-    },
-  };
+  const config = baseConfig();
+  config.plugins["deep-link"].desktop.schemes = ["formula://"];
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /preflight passed/i);
 });
 
-test("fails when bundle.fileAssociations is present but does not include .xlsx", () => {
+test("fails when bundle.fileAssociations is present but missing required extensions", () => {
   const config = baseConfig({
-    fileAssociations: [{ ext: ["csv"], mimeType: "text/csv" }],
+    fileAssociations: [
+      { ext: ["csv"], mimeType: "text/csv" },
+      { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
+    ],
   });
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
-  assert.match(proc.stderr, /file association configuration/i);
+  assert.match(proc.stderr, /required desktop file associations/i);
   assert.match(proc.stderr, /xlsx/i);
 });
 
 test("fails when macOS Info.plist does not declare the formula:// URL scheme", () => {
-  const config = baseConfig({
-    fileAssociations: [
-      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-    ],
-  });
+  const config = baseConfig();
   const plist = basePlistWithFormulaScheme().replace("<string>formula</string>", "<string>wrong</string>");
   const proc = runWithConfigAndPlist(config, plist);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
@@ -124,18 +125,8 @@ test("fails when macOS Info.plist does not declare the formula:// URL scheme", (
 });
 
 test("fails when tauri.conf.json deep-link schemes do not include formula", () => {
-  const config = {
-    plugins: {
-      "deep-link": {
-        desktop: { schemes: ["wrong"] },
-      },
-    },
-    bundle: {
-      fileAssociations: [
-        { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-      ],
-    },
-  };
+  const config = baseConfig();
+  config.plugins["deep-link"].desktop.schemes = ["wrong"];
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /Missing desktop deep-link scheme configuration/i);
@@ -144,7 +135,11 @@ test("fails when tauri.conf.json deep-link schemes do not include formula", () =
 
 test("fails when .xlsx association is missing a mimeType entry", () => {
   const config = baseConfig({
-    fileAssociations: [{ ext: ["xlsx"] }],
+    fileAssociations: [
+      { ext: ["xlsx"] },
+      { ext: ["csv"], mimeType: "text/csv" },
+      { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
+    ],
   });
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
@@ -153,11 +148,7 @@ test("fails when .xlsx association is missing a mimeType entry", () => {
 });
 
 test("fails when macOS Info.plist is missing CFBundleDocumentTypes", () => {
-  const config = baseConfig({
-    fileAssociations: [
-      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-    ],
-  });
+  const config = baseConfig();
   const plist = basePlistWithFormulaScheme().replace(/<key>CFBundleDocumentTypes[\s\S]*$/i, "</dict>\n</plist>\n");
   const proc = runWithConfigAndPlist(config, plist);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
@@ -166,11 +157,7 @@ test("fails when macOS Info.plist is missing CFBundleDocumentTypes", () => {
 });
 
 test("fails when macOS Info.plist CFBundleDocumentTypes does not include xlsx", () => {
-  const config = baseConfig({
-    fileAssociations: [
-      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-    ],
-  });
+  const config = baseConfig();
   const plist = basePlistWithFormulaScheme().replace("<string>xlsx</string>", "<string>txt</string>");
   const proc = runWithConfigAndPlist(config, plist);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
@@ -182,6 +169,8 @@ test("fails when xlsx appears only in UT*TypeDeclarations (not CFBundleDocumentT
   const config = baseConfig({
     fileAssociations: [
       { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      { ext: ["csv"], mimeType: "text/csv" },
+      { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
     ],
   });
   const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>txt</string>\n      </array>\n    </dict>\n  </array>\n  <key>UTImportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
