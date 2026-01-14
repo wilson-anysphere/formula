@@ -608,6 +608,16 @@ impl<'a> AppStateSpreadsheet<'a> {
 
         let remaining = MAX_MACRO_UPDATES.saturating_sub(self.updates.len());
         if updates.len() > remaining {
+            // `state.set_cell` has already applied the change and computed `updates`. If we simply
+            // return an error here we would leave the backend workbook mutated without returning
+            // the corresponding updates, which would desync the frontend from backend state.
+            //
+            // Best-effort rollback the last edit via the undo stack before aborting macro
+            // execution. This keeps macro failures deterministic and avoids returning a partial /
+            // inconsistent update payload.
+            let _ = self.state.undo();
+            // Clear the redo stack so the rejected change can't be "redone" later.
+            self.state.mark_dirty();
             return Err(formula_vba_runtime::VbaError::Runtime(format!(
                 "macro produced too many cell updates (limit {MAX_MACRO_UPDATES})"
             )));
@@ -811,10 +821,16 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             while end > 0 && !message.is_char_boundary(end) {
                 end -= 1;
             }
-            message.truncate(end);
-            if message.len() + suffix_len <= max_line_bytes {
-                message.push_str(MESSAGE_TRUNCATED_SUFFIX);
+            let mut truncated = message[..end].to_string();
+            if truncated.len() + suffix_len <= max_line_bytes {
+                truncated.push_str(MESSAGE_TRUNCATED_SUFFIX);
             }
+            message = truncated;
+        } else if message.capacity() > max_line_bytes {
+            // Even if the string is short enough, a malicious macro can still force a huge
+            // allocation and pass it through to us. Ensure we don't retain that capacity in the
+            // output buffer.
+            message = message.as_str().to_string();
         }
 
         let would_exceed_lines = self.output.len() >= MAX_MACRO_OUTPUT_LINES;
@@ -1120,6 +1136,37 @@ End Sub
             "expected a single truncation marker at the end, got: {:?}",
             outcome.output.last()
         );
+
+        // Ensure we never retain a giant `String` allocation in the output buffer.
+        let max_line_bytes = (8 * 1024).min(MAX_MACRO_OUTPUT_BYTES);
+        for line in &outcome.output {
+            assert!(
+                line.capacity() <= max_line_bytes,
+                "expected output line capacity <= {max_line_bytes}, got {}",
+                line.capacity()
+            );
+        }
+    }
+
+    #[test]
+    fn macro_log_does_not_retain_giant_string_capacity() {
+        let mut state = empty_state_with_sheet();
+        let mut sheet =
+            AppStateSpreadsheet::new(&mut state, MacroRuntimeContext::default()).expect("new sheet");
+
+        // Simulate a malicious `Debug.Print` string that was allocated with an extreme capacity.
+        let mut message = String::with_capacity(10 * 1024 * 1024);
+        message.push_str("ok");
+        sheet.log(message);
+
+        let out = sheet.take_output();
+        assert_eq!(out.len(), 1);
+        let max_line_bytes = (8 * 1024).min(MAX_MACRO_OUTPUT_BYTES);
+        assert!(
+            out[0].capacity() <= max_line_bytes,
+            "expected log output capacity <= {max_line_bytes}, got {}",
+            out[0].capacity()
+        );
     }
 
     #[test]
@@ -1139,7 +1186,8 @@ End Sub
         }
 
         let mut state = AppState::new();
-        state.load_workbook(workbook);
+        let info = state.load_workbook(workbook);
+        let sheet_id = info.sheets[0].id.clone();
 
         let source = r#"
 Sub TouchA1()
@@ -1164,6 +1212,13 @@ End Sub
         assert!(
             err.contains(&format!("limit {MAX_MACRO_UPDATES}")),
             "expected error to mention the limit {MAX_MACRO_UPDATES}, got: {err}"
+        );
+
+        // The last write should be rolled back so the backend workbook remains consistent with the
+        // (empty) update payload returned for this failed invocation.
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 0).unwrap().value,
+            CellScalar::Empty
         );
     }
 }
