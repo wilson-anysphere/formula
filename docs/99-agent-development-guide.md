@@ -17,6 +17,10 @@ If these files become hard to read because patch/diff formatting was pasted into
 clean them up locally by replacing the literal backslash-`n` sequences and stray diff markers with
 real newlines / normal Markdown formatting.
 
+Note: because these files are gitignored, changes to them will not appear in `git diff` unless
+you explicitly force-add them (don’t). To verify local cleanup, open the files directly (e.g.
+`cat scratchpad.md`) or search them with a text tool like `rg`.
+
 For example, to replace accidental literal backslash-`n` fragments (often introduced when diff/patch
 text is pasted into Markdown) with real newlines (best-effort; tune for your specific corruption),
 you can run:
