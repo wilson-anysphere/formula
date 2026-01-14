@@ -52,6 +52,7 @@ fn workbook_and_document_loaders_decrypt_agile_standard_and_empty_password_fixtu
         ("agile.xlsx", "password"),
         ("agile-unicode.xlsx", "pässwörd"),
         ("standard.xlsx", "password"),
+        ("standard-unicode.xlsx", "pässwörd🔒"),
         ("agile-empty-password.xlsx", ""),
     ];
 
@@ -98,9 +99,13 @@ fn xlsx_package_loader_decrypts_standard_fixture_and_exposes_password_errors() {
     let plaintext = read_fixture("plaintext.xlsx");
     let plaintext_pkg = XlsxPackage::from_bytes(&plaintext).expect("open plaintext package");
 
-    for encrypted_name in ["agile.xlsx", "standard.xlsx"] {
+    for (encrypted_name, password) in [
+        ("agile.xlsx", "password"),
+        ("standard.xlsx", "password"),
+        ("standard-unicode.xlsx", "pässwörd🔒"),
+    ] {
         let encrypted = read_fixture(encrypted_name);
-        let pkg = XlsxPackage::from_bytes_with_password(&encrypted, "password")
+        let pkg = XlsxPackage::from_bytes_with_password(&encrypted, password)
             .unwrap_or_else(|err| panic!("from_bytes_with_password({encrypted_name}): {err:?}"));
 
         assert_eq!(
@@ -152,6 +157,22 @@ fn unicode_emoji_password_normalization_mismatch_fails() {
 
     let bytes = read_fixture("agile-unicode-excel.xlsx");
     let err = read_workbook_model_from_bytes_with_password(&bytes, nfd).expect_err("expected error");
+    assert!(
+        matches!(err, ReadError::InvalidPassword),
+        "expected ReadError::InvalidPassword, got {err:?}"
+    );
+}
+
+#[test]
+fn standard_unicode_emoji_password_normalization_mismatch_fails() {
+    // NFC password is "pässwörd🔒" (U+00E4, U+00F6). NFD decomposes those into combining marks, but
+    // leaves the non-BMP emoji alone.
+    let nfd = "pa\u{0308}sswo\u{0308}rd🔒";
+    assert_ne!(nfd, "pässwörd🔒");
+
+    let bytes = read_fixture("standard-unicode.xlsx");
+    let err =
+        read_workbook_model_from_bytes_with_password(&bytes, nfd).expect_err("expected error");
     assert!(
         matches!(err, ReadError::InvalidPassword),
         "expected ReadError::InvalidPassword, got {err:?}"

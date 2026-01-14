@@ -56,6 +56,17 @@ fn detects_encrypted_ooxml_standard_fixture() {
 }
 
 #[test]
+fn detects_encrypted_ooxml_standard_unicode_fixture() {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/encrypted/ooxml/standard-unicode.xlsx"
+    ));
+
+    let bytes = std::fs::read(fixture_path).expect("read standard-unicode encrypted fixture");
+    assert_encrypted_ooxml_bytes_detected(&bytes, "standard-unicode");
+}
+
+#[test]
 fn detects_encrypted_ooxml_agile_empty_password_fixture() {
     let fixture_path = Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -206,7 +217,8 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
     ));
 
     let common_expected = StandardEncryptionInfoParams {
-        version_flags: 0x0000_0000,
+        // Standard (CryptoAPI) flags observed in the committed fixtures (fCryptoAPI + fAES).
+        version_flags: 0x0000_0024,
         alg_id: 0x0000_660E,      // CALG_AES_128
         alg_id_hash: 0x0000_8004, // CALG_SHA1
         key_size_bits: 128,
@@ -236,8 +248,6 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
 
         let expected = StandardEncryptionInfoParams {
             csp_name: match fixture_name {
-                // `standard-large.xlsx` has an empty CSPName (UTF-16LE NUL terminator only).
-                "standard-large.xlsx" => None,
                 _ => Some("Microsoft Enhanced RSA and AES Cryptographic Provider".to_string()),
             },
             ..common_expected.clone()

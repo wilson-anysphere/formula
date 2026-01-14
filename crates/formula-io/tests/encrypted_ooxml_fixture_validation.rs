@@ -56,7 +56,9 @@ const AGILE_FIXTURES: &[(&str, &str)] = &[
 
 const STANDARD_FIXTURES: &[(&str, &str)] = &[
     ("standard.xlsx", "plaintext.xlsx"),
+    ("standard-4.2.xlsx", "plaintext.xlsx"),
     ("standard-rc4.xlsx", "plaintext.xlsx"),
+    ("standard-unicode.xlsx", "plaintext.xlsx"),
     ("standard-large.xlsx", "plaintext-large.xlsx"),
     ("standard-basic.xlsm", "plaintext-basic.xlsm"),
 ];

@@ -13,6 +13,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 - `agile-empty-password.xlsx`: empty string (`""`)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 - `agile-unicode-excel.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
+- `standard-unicode.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
 - `agile-basic.xlsm` / `standard-basic.xlsm`: `password`
 - `basic-password.xlsm`: `password`
 
@@ -30,8 +31,11 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
   - Decrypts to `plaintext.xlsx` with password `password`
 - `standard-4.2.xlsx` – Standard encrypted OOXML (Apache POI output).
-  - `EncryptionInfo` header version **Major 4 / Minor 2**
-  - Decrypts to `plaintext.xlsx` with password `password`
+   - `EncryptionInfo` header version **Major 4 / Minor 2**
+   - Decrypts to `plaintext.xlsx` with password `password`
+- `standard-unicode.xlsx` – Standard encrypted OOXML with a Unicode open password (Apache POI output).
+   - `EncryptionInfo` header version **Major 4 / Minor 2**
+   - Decrypts to `plaintext.xlsx` with password `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
 - `standard-rc4.xlsx` – Standard encrypted OOXML (RC4 CryptoAPI).
   - `EncryptionInfo` header version **Major 3 / Minor 2**
   - `EncryptionHeader.algId` = `CALG_RC4` (`0x00006801`)
@@ -143,6 +147,7 @@ bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fix
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode-excel.xlsx
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-unicode.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-large.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-large.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-basic.xlsm
@@ -188,6 +193,8 @@ The committed fixture binaries were generated using a mix of tooling:
   [`ms-offcrypto-writer`](https://crates.io/crates/ms-offcrypto-writer) crate (with a deterministic
   RNG seed) so it includes `dataIntegrity` and is compatible with our strict Agile decryptor.
 - `standard-4.2.xlsx` was generated using **Apache POI 5.2.5** via
+  `tools/encrypted-ooxml-fixtures/generate.sh standard`.
+- `standard-unicode.xlsx` was generated using **Apache POI 5.2.5** via
   `tools/encrypted-ooxml-fixtures/generate.sh standard`.
 
 Implementation detail: `msoffcrypto-tool` includes a minimal OLE writer that does not correctly
@@ -244,7 +251,7 @@ fixture drift (cipher/keysize/provider/flags).
 
 - `major`: `3`
 - `minor`: `2`
-- `flags`: `0x00000000`
+- `flags`: `0x00000024` (fCryptoAPI + fAES)
 
 `EncryptionHeader` (CryptoAPI):
 
@@ -253,8 +260,7 @@ fixture drift (cipher/keysize/provider/flags).
 - `KeySize`: `128` (bits)
 - `ProviderType`: `24` (PROV_RSA_AES)
 - `CSPName`:
-  - `standard.xlsx` / `standard-basic.xlsm`: `"Microsoft Enhanced RSA and AES Cryptographic Provider"`
-  - `standard-large.xlsx`: _(empty)_
+  - `standard.xlsx` / `standard-basic.xlsm` / `standard-large.xlsx`: `"Microsoft Enhanced RSA and AES Cryptographic Provider"`
 
 `EncryptionVerifier`:
 

@@ -117,7 +117,7 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsx() {
 }
 
 #[test]
-fn open_workbook_with_password_decrypts_agile_encrypted_xlsb() {
+fn open_workbook_with_password_rejects_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -126,19 +126,16 @@ fn open_workbook_with_password_decrypts_agile_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let wb =
-        open_workbook_with_password(&path, Some(password)).expect("open decrypted xlsb workbook");
-    match wb {
-        Workbook::Xlsb(wb) => {
-            assert_eq!(wb.sheet_metas().len(), 1);
-            assert_eq!(wb.sheet_metas()[0].name, "Sheet1");
-        }
-        other => panic!("expected Workbook::Xlsb, got {other:?}"),
-    }
+    let err =
+        open_workbook_with_password(&path, Some(password)).expect_err("expected error on xlsb");
+    assert!(
+        matches!(err, Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }),
+        "expected UnsupportedEncryptedWorkbookKind xlsb, got {err:?}"
+    );
 }
 
 #[test]
-fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
+fn open_workbook_model_with_password_rejects_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -147,22 +144,12 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let model = open_workbook_model_with_password(&path, Some(password))
-        .expect("open decrypted xlsb workbook model");
-    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
-    assert_eq!(
-        sheet.value(CellRef::from_a1("A1").unwrap()),
-        CellValue::String("Hello".to_string())
+    let err =
+        open_workbook_model_with_password(&path, Some(password)).expect_err("expected error on xlsb");
+    assert!(
+        matches!(err, Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }),
+        "expected UnsupportedEncryptedWorkbookKind xlsb, got {err:?}"
     );
-    assert_eq!(
-        sheet.value(CellRef::from_a1("B1").unwrap()),
-        CellValue::Number(42.5)
-    );
-    assert_eq!(
-        sheet.value(CellRef::from_a1("C1").unwrap()),
-        CellValue::Number(85.0)
-    );
-    assert_eq!(sheet.formula(CellRef::from_a1("C1").unwrap()), Some("B1*2"));
 }
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -323,6 +310,7 @@ fn errors_on_wrong_password_fixtures() {
     let agile_path = fixture_path("agile.xlsx");
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
+    let standard_unicode_path = fixture_path("standard-unicode.xlsx");
     let agile_unicode_path = fixture_path("agile-unicode.xlsx");
     let agile_unicode_excel_path = fixture_path("agile-unicode-excel.xlsx");
     let agile_basic_path = fixture_path("agile-basic.xlsm");
@@ -332,6 +320,7 @@ fn errors_on_wrong_password_fixtures() {
         &agile_path,
         &agile_empty_password_path,
         &standard_path,
+        &standard_unicode_path,
         &agile_unicode_path,
         &agile_unicode_excel_path,
         &agile_basic_path,
@@ -367,6 +356,18 @@ fn decrypts_agile_unicode_excel_password() {
 }
 
 #[test]
+fn decrypts_standard_unicode_password() {
+    let plaintext_path = fixture_path("plaintext.xlsx");
+    let encrypted_path = fixture_path("standard-unicode.xlsx");
+
+    let plaintext = open_workbook_model(&plaintext_path).expect("open plaintext.xlsx");
+    assert_expected_contents(&plaintext);
+
+    let wb = open_model_with_password(&encrypted_path, "pässwörd🔒");
+    assert_expected_contents(&wb);
+}
+
+#[test]
 fn agile_unicode_password_different_normalization_fails() {
     // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
     let nfd = "pa\u{0308}sswo\u{0308}rd";
@@ -376,6 +377,26 @@ fn agile_unicode_password_different_normalization_fails() {
     );
 
     let path = fixture_path("agile-unicode.xlsx");
+    assert!(
+        matches!(
+            open_workbook_model_with_password(&path, Some(nfd)),
+            Err(Error::InvalidPassword { .. })
+        ),
+        "expected InvalidPassword error for NFD-normalized password"
+    );
+}
+
+#[test]
+fn standard_unicode_password_different_normalization_fails() {
+    // NFC password is "pässwörd🔒" (U+00E4, U+00F6). NFD decomposes those into combining marks, but
+    // leaves the non-BMP emoji alone.
+    let nfd = "pa\u{0308}sswo\u{0308}rd🔒";
+    assert_ne!(
+        nfd, "pässwörd🔒",
+        "strings should differ before UTF-16 encoding"
+    );
+
+    let path = fixture_path("standard-unicode.xlsx");
     assert!(
         matches!(
             open_workbook_model_with_password(&path, Some(nfd)),
