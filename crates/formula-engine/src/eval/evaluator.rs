@@ -122,6 +122,19 @@ impl DependencyTrace {
 
 pub trait ValueResolver {
     fn sheet_exists(&self, sheet_id: usize) -> bool;
+    /// Returns the current worksheet tab order index for `sheet_id`.
+    ///
+    /// Excel defines the ordering of multi-area references (e.g. 3D sheet spans like
+    /// `Sheet1:Sheet3!A1`, or `INDEX(..., area_num)`) based on workbook sheet tab order, not the
+    /// internal numeric sheet id.
+    ///
+    /// Most resolvers historically used sheet ids that matched tab order, so the default
+    /// implementation preserves the old behavior by treating the sheet id itself as the order
+    /// index. Resolvers with stable sheet ids should override this to return the current tab
+    /// position.
+    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
+        Some(sheet_id)
+    }
     /// Return the number of worksheets available in the workbook.
     ///
     /// This is used by worksheet information functions like `INFO("numfile")`.
@@ -301,6 +314,29 @@ impl Drop for LexicalScopeGuard {
 }
 
 impl<'a, R: ValueResolver> Evaluator<'a, R> {
+    fn cmp_sheet_ids_in_tab_order(&self, a: &FnSheetId, b: &FnSheetId) -> Ordering {
+        match (a, b) {
+            (FnSheetId::Local(a_id), FnSheetId::Local(b_id)) => {
+                let a_idx = self.resolver.sheet_order_index(*a_id).unwrap_or(*a_id);
+                let b_idx = self.resolver.sheet_order_index(*b_id).unwrap_or(*b_id);
+                a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
+            }
+            (FnSheetId::Local(_), FnSheetId::External(_)) => Ordering::Less,
+            (FnSheetId::External(_), FnSheetId::Local(_)) => Ordering::Greater,
+            (FnSheetId::External(a_key), FnSheetId::External(b_key)) => a_key.cmp(b_key),
+        }
+    }
+
+    fn sort_resolved_ranges(&self, ranges: &mut [ResolvedRange]) {
+        ranges.sort_by(|a, b| {
+            self.cmp_sheet_ids_in_tab_order(&a.sheet_id, &b.sheet_id)
+                .then_with(|| a.start.row.cmp(&b.start.row))
+                .then_with(|| a.start.col.cmp(&b.start.col))
+                .then_with(|| a.end.row.cmp(&b.end.row))
+                .then_with(|| a.end.col.cmp(&b.end.col))
+        });
+    }
+
     pub fn new(resolver: &'a R, ctx: EvalContext, recalc_ctx: &'a RecalcContext) -> Self {
         Self::new_with_date_system_and_locales(
             resolver,
@@ -836,14 +872,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             let v = match self.eval_value(arg) {
                 EvalValue::Scalar(v) => v,
                 EvalValue::Reference(mut ranges) => {
-                    ranges.sort_by(|a, b| {
-                        a.sheet_id
-                            .cmp(&b.sheet_id)
-                            .then_with(|| a.start.row.cmp(&b.start.row))
-                            .then_with(|| a.start.col.cmp(&b.start.col))
-                            .then_with(|| a.end.row.cmp(&b.end.row))
-                            .then_with(|| a.end.col.cmp(&b.end.col))
-                    });
+                    self.sort_resolved_ranges(&mut ranges);
 
                     match ranges.as_slice() {
                         [only] => Value::Reference(FnReference {
@@ -895,14 +924,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             EvalValue::Reference(mut ranges) => {
                 // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
                 // multi-area union).
-                ranges.sort_by(|a, b| {
-                    a.sheet_id
-                        .cmp(&b.sheet_id)
-                        .then_with(|| a.start.row.cmp(&b.start.row))
-                        .then_with(|| a.start.col.cmp(&b.start.col))
-                        .then_with(|| a.end.row.cmp(&b.end.row))
-                        .then_with(|| a.end.col.cmp(&b.end.col))
-                });
+                evaluator.sort_resolved_ranges(&mut ranges);
 
                 match ranges.as_slice() {
                     [only] => Value::Reference(FnReference {
@@ -1376,14 +1398,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             EvalValue::Reference(mut ranges) => {
                 // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
                 // multi-area union).
-                ranges.sort_by(|a, b| {
-                    a.sheet_id
-                        .cmp(&b.sheet_id)
-                        .then_with(|| a.start.row.cmp(&b.start.row))
-                        .then_with(|| a.start.col.cmp(&b.start.col))
-                        .then_with(|| a.end.row.cmp(&b.end.row))
-                        .then_with(|| a.end.col.cmp(&b.end.col))
-                });
+                self.sort_resolved_ranges(&mut ranges);
                 match ranges.as_slice() {
                     [only] => FnArgValue::Reference(FnReference {
                         sheet_id: only.sheet_id.clone(),
@@ -1598,14 +1613,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             EvalValue::Reference(mut ranges) => {
                 // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
                 // multi-area union).
-                ranges.sort_by(|a, b| {
-                    a.sheet_id
-                        .cmp(&b.sheet_id)
-                        .then_with(|| a.start.row.cmp(&b.start.row))
-                        .then_with(|| a.start.col.cmp(&b.start.col))
-                        .then_with(|| a.end.row.cmp(&b.end.row))
-                        .then_with(|| a.end.col.cmp(&b.end.col))
-                });
+                evaluator.sort_resolved_ranges(&mut ranges);
 
                 match ranges.as_slice() {
                     [only] => Value::Reference(FnReference {
