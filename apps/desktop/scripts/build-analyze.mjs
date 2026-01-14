@@ -89,7 +89,9 @@ async function main() {
     ...(args.sourcemap ? { VITE_BUNDLE_ANALYZE_SOURCEMAP: "1" } : {}),
   };
 
-  const pyodideCode = await run(process.execPath, ["scripts/ensure-pyodide-assets.mjs"], { env });
+  // Match the default desktop build behavior: Pyodide is *not* bundled into `dist/` unless
+  // explicitly opted in via `FORMULA_BUNDLE_PYODIDE_ASSETS=1`.
+  const pyodideCode = await run(process.execPath, ["scripts/maybe-ensure-pyodide-assets.mjs"], { env });
   if (pyodideCode !== 0) process.exit(pyodideCode);
 
   const viteCode = await run("vite", ["build", ...args.viteArgs], { env });
