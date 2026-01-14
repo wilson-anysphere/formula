@@ -132,8 +132,10 @@ describe("DrawingInteractionController zoom + capture", () => {
     });
 
     // Local coordinates are (client - rect). Set bogus `offsetX/Y` to ensure we don't rely on them.
-    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 160, clientY: 110, pointerId: 1, offsetX: 0, offsetY: 0 }));
-    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 180, clientY: 110, pointerId: 1, offsetX: 0, offsetY: 0 }));
+    // Object starts at (50,50) with size 40x40 in document-space; zoom=2 means the on-screen rect
+    // begins at (100,100) with size 80x80. (Rect is relative to the element's top-left.)
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 210, clientY: 160, pointerId: 1, offsetX: 0, offsetY: 0 }));
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 230, clientY: 160, pointerId: 1, offsetX: 0, offsetY: 0 }));
 
     expect(lastSet).not.toBeNull();
     const moved = (lastSet ?? [])[0]!;
