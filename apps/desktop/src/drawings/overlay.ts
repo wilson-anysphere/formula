@@ -1410,6 +1410,9 @@ function renderShapeText(
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.globalAlpha = 1;
+  // Shapes may have dashed outlines; ensure underline strokes do not inherit the
+  // dash pattern from the shape geometry rendering.
+  ctx.setLineDash([]);
 
   const alignment = layout.alignment ?? "left";
   for (const line of lines) {
