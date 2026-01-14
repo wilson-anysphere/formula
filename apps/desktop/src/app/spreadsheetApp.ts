@@ -12921,16 +12921,54 @@ export class SpreadsheetApp {
     const zoom = typeof viewport.zoom === "number" && Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
 
     const nextAnchor = shiftAnchor(selected.anchor, dxPx, dyPx, this.drawingGeom, zoom);
-    if (nextAnchor === selected.anchor) return;
+    const anchorsEqual = (a: DrawingObject["anchor"], b: DrawingObject["anchor"]): boolean => {
+      if (a.type !== b.type) return false;
+      switch (a.type) {
+        case "absolute": {
+          const bb = b as any;
+          return a.pos.xEmu === bb.pos.xEmu && a.pos.yEmu === bb.pos.yEmu && a.size.cx === bb.size.cx && a.size.cy === bb.size.cy;
+        }
+        case "oneCell": {
+          const bb = b as any;
+          return (
+            a.from.cell.row === bb.from.cell.row &&
+            a.from.cell.col === bb.from.cell.col &&
+            a.from.offset.xEmu === bb.from.offset.xEmu &&
+            a.from.offset.yEmu === bb.from.offset.yEmu &&
+            a.size.cx === bb.size.cx &&
+            a.size.cy === bb.size.cy
+          );
+        }
+        case "twoCell": {
+          const bb = b as any;
+          return (
+            a.from.cell.row === bb.from.cell.row &&
+            a.from.cell.col === bb.from.cell.col &&
+            a.from.offset.xEmu === bb.from.offset.xEmu &&
+            a.from.offset.yEmu === bb.from.offset.yEmu &&
+            a.to.cell.row === bb.to.cell.row &&
+            a.to.cell.col === bb.to.cell.col &&
+            a.to.offset.xEmu === bb.to.offset.xEmu &&
+            a.to.offset.yEmu === bb.to.offset.yEmu
+          );
+        }
+      }
+    };
+    if (anchorsEqual(nextAnchor, selected.anchor)) return;
 
-    const dxEmu = pxToEmu(dxPx / zoom);
-    const dyEmu = pxToEmu(dyPx / zoom);
+    // Match DrawingInteractionController's commit behavior by computing deltas from the *actual*
+    // top-left movement after clamping rather than the raw keypress delta. This prevents mutating
+    // preserved DrawingML payloads when the anchor does not actually move (e.g. nudging left at col 0).
+    const beforeRect = anchorToRectPx(selected.anchor, this.drawingGeom, zoom);
+    const afterRect = anchorToRectPx(nextAnchor, this.drawingGeom, zoom);
+    const dxEmu = pxToEmu((afterRect.x - beforeRect.x) / zoom);
+    const dyEmu = pxToEmu((afterRect.y - beforeRect.y) / zoom);
     const nextObjects = objects.map((obj) => {
       if (obj.id !== selectedId) return obj;
       const moved = { ...obj, anchor: nextAnchor };
       // Keep preserved DrawingML payloads (rawXml/xlsx.pic_xml) in sync with anchor edits so
       // export/roundtrip remains faithful (mirrors DrawingInteractionController pointerup behavior).
-      return dxEmu !== 0 || dyEmu !== 0 ? patchDrawingXmlForMove(moved, dxEmu, dyEmu) : moved;
+      return patchDrawingXmlForMove(moved, dxEmu, dyEmu);
     });
 
     // Update in-memory caches immediately so render/hit-test paths see the new positions even if
