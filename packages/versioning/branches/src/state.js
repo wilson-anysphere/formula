@@ -380,8 +380,11 @@ function normalizeSheetView(value) {
       out.push({ col, runs });
     };
 
-    if (raw instanceof Map) {
-      for (const [col, runs] of raw.entries()) addColRuns(col, runs);
+    const isMapLike = (value) =>
+      value && typeof value === "object" && typeof value.forEach === "function" && typeof value.get === "function";
+
+    if (raw instanceof Map || isMapLike(raw)) {
+      raw.forEach((runs, col) => addColRuns(col, runs));
     } else if (Array.isArray(raw)) {
       for (const entry of raw) {
         if (!entry) continue;
@@ -412,24 +415,69 @@ function normalizeSheetView(value) {
     /** @type {Record<string, any>} */
     const out = {};
 
+    const readEntryField = (entry, keys) => {
+      if (!entry || typeof entry !== "object") return undefined;
+      const get = typeof entry.get === "function" ? entry.get.bind(entry) : null;
+      if (get) {
+        for (const key of keys) {
+          try {
+            const value = get(key);
+            if (value !== undefined) return value;
+          } catch {
+            // ignore
+          }
+        }
+      }
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(entry, key)) return entry[key];
+      }
+      return undefined;
+    };
+
+    const addEntry = (index, format) => {
+      const idx = Number(index);
+      if (!Number.isInteger(idx) || idx < 0) return;
+      const normalized = normalizeFormatObject(format);
+      if (normalized == null) return;
+      out[String(idx)] = normalized;
+    };
+
+    const isYArrayLike = (value) =>
+      value && typeof value === "object" && typeof value.length === "number" && typeof value.get === "function";
+    const isMapLike = (value) =>
+      value && typeof value === "object" && typeof value.forEach === "function" && typeof value.get === "function";
+
     if (Array.isArray(raw)) {
       for (const entry of raw) {
-        const index = Array.isArray(entry) ? entry[0] : entry?.index;
-        const format = Array.isArray(entry) ? entry[1] : (entry?.format ?? entry?.style);
-        const idx = Number(index);
-        if (!Number.isInteger(idx) || idx < 0) continue;
-        const normalized = normalizeFormatObject(format);
-        if (normalized == null) continue;
-        out[String(idx)] = normalized;
+        const index = Array.isArray(entry) ? entry[0] : readEntryField(entry, ["index"]);
+        const format = Array.isArray(entry) ? entry[1] : readEntryField(entry, ["format", "style"]);
+        addEntry(index, format);
       }
+    } else if (isYArrayLike(raw)) {
+      let arr = raw;
+      // Avoid Yjs dev-mode warnings for unintegrated arrays by reading from `_prelimContent`.
+      if (arr?.doc == null && Array.isArray(arr?._prelimContent)) {
+        arr = arr._prelimContent;
+      }
+      if (Array.isArray(arr)) {
+        for (const entry of arr) {
+          const index = Array.isArray(entry) ? entry[0] : readEntryField(entry, ["index"]);
+          const format = Array.isArray(entry) ? entry[1] : readEntryField(entry, ["format", "style"]);
+          addEntry(index, format);
+        }
+      } else {
+        const len = typeof arr.length === "number" ? arr.length : 0;
+        for (let i = 0; i < len; i += 1) {
+          const entry = arr.get(i);
+          const index = Array.isArray(entry) ? entry[0] : readEntryField(entry, ["index"]);
+          const format = Array.isArray(entry) ? entry[1] : readEntryField(entry, ["format", "style"]);
+          addEntry(index, format);
+        }
+      }
+    } else if (raw instanceof Map || isMapLike(raw)) {
+      raw.forEach((format, key) => addEntry(key, format));
     } else if (isRecord(raw)) {
-      for (const [key, format] of Object.entries(raw)) {
-        const idx = Number(key);
-        if (!Number.isInteger(idx) || idx < 0) continue;
-        const normalized = normalizeFormatObject(format);
-        if (normalized == null) continue;
-        out[String(idx)] = normalized;
-      }
+      for (const [key, format] of Object.entries(raw)) addEntry(key, format);
     }
 
     return Object.keys(out).length === 0 ? null : out;
@@ -447,24 +495,69 @@ function normalizeSheetView(value) {
     /** @type {Record<string, number>} */
     const out = {};
 
+    const readEntryField = (entry, keys) => {
+      if (!entry || typeof entry !== "object") return undefined;
+      const get = typeof entry.get === "function" ? entry.get.bind(entry) : null;
+      if (get) {
+        for (const key of keys) {
+          try {
+            const value = get(key);
+            if (value !== undefined) return value;
+          } catch {
+            // ignore
+          }
+        }
+      }
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(entry, key)) return entry[key];
+      }
+      return undefined;
+    };
+
+    const addEntry = (index, size) => {
+      const idx = Number(index);
+      if (!Number.isInteger(idx) || idx < 0) return;
+      const normalized = normalizeAxisSize(size);
+      if (normalized == null) return;
+      out[String(idx)] = normalized;
+    };
+
+    const isYArrayLike = (value) =>
+      value && typeof value === "object" && typeof value.length === "number" && typeof value.get === "function";
+    const isMapLike = (value) =>
+      value && typeof value === "object" && typeof value.forEach === "function" && typeof value.get === "function";
+
     if (Array.isArray(raw)) {
       for (const entry of raw) {
-        const index = Array.isArray(entry) ? entry[0] : entry?.index;
-        const size = Array.isArray(entry) ? entry[1] : entry?.size;
-        const idx = Number(index);
-        if (!Number.isInteger(idx) || idx < 0) continue;
-        const normalized = normalizeAxisSize(size);
-        if (normalized == null) continue;
-        out[String(idx)] = normalized;
+        const index = Array.isArray(entry) ? entry[0] : readEntryField(entry, ["index"]);
+        const size = Array.isArray(entry) ? entry[1] : readEntryField(entry, ["size"]);
+        addEntry(index, size);
       }
+    } else if (isYArrayLike(raw)) {
+      let arr = raw;
+      // Avoid Yjs dev-mode warnings for unintegrated arrays by reading from `_prelimContent`.
+      if (arr?.doc == null && Array.isArray(arr?._prelimContent)) {
+        arr = arr._prelimContent;
+      }
+      if (Array.isArray(arr)) {
+        for (const entry of arr) {
+          const index = Array.isArray(entry) ? entry[0] : readEntryField(entry, ["index"]);
+          const size = Array.isArray(entry) ? entry[1] : readEntryField(entry, ["size"]);
+          addEntry(index, size);
+        }
+      } else {
+        const len = typeof arr.length === "number" ? arr.length : 0;
+        for (let i = 0; i < len; i += 1) {
+          const entry = arr.get(i);
+          const index = Array.isArray(entry) ? entry[0] : readEntryField(entry, ["index"]);
+          const size = Array.isArray(entry) ? entry[1] : readEntryField(entry, ["size"]);
+          addEntry(index, size);
+        }
+      }
+    } else if (raw instanceof Map || isMapLike(raw)) {
+      raw.forEach((value, key) => addEntry(key, value));
     } else if (isRecord(raw)) {
-      for (const [key, value] of Object.entries(raw)) {
-        const idx = Number(key);
-        if (!Number.isInteger(idx) || idx < 0) continue;
-        const normalized = normalizeAxisSize(value);
-        if (normalized == null) continue;
-        out[String(idx)] = normalized;
-      }
+      for (const [key, value] of Object.entries(raw)) addEntry(key, value);
     }
 
     return Object.keys(out).length === 0 ? null : out;
