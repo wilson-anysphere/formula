@@ -257,6 +257,12 @@ Many-to-many semantics:
 Propagation is performed by `resolve_row_sets(...)` in `crates/formula-dax/src/engine.rs` and iterates
 until a fixed point is reached.
 
+#### Debugging relationship propagation
+
+Set `FORMULA_DAX_RELATIONSHIP_TRACE=1` to print a one-time summary of relationship propagation
+(`resolve_row_sets`) for the first evaluation in the process. This includes table row counts before/after
+filtering and the number of propagation iterations/updates.
+
 ### Active vs inactive and `USERELATIONSHIP`
 
 Each relationship has `is_active: bool`.
