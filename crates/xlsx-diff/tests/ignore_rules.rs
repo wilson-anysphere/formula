@@ -50,6 +50,102 @@ fn missing_calcchain_bin_is_warning() {
 }
 
 #[test]
+fn extra_calcchain_xml_is_warning_by_default_and_critical_in_strict_mode() {
+    let expected_zip = zip_bytes(&[]);
+    let actual_zip = zip_bytes(&[("xl/calcChain.xml", br#"<calcChain/>"#)]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert_eq!(report.differences.len(), 1);
+    assert_eq!(report.differences[0].kind, "extra_part");
+    assert_eq!(report.differences[0].part, "xl/calcChain.xml");
+    assert_eq!(report.differences[0].severity, Severity::Warning);
+
+    let options = DiffOptions {
+        strict_calc_chain: true,
+        ..Default::default()
+    };
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert_eq!(report.differences.len(), 1);
+    assert_eq!(report.differences[0].kind, "extra_part");
+    assert_eq!(report.differences[0].part, "xl/calcChain.xml");
+    assert_eq!(report.differences[0].severity, Severity::Critical);
+}
+
+#[test]
+fn calcchain_xml_content_diffs_are_warning_by_default_and_critical_in_strict_mode() {
+    let expected_zip = zip_bytes(&[(
+        "xl/calcChain.xml",
+        br#"<calcChain><c r="A1"/></calcChain>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/calcChain.xml",
+        br#"<calcChain><c r="B2"/></calcChain>"#,
+    )]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        report.differences.iter().any(|d| {
+            d.part == "xl/calcChain.xml"
+                && d.kind != "missing_part"
+                && d.kind != "extra_part"
+                && d.severity == Severity::Warning
+        }),
+        "expected calcChain.xml content diffs to be WARNING by default, got {:#?}",
+        report.differences
+    );
+    assert_eq!(
+        report.count(Severity::Critical),
+        0,
+        "expected no CRITICAL diffs by default, got {:#?}",
+        report.differences
+    );
+
+    let options = DiffOptions {
+        strict_calc_chain: true,
+        ..Default::default()
+    };
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report.differences.iter().any(|d| {
+            d.part == "xl/calcChain.xml"
+                && d.kind != "missing_part"
+                && d.kind != "extra_part"
+                && d.severity == Severity::Critical
+        }),
+        "expected calcChain.xml content diffs to be CRITICAL in strict mode, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
+fn calcchain_bin_binary_diffs_are_warning_by_default_and_critical_in_strict_mode() {
+    let expected_zip = zip_bytes(&[("xl/calcChain.bin", &[0x01, 0x02, 0x03])]);
+    let actual_zip = zip_bytes(&[("xl/calcChain.bin", &[0x01, 0x02, 0x04])]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert_eq!(report.differences.len(), 1);
+    assert_eq!(report.differences[0].kind, "binary_diff");
+    assert_eq!(report.differences[0].part, "xl/calcChain.bin");
+    assert_eq!(report.differences[0].severity, Severity::Warning);
+
+    let options = DiffOptions {
+        strict_calc_chain: true,
+        ..Default::default()
+    };
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert_eq!(report.differences.len(), 1);
+    assert_eq!(report.differences[0].kind, "binary_diff");
+    assert_eq!(report.differences[0].part, "xl/calcChain.bin");
+    assert_eq!(report.differences[0].severity, Severity::Critical);
+}
+
+#[test]
 fn missing_calcchain_xml_is_critical_when_strict_enabled() {
     let expected_zip = zip_bytes(&[("xl/calcChain.xml", br#"<calcChain/>"#)]);
     let actual_zip = zip_bytes(&[]);
