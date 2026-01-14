@@ -59,6 +59,28 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
   return context as any;
 }
 
+function dispatchPointerEvent(
+  target: EventTarget,
+  type: string,
+  opts: { clientX: number; clientY: number; pointerId?: number; button?: number; pointerType?: string },
+): void {
+  const pointerId = opts.pointerId ?? 1;
+  const button = opts.button ?? 0;
+  const pointerType = opts.pointerType ?? "mouse";
+  const base = { bubbles: true, cancelable: true, clientX: opts.clientX, clientY: opts.clientY, pointerId, button };
+  const event =
+    typeof (globalThis as any).PointerEvent === "function"
+      ? new (globalThis as any).PointerEvent(type, { ...base, pointerType })
+      : (() => {
+          const e = new MouseEvent(type, base);
+          return e;
+        })();
+  // Some test environments polyfill `PointerEvent` as `MouseEvent` or omit `pointerId/pointerType`.
+  // Ensure the fields exist so DrawingInteractionController can track the active gesture.
+  Object.assign(event, { pointerId, pointerType });
+  target.dispatchEvent(event);
+}
+
 describe("SpreadsheetApp.hitTestDrawingAtClientPoint (split view)", () => {
   beforeEach(() => {
     priorGridMode = process.env.DESKTOP_GRID_MODE;
@@ -315,6 +337,169 @@ describe("SpreadsheetApp.hitTestDrawingAtClientPoint (split view)", () => {
     selectionCanvas.dispatchEvent(esc);
     expect(esc.defaultPrevented).toBe(true);
     expect(app.getSelectedDrawingId()).toBeNull();
+
+    view.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
+
+  it("keeps the selected drawing when Escape cancels an active gesture in the split-view secondary pane", () => {
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 300,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("legacy");
+
+    const secondaryContainer = document.createElement("div");
+    secondaryContainer.tabIndex = 0;
+    Object.defineProperty(secondaryContainer, "clientWidth", { configurable: true, value: 400 });
+    Object.defineProperty(secondaryContainer, "clientHeight", { configurable: true, value: 300 });
+    secondaryContainer.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 500,
+          top: 0,
+          right: 900,
+          bottom: 300,
+          x: 500,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(secondaryContainer);
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img_1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+        size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+      },
+      zOrder: 0,
+    };
+    const startXEmu = (drawing.anchor as any).pos.xEmu;
+    const startYEmu = (drawing.anchor as any).pos.yEmu;
+    app.setDrawingObjects([drawing]);
+
+    const view = new SecondaryGridView({
+      container: secondaryContainer,
+      document: app.getDocument(),
+      getSheetId: () => app.getCurrentSheetId(),
+      rowCount: 50,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
+      images: app.getDrawingImages(),
+      getSelectedDrawingId: () => app.getSelectedDrawingId(),
+    });
+
+    const selectionCanvas = secondaryContainer.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    if (!selectionCanvas) throw new Error("Missing secondary selection canvas");
+
+    app.setSplitViewSecondaryGridView({ container: secondaryContainer, grid: view.grid });
+
+    const rect = secondaryContainer.getBoundingClientRect();
+    const scroll = view.grid.getScroll();
+    const viewportState = view.grid.renderer.scroll.getViewportState();
+    const headerRows = 1;
+    const headerCols = 1;
+    const headerWidth = view.grid.renderer.scroll.cols.totalSize(headerCols);
+    const headerHeight = view.grid.renderer.scroll.rows.totalSize(headerRows);
+    const headerOffsetX = Math.min(headerWidth, rect.width);
+    const headerOffsetY = Math.min(headerHeight, rect.height);
+    const zoom = view.grid.renderer.getZoom();
+    const { frozenRows, frozenCols } = app.getFrozen();
+
+    const viewport = {
+      scrollX: scroll.x,
+      scrollY: scroll.y,
+      width: rect.width,
+      height: rect.height,
+      dpr: 1,
+      zoom,
+      frozenRows,
+      frozenCols,
+      headerOffsetX,
+      headerOffsetY,
+      frozenWidthPx: viewportState.frozenWidth,
+      frozenHeightPx: viewportState.frozenHeight,
+    } as any;
+
+    const geom = {
+      cellOriginPx: (cell: { row: number; col: number }) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: view.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: view.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell: { row: number; col: number }) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return { width: view.grid.renderer.getColWidth(gridCol), height: view.grid.renderer.getRowHeight(gridRow) };
+      },
+    };
+
+    const bounds = drawingObjectToViewportRect(drawing, viewport, geom as any);
+    const startClientX = rect.left + bounds.x + bounds.width / 2;
+    const startClientY = rect.top + bounds.y + bounds.height / 2;
+
+    const dx = 10;
+    const dy = 5;
+
+    dispatchPointerEvent(selectionCanvas, "pointerdown", { clientX: startClientX, clientY: startClientY, pointerId: 1, pointerType: "mouse" });
+    dispatchPointerEvent(selectionCanvas, "pointermove", {
+      clientX: startClientX + dx,
+      clientY: startClientY + dy,
+      pointerId: 1,
+      pointerType: "mouse",
+    });
+
+    expect(app.getSelectedDrawingId()).toBe(drawing.id);
+    const moved = app.getDrawingObjects().find((o) => o.id === drawing.id) as any;
+    expect(moved).toBeTruthy();
+    expect(moved.anchor.type).toBe("absolute");
+    expect(moved.anchor.pos.xEmu).not.toBe(startXEmu);
+    expect(moved.anchor.pos.yEmu).not.toBe(startYEmu);
+
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    selectionCanvas.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    // Excel-like: first Escape cancels the drag but keeps selection.
+    expect(app.getSelectedDrawingId()).toBe(drawing.id);
+
+    const reverted = app.getDrawingObjects().find((o) => o.id === drawing.id) as any;
+    expect(reverted).toBeTruthy();
+    expect(reverted.anchor.type).toBe("absolute");
+    expect(reverted.anchor.pos.xEmu).toBe(startXEmu);
+    expect(reverted.anchor.pos.yEmu).toBe(startYEmu);
 
     view.destroy();
     app.destroy();

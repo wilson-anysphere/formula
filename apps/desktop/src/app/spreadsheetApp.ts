@@ -1250,6 +1250,7 @@ export class SpreadsheetApp {
   // Some tests and legacy call sites still reference `drawingsInteraction`.
   private drawingsInteraction: DrawingInteractionController | null = null;
   private drawingInteractionCallbacks: DrawingInteractionCallbacks | null = null;
+  private drawingInteractionGestureActive = false;
   private readonly drawingImages: ImageStore;
   private drawingObjectsCache: { sheetId: string; objects: DrawingObject[]; source: unknown } | null = null;
   /**
@@ -1542,7 +1543,13 @@ export class SpreadsheetApp {
 
     // Workbook drawings (pictures/shapes/imported charts).
     if (this.selectedDrawingId != null) {
-      handled = this.handleDrawingKeyDown(e);
+      // DrawingInteractionController attaches a window-level Escape handler while dragging/resizing.
+      // In split-view, our window capture handler runs *before* that listener. Avoid clearing selection
+      // during an active gesture so Escape behaves like Excel (first Escape cancels the gesture,
+      // second Escape deselects).
+      if (!(isEscape && this.drawingInteractionGestureActive)) {
+        handled = this.handleDrawingKeyDown(e);
+      }
     }
 
     // ChartStore charts (canvas charts mode) have their own selection state.
@@ -3107,6 +3114,7 @@ export class SpreadsheetApp {
           }
         },
         beginBatch: ({ label }) => {
+          this.drawingInteractionGestureActive = true;
           interactionCommitKind =
             label === "Move Picture"
               ? "move"
@@ -3126,10 +3134,12 @@ export class SpreadsheetApp {
           this.document.beginBatch({ label: mapped });
         },
         endBatch: () => {
+          this.drawingInteractionGestureActive = false;
           interactionCommitKind = null;
           this.document.endBatch();
         },
         cancelBatch: () => {
+          this.drawingInteractionGestureActive = false;
           interactionCommitKind = null;
           this.document.cancelBatch();
         },
@@ -9051,6 +9061,7 @@ export class SpreadsheetApp {
           }
         },
         beginBatch: ({ label }) => {
+          this.drawingInteractionGestureActive = true;
           interactionCommitKind =
             label === "Move Picture"
               ? "move"
@@ -9070,10 +9081,12 @@ export class SpreadsheetApp {
           this.document.beginBatch({ label: mapped });
         },
         endBatch: () => {
+          this.drawingInteractionGestureActive = false;
           interactionCommitKind = null;
           this.document.endBatch();
         },
         cancelBatch: () => {
+          this.drawingInteractionGestureActive = false;
           interactionCommitKind = null;
           this.document.cancelBatch();
         },
@@ -12336,6 +12349,7 @@ export class SpreadsheetApp {
         }
       },
       beginBatch: ({ label }) => {
+        this.drawingInteractionGestureActive = true;
         interactionCommitKind =
           label === "Move Picture"
             ? "move"
@@ -12355,10 +12369,12 @@ export class SpreadsheetApp {
         this.document.beginBatch({ label: mapped });
       },
       endBatch: () => {
+        this.drawingInteractionGestureActive = false;
         interactionCommitKind = null;
         this.document.endBatch();
       },
       cancelBatch: () => {
+        this.drawingInteractionGestureActive = false;
         interactionCommitKind = null;
         this.document.cancelBatch();
       },
