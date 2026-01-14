@@ -1513,17 +1513,20 @@ export class SpreadsheetApp {
     const isArrange = primary && !e.altKey && (code === "BracketLeft" || code === "BracketRight");
     if (!(isArrow || isDelete || isEscape || isDuplicate || isArrange)) return;
 
+    const target = e.target as EventTarget | null;
+
     // Never hijack key events originating from text inputs/contenteditable nodes.
-    const target = e.target as HTMLElement | null;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+    const targetEl = typeof HTMLElement !== "undefined" && target instanceof HTMLElement ? target : null;
+    if (targetEl && (targetEl.tagName === "INPUT" || targetEl.tagName === "TEXTAREA" || targetEl.isContentEditable)) {
       return;
     }
 
     // Only handle when the keyboard target lives inside the spreadsheet grid surfaces.
     // (This avoids stealing arrow keys from other UI like the Selection Pane.)
-    const inPrimaryGrid = Boolean(target && this.root.contains(target));
+    const targetNode = typeof Node !== "undefined" && target instanceof Node ? target : null;
+    const inPrimaryGrid = Boolean(targetNode && this.root.contains(targetNode));
     const secondaryRoot = this.splitViewSecondaryGrid?.container ?? null;
-    const inSecondaryGrid = Boolean(target && secondaryRoot && secondaryRoot.contains(target));
+    const inSecondaryGrid = Boolean(targetNode && secondaryRoot && secondaryRoot.contains(targetNode));
     if (!inPrimaryGrid && !inSecondaryGrid) return;
     // Escape handling for deselect/cancel already works in the primary pane via SpreadsheetApp's
     // root keydown handler. Only intercept it here for the split-view secondary pane.
