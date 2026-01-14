@@ -30,7 +30,7 @@ fn exports_worksheet_data_validations() -> Result<(), Box<dyn std::error::Error>
             allow_blank: true,
             show_input_message: true,
             show_error_message: true,
-            show_drop_down: true,
+            show_drop_down: false,
             input_message: Some(DataValidationInputMessage {
                 title: Some("Pick & choose".to_string()),
                 body: Some("Enter a value <= 10".to_string()),
@@ -43,10 +43,7 @@ fn exports_worksheet_data_validations() -> Result<(), Box<dyn std::error::Error>
         };
 
         sheet.add_data_validation(
-            vec![
-                Range::from_a1("A1:A5")?,
-                Range::from_a1("C1:C5")?,
-            ],
+            vec![Range::from_a1("A1:A5")?, Range::from_a1("C1:C5")?],
             validation,
         );
     }
@@ -75,7 +72,7 @@ fn exports_worksheet_data_validations() -> Result<(), Box<dyn std::error::Error>
     assert_eq!(dv.attribute("allowBlank"), Some("1"));
     assert_eq!(dv.attribute("showInputMessage"), Some("1"));
     assert_eq!(dv.attribute("showErrorMessage"), Some("1"));
-    assert_eq!(dv.attribute("showDropDown"), Some("1"));
+    assert_eq!(dv.attribute("showDropDown"), None);
 
     assert_eq!(dv.attribute("promptTitle"), Some("Pick & choose"));
     assert_eq!(dv.attribute("prompt"), Some("Enter a value <= 10"));
@@ -102,4 +99,3 @@ fn exports_worksheet_data_validations() -> Result<(), Box<dyn std::error::Error>
 
     Ok(())
 }
-

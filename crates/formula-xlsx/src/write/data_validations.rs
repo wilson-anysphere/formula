@@ -7,7 +7,11 @@ use quick_xml::{Reader, Writer};
 use crate::XlsxError;
 
 fn bool_attr(value: bool) -> &'static str {
-    if value { "1" } else { "0" }
+    if value {
+        "1"
+    } else {
+        "0"
+    }
 }
 
 fn kind_to_ooxml(kind: DataValidationKind) -> &'static str {
@@ -189,7 +193,11 @@ fn write_data_validations_block<W: std::io::Write>(
         dv.push_attribute(("allowBlank", bool_attr(validation.allow_blank)));
         dv.push_attribute(("showInputMessage", bool_attr(validation.show_input_message)));
         dv.push_attribute(("showErrorMessage", bool_attr(validation.show_error_message)));
-        dv.push_attribute(("showDropDown", bool_attr(validation.show_drop_down)));
+        // OOXML `showDropDown` is historically inverted: 1 = suppress (hide) the dropdown arrow.
+        // Our model stores `show_drop_down` using Excel UI semantics: true = arrow shown.
+        if validation.kind == DataValidationKind::List && !validation.show_drop_down {
+            dv.push_attribute(("showDropDown", "1"));
+        }
 
         if let Some(msg) = &validation.input_message {
             if let Some(title) = msg.title.as_deref() {
@@ -227,9 +235,8 @@ fn write_data_validations_block<W: std::io::Write>(
         writer.write_event(Event::End(BytesEnd::new(formula1_tag.as_str())))?;
 
         if let Some(formula2_raw) = validation.formula2.as_deref() {
-            let formula2 = crate::formula_text::add_xlfn_prefixes(super::strip_leading_equals(
-                formula2_raw,
-            ));
+            let formula2 =
+                crate::formula_text::add_xlfn_prefixes(super::strip_leading_equals(formula2_raw));
             writer.write_event(Event::Start(BytesStart::new(formula2_tag.as_str())))?;
             writer
                 .get_mut()
@@ -274,7 +281,9 @@ mod tests {
         let validations = vec![list_validation_assignment("A1")];
         let updated = update_worksheet_data_validations_xml(xml, &validations).unwrap();
 
-        let dv_pos = updated.find("<dataValidations").expect("dataValidations inserted");
+        let dv_pos = updated
+            .find("<dataValidations")
+            .expect("dataValidations inserted");
         let table_pos = updated.find("<tableParts").expect("tableParts exists");
         assert!(
             dv_pos < table_pos,
@@ -288,7 +297,9 @@ mod tests {
         let validations = vec![list_validation_assignment("A1")];
         let updated = update_worksheet_data_validations_xml(xml, &validations).unwrap();
 
-        let dv_pos = updated.find("<dataValidations").expect("dataValidations inserted");
+        let dv_pos = updated
+            .find("<dataValidations")
+            .expect("dataValidations inserted");
         let margins_pos = updated.find("<pageMargins").expect("pageMargins exists");
         assert!(
             dv_pos < margins_pos,

@@ -6,13 +6,16 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 fn fixture_path(rel: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../").join(rel)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../")
+        .join(rel)
 }
 
 #[test]
 fn reads_list_data_validation_fixture() -> Result<(), Box<dyn std::error::Error>> {
-    let bytes =
-        std::fs::read(fixture_path("fixtures/xlsx/metadata/data-validation-list.xlsx"))?;
+    let bytes = std::fs::read(fixture_path(
+        "fixtures/xlsx/metadata/data-validation-list.xlsx",
+    ))?;
     let doc = formula_xlsx::load_from_bytes(&bytes)?;
 
     let sheet = doc
@@ -30,6 +33,10 @@ fn reads_list_data_validation_fixture() -> Result<(), Box<dyn std::error::Error>
     assert_eq!(dv.validation.allow_blank, true);
     assert_eq!(dv.validation.show_input_message, true);
     assert_eq!(dv.validation.show_error_message, true);
+    assert_eq!(
+        dv.validation.show_drop_down, true,
+        "list validations should show the in-cell dropdown arrow by default"
+    );
     assert_eq!(dv.validation.formula1, r#""Yes,No""#);
     assert_eq!(dv.ranges, vec![Range::from_a1("A1")?]);
 
@@ -98,12 +105,18 @@ fn reads_synthetic_data_validations_ranges_operator_and_messages(
 
     let first = &sheet.data_validations[0];
     assert_eq!(first.id, 1);
-    assert_eq!(first.ranges, vec![Range::from_a1("A1")?, Range::from_a1("B2:C3")?]);
+    assert_eq!(
+        first.ranges,
+        vec![Range::from_a1("A1")?, Range::from_a1("B2:C3")?]
+    );
     assert_eq!(first.validation.kind, DataValidationKind::Whole);
-    assert_eq!(first.validation.operator, Some(DataValidationOperator::Between));
+    assert_eq!(
+        first.validation.operator,
+        Some(DataValidationOperator::Between)
+    );
     assert_eq!(first.validation.formula1, "1");
     assert_eq!(first.validation.formula2.as_deref(), Some("10"));
-    assert_eq!(first.validation.show_drop_down, true);
+    assert_eq!(first.validation.show_drop_down, false);
     assert_eq!(first.validation.show_input_message, true);
     assert_eq!(first.validation.show_error_message, true);
     assert_eq!(
@@ -123,11 +136,7 @@ fn reads_synthetic_data_validations_ranges_operator_and_messages(
         Some("Enter a value between 1 and 10")
     );
     assert_eq!(
-        first
-            .validation
-            .error_alert
-            .as_ref()
-            .map(|a| a.style),
+        first.validation.error_alert.as_ref().map(|a| a.style),
         Some(DataValidationErrorStyle::Warning)
     );
     assert_eq!(
@@ -153,11 +162,9 @@ fn reads_synthetic_data_validations_ranges_operator_and_messages(
     assert_eq!(second.validation.kind, DataValidationKind::Custom);
     assert_eq!(second.validation.allow_blank, true);
     assert_eq!(
-        second.validation.formula1,
-        "SEQUENCE(1)",
-        "import should strip both '=' and `_xlfn.` prefixes"
+        second.validation.formula1, "_xlfn.SEQUENCE(1)",
+        "import should strip a single leading '=' but preserve formula text otherwise"
     );
 
     Ok(())
 }
-

@@ -1470,7 +1470,9 @@ fn sheet_data_validations_xml(sheet: &Worksheet) -> String {
         if dv.show_error_message {
             attrs.push_str(r#" showErrorMessage="1""#);
         }
-        if dv.show_drop_down {
+        // OOXML `showDropDown` is historically inverted: 1 = suppress (hide) the dropdown arrow.
+        // Our model stores `show_drop_down` using Excel UI semantics: true = arrow shown.
+        if dv.kind == DataValidationKind::List && !dv.show_drop_down {
             attrs.push_str(r#" showDropDown="1""#);
         }
 
@@ -1592,6 +1594,28 @@ fn sheet_protection_xml(sheet: &Worksheet) -> String {
     }
 
     format!(r#"<sheetProtection{attrs}/>"#)
+}
+
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_row_height.is_none()
+        && sheet.default_col_width.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut attrs = String::new();
+    if let Some(base) = sheet.base_col_width {
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+
+    format!(r#"<sheetFormatPr{attrs}/>"#)
 }
 
 fn cell_xml(
