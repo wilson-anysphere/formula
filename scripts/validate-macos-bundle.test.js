@@ -184,6 +184,7 @@ test("validate-macos-bundle honors FORMULA_TAURI_CONF_PATH (override identifier/
   const overrideIdentifier = "com.example.formula.override";
   const overrideVersion = "0.0.0";
   const overrideProductName = "FormulaOverride";
+  const overrideScheme = "formulaoverride";
 
   const confParent = join(repoRoot, "target");
   mkdirSync(confParent, { recursive: true });
@@ -197,6 +198,7 @@ test("validate-macos-bundle honors FORMULA_TAURI_CONF_PATH (override identifier/
         version: overrideVersion,
         productName: overrideProductName,
         mainBinaryName: "formula-desktop",
+        plugins: { "deep-link": { desktop: { schemes: [overrideScheme] } } },
         bundle: { fileAssociations: [] },
       },
       null,
@@ -215,6 +217,7 @@ test("validate-macos-bundle honors FORMULA_TAURI_CONF_PATH (override identifier/
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: overrideIdentifier,
       version: overrideVersion,
+      urlSchemes: [overrideScheme],
     });
     writeComplianceResources(appRoot);
 

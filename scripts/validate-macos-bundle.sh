@@ -256,12 +256,12 @@ if [ "${#EXPECTED_FILE_EXTENSIONS[@]}" -eq 0 ]; then
 fi
 
 get_expected_url_schemes() {
-  # Source of truth for configured deep-link schemes is apps/desktop/src-tauri/tauri.conf.json:
+  # Source of truth for configured deep-link schemes is tauri.conf.json:
   #   plugins.deep-link.desktop.schemes
   #
   # CFBundleURLSchemes entries in Info.plist should contain only the *scheme name*
   # (e.g. "formula"), but we normalize common config values like "formula://" here.
-  local tauri_conf="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  local tauri_conf="$TAURI_CONF_PATH"
   if [ -f "$tauri_conf" ]; then
     local schemes
     set +e
@@ -346,7 +346,7 @@ validate_plist_url_scheme() {
   local expected
   for expected in "${expected_schemes[@]}"; do
     if [[ "$expected" == *:* || "$expected" == */* ]]; then
-      die "Expected URL scheme value contains invalid character(s): '$expected'. Expected scheme names only (no ':' or '/'). (Check apps/desktop/src-tauri/tauri.conf.json plugins.deep-link.desktop.schemes)"
+      die "Expected URL scheme value contains invalid character(s): '$expected'. Expected scheme names only (no ':' or '/'). (Check ${TAURI_CONF_PATH} plugins.deep-link.desktop.schemes)"
     fi
   done
 
@@ -414,7 +414,7 @@ PY
     if [ -z "$found_one_line" ]; then
       found_one_line="(none)"
     fi
-    die "Info.plist does not declare expected URL scheme(s): ${missing[*]}. Found: ${found_one_line}. (Check apps/desktop/src-tauri/tauri.conf.json plugins.deep-link.desktop.schemes and apps/desktop/src-tauri/Info.plist)"
+    die "Info.plist does not declare expected URL scheme(s): ${missing[*]}. Found: ${found_one_line}. (Check ${TAURI_CONF_PATH} plugins.deep-link.desktop.schemes and apps/desktop/src-tauri/Info.plist)"
   fi
 }
 
