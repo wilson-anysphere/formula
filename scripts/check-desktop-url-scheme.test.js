@@ -73,3 +73,44 @@ test("fails when bundle.fileAssociations is present but does not include .xlsx",
   assert.match(proc.stderr, /xlsx/i);
 });
 
+test("fails when macOS Info.plist does not declare the formula:// URL scheme", () => {
+  const config = baseConfig({
+    fileAssociations: [
+      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    ],
+  });
+  const plist = basePlistWithFormulaScheme().replace("<string>formula</string>", "<string>wrong</string>");
+  const proc = runWithConfigAndPlist(config, plist);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing macOS URL scheme registration/i);
+  assert.match(proc.stderr, /Info\.plist/i);
+});
+
+test("fails when tauri.conf.json deep-link schemes do not include formula", () => {
+  const config = {
+    plugins: {
+      "deep-link": {
+        desktop: { schemes: ["wrong"] },
+      },
+    },
+    bundle: {
+      fileAssociations: [
+        { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      ],
+    },
+  };
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing desktop deep-link scheme configuration/i);
+  assert.match(proc.stderr, /plugins\["deep-link"\]/i);
+});
+
+test("fails when .xlsx association is missing a mimeType entry", () => {
+  const config = baseConfig({
+    fileAssociations: [{ ext: ["xlsx"] }],
+  });
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing Linux mimeType fields/i);
+  assert.match(proc.stderr, /xlsx/i);
+});
