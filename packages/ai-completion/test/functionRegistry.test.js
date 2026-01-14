@@ -57,6 +57,14 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("TEXTJOIN", 2), "Expected TEXTJOIN text1 to be a range");
   assert.ok(registry.isRangeArg("TEXTJOIN", 3), "Expected TEXTJOIN text2 to be a range (varargs)");
 
+  // TEXTAFTER/TEXTBEFORE are curated (not present in the Rust catalog yet).
+  assert.ok(registry.getFunction("TEXTAFTER"), "Expected TEXTAFTER to be present");
+  assert.equal(registry.getFunction("TEXTAFTER")?.minArgs, 2, "Expected TEXTAFTER minArgs to be 2");
+  assert.ok(registry.isRangeArg("TEXTAFTER", 0), "Expected TEXTAFTER text to be a range");
+  assert.equal(registry.getArgType("TEXTAFTER", 1), "string", "Expected TEXTAFTER delimiter to be string-like");
+  assert.ok(registry.getFunction("_xlfn.TEXTAFTER"), "Expected _xlfn.TEXTAFTER alias to be present");
+  assert.ok(registry.getFunction("TEXTBEFORE"), "Expected TEXTBEFORE to be present");
+
   // SUBTOTAL(function_num, ref1, [ref2], ...)
   assert.equal(registry.isRangeArg("SUBTOTAL", 0), false, "Expected SUBTOTAL function_num not to be a range");
   assert.ok(registry.isRangeArg("SUBTOTAL", 1), "Expected SUBTOTAL ref1 to be a range");

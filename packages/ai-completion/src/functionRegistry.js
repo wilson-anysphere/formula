@@ -2183,6 +2183,34 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "TEXTAFTER",
+    description: "Returns text that occurs after a given delimiter.",
+    minArgs: 2,
+    maxArgs: 6,
+    args: [
+      { name: "text", type: "range" },
+      { name: "delimiter", type: "string" },
+      { name: "instance_num", type: "number", optional: true },
+      { name: "match_mode", type: "number", optional: true },
+      { name: "match_end", type: "number", optional: true },
+      { name: "if_not_found", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "TEXTBEFORE",
+    description: "Returns text that occurs before a given delimiter.",
+    minArgs: 2,
+    maxArgs: 6,
+    args: [
+      { name: "text", type: "range" },
+      { name: "delimiter", type: "string" },
+      { name: "instance_num", type: "number", optional: true },
+      { name: "match_mode", type: "number", optional: true },
+      { name: "match_end", type: "number", optional: true },
+      { name: "if_not_found", type: "value", optional: true },
+    ],
+  },
+  {
     name: "TEXT",
     description: "Formats a number and converts it to text.",
     args: [
