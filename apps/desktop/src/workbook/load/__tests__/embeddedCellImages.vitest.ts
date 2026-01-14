@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { mergeEmbeddedCellImagesIntoSnapshot } from "../embeddedCellImages.js";
 
 describe("mergeEmbeddedCellImagesIntoSnapshot", () => {
-  it("deduplicates snapshot images and preserves existing cell formats", () => {
+  it("deduplicates snapshot images and preserves existing cell metadata", () => {
     const sheet = {
       id: "Sheet1",
       name: "Sheet1",
-      cells: [{ row: 0, col: 0, value: 123, formula: null, format: { font: { bold: true } } }],
+      cells: [{ row: 0, col: 0, value: 123, formula: "=1+1", format: { font: { bold: true } } }],
     };
 
     const result = mergeEmbeddedCellImagesIntoSnapshot({
@@ -47,7 +47,7 @@ describe("mergeEmbeddedCellImagesIntoSnapshot", () => {
         row: 0,
         col: 0,
         value: { type: "image", value: { imageId: "image2.png", altText: "alt" } },
-        formula: null,
+        formula: "=1+1",
         format: { font: { bold: true } },
       },
       {
@@ -118,4 +118,3 @@ describe("mergeEmbeddedCellImagesIntoSnapshot", () => {
     expect(warn).toHaveBeenCalled();
   });
 });
-

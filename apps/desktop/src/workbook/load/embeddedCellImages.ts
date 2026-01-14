@@ -169,6 +169,7 @@ export function mergeEmbeddedCellImagesIntoSnapshot<
     const existingIdx = indexByCoord.get(key);
     const existing = existingIdx != null ? sheet.cells[existingIdx] : null;
     const existingFormat = existing ? (existing as any).format ?? null : null;
+    const existingFormula = existing && typeof (existing as any).formula === "string" ? (existing as any).formula : null;
 
     const altText = normalizeString(entry.alt_text);
     const imageValue: any = { type: "image", value: { imageId } };
@@ -178,7 +179,7 @@ export function mergeEmbeddedCellImagesIntoSnapshot<
       row,
       col,
       value: imageValue,
-      formula: null,
+      formula: existingFormula,
       format: existingFormat,
     };
 
@@ -195,4 +196,3 @@ export function mergeEmbeddedCellImagesIntoSnapshot<
 
   return { sheets: options.sheets, images };
 }
-
