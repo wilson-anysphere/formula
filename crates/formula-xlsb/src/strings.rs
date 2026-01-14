@@ -195,21 +195,6 @@ const FLAG_PHONETIC: u16 = 0x0002;
 // (see also the shared string parser in `parser.rs`).
 const RICH_RUN_BYTE_LEN: usize = 8;
 
-pub(crate) fn read_xl_wide_string(
-    rr: &mut RecordReader<'_>,
-    flags_width: FlagsWidth,
-) -> Result<ParsedXlsbString, Error> {
-    read_xl_wide_string_impl(rr, flags_width, true)
-}
-
-pub(crate) fn read_xl_wide_string_impl(
-    rr: &mut RecordReader<'_>,
-    flags_width: FlagsWidth,
-    preserve_extras: bool,
-) -> Result<ParsedXlsbString, Error> {
-    Ok(read_xl_wide_string_with_flags(rr, flags_width, preserve_extras)?.1)
-}
-
 pub(crate) fn read_xl_wide_string_with_flags(
     rr: &mut RecordReader<'_>,
     flags_width: FlagsWidth,
@@ -306,7 +291,8 @@ mod tests {
         data.extend_from_slice(&0xAABBCCDDu32.to_le_bytes()); // sentinel "next field"
 
         let mut rr = RecordReader::new(&data);
-        let parsed = read_xl_wide_string(&mut rr, FlagsWidth::U16).expect("parse string");
+        let parsed =
+            read_xl_wide_string_with_flags(&mut rr, FlagsWidth::U16, true).expect("parse string").1;
         assert_eq!(parsed.text, text);
 
         let next = rr.read_u32().expect("read next field");
@@ -329,7 +315,8 @@ mod tests {
         data.extend_from_slice(&0x11223344u32.to_le_bytes());
 
         let mut rr = RecordReader::new(&data);
-        let parsed = read_xl_wide_string(&mut rr, FlagsWidth::U16).expect("parse rich string");
+        let parsed =
+            read_xl_wide_string_with_flags(&mut rr, FlagsWidth::U16, true).expect("parse rich string").1;
         assert_eq!(parsed.text, text);
         assert!(parsed.rich.is_some());
 
@@ -354,7 +341,9 @@ mod tests {
         data.extend_from_slice(&0x55667788u32.to_le_bytes());
 
         let mut rr = RecordReader::new(&data);
-        let parsed = read_xl_wide_string(&mut rr, FlagsWidth::U16).expect("parse phonetic string");
+        let parsed = read_xl_wide_string_with_flags(&mut rr, FlagsWidth::U16, true)
+            .expect("parse phonetic string")
+            .1;
         assert_eq!(parsed.text, text);
         assert_eq!(parsed.phonetic.as_deref(), Some(phonetic_bytes.as_slice()));
 

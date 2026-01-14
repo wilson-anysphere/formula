@@ -2346,7 +2346,21 @@ fn patch_cell_st<W: io::Write>(
     for unit in text.encode_utf16() {
         desired_utf16.extend_from_slice(&unit.to_le_bytes());
     }
-    let preserve_wide_string_bytes = desired_cch == ws.cch && desired_utf16.as_slice() == existing_utf16;
+    // If the decoded UTF-16 bytes are unchanged, preserve the original payload bytes verbatim
+    // (including any rich/phonetic blocks and any unknown trailing bytes) and patch style in-place.
+    //
+    // Compare against both plausible UTF-16 start offsets:
+    // - Flagged layout: UTF-16 begins after the flags byte.
+    // - Simple layout:  UTF-16 begins immediately after `cch` (no flags byte).
+    //
+    // This mirrors the lenient no-op detection logic and ensures we don't accidentally drop
+    // unexpected trailing bytes when a producer emits the simple layout with extra payload data.
+    let simple_utf16_matches = 12usize
+        .checked_add(desired_utf16.len())
+        .and_then(|end| payload.get(12..end))
+        .map_or(false, |raw| raw == desired_utf16.as_slice());
+    let preserve_wide_string_bytes =
+        desired_cch == ws.cch && (desired_utf16.as_slice() == existing_utf16 || simple_utf16_matches);
     if preserve_wide_string_bytes {
         // Preserve the full payload bytes (including any unknown trailing bytes) and patch style
         // in-place. This keeps diffs minimal and retains rich/phonetic payloads.

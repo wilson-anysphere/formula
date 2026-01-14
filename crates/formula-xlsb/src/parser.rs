@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::rgce::DecodeWarning;
 use crate::strings::{
-    read_xl_wide_string, read_xl_wide_string_with_flags, FlagsWidth, ParsedXlsbString,
+    read_xl_wide_string_with_flags, FlagsWidth, ParsedXlsbString,
 };
 
 #[cfg(test)]
@@ -1818,7 +1818,8 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             u32::from_le_bytes(bytes) as usize
                         };
                         let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-                        let simple_utf16_start = start_offset.checked_add(4).ok_or(Error::UnexpectedEof)?;
+                        let simple_utf16_start =
+                            start_offset.checked_add(4).ok_or(Error::UnexpectedEof)?;
                         let simple_utf16_end = simple_utf16_start
                             .checked_add(utf16_len)
                             .ok_or(Error::UnexpectedEof)?;
@@ -1859,8 +1860,9 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             (false, true) => true,
                             (false, false) => return Err(Error::UnexpectedEof),
                             (true, true) => {
-                                let simple_score =
-                                    score_utf16_le_bytes(&rr.data[simple_utf16_start..simple_utf16_end]);
+                                let simple_score = score_utf16_le_bytes(
+                                    &rr.data[simple_utf16_start..simple_utf16_end],
+                                );
                                 let flagged_score = score_utf16_le_bytes(
                                     &rr.data[flagged_utf16_start..flagged_utf16_end],
                                 );
@@ -1875,11 +1877,11 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             // phonetic extras are preserved. If the extras are missing (malformed
                             // flags) fall back to a minimal parse that reads only `[cch][flags][utf16]`.
                             rr.offset = start_offset;
-                            match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
-                                Ok(parsed) => parsed,
+                            match read_xl_wide_string_with_flags(&mut rr, FlagsWidth::U8, true) {
+                                Ok((_flags, parsed)) => parsed,
                                 Err(Error::UnexpectedEof) => {
                                     rr.offset = start_offset;
-                                    let _cch = rr.read_u32()? as usize;
+                                    let cch = rr.read_u32()? as usize;
                                     let _flags = rr.read_u8()?;
                                     ParsedXlsbString {
                                         text: rr.read_utf16_chars(cch)?,

@@ -1,5 +1,5 @@
 use formula_xlsb::biff12_varint;
-use formula_xlsb::{parse_sheet_bin, patch_sheet_bin, CellEdit, CellValue};
+use formula_xlsb::{parse_sheet_bin, patch_sheet_bin, patch_sheet_bin_streaming, CellEdit, CellValue};
 use pretty_assertions::assert_eq;
 use std::io::Cursor;
 
@@ -36,6 +36,26 @@ fn sheet_with_single_cell_st(cell_st_payload: &[u8]) -> Vec<u8> {
     sheet_bin.extend_from_slice(&biff12_record(CELL_ST, cell_st_payload));
     sheet_bin.extend_from_slice(&biff12_record(SHEETDATA_END, &[]));
     sheet_bin
+}
+
+fn find_cell_st_payload(sheet_bin: &[u8]) -> Vec<u8> {
+    const CELL_ST: u32 = 0x0006;
+    let mut cursor = Cursor::new(sheet_bin);
+    loop {
+        let id = biff12_varint::read_record_id(&mut cursor)
+            .expect("read record id")
+            .expect("record id");
+        let len = biff12_varint::read_record_len(&mut cursor)
+            .expect("read record len")
+            .expect("record len") as usize;
+        let start = cursor.position() as usize;
+        let end = start + len;
+        let payload = sheet_bin.get(start..end).expect("payload bytes");
+        cursor.set_position(end as u64);
+        if id == CELL_ST {
+            return payload.to_vec();
+        }
+    }
 }
 
 #[test]
@@ -106,6 +126,68 @@ fn noop_inline_string_simple_layout_with_trailing_bytes_is_preserved() {
 
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
     assert_eq!(patched, sheet_bin);
+}
+
+#[test]
+fn style_update_inline_string_simple_layout_with_trailing_bytes_is_preserved() {
+    // Simple BrtCellSt layout:
+    //   [col:u32][style:u32][cch:u32][utf16 bytes...]
+    //
+    // Some streams contain extra trailing bytes after the UTF-16 text. When applying a *style-only*
+    // update (text unchanged), the patcher should preserve those bytes instead of rewriting the
+    // string payload and dropping the unknown suffix.
+    let text = "Hello".to_string();
+    let cch = text.encode_utf16().count() as u32;
+    let utf16 = utf16_le_bytes(&text);
+    let trailing = [0xDE, 0xAD, 0xBE, 0xEF];
+
+    let mut cell_st_payload = Vec::new();
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    cell_st_payload.extend_from_slice(&cch.to_le_bytes());
+    cell_st_payload.extend_from_slice(&utf16);
+    cell_st_payload.extend_from_slice(&trailing);
+
+    let sheet_bin = sheet_with_single_cell_st(&cell_st_payload);
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text(text.clone()),
+        new_style: Some(7),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    };
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &[edit.clone()]).expect("patch sheet");
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &[edit])
+        .expect("patch sheet streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let parsed = parse_sheet_bin(&mut Cursor::new(&patched_in_mem), &[]).expect("parse patched");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("find cell");
+    assert_eq!(cell.value, CellValue::Text(text));
+    assert_eq!(cell.style, 7);
+
+    let payload = find_cell_st_payload(&patched_in_mem);
+    assert_eq!(
+        u32::from_le_bytes(payload[4..8].try_into().unwrap()),
+        7,
+        "expected style to be updated in-place"
+    );
+    assert!(
+        payload.ends_with(&trailing),
+        "expected trailing bytes to be preserved on style-only update"
+    );
 }
 
 #[test]
