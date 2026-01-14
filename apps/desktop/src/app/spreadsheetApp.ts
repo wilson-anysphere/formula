@@ -9445,6 +9445,20 @@ export class SpreadsheetApp {
     const summary = document.createElement("div");
     summary.className = "formula-range-preview-tooltip__summary";
 
+    // When previewing a multi-cell range that contains formulas, we may need to evaluate the
+    // referenced cells' computed values. Use a shared `{memo, stack}` so dependent formula
+    // evaluations are cached across the preview grid/sample, rather than re-evaluating from
+    // scratch for each individual cell.
+    //
+    // This keeps previews snappy even for small ranges that contain many formulas with shared
+    // dependencies.
+    const sheetCount = (this.document as any)?.model?.sheets?.size;
+    const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+    const evalMemo = new Map<string, Map<number, SpreadsheetValue>>();
+    const evalStack = new Map<string, Set<number>>();
+    const getComputedForPreview = (cell: CellCoord): SpreadsheetValue =>
+      this.computeCellValue(this.sheetId, cell, evalMemo, evalStack, { useEngineCache });
+
     const formatDisplay = (computed: SpreadsheetValue): string => {
       if (computed == null) return "";
       return this.formatCellValueForDisplay(coordScratch, computed);
@@ -9462,7 +9476,7 @@ export class SpreadsheetApp {
         for (let c = 0; c < sampleCols; c += 1) {
           coordScratch.row = startRow + r;
           coordScratch.col = startCol + c;
-          const computed = this.getCellComputedValue(coordScratch);
+          const computed = getComputedForPreview(coordScratch);
           sampleValues[r]![c] = formatDisplay(computed);
         }
       }
@@ -9476,7 +9490,7 @@ export class SpreadsheetApp {
         for (let col = startCol; col <= endCol; col += 1) {
           coordScratch.row = row;
           coordScratch.col = col;
-          const computed = this.getCellComputedValue(coordScratch);
+          const computed = getComputedForPreview(coordScratch);
 
           if (inSampleRow) {
             const sampleColIdx = col - startCol;
