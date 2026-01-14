@@ -15,7 +15,8 @@ fn read_sheet_bin(xlsb_bytes: Vec<u8>) -> Vec<u8> {
     let mut entry = zip
         .by_name("xl/worksheets/sheet1.bin")
         .expect("find sheet1.bin");
-    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    // Avoid pre-allocating based on attacker-controlled ZIP metadata.
+    let mut sheet_bin = Vec::new();
     entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
     sheet_bin
 }

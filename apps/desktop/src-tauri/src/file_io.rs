@@ -3894,7 +3894,8 @@ mod tests {
             let mut entry = input.by_index(i).expect("open zip entry");
             let name = entry.name().to_string();
 
-            let mut contents = Vec::with_capacity(entry.size() as usize);
+            // Avoid pre-allocating based on attacker-controlled ZIP metadata.
+            let mut contents = Vec::new();
             entry.read_to_end(&mut contents).expect("read zip entry");
 
             let contents = if zip_entry_name_matches(&name, "xl/worksheets/sheet1.bin") {

@@ -116,7 +116,8 @@ fn write_fixture_without_data_validations(
             continue;
         }
         let name = file.name().to_string();
-        let mut buf = Vec::with_capacity(file.size() as usize);
+        // Avoid pre-allocating based on attacker-controlled ZIP metadata.
+        let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
         if name == "xl/worksheets/sheet1.xml" {
@@ -175,4 +176,3 @@ fn clearing_data_validations_removes_data_validations_block() -> Result<(), Box<
 
     Ok(())
 }
-
