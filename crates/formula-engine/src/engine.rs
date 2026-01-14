@@ -17673,6 +17673,124 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_sum_over_sheet_span_error_precedence_follows_tab_order() {
+        fn setup(engine: &mut Engine) {
+            for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+                engine.ensure_sheet(sheet);
+            }
+
+            engine
+                .set_cell_value("Sheet1", "A1", Value::Error(ErrorKind::Div0))
+                .unwrap();
+            engine
+                .set_cell_value("Sheet2", "A1", Value::Error(ErrorKind::Value))
+                .unwrap();
+            engine
+                .set_cell_value("Sheet3", "A1", Value::Error(ErrorKind::Name))
+                .unwrap();
+
+            // Reorder tabs to [Sheet3, Sheet2, Sheet1].
+            let sheet1_id = engine.workbook.sheet_id("Sheet1").unwrap();
+            let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+            let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
+            engine
+                .workbook
+                .set_sheet_order(vec![sheet3_id, sheet2_id, sheet1_id]);
+
+            engine
+                .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet3!A1)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure the formula is actually bytecode-compiled.
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let compiled_b1 = bytecode_engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(compiled_b1, CompiledFormula::Bytecode(_)),
+            "expected SUM(Sheet1:Sheet3!A1) to compile to bytecode"
+        );
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_value = bytecode_engine.get_cell_value("Sheet1", "B1");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_value = ast_engine.get_cell_value("Sheet1", "B1");
+
+        assert_eq!(bc_value, ast_value, "bytecode/AST mismatch");
+        assert_eq!(bc_value, Value::Error(ErrorKind::Name));
+    }
+
+    #[test]
+    fn bytecode_and_over_sheet_span_error_precedence_follows_tab_order() {
+        fn setup(engine: &mut Engine) {
+            for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+                engine.ensure_sheet(sheet);
+            }
+
+            engine
+                .set_cell_value("Sheet1", "A1", Value::Error(ErrorKind::Div0))
+                .unwrap();
+            engine
+                .set_cell_value("Sheet2", "A1", Value::Error(ErrorKind::Value))
+                .unwrap();
+            engine
+                .set_cell_value("Sheet3", "A1", Value::Error(ErrorKind::Name))
+                .unwrap();
+
+            // Reorder tabs to [Sheet3, Sheet2, Sheet1].
+            let sheet1_id = engine.workbook.sheet_id("Sheet1").unwrap();
+            let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+            let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
+            engine
+                .workbook
+                .set_sheet_order(vec![sheet3_id, sheet2_id, sheet1_id]);
+
+            engine
+                .set_cell_formula("Sheet1", "B1", "=AND(Sheet1:Sheet3!A1)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure the formula is actually bytecode-compiled.
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let compiled_b1 = bytecode_engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(compiled_b1, CompiledFormula::Bytecode(_)),
+            "expected AND(Sheet1:Sheet3!A1) to compile to bytecode"
+        );
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_value = bytecode_engine.get_cell_value("Sheet1", "B1");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_value = ast_engine.get_cell_value("Sheet1", "B1");
+
+        assert_eq!(bc_value, ast_value, "bytecode/AST mismatch");
+        assert_eq!(bc_value, Value::Error(ErrorKind::Name));
+    }
+
+    #[test]
     fn bytecode_sheet_span_expansion_respects_tab_order_after_reorder_and_rebuild() {
         let mut engine = Engine::new();
         for sheet in ["Sheet1", "Sheet2", "Sheet3", "Sheet4"] {
