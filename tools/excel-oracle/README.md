@@ -8,6 +8,7 @@ The intent is to continuously compare our formula engine against Excel across a 
 
 - A deterministic, machine-readable **case corpus** (`tests/compatibility/excel-oracle/cases.json`)
 - A Windows-only **Excel COM automation runner** that evaluates all cases in **real Excel** and exports results (`run-excel-oracle.ps1`)
+- A Windows-only **function-translation extractor** to generate locale function name sources via `Range.Formula/FormulaLocal` (`extract-function-translations.ps1`)
 - A **comparison tool** that diffs engine output vs Excel output and emits a mismatch report (`compare.py`)
 - A lightweight **compatibility gate** that runs the engine + comparison on a bounded subset (`compat_gate.py`)
 - A GitHub Actions workflow (`.github/workflows/excel-compat.yml`) wired to run on `windows-latest`

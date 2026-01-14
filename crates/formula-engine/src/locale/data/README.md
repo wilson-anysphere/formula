@@ -41,6 +41,31 @@ Locale-specific function translations are sourced from deterministic JSON files 
 
 Missing entries are treated as identity mappings (canonical == localized).
 
+#### Generating `sources/<locale>.json` from a real Excel install (Windows)
+
+The most reliable way to obtain a complete translation mapping for a locale is to ask
+**real Microsoft Excel** what it displays for each canonical function name.
+
+From repo root on Windows (requires Excel desktop installed and configured for that locale):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+  -LocaleId de-DE `
+  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+```
+
+For debugging, you can also pass:
+
+- `-Visible` to watch Excel work
+- `-MaxFunctions N` to run a smaller subset
+
+After updating the source JSON, regenerate and verify the generated TSVs:
+
+```bash
+node scripts/generate-locale-function-tsv.js
+node scripts/generate-locale-function-tsv.js --check
+```
+
 ### Error translations (`<locale>.errors.tsv`)
 
 Error literal translations are maintained in the locale registry (`src/locale/registry.rs`), but we
