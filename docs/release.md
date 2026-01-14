@@ -1296,6 +1296,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
     - SBOM: `sbom.spdx.json` (SPDX JSON; Rust + JS dependency set; also uploaded as a workflow artifact named `sbom-<tag>`)
     - Build provenance bundles: `provenance-*.intoto.jsonl` (also uploaded as workflow artifacts `provenance-*`)
+      - Expected (one per target): `provenance-universal-apple-darwin.intoto.jsonl`, `provenance-x86_64-pc-windows-msvc.intoto.jsonl`, `provenance-aarch64-pc-windows-msvc.intoto.jsonl`, `provenance-x86_64-unknown-linux-gnu.intoto.jsonl`, `provenance-aarch64-unknown-linux-gnu.intoto.jsonl`
     - macOS (**universal**): `.dmg` (installer) + updater payload archive (`*.app.tar.gz` preferred;
       allow `*.tar.gz`/`*.tgz`)
     - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
