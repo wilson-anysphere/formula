@@ -829,15 +829,21 @@ pub(crate) fn display_supbook_name(raw: &str) -> String {
     // entire path in brackets (`[C:\tmp\Book.xlsx]`). Normalize these cases so we can safely
     // produce `[Book]Sheet` prefixes for external workbook references.
     let without_nuls = raw.replace('\0', "");
-    let basename = without_nuls
+    let trimmed_full = without_nuls.trim();
+    let has_full_wrapper = trimmed_full.starts_with('[') && trimmed_full.ends_with(']');
+
+    let basename = trimmed_full
         .rsplit(['/', '\\'])
         .next()
-        .unwrap_or(&without_nuls);
+        .unwrap_or(trimmed_full);
     let trimmed = basename.trim();
+    let has_basename_wrapper = trimmed.starts_with('[') && trimmed.ends_with(']');
 
     let mut inner = trimmed;
-    inner = inner.strip_prefix('[').unwrap_or(inner);
-    inner = inner.strip_suffix(']').unwrap_or(inner);
+    if has_full_wrapper || has_basename_wrapper {
+        inner = inner.strip_prefix('[').unwrap_or(inner);
+        inner = inner.strip_suffix(']').unwrap_or(inner);
+    }
     inner.to_string()
 }
 
@@ -986,5 +992,16 @@ mod tests {
             "Book2.xlsb"
         );
         assert_eq!(display_supbook_name("[Book2.xlsb]"), "Book2.xlsb");
+    }
+
+    #[test]
+    fn display_supbook_name_preserves_literal_brackets_in_workbook_names() {
+        // Workbook names may contain literal `[` / `]` characters. Preserve these when the input
+        // is not wrapper-bracketed.
+        assert_eq!(
+            display_supbook_name("[LeadingBracket.xlsb"),
+            "[LeadingBracket.xlsb"
+        );
+        assert_eq!(display_supbook_name("Book2.xlsb]"), "Book2.xlsb]");
     }
 }

@@ -316,20 +316,32 @@ fn workbook_name_from_virt_path(virt_path: &str) -> String {
     // Best-effort conversion:
     // - strip embedded NULs
     // - take basename after path separators
-    // - strip brackets if present
+    // - strip Excel-style wrapper brackets if present (but preserve literal `[` / `]` characters
+    //   in actual workbook names)
     let without_nuls = virt_path.replace('\0', "");
 
-    let basename = without_nuls
+    let trimmed_full = without_nuls.trim();
+    let has_full_wrapper = trimmed_full.starts_with('[') && trimmed_full.ends_with(']');
+
+    let basename = trimmed_full
         .rsplit(['\\', '/'])
         .next()
-        .unwrap_or(&without_nuls);
+        .unwrap_or(trimmed_full);
 
     let trimmed = basename.trim();
+    let has_basename_wrapper = trimmed.starts_with('[') && trimmed.ends_with(']');
+
     // Be permissive about bracket placement: some producers wrap the full path in brackets
     // (`[C:\\path\\Book.xlsx]`), which means we might lose the opening `[` when taking the basename.
+    //
+    // Only strip wrapper brackets when the input appears to be wrapper-bracketed, so we don't
+    // drop legitimate leading `[` / trailing `]` characters in workbook names.
     let mut inner = trimmed;
-    inner = inner.strip_prefix('[').unwrap_or(inner);
-    inner = inner.strip_suffix(']').unwrap_or(inner);
+    if has_full_wrapper || has_basename_wrapper {
+        inner = inner.strip_prefix('[').unwrap_or(inner);
+        inner = inner.strip_suffix(']').unwrap_or(inner);
+    }
+
     inner.to_string()
 }
 
@@ -885,6 +897,41 @@ mod tests {
         let sb = &parsed.supbooks[0];
         assert_eq!(sb.kind, SupBookKind::ExternalWorkbook);
         assert_eq!(sb.workbook_name.as_deref(), Some("Book2.xlsx"));
+    }
+
+    #[test]
+    fn preserves_literal_brackets_in_workbook_names() {
+        // Workbook names may contain literal `[` / `]` characters. Those are distinct from the
+        // Excel-style wrapper brackets used in some SUPBOOK virtPath strings.
+        //
+        // When the virtPath is a plain workbook name (no wrapper pair), preserve literal bracket
+        // characters rather than stripping them.
+        for (virt_path, expected) in [
+            ("[LeadingBracket.xlsx", "[LeadingBracket.xlsx"),
+            ("Book2.xlsx]", "Book2.xlsx]"),
+        ] {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
+            payload.extend_from_slice(&xl_unicode_string_compressed(virt_path));
+
+            let stream = [
+                record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+                record(RECORD_SUPBOOK, &payload),
+                record(records::RECORD_EOF, &[]),
+            ]
+            .concat();
+
+            let parsed = parse_biff8_supbook_table(&stream, 1252);
+            assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+            assert_eq!(parsed.supbooks.len(), 1);
+            let sb = &parsed.supbooks[0];
+            assert_eq!(sb.kind, SupBookKind::ExternalWorkbook);
+            assert_eq!(
+                sb.workbook_name.as_deref(),
+                Some(expected),
+                "virt_path={virt_path:?}"
+            );
+        }
     }
 
     #[test]
