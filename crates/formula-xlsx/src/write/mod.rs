@@ -928,16 +928,59 @@ fn build_parts(
                 _ => false,
             });
         let original_drawings = doc.meta.drawings_snapshot.get(&sheet_meta.worksheet_id);
-        let drawings_changed = has_drawings
-            && match original_drawings {
-                Some(orig) => orig != &sheet.drawings,
-                None => true,
-            };
+        let drawings_changed = if !has_drawings {
+            false
+        } else if let Some(orig) = original_drawings {
+            orig != &sheet.drawings
+        } else if has_existing_drawing_part && !missing_drawing_media {
+            // Snapshot missing (e.g. workbook not loaded via `load_from_bytes`, or drawing parsing
+            // failed on load). Fall back to parsing the existing drawing part to determine whether
+            // we need to rewrite it.
+            //
+            // Best-effort: if parsing fails, assume unchanged so we preserve the original bytes.
+            existing_drawing_part_path
+                .as_deref()
+                .and_then(|drawing_path| {
+                    let mut tmp_workbook = formula_model::Workbook::new();
+                    crate::drawings::DrawingPart::parse_from_parts(
+                        sheet_index,
+                        drawing_path,
+                        &parts,
+                        &mut tmp_workbook,
+                    )
+                    .ok()
+                    .map(|part| part.objects != sheet.drawings)
+                })
+                .unwrap_or(false)
+        } else {
+            // No baseline; treat as changed so we emit a drawing part when needed.
+            true
+        };
         let drawings_need_emit =
             has_drawings && (!has_existing_drawing_part || missing_drawing_media || drawings_changed);
-        let drawings_need_remove = !has_drawings
-            && original_drawings
-                .is_some_and(|orig| !orig.is_empty());
+        let drawings_need_remove = if has_drawings {
+            false
+        } else if let Some(orig) = original_drawings {
+            !orig.is_empty()
+        } else if has_existing_drawing_part {
+            // Snapshot missing; best-effort determine if the source drawing part was non-empty.
+            existing_drawing_part_path
+                .as_deref()
+                .and_then(|drawing_path| {
+                    let mut tmp_workbook = formula_model::Workbook::new();
+                    crate::drawings::DrawingPart::parse_from_parts(
+                        sheet_index,
+                        drawing_path,
+                        &parts,
+                        &mut tmp_workbook,
+                    )
+                    .ok()
+                    .map(|part| !part.objects.is_empty())
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
 
         if has_drawings && !drawings_need_emit {
             if let Some(drawing_part_path) = existing_drawing_part_path.as_deref() {
