@@ -216,7 +216,11 @@ pub fn parse_dax_column_ref(input: &str) -> Option<(String, String)> {
     }
 
     let table = if raw_table.starts_with('\'') {
-        parse_dax_quoted_identifier(raw_table)?
+        let table = parse_dax_quoted_identifier(raw_table)?;
+        if table.is_empty() {
+            return None;
+        }
+        table
     } else {
         let t = raw_table.trim();
         if t.is_empty() {
@@ -522,6 +526,9 @@ mod tests {
             parse_dax_column_ref("'O''Reilly'[Name]"),
             Some(("O'Reilly".to_string(), "Name".to_string()))
         );
+        assert_eq!(parse_dax_column_ref("''[Column]"), None);
+        assert_eq!(parse_dax_column_ref("'O'Reilly'[Name]"), None);
+        assert_eq!(parse_dax_column_ref("'Table'X[Column]"), None);
         assert_eq!(parse_dax_column_ref("[Measure]"), None);
         assert_eq!(parse_dax_column_ref("Table[]"), None);
     }
