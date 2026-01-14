@@ -136,8 +136,13 @@ import sys
 
 plist_path = sys.argv[1]
 expected = sys.argv[2]
-with open(plist_path, "rb") as f:
-    data = plistlib.load(f)
+try:
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+except Exception as e:
+    # Exit code 2 is reserved for parse failures; exit code 1 is "valid plist, but missing scheme".
+    print(str(e))
+    raise SystemExit(2)
 
 schemes = []
 for url_type in data.get("CFBundleURLTypes", []) or []:
@@ -156,7 +161,9 @@ PY
   local status=$?
   set -e
 
-  if [ "$status" -ne 0 ]; then
+  if [ "$status" -eq 2 ]; then
+    die "failed to parse Info.plist at ${plist_path}: ${found}"
+  elif [ "$status" -ne 0 ]; then
     die "Info.plist does not declare expected URL scheme '${expected_scheme}'. Found: ${found}. (Check apps/desktop/src-tauri/Info.plist)"
   fi
 }
@@ -189,12 +196,30 @@ cleanup() {
 
   set +e
 
-  if [ -n "${CURRENT_MOUNT_DEV}" ]; then
-    hdiutil detach "${CURRENT_MOUNT_DEV}" >/dev/null 2>&1 || hdiutil detach -force "${CURRENT_MOUNT_DEV}" >/dev/null 2>&1
-    CURRENT_MOUNT_DEV=""
-  fi
+  if [ -n "${CURRENT_MOUNT_DEV}" ] || [ -n "${CURRENT_MOUNT_POINT}" ]; then
+    local dev="${CURRENT_MOUNT_DEV}"
+    local mount_point="${CURRENT_MOUNT_POINT}"
+    local detached=0
 
-  CURRENT_MOUNT_POINT=""
+    if [ -n "${dev}" ]; then
+      hdiutil detach "${dev}" >/dev/null 2>&1 && detached=1
+      if [ "$detached" -eq 0 ]; then
+        hdiutil detach -force "${dev}" >/dev/null 2>&1 && detached=1
+      fi
+    fi
+
+    # Fallback: `hdiutil detach` also accepts the mount point. This is useful when the dev-entry
+    # points to a slice (e.g. /dev/diskXs1) and the detach prefers the parent disk.
+    if [ "$detached" -eq 0 ] && [ -n "${mount_point}" ]; then
+      hdiutil detach "${mount_point}" >/dev/null 2>&1 && detached=1
+      if [ "$detached" -eq 0 ]; then
+        hdiutil detach -force "${mount_point}" >/dev/null 2>&1 && detached=1
+      fi
+    fi
+
+    CURRENT_MOUNT_DEV=""
+    CURRENT_MOUNT_POINT=""
+  fi
 
   if [ "${#CURRENT_TMP_FILES[@]}" -gt 0 ]; then
     rm -f "${CURRENT_TMP_FILES[@]}" >/dev/null 2>&1 || true
@@ -420,6 +445,11 @@ validate_app_tarball() {
   cleanup
 }
 
+dedupe_lines() {
+  # Read newline-delimited paths on stdin and print unique paths, preserving first-seen order.
+  python3 -c $'import sys\nseen=set()\nfor line in sys.stdin.read().splitlines():\n    if not line:\n        continue\n    if line in seen:\n        continue\n    seen.add(line)\n    print(line)\n'
+}
+
 main() {
   local dmgs=()
   local app_tars=()
@@ -446,20 +476,63 @@ main() {
       "$REPO_ROOT/target"
     )
 
+    local nullglob_was_set=0
+    if shopt -q nullglob; then
+      nullglob_was_set=1
+    fi
+    shopt -s nullglob
+
     local root
     for root in "${roots[@]}"; do
       [ -d "$root" ] || continue
 
-      # DMG artifacts.
-      while IFS= read -r -d '' path; do
-        dmgs+=("$path")
-      done < <(find "$root" -type f -path "*/release/bundle/dmg/*.dmg" -print0 2>/dev/null || true)
-
-      # Optional .app.tar.gz artifacts.
-      while IFS= read -r -d '' path; do
-        app_tars+=("$path")
-      done < <(find "$root" -type f -path "*/release/bundle/macos/*.app.tar.gz" -print0 2>/dev/null || true)
+      # Fast path: use globs against the expected bundle output directories.
+      dmgs+=("$root/release/bundle/dmg/"*.dmg)
+      dmgs+=("$root"/*/release/bundle/dmg/*.dmg)
+      app_tars+=("$root/release/bundle/macos/"*.app.tar.gz)
+      app_tars+=("$root"/*/release/bundle/macos/*.app.tar.gz)
     done
+
+    if [ "$nullglob_was_set" -eq 0 ]; then
+      shopt -u nullglob
+    fi
+
+    # Fallback: traverse target roots only when the expected globs produced nothing (layout changed).
+    if [ "${#dmgs[@]}" -eq 0 ] || [ "${#app_tars[@]}" -eq 0 ]; then
+      for root in "${roots[@]}"; do
+        [ -d "$root" ] || continue
+
+        if [ "${#dmgs[@]}" -eq 0 ]; then
+          while IFS= read -r -d '' path; do
+            dmgs+=("$path")
+          done < <(find "$root" -type f -path "*/release/bundle/dmg/*.dmg" -print0 2>/dev/null || true)
+        fi
+
+        if [ "${#app_tars[@]}" -eq 0 ]; then
+          while IFS= read -r -d '' path; do
+            app_tars+=("$path")
+          done < <(find "$root" -type f -path "*/release/bundle/macos/*.app.tar.gz" -print0 2>/dev/null || true)
+        fi
+      done
+    fi
+
+    if [ "${#dmgs[@]}" -gt 1 ]; then
+      local deduped_dmgs
+      deduped_dmgs="$(printf '%s\n' "${dmgs[@]}" | dedupe_lines)"
+      dmgs=()
+      while IFS= read -r line; do
+        [ -n "$line" ] && dmgs+=("$line")
+      done <<<"$deduped_dmgs"
+    fi
+
+    if [ "${#app_tars[@]}" -gt 1 ]; then
+      local deduped_app_tars
+      deduped_app_tars="$(printf '%s\n' "${app_tars[@]}" | dedupe_lines)"
+      app_tars=()
+      while IFS= read -r line; do
+        [ -n "$line" ] && app_tars+=("$line")
+      done <<<"$deduped_app_tars"
+    fi
   fi
 
   if [ "${#dmgs[@]}" -eq 0 ]; then
