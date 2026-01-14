@@ -10,14 +10,16 @@ import { getPrimaryCommandKeybindingAria, getPrimaryCommandKeybindingDisplay } f
  * tooltips/menus can display keybinding hints.
  */
 const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
-  // --- File -------------------------------------------------------------------
-  // File tab buttons are wired through ribbon-specific ids, but the keyboard shortcuts
-  // are registered against the canonical workbench file commands.
+  // --- File ------------------------------------------------------------------
+  // File tab uses Excel-like ids (e.g. `file.save.save`) but the keyboard shortcuts
+  // are registered against the canonical `workbench.*` file commands.
   "file.new.new": "workbench.newWorkbook",
   "file.new.blankWorkbook": "workbench.newWorkbook",
   "file.open.open": "workbench.openWorkbook",
   "file.save.save": "workbench.saveWorkbook",
   "file.save.saveAs": "workbench.saveWorkbookAs",
+  "file.save.saveAs.copy": "workbench.saveWorkbookAs",
+  "file.save.saveAs.download": "workbench.saveWorkbookAs",
   "file.print.print": "workbench.print",
   "file.options.close": "workbench.closeWorkbook",
 

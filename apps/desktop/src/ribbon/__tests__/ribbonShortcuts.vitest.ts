@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "../ribbonShortcuts.js";
 
 describe("ribbonShortcuts", () => {
-  it("maps file tab ribbon ids to workbench.* keybindings", () => {
+  it("maps file.* ribbon ids to workbench.* keybindings", () => {
     const displayIndex = new Map<string, string[]>([
       ["workbench.newWorkbook", ["Ctrl+N"]],
       ["workbench.openWorkbook", ["Ctrl+O"]],
@@ -20,11 +20,13 @@ describe("ribbonShortcuts", () => {
     expect(shortcutById["file.open.open"]).toBe("Ctrl+O");
     expect(shortcutById["file.save.save"]).toBe("Ctrl+S");
     expect(shortcutById["file.save.saveAs"]).toBe("Ctrl+Shift+S");
+    expect(shortcutById["file.save.saveAs.copy"]).toBe("Ctrl+Shift+S");
+    expect(shortcutById["file.save.saveAs.download"]).toBe("Ctrl+Shift+S");
     expect(shortcutById["file.print.print"]).toBe("Ctrl+P");
     expect(shortcutById["file.options.close"]).toBe("Ctrl+W");
   });
 
-  it("maps file tab ribbon ids to workbench.* aria-keyshortcuts", () => {
+  it("maps file.* ribbon ids to workbench.* aria-keyshortcuts", () => {
     const ariaIndex = new Map<string, string[]>([
       ["workbench.newWorkbook", ["Control+N"]],
       ["workbench.openWorkbook", ["Control+O"]],
@@ -41,6 +43,8 @@ describe("ribbonShortcuts", () => {
     expect(ariaById["file.open.open"]).toBe("Control+O");
     expect(ariaById["file.save.save"]).toBe("Control+S");
     expect(ariaById["file.save.saveAs"]).toBe("Control+Shift+S");
+    expect(ariaById["file.save.saveAs.copy"]).toBe("Control+Shift+S");
+    expect(ariaById["file.save.saveAs.download"]).toBe("Control+Shift+S");
     expect(ariaById["file.print.print"]).toBe("Control+P");
     expect(ariaById["file.options.close"]).toBe("Control+W");
   });
