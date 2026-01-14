@@ -862,6 +862,7 @@ export type CellValue =
 Error surface (host contract):
 
 - Rust functions return `Result<T, WhatIfError<_>>`. WASM bindings should throw a JS `Error` whose message is `WhatIfError::to_string()` (e.g. `"invalid parameters: iterations must be > 0"`).
+  - When using `EngineWhatIfModel`, cell-ref parse failures and engine recalculation failures surface as `WhatIfError::Model(EngineError)` and format like `"model error: ..."` (exact message depends on the engine error kind).
 
 ### Goal Seek
 
@@ -1264,9 +1265,16 @@ Validation + edge cases (Rust behavior):
     - `true`: the best solution is applied to the model.
     - `false`: the original variable values are restored (the solve still recalculates during the search).
 - Engine integration (`EngineSolverModel`):
-  - Decision variables must be coercible to numbers at construction time; otherwise `EngineSolverModel::new` fails with a `SolverError` like `"cell Sheet1!A1 is not numeric (...)"`.
-  - Objective and constraint cells are coerced per-iteration; non-numeric values become `NaN` (methods treat non-finite values as very bad via a large penalty).
-  - Cell refs accept the same forms as What‑If (`A1` default-sheet, `Sheet!A1`, `'My Sheet'!A1`).
+  - Cell-ref parsing:
+    - Accepted forms include `A1` (default sheet), `Sheet1!A1`, and `'My Sheet'!A1` (quoted with Excel escaping `''`).
+    - Invalid refs fail fast during `EngineSolverModel::new` (e.g. empty refs, missing sheet name when `!` is present).
+  - Numeric coercion:
+    - Decision variables are read **strictly** at construction time:
+      - accepted: numbers, booleans (`TRUE`→1, `FALSE`→0), blanks (`0`), and numeric text (parsed using the engine’s `ValueLocaleConfig`, so thousands/decimal separators and common adornments are accepted)
+      - rejected: arrays/spills and any value whose display string can’t be parsed as a finite number
+      - failure returns a `SolverError` like: `"cell Sheet1!A1 is not numeric (value: ...)"`.
+    - Objective + constraint cells are re-read after every `recalc()` using the same coercion rules, but **non-coercible values become `NaN`** rather than throwing.
+      - Downstream solver code treats non-finite objective/constraint values as very bad via a fixed penalty (`NON_FINITE_PENALTY = 1e30`).
 
 ---
 
