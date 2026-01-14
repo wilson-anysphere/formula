@@ -199,6 +199,8 @@ describe("SpreadsheetApp drawings teardown", () => {
     const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
     expect(selectionCanvas).toBeTruthy();
     const interactionTarget = selectionCanvas!;
+    // JSDOM returns a default zero-sized rect for canvases; align with our stubbed root rect so
+    // pointer coordinate conversion + hit-testing behaves consistently.
     interactionTarget.getBoundingClientRect = root.getBoundingClientRect;
 
     // Drag the object slightly: should call `setObjects`.
@@ -231,8 +233,8 @@ describe("SpreadsheetApp drawings teardown", () => {
       expect((app as any).insertImageInput).toBeNull();
     }
 
-    // Disposing while a drag gesture is in progress may cancel the gesture by restoring the
-    // pre-drag object list. Clear spies after dispose so we only assert on post-dispose events.
+    // Disposing may cancel an in-flight gesture by restoring the pre-drag object list. Clear spies
+    // after dispose so we only assert on *post-dispose* pointer events.
     setObjectsSpy.mockClear();
 
     dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });

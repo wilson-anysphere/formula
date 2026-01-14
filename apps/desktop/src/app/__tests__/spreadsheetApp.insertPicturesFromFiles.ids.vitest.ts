@@ -110,7 +110,7 @@ describe("SpreadsheetApp.insertPicturesFromFiles ids", () => {
     vi.restoreAllMocks();
   });
 
-  it("allocates collision-resistant numeric drawing ids (stringified) when inserting pictures", async () => {
+  it("allocates collision-resistant numeric drawing ids when inserting pictures", async () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
@@ -132,14 +132,16 @@ describe("SpreadsheetApp.insertPicturesFromFiles ids", () => {
 
       expect(drawings).toHaveLength(files.length);
 
-      const ids = new Set<number>();
+      const ids = new Set<string>();
       for (const d of drawings) {
+        // DocumentController persists drawing ids as strings for stable JSON snapshots.
+        // They should still be collision-resistant safe-integer identifiers.
         expect(typeof d.id).toBe("string");
-        expect(d.id).toMatch(/^[0-9]+$/);
+        expect(String(d.id)).toMatch(/^[0-9]+$/);
         const parsed = Number(d.id);
         expect(Number.isSafeInteger(parsed)).toBe(true);
         expect(parsed).toBeGreaterThan(0);
-        ids.add(parsed);
+        ids.add(String(d.id));
       }
 
       expect(ids.size).toBe(files.length);

@@ -85,16 +85,28 @@ if (!storageUsable(existing)) {
   installLocalStorage(new MemoryLocalStorage());
 }
 
+// ---------------------------------------------------------------------------
+// DOM polyfills for jsdom-based unit tests
+// ---------------------------------------------------------------------------
+//
+// Vitest's default environment for the desktop package is `node`, but many UI
+// tests opt into jsdom via `@vitest-environment jsdom`. Keep these shims
+// lightweight and feature-detect so they don't interfere with Node-only tests.
+
 // JSDOM does not always provide PointerEvent. Some tests (e.g. shared-grid drawing interactions)
 // rely on dispatching pointer events; provide a minimal shim backed by MouseEvent.
 if (typeof (globalThis as any).PointerEvent === "undefined" && typeof (globalThis as any).MouseEvent === "function") {
   const Base = (globalThis as any).MouseEvent as typeof MouseEvent;
   class PointerEventShim extends Base {
     pointerId: number;
+    pointerType: string;
+    isPrimary: boolean;
 
-    constructor(type: string, init?: PointerEventInit) {
+    constructor(type: string, init: PointerEventInit = {}) {
       super(type, init);
-      this.pointerId = typeof init?.pointerId === "number" ? init.pointerId : 1;
+      this.pointerId = typeof init.pointerId === "number" ? init.pointerId : 1;
+      this.pointerType = typeof init.pointerType === "string" ? init.pointerType : "mouse";
+      this.isPrimary = typeof init.isPrimary === "boolean" ? init.isPrimary : true;
     }
   }
 
@@ -149,4 +161,28 @@ if (typeof (globalThis as any).HTMLElement === "function") {
       };
     }
   }
+}
+
+// jsdom's File/Blob implementations may omit `arrayBuffer()` depending on the
+// version. Picture insertion paths rely on it; provide a minimal polyfill so
+// tests can exercise those codepaths deterministically.
+if (typeof Blob !== "undefined" && typeof (Blob.prototype as any).arrayBuffer !== "function") {
+  (Blob.prototype as any).arrayBuffer = function arrayBufferPolyfill(): Promise<ArrayBuffer> {
+    // Prefer FileReader when available (jsdom).
+    if (typeof FileReader !== "undefined") {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(reader.error ?? new Error("Failed to read Blob as ArrayBuffer"));
+        reader.readAsArrayBuffer(this as Blob);
+      });
+    }
+
+    // Fallback: use Response if present (Node 18+ / undici).
+    if (typeof Response !== "undefined") {
+      return new Response(this as Blob).arrayBuffer();
+    }
+
+    return Promise.reject(new Error("Blob.arrayBuffer is not available in this environment"));
+  };
 }

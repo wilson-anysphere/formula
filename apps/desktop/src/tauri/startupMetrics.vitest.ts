@@ -476,9 +476,9 @@ describe("startupMetrics", () => {
         (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
       }, 5);
 
-      vi.advanceTimersByTime(10);
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      // Use the async fake-timer helpers so pending promise continuations are flushed as timers run.
+      await vi.advanceTimersByTimeAsync(20);
+      await Promise.resolve();
 
       expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
       expect(listen).toHaveBeenCalled();

@@ -21317,6 +21317,35 @@ export class SpreadsheetApp {
           // Only rewrite if we found a matching closing bracket.
           if (depth === 0 && j > start) {
             const segment = input.slice(start, j);
+
+            // Whole-row structured references (`[@]` / `Table[@]`) are valid Excel syntax and should
+            // resolve to the current row's values. Unfortunately the lightweight formula tokenizer
+            // does not reliably surface `[@]` as a single reference token, so rewrite it to an
+            // explicit A1 range before invoking `evaluateFormula`.
+            if (segment === "[@]") {
+              const resolvedTableName = (() => {
+                if (!hasExplicitTablePrefix) return tableName;
+                let k = start - 1;
+                while (k >= 0 && isIdentifierPart(input[k] ?? "")) k -= 1;
+                const name = input.slice(k + 1, start).trim();
+                return name || null;
+              })();
+
+              if (resolvedTableName) {
+                const resolved = resolveStructuredRefToReference(`${resolvedTableName}${segment}`);
+                if (resolved) {
+                  if (hasExplicitTablePrefix && out.endsWith(resolvedTableName)) {
+                    // Replace the full `Table[@]` token (we've already emitted the table identifier).
+                    out = out.slice(0, out.length - resolvedTableName.length);
+                  }
+                  out += resolved;
+                  changed = true;
+                  i = j;
+                  continue;
+                }
+              }
+            }
+
             // Column names containing spaces are written in the implicit-this-row shorthand
             // using a nested bracket group: `[@[Total Amount]]`.
             if (segment.startsWith("[@[") && segment.endsWith("]]") && segment.length > 5) {
