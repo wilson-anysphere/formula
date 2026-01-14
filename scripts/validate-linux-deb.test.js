@@ -257,6 +257,47 @@ test("validate-linux-deb fails when the expected binary path is missing", { skip
   assert.match(proc.stderr, /missing expected desktop binary/i);
 });
 
+test("validate-linux-deb accepts when DEB Version has a Debian revision suffix (-1)", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    fakeVersion: `${expectedVersion}-1`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("validate-linux-deb fails when DEB Version uses a non-numeric suffix after the expected version", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    fakeVersion: `${expectedVersion}-beta.1`,
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /DEB version mismatch/i);
+});
+
 test("validate-linux-deb accepts when Debian Package name is overridden for validation", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
   const binDir = join(tmp, "bin");

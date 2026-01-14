@@ -338,18 +338,16 @@ for deb in "${debs[@]}"; do
     # Debian version format: [epoch:]upstream[-revision]
     deb_version_no_epoch="${deb_version_no_epoch#*:}"
   fi
-  # Debian version format: [epoch:]upstream[-revision]
-  #
-  # Prefer matching the full "epoch-stripped" value first so pre-release versions
-  # that contain hyphens (e.g. 1.2.3-beta.1) are not incorrectly treated as
-  # "upstream + Debian revision" unless a separate revision suffix is present.
   if [[ "$deb_version_no_epoch" != "$EXPECTED_DESKTOP_VERSION" ]]; then
-    deb_upstream_version="${deb_version_no_epoch}"
-    if [[ "$deb_upstream_version" == *-* ]]; then
-      deb_upstream_version="${deb_upstream_version%-*}"
-    fi
-    if [[ "$deb_upstream_version" != "$EXPECTED_DESKTOP_VERSION" ]]; then
-      fail "$deb: version mismatch (dpkg Version). Expected ${EXPECTED_DESKTOP_VERSION}, found ${deb_version}"
+    # Allow Debian revision suffixes (e.g. 1.2.3-1, 1.2.3-beta.1-1), but avoid accepting
+    # non-numeric suffixes like 1.2.3-beta.1 when EXPECTED_DESKTOP_VERSION is 1.2.3.
+    if [[ "$deb_version_no_epoch" == "${EXPECTED_DESKTOP_VERSION}-"* ]]; then
+      deb_revision="${deb_version_no_epoch#${EXPECTED_DESKTOP_VERSION}-}"
+      if [[ -z "$deb_revision" || ! "$deb_revision" =~ ^[0-9][0-9A-Za-z.+~]*$ ]]; then
+        fail "$deb: version mismatch (dpkg Version). Expected ${EXPECTED_DESKTOP_VERSION} (or ${EXPECTED_DESKTOP_VERSION}-<debian-revision>), found ${deb_version}"
+      fi
+    else
+      fail "$deb: version mismatch (dpkg Version). Expected ${EXPECTED_DESKTOP_VERSION} (or ${EXPECTED_DESKTOP_VERSION}-<debian-revision>), found ${deb_version}"
     fi
   fi
 

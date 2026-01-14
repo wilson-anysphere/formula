@@ -471,8 +471,26 @@ validate_static() {
     deb_version_no_epoch="${deb_version_no_epoch#*:}"
   fi
 
-  if [[ "$deb_version_no_epoch" != "${EXPECTED_VERSION}" && "$deb_version_no_epoch" != "${EXPECTED_VERSION}-"* && "$deb_version_no_epoch" != "${EXPECTED_VERSION}+"* && "$deb_version_no_epoch" != "${EXPECTED_VERSION}~"* ]]; then
-    die "DEB version mismatch for ${deb_path}: expected ${EXPECTED_VERSION} (or ${EXPECTED_VERSION}-*), found ${deb_version}"
+  if [[ "$deb_version_no_epoch" != "${EXPECTED_VERSION}" ]]; then
+    # Allow a Debian revision suffix after the expected upstream version, e.g.:
+    #   0.1.0-1
+    #   0.1.0-beta.1-1
+    #
+    # NOTE: We intentionally do not accept arbitrary `EXPECTED_VERSION-*` prefixes here because
+    # a version like "0.1.0-beta.1" would otherwise be treated as a "revision" of 0.1.0 and
+    # could mask stale/mis-versioned artifacts.
+    if [[ "$deb_version_no_epoch" == "${EXPECTED_VERSION}-"* ]]; then
+      local deb_revision
+      deb_revision="${deb_version_no_epoch#${EXPECTED_VERSION}-}"
+      # Debian revision strings are typically numeric (e.g. -1, -0ubuntu1). Require the
+      # suffix to begin with a digit to avoid accepting pre-release mismatches like
+      # "0.1.0-beta.1" when EXPECTED_VERSION is "0.1.0".
+      if [[ -z "$deb_revision" || ! "$deb_revision" =~ ^[0-9][0-9A-Za-z.+~]*$ ]]; then
+        die "DEB version mismatch for ${deb_path}: expected ${EXPECTED_VERSION} (or ${EXPECTED_VERSION}-<debian-revision>), found ${deb_version}"
+      fi
+    else
+      die "DEB version mismatch for ${deb_path}: expected ${EXPECTED_VERSION} (or ${EXPECTED_VERSION}-<debian-revision>), found ${deb_version}"
+    fi
   fi
 
   local deb_pkg
