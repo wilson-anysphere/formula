@@ -729,6 +729,15 @@ key (AES-128, 16 bytes; CryptDeriveKey result) =
   5e8727d6c94408a903aececf1382b380
 ```
 
+This is **not** the AES-128 key; if your code uses `H_block0[0:16]` directly, you will derive the
+wrong key.
+
+Interop note: while the ECMA-376 / MS-OFFCRYPTO Standard AES derivation above requires the full
+`CryptDeriveKey` step, some third-party producers have been observed to *skip* that expansion and
+use the truncated digest `H_block0[0:keyLen]` as the AES key (effectively treating AES like the RC4
+truncation path). This is **non-standard**, but `crates/formula-offcrypto` includes a verifier-checked
+fallback for compatibility (see fixture `fixtures/encrypted/ooxml/standard-basic.xlsm`).
+
 ### 8.3) RC4 per-block key example (128-bit)
 
 If the file uses **RC4** (`AlgID = CALG_RC4`) with a 128-bit key (`KeySize = 128` bits → 16 bytes),

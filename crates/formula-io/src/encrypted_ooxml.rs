@@ -58,9 +58,7 @@ pub(crate) fn decrypted_package_reader<R: Read + Seek>(
             encryption_info,
             password,
         ),
-        // MS-OFFCRYPTO identifies Standard (CryptoAPI) encryption via `versionMinor == 2`, but
-        // real-world files vary `versionMajor` across 2/3/4 (commonly 3.2 or 4.2).
-        (2 | 3 | 4, 2) => decrypted_package_reader_standard(
+        (major, 2) if matches!(major, 2 | 3 | 4) => decrypted_package_reader_standard(
             ciphertext_reader,
             plaintext_len,
             encryption_info,

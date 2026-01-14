@@ -368,6 +368,11 @@ key = keyMaterial[0..keySizeBytes]          // keySizeBytes = keySizeBits/8
 key = TruncateHash(Hblock0, keySizeBytes)   // truncate, or pad with 0x36
 ```
 
+Interop note: some third-party producers have been observed to **omit** the `CryptDeriveKey`-style
+`keyMaterial = SHA1((0x36*64) XOR Hfinal) || ...` expansion and instead use `key = Hfinal[0..keySizeBytes]`
+directly. This is **non-standard**, but Formula includes a verifier-checked fallback for compatibility
+(see fixture `fixtures/encrypted/ooxml/standard-basic.xlsm`).
+
 Verifier nuances (very common bug source):
 
 - `EncryptionVerifier.encryptedVerifier` and `EncryptionVerifier.encryptedVerifierHash` are
@@ -375,16 +380,19 @@ Verifier nuances (very common bug source):
 - The verifier hash is `EncryptionHeader.algIdHash` (commonly SHA-1, 20 bytes) and the encrypted
   blob is padded to an AES block boundary (for SHA-1, typically **32 bytes** on disk).
 
-Implementation note: in this repo (matching `crates/formula-offcrypto`), Standard/CryptoAPI **AES**
-uses **AES-ECB** (no IV) for both the verifier fields **and** `EncryptedPackage` for
-Excel-default/ECMA-376 Standard AES. Some third-party producers use a non-standard segmented
-AES-CBC variant with a per-segment IV derived from the verifier salt; `formula-io` includes
-compatibility fallbacks for some of these cases (see `docs/offcrypto-standard-encryptedpackage.md`).
+Implementation note: Excel-default Standard/CryptoAPI AES uses **AES-ECB** (no IV) for the verifier
+fields, and typically AES-ECB for `EncryptedPackage`. Some third-party producers emit a segmented
+AES-CBC variant for `EncryptedPackage` (and/or vary key derivation). In this repo:
 
-### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB, no IV)
+- `crates/formula-offcrypto` supports multiple Standard/CryptoAPI variants, including ECB vs segmented
+  CBC `EncryptedPackage` decryption (auto-detected by ZIP signature).
+- `crates/formula-office-crypto` is intentionally more permissive and attempts additional variants
+  for compatibility.
 
-Standard/CryptoAPI AES `EncryptedPackage` decryption is **AES-ECB** (no IV) over the ciphertext
-bytes (after the 8-byte `orig_size` prefix):
+### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB vs segmented AES-CBC)
+
+Excel-default Standard/CryptoAPI AES `EncryptedPackage` decryption is **AES-ECB** (no IV) over the
+ciphertext bytes (after the 8-byte `orig_size` prefix):
 
 ```text
 plaintext = AES-ECB-Decrypt(key, ciphertext)
@@ -406,8 +414,9 @@ See `docs/offcrypto-standard-encryptedpackage.md` for framing/padding/truncation
 
 Implementation pointers:
 
-- `crates/formula-offcrypto`: `decrypt_encrypted_package_ecb` (and the convenience wrapper
-  `decrypt_from_bytes`).
+- `crates/formula-offcrypto`:
+  - End-to-end Standard decrypt: `decrypt_ooxml_standard`
+  - `EncryptedPackage` decrypt (auto-detect ECB vs segmented CBC): `encrypted_package::decrypt_standard_encrypted_package_auto`
 - `crates/formula-office-crypto`: end-to-end Standard decryptor (tries multiple key-derivation
   variants for compatibility).
 - `crates/formula-xlsx::offcrypto`: end-to-end OOXML decryptor (Agile + Standard), with additional
@@ -430,7 +439,7 @@ This repo currently includes multiple Standard-encrypted OOXML fixtures under
    - Key derivation: `TruncateHash` (truncate, or pad with `0x36`)
    - Verifier encryption: **AES-ECB**
    - `EncryptedPackage` encryption: **AES-ECB**
-   - Decryptor: `crates/formula-office-crypto`
+    - Decryptors: `crates/formula-offcrypto`, `crates/formula-office-crypto`
 
 3. `standard-large.xlsx` — Standard AES-ECB, larger package regression fixture (exercises truncation
    behavior and more realistic ciphertext sizes).

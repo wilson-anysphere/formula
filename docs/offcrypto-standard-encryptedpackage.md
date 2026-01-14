@@ -1,4 +1,4 @@
-# MS-OFFCRYPTO Standard/CryptoAPI AES: `EncryptedPackage` decryption notes (AES-ECB)
+# MS-OFFCRYPTO Standard/CryptoAPI: `EncryptedPackage` decryption notes (AES-ECB + segmented AES-CBC)
 
 This repo detects password-protected / encrypted OOXML workbooks as an **OLE/CFB** container with
 `EncryptionInfo` + `EncryptedPackage` streams (MS-OFFCRYPTO).
@@ -57,10 +57,15 @@ See also:
   - `crates/formula-io/src/offcrypto/encrypted_package.rs`
     - `decrypt_encrypted_package_standard_aes_to_writer` (streaming Standard AES-ECB; no IV)
     - `decrypt_standard_encrypted_package_stream` (buffered Standard AES-ECB; no IV; truncates to `orig_size`)
-- **`formula-offcrypto` Standard AES helpers**:
-  - `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb` (baseline AES-ECB)
-  - `crates/formula-offcrypto/src/encrypted_package.rs`: `decrypt_standard_encrypted_package_auto` (ECB vs segmented CBC auto-detect)
-- **More permissive Standard decryptors (handles additional variants)**:
+- **`formula-offcrypto` Standard `EncryptedPackage` decryptors**:
+  - `crates/formula-offcrypto/src/encrypted_package.rs`:
+    - `decrypt_standard_encrypted_package` (AES-ECB)
+    - `decrypt_standard_encrypted_package_cbc` (segmented AES-CBC)
+    - `decrypt_standard_encrypted_package_auto` (auto-detect ECB vs segmented CBC by ZIP signature)
+  - `crates/formula-offcrypto/src/lib.rs`:
+    - `decrypt_encrypted_package_ecb` (baseline AES-ECB helper)
+    - `decrypt_ooxml_standard` (full Standard/CryptoAPI decrypt: parses `EncryptionInfo`, derives key, decrypts `EncryptedPackage`)
+- **More permissive Standard decryptors (handles additional variants / layouts)**:
   - `crates/formula-io/src/encrypted_ooxml.rs` (tries multiple `EncryptedPackage` layouts for compatibility)
   - `crates/formula-office-crypto/src/standard.rs`
 
@@ -101,7 +106,12 @@ store a true 64-bit size that is an exact multiple of `2^32` (e.g. exactly 4GiB)
 Spec note (MS-OFFCRYPTO §2.3.4.4): the *physical* stream length can be **larger** than `orig_size`
 because the encrypted data is padded to a cipher block boundary.
 
-## AES decryption (baseline: AES-ECB, no IV)
+## AES decryption variants
+
+Excel-default Standard AES uses **AES-ECB** for `EncryptedPackage` (no IV). However, real-world
+producers have been observed to emit a **segmented AES-CBC** variant instead. Formula supports both.
+
+### Variant A: AES-ECB (no IV)
 
 Decrypt the ciphertext bytes (everything after the 8-byte size prefix) with **AES-ECB(key)**:
 
@@ -137,12 +147,15 @@ with a per-segment IV derived from the verifier salt and segment index:
 iv_i = SHA1(salt || LE32(i))[0..16]
 ```
 
-This is **not** the Excel-default Standard AES scheme (Excel uses AES-ECB). `formula-io`
-implements baseline AES-ECB primitives in `crates/formula-io/src/offcrypto/encrypted_package.rs`,
-but higher-level decryptors in this repo include CBC-segmented compatibility fallbacks (notably
-`crates/formula-offcrypto/src/encrypted_package.rs` and `crates/formula-io/src/encrypted_ooxml.rs`).
-`crates/formula-office-crypto` is the most permissive Standard decryptor for unusual producer
-variants.
+This is **not** the Excel-default Standard AES scheme (Excel uses AES-ECB), but it appears in the
+wild. Formula supports it in higher-level decryptors:
+
+- `crates/formula-offcrypto` can auto-detect **AES-ECB** vs **segmented AES-CBC** based on the
+  decrypted `PK..` ZIP signature.
+- `crates/formula-io/src/encrypted_ooxml.rs` includes CBC-segmented compatibility fallbacks on the
+  Standard open path (in addition to the baseline AES-ECB primitives in
+  `crates/formula-io/src/offcrypto/encrypted_package.rs`).
+- `crates/formula-office-crypto` supports additional Standard variants beyond ECB/CBC.
 
 ## Padding + truncation (do not trust PKCS#7)
 
