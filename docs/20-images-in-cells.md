@@ -632,7 +632,7 @@ See `crates/formula-xlsx/src/cell_images/mod.rs` (`resolve_target_best_effort`).
 
 - Preserve `Relationship/@Id` values.
 - Preserve `Target` paths and file names (Excel reuses these paths across features).
-- Preserve the referenced `xl/media/*` bytes byte-for-byte.
+- Preserve the referenced `xl/media/*` bytes byte-for-byte (OPC part payload bytes).
 
 ## `xl/metadata.xml`
 
@@ -691,7 +691,7 @@ media via the shared relationship-slot table:
       - `xl/cellimages.xml` → `xl/_rels/cellimages.xml.rels` → `xl/media/*` also references the same image bytes.
    - The exact semantic role of `xl/cellimages.xml` in this variant (whether it is a cache, a parallel lookup
      table, or is referenced by rich value payloads) is not fully characterized. Treat the `cellimages` part as
-     **opaque** and preserve it byte-for-byte for safe round-trips.
+     **opaque** and preserve it byte-for-byte (OPC part payload bytes) for safe round-trips.
 3. **`cellimages.xml` / `cellImages.xml` “cell image store” → media (standalone)**
    - Observed in this repo via synthetic fixtures/tests like `crates/formula-xlsx/tests/cell_images.rs`.
    - The image bytes are resolved via:
