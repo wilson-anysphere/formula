@@ -3965,6 +3965,11 @@ export class SpreadsheetApp {
     this.auditingCache.clear();
     this.outlinesBySheet.clear();
     this.chartRecordLookupCache = null;
+    // Ensure we don't keep a split-view SecondaryGridView alive via hit-test caches.
+    this.splitViewSecondaryGrid = null;
+    this.splitViewDrawingHitTestIndex = null;
+    this.splitViewDrawingHitTestIndexObjects = null;
+    this.splitViewDrawingHitTestIndexGrid = null;
 
     // Release backing stores for all canvas layers. Even after `root.replaceChildren()`,
     // the SpreadsheetApp instance still holds references to these canvases; shrinking
