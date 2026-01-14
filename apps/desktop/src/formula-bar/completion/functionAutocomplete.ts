@@ -149,7 +149,6 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   if (upper.startsWith(qualifierUpper)) {
     const qualifier = typedPrefix.slice(0, qualifierUpper.length);
     const rest = typedPrefix.slice(qualifierUpper.length);
-    if (rest.length < 1) return null;
     return {
       replaceStart,
       replaceEnd,
@@ -229,7 +228,13 @@ function preserveTypedCasing(typedPrefix: string, canonical: string): string {
 
 function buildSuggestions(prefixUpper: string, limit: number): FunctionSuggestion[] {
   const out: FunctionSuggestion[] = [];
-  if (!prefixUpper) return out;
+  if (!prefixUpper) {
+    for (let i = 0; i < FUNCTION_ENTRIES.length && out.length < limit; i += 1) {
+      const fn = FUNCTION_ENTRIES[i]!;
+      out.push({ name: fn.name, signature: signaturePreview(fn.name) });
+    }
+    return out;
+  }
 
   for (const fn of FUNCTION_ENTRIES) {
     if (!fn.upper.startsWith(prefixUpper)) continue;
