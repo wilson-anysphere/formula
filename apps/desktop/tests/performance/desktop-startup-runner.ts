@@ -33,8 +33,8 @@ type Summary = {
   mode: DesktopStartupMode;
   runs: number;
   windowVisible: { p50: number; p95: number; targetMs: number };
-  // `first_render_ms` is only meaningful for the full-app benchmark (the shell benchmark uses a
-  // minimal page and exits before the app grid is rendered).
+  // `first_render_ms` is only enforced for the full-app benchmark (the shell benchmark uses a
+  // minimal page; its first-render mark is a best-effort "first frame" proxy rather than the grid).
   firstRender: { p50: number | null; p95: number | null; targetMs: number | null };
   tti: { p50: number; p95: number; targetMs: number };
   enforce: boolean;
@@ -276,11 +276,9 @@ async function main(): Promise<void> {
   });
 
   const firstRenderValues =
-    benchKind === "full"
-      ? results
-          .map((r) => r.firstRenderMs)
-          .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
-      : [];
+    results
+      .map((r) => r.firstRenderMs)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   const includeWebviewLoaded = mode === "cold";
   const webviewLoadedValues = includeWebviewLoaded
     ? results
@@ -327,7 +325,7 @@ async function main(): Promise<void> {
     "ms",
   );
   const firstRenderStats =
-    benchKind === "full" && firstRenderValues.length > 0
+    firstRenderValues.length > 0
       ? buildBenchmarkResultFromValues("first_render_ms", firstRenderValues, firstRenderTargetMs, "ms")
       : null;
   const webviewLoadedStats =
@@ -348,7 +346,7 @@ async function main(): Promise<void> {
         ? {
             p50: firstRenderStats.median,
             p95: firstRenderStats.p95,
-            targetMs: firstRenderTargetMs,
+            targetMs: benchKind === "full" ? firstRenderTargetMs : null,
           }
         : { p50: null, p95: null, targetMs: null },
     ...(webviewLoadedStats
