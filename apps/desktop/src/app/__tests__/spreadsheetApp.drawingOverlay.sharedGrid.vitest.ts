@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DrawingOverlay, pxToEmu } from "../../drawings/overlay";
-import { buildHitTestIndex, hitTestDrawings } from "../../drawings/hitTest";
+import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings } from "../../drawings/hitTest";
 import type { DrawingObject, ImageStore } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
@@ -341,6 +341,73 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       // Verify the public viewport helpers also include zoom (used by hit testing + interactions).
       expect(app.getDrawingRenderViewport().zoom).toBe(2);
       expect(app.getDrawingInteractionViewport().zoom).toBe(2);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("pickDrawingAtClientPoint hit-tests transformed drawings under zoom", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      app.setZoom(2);
+
+      const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvas).not.toBeNull();
+      selectionCanvas!.getBoundingClientRect = () =>
+        ({
+          width: 800,
+          height: 600,
+          left: 0,
+          top: 0,
+          right: 800,
+          bottom: 600,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        }) as any;
+
+      const object: DrawingObject = {
+        id: 123,
+        kind: { type: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(100) },
+          size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+        },
+        transform: { rotationDeg: 45, flipH: false, flipV: false },
+        zOrder: 0,
+      };
+
+      // Provide the UI drawing object directly so SpreadsheetApp doesn't need to decode model objects.
+      const doc: any = app.getDocument();
+      doc.getSheetDrawings = () => [object];
+      (app as any).drawingObjectsCache = null;
+
+      const viewport = app.getDrawingInteractionViewport();
+      const geom = (app as any).drawingGeom;
+      const rect = drawingObjectToViewportRect(object, viewport, geom);
+
+      // Choose a point that is inside the rotated rect but outside the untransformed anchor rect.
+      const cx = rect.x + rect.width / 2;
+      const cy = rect.y + rect.height / 2;
+      const clientX = cx;
+      const clientY = cy + (rect.height / 2) * 1.3; // outside untransformed (dy > half-height), inside rotated at 45deg.
+
+      expect(clientY).toBeGreaterThan(rect.y + rect.height);
+      expect(app.pickDrawingAtClientPoint(clientX, clientY)).toBe(123);
 
       app.destroy();
       root.remove();

@@ -6536,7 +6536,8 @@ export class SpreadsheetApp {
     if (x < 0 || y < 0 || x > canvasRect.width || y > canvasRect.height) return null;
 
     const viewport = this.getDrawingInteractionViewport();
-    const index = buildHitTestIndex(objects, geom);
+    const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
+    const index = buildHitTestIndex(objects, geom, { zoom });
     const hit = hitTestDrawings(index, viewport, x, y);
     return hit?.object.id ?? null;
   }
