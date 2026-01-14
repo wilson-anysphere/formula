@@ -31,6 +31,31 @@ fn make_ooxml_encrypted_container(major: u16, minor: u16, flags: u32, payload: &
     ole.into_inner().into_inner()
 }
 
+fn make_ooxml_encrypted_container_with_leading_slash_paths(
+    major: u16,
+    minor: u16,
+    flags: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut stream = ole
+            .create_stream("/EncryptionInfo")
+            .expect("create /EncryptionInfo stream");
+        stream.write_all(&major.to_le_bytes()).unwrap();
+        stream.write_all(&minor.to_le_bytes()).unwrap();
+        stream.write_all(&flags.to_le_bytes()).unwrap();
+        stream.write_all(payload).unwrap();
+    }
+
+    ole.create_stream("/EncryptedPackage")
+        .expect("create /EncryptedPackage stream");
+
+    ole.into_inner().into_inner()
+}
+
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/encrypted/ooxml")
@@ -272,6 +297,31 @@ fn cli_prints_agile_version_for_utf16le_xml() {
     assert!(
         stdout.contains("xml_root=encryption"),
         "expected xml_root detection for UTF-16 XML, got: {stdout}"
+    );
+}
+
+#[test]
+fn cli_accepts_leading_slash_stream_paths() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("agile_slash.xlsx");
+
+    let xml = br#"<?xml version="1.0" encoding="UTF-8"?><encryption></encryption>"#;
+    let bytes = make_ooxml_encrypted_container_with_leading_slash_paths(4, 4, 0, xml);
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        out.status.success(),
+        "expected success exit status, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Agile (4.4)"),
+        "expected Agile version, got: {stdout}"
     );
 }
 
