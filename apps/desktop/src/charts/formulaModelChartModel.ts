@@ -61,7 +61,11 @@ function normalizeChartKind(kind: string): ChartTypeModel["kind"] {
   // Canvas chart renderer does not implement these kinds yet; map them to the closest
   // supported visualization so imported workbooks remain readable.
   if (k === "area") return "line";
+  if (k === "radar") return "line";
   if (k === "doughnut") return "pie";
+  if (k === "bubble") return "scatter";
+  if (k === "stock") return "line";
+  if (k === "surface") return "bar";
   return "unknown";
 }
 

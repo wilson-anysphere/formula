@@ -210,7 +210,21 @@ describe("formulaModelChartModelToUiChartModel", () => {
     expect(out.chartType).toEqual({ kind: "pie" });
   });
 
-  it("preserves unsupported chart kinds as unknown with a name for debugging", () => {
+  it("maps bubble charts to scatter charts (renderer fallback)", () => {
+    const input = {
+      chartKind: { kind: "bubble" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "bubble", bubbleScale: null, axIds: [1, 2] },
+      axes: [],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.chartType).toEqual({ kind: "scatter" });
+  });
+
+  it("maps radar charts to line charts (renderer fallback)", () => {
     const input = {
       chartKind: { kind: "radar" },
       title: null,
@@ -221,7 +235,49 @@ describe("formulaModelChartModelToUiChartModel", () => {
       diagnostics: [],
     };
     const out = formulaModelChartModelToUiChartModel(input);
-    expect(out.chartType).toEqual({ kind: "unknown", name: "radar" });
+    expect(out.chartType).toEqual({ kind: "line" });
+  });
+
+  it("maps stock charts to line charts (renderer fallback)", () => {
+    const input = {
+      chartKind: { kind: "stock" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "stock", axIds: [1, 2, 3] },
+      axes: [],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.chartType).toEqual({ kind: "line" });
+  });
+
+  it("maps surface charts to bar charts (renderer fallback)", () => {
+    const input = {
+      chartKind: { kind: "surface" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "surface", wireframe: null, axIds: [1, 2, 3] },
+      axes: [],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.chartType).toEqual({ kind: "bar" });
+  });
+
+  it("preserves unknown chart kinds as unknown with a name for debugging", () => {
+    const input = {
+      chartKind: { kind: "unknown", name: "funnel" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "unknown", name: "funnel" },
+      axes: [],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.chartType).toEqual({ kind: "unknown", name: "funnel" });
   });
 
   it("trims whitespace around series formula refs", () => {
