@@ -196,8 +196,8 @@ node scripts/check-updater-config.mjs
 node scripts/check-tauri-permissions.mjs
 
 # Ensures the packaged app registers the `formula://` URL scheme (installer/bundle metadata) and
-# that `bundle.fileAssociations` includes `.xlsx` (so “Open with…” / double-click spreadsheet
-# integration is configured for desktop bundles).
+# that `bundle.fileAssociations` includes the expected desktop file types (xlsx/xls/xlt/xla/xlsm/xltx/xltm/xlam/xlsb/csv/parquet),
+# with stable MIME types (so “Open with…” / double-click integration is configured for desktop bundles).
 node scripts/check-desktop-url-scheme.mjs
 
 # Ensures the committed Cargo.lock matches the dependency graph used by the release build.
