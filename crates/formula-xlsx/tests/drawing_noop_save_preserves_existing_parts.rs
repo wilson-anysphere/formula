@@ -47,7 +47,9 @@ fn build_two_sheet_drawing_workbook() -> Vec<u8> {
         .get("xl/drawings/drawing1.xml")
         .expect("base drawing1.xml")
         .clone();
-    parts.insert("xl/drawings/drawing2.xml".to_string(), drawing1);
+    let drawing2 = String::from_utf8(drawing1.clone()).expect("drawing xml utf-8");
+    let drawing2 = drawing2.replace("Picture 1", "Picture 2");
+    parts.insert("xl/drawings/drawing2.xml".to_string(), drawing2.into_bytes());
     let drawing1_rels = parts
         .get("xl/drawings/_rels/drawing1.xml.rels")
         .expect("base drawing1 rels")
