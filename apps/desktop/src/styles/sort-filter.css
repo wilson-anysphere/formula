@@ -206,6 +206,15 @@
 
 /* --- AutoFilterDropdown --------------------------------------------------- */
 
+dialog.ribbon-auto-filter-dialog {
+  /* The AutoFilterDropdown UI defines its own border + shadow; keep the modal wrapper
+     invisible so we don't double-render dialog chrome around a dropdown-style surface. */
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
 .formula-table-filter-dropdown {
   background: var(--formula-grid-bg, var(--bg-primary));
   color: var(--formula-grid-cell-text, var(--text-primary));

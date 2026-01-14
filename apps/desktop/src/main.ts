@@ -9626,8 +9626,8 @@ async function showRibbonAutoFilterDialog(args: {
 
   return await new Promise<string[] | null>((resolve) => {
     const dialog = document.createElement("dialog");
-    dialog.className = "dialog";
-    dialog.dataset.keybindingBarrier = "true";
+    dialog.className = "dialog ribbon-auto-filter-dialog";
+    markKeybindingBarrier(dialog);
     dialog.setAttribute("aria-label", "Filter");
 
     const container = document.createElement("div");

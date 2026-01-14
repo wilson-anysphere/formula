@@ -10,7 +10,6 @@ dialog.extensions-ui {
 }
 
 .extensions-ui .dialog__field {
-  box-sizing: border-box;
   width: 100%;
   padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   border-radius: var(--radius);
