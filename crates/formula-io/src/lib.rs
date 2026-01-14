@@ -1492,7 +1492,7 @@ pub fn open_workbook_model_with_password(
     // For legacy `.xls` BIFF encryption (FILEPASS), provide a more actionable error: callers using
     // the password-capable API likely want to prompt the user for a password rather than being told
     // to remove encryption.
-    let Some(password) = password else {
+    if password.is_none() {
         if let Ok(encryption) = detect_workbook_encryption(path) {
             if matches!(encryption, WorkbookEncryption::LegacyXlsFilePass { .. }) {
                 return Err(Error::PasswordRequired {
@@ -1506,8 +1506,7 @@ pub fn open_workbook_model_with_password(
     open_workbook_model_with_options(
         path,
         OpenOptions {
-            password: Some(password.to_string()),
-            ..Default::default()
+            password: password.map(ToString::to_string),
         },
     )
 }
@@ -1563,7 +1562,6 @@ pub fn open_workbook_with_password(
         path,
         OpenOptions {
             password: password.map(ToString::to_string),
-            ..Default::default()
         },
     )
 }
@@ -2573,39 +2571,15 @@ fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> 
     None
 }
 
-#[cfg(not(feature = "encrypted-workbooks"))]
-fn unsupported_office_ooxml_encryption(path: &Path) -> Error {
-    Error::UnsupportedEncryption {
-        path: path.to_path_buf(),
-        kind: "Office-encrypted OOXML workbook (OLE EncryptionInfo + EncryptedPackage) is not supported; save a decrypted copy in Excel and try again".to_string(),
-    }
-}
-
-/// Attempt to read the `EncryptedPackage` stream as a plaintext OOXML ZIP payload (without
-/// performing any cryptography).
-///
-/// This is primarily used for:
-/// - synthetic fixtures that wrap a plaintext package in an OLE container, and
-/// - callers that have already decrypted the payload upstream but still provide the OOXML-in-OLE
-///   wrapper structure.
-///
-/// Returns:
-/// - `Ok(Some(zip_bytes))` when the `EncryptedPackage` stream appears to contain a valid ZIP payload
-///   (either directly or after the usual 8-byte size header),
-/// - `Ok(None)` when the input is not an encrypted OOXML wrapper or the package does not appear to
-///   be plaintext,
-/// - `Err(..)` for I/O errors while reading the file.
 fn maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(
     path: &Path,
 ) -> Result<Option<Vec<u8>>, Error> {
     use std::io::{Read as _, Seek as _, SeekFrom};
-    use std::io::{self, Cursor};
 
     let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
         path: path.to_path_buf(),
         source,
     })?;
-
     let mut header = [0u8; 8];
     let n = file.read(&mut header).map_err(|source| Error::OpenIo {
         path: path.to_path_buf(),
@@ -2614,7 +2588,6 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(
     if n < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
         return Ok(None);
     }
-
     file.seek(SeekFrom::Start(0))
         .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
@@ -2625,56 +2598,39 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(
         Ok(ole) => ole,
         Err(_) => return Ok(None),
     };
-
     if !(stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")) {
         return Ok(None);
     }
 
-    let mut stream = match open_stream_best_effort(&mut ole, "EncryptedPackage") {
-        Some(s) => s,
-        None => return Ok(None),
+    let Some(encrypted_package) = read_ole_stream_best_effort(&mut ole, "EncryptedPackage")
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?
+    else {
+        return Ok(None);
     };
 
-    // Read a small prefix to determine if this looks like a plaintext ZIP payload.
-    let mut prefix = [0u8; 10];
-    let prefix_len = match stream.read(&mut prefix) {
-        Ok(n) => n,
-        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => 0,
-        Err(err) => {
-            return Err(Error::OpenIo {
-                path: path.to_path_buf(),
-                source: err,
-            })
+    if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
+        // Avoid copying when the EncryptedPackage stream is already a ZIP file (rare, but useful
+        // for synthetic fixtures and already-decrypted pipelines).
+        if package_bytes.as_ptr() == encrypted_package.as_ptr()
+            && package_bytes.len() == encrypted_package.len()
+        {
+            return Ok(Some(encrypted_package));
         }
-    };
-    if prefix_len < 2 {
-        return Ok(None);
+        return Ok(Some(package_bytes.to_vec()));
     }
 
-    let looks_like_zip_direct = prefix[..2] == *b"PK";
-    let looks_like_zip_after_len = prefix_len >= 10 && prefix[8..10] == *b"PK";
-    if !looks_like_zip_direct && !looks_like_zip_after_len {
-        return Ok(None);
-    }
+    Ok(None)
+}
 
-    // Read the full stream bytes only when the prefix suggests a plaintext package.
-    let mut encrypted_package = Vec::new();
-    encrypted_package.extend_from_slice(&prefix[..prefix_len]);
-    stream.read_to_end(&mut encrypted_package).map_err(|source| Error::OpenIo {
+#[cfg(not(feature = "encrypted-workbooks"))]
+fn unsupported_office_ooxml_encryption(path: &Path) -> Error {
+    Error::UnsupportedEncryption {
         path: path.to_path_buf(),
-        source,
-    })?;
-
-    let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) else {
-        return Ok(None);
-    };
-
-    // Validate ZIP structure to avoid false positives on ciphertext that happens to start with `PK`.
-    if zip::ZipArchive::new(Cursor::new(package_bytes)).is_err() {
-        return Ok(None);
+        kind: "Office-encrypted OOXML workbook (OLE EncryptionInfo + EncryptedPackage) is not supported; save a decrypted copy in Excel and try again".to_string(),
     }
-
-    Ok(Some(package_bytes.to_vec()))
 }
 
 fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(

@@ -66,8 +66,8 @@ fn derive_rc4_key_md5(h: &[u8], block: u32, key_len: usize) -> Vec<u8> {
     hasher.update(block.to_le_bytes());
     let digest = hasher.finalize();
 
-    // MS-OFFCRYPTO Standard RC4 uses `keyLen = keySize/8` bytes directly (keySize=0 means 40-bit =>
-    // 5 bytes). Do **not** zero-pad 40-bit keys to 16 bytes.
+    // MS-OFFCRYPTO Standard RC4 uses raw digest truncation (`keyLen = keySize/8`). For
+    // `keySize == 0` (40-bit), that is a 5-byte key — *not* a 16-byte key padded with zeros.
     digest[..key_len].to_vec()
 }
 

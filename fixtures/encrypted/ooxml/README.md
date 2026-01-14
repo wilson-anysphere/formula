@@ -248,7 +248,7 @@ fixture drift (cipher/keysize/provider/flags).
   - `3`: `standard.xlsx`, `standard-large.xlsx`, `standard-basic.xlsm`
   - `4`: `standard-4.2.xlsx`, `standard-unicode.xlsx` (Apache POI output)
 - `minor`: `2`
-- `flags`: `0x00000024` (fCryptoAPI + fAES)
+- `flags`: `0x00000024` (`fCryptoAPI` + `fAES`)
 
 `EncryptionHeader` (CryptoAPI):
 
@@ -257,7 +257,7 @@ fixture drift (cipher/keysize/provider/flags).
 - `KeySize`: `128` (bits)
 - `ProviderType`: `24` (PROV_RSA_AES)
 - `CSPName`:
-  - `standard.xlsx` / `standard-basic.xlsm` / `standard-large.xlsx` / `standard-4.2.xlsx` / `standard-unicode.xlsx`: `"Microsoft Enhanced RSA and AES Cryptographic Provider"`
+  - `"Microsoft Enhanced RSA and AES Cryptographic Provider"`
 
 `EncryptionVerifier`:
 
