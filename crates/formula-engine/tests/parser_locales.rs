@@ -116,6 +116,26 @@ fn lex_fr_fr_supports_mixed_nbsp_and_narrow_nbsp_thousands_separators_in_numbers
 }
 
 #[test]
+fn lex_fr_fr_does_not_treat_ascii_space_as_thousands_separator_in_numbers() {
+    // The formula language uses ASCII space (` `) as the range intersection operator. Unlike NBSP,
+    // it must not be treated as a numeric grouping separator.
+    let locale = LocaleConfig::fr_fr();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex("SUM(1 234,56;0,5)", &opts).unwrap();
+
+    assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
+    assert!(matches!(tokens[1].kind, TokenKind::LParen));
+    assert!(matches!(tokens[2].kind, TokenKind::Number(ref n) if n == "1"));
+    assert!(matches!(tokens[3].kind, TokenKind::Whitespace(ref s) if s == " "));
+    assert!(matches!(tokens[4].kind, TokenKind::Number(ref n) if n == "234,56"));
+    assert!(matches!(tokens[5].kind, TokenKind::ArgSep));
+    assert!(matches!(tokens[6].kind, TokenKind::Number(ref n) if n == "0,5"));
+    assert!(matches!(tokens[7].kind, TokenKind::RParen));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
+
+#[test]
 fn lex_es_es_decimal_and_arg_separators() {
     let locale = LocaleConfig::es_es();
     let mut opts = ParseOptions::default();
