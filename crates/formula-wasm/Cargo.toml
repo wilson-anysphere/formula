@@ -42,4 +42,5 @@ zip = { version = "2.1", default-features = false, features = ["deflate"] }
 getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
+formula-format = { path = "../formula-format" }
 wasm-bindgen-test = "0.3"

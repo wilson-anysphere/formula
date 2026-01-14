@@ -4511,6 +4511,20 @@ impl WasmWorkbook {
                 let has_value = !cell.value.is_empty();
                 let has_phonetic = cell.phonetic.is_some();
                 if !has_formula && !has_value && !has_phonetic {
+                    // Style-only cells are not represented in the sparse JS input map (`toJson`) but
+                    // still need to be present in the calc engine so worksheet info functions like
+                    // `CELL("format")`/`CELL("protect")` can observe their formatting metadata.
+                    if cell.style_id != 0 {
+                        let mapped = style_id_map
+                            .get(cell.style_id as usize)
+                            .copied()
+                            .unwrap_or(0);
+                        if mapped != 0 {
+                            wb.engine
+                                .set_cell_style_id(&sheet_name, &address, mapped)
+                                .map_err(|err| js_err(err.to_string()))?;
+                        }
+                    }
                     continue;
                 }
 

@@ -2299,6 +2299,7 @@ version = "0.1.0"
 dependencies = [
  "formula-dax",
  "formula-engine",
+ "formula-format",
  "formula-model",
  "formula-office-crypto",
  "formula-xlsx",
