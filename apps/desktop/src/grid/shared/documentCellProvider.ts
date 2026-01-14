@@ -4,6 +4,7 @@ import type { DocumentController } from "../../document/documentController.js";
 import { applyStylePatch } from "../../formatting/styleTable.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
 import { formatValueWithNumberFormat } from "../../formatting/numberFormat.ts";
+import { getStyleNumberFormat } from "../../formatting/styleFieldAccess.js";
 import { normalizeExcelColorToCss } from "../../shared/colors.js";
 import { looksLikeExternalHyperlink } from "./looksLikeExternalHyperlink.js";
 
@@ -228,26 +229,7 @@ export class DocumentCellProvider implements CellProvider {
   } {
     const controller: any = this.options.document as any;
 
-    const getNumberFormat = (docStyle: any): string | null => {
-      // formula-model serializes number formats as `number_format` (snake_case), but UI patches use `numberFormat`.
-      // If the UI explicitly sets `numberFormat: null` to clear formatting, treat it as authoritative and do not
-      // fall back to the imported `number_format` value.
-      if (hasOwn(docStyle, "numberFormat")) {
-        const raw = docStyle?.numberFormat;
-        if (typeof raw !== "string") return null;
-        const trimmed = raw.trim();
-        if (trimmed === "" || trimmed.toLowerCase() === "general") return null;
-        return raw;
-      }
-      if (hasOwn(docStyle, "number_format")) {
-        const raw = docStyle?.number_format;
-        if (typeof raw !== "string") return null;
-        const trimmed = raw.trim();
-        if (trimmed === "" || trimmed.toLowerCase() === "general") return null;
-        return raw;
-      }
-      return null;
-    };
+    const getNumberFormat = (docStyle: any): string | null => getStyleNumberFormat(docStyle);
 
     const styleTable: any = (this.options.document as any)?.styleTable;
 
@@ -556,11 +538,8 @@ export class DocumentCellProvider implements CellProvider {
     const fontColor = normalizeCssColor(fontColorInput);
     if (fontColor) out.color = fontColor;
 
-    const rawNumberFormat = hasOwn(docStyle, "numberFormat") ? (docStyle as any).numberFormat : (docStyle as any).number_format;
-    if (typeof rawNumberFormat === "string") {
-      const trimmed = rawNumberFormat.trim();
-      if (trimmed !== "" && trimmed.toLowerCase() !== "general") out.numberFormat = rawNumberFormat;
-    }
+    const numberFormat = getStyleNumberFormat(docStyle);
+    if (numberFormat != null) out.numberFormat = numberFormat;
 
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
     // Horizontal alignment may exist in several shapes depending on provenance:

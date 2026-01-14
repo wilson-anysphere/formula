@@ -6,6 +6,7 @@ import { parseTsvToCellGrid, serializeCellGridToTsv } from "./tsv.js";
 import { ClipboardParseLimitError, DEFAULT_MAX_CLIPBOARD_HTML_CHARS, DEFAULT_MAX_CLIPBOARD_PARSE_CELLS } from "./limits.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
+import { getStyleNumberFormat } from "../formatting/styleFieldAccess.js";
 
 /**
  * @typedef {import("./types.js").CellGrid} CellGrid
@@ -343,17 +344,8 @@ function styleToClipboardFormat(style) {
 
   // Treat `numberFormat` as authoritative even when it is explicitly cleared (null/undefined)
   // so UI patches can override imported formula-model `number_format` strings.
-  const rawNumberFormat = (() => {
-    if (hasOwn(style, "numberFormat")) return style.numberFormat;
-    if (hasOwn(style, "number_format")) return style.number_format;
-    return undefined;
-  })();
-  if (typeof rawNumberFormat === "string") {
-    const trimmed = rawNumberFormat.trim();
-    if (trimmed !== "" && trimmed.toLowerCase() !== "general") {
-      out.numberFormat = rawNumberFormat;
-    }
-  }
+  const numberFormat = getStyleNumberFormat(style);
+  if (numberFormat != null) out.numberFormat = numberFormat;
 
   // Back-compat: allow flat clipboard-ish styles to round trip.
   if (out.bold === undefined && typeof style.bold === "boolean") out.bold = style.bold;

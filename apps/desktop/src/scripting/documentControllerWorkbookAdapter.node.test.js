@@ -57,3 +57,30 @@ test("DocumentControllerWorkbookAdapter guards getValues against huge ranges", (
 
   workbook.dispose();
 });
+
+test("DocumentControllerWorkbookAdapter surfaces snake_case number_format and respects cleared numberFormat", () => {
+  const controller = new DocumentController();
+
+  // Use a stable id that differs from the display name.
+  controller.setCellValue("sheet-1", "A1", 1);
+
+  const importedStyleId = controller.styleTable.intern({ number_format: "0.00" });
+  controller.setRangeValues("sheet-1", "A1", [[{ value: 1.23, styleId: importedStyleId }]]);
+
+  // If the UI clears a number format (numberFormat: null), that should override any imported snake_case value.
+  const clearedStyleId = controller.styleTable.intern({ number_format: "0.00", numberFormat: null });
+  controller.setRangeValues("sheet-1", "A2", [[{ value: 1.23, styleId: clearedStyleId }]]);
+
+  const sheetNameResolver = {
+    getSheetNameById: (id) => (String(id) === "sheet-1" ? "Budget" : null),
+    getSheetIdByName: (name) => (String(name).trim().toLowerCase() === "budget" ? "sheet-1" : null),
+  };
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { sheetNameResolver });
+  const sheet = workbook.getSheet("Budget");
+
+  assert.equal(sheet.getRange("A1").getFormat().numberFormat, "0.00");
+  assert.equal(sheet.getRange("A2").getFormat().numberFormat, undefined);
+
+  workbook.dispose();
+});

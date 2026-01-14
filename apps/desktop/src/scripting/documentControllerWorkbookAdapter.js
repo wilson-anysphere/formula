@@ -1,6 +1,7 @@
 import { formatCellAddress, formatRangeAddress, parseRangeAddress } from "../../../../packages/scripting/src/a1.js";
 import { TypedEventEmitter } from "../../../../packages/scripting/src/events.js";
 import { applyStylePatch } from "../formatting/styleTable.js";
+import { getStyleNumberFormat } from "../formatting/styleFieldAccess.js";
 
 // Excel limits used by the scripting A1 address helpers and macro recorder.
 // - Rows: 1..1048576 (0-based: 0..1048575)
@@ -228,9 +229,8 @@ function scriptFormatFromDocStyle(style) {
   if (!hasOwn(out, "bold") && hasOwn(style, "bold") && typeof style.bold === "boolean") out.bold = style.bold;
   if (!hasOwn(out, "italic") && hasOwn(style, "italic") && typeof style.italic === "boolean") out.italic = style.italic;
 
-  if (hasOwn(style, "numberFormat") && typeof style.numberFormat === "string") {
-    out.numberFormat = style.numberFormat;
-  }
+  const numberFormat = getStyleNumberFormat(style);
+  if (numberFormat != null) out.numberFormat = numberFormat;
 
   const fill = style.fill;
   if (isPlainObject(fill)) {
