@@ -247,6 +247,9 @@ export class TabCompletionEngine {
 
       const topLevelSheetRanges = await this.suggestTopLevelSheetQualifiedRanges(context);
       if (topLevelSheetRanges.length > 0) return topLevelSheetRanges;
+
+      const topLevelStructuredRefs = await this.suggestTopLevelStructuredRefs(context);
+      if (topLevelStructuredRefs.length > 0) return topLevelStructuredRefs;
     }
 
     // 1) Function name completion
@@ -898,6 +901,49 @@ export class TabCompletionEngine {
         displayText: newText,
         type: "range",
         confidence: Math.min(0.85, (candidate.confidence ?? 0) + 0.05),
+      });
+    }
+
+    return rankAndDedupe(suggestions).slice(0, this.maxSuggestions);
+  }
+
+  /**
+   * Suggest structured references (table[column]) when the user is typing inside the
+   * `[...]` portion at the top level of a formula (i.e. not inside a function call).
+   *
+   * Example: `=Table1[Am` → `=Table1[Amount]`
+   *
+   * @param {CompletionContext} context
+   * @returns {Promise<Suggestion[]>}
+   */
+  async suggestTopLevelStructuredRefs(context) {
+    const provider = this.schemaProvider;
+    if (!provider) return [];
+
+    const input = safeToString(context?.currentInput);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const prefix = input.slice(0, cursor);
+    if (!prefix.includes("[")) return [];
+
+    const tokenStart = findOpenStructuredRefTokenStart(prefix);
+    if (tokenStart === null) return [];
+
+    const typedPrefix = prefix.slice(tokenStart);
+    const tables = await safeProviderCall(provider.getTables);
+    if (tables.length === 0) return [];
+
+    const matches = suggestStructuredRefs(typedPrefix, tables);
+    /** @type {Suggestion[]} */
+    const suggestions = [];
+    for (const m of matches) {
+      const replacement = m.text;
+      const insertedSuffix = replacement.slice(typedPrefix.length);
+      const newText = replaceSpan(input, tokenStart, cursor, replacement);
+      suggestions.push({
+        text: newText,
+        displayText: insertedSuffix,
+        type: "range",
+        confidence: m.confidence,
       });
     }
 
@@ -2536,6 +2582,88 @@ function findSheetQualifiedTokenStart(textPrefix, bangIdx) {
 
   // Unquoted sheet name: scan backwards until we hit an operator/whitespace.
   let start = bangIdx;
+  while (start - 1 >= 0 && !/[=\s(,;{+\\\-*/^@<>&]/.test(text[start - 1])) start -= 1;
+  const before = start - 1 >= 0 ? text[start - 1] : "";
+  if (before && !/[=\s(,;{+\\\-*/^@<>&]/.test(before)) return null;
+  return start;
+}
+
+/**
+ * Find the start index of an open structured reference (table[...]) in a formula prefix.
+ * Returns null if the cursor is not currently inside a structured reference.
+ *
+ * This intentionally ignores brackets inside:
+ * - double-quoted string literals
+ * - quoted sheet names (`'...'`)
+ *
+ * @param {string} textPrefix
+ * @returns {number | null}
+ */
+function findOpenStructuredRefTokenStart(textPrefix) {
+  const text = typeof textPrefix === "string" ? textPrefix : "";
+  if (!text.includes("[")) return null;
+
+  let inString = false;
+  let inSheetQuote = false;
+  let bracketDepth = 0;
+  let firstBracketIdx = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+
+    if (inSheetQuote) {
+      if (ch === "'") {
+        if (text[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "'" && bracketDepth === 0) {
+      // Treat sheet quotes as opaque so we don't interpret brackets inside sheet names.
+      inSheetQuote = true;
+      continue;
+    }
+
+    if (ch === "[") {
+      bracketDepth += 1;
+      if (bracketDepth === 1) {
+        firstBracketIdx = i;
+      }
+      continue;
+    }
+
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      if (bracketDepth === 0) {
+        firstBracketIdx = -1;
+      }
+    }
+  }
+
+  if (bracketDepth === 0 || firstBracketIdx < 0) return null;
+
+  // The table name token precedes the first '[' and cannot contain whitespace.
+  let start = firstBracketIdx;
   while (start - 1 >= 0 && !/[=\s(,;{+\\\-*/^@<>&]/.test(text[start - 1])) start -= 1;
   const before = start - 1 >= 0 ? text[start - 1] : "";
   if (before && !/[=\s(,;{+\\\-*/^@<>&]/.test(before)) return null;

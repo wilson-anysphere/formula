@@ -4357,6 +4357,29 @@ test("Structured references support column names with spaces (pure insertion)", 
   );
 });
 
+test("Structured references are suggested inside brackets at top level (=Table1[First ␠ → =Table1[First Name])", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [{ name: "Table1", columns: ["First Name"] }],
+    },
+  });
+
+  const currentInput = "=Table1[First ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=Table1[First Name]"),
+    `Expected a top-level structured ref completion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-name prefixes are suggested as SheetName! inside range args (=SUM(she → sheet2!) without auto-closing parens", async () => {
   const engine = new TabCompletionEngine({
     schemaProvider: {
