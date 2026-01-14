@@ -84,6 +84,11 @@ fn record_len_vectors_lock_in_encoding() {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        failure_persistence: None,
+        .. ProptestConfig::default()
+    })]
+
     #[test]
     fn record_id_roundtrips(id in valid_record_id()) {
         let mut encoded = Vec::new();

@@ -321,6 +321,11 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        failure_persistence: None,
+        .. ProptestConfig::default()
+    })]
+
     #[test]
     fn prop_ast_matches_bytecode(
         expr in arb_expr(CellCoord::new(5, 5), 10, 10),

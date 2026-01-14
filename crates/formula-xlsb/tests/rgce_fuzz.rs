@@ -2,6 +2,11 @@ use formula_xlsb::rgce::{decode_rgce, DecodeError};
 use proptest::prelude::*;
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        failure_persistence: None,
+        .. ProptestConfig::default()
+    })]
+
     #[test]
     fn decode_rgce_is_robust(rgce in proptest::collection::vec(any::<u8>(), 0..=256)) {
         let res = decode_rgce(&rgce);

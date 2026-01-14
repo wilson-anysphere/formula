@@ -7856,7 +7856,11 @@ fn bytecode_backend_rng_is_stable_within_one_recalc_tick_and_changes_across_tick
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig {
+        cases: 32,
+        failure_persistence: None,
+        .. ProptestConfig::default()
+    })]
     #[test]
     fn bytecode_backend_matches_ast_for_random_supported_formulas(
         a in -1000f64..1000f64,

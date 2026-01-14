@@ -2,6 +2,11 @@ use formula_biff::{decode_rgce, DecodeRgceError};
 use proptest::prelude::*;
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        failure_persistence: None,
+        .. ProptestConfig::default()
+    })]
+
     #[test]
     fn decode_rgce_is_robust(rgce in proptest::collection::vec(any::<u8>(), 0..=256)) {
         let res = std::panic::catch_unwind(|| decode_rgce(&rgce));
@@ -74,4 +79,3 @@ fn ptgstr_escapes_quotes_excel_style() {
     let decoded = decode_rgce(&rgce).expect("decode string literal");
     assert_eq!(decoded, "\"A\"\"B\"");
 }
-
