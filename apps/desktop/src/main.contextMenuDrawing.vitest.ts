@@ -202,6 +202,51 @@ describe("Drawing context menu (main wiring helper)", () => {
     }
   });
 
+  it("disables delete/cut/arrange in read-only mode but allows Copy for image drawings", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-read-only" });
+    let selectedId: number | null = 1;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      listDrawingsForSheet: vi.fn(() => [{ id: 2 }, { id: 1 }]),
+      isSelectedDrawingImage: vi.fn(() => true),
+      isReadOnly: vi.fn(() => true),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteDrawingById: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-read-only"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      expect(buttonByLabel("Cut")?.disabled).toBe(true);
+      expect(buttonByLabel("Copy")?.disabled).toBe(false);
+      expect(buttonByLabel("Delete")?.disabled).toBe(true);
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(true);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(true);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-read-only"]')?.remove();
+    }
+  });
+
   it("disables z-order actions for a single canvas chart (no reorder possible)", () => {
     const contextMenu = new ContextMenu({ testId: "context-menu-drawing-chart" });
     let selectedId: number | null = -123;

@@ -11,6 +11,7 @@ type DrawingContextMenuApp = Pick<
   | "getSelectedDrawingId"
   | "listDrawingsForSheet"
   | "isSelectedDrawingImage"
+  | "isReadOnly"
   | "selectDrawingById"
   | "cut"
   | "copy"
@@ -27,15 +28,26 @@ export function buildDrawingContextMenuItems(params: {
   const { app, isEditing } = params;
   const selectedId = app.getSelectedDrawingId();
   const hasSelection = selectedId != null;
-  const enabled = !isEditing && hasSelection;
-  const clipboardEnabled = enabled && app.isSelectedDrawingImage();
+  const readOnly = (() => {
+    try {
+      return Boolean(app.isReadOnly());
+    } catch {
+      return false;
+    }
+  })();
+
+  const selectionEnabled = !isEditing && hasSelection;
+  // Copy is allowed in read-only mode, but mutating actions should be disabled.
+  const canModify = selectionEnabled && !readOnly;
+  const copyEnabled = selectionEnabled && app.isSelectedDrawingImage();
+  const cutEnabled = canModify && app.isSelectedDrawingImage();
 
   const { canBringForward, canSendBackward } = (() => {
     // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with negative ids and
     // form a separate z-stack above workbook drawings. Arrange operations should therefore be
     // enabled/disabled based on the selection's position *within its stack* (chart stack vs
     // workbook drawings stack).
-    if (!enabled || selectedId == null) return { canBringForward: false, canSendBackward: false };
+    if (!canModify || selectedId == null) return { canBringForward: false, canSendBackward: false };
     // `listDrawingsForSheet` returns topmost-first ordering.
     const drawings = app.listDrawingsForSheet();
     if (!Array.isArray(drawings) || drawings.length < 2) {
@@ -69,7 +81,7 @@ export function buildDrawingContextMenuItems(params: {
     {
       type: "item",
       label: cutLabel,
-      enabled: clipboardEnabled,
+      enabled: cutEnabled,
       onSelect: () => {
         // Ensure clipboard commands treat the grid as the active focus target (so
         // they don't early-return due to focus being in an input, and so Cut doesn't
@@ -81,7 +93,7 @@ export function buildDrawingContextMenuItems(params: {
     {
       type: "item",
       label: copyLabel,
-      enabled: clipboardEnabled,
+      enabled: copyEnabled,
       onSelect: () => {
         app.focus();
         app.copy();
@@ -90,7 +102,7 @@ export function buildDrawingContextMenuItems(params: {
     {
       type: "item",
       label: "Delete",
-      enabled,
+      enabled: canModify,
       onSelect: () => {
         if (selectedId != null) {
           app.deleteDrawingById(selectedId);
