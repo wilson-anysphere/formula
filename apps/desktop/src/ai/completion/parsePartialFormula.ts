@@ -722,11 +722,15 @@ export function createLocaleAwarePartialFormulaParser(options: {
       baseline = { isFormula: true, inFunctionCall: false };
     }
     const localeArgSeparator = getLocaleArgSeparator(normalizedLocaleId);
-    if (localeArgSeparator === ";") {
-      // The fallback parser is intentionally locale-agnostic, and will treat `,` as an argument
-      // separator until a `;` appears. In semicolon locales (where `,` is the decimal separator),
-      // that can mis-classify partial numbers like `1,` as "arg 1". Fix up the arg span/index
-      // using the known locale separator so completion edits remain stable.
+    const shouldFixArgContext = localeArgSeparator === ";" || prefix.includes(";");
+    if (shouldFixArgContext) {
+      // The fallback parser is intentionally locale-agnostic:
+      // - It treats `,` as an argument separator until a `;` appears.
+      // - If a `;` appears, it may switch into "semicolon locale" mode.
+      //
+      // When we know the locale (or are falling back to en-US for unsupported locales),
+      // recompute the arg span/index using the effective locale separator so completion
+      // behavior matches parsing semantics.
       const openParenIndex = findOpenParenIndex(prefix, functionRegistry);
       if (openParenIndex != null) {
         const { argIndex, currentArg } = getArgContextWithSeparator(

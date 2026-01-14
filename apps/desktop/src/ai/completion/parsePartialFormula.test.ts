@@ -286,6 +286,37 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     }
   });
 
+  it("falls back to en-US semantics when document.lang is an unsupported locale (pt-BR)", async () => {
+    // Some hosts report locales that the formula engine doesn't support yet (e.g. pt-BR).
+    // Formula UX should match the engine's behavior (treat unsupported locales as en-US)
+    // so arg separators and parsing remain consistent.
+    setLocale("en-US");
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = { documentElement: { lang: "pt-BR" } };
+
+    try {
+      const parser = createLocaleAwarePartialFormulaParser({});
+      const fnRegistry = new FunctionRegistry();
+
+      const commaInput = "=SUM(1,";
+      const commaResult = await parser(commaInput, commaInput.length, fnRegistry);
+      expect(commaResult.isFormula).toBe(true);
+      expect(commaResult.inFunctionCall).toBe(true);
+      // In the en-US fallback, ',' is treated as an argument separator.
+      expect(commaResult.argIndex).toBe(1);
+      expect(commaResult.currentArg?.text).toBe("");
+      expect(commaResult.functionName).toBe("SUM");
+
+      const semiInput = "=SUM(1;";
+      const semiResult = await parser(semiInput, semiInput.length, fnRegistry);
+      // In the en-US fallback, ';' is treated as plain text (not an argument separator).
+      expect(semiResult.argIndex).toBe(0);
+      expect(semiResult.currentArg?.text).toBe("1;");
+    } finally {
+      (globalThis as any).document = prevDocument;
+    }
+  });
+
   it("respects getLocaleId() overrides over document/i18n locale when choosing the formula locale", async () => {
     setLocale("en-US");
     const prevDocument = (globalThis as any).document;
