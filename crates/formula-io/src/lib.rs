@@ -1,3 +1,4 @@
+#[cfg(test)]
 mod cryptoapi_rc4;
 
 use std::borrow::Cow;
