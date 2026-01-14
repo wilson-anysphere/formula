@@ -2114,6 +2114,179 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ASC",
+    description: "Changes full-width (double-byte) characters to half-width (single-byte) characters.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "DBCS",
+    description: "Changes half-width (single-byte) characters to full-width (double-byte) characters.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "PHONETIC",
+    description: "Extracts the phonetic (furigana) characters from a text string.",
+    args: [
+      { name: "reference", type: "range" },
+    ],
+  },
+  {
+    name: "ISTHAIDIGIT",
+    description: "Returns TRUE if the text is a Thai digit.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "THAIDIGIT",
+    description: "Converts Arabic numerals to Thai digits.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "THAISTRINGLENGTH",
+    description: "Returns the length of a Thai text string.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "COMPLEX",
+    description: "Converts real and imaginary coefficients into a complex number.",
+    args: [
+      { name: "real_num", type: "number" },
+      { name: "i_num", type: "number" },
+      { name: "suffix", type: "string", optional: true },
+    ],
+  },
+  {
+    name: "IMABS",
+    description: "Returns the absolute value (modulus) of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMAGINARY",
+    description: "Returns the imaginary coefficient of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMARGUMENT",
+    description: "Returns the argument (theta) of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMCONJUGATE",
+    description: "Returns the complex conjugate of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMCOS",
+    description: "Returns the cosine of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMDIV",
+    description: "Returns the quotient of two complex numbers.",
+    args: [
+      { name: "inumber1", type: "range" },
+      { name: "inumber2", type: "range" },
+    ],
+  },
+  {
+    name: "IMEXP",
+    description: "Returns the exponential of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMLN",
+    description: "Returns the natural logarithm of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMLOG10",
+    description: "Returns the base-10 logarithm of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMLOG2",
+    description: "Returns the base-2 logarithm of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMPOWER",
+    description: "Returns a complex number raised to an integer power.",
+    args: [
+      { name: "inumber", type: "range" },
+      { name: "number", type: "number" },
+    ],
+  },
+  {
+    name: "IMPRODUCT",
+    description: "Returns the product of complex numbers.",
+    args: [
+      { name: "inumber1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "IMREAL",
+    description: "Returns the real coefficient of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMSIN",
+    description: "Returns the sine of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMSQRT",
+    description: "Returns the square root of a complex number.",
+    args: [
+      { name: "inumber", type: "range" },
+    ],
+  },
+  {
+    name: "IMSUB",
+    description: "Returns the difference of two complex numbers.",
+    args: [
+      { name: "inumber1", type: "range" },
+      { name: "inumber2", type: "range" },
+    ],
+  },
+  {
+    name: "IMSUM",
+    description: "Returns the sum of complex numbers.",
+    args: [
+      { name: "inumber1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "CONCAT",
     description: "Combines the text from multiple ranges and/or strings.",
     args: [

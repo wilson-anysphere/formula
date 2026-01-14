@@ -85,6 +85,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("OCT2DEC", 0), "Expected OCT2DEC octal_number to be a range");
   assert.ok(registry.getFunction("BIN2HEX")?.args?.[1]?.optional, "Expected BIN2HEX places to be optional");
   assert.ok(registry.isRangeArg("ARABIC", 0), "Expected ARABIC text to be a range");
+  assert.ok(registry.isRangeArg("ASC", 0), "Expected ASC text to be a range");
+  assert.ok(registry.isRangeArg("PHONETIC", 0), "Expected PHONETIC reference to be a range");
+  assert.equal(registry.getArgType("COMPLEX", 2), "string", "Expected COMPLEX suffix to be string-like");
+  assert.ok(registry.isRangeArg("IMABS", 0), "Expected IMABS inumber to be a range");
+  assert.ok(registry.isRangeArg("IMDIV", 1), "Expected IMDIV inumber2 to be a range");
+  assert.ok(registry.getFunction("IMSUM")?.args?.[0]?.repeating, "Expected IMSUM to accept repeating inumber args");
 
   // SUBTOTAL(function_num, ref1, [ref2], ...)
   assert.equal(registry.isRangeArg("SUBTOTAL", 0), false, "Expected SUBTOTAL function_num not to be a range");
