@@ -168,13 +168,17 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 
-  it("keeps ribbon-only commands enabled via the exemption list (not CommandRegistry)", () => {
+  it("keeps exempt ribbon-only commands enabled via the exemption list (not CommandRegistry)", () => {
     const commandRegistry = new CommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    // These are currently handled directly by the desktop ribbon command handler (not via CommandRegistry),
-    // so they must be exempt from the registry-backed disabling allowlist.
-    expect(baselineDisabledById["home.cells.format.organizeSheets"]).toBeUndefined();
+    // These ids are intentionally handled outside CommandRegistry (e.g. ribbon overrides), so they
+    // must remain enabled via the exemption list even when the CommandRegistry is empty.
+    expect(baselineDisabledById["data.sortFilter.filter"]).toBeUndefined();
+
+    // Organize Sheets is now a real CommandRegistry command, so it should be disabled in the baseline
+    // state when the registry does not register it.
+    expect(baselineDisabledById["home.cells.format.organizeSheets"]).toBe(true);
 
     // Home → Cells structural edit commands should be disabled when the CommandRegistry does not
     // register them (baseline allowlist behavior).
@@ -340,9 +344,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   menuItems: [
                     { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
                     { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
-                    // Exempt id: implemented directly by the desktop shell, so it must remain enabled even
+                    // Exempt id: intentionally handled outside CommandRegistry, so it must remain enabled even
                     // when the CommandRegistry does not register it.
-                    { id: "home.cells.format.organizeSheets", label: "Organize Sheets…", ariaLabel: "Organize Sheets" },
+                    { id: "data.sortFilter.clear", label: "Clear", ariaLabel: "Clear" },
                   ],
                  },
                  // Exempt command id to prove the exemption list keeps implemented ribbon-only
@@ -396,10 +400,10 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     const rowHeight = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.rowHeight"]');
     const colWidth = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.columnWidth"]');
-    const organizeSheets = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.organizeSheets"]');
+    const clear = container.querySelector<HTMLButtonElement>('[data-command-id="data.sortFilter.clear"]');
     expect(rowHeight).toBeInstanceOf(HTMLButtonElement);
     expect(colWidth).toBeInstanceOf(HTMLButtonElement);
-    expect(organizeSheets).toBeInstanceOf(HTMLButtonElement);
+    expect(clear).toBeInstanceOf(HTMLButtonElement);
 
     // Row/column sizing menu items are backed by CommandRegistry commands, so they should be disabled
     // when the registry does not register them.
@@ -407,7 +411,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(colWidth?.disabled).toBe(true);
 
     // Exempt menu items remain enabled even without a corresponding CommandRegistry entry.
-    expect(organizeSheets?.disabled).toBe(false);
+    expect(clear?.disabled).toBe(false);
 
     act(() => root.unmount());
   });
