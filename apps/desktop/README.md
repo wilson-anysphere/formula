@@ -18,7 +18,7 @@ Note: `pnpm -C apps/desktop build:analyze` sets `VITE_BUNDLE_ANALYZE=1` automati
 Optional: for more accurate *per-module* attribution, you can also enable sourcemap-based analysis:
 
 ```bash
-VITE_BUNDLE_ANALYZE_SOURCEMAP=1 pnpm -C apps/desktop build:analyze
+pnpm -C apps/desktop build:analyze:sourcemap
 ```
 
 This additionally generates `apps/desktop/dist/bundle-stats-sourcemap.html` (and enables `build.sourcemap` for that run).
