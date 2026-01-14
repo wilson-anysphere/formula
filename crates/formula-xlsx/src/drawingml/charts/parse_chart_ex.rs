@@ -204,7 +204,6 @@ fn parse_legend(
         layout: None,
         text_style: None,
         style: None,
-        layout: None,
     })
 }
 

@@ -247,7 +247,7 @@ pub struct SheetUsedRange {
 
 #[cfg(feature = "desktop")]
 const SHEET_FORMATTING_METADATA_KEY: &str = "formula_ui_formatting";
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 const SHEET_FORMATTING_SCHEMA_VERSION: i64 = 1;
 
 #[cfg(any(feature = "desktop", test))]
@@ -291,6 +291,36 @@ fn validate_sheet_formatting_metadata_size(value: &JsonValue) -> Result<(), Stri
         MAX_SHEET_FORMATTING_METADATA_BYTES,
         "Sheet formatting metadata",
     )
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn default_sheet_formatting_payload() -> JsonValue {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "schemaVersion".to_string(),
+        JsonValue::from(SHEET_FORMATTING_SCHEMA_VERSION),
+    );
+    JsonValue::Object(obj)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn sheet_formatting_payload_for_ipc(sheet_id: &str, raw: Option<&JsonValue>) -> JsonValue {
+    use crate::resource_limits::MAX_SHEET_FORMATTING_METADATA_BYTES;
+
+    let Some(raw) = raw else {
+        return default_sheet_formatting_payload();
+    };
+
+    if let Err(err) = json_within_byte_limit(
+        raw,
+        MAX_SHEET_FORMATTING_METADATA_BYTES,
+        "Sheet formatting metadata",
+    ) {
+        eprintln!("[sheet formatting] {err} for sheet {sheet_id}; returning default formatting");
+        return default_sheet_formatting_payload();
+    }
+
+    raw.clone()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -2864,14 +2894,11 @@ pub fn get_sheet_formatting(
     let meta = storage
         .get_sheet_meta(sheet_uuid)
         .map_err(|e| e.to_string())?;
-    let Some(metadata) = meta.metadata else {
-        return Ok(json!({ "schemaVersion": SHEET_FORMATTING_SCHEMA_VERSION }));
-    };
-
-    Ok(metadata
-        .get(SHEET_FORMATTING_METADATA_KEY)
-        .cloned()
-        .unwrap_or_else(|| json!({ "schemaVersion": SHEET_FORMATTING_SCHEMA_VERSION })))
+    let raw = meta
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get(SHEET_FORMATTING_METADATA_KEY));
+    Ok(sheet_formatting_payload_for_ipc(&sheet_id, raw))
 }
 
 #[cfg(feature = "desktop")]
@@ -6862,6 +6889,15 @@ mod tests {
             err.to_string().contains(&max.to_string()),
             "expected error to mention limit: {err}"
         );
+    }
+
+    #[test]
+    fn sheet_formatting_payload_for_ipc_returns_default_when_too_large() {
+        let max = crate::resource_limits::MAX_SHEET_FORMATTING_METADATA_BYTES;
+        let too_big = JsonValue::String("a".repeat(max.saturating_sub(1)));
+
+        let clamped = sheet_formatting_payload_for_ipc("Sheet1", Some(&too_big));
+        assert_eq!(clamped, default_sheet_formatting_payload());
     }
 
     #[test]
