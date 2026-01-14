@@ -126,6 +126,16 @@ export class ImageBitmapCache {
 
   get(entry: ImageEntry, opts: ImageBitmapCacheGetOptions = {}): Promise<ImageBitmap> {
     const id = entry.id;
+
+    // Opportunistically prune expired negative-cache entries so we don't retain
+    // large numbers of failures indefinitely (the expiry window is short, but a
+    // workbook could reference many distinct broken images).
+    let now: number | undefined;
+    if (this.negativeCacheMs > 0 && this.negativeCache.size > 0) {
+      now = Date.now();
+      this.pruneExpiredNegativeCache(now);
+    }
+
     const existing = this.entries.get(id);
     if (existing) {
       // Mark as most-recently-used.
@@ -146,7 +156,8 @@ export class ImageBitmapCache {
 
     const cachedFailure = this.negativeCache.get(id);
     if (cachedFailure) {
-      if (cachedFailure.expiresAt > Date.now()) {
+      const t = now ?? Date.now();
+      if (cachedFailure.expiresAt > t) {
         return Promise.reject(cachedFailure.error);
       }
       this.negativeCache.delete(id);
@@ -223,6 +234,8 @@ export class ImageBitmapCache {
 
         this.__testOnly_failCount++;
         if (this.negativeCacheMs > 0) {
+          // Replace + touch for predictable iteration order (useful for pruning).
+          this.negativeCache.delete(id);
           this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
         }
 
@@ -331,6 +344,15 @@ export class ImageBitmapCache {
         break;
       }
       if (!evicted) return;
+    }
+  }
+
+  private pruneExpiredNegativeCache(now: number): void {
+    // Entries are inserted in chronological order (we delete+set on refresh),
+    // which means we can stop once we hit the first unexpired value.
+    for (const [id, entry] of this.negativeCache) {
+      if (entry.expiresAt > now) break;
+      this.negativeCache.delete(id);
     }
   }
 
