@@ -86,7 +86,7 @@ fn phonetic_reads_cell_metadata_or_falls_back_to_text() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "abc");
 
-    // With no metadata, fall back to the referenced cell's text.
+    // Excel returns the cell's displayed text when no phonetic guide metadata is present.
     assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("abc".to_string()));
 
     // When phonetic guides are present, return them.
@@ -125,12 +125,15 @@ fn phonetic_propagates_errors() {
     sheet.set_formula("A1", "=1/0");
     sheet.recalculate();
 
+    // Error values are propagated even if phonetic metadata is present.
+    sheet.set_phonetic("A1", Some("should-not-win"));
     assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Error(ErrorKind::Div0));
 }
 
 #[test]
-fn phonetic_coerces_numbers_using_value_locale() {
+fn phonetic_fallback_coerces_numbers_using_value_locale() {
     let mut sheet = TestSheet::new();
     sheet.set_value_locale(ValueLocaleConfig::de_de());
-    assert_eq!(sheet.eval("=PHONETIC(1.5)"), Value::Text("1,5".to_string()));
+    sheet.set("A1", 1.5);
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("1,5".to_string()));
 }

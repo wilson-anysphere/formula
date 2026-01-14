@@ -12,9 +12,12 @@
 //! `ASC` / `DBCS` perform half-width / full-width conversions in Japanese locales.
 //! We currently implement these as identity transforms (no conversions).
 //!
-//! `PHONETIC` depends on per-cell phonetic guide metadata (furigana). When phonetic
-//! metadata is available, the engine returns it; otherwise it falls back to
-//! returning the referenced value coerced to text.
+//! `PHONETIC` depends on per-cell phonetic guide metadata (furigana).
+//! When phonetic metadata is present for a referenced cell, `PHONETIC(reference)`
+//! returns that stored string. When phonetic metadata is absent (the common
+//! case), Excel falls back to the referenced cell’s displayed text, so the
+//! engine returns the referenced value coerced to text using the current
+//! locale-aware formatting rules.
 //!
 //! Once workbook locale + codepage + phonetic metadata are modeled, this module
 //! can be extended to implement real Excel semantics for DBCS workbooks.
@@ -75,14 +78,14 @@ pub(crate) fn dbcs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 }
 
 pub(crate) fn phonetic_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    // If the argument is a reference, attempt to read the target cells' phonetic guides.
-    // Otherwise, this behaves like `TEXT(value)` (coerce to text with locale-aware number
-    // formatting).
     match ctx.eval_arg(&args[0]) {
-        ArgValue::Scalar(v) => {
-            array_lift::lift1(v, |v| Ok(Value::Text(v.coerce_to_string_with_ctx(ctx)?)))
-        }
         ArgValue::Reference(reference) => phonetic_from_reference(ctx, reference),
+        // TODO: Verify Excel's behavior for scalar/non-reference arguments (e.g. `PHONETIC("abc")`).
+        // Historically, the engine treated PHONETIC as a string-coercion placeholder; preserve that
+        // behavior until we have an Excel oracle case for scalar arguments.
+        ArgValue::Scalar(value) => array_lift::lift1(value, |v| {
+            Ok(Value::Text(v.coerce_to_string_with_ctx(ctx)?))
+        }),
         ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
     }
 }
@@ -92,16 +95,20 @@ fn phonetic_from_reference(ctx: &dyn FunctionContext, reference: Reference) -> V
     ctx.record_reference(&reference);
 
     if reference.is_single_cell() {
+        let cell_value = ctx.get_cell_value(&reference.sheet_id, reference.start);
+        if let Value::Error(e) = &cell_value {
+            return Value::Error(*e);
+        }
         if let Some(phonetic) = ctx.get_cell_phonetic(&reference.sheet_id, reference.start) {
             return Value::Text(phonetic.to_string());
         }
-        let value = ctx.get_cell_value(&reference.sheet_id, reference.start);
-        return match value.coerce_to_string_with_ctx(ctx) {
-            Ok(text) => Value::Text(text),
+        return match cell_value.coerce_to_string_with_ctx(ctx) {
+            Ok(s) => Value::Text(s),
             Err(e) => Value::Error(e),
         };
     }
 
+    // Preserve the existing array/broadcast behavior for multi-cell references.
     let rows = (reference.end.row - reference.start.row + 1) as usize;
     let cols = (reference.end.col - reference.start.col + 1) as usize;
     let total = match rows.checked_mul(cols) {
@@ -111,23 +118,25 @@ fn phonetic_from_reference(ctx: &dyn FunctionContext, reference: Reference) -> V
     if total > MAX_MATERIALIZED_ARRAY_CELLS {
         return Value::Error(ErrorKind::Spill);
     }
-
     let mut out = Vec::new();
     if out.try_reserve_exact(total).is_err() {
         return Value::Error(ErrorKind::Num);
     }
     for addr in reference.iter_cells() {
+        let cell_value = ctx.get_cell_value(&reference.sheet_id, addr);
+        // Error values are preserved per element (matching `array_lift` behavior).
+        if let Value::Error(e) = cell_value {
+            out.push(Value::Error(e));
+            continue;
+        }
         if let Some(phonetic) = ctx.get_cell_phonetic(&reference.sheet_id, addr) {
             out.push(Value::Text(phonetic.to_string()));
             continue;
         }
-
-        let value = ctx.get_cell_value(&reference.sheet_id, addr);
-        out.push(match value.coerce_to_string_with_ctx(ctx) {
-            Ok(text) => Value::Text(text),
+        out.push(match cell_value.coerce_to_string_with_ctx(ctx) {
+            Ok(s) => Value::Text(s),
             Err(e) => Value::Error(e),
         });
     }
-
     Value::Array(Array::new(rows, cols, out))
 }

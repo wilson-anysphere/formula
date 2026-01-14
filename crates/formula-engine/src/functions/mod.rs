@@ -287,6 +287,7 @@ pub trait FunctionContext {
     fn get_cell_formula(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
         None
     }
+
     /// Returns the workbook's style table, if available.
     fn style_table(&self) -> Option<&formula_model::StyleTable> {
         None

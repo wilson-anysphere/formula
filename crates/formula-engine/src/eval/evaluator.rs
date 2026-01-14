@@ -227,10 +227,10 @@ pub trait ValueResolver {
         None
     }
 
-    /// Returns the cell's stored phonetic guide (furigana) text, if available.
+    /// Returns the stored phonetic guide (furigana) text for a cell, if available.
     ///
-    /// This is used by the `PHONETIC` worksheet function. Most resolvers do not model phonetic
-    /// guides, so the default implementation returns `None`.
+    /// This metadata is used by Excel's `PHONETIC(...)` worksheet function. Most resolvers do not
+    /// model phonetic guides, so the default implementation returns `None`.
     fn get_cell_phonetic(&self, _sheet_id: usize, _addr: CellAddr) -> Option<&str> {
         None
     }
@@ -1888,11 +1888,9 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn workbook_filename(&self) -> Option<&str> {
         self.resolver.workbook_filename()
     }
-
     fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
         self.resolver.pivot_registry()
     }
-
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
         self.resolver.sheet_id(name)
     }

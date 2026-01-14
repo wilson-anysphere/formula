@@ -1851,7 +1851,10 @@ impl Engine {
             .and_then(|sheet| sheet.cells.get(&addr))
             .map(|cell| cell.style_id))
     }
-
+    /// Sets the phonetic guide string (furigana) metadata for a single cell.
+    ///
+    /// This metadata is consumed by Excel's `PHONETIC(...)` worksheet function. When unset,
+    /// `PHONETIC(reference)` should fall back to the referenced cell's displayed text.
     pub fn set_cell_phonetic(
         &mut self,
         sheet: &str,
@@ -9081,7 +9084,6 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
             Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
         }
     }
-
     match value {
         Value::Number(n) => bytecode::Value::Number(*n),
         Value::Bool(b) => bytecode::Value::Bool(*b),
@@ -11166,7 +11168,6 @@ fn bytecode_expr_is_eligible_inner(
                 if args.is_empty() || args.len() > 2 {
                     return false;
                 }
-
                 // The bytecode runtime does not currently support resolving external workbook
                 // references produced by INDIRECT (the runtime's reference value model only
                 // supports local sheet ids). For the common case of a static string literal that
