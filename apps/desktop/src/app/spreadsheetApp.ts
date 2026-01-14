@@ -8860,6 +8860,8 @@ export class SpreadsheetApp {
     tooltip.dataset.testid = "formula-range-preview-tooltip";
     tooltip.className = "formula-range-preview-tooltip";
     tooltip.hidden = true;
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.setAttribute("aria-hidden", "true");
     return tooltip;
   }
 
@@ -8965,6 +8967,7 @@ export class SpreadsheetApp {
     if (!this.formulaRangePreviewTooltipVisible && tooltip.hidden) return;
     this.formulaRangePreviewTooltipVisible = false;
     tooltip.hidden = true;
+    tooltip.setAttribute("aria-hidden", "true");
     tooltip.classList.remove("formula-range-preview-tooltip--visible");
   }
 
@@ -9237,6 +9240,7 @@ export class SpreadsheetApp {
 
     this.formulaRangePreviewTooltipVisible = true;
     tooltip.hidden = false;
+    tooltip.setAttribute("aria-hidden", "false");
     tooltip.classList.add("formula-range-preview-tooltip--visible");
   }
 
