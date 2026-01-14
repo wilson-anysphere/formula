@@ -175,6 +175,11 @@ Notes:
 
 - The `saltValue` and `spinCount` come from `<p:encryptedKey ...>`, not `<keyData>`.
 - “Hash” is the algorithm named by `p:encryptedKey/@hashAlgorithm`.
+- `password` is taken **as-is** from the caller. No Unicode normalization is applied before UTF-16LE
+  encoding, so different normalization forms (e.g. NFC vs NFD) will yield different hashes and
+  therefore different derived keys. See the in-repo Unicode-password fixture
+  `fixtures/encrypted/ooxml/agile-unicode.xlsx` and the regression tests in
+  `crates/formula-io/tests/encrypted_ooxml_decrypt.rs`.
 
 ### Verifier check (wrong password vs continue)
 
