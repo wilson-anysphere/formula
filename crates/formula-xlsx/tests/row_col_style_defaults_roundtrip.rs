@@ -186,6 +186,84 @@ fn patch_writer_emits_row_default_style_when_xf_index_is_zero(
 }
 
 #[test]
+fn patch_writer_emits_col_default_style_when_xf_index_is_zero(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Some producers place custom xfs at index 0. Ensure we still emit `col/@style="0"` when the
+    // model references that non-default style.
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1">
+    <font>
+      <sz val="11"/>
+      <color theme="1"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+  </fonts>
+  <fills count="2">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+  </fills>
+  <borders count="1">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+  </borders>
+  <cellStyleXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+  </cellStyleXfs>
+  <cellXfs count="2">
+    <xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+  </cellXfs>
+  <cellStyles count="1">
+    <cellStyle name="Normal" xfId="0" builtinId="0"/>
+  </cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1"><c r="A1" s="0"><v>1</v></c></row>
+  </sheetData>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml, styles_xml);
+    let mut doc = load_from_bytes(&bytes)?;
+
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
+    let xf0_style_id = sheet
+        .cell(formula_model::CellRef::from_a1("A1")?)
+        .expect("A1 exists")
+        .style_id;
+    assert_ne!(xf0_style_id, 0, "expected xf index 0 to map to a non-default style");
+
+    // Column properties are 0-based; apply to column B.
+    sheet.set_col_style_id(1, Some(xf0_style_id));
+
+    let out = write::write_to_vec(&doc)?;
+    let out_sheet_xml = read_zip_part(&out, "xl/worksheets/sheet1.xml");
+    let parsed = roxmltree::Document::parse(&out_sheet_xml)?;
+
+    let col_b = parsed
+        .descendants()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "col"
+                && n.attribute("min") == Some("2")
+                && n.attribute("max") == Some("2")
+        })
+        .expect("col B exists");
+    assert_eq!(col_b.attribute("style"), Some("0"));
+    assert_eq!(col_b.attribute("customFormat"), Some("1"));
+
+    Ok(())
+}
+
+#[test]
 fn new_document_emits_row_and_col_default_styles() -> Result<(), Box<dyn std::error::Error>> {
     let mut workbook = Workbook::new();
     let sheet_id = workbook.add_sheet("Sheet1")?;
