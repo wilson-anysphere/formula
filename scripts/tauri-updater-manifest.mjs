@@ -168,16 +168,16 @@ export function validateTauriUpdaterManifest(manifest, opts = {}) {
           errors.push(`macOS updater artifact must end with .app.tar.gz: ${JSON.stringify(url)}`);
         }
       } else if (os === "linux") {
-        if (lower.endsWith(".deb")) {
+        if (lower.endsWith(".deb") || lower.endsWith(".rpm")) {
           errors.push(
-            `Linux updater artifact must be an AppImage archive (.AppImage.tar.gz), not a .deb installer: ${JSON.stringify(url)}`,
+            `Linux updater artifact must be an AppImage bundle (.AppImage), not a distro package (.deb/.rpm): ${JSON.stringify(url)}`,
           );
-        } else if (!lower.endsWith(".appimage.tar.gz")) {
-          errors.push(`Linux updater artifact must end with .AppImage.tar.gz: ${JSON.stringify(url)}`);
+        } else if (!lower.endsWith(".appimage")) {
+          errors.push(`Linux updater artifact must end with .AppImage: ${JSON.stringify(url)}`);
         }
       } else if (os === "windows") {
-        if (!(lower.endsWith(".msi.zip") || lower.endsWith(".exe.zip"))) {
-          errors.push(`Windows updater artifact must end with .msi.zip or .exe.zip: ${JSON.stringify(url)}`);
+        if (!lower.endsWith(".msi")) {
+          errors.push(`Windows updater artifact must end with .msi: ${JSON.stringify(url)}`);
         }
       }
     }
@@ -242,4 +242,3 @@ function urlPathname(url) {
     return url;
   }
 }
-
