@@ -131,19 +131,22 @@ def check_job(
                     f"- Pyodide cache key (line {ln}) is missing version reference (expected steps.pyodide.outputs.version or {pyodide_version})"
                 )
 
-    # Ensure we cache the expected directory (versioned `full/` bundle).
+    # Ensure we cache the expected directory.
     #
-    # This keeps caches consistent across workflows (same inputs -> same directory) and
-    # avoids accidentally caching the entire `apps/desktop/public/pyodide/` tree, which
-    # can grow over time as versions are bumped.
+    # Most workflows cache the versioned `full/` directory that `ensure-pyodide-assets.mjs`
+    # downloads into. Some release/dry-run workflows cache the entire
+    # `apps/desktop/public/pyodide/` tree to allow restoring tracked files + cross-OS
+    # cache sharing.
     expected_dirs = [
         "apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full",
         f"apps/desktop/public/pyodide/v{pyodide_version}/full",
+        "apps/desktop/public/pyodide/",
+        "apps/desktop/public/pyodide",
     ]
     if not any(d in text for d in expected_dirs):
         errors.append(
-            "- Pyodide cache config is missing the expected versioned `full/` directory "
-            f"({expected_dirs[0]})"
+            "- Pyodide cache config is missing an expected pyodide directory path "
+            "(apps/desktop/public/pyodide/ or apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/)"
         )
 
     if errors:
