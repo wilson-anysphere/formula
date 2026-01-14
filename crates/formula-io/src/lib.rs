@@ -1931,7 +1931,8 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         });
     };
 
-    // `EncryptedPackage` streams should start with an 8-byte plaintext length header.
+    // `EncryptedPackage` streams should start with an 8-byte plaintext length header and include at
+    // least one ciphertext byte.
     //
     // If the stream is too short (and we didn't already detect a plaintext ZIP payload above),
     // treat it as a malformed/unsupported encryption container rather than an invalid password.

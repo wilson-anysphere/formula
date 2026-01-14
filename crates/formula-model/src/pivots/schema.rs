@@ -230,7 +230,8 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     // (spaces, punctuation, leading digits, etc.) must be wrapped in single quotes.
     //
     // Keep this conservative—quoting is always safe and keeps `Display` stable across table names
-    // that contain punctuation or whitespace.
+    // that contain punctuation or whitespace. Also quote identifiers that collide with keywords
+    // like `VAR`/`RETURN`/`IN`.
     let mut chars = raw.chars();
     let Some(first) = chars.next() else {
         return true;
@@ -238,7 +239,10 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     if !matches!(first, 'A'..='Z' | 'a'..='z' | '_') {
         return true;
     }
-    chars.any(|c| !matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_'))
+    let is_keyword = raw.eq_ignore_ascii_case("VAR")
+        || raw.eq_ignore_ascii_case("RETURN")
+        || raw.eq_ignore_ascii_case("IN");
+    chars.any(|c| !matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_')) || is_keyword
 }
 
 fn quote_dax_identifier(raw: &str) -> String {

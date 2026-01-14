@@ -51,6 +51,8 @@ fn decrypts_standard_fixture_via_open_workbook_with_options() {
 
     let decrypted_model = match decrypted {
         Workbook::Xlsx(package) => {
+            // Materialize the decrypted ZIP bytes and parse them into a model workbook so we can
+            // validate cell contents.
             let decrypted_bytes = package
                 .write_to_bytes()
                 .expect("serialize decrypted workbook package to bytes");
