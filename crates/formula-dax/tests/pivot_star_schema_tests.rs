@@ -996,10 +996,16 @@ fn pivot_star_schema_errors_on_ambiguous_relationship_paths() {
     .unwrap_err();
 
     match err {
-        DaxError::Eval(message) => assert!(
-            message.contains("ambiguous active relationship path"),
-            "unexpected error message: {message}"
-        ),
+        DaxError::Eval(message) => {
+            assert!(
+                message.contains("ambiguous active relationship path between Sales and Customers"),
+                "unexpected error message: {message}"
+            );
+            assert!(
+                message.contains("Sales -> Customers"),
+                "expected error to include relationship path, got: {message}"
+            );
+        }
         other => panic!("expected DaxError::Eval, got {other:?}"),
     }
 }
