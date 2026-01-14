@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { pickLocalImageFiles } from "../pickLocalImageFiles.js";
 import { MAX_INSERT_IMAGE_BYTES } from "../insertImageLimits.js";
+import { pickLocalImageFiles } from "../pickLocalImageFiles.js";
 
 describe("pickLocalImageFiles (Tauri)", () => {
   afterEach(() => {
@@ -114,9 +114,12 @@ describe("pickLocalImageFiles (Tauri)", () => {
     expect(files[0]!.size).toBe(2);
   });
 
-  it("rejects when stat_file reports an oversized image", async () => {
+  it("returns an oversized placeholder File when stat_file reports an oversized image", async () => {
+    const calls: Array<{ cmd: string; args: any }> = [];
+
     const open = vi.fn(async () => ["/tmp/huge.png"]);
-    const invoke = vi.fn(async (cmd: string) => {
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
       if (cmd === "stat_file") return { size_bytes: MAX_INSERT_IMAGE_BYTES + 1 };
       throw new Error(`Unexpected invoke: ${cmd}`);
     });
@@ -124,9 +127,15 @@ describe("pickLocalImageFiles (Tauri)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).__TAURI__ = { dialog: { open }, core: { invoke } };
 
-    await expect(pickLocalImageFiles({ multiple: true })).rejects.toThrow(/too large/i);
+    const files = await pickLocalImageFiles({ multiple: true });
+
     expect(open).toHaveBeenCalledTimes(1);
-    expect(invoke).toHaveBeenCalledTimes(1);
-    expect(invoke).toHaveBeenCalledWith("stat_file", { path: "/tmp/huge.png" });
+    expect(calls.map((c) => c.cmd)).toEqual(["stat_file"]);
+    expect(calls[0]?.args).toEqual({ path: "/tmp/huge.png" });
+
+    expect(files).toHaveLength(1);
+    expect(files[0]!.name).toBe("huge.png");
+    expect(files[0]!.type).toBe("image/png");
+    expect(files[0]!.size).toBeGreaterThan(MAX_INSERT_IMAGE_BYTES);
   });
 });
