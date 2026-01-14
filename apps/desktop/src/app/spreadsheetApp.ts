@@ -9355,6 +9355,30 @@ export class SpreadsheetApp {
         return;
       }
 
+      // Guard against PNG decompression bombs: small compressed files can still decode into huge bitmaps.
+      // We already cap raw bytes via `MAX_INSERT_IMAGE_BYTES`; also cap pixel dimensions for common formats
+      // we can cheaply inspect without decoding.
+      const dims = readPngDimensions(image.bytes);
+      if (dims) {
+        const MAX_DIMENSION = 10_000;
+        const MAX_PIXELS = 50_000_000;
+        if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
+          try {
+            showToast(`Image dimensions too large (${dims.width}x${dims.height}). Choose a smaller image.`, "warning");
+          } catch {
+            // `showToast` requires a #toast-root; unit tests don't always include it.
+          }
+          // Remove the stored bytes since we won't insert the drawing.
+          try {
+            this.drawingImages.delete(image.id);
+          } catch {
+            // ignore
+          }
+          this.focus();
+          return;
+        }
+      }
+
       // Prefer placing the new object on top of existing drawings.
       //
       // IMPORTANT: determine zOrder from the DocumentController at commit time so

@@ -233,6 +233,49 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     root.remove();
   });
 
+  it("rejects PNGs with extremely large dimensions without inserting a drawing", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    // Construct a minimal PNG header with an oversized IHDR width.
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    png.set([0x49, 0x48, 0x44, 0x52], 12); // IHDR
+    // width=10001, height=1 (big-endian)
+    png.set([0x00, 0x00, 0x27, 0x11], 16);
+    png.set([0x00, 0x00, 0x00, 0x01], 20);
+
+    const file = new File([png], "huge.png", { type: "image/png" });
+
+    const images = app.getDrawingImages();
+    const setSpy = vi.spyOn(images, "set");
+
+    await (app as any).insertImageFromPickedFile(file);
+
+    expect(toastSpy).toHaveBeenCalledWith(
+      "Image dimensions too large (10001x1). Choose a smaller image.",
+      "warning",
+    );
+
+    expect(((app.getDocument() as any).getSheetDrawings?.(sheetId) ?? [])).toHaveLength(0);
+
+    const insertedImageId = (setSpy.mock.calls[0]?.[0] as any)?.id;
+    expect(typeof insertedImageId).toBe("string");
+    expect(images.get(insertedImageId)).toBeUndefined();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("shows a toast and skips oversized files when inserting an image from the local file picker", async () => {
     const root = createRoot();
     const status = {
