@@ -167,6 +167,7 @@ function Get-StableCaseSetPath {
   # - Convert backslashes to forward slashes
   # - If the path is absolute, strip user/mount-point prefixes by keeping a repo-relative suffix
   #   (tests/, tools/, crates/, shared/) when present, otherwise fall back to the basename.
+  # - Treat URI-like paths (e.g. file://...) as absolute to avoid leaking local mount points.
   $raw = $PathStr.Trim()
   if ([string]::IsNullOrWhiteSpace($raw)) { return $raw }
 
@@ -183,7 +184,14 @@ function Get-StableCaseSetPath {
     }
   }
 
-  $looksAbs = $normalized.StartsWith("/") -or $normalized.StartsWith("//") -or ($normalized -match "^[A-Za-z]:/")
+  $looksAbs = (
+    $normalized.StartsWith("~") -or
+    $normalized.StartsWith("/") -or
+    $normalized.StartsWith("//") -or
+    ($normalized -match "^[A-Za-z]:/") -or
+    # Non-path schemes like file://, smb://, urn:, etc. Treat as absolute (privacy-safe).
+    ($normalized -match "^[A-Za-z][A-Za-z0-9+.-]*:")
+  )
   if (-not $looksAbs) {
     return $normalized
   }
