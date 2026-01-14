@@ -2228,6 +2228,13 @@ impl AppState {
         }
         self.dirty = false;
 
+        // Update workbook file metadata on the formula engine so worksheet information functions
+        // like `CELL("filename")` and `INFO("directory")` reflect the latest save path.
+        let (directory, filename) = workbook_file_metadata(workbook);
+        let _ = workbook;
+        self.engine
+            .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
+
         // If the user saved under a new path (Save As), re-key the autosave database to the new file
         // identity so crash recovery uses the correct autosave DB for subsequent opens.
         //
@@ -4071,6 +4078,9 @@ impl AppState {
             .as_ref()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         self.engine = FormulaEngine::new();
+        let (directory, filename) = workbook_file_metadata(workbook);
+        self.engine
+            .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
         self.engine.set_date_system(match workbook.date_system {
             formula_model::DateSystem::Excel1900 => {
                 formula_engine::date::ExcelDateSystem::EXCEL_1900
@@ -4222,6 +4232,47 @@ impl AppState {
 
         Ok(updates)
     }
+}
+
+fn workbook_file_metadata(workbook: &Workbook) -> (Option<String>, Option<String>) {
+    let path = workbook
+        .path
+        .as_deref()
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| workbook.origin_path.as_deref().filter(|p| !p.trim().is_empty()));
+    let Some(path) = path else {
+        return (None, None);
+    };
+
+    let path = Path::new(path);
+    let filename = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let directory = path
+        .parent()
+        .and_then(|p| p.to_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let (Some(mut directory), Some(filename)) = (
+        directory.map(|s| s.to_string()),
+        filename.map(|s| s.to_string()),
+    ) else {
+        return (None, None);
+    };
+
+    // Excel typically includes a trailing separator in directory paths returned from worksheet
+    // information functions.
+    if directory
+        .chars()
+        .last()
+        .is_some_and(|c| c != std::path::MAIN_SEPARATOR)
+    {
+        directory.push(std::path::MAIN_SEPARATOR);
+    }
+
+    (Some(directory), Some(filename))
 }
 
 fn dedupe_updates(updates: Vec<CellUpdateData>) -> Vec<CellUpdateData> {
@@ -5244,6 +5295,43 @@ mod tests {
                 inserted_id
             ]
         );
+    }
+
+    #[test]
+    fn cell_filename_includes_workbook_path_when_set() {
+        let workbook_path = std::env::temp_dir().join("formula-cell-filename-test.xlsx");
+        let mut workbook = Workbook::new_empty(Some(workbook_path.to_string_lossy().to_string()));
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .expect("Sheet1 exists")
+            .set_cell(
+                0,
+                0,
+                Cell::from_formula("=CELL(\"filename\")".to_string()),
+            );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("read Sheet1!A1");
+
+        let parent = workbook_path.parent().expect("workbook path has parent");
+        let mut dir = parent.to_string_lossy().to_string();
+        if dir
+            .chars()
+            .last()
+            .is_some_and(|c| c != std::path::MAIN_SEPARATOR)
+        {
+            dir.push(std::path::MAIN_SEPARATOR);
+        }
+        let filename = workbook_path
+            .file_name()
+            .expect("workbook path has filename")
+            .to_string_lossy();
+        let expected = format!("{dir}[{filename}]Sheet1");
+        assert_eq!(cell.value, CellScalar::Text(expected));
     }
 
     #[test]
