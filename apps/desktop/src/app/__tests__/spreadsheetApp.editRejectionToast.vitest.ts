@@ -239,6 +239,7 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     const doc = app.getDocument();
     // Seed A1 so the fill has a source value.
     doc.setCellInput("Sheet1", { row: 0, col: 0 }, 1);
+    const beforeTargetCell = doc.getCell("Sheet1", { row: 1, col: 0 });
 
     // Select A1:A2 so Ctrl+D style fill will target A2.
     app.selectRange({ sheetId: "Sheet1", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 0 } }, { focus: false });
@@ -249,7 +250,7 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     app.fillDown();
 
     expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
-    expect(doc.getCell("Sheet1", { row: 1, col: 0 })).toMatchObject({ value: null, formula: null });
+    expect(doc.getCell("Sheet1", { row: 1, col: 0 })).toEqual(beforeTargetCell);
 
     app.destroy();
     root.remove();
