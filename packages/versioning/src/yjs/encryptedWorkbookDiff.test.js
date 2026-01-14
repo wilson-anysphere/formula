@@ -238,6 +238,44 @@ test("diffYjsWorkbookSnapshots: enc=null markers win over plaintext duplicates a
   assert.equal(sheetDiff.moved.length, 0);
 });
 
+test("diffYjsWorkbookSnapshots: enc=null markers are not matched as moves against plaintext format-only cells", () => {
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  doc.transact(() => {
+    const encryptedMarker = new Y.Map();
+    encryptedMarker.set("enc", null);
+    encryptedMarker.set("format", { bold: true });
+    cells.set("Sheet1:0:0", encryptedMarker);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    cells.delete("Sheet1:0:0");
+    const formatOnly = new Y.Map();
+    formatOnly.set("format", { bold: true });
+    cells.set("Sheet1:0:1", formatOnly);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheetDiff = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1")?.diff;
+  assert.ok(sheetDiff);
+
+  assert.equal(sheetDiff.moved.length, 0);
+  assert.equal(sheetDiff.removed.length, 1);
+  assert.deepEqual(sheetDiff.removed[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.removed[0].oldEncrypted, true);
+
+  assert.equal(sheetDiff.added.length, 1);
+  assert.deepEqual(sheetDiff.added[0].cell, { row: 0, col: 1 });
+  assert.equal("newEncrypted" in sheetDiff.added[0], false);
+
+  assert.equal(sheetDiff.modified.length, 0);
+  assert.equal(sheetDiff.formatOnly.length, 0);
+});
+
 test("diffYjsWorkbookSnapshots: encrypted format-only changes work even when format is only present on a legacy duplicate", () => {
   const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
 

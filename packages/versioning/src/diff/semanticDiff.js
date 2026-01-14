@@ -177,7 +177,9 @@ function cellSignature(cell) {
   const enc = cell?.enc;
   const isEncrypted = enc !== undefined;
   const normalized = {
-    enc: isEncrypted ? enc : null,
+    // Preserve `undefined` vs `null` for `enc` so move detection never conflates
+    // unencrypted format-only cells with encrypted marker cells (`enc: null`).
+    enc,
     value: isEncrypted ? null : (cell?.value ?? null),
     formula: isEncrypted ? null : (normalizeFormula(cell?.formula) ?? null),
     format: cell?.format ?? null,
