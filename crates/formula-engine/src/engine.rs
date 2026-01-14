@@ -510,11 +510,15 @@ pub enum PrecedentNode {
         end: CellAddr,
     },
     /// Cell reference into an external workbook, e.g. `[Book.xlsx]Sheet1!A1`.
+    ///
+    /// `sheet` is the canonical external sheet key (`"[workbook]sheet"`, e.g. `"[Book.xlsx]Sheet1"`).
     ExternalCell {
         sheet: String,
         addr: CellAddr,
     },
     /// Range reference into an external workbook, e.g. `[Book.xlsx]Sheet1!A1:B3`.
+    ///
+    /// `sheet` is the canonical external sheet key (`"[workbook]sheet"`, e.g. `"[Book.xlsx]Sheet1"`).
     ExternalRange {
         sheet: String,
         start: CellAddr,
@@ -5697,6 +5701,10 @@ impl Engine {
     }
 
     /// Direct precedents (cells and ranges referenced by the formula in `cell`).
+    ///
+    /// Note: external-workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are expanded at
+    /// evaluation time using [`ExternalValueProvider::sheet_order`]. They are not currently
+    /// surfaced as per-sheet precedents in this auditing API.
     pub fn precedents(&self, sheet: &str, addr: &str) -> Result<Vec<PrecedentNode>, EngineError> {
         self.precedents_impl(sheet, addr, false)
     }
