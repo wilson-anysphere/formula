@@ -596,9 +596,10 @@ def main() -> int:
         choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
         default=_PRIVACY_PUBLIC,
         help=(
-            "Control redaction of outputs. When set to `private`, compare.py will hash absolute "
-            "filesystem paths embedded in the mismatch report (useful when running on self-hosted "
-            "runners that might expose usernames/mount points)."
+            "Control redaction of outputs. When set to `private`, downstream reporting (compare.py) "
+            "hashes potentially sensitive strings in reports/artifacts (absolute paths/URIs, "
+            "domain-like strings, and custom/UDF identifiers) so CI logs/artifacts do not leak "
+            "usernames, mount points, or internal namespaces."
         ),
     )
     args = p.parse_args()
