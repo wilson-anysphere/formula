@@ -1833,53 +1833,45 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let has_simple_bytes = simple_utf16_end <= rr.data.len();
                         let has_flagged_bytes = flagged_utf16_end <= rr.data.len();
 
-                        let score_utf16_le_bytes = |raw: &[u8]| -> i32 {
-                            // Heuristic: reward UTF-16LE slices with many 0 high bytes (common for
-                            // ASCII/Latin-1 text) and penalize the byte-swapped pattern (0 low
-                            // bytes with printable ASCII highs), which is typical of misaligned
-                            // parsing when a flags byte is mistaken for UTF-16.
+                        let score_utf16_candidate = |raw: &[u8]| -> i32 {
+                            // Score a candidate UTF-16LE byte slice by attempting to decode it.
+                            // This is used to disambiguate the "simple" (`[cch][utf16...]`) vs
+                            // "flagged" (`[cch][flags:u8][utf16...]`) BrtCellSt layouts when the
+                            // record length is ambiguous (e.g. trailing bytes).
+                            //
+                            // Keep this bounded: strings can be large, and we only need enough
+                            // signal to pick the correct offset.
+                            const MAX_DECODED_CHARS: usize = 16;
+                            let iter = raw
+                                .chunks_exact(2)
+                                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
                             let mut score = 0i32;
-                            let mut i = 0usize;
-                            while i + 1 < raw.len() {
-                                let low = raw[i];
-                                let high = raw[i + 1];
-                                if high == 0 {
-                                    score += 2;
-                                    if (0x20..=0x7E).contains(&low) {
-                                        score += 2;
-                                    }
-                                }
-                                if low == 0 && (0x20..=0x7E).contains(&high) {
-                                    score -= 1;
-                                }
-
-                                // Penalize invalid surrogate structure. Misaligned parsing is
-                                // likely to introduce unpaired surrogates.
-                                let unit = u16::from_le_bytes([low, high]);
-                                if (0xD800..=0xDBFF).contains(&unit) {
-                                    // High surrogate: must be followed by a low surrogate.
-                                    if i + 3 < raw.len() {
-                                        let next = u16::from_le_bytes([raw[i + 2], raw[i + 3]]);
-                                        if (0xDC00..=0xDFFF).contains(&next) {
-                                            score += 2;
-                                            i += 4;
-                                            continue;
+                            for decoded in std::char::decode_utf16(iter).take(MAX_DECODED_CHARS) {
+                                match decoded {
+                                    Ok(ch) => {
+                                        let cp = ch as u32;
+                                        // NUL and control characters are uncommon in visible cell
+                                        // text and are often a sign of misalignment.
+                                        if ch == '\0' {
+                                            score -= 5;
+                                        } else if ch.is_control()
+                                            && ch != '\t'
+                                            && ch != '\n'
+                                            && ch != '\r'
+                                        {
+                                            score -= 2;
+                                        } else if (0xE000..=0xF8FF).contains(&cp) {
+                                            // Private-use characters are rare in normal cell text.
+                                            score -= 2;
+                                        } else {
+                                            score += 1;
                                         }
                                     }
-                                    score -= 5;
-                                } else if (0xDC00..=0xDFFF).contains(&unit) {
-                                    // Low surrogate without preceding high surrogate.
-                                    score -= 5;
+                                    Err(_) => {
+                                        // Invalid surrogate pairing (common when misaligned).
+                                        score -= 5;
+                                    }
                                 }
-
-                                // NULs and control characters are uncommon in visible cell text.
-                                if unit == 0 {
-                                    score -= 2;
-                                } else if unit < 0x20 && unit != 0x09 && unit != 0x0A && unit != 0x0D
-                                {
-                                    score -= 1;
-                                }
-                                i += 2;
                             }
                             score
                         };
@@ -1900,10 +1892,10 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                 if rr.data[simple_utf16_start] & !0x83 != 0 {
                                     false
                                 } else {
-                                    let simple_score = score_utf16_le_bytes(
+                                    let simple_score = score_utf16_candidate(
                                         &rr.data[simple_utf16_start..simple_utf16_end],
                                     );
-                                    let flagged_score = score_utf16_le_bytes(
+                                    let flagged_score = score_utf16_candidate(
                                         &rr.data[flagged_utf16_start..flagged_utf16_end],
                                     );
                                     // Tie-break in favor of the flagged layout (more common in the
