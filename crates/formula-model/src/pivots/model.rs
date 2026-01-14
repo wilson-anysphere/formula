@@ -72,8 +72,11 @@ pub struct FilterField {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotConfig {
+    #[serde(default)]
     pub row_fields: Vec<PivotField>,
+    #[serde(default)]
     pub column_fields: Vec<PivotField>,
+    #[serde(default)]
     pub value_fields: Vec<ValueField>,
     #[serde(default)]
     pub filter_fields: Vec<FilterField>,
