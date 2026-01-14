@@ -378,8 +378,7 @@ fn resolve_defined_name_reference(
                     match local_name(attr.key.as_ref()) {
                         b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id =
-                                attr.unescape_value()?.trim().parse::<u32>().ok();
+                            local_sheet_id = attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         _ => {}
                     }
@@ -407,8 +406,7 @@ fn resolve_defined_name_reference(
                     match local_name(attr.key.as_ref()) {
                         b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id =
-                                attr.unescape_value()?.trim().parse::<u32>().ok();
+                            local_sheet_id = attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         _ => {}
                     }
@@ -849,16 +847,23 @@ fn resolve_styles_part_name(package: &XlsxPackage) -> Result<Option<String>, Xls
         Ok(rels) => rels,
         Err(_) => return Ok(None),
     };
-    Ok(rels
-        .into_iter()
-        .find(|rel| {
-            rel.type_uri == REL_TYPE_STYLES
-                && !rel
-                    .target_mode
-                    .as_deref()
-                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-        })
-        .map(|rel| resolve_target(WORKBOOK_PART, &rel.target)))
+    for rel in rels {
+        if rel.type_uri != REL_TYPE_STYLES {
+            continue;
+        }
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+        let target = resolve_target(WORKBOOK_PART, &rel.target);
+        if package.part(&target).is_some() {
+            return Ok(Some(target));
+        }
+    }
+    Ok(None)
 }
 
 fn parse_styles_num_fmts_xml(xml: &[u8]) -> Result<HashMap<u16, String>, quick_xml::Error> {
@@ -1064,16 +1069,23 @@ fn resolve_shared_strings_part_name(package: &XlsxPackage) -> Result<Option<Stri
         Ok(rels) => rels,
         Err(_) => return Ok(None),
     };
-    Ok(rels
-        .into_iter()
-        .find(|rel| {
-            rel.type_uri == REL_TYPE_SHARED_STRINGS
-                && !rel
-                    .target_mode
-                    .as_deref()
-                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-        })
-        .map(|rel| resolve_target(WORKBOOK_PART, &rel.target)))
+    for rel in rels {
+        if rel.type_uri != REL_TYPE_SHARED_STRINGS {
+            continue;
+        }
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+        let target = resolve_target(WORKBOOK_PART, &rel.target);
+        if package.part(&target).is_some() {
+            return Ok(Some(target));
+        }
+    }
+    Ok(None)
 }
 
 fn parse_worksheet_cells_in_range(
@@ -1625,6 +1637,74 @@ mod tests {
             super::resolve_shared_strings_part_name(&pkg).expect("resolve shared strings"),
             Some("xl/sharedStrings.xml".to_string())
         );
+    }
+
+    #[test]
+    fn load_shared_strings_falls_back_when_workbook_rels_target_missing() {
+        // Workbook relationship points to a missing part, but the canonical `xl/sharedStrings.xml`
+        // exists. We should still load it.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="missingSharedStrings.xml"/>
+</Relationships>"#;
+
+        let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1">
+  <si><t>Alpha</t></si>
+</sst>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/sharedStrings.xml", options).unwrap();
+        zip.write_all(shared_strings_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let strings = load_shared_strings(&pkg).expect("load shared strings");
+        assert_eq!(strings, vec!["Alpha".to_string()]);
+    }
+
+    #[test]
+    fn load_styles_num_fmts_falls_back_when_workbook_rels_target_missing() {
+        // Workbook relationship points to a missing styles part, but the canonical `xl/styles.xml`
+        // exists. We should still load it so date detection works.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="missingStyles.xml"/>
+</Relationships>"#;
+
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="164" formatCode="m/d/yyyy"/>
+  </numFmts>
+</styleSheet>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/styles.xml", options).unwrap();
+        zip.write_all(styles_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let num_fmts = load_styles_num_fmts(&pkg).expect("load num formats");
+        assert_eq!(num_fmts.get(&164).map(String::as_str), Some("m/d/yyyy"));
     }
 
     #[test]
