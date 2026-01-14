@@ -59,7 +59,14 @@ async function getImageDrawingCount(page: Page): Promise<number> {
       );
     })();
 
-    return objects.filter((obj: any) => obj?.kind?.type === "image").length;
+    return objects.filter((obj: any) => {
+      // `SpreadsheetApp.getDrawingsDebugState()` returns `{ drawings: [{ kind: string, ... }] }`
+      // while `SpreadsheetApp.getDrawingObjects()` returns `{ kind: { type: string, ... }, ... }`.
+      const kind = obj?.kind;
+      if (typeof kind === "string") return kind === "image";
+      if (kind && typeof kind === "object" && typeof (kind as any).type === "string") return (kind as any).type === "image";
+      return false;
+    }).length;
   });
 }
 
