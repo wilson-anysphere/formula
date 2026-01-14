@@ -296,29 +296,49 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         candidates.length === 1
           ? candidates[0]!.id
           : await showQuickPick(
-              candidates.map((r) => {
-                const a1 = rangeToA1({ startRow: r.startRow, startCol: r.startCol, endRow: r.endRow, endCol: r.endCol });
-                const displaySheetName = app.getSheetDisplayNameById(r.sheetId);
-                return {
-                  label: `Remove ${displaySheetName}!${a1}`,
-                  description: `Key ID: ${r.keyId}`,
-                  value: r.id,
-                };
-              }),
+              [
+                ...(candidates.length > 1
+                  ? [
+                      {
+                        label: "Remove all overlapping encrypted ranges",
+                        description: `${candidates.length} range(s)`,
+                        value: "__all__",
+                      } as const,
+                    ]
+                  : []),
+                ...candidates.map((r) => {
+                  const a1 = rangeToA1({ startRow: r.startRow, startCol: r.startCol, endRow: r.endRow, endCol: r.endCol });
+                  const displaySheetName = app.getSheetDisplayNameById(r.sheetId);
+                  return {
+                    label: `Remove ${displaySheetName}!${a1}`,
+                    description: `Key ID: ${r.keyId}`,
+                    value: r.id,
+                  };
+                }),
+              ],
               { placeHolder: "Select encrypted range to remove" },
             );
 
       if (!idToRemove) return;
 
-      try {
-        manager.remove(idToRemove);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        showToast(`Failed to remove encrypted range: ${message}`, "error");
-        return;
+      const idsToRemove =
+        idToRemove === "__all__" ? candidates.map((c) => c.id) : [idToRemove];
+      for (const id of idsToRemove) {
+        try {
+          manager.remove(id);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          showToast(`Failed to remove encrypted range: ${message}`, "error");
+          return;
+        }
       }
 
-      showToast("Encrypted range removed (existing encrypted cells remain encrypted).", "info");
+      showToast(
+        idsToRemove.length === 1
+          ? "Encrypted range removed (existing encrypted cells remain encrypted)."
+          : `Removed ${idsToRemove.length} encrypted ranges (existing encrypted cells remain encrypted).`,
+        "info",
+      );
     },
     {
       category: COMMAND_CATEGORY,

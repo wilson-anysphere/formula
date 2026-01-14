@@ -97,6 +97,55 @@ describe("registerEncryptionUiCommands", () => {
     expect(manager.remove).toHaveBeenCalledWith("r2");
   });
 
+  it("removeEncryptedRange can remove all overlapping encrypted ranges", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const manager = {
+      list: () => [
+        {
+          id: "r1",
+          sheetId: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 5,
+          endCol: 5,
+          keyId: "k1",
+        },
+        {
+          id: "r2",
+          sheetId: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 5,
+          endCol: 5,
+          keyId: "k2",
+        },
+      ],
+      remove: vi.fn(),
+    };
+
+    vi.mocked(showQuickPick).mockResolvedValue("__all__");
+
+    const app: any = {
+      getCollabSession: () => ({ getRole: () => "editor" }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 1, startCol: 1, endRow: 1, endCol: 1 }],
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getSheetDisplayNameById: (id: string) => id,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    await commandRegistry.executeCommand("collab.removeEncryptedRange");
+
+    expect(showQuickPick).toHaveBeenCalledTimes(1);
+    expect(manager.remove).toHaveBeenCalledTimes(2);
+    expect(manager.remove).toHaveBeenCalledWith("r1");
+    expect(manager.remove).toHaveBeenCalledWith("r2");
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Removed 2 encrypted ranges/), "info");
+  });
+
   it("removeEncryptedRange surfaces remove errors via toast", async () => {
     const commandRegistry = new CommandRegistry();
 
