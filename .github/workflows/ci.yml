@@ -431,7 +431,7 @@ jobs:
         if: always() && steps.build_desktop_binary.outcome == 'success'
         # Informational by default. Set `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (and a
         # `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB` budget) to turn this into a regression gate.
-        continue-on-error: ${{ !(vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == '1' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'true' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'yes' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'on') }}
+        continue-on-error: ${{ !contains(fromJson('["1","true","True","TRUE","yes","Yes","YES","y","Y","on","On","ON"]'), vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE) }}
         env:
           FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
           FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
