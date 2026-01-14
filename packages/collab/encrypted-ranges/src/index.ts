@@ -692,9 +692,9 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
 
     const arr = getYArray(raw);
     if (arr) {
-      const items = arr.toArray();
-      for (let i = items.length - 1; i >= 0; i -= 1) {
-        const match = scanValue(items[i]);
+      const len = typeof (arr as any).length === "number" ? (arr as any).length : arr.toArray().length;
+      for (let i = len - 1; i >= 0; i -= 1) {
+        const match = scanValue(arr.get(i));
         if (match) return match;
       }
       return null;
