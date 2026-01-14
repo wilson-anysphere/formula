@@ -2,14 +2,17 @@ use crate::commands::{
     CellUpdate, PythonError, PythonFilesystemPermission, PythonNetworkPermission,
     PythonPermissions, PythonRunContext, PythonRunResult, PythonSelection,
 };
-use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+use crate::resource_limits::{
+    MAX_PYTHON_PROTOCOL_LINE_BYTES, MAX_PYTHON_STDERR_BYTES, MAX_PYTHON_UPDATES,
+    MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM,
+};
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{AppState, AppStateError, CellUpdateData};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +25,15 @@ const DEFAULT_MAX_MEMORY_BYTES: u64 = 256 * 1024 * 1024;
 const PYTHON_PERMISSION_ESCALATION_ERROR: &str =
     "Python permission escalation is not supported yet";
 
+const STDERR_TRUNCATED_MARKER: &str = "\n[stderr truncated]\n";
+
+// Clamp user-provided limits for native Python execution.
+//
+// In release builds we enforce hard caps to avoid a compromised WebView requesting arbitrarily long
+// execution times or unbounded memory. Debug builds allow local developers to loosen these limits.
+const MAX_TIMEOUT_MS: u64 = 60_000;
+const MAX_MEMORY_BYTES: u64 = 512 * 1024 * 1024;
+
 fn unsafe_python_permissions_enabled() -> bool {
     // Escape hatch for local development only.
     //
@@ -33,6 +45,185 @@ fn unsafe_python_permissions_enabled() -> bool {
 
     let value = std::env::var("FORMULA_UNSAFE_PYTHON_PERMISSIONS").unwrap_or_default();
     matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES")
+}
+
+fn python_timeout_ms_cap() -> u64 {
+    let default = MAX_TIMEOUT_MS;
+    let Some(value) = std::env::var("FORMULA_PYTHON_TIMEOUT_MS_MAX")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+    else {
+        return default;
+    };
+    // Allow relaxing limits only in debug builds; in release we only honor stricter settings.
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
+}
+
+fn python_max_memory_bytes_cap() -> u64 {
+    let default = MAX_MEMORY_BYTES;
+    let Some(value) = std::env::var("FORMULA_PYTHON_MAX_MEMORY_BYTES_MAX")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+    else {
+        return default;
+    };
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
+}
+
+fn clamp_timeout_ms(requested: u64) -> u64 {
+    let cap = python_timeout_ms_cap();
+    if requested == 0 {
+        // `0` disables the host-side timeout guard. Allow this only in debug builds.
+        if cfg!(debug_assertions) {
+            0
+        } else {
+            cap
+        }
+    } else {
+        requested.min(cap)
+    }
+}
+
+fn clamp_max_memory_bytes(requested: u64) -> u64 {
+    let cap = python_max_memory_bytes_cap();
+    if requested == 0 {
+        if cfg!(debug_assertions) {
+            0
+        } else {
+            cap
+        }
+    } else {
+        requested.min(cap)
+    }
+}
+
+fn read_stream_lossy_truncated<R: Read>(
+    reader: R,
+    max_bytes: usize,
+    marker: &str,
+) -> io::Result<String> {
+    let mut reader = BufReader::new(reader);
+    let mut buf = Vec::new();
+
+    // Read at most `max_bytes + 1` so we can detect truncation without unbounded growth.
+    (&mut reader)
+        .take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut buf)?;
+    let truncated = buf.len() > max_bytes;
+    if truncated {
+        buf.truncate(max_bytes);
+    }
+
+    // Drain the remainder so the subprocess can't block on a full stderr pipe.
+    let _ = io::copy(&mut reader, &mut io::sink());
+
+    let mut out = String::from_utf8_lossy(&buf).into_owned();
+    if truncated {
+        out.push_str(marker);
+    }
+    Ok(out)
+}
+
+/// A `BufRead` adaptor similar to `Read::take`, but without losing any buffered bytes.
+///
+/// This is used to bound `read_until`/`read_line` style operations. The standard `read_until`
+/// implementation will keep appending into a `Vec` until it finds a delimiter; by limiting the
+/// readable stream we ensure protocol lines cannot cause unbounded allocations.
+struct BufReadTake<'a, R> {
+    inner: &'a mut R,
+    remaining: usize,
+}
+
+impl<'a, R> BufReadTake<'a, R> {
+    fn new(inner: &'a mut R, limit: usize) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+        }
+    }
+}
+
+impl<R: BufRead> Read for BufReadTake<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let available = self.fill_buf()?;
+        if available.is_empty() {
+            return Ok(0);
+        }
+        let n = buf.len().min(available.len());
+        buf[..n].copy_from_slice(&available[..n]);
+        self.consume(n);
+        Ok(n)
+    }
+}
+
+impl<R: BufRead> BufRead for BufReadTake<'_, R> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        if self.remaining == 0 {
+            return Ok(&[]);
+        }
+        let buf = self.inner.fill_buf()?;
+        let n = buf.len().min(self.remaining);
+        Ok(&buf[..n])
+    }
+
+    fn consume(&mut self, amt: usize) {
+        if self.remaining == 0 {
+            return;
+        }
+        let n = amt.min(self.remaining);
+        self.remaining -= n;
+        self.inner.consume(n);
+    }
+}
+
+fn read_protocol_line_bounded<R: BufRead>(
+    reader: &mut R,
+    max_bytes: usize,
+    buf: &mut Vec<u8>,
+) -> Result<Option<String>, String> {
+    buf.clear();
+    let limit = max_bytes.saturating_add(1);
+    let mut limited = BufReadTake::new(reader, limit);
+    let read = limited
+        .read_until(b'\n', buf)
+        .map_err(|e| e.to_string())?;
+
+    if read == 0 {
+        return Ok(None);
+    }
+
+    let had_newline = buf.last() == Some(&b'\n');
+    if had_newline {
+        buf.pop();
+        if buf.last() == Some(&b'\r') {
+            buf.pop();
+        }
+    }
+
+    if buf.len() > max_bytes {
+        return Err(format!(
+            "Python runtime protocol line exceeded maximum size ({max_bytes} bytes)"
+        ));
+    }
+
+    // If we hit the limit and still didn't see a newline, the line is too long.
+    if !had_newline && read == limit {
+        return Err(format!(
+            "Python runtime protocol line exceeded maximum size ({max_bytes} bytes)"
+        ));
+    }
+
+    Ok(Some(String::from_utf8_lossy(buf).into_owned()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,19 +303,8 @@ fn cell_update_from_state(update: CellUpdateData) -> CellUpdate {
     }
 }
 
-fn dedupe_updates(updates: Vec<CellUpdateData>) -> Vec<CellUpdateData> {
-    let mut out = Vec::new();
-    let mut index_by_key = HashMap::<(String, usize, usize), usize>::new();
-    for update in updates {
-        let key = (update.sheet_id.clone(), update.row, update.col);
-        if let Some(idx) = index_by_key.get(&key).copied() {
-            out[idx] = update;
-        } else {
-            index_by_key.insert(key, out.len());
-            out.push(update);
-        }
-    }
-    out
+fn python_updates_limit_error(max_updates: usize) -> String {
+    format!("Python script produced too many cell updates (limit: {max_updates})")
 }
 
 fn normalize_formula_text(raw: &str) -> Option<String> {
@@ -213,9 +393,39 @@ impl<'a> PythonRpcHost<'a> {
         })
     }
 
-    fn extend_updates(&mut self, updates: Vec<CellUpdateData>) {
-        self.updates.extend(updates);
-        self.updates = dedupe_updates(std::mem::take(&mut self.updates));
+    fn extend_updates(&mut self, updates: Vec<CellUpdateData>) -> Result<(), String> {
+        self.extend_updates_with_limit(updates, MAX_PYTHON_UPDATES)
+    }
+
+    fn extend_updates_with_limit(
+        &mut self,
+        updates: Vec<CellUpdateData>,
+        max_updates: usize,
+    ) -> Result<(), String> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Build an index for existing updates so we can update in-place without allocating an
+        // intermediate "all updates" vector (which would temporarily exceed the cap).
+        let mut index_by_key = HashMap::<(String, usize, usize), usize>::with_capacity(self.updates.len());
+        for (idx, update) in self.updates.iter().enumerate() {
+            index_by_key.insert((update.sheet_id.clone(), update.row, update.col), idx);
+        }
+
+        for update in updates {
+            let key = (update.sheet_id.clone(), update.row, update.col);
+            if let Some(idx) = index_by_key.get(&key).copied() {
+                self.updates[idx] = update;
+            } else {
+                if self.updates.len() >= max_updates {
+                    return Err(python_updates_limit_error(max_updates));
+                }
+                index_by_key.insert(key, self.updates.len());
+                self.updates.push(update);
+            }
+        }
+        Ok(())
     }
 
     fn take_updates(&mut self) -> Vec<CellUpdateData> {
@@ -454,7 +664,7 @@ impl<'a> PythonRpcHost<'a> {
                         edits,
                     )
                     .map_err(|e| e.to_string())?;
-                self.extend_updates(updates);
+                self.extend_updates(updates)?;
                 Ok(JsonValue::Null)
             }
             "set_cell_value" => {
@@ -472,7 +682,7 @@ impl<'a> PythonRpcHost<'a> {
                         formula,
                     )
                     .map_err(|e| e.to_string())?;
-                self.extend_updates(updates);
+                self.extend_updates(updates)?;
                 Ok(JsonValue::Null)
             }
             "get_cell_formula" => {
@@ -507,7 +717,7 @@ impl<'a> PythonRpcHost<'a> {
                         Some(formula),
                     )
                     .map_err(|e| e.to_string())?;
-                self.extend_updates(updates);
+                self.extend_updates(updates)?;
                 Ok(JsonValue::Null)
             }
             "clear_range" => {
@@ -522,7 +732,7 @@ impl<'a> PythonRpcHost<'a> {
                         range.end_col,
                     )
                     .map_err(|e| e.to_string())?;
-                self.extend_updates(updates);
+                self.extend_updates(updates)?;
                 Ok(JsonValue::Null)
             }
             "set_range_format" => {
@@ -645,8 +855,8 @@ pub fn run_python_script(
     {
         return Err(PYTHON_PERMISSION_ESCALATION_ERROR.to_string());
     }
-    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-    let max_memory_bytes = max_memory_bytes.unwrap_or(DEFAULT_MAX_MEMORY_BYTES);
+    let timeout_ms = clamp_timeout_ms(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
+    let max_memory_bytes = clamp_max_memory_bytes(max_memory_bytes.unwrap_or(DEFAULT_MAX_MEMORY_BYTES));
 
     let repo_root = resolve_repo_root();
     let formula_api_path = resolve_formula_api_path();
@@ -704,9 +914,9 @@ pub fn run_python_script(
     let stderr_buf = Arc::new(Mutex::new(String::new()));
     let stderr_buf_clone = stderr_buf.clone();
     let stderr_thread = thread::spawn(move || {
-        let mut reader = BufReader::new(stderr);
-        let mut out = String::new();
-        let _ = reader.read_to_string(&mut out);
+        let out =
+            read_stream_lossy_truncated(stderr, MAX_PYTHON_STDERR_BYTES, STDERR_TRUNCATED_MARKER)
+                .unwrap_or_default();
         if let Ok(mut guard) = stderr_buf_clone.lock() {
             guard.push_str(&out);
         }
@@ -732,9 +942,24 @@ pub fn run_python_script(
     let mut host = PythonRpcHost::new(state, context)?;
     let mut runner_result: Option<(bool, Option<String>, Option<String>)> = None;
 
-    let reader = BufReader::new(stdout);
-    for line in reader.lines() {
-        let line = line.map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(stdout);
+    let mut line_buf = Vec::new();
+    loop {
+        let line = match read_protocol_line_bounded(
+            &mut reader,
+            MAX_PYTHON_PROTOCOL_LINE_BYTES,
+            &mut line_buf,
+        ) {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(err) => {
+                if let Ok(mut child) = child.lock() {
+                    let _ = child.kill();
+                }
+                return Err(err);
+            }
+        };
+
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -841,7 +1066,89 @@ pub fn run_python_script(
 mod tests {
     use super::*;
     use crate::ipc_limits::MAX_SCRIPT_CODE_BYTES;
+    use crate::state::CellScalar;
     use serde_json::json;
+    use std::io::Cursor;
+
+    #[test]
+    fn stderr_capture_is_bounded_and_appends_truncation_marker() {
+        let input = b"hello world";
+        let out =
+            read_stream_lossy_truncated(Cursor::new(input), 5, STDERR_TRUNCATED_MARKER).unwrap();
+        assert_eq!(out, format!("hello{STDERR_TRUNCATED_MARKER}"));
+    }
+
+    #[test]
+    fn protocol_line_reader_rejects_oversized_lines() {
+        let mut buf = Vec::new();
+
+        let mut reader = BufReader::new(Cursor::new(b"abcde\n"));
+        let line = read_protocol_line_bounded(&mut reader, 5, &mut buf)
+            .expect("expected ok")
+            .expect("expected a line");
+        assert_eq!(line, "abcde");
+
+        let mut reader = BufReader::new(Cursor::new(b"abcdef\n"));
+        let err = read_protocol_line_bounded(&mut reader, 5, &mut buf)
+            .expect_err("expected oversized line to error");
+        assert!(
+            err.contains("5"),
+            "expected error to mention limit (5 bytes): {err}"
+        );
+    }
+
+    #[test]
+    fn python_updates_are_capped() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+
+        let updates = vec![
+            CellUpdateData {
+                sheet_id: "Sheet1".to_string(),
+                row: 0,
+                col: 0,
+                value: CellScalar::Empty,
+                formula: None,
+                display_value: String::new(),
+            },
+            CellUpdateData {
+                sheet_id: "Sheet1".to_string(),
+                row: 0,
+                col: 1,
+                value: CellScalar::Empty,
+                formula: None,
+                display_value: String::new(),
+            },
+            CellUpdateData {
+                sheet_id: "Sheet1".to_string(),
+                row: 0,
+                col: 2,
+                value: CellScalar::Empty,
+                formula: None,
+                display_value: String::new(),
+            },
+            CellUpdateData {
+                sheet_id: "Sheet1".to_string(),
+                row: 0,
+                col: 3,
+                value: CellScalar::Empty,
+                formula: None,
+                display_value: String::new(),
+            },
+        ];
+
+        let err = host
+            .extend_updates_with_limit(updates, 3)
+            .expect_err("expected update limit to be enforced");
+        assert!(
+            err.contains("3"),
+            "expected error to mention limit (3 updates): {err}"
+        );
+    }
 
     #[test]
     fn run_python_script_rejects_oversized_code_without_spawning_python() {

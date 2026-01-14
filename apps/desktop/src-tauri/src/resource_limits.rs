@@ -107,3 +107,31 @@ pub const MAX_MACRO_OUTPUT_BYTES: usize = 1 * 1024 * 1024; // 1 MiB
 /// sending extremely large IPC responses. When exceeded, macro execution is aborted with an
 /// explicit runtime error (no truncation) so callers can handle the failure deterministically.
 pub const MAX_MACRO_UPDATES: usize = 10_000;
+
+// -----------------------------------------------------------------------------
+// Native Python runner limits
+// -----------------------------------------------------------------------------
+
+/// Maximum number of bytes captured from the native Python runner's stderr stream.
+///
+/// The WebView can execute arbitrary code in the Python subprocess. A compromised/buggy script can
+/// spam stderr indefinitely; capturing stderr without a cap can OOM the Rust host.
+///
+/// 1 MiB keeps error messages and tracebacks useful while bounding host memory.
+pub const MAX_PYTHON_STDERR_BYTES: usize = 1 * 1024 * 1024; // 1 MiB
+
+/// Maximum size (in bytes) of a single JSON protocol line emitted by the native Python runner.
+///
+/// The host reads newline-delimited JSON messages from the runner. Each line is bounded to prevent
+/// pathological allocations (e.g. a single multi-gigabyte "line") in the Rust process.
+pub const MAX_PYTHON_PROTOCOL_LINE_BYTES: usize = 1 * 1024 * 1024; // 1 MiB
+
+/// Maximum number of distinct cell updates accumulated during a single Python execution.
+///
+/// Updates are deduped by `(sheet_id, row, col)` before being returned to the frontend, but without
+/// an overall cap a script can still touch an unbounded number of cells and force the backend to
+/// retain (and eventually serialize) a massive update payload.
+///
+/// This is aligned with `MAX_RANGE_CELLS_PER_CALL` so a single "large range" operation doesn't
+/// immediately fail, but scripts that fan out to multiple large operations will be rejected.
+pub const MAX_PYTHON_UPDATES: usize = MAX_RANGE_CELLS_PER_CALL;
