@@ -1707,17 +1707,17 @@ pub(crate) mod tests {
             let mut combined = Vec::new();
             combined.extend_from_slice(a);
             combined.extend_from_slice(b);
-            let one = compute_hmac(hash_alg, key, &combined);
-            let two = compute_hmac_two(hash_alg, key, a, b);
+            let one = compute_hmac(hash_alg, key, &combined).expect("compute_hmac");
+            let two = compute_hmac_two(hash_alg, key, a, b).expect("compute_hmac_two");
             assert_eq!(one, two, "hash_alg={hash_alg:?}");
 
             // Also exercise empty suffix/prefix combinations.
-            let one = compute_hmac(hash_alg, key, a);
-            let two = compute_hmac_two(hash_alg, key, a, b"");
+            let one = compute_hmac(hash_alg, key, a).expect("compute_hmac");
+            let two = compute_hmac_two(hash_alg, key, a, b"").expect("compute_hmac_two");
             assert_eq!(one, two, "hash_alg={hash_alg:?} (empty b)");
 
-            let one = compute_hmac(hash_alg, key, b);
-            let two = compute_hmac_two(hash_alg, key, b"", b);
+            let one = compute_hmac(hash_alg, key, b).expect("compute_hmac");
+            let two = compute_hmac_two(hash_alg, key, b"", b).expect("compute_hmac_two");
             assert_eq!(one, two, "hash_alg={hash_alg:?} (empty a)");
         }
     }
