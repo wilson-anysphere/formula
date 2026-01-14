@@ -1256,11 +1256,21 @@ export class CollabSession {
     // generate Yjs updates (they would be rejected by server-side access control
     // anyway). Gate migration on comment permissions and re-attempt after a role
     // upgrade (e.g. viewer → commenter).
-    let hydrationReady = false;
+    const provider = this.provider;
+    const providerUsesSyncEvents = Boolean(provider && typeof provider.on === "function");
+    // Like workbook schema init, only migrate after the doc is hydrated. When both a
+    // sync provider and local persistence are present, require *both* to settle so
+    // we don't run migrations against a partially-hydrated doc.
+    let providerHydrated = !providerUsesSyncEvents;
+    if (providerUsesSyncEvents) {
+      providerHydrated = Boolean((provider as any).synced);
+    }
+    let localPersistenceHydrated = !this.hasLocalPersistence;
 
     const tryMigrate = () => {
       if (this.isDestroyed) return;
-      if (!hydrationReady) return;
+      if (!providerHydrated) return;
+      if (!localPersistenceHydrated) return;
 
       let canComment = false;
       try {
@@ -1336,14 +1346,14 @@ export class CollabSession {
           // remote/provider hydration.
         })
         .finally(() => {
-          hydrationReady = true;
+          localPersistenceHydrated = true;
           queueMicrotask(tryMigrate);
         });
     }
 
-    const provider = this.provider;
-    if (provider && typeof provider.on === "function") {
+    if (providerUsesSyncEvents) {
       const handler = (isSynced: boolean) => {
+        providerHydrated = Boolean(isSynced);
         if (!isSynced) return;
         try {
           if (typeof provider.off === "function") provider.off("sync", handler);
@@ -1353,7 +1363,6 @@ export class CollabSession {
         if (this.commentsMigrationSyncHandler === handler) {
           this.commentsMigrationSyncHandler = null;
         }
-        hydrationReady = true;
         queueMicrotask(tryMigrate);
       };
       this.commentsMigrationSyncHandler = handler;
@@ -1364,9 +1373,7 @@ export class CollabSession {
       }
       if (provider.synced) handler(true);
     } else if (!this.hasLocalPersistence) {
-      // No persistence + no sync provider: the caller-provided doc is already in
-      // memory, so migrate in a microtask.
-      hydrationReady = true;
+      // No persistence + no sync provider: the caller-provided doc is already in memory.
       queueMicrotask(tryMigrate);
     }
   }

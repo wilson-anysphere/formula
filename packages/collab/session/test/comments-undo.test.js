@@ -403,6 +403,64 @@ test("CollabSession comment migration is gated by comment permissions (viewer do
   doc.destroy();
 });
 
+test("CollabSession comment migration waits for provider sync when local persistence is enabled", async () => {
+  const doc = new Y.Doc();
+  const legacyRoot = doc.getArray("comments");
+  legacyRoot.push([
+    createYComment({
+      id: "c_legacy",
+      cellRef: "Sheet1:0:0",
+      kind: "threaded",
+      content: "legacy",
+      author: { id: "u_legacy", name: "Legacy User" },
+      now: 1,
+    }),
+  ]);
+
+  assert.ok(doc.share.get("comments") instanceof Y.Array);
+
+  const provider = createMockProvider();
+
+  // Minimal persistence stub: resolves immediately and does not mutate the doc.
+  const persistence = {
+    async load() {},
+    bind() {
+      return { destroy: async () => {} };
+    },
+    async flush() {},
+    async clear() {},
+  };
+
+  const session = createCollabSession({
+    doc,
+    docId: "doc-comments-migrate",
+    provider,
+    persistence,
+    comments: { migrateLegacyArrayToMap: true },
+  });
+
+  await session.whenLocalPersistenceLoaded();
+
+  // Enable migration (editor role), but do not mark the provider as synced yet.
+  session.setPermissions({ role: "editor", rangeRestrictions: [], userId: "u_legacy" });
+
+  // Migration should *not* run until provider sync completes.
+  await new Promise((resolve) => queueMicrotask(resolve));
+  assert.ok(doc.share.get("comments") instanceof Y.Array);
+
+  provider.emit("sync", true);
+  await new Promise((resolve) => queueMicrotask(resolve));
+
+  assert.ok(doc.share.get("comments") instanceof Y.Map);
+
+  const comments = createCommentManagerForSession(session);
+  const getContent = () => comments.listAll().find((c) => c.id === "c_legacy")?.content ?? null;
+  assert.equal(getContent(), "legacy");
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession undo captures comment edits when comments root was created by a different Yjs instance (CJS applyUpdate)", () => {
   const Ycjs = requireYjsCjs();
 
