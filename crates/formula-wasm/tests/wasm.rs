@@ -144,6 +144,30 @@ fn style_locked_null_clears_lower_layers_for_cell_protect() {
     assert_json_number(&b3.value, 1.0);
 }
 
+#[wasm_bindgen_test]
+fn set_format_runs_by_col_accepts_valid_runs_and_null_clears() {
+    let mut wb = WasmWorkbook::new();
+
+    let style_id = wb
+        .intern_style(to_js_value(&json!({ "numberFormat": "0.00" })))
+        .unwrap();
+
+    wb.set_format_runs_by_col(
+        DEFAULT_SHEET.to_string(),
+        0,
+        to_js_value(&json!([{
+            "startRow": 0,
+            "endRowExclusive": 2,
+            "styleId": style_id,
+        }])),
+    )
+    .unwrap();
+
+    // `null`/`undefined` clears the run list.
+    wb.set_format_runs_by_col(DEFAULT_SHEET.to_string(), 0, JsValue::NULL)
+        .unwrap();
+}
+
 #[derive(Debug, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct PartialParseResult {
