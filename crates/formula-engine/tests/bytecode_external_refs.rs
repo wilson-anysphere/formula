@@ -111,7 +111,7 @@ fn bytecode_missing_external_cell_ref_is_ref_error() {
 }
 
 #[test]
-fn bytecode_indirect_external_cell_ref_falls_back_and_returns_ref_error() {
+fn bytecode_indirect_external_cell_ref_compiles_and_is_ref_error() {
     let mut engine = Engine::new();
     let provider = Arc::new(Provider::new());
     engine.set_external_value_provider(Some(provider.clone()));
@@ -120,20 +120,23 @@ fn bytecode_indirect_external_cell_ref_falls_back_and_returns_ref_error() {
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
 
-    // Ensure the bytecode backend rejects literal external workbook refs inside INDIRECT so we
-    // fall back to the AST backend (see `Engine::try_compile_bytecode`).
+    // Excel semantics: INDIRECT does not resolve references into external workbooks (even if an
+    // external value provider is configured).
+    //
+    // Ensure we compile to bytecode (no AST fallback).
     assert_eq!(
         engine.bytecode_program_count(),
-        0,
-        "expected INDIRECT literal external workbook refs to fall back (stats={:?}, report={:?})",
+        1,
+        "expected INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
         engine.bytecode_compile_stats(),
         engine.bytecode_compile_report(32)
     );
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
-    assert!(
-        provider.calls() == 0,
+    assert_eq!(
+        provider.calls(),
+        0,
         "expected INDIRECT to reject external workbook refs without consulting the provider"
     );
 }

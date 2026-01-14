@@ -10074,21 +10074,6 @@ fn canonical_expr_collect_sheet_prefix_errors(
             );
         }
         crate::Expr::FunctionCall(call) => {
-            // Excel semantics: INDIRECT does not resolve references into external workbooks.
-            //
-            // The AST evaluator returns `#REF!` for `INDIRECT("[Book.xlsx]Sheet1!A1")`, but the
-            // bytecode backend can otherwise lower/explore external workbook references. Detect
-            // literal external workbook references inside INDIRECT so we can fall back to the AST
-            // backend for consistent behavior.
-            if call.name.name_upper == "INDIRECT"
-                && call
-                    .args
-                    .first()
-                    .is_some_and(|arg| indirect_literal_is_external_workbook_ref(arg))
-            {
-                flags.external_reference = true;
-                return;
-            }
             for arg in &call.args {
                 canonical_expr_collect_sheet_prefix_errors(arg, current_sheet, workbook, flags);
             }
@@ -10127,28 +10112,6 @@ fn canonical_expr_collect_sheet_prefix_errors(
         | crate::Expr::Error(_)
         | crate::Expr::Missing => {}
     }
-}
-
-fn indirect_literal_is_external_workbook_ref(expr: &crate::Expr) -> bool {
-    let crate::Expr::String(raw) = expr else {
-        return false;
-    };
-
-    let text = raw.trim();
-    if text.is_empty() {
-        return false;
-    }
-
-    // External workbook references use the form `"[workbook]sheet"!A1` (or quoted versions like
-    // `"'C:\\path\\[workbook]sheet'!A1"`). We don't attempt to fully parse the reference text here;
-    // instead, detect a workbook prefix bracket pair in the sheet portion before the `!`.
-    let Some((sheet_prefix, _)) = text.split_once('!') else {
-        return false;
-    };
-    let Some(l_bracket) = sheet_prefix.find('[') else {
-        return false;
-    };
-    sheet_prefix[l_bracket + 1..].contains(']')
 }
 
 fn update_sheet_prefix_flags(
