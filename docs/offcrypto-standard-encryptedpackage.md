@@ -78,7 +78,7 @@ See also:
 1. `orig_size` (8-byte plaintext size prefix; `StreamSize` in the spec): decrypted package size in
    bytes.
 2. `ciphertext: [u8]` (`EncryptedData` in the spec): encrypted bytes of the underlying OPC package
-   (the `.xlsx` ZIP bytes), padded to a cipher block boundary.
+   (the OOXML ZIP/OPC bytes), padded to a cipher block boundary.
 
 Compatibility note: while MS-OFFCRYPTO describes the 8-byte prefix as a `u64le`, some
 producers/libraries treat it as `u32 totalSize` + `u32 reserved` (often 0). To be compatible, parse
