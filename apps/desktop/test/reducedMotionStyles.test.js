@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_ROOT = path.join(__dirname, "..");
 
@@ -13,24 +15,6 @@ function readDesktopFile(...segments) {
 
 function extractTransitionDeclarations(css) {
   return [...css.matchAll(/transition\s*:\s*([\s\S]*?);/g)].map((match) => match[1]?.trim() ?? "");
-}
-
-function stripCssComments(css) {
-  // CSS in this repo uses block comments only. Strip them so lint-style assertions
-  // don't trip over explanatory text like "16ms" in comments.
-  return css.replace(/\/\*[\s\S]*?\*\//g, "");
-}
-
-function stripJsComments(src) {
-  // Conservative comment stripping for lint-style assertions.
-  // This is not a full parser, but it's good enough to avoid false positives from comments.
-  return (
-    src
-      // Block comments
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      // Line comments
-      .replace(/(^|[^:])\/\/.*$/gm, "$1")
-  );
 }
 
 function collectCssFiles(dirPath) {
@@ -234,7 +218,7 @@ test("Any smooth scrolling JS is gated behind reduced motion checks", () => {
 
   for (const filePath of files) {
     const raw = fs.readFileSync(filePath, "utf8");
-    const src = stripJsComments(raw);
+    const src = stripComments(raw);
     if (!smoothBehaviorRe.test(src)) continue;
     if (allowedTernaryRe.test(src)) continue;
     if (reducedMotionHintRe.test(src)) continue;
