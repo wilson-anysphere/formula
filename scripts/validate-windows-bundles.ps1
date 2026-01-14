@@ -102,13 +102,31 @@ function Get-RepoRoot {
   return $root.Path
 }
 
+function Get-TauriConfPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot
+  )
+
+  $raw = [string]$env:FORMULA_TAURI_CONF_PATH
+  if (-not [string]::IsNullOrWhiteSpace($raw)) {
+    $p = $raw.Trim()
+    if ([System.IO.Path]::IsPathRooted($p)) {
+      return $p
+    }
+    return (Join-Path $RepoRoot $p)
+  }
+
+  return (Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json")
+}
+
 function Get-ExpectedTauriVersion {
   param(
     [Parameter(Mandatory = $true)]
     [string]$RepoRoot
   )
 
-  $tauriConfPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+  $tauriConfPath = Get-TauriConfPath -RepoRoot $RepoRoot
   if (-not (Test-Path -LiteralPath $tauriConfPath)) {
     throw "Missing Tauri config: $tauriConfPath"
   }
@@ -116,7 +134,7 @@ function Get-ExpectedTauriVersion {
   $conf = Get-Content -Raw -LiteralPath $tauriConfPath | ConvertFrom-Json
   $v = [string]$conf.version
   if ([string]::IsNullOrWhiteSpace($v)) {
-    throw "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty `"version`" field."
+    throw "Expected $tauriConfPath to contain a non-empty `"version`" field."
   }
   return $v.Trim()
 }
@@ -147,8 +165,8 @@ function Get-ExpectedWixUpgradeCode {
     [Parameter(Mandatory = $true)]
     [string]$RepoRoot
   )
- 
-  $tauriConfPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+
+  $tauriConfPath = Get-TauriConfPath -RepoRoot $RepoRoot
   if (-not (Test-Path -LiteralPath $tauriConfPath)) {
     return ""
   }
@@ -184,8 +202,8 @@ function Get-ExpectedProductName {
     [Parameter(Mandatory = $true)]
     [string]$RepoRoot
   )
- 
-  $tauriConfPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+
+  $tauriConfPath = Get-TauriConfPath -RepoRoot $RepoRoot
   if (-not (Test-Path -LiteralPath $tauriConfPath)) {
     return ""
   }
@@ -626,7 +644,7 @@ try {
       [string]$RepoRoot
     )
 
-    $configPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+    $configPath = Get-TauriConfPath -RepoRoot $RepoRoot
     $defaultXlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     $default = [pscustomobject]@{
       Extensions = @("xlsx")
@@ -713,14 +731,14 @@ try {
       XlsxMimeType = $xlsxMime
     }
   }
- 
+
   function Get-ExpectedUrlProtocolSpec {
     param(
       [Parameter(Mandatory = $true)]
       [string]$RepoRoot
     )
- 
-    $configPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+
+    $configPath = Get-TauriConfPath -RepoRoot $RepoRoot
     $default = [pscustomobject]@{
       Schemes = @("formula")
     }

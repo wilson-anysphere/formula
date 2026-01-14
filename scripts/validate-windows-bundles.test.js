@@ -173,3 +173,16 @@ test("validate-windows-bundles.ps1 validates MSI ProductName against tauri.conf.
     "Expected validator to query the MSI Property table for ProductName.",
   );
 });
+
+test("validate-windows-bundles.ps1 supports overriding tauri.conf.json path via FORMULA_TAURI_CONF_PATH", () => {
+  assert.match(
+    text,
+    /FORMULA_TAURI_CONF_PATH/,
+    "Expected validator to support FORMULA_TAURI_CONF_PATH override (consistent with other desktop validation scripts).",
+  );
+  assert.match(
+    text,
+    /Get-TauriConfPath/,
+    "Expected validator to centralize tauri.conf.json path resolution via a helper (Get-TauriConfPath).",
+  );
+});
