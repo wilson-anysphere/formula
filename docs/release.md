@@ -1056,6 +1056,9 @@ bash scripts/validate-linux-rpm.sh --rpm "$rpm_pkg"
 bash scripts/validate-linux-rpm.sh --no-container
 ```
 
+Note: `--no-container` still extracts the RPM payload to validate `.desktop` file `MimeType=` entries
+(file association metadata), so it requires `rpm2cpio` + `cpio` on the host.
+
 Note: the Fedora container install smoke test runs on the **same CPU architecture as the host**
 (x86_64 Fedora image on x86_64 hosts; aarch64 Fedora image on aarch64 hosts). Validate ARM64 RPMs on
 an ARM64 host/runner (or use QEMU/binfmt emulation), or use `--no-container` for metadata-only
