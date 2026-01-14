@@ -1944,10 +1944,35 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "EXACT",
+    description: "Checks whether two text values are identical.",
+    args: [
+      { name: "text1", type: "range" },
+      { name: "text2", type: "range" },
+    ],
+  },
+  {
     name: "VALUE",
     description: "Converts a text string that represents a number to a number.",
     args: [
       { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "DECIMAL",
+    description: "Converts a text representation of a number in a given base to decimal.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "radix", type: "number" },
+    ],
+  },
+  {
+    name: "CONVERT",
+    description: "Converts a number from one measurement system to another.",
+    args: [
+      { name: "number", type: "number" },
+      { name: "from_unit", type: "string" },
+      { name: "to_unit", type: "string" },
     ],
   },
   {

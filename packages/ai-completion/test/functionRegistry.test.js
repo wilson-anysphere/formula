@@ -73,7 +73,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("TRIM", 0), "Expected TRIM text to be a range");
   assert.ok(registry.isRangeArg("SUBSTITUTE", 0), "Expected SUBSTITUTE text to be a range");
   assert.ok(registry.isRangeArg("FIND", 1), "Expected FIND within_text to be a range");
+  assert.ok(registry.isRangeArg("EXACT", 0), "Expected EXACT text1 to be a range");
   assert.ok(registry.isRangeArg("VALUE", 0), "Expected VALUE text to be a range");
+  assert.ok(registry.isRangeArg("DECIMAL", 0), "Expected DECIMAL text to be a range");
+  assert.equal(registry.getArgType("CONVERT", 1), "string", "Expected CONVERT from_unit to be string-like");
 
   // SUBTOTAL(function_num, ref1, [ref2], ...)
   assert.equal(registry.isRangeArg("SUBTOTAL", 0), false, "Expected SUBTOTAL function_num not to be a range");
