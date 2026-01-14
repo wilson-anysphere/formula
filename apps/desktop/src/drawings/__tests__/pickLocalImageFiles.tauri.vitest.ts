@@ -89,7 +89,8 @@ describe("pickLocalImageFiles (Tauri)", () => {
 
     const invoke = vi.fn(async (cmd: string, args?: any) => {
       calls.push({ cmd, args });
-      if (cmd === "stat_file") return { size_bytes: fileSize };
+      // Rust `stat_file` returns camelCase (`sizeBytes`); keep tests aligned with the real API shape.
+      if (cmd === "stat_file") return { sizeBytes: fileSize };
       if (cmd === "read_binary_file_range") {
         const length = Number(args?.length ?? 0);
         return base64Zeros(length);
@@ -121,7 +122,8 @@ describe("pickLocalImageFiles (Tauri)", () => {
     const open = vi.fn(async () => ["/tmp/c.webp"]);
     const invoke = vi.fn(async (cmd: string, args?: any) => {
       calls.push({ cmd, args });
-      if (cmd === "stat_file") return { size_bytes: 2 };
+      // Rust `stat_file` returns camelCase (`sizeBytes`); keep tests aligned with the real API shape.
+      if (cmd === "stat_file") return { sizeBytes: 2 };
       if (cmd === "read_binary_file") {
         // eslint-disable-next-line no-undef
         return Buffer.from([9, 10]).toString("base64");
@@ -151,7 +153,8 @@ describe("pickLocalImageFiles (Tauri)", () => {
     const open = vi.fn(async () => ["/tmp/huge.png"]);
     const invoke = vi.fn(async (cmd: string, args?: any) => {
       calls.push({ cmd, args });
-      if (cmd === "stat_file") return { size_bytes: MAX_INSERT_IMAGE_BYTES + 1 };
+      // Rust `stat_file` returns camelCase (`sizeBytes`); keep tests aligned with the real API shape.
+      if (cmd === "stat_file") return { sizeBytes: MAX_INSERT_IMAGE_BYTES + 1 };
       throw new Error(`Unexpected invoke: ${cmd}`);
     });
 
