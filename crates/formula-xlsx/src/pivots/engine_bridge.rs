@@ -68,11 +68,15 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
         PivotCacheValue::Bool(b) => PivotValue::Bool(b),
         PivotCacheValue::Missing => PivotValue::Blank,
         PivotCacheValue::Error(_) => PivotValue::Blank,
-        PivotCacheValue::DateTime(s) => {
-            pivot_cache_datetime_to_naive_date(&s)
-                .map(PivotValue::Date)
-                .unwrap_or_else(|| if s.is_empty() { PivotValue::Blank } else { PivotValue::Text(s) })
-        }
+        PivotCacheValue::DateTime(s) => pivot_cache_datetime_to_naive_date(&s)
+            .map(PivotValue::Date)
+            .unwrap_or_else(|| {
+                if s.is_empty() {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Text(s)
+                }
+            }),
         PivotCacheValue::Index(_) => PivotValue::Blank,
     }
 }
@@ -89,6 +93,108 @@ fn scalar_value_to_engine_key_part(value: &ScalarValue) -> PivotKeyPart {
         ScalarValue::Date(d) => PivotKeyPart::Date(*d),
         ScalarValue::Bool(b) => PivotKeyPart::Bool(*b),
     }
+}
+
+fn slicer_cache_field_idx_best_effort(
+    slicer: &crate::pivots::slicers::SlicerDefinition,
+    cache_def: &PivotCacheDefinition,
+    cache: &PivotCache,
+) -> Option<usize> {
+    // Prefer explicit field metadata when present.
+    if let Some(source_name) = slicer.source_name.as_deref() {
+        if let Some(idx) = cache_def
+            .cache_fields
+            .iter()
+            .position(|f| f.name == source_name)
+        {
+            return Some(idx);
+        }
+
+        // Some producers differ in case; try a case-insensitive match.
+        let folded = source_name.trim().to_ascii_lowercase();
+        if !folded.is_empty() {
+            if let Some(idx) = cache_def
+                .cache_fields
+                .iter()
+                .position(|f| f.name.to_ascii_lowercase() == folded)
+            {
+                return Some(idx);
+            }
+        }
+    }
+
+    // Fall back to inferring the field by matching slicer item keys against the cache's
+    // per-field unique values.
+    //
+    // This is intentionally best-effort: OOXML slicer cache parts often omit a stable
+    // field mapping (especially in simplified fixtures), but the item values typically
+    // correspond to one cache field. When multiple fields share the same items (or the
+    // slicer uses index keys), we may not be able to infer the correct field.
+    if slicer.selection.available_items.is_empty() {
+        return None;
+    }
+
+    let items = slicer
+        .selection
+        .available_items
+        .iter()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return None;
+    }
+
+    let cache_name_folded = slicer
+        .cache_name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let slicer_name_folded = slicer
+        .name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let mut best: Option<(usize, usize, bool)> = None; // (field_idx, match_count, name_hint)
+    for (field_idx, field) in cache_def.cache_fields.iter().enumerate() {
+        let Some(values) = cache.unique_values.get(&field.name) else {
+            continue;
+        };
+
+        let mut value_strings = HashSet::with_capacity(values.len());
+        for value in values {
+            value_strings.insert(value.to_key_part().display_string().to_ascii_lowercase());
+        }
+
+        let mut match_count = 0usize;
+        for item in &items {
+            if value_strings.contains(item) {
+                match_count += 1;
+            }
+        }
+        if match_count == 0 {
+            continue;
+        }
+
+        let field_folded = field.name.to_ascii_lowercase();
+        let name_hint = !field_folded.is_empty()
+            && (cache_name_folded.contains(&field_folded)
+                || slicer_name_folded.contains(&field_folded));
+
+        let is_better = match best {
+            None => true,
+            Some((_best_idx, best_matches, best_hint)) => {
+                match_count > best_matches
+                    || (match_count == best_matches && name_hint && !best_hint)
+            }
+        };
+        if is_better {
+            best = Some((field_idx, match_count, name_hint));
+        }
+    }
+
+    best.map(|(idx, _, _)| idx)
 }
 
 /// Convert a parsed slicer selection into a pivot-engine filter field.
@@ -181,21 +287,22 @@ pub fn pivot_slicer_parts_to_engine_filters(
         if slicer.selection.selected_items.is_none() {
             continue;
         }
-        let Some(field) = slicer.source_name.as_deref() else {
+        let Some(field_idx) = slicer_cache_field_idx_best_effort(slicer, cache_def, cache) else {
             continue;
         };
-        let Some(field_idx) = cache_def.cache_fields.iter().position(|f| f.name == field) else {
+        let Some(field) = cache_def
+            .cache_fields
+            .get(field_idx)
+            .map(|f| f.name.clone())
+        else {
             continue;
         };
 
-        let filter = slicer_selection_to_engine_filter_with_resolver(
-            field.to_string(),
-            &slicer.selection,
-            |key| {
+        let filter =
+            slicer_selection_to_engine_filter_with_resolver(field, &slicer.selection, |key| {
                 let idx = key.trim().parse::<u32>().ok()?;
                 cache_def.resolve_shared_item(field_idx, idx)
-            },
-        );
+            });
         out.push(filter);
     }
 
@@ -234,12 +341,13 @@ pub fn apply_pivot_slicer_parts_to_engine_config(
     cache: &PivotCache,
     parts: &PivotSlicerParts,
 ) {
-    cfg.filter_fields.extend(pivot_slicer_parts_to_engine_filters(
-        pivot_table_part,
-        cache_def,
-        cache,
-        parts,
-    ));
+    cfg.filter_fields
+        .extend(pivot_slicer_parts_to_engine_filters(
+            pivot_table_part,
+            cache_def,
+            cache,
+            parts,
+        ));
 }
 
 fn parse_iso_ymd(value: &str) -> Option<NaiveDate> {
@@ -510,8 +618,10 @@ fn aggregation_display_name(agg: AggregationType) -> &'static str {
 mod tests {
     use super::*;
 
+    use crate::pivots::slicers::SlicerDefinition;
     use crate::pivots::PivotCacheField;
     use pretty_assertions::assert_eq;
+    use std::collections::HashSet;
 
     #[test]
     fn map_show_data_as_handles_known_strings_case_insensitively() {
@@ -902,11 +1012,97 @@ mod tests {
         assert_eq!(cfg.row_fields[0].sort_order, SortOrder::Manual);
         assert_eq!(
             cfg.row_fields[0].manual_sort.as_deref(),
-            Some(&[
-                PivotKeyPart::Text("North".to_string()),
-                PivotKeyPart::Text("East".to_string()),
-                PivotKeyPart::Text("West".to_string()),
-            ][..])
+            Some(
+                &[
+                    PivotKeyPart::Text("North".to_string()),
+                    PivotKeyPart::Text("East".to_string()),
+                    PivotKeyPart::Text("West".to_string()),
+                ][..]
+            )
+        );
+    }
+
+    #[test]
+    fn pivot_slicer_parts_to_engine_filters_infers_field_from_item_values_when_source_name_is_pivot_name(
+    ) {
+        let source = vec![
+            vec![
+                PivotValue::Text("Region".to_string()),
+                PivotValue::Text("Product".to_string()),
+                PivotValue::Text("Sales".to_string()),
+            ],
+            vec![
+                PivotValue::Text("East".to_string()),
+                PivotValue::Text("A".to_string()),
+                PivotValue::Number(10.0),
+            ],
+            vec![
+                PivotValue::Text("West".to_string()),
+                PivotValue::Text("A".to_string()),
+                PivotValue::Number(20.0),
+            ],
+            vec![
+                PivotValue::Text("East".to_string()),
+                PivotValue::Text("B".to_string()),
+                PivotValue::Number(30.0),
+            ],
+        ];
+        let cache = PivotCache::from_range(&source).expect("build pivot cache");
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "Region".to_string(),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Product".to_string(),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Sales".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut selected_items = HashSet::new();
+        selected_items.insert("East".to_string());
+        let slicer = SlicerDefinition {
+            part_name: "xl/slicers/slicer1.xml".to_string(),
+            name: Some("RegionSlicer".to_string()),
+            uid: None,
+            cache_part: None,
+            cache_name: Some("RegionSlicerCache".to_string()),
+            // Some producers persist the pivot table name in `sourceName` instead of the field name.
+            source_name: Some("PivotTable1".to_string()),
+            connected_pivot_tables: vec!["xl/pivotTables/pivotTable1.xml".to_string()],
+            connected_tables: vec![],
+            placed_on_drawings: vec![],
+            placed_on_sheets: vec![],
+            placed_on_sheet_names: vec![],
+            selection: SlicerSelectionState {
+                available_items: vec!["East".to_string(), "West".to_string()],
+                selected_items: Some(selected_items),
+            },
+        };
+
+        let parts = PivotSlicerParts {
+            slicers: vec![slicer],
+            timelines: vec![],
+        };
+
+        let filters = pivot_slicer_parts_to_engine_filters(
+            "xl/pivotTables/pivotTable1.xml",
+            &cache_def,
+            &cache,
+            &parts,
+        );
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].source_field, "Region");
+        assert_eq!(
+            filters[0].allowed.as_ref(),
+            Some(&HashSet::from([PivotKeyPart::Text("East".to_string())]))
         );
     }
 }

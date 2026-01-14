@@ -212,9 +212,12 @@ intentionally ignore fidelity-sensitive options:
      into typed pivot-engine filters (see `pivots::engine_bridge::*pivot_slicer_parts*`).
 
 2) **Mapping slicers/timelines to specific cache fields**
-   - We discover slicers/timelines and the pivot tables they are connected to, but we do not yet
-     join that information with pivot cache field metadata (e.g. `baseField` → cache field name) to
-     produce a stable “this slicer filters field X” mapping.
+    - We discover slicers/timelines and the pivot tables they are connected to, but we do not yet
+      join that information with pivot cache field metadata (e.g. `baseField` → cache field name) to
+      produce a stable “this slicer filters field X” mapping.
+    - As a best-effort fallback, the pivot → engine bridge can infer the cache field for some
+      slicers by matching slicer item keys against the pivot cache’s unique values. This is
+      heuristic and may fail for ambiguous fields or typed (non-text) slicers.
 
 3) **Pivot table sort/manual ordering (partial)**
    - We parse `pivotField@sortType` and best-effort manual item ordering (including shared-item

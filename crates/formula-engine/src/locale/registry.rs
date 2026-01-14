@@ -1,5 +1,5 @@
-use crate::LocaleConfig;
 use crate::value::casefold;
+use crate::LocaleConfig;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
