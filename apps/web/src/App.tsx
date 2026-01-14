@@ -1,4 +1,4 @@
-import { createEngineClient, type CellChange, type CellScalar } from "@formula/engine";
+import { createEngineClient, type CellChange, type CellDataCompact, type CellScalar, type EngineClient } from "@formula/engine";
 import { computeFillEdits, type FillSourceCell } from "@formula/fill-engine";
 import type { CellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
@@ -44,6 +44,7 @@ function EngineDemoApp() {
   const previousSheetRef = useRef<string | null>(null);
   const activeSheetRef = useRef(activeSheet);
   activeSheetRef.current = activeSheet;
+  const supportsRangeCompactRef = useRef<boolean | null>(null);
 
   // Persist per-sheet axis sizes (row heights / col widths). Values are stored in "base" units
   // (CSS pixels at zoom=1) so they can be reapplied consistently across zoom changes.
@@ -782,6 +783,34 @@ function EngineDemoApp() {
     });
   };
 
+  const getRangeInputValues = async (
+    engine: EngineClient,
+    rangeA1: string,
+    sheet: string
+  ): Promise<CellDataCompact[][]> => {
+    if (supportsRangeCompactRef.current !== false && typeof engine.getRangeCompact === "function") {
+      try {
+        const compact = await engine.getRangeCompact(rangeA1, sheet);
+        supportsRangeCompactRef.current = true;
+        return compact;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const isMissingCompactApi =
+          message.includes("unknown method: getRangeCompact") ||
+          (message.toLowerCase().includes("getrangecompact") && message.toLowerCase().includes("not available"));
+        if (!isMissingCompactApi) {
+          throw err;
+        }
+        supportsRangeCompactRef.current = false;
+      }
+    }
+
+    const legacy = await engine.getRange(rangeA1, sheet);
+    return legacy.map((row) =>
+      row.map((cell): CellDataCompact => [cell?.input ?? null, cell?.value ?? null]),
+    );
+  };
+
   const handleFillCommit = async (event: { sourceRange: CellRange; targetRange: CellRange; mode: "copy" | "series" | "formulas" }) => {
     const engine = engineRef.current;
     if (!engine || !provider) return;
@@ -799,12 +828,9 @@ function EngineDemoApp() {
       const seriesUpdates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
 
       if (event.mode === "series") {
-        const sourceMatrix = await engine.getRange(sourceA1, activeSheet);
+        const sourceMatrix = await getRangeInputValues(engine, sourceA1, activeSheet);
         const sourceCells: FillSourceCell[][] = sourceMatrix.map((row) =>
-          row.map((cell) => ({
-            input: cell.input as CellScalar,
-            value: cell.value as CellScalar
-          }))
+          row.map((cell) => ({ input: cell[0], value: cell[1] })),
         );
 
         const { edits } = computeFillEdits({
@@ -867,12 +893,9 @@ function EngineDemoApp() {
     }
 
     // `copy` mode fills formulas as values (no formula shifting), so the JS fill engine is fine.
-    const sourceMatrix = await engine.getRange(sourceA1, activeSheet);
+    const sourceMatrix = await getRangeInputValues(engine, sourceA1, activeSheet);
     const sourceCells: FillSourceCell[][] = sourceMatrix.map((row) =>
-      row.map((cell) => ({
-        input: cell.input as CellScalar,
-        value: cell.value as CellScalar
-      }))
+      row.map((cell) => ({ input: cell[0], value: cell[1] })),
     );
 
     const { edits } = computeFillEdits({
@@ -1017,7 +1040,7 @@ function EngineDemoApp() {
     if (!fillDelta) return;
     const { range: fillArea0, direction } = fillDelta;
 
-    const sourceCells = await engine.getRange(range0ToA1(source0), activeSheet);
+    const sourceCells = await getRangeInputValues(engine, range0ToA1(source0), activeSheet);
     const sourceHeight = source0.endRow0Exclusive - source0.startRow0;
     const sourceWidth = source0.endCol0Exclusive - source0.startCol0;
 
@@ -1074,7 +1097,7 @@ function EngineDemoApp() {
           const numberValues: number[] = [];
           const textValues: string[] = [];
           for (let r = 0; r < sourceHeight; r++) {
-            const input = (sourceCells[r]?.[c]?.input ?? null) as CellScalar;
+            const input = (sourceCells[r]?.[c]?.[0] ?? null) as CellScalar;
             if (typeof input === "number" && Number.isFinite(input)) {
               if (kind === "text") {
                 kind = null;
@@ -1111,7 +1134,7 @@ function EngineDemoApp() {
           const numberValues: number[] = [];
           const textValues: string[] = [];
           for (let c = 0; c < sourceWidth; c++) {
-            const input = (sourceCells[r]?.[c]?.input ?? null) as CellScalar;
+            const input = (sourceCells[r]?.[c]?.[0] ?? null) as CellScalar;
             if (typeof input === "number" && Number.isFinite(input)) {
               if (kind === "text") {
                 kind = null;
