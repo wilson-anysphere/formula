@@ -261,16 +261,16 @@ fn standard_cryptoapi_rc4_40_bit_key_vector() {
     let key_material = hb[..5].to_vec();
     assert_eq!(key_material, hex_decode("6ad7dedf2d"));
 
-    // 40-bit RC4 uses a 5-byte key (`keyLen = keySize/8`). Zero-padding it to 16 bytes changes RC4
-    // KSA and yields a different keystream.
+    // CryptoAPI/Office represent a "40-bit" RC4 key as a 16-byte RC4 key where the high 88 bits are
+    // zero. RC4's KSA depends on both the key bytes and the key length, so treating the 40-bit key
+    // material as a raw 5-byte key produces a different keystream than CryptoAPI/Office.
     let mut padded_key = key_material.clone();
     padded_key.resize(16, 0);
     assert_eq!(padded_key, hex_decode("6ad7dedf2d0000000000000000000000"));
 
     let plaintext = b"Hello, RC4 CryptoAPI!";
 
-    // Demonstrate that padding changes the ciphertext (and therefore must not be applied by
-    // MS-OFFCRYPTO Standard RC4 readers).
+    // CryptoAPI padded 16-byte key (correct behavior).
     let ciphertext_padded = rc4_apply(&padded_key, plaintext);
     assert_eq!(
         ciphertext_padded,
@@ -285,10 +285,10 @@ fn standard_cryptoapi_rc4_40_bit_key_vector() {
     );
     assert_ne!(ciphertext_padded, ciphertext_unpadded);
 
-    // Ensure the production decrypt reader uses the **unpadded** 5-byte key form.
+    // Ensure the production decrypt reader uses the CryptoAPI padded key form.
     let mut stream = Vec::new();
     stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
-    stream.extend_from_slice(&ciphertext_unpadded);
+    stream.extend_from_slice(&ciphertext_padded);
 
     let mut cursor = Cursor::new(stream);
     cursor.seek(SeekFrom::Start(8)).unwrap();
