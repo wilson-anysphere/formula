@@ -306,8 +306,9 @@ Agile includes a `dataIntegrity` block that authenticates the package bytes:
 
 Implementation status:
 
-- `crates/formula-xlsx::offcrypto` validates `dataIntegrity` and returns `IntegrityMismatch` on
-  failure.
+- `crates/formula-xlsx::offcrypto` validates `dataIntegrity` **when present** and returns
+  `IntegrityMismatch` on failure. When `<dataIntegrity>` is missing, decryption can still succeed
+  but **no integrity verification** is performed (and a warning may be emitted during parsing).
 - `crates/formula-office-crypto` validates `dataIntegrity` and returns:
   - `IntegrityCheckFailed` on HMAC mismatch
   - When the `<dataIntegrity>` element is missing, decryption can still succeed but **no integrity
@@ -835,6 +836,17 @@ debugging encryption:
   truncation).
 * **§2.3.4.15** — “Data Encryption (Agile Encryption)” (4096-byte segmenting and padding/truncation
   behavior).
+
+Deep links used frequently during development:
+
+- EncryptionInfo Stream (Agile header + XML)  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/87020a34-e73f-4139-99bc-bbdf6cf6fa55
+- EncryptedPackage Stream  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/b60c8b35-2db2-4409-8710-59d88a793f83
+- Agile password verification / key derivation  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/a57cb947-554f-4e5e-b150-3f2978225e92
+- Data integrity (HMAC)  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/63d9c262-82b9-4fa3-a06d-d087b93e3b00
 
 Other useful keywords inside MS-OFFCRYPTO:
 * `spinCount` (Agile password hashing loop)
