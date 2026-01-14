@@ -2417,6 +2417,54 @@ fn from_xlsx_bytes_imports_style_and_column_metadata() {
     let c1_js = wb.get_cell("C1".to_string(), None).unwrap();
     let c1: CellData = serde_wasm_bindgen::from_value(c1_js).unwrap();
     assert_json_number(&c1.value, 20.1);
+
+    // Style-only cells should *not* appear in the legacy scalar IO schema returned by `toJson()`.
+    let json = wb.to_json().unwrap();
+    let parsed: JsonValue = serde_json::from_str(&json).unwrap();
+    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"]
+        .as_object()
+        .expect("expected cells object");
+    assert!(
+        !cells.contains_key("A1"),
+        "style-only cell A1 should be omitted from toJson() but was present: {cells:?}"
+    );
+
+    // Workbook file metadata should round-trip into functions like CELL("filename") / INFO("directory").
+    wb.set_cell(
+        "D1".to_string(),
+        JsValue::from_str(r#"=CELL("filename")"#),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+    let d1_js = wb.get_cell("D1".to_string(), None).unwrap();
+    let d1: CellData = serde_wasm_bindgen::from_value(d1_js).unwrap();
+    assert_eq!(d1.value, JsonValue::String(String::new()));
+
+    wb.set_workbook_file_metadata(
+        JsValue::from_str(r#"C:\foo"#),
+        JsValue::from_str("Book1.xlsx"),
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let d1_js = wb.get_cell("D1".to_string(), None).unwrap();
+    let d1: CellData = serde_wasm_bindgen::from_value(d1_js).unwrap();
+    assert_eq!(
+        d1.value,
+        JsonValue::String(r#"C:\foo\[Book1.xlsx]Sheet1"#.to_string())
+    );
+
+    wb.set_cell(
+        "E1".to_string(),
+        JsValue::from_str(r#"=INFO("directory")"#),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+    let e1_js = wb.get_cell("E1".to_string(), None).unwrap();
+    let e1: CellData = serde_wasm_bindgen::from_value(e1_js).unwrap();
+    assert_eq!(e1.value, JsonValue::String(r#"C:\foo\"#.to_string()));
 }
 
 #[wasm_bindgen_test]
