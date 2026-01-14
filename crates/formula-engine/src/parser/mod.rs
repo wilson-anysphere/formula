@@ -3909,7 +3909,11 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
         workbook.push_str(book);
         return (Some(workbook), sheet.to_string());
     };
-    let Some(end) = rest.find(']') else {
+    // Workbook ids can include path prefixes which may themselves contain `[` / `]` characters.
+    // When parsing a bracketed external prefix (`[workbook]sheet`), locate the *last* closing
+    // bracket so we can recover the full workbook id (mirrors `split_external_sheet_key` used by
+    // the evaluator).
+    let Some(end) = rest.rfind(']') else {
         return (None, name.to_string());
     };
     let workbook = rest[..end].to_string();

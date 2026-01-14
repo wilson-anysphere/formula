@@ -1117,7 +1117,14 @@ fn fmt_ref_prefix(
                 SheetRef::Sheet(sheet) => {
                     // Workbook names inside `[...]` are permissive (Excel allows spaces, dashes,
                     // etc), but the sheet name portion follows normal quoting rules.
-                    if sheet_name_needs_quotes(sheet, reference_style) {
+                    //
+                    // However, when the workbook id contains `[`/`]` (e.g. from a path prefix that
+                    // includes brackets), we must also force a quoted combined token so the lexer
+                    // doesn't interpret nested brackets as structured-ref syntax.
+                    let needs_quotes = sheet_name_needs_quotes(sheet, reference_style)
+                        || book.contains('[')
+                        || book.contains(']');
+                    if needs_quotes {
                         out.push('\'');
                         out.push('[');
                         fmt_sheet_name_escaped(out, book);
@@ -1135,7 +1142,10 @@ fn fmt_ref_prefix(
                 SheetRef::SheetRange { start, end } => {
                     if sheet_name_eq_case_insensitive(start, end) {
                         // Degenerate 3D span within an external workbook.
-                        if sheet_name_needs_quotes(start, reference_style) {
+                        let needs_quotes = sheet_name_needs_quotes(start, reference_style)
+                            || book.contains('[')
+                            || book.contains(']');
+                        if needs_quotes {
                             out.push('\'');
                             out.push('[');
                             fmt_sheet_name_escaped(out, book);
@@ -1150,7 +1160,9 @@ fn fmt_ref_prefix(
                         }
                         out.push('!');
                     } else {
-                        let needs_quotes = sheet_name_needs_quotes(start, reference_style)
+                        let needs_quotes = book.contains('[')
+                            || book.contains(']')
+                            || sheet_name_needs_quotes(start, reference_style)
                             || sheet_name_needs_quotes(end, reference_style);
                         if needs_quotes {
                             out.push('\'');

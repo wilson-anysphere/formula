@@ -43,6 +43,13 @@ fn roundtrip_with_path_qualified_external_ref_in_quoted_sheet_prefix() {
 }
 
 #[test]
+fn roundtrip_with_path_qualified_external_ref_with_brackets_in_path_prefix() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("='C:\\[foo]\\[Book.xlsx]Sheet1'!A1+1", opts, ser);
+}
+
+#[test]
 fn roundtrip_with_unquoted_external_ref_with_spaces_in_workbook_name() {
     let opts = ParseOptions::default();
     let ser = SerializeOptions::default();
