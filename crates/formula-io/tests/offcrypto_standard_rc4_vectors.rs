@@ -271,36 +271,35 @@ fn standard_cryptoapi_rc4_40_bit_key_vector() {
     let key_material = hb[..5].to_vec();
     assert_eq!(key_material, hex_decode("6ad7dedf2d"));
 
-    // CryptoAPI/Office quirk (SHA1 + 40-bit): some implementations initialize RC4 with a 16-byte
-    // key blob `key_material || 0x00 * 11` (not the raw 5-byte key). Demonstrate that the padding
-    // changes ciphertext.
+    // The 40-bit RC4 key is the first 5 bytes of `Hb0`.
+    //
+    // Zero-padding this to 16 bytes is a common legacy behavior that changes the RC4 KSA and
+    // produces a different keystream/ciphertext.
     let mut padded_key = key_material.clone();
     padded_key.resize(16, 0);
     assert_eq!(padded_key, hex_decode("6ad7dedf2d0000000000000000000000"));
 
     let plaintext = b"Hello, RC4 CryptoAPI!";
 
-    // Raw 5-byte key material (no padding).
+    // Spec-correct 5-byte key.
     let ciphertext_unpadded = rc4_apply(&key_material, plaintext);
     assert_eq!(
         ciphertext_unpadded,
         hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf")
     );
 
-    // Padded 16-byte key produces a different keystream/ciphertext.
+    // Demonstrate that (incorrect) zero-padding changes ciphertext.
     let ciphertext_padded = rc4_apply(&padded_key, plaintext);
     assert_eq!(
         ciphertext_padded,
         hex_decode("7a8bd000713a6e30ba9916476d27b01d36707a6ef8")
     );
-
     assert_ne!(ciphertext_padded, ciphertext_unpadded);
 
-    // Ensure the production decrypt reader uses the padded 16-byte key for the SHA1+40-bit
-    // compatibility quirk.
+    // Ensure the production decrypt reader uses the unpadded 5-byte key.
     let mut stream = Vec::new();
     stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
-    stream.extend_from_slice(&ciphertext_padded);
+    stream.extend_from_slice(&ciphertext_unpadded);
 
     let mut cursor = Cursor::new(stream);
     cursor.seek(SeekFrom::Start(8)).unwrap();

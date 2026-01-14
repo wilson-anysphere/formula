@@ -81,21 +81,12 @@ pub enum Rc4CryptoApiEncryptedPackageError {
 /// fresh RC4 key derived as:
 ///
 /// `key_material_b = Hash(H || LE32(b))[0..key_len]`
-///
-/// CryptoAPI quirk: for **40-bit RC4** (`key_len == 5`, i.e. `keySize == 0`/`40`) when
-/// `algIdHash = CALG_SHA1`, some CryptoAPI/Office implementations treat the RC4 key as a 16-byte
-/// key blob where the remaining 11 bytes are zero:
-/// `rc4_key_b = key_material_b || 0x00 * 11`.
-///
 /// where:
 /// - `H` is the base hash bytes (typically `Hfinal`; 20 bytes for SHA-1 or 16 bytes for MD5).
 /// - `b` is the 0-based block index.
 /// - `key_len = keySize/8` (40→5 bytes, 56→7 bytes, 128→16 bytes). MS-OFFCRYPTO specifies that for
 ///   RC4, `keySize == 0` MUST be interpreted as 40-bit.
-///
-/// **Compatibility note (40-bit RC4):** Some Office/CryptoAPI variants treat a 40-bit key as a
-/// 16-byte RC4 key blob where the high 88 bits are zero. This behavior is observed for the SHA-1
-/// variant; the MD5 variant uses the raw 5-byte key material (matching published vector tests).
+/// - For 40-bit RC4 (`key_len == 5`), use the 5-byte key directly (do not pad to 16 bytes).
 ///
 /// Seeking is supported by re-deriving the block key and discarding `o = pos % 0x200` bytes of
 /// RC4 keystream.
@@ -365,18 +356,10 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             }
         };
 
-        // CryptoAPI quirk: for 40-bit RC4 (`key_len == 5`), some Office/CryptoAPI variants treat the
-        // RC4 key as a 16-byte blob with the high 88 bits set to zero. RC4's keystream depends on
-        // both the key bytes *and* the key length, so this is not equivalent to using the raw
-        // 5-byte key material. This behavior is observed for the SHA-1 variant; the MD5 variant
-        // uses the raw 5-byte key material (matching published vector tests).
-        let mut padded_key = [0u8; 16];
-        let key = if self.key_len == 5 && self.hash_alg == HashAlg::Sha1 {
-            padded_key[..5].copy_from_slice(&digest[..5]);
-            padded_key.as_slice()
-        } else {
-            &digest[..self.key_len]
-        };
+        // For 40-bit RC4 (`keySize == 0`/`40` → `key_len == 5`), the key material is the first
+        // 5 bytes of the digest. Do **not** pad the key to 16 bytes; RC4's KSA depends on the key
+        // length and a zero-padded 16-byte key produces a different keystream.
+        let key = &digest[..self.key_len];
 
         let mut rc4 = Rc4::new(key);
         rc4.skip(offset);
@@ -636,16 +619,11 @@ mod tests {
                     hasher.finalize().to_vec()
                 }
             };
-            // CryptoAPI quirk: for 40-bit RC4 (`key_len == 5`), some Office/CryptoAPI variants treat
-            // the RC4 key as a 16-byte blob with the high 88 bits set to zero. This behavior is
-            // observed for the SHA-1 variant; the MD5 variant uses the raw 5-byte key material.
-            let mut padded_key = [0u8; 16];
-            let key = if key_len == 5 && hash_alg == HashAlg::Sha1 {
-                padded_key[..5].copy_from_slice(&digest[..5]);
-                padded_key.as_slice()
-            } else {
-                &digest[..key_len]
-            };
+            // Derive per-block RC4 key: Hash(H || LE32(block_index)) truncated to key_len.
+            //
+            // For 40-bit RC4 (`keySize == 0`/`40` → `key_len == 5`), the key is the first 5 bytes of
+            // the digest. Do not pad to 16 bytes: RC4's key schedule depends on the key length.
+            let key = &digest[..key_len];
             let mut rc4 = Rc4::new(key);
 
             let block_len = (plaintext.len() - offset).min(RC4_BLOCK_SIZE);
@@ -831,8 +809,6 @@ mod tests {
         //   6ad7dedf2da3514b1d85eabee069d47dd058967f
         // - 40-bit RC4 key material = first 5 bytes of digest:
         //   6ad7dedf2d
-        // - CryptoAPI/Office quirk (SHA1 + 40-bit): initialize RC4 with a 16-byte key blob
-        //   `key_material || 0x00 * 11`, not the raw 5-byte key.
         let h: Vec<u8> = vec![
             0x1b, 0x59, 0x72, 0x28, 0x4e, 0xab, 0x64, 0x81, 0xeb, 0x65, 0x65, 0xa0, 0x98, 0x5b,
             0x33, 0x4b, 0x3e, 0x65, 0xe0, 0x41,
@@ -840,11 +816,11 @@ mod tests {
         let key_len = 5usize;
         let plaintext = b"Hello, RC4 CryptoAPI!";
         let expected_ciphertext: Vec<u8> = vec![
-            0x7a, 0x8b, 0xd0, 0x00, 0x71, 0x3a, 0x6e, 0x30, 0xba, 0x99, 0x16, 0x47, 0x6d, 0x27,
-            0xb0, 0x1d, 0x36, 0x70, 0x7a, 0x6e, 0xf8,
+            0xd1, 0xfa, 0x44, 0x49, 0x13, 0xb4, 0x83, 0x9b, 0x06, 0xeb, 0x48, 0x51, 0x75,
+            0x0a, 0x07, 0x76, 0x10, 0x05, 0xf0, 0x25, 0xbf,
         ];
 
-        // Encrypt and assert ciphertext matches the known vector.
+        // Encrypt and assert the ciphertext matches the known vector.
         let got_ciphertext = encrypt_rc4_cryptoapi(plaintext, &h, key_len, HashAlg::Sha1);
         assert_eq!(got_ciphertext, expected_ciphertext);
 
