@@ -32,10 +32,19 @@ mod locale_parse_number {
 
         assert_eq!(locale.parse_number("1\u{00A0}234,56"), Some(1234.56));
         assert_eq!(locale.parse_number("1\u{202F}234,56"), Some(1234.56));
+        assert_eq!(
+            locale.parse_number("1\u{00A0}234\u{00A0}567,89"),
+            Some(1234567.89)
+        );
+        assert_eq!(
+            locale.parse_number("1\u{00A0}234\u{202F}567,89"),
+            Some(1234567.89)
+        );
 
         // ASCII space is meaningful in the formula language (range intersection), so we do not
         // treat it as a valid grouping separator.
         assert_eq!(locale.parse_number("1 234,56"), None);
+        assert_eq!(locale.parse_number("1 234 567,89"), None);
     }
 
     #[test]
