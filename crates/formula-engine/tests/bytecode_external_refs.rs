@@ -23,7 +23,13 @@ fn bytecode_external_cell_ref_evaluates_via_provider() {
         .unwrap();
 
     // Ensure we compile to bytecode (no AST fallback).
-    assert_eq!(engine.bytecode_program_count(), 1);
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
@@ -53,4 +59,26 @@ fn bytecode_missing_external_cell_ref_is_ref_error() {
         engine.get_cell_value("Sheet1", "A1"),
         Value::Error(ErrorKind::Ref)
     );
+}
+
+#[test]
+fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")+1"#)
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
 }

@@ -5277,14 +5277,6 @@ impl Engine {
             bytecode::LowerError::Unsupported => BytecodeCompileReason::IneligibleExpr,
             other => BytecodeCompileReason::LowerError(other),
         })?;
-        // The bytecode backend does not support external workbook references. Since `INDIRECT` can
-        // synthesize external references dynamically at runtime (via the external value provider),
-        // we conservatively fall back to the AST evaluator when an external provider is configured.
-        //
-        // This ensures `INDIRECT("[Book.xlsx]Sheet1!A1")` behaves like direct external references.
-        if self.external_value_provider.is_some() && bytecode_expr_contains_indirect(&expr) {
-            return Err(BytecodeCompileReason::IneligibleExpr);
-        }
         if let Some(name) = bytecode_expr_first_unsupported_function(&expr) {
             return Err(BytecodeCompileReason::UnsupportedFunction(name));
         }
@@ -8212,119 +8204,6 @@ fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
     }
 }
 
-fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
-    match expr {
-        crate::Expr::NameRef(r) => r.workbook.is_some(),
-        crate::Expr::CellRef(r) => r.workbook.is_some(),
-        crate::Expr::ColRef(r) => r.workbook.is_some(),
-        crate::Expr::RowRef(r) => r.workbook.is_some(),
-        crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => {
-            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
-        }
-        crate::Expr::FunctionCall(call) => call
-            .args
-            .iter()
-            .any(|arg| canonical_expr_contains_external_workbook_refs(arg)),
-        crate::Expr::Call(call) => {
-            canonical_expr_contains_external_workbook_refs(call.callee.as_ref())
-                || call
-                    .args
-                    .iter()
-                    .any(|arg| canonical_expr_contains_external_workbook_refs(arg))
-        }
-        crate::Expr::Unary(u) => canonical_expr_contains_external_workbook_refs(&u.expr),
-        crate::Expr::Postfix(p) => canonical_expr_contains_external_workbook_refs(&p.expr),
-        crate::Expr::Binary(b) => {
-            canonical_expr_contains_external_workbook_refs(&b.left)
-                || canonical_expr_contains_external_workbook_refs(&b.right)
-        }
-        crate::Expr::Array(arr) => arr
-            .rows
-            .iter()
-            .flat_map(|row| row.iter())
-            .any(|el| canonical_expr_contains_external_workbook_refs(el)),
-        crate::Expr::Number(_)
-        | crate::Expr::String(_)
-        | crate::Expr::Boolean(_)
-        | crate::Expr::Error(_)
-        | crate::Expr::Missing => false,
-    }
-}
-
-/// Returns true if `expr` contains an `INDIRECT()` call with a *string literal* argument that
-/// parses as an external workbook reference (e.g. `"[Book.xlsx]Sheet1!A1"`).
-///
-/// The bytecode backend does not currently support returning external workbook references from
-/// `INDIRECT` (it cannot represent external sheet ids in the bytecode value model), so formulas
-/// containing such calls must fall back to the AST evaluator.
-fn canonical_expr_contains_external_workbook_refs_in_indirect_literals(expr: &crate::Expr) -> bool {
-    fn indirect_literal_is_external(text: &str) -> bool {
-        let ref_text = text.trim();
-        if ref_text.is_empty() {
-            return false;
-        }
-
-        // Quick prefilter: Excel sheet names cannot contain `[`/`]`, so any INDIRECT target with
-        // brackets almost certainly intends an external workbook reference.
-        let maybe_external = ref_text.contains('[');
-
-        let opts = crate::ParseOptions {
-            locale: crate::LocaleConfig::en_us(),
-            reference_style: crate::ReferenceStyle::A1,
-            normalize_relative_to: None,
-        };
-
-        match crate::parse_formula(ref_text, opts) {
-            Ok(ast) => canonical_expr_contains_external_workbook_refs(&ast.expr),
-            Err(_) => maybe_external,
-        }
-    }
-
-    match expr {
-        crate::Expr::FunctionCall(call) => {
-            if call.name.name_upper == "INDIRECT" {
-                if let Some(crate::Expr::String(text)) = call.args.first() {
-                    if indirect_literal_is_external(text) {
-                        return true;
-                    }
-                }
-            }
-            call.args
-                .iter()
-                .any(canonical_expr_contains_external_workbook_refs_in_indirect_literals)
-        }
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_external_workbook_refs_in_indirect_literals(access.base.as_ref()),
-        crate::Expr::Call(call) => {
-            canonical_expr_contains_external_workbook_refs_in_indirect_literals(call.callee.as_ref())
-                || call
-                    .args
-                    .iter()
-                    .any(canonical_expr_contains_external_workbook_refs_in_indirect_literals)
-        }
-        crate::Expr::Unary(u) => canonical_expr_contains_external_workbook_refs_in_indirect_literals(&u.expr),
-        crate::Expr::Postfix(p) => canonical_expr_contains_external_workbook_refs_in_indirect_literals(&p.expr),
-        crate::Expr::Binary(b) => {
-            canonical_expr_contains_external_workbook_refs_in_indirect_literals(&b.left)
-                || canonical_expr_contains_external_workbook_refs_in_indirect_literals(&b.right)
-        }
-        crate::Expr::Array(arr) => arr
-            .rows
-            .iter()
-            .flatten()
-            .any(canonical_expr_contains_external_workbook_refs_in_indirect_literals),
-        crate::Expr::NameRef(_)
-        | crate::Expr::StructuredRef(_)
-        | crate::Expr::CellRef(_)
-        | crate::Expr::ColRef(_)
-        | crate::Expr::RowRef(_)
-        | crate::Expr::Number(_)
-        | crate::Expr::String(_)
-        | crate::Expr::Boolean(_)
-        | crate::Expr::Error(_)
-        | crate::Expr::Missing => false,
-    }
-}
 fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
     match expr {
         crate::Expr::FunctionCall(call) => {
@@ -8371,7 +8250,6 @@ fn canonical_expr_depends_on_lowering_prefix_error(
 ) -> Option<bytecode::LowerError> {
     let mut flags = PrefixLowerErrorFlags::default();
     canonical_expr_collect_sheet_prefix_errors(expr, current_sheet, workbook, &mut flags);
-    flags.external_reference |= canonical_expr_contains_external_workbook_refs_in_indirect_literals(expr);
 
     if flags.external_reference {
         return Some(bytecode::LowerError::ExternalReference);
@@ -11092,31 +10970,6 @@ fn bytecode_expr_first_unsupported_function(expr: &bytecode::Expr) -> Option<Arc
     }
 }
 
-fn bytecode_expr_contains_indirect(expr: &bytecode::Expr) -> bool {
-    match expr {
-        bytecode::Expr::FuncCall {
-            func: bytecode::ast::Function::Indirect,
-            ..
-        } => true,
-        bytecode::Expr::FuncCall { args, .. } => args.iter().any(bytecode_expr_contains_indirect),
-        bytecode::Expr::SpillRange(inner) => bytecode_expr_contains_indirect(inner),
-        bytecode::Expr::Unary { expr, .. } => bytecode_expr_contains_indirect(expr),
-        bytecode::Expr::Binary { left, right, .. } => {
-            bytecode_expr_contains_indirect(left) || bytecode_expr_contains_indirect(right)
-        }
-        bytecode::Expr::Lambda { body, .. } => bytecode_expr_contains_indirect(body),
-        bytecode::Expr::Call { callee, args } => {
-            bytecode_expr_contains_indirect(callee)
-                || args.iter().any(bytecode_expr_contains_indirect)
-        }
-        bytecode::Expr::Literal(_)
-        | bytecode::Expr::CellRef(_)
-        | bytecode::Expr::RangeRef(_)
-        | bytecode::Expr::MultiRangeRef(_)
-        | bytecode::Expr::NameRef(_) => false,
-    }
-}
-
 fn bytecode_expr_within_grid_limits(
     expr: &bytecode::Expr,
     origin: bytecode::CellCoord,
@@ -12072,59 +11925,6 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 if args.is_empty() || args.len() > 2 {
                     return false;
-                }
-                // If the reference text is a string literal that parses to an external workbook
-                // reference (e.g. `"[Book.xlsx]Sheet1!A1"`), force an AST fallback.
-                //
-                // The bytecode backend does not represent external-workbook precedents in its
-                // dependency graph, and historically has used the AST evaluator for these cases.
-                if let bytecode::Expr::Literal(bytecode::Value::Text(text)) = &args[0] {
-                    let ref_text = text.trim();
-                    if !ref_text.is_empty() {
-                        let reference_style = match args.get(1) {
-                            Some(bytecode::Expr::Literal(bytecode::Value::Bool(false))) => {
-                                crate::ReferenceStyle::R1C1
-                            }
-                            Some(bytecode::Expr::Literal(bytecode::Value::Number(n))) if *n == 0.0 => {
-                                crate::ReferenceStyle::R1C1
-                            }
-                            _ => crate::ReferenceStyle::A1,
-                        };
-
-                        if let Ok(ast) = crate::parse_formula(
-                            ref_text,
-                            crate::ParseOptions {
-                                locale: crate::LocaleConfig::en_us(),
-                                reference_style,
-                                normalize_relative_to: None,
-                            },
-                        ) {
-                            let origin = match reference_style {
-                                crate::ReferenceStyle::A1 => None,
-                                crate::ReferenceStyle::R1C1 => Some(crate::CellAddr::new(0, 0)),
-                            };
-                            let lowered = crate::eval::lower_ast(&ast, origin);
-                            match lowered {
-                                crate::eval::Expr::CellRef(r)
-                                    if matches!(
-                                        r.sheet,
-                                        crate::eval::SheetReference::External(_)
-                                    ) =>
-                                {
-                                    return false;
-                                }
-                                crate::eval::Expr::RangeRef(r)
-                                    if matches!(
-                                        r.sheet,
-                                        crate::eval::SheetReference::External(_)
-                                    ) =>
-                                {
-                                    return false;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
                 }
                 // Both arguments are scalar (text + optional bool), but accept references via
                 // implicit intersection.
