@@ -240,6 +240,22 @@ test("Typing =XLO suggests XLOOKUP(", async () => {
   );
 });
 
+test("Typing =vlo suggests vlookup(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=vlo",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=vlookup("),
+    `Expected a vlookup suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =_xlfn.XLO suggests =_xlfn.XLOOKUP(", async () => {
   const engine = new TabCompletionEngine();
 
@@ -288,6 +304,40 @@ test("Typing =_xlfn.TAK suggests =_xlfn.TAKE(", async () => {
   assert.ok(
     suggestions.some((s) => s.text === "=_xlfn.TAKE("),
     `Expected an _xlfn.TAKE suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.Tak suggests =_xlfn.Take( (title-style casing)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.Tak";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.Take("),
+    `Expected an _xlfn.Take suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.tak suggests =_xlfn.take(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.tak";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.take("),
+    `Expected an _xlfn.take suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
