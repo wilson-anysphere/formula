@@ -162,7 +162,7 @@ describe("DocumentCellProvider (shared grid)", () => {
     provider.getCell(1, 1);
     expect(doc.getCell).toHaveBeenCalledTimes(1);
 
-    // Large region (50x50=2500 cells) triggers a full cache clear.
+    // Large region invalidation should evict impacted entries so subsequent reads refetch.
     provider.invalidateDocCells({ startRow: 0, endRow: 50, startCol: 0, endCol: 50 });
 
     provider.getCell(1, 1);
@@ -181,7 +181,7 @@ describe("DocumentCellProvider (shared grid)", () => {
     expect(doc.getCell).toHaveBeenCalledTimes(2);
 
     const updates: any[] = [];
-    provider.subscribe((update) => updates.push(update));
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
 
     const sheetCache = (provider as any).sheetCaches.get("sheet-1");
     expect(sheetCache).toBeTruthy();
@@ -198,6 +198,8 @@ describe("DocumentCellProvider (shared grid)", () => {
     // Cache miss after invalidation.
     provider.getCell(1, 1);
     expect(doc.getCell).toHaveBeenCalledTimes(3);
+
+    unsubscribe();
   });
 
   it("invalidateDocCells still scans the LRU for medium-large invalidations", () => {
@@ -210,7 +212,7 @@ describe("DocumentCellProvider (shared grid)", () => {
     expect(doc.getCell).toHaveBeenCalledTimes(1);
 
     const updates: any[] = [];
-    provider.subscribe((update) => updates.push(update));
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
 
     const sheetCache = (provider as any).sheetCaches.get("sheet-1");
     expect(sheetCache).toBeTruthy();
@@ -229,6 +231,8 @@ describe("DocumentCellProvider (shared grid)", () => {
 
     // Cache map is preserved (we didn't drop all per-sheet caches).
     expect((provider as any).sheetCaches.size).toBe(1);
+
+    unsubscribe();
   });
 
   it("invalidateDocCells uses the configured sheetCacheMaxSize when deciding to invalidateAll", () => {
