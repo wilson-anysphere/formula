@@ -430,6 +430,7 @@ def main() -> int:
                                 "expectations": str(expectations_path),
                                 "expectations_changed": False,
                                 "fixture_changed": False,
+                                "needs_force": {"fixture": False, "expectations": False},
                                 "dry_run": args.dry_run,
                                 "triage_report": None,
                                 "skipped": "already_promoted",
@@ -468,17 +469,21 @@ def main() -> int:
         entry = extract_public_expectations(report)
         fixture_changed = True
         expectations_changed = True
+        fixture_needs_force = False
+        expectations_needs_force = False
 
         if fixture_path.exists():
             existing_fixture_bytes = read_workbook_input(fixture_path).data
             fixture_changed = existing_fixture_bytes != workbook_bytes
-            if existing_fixture_bytes != workbook_bytes and not args.force:
+            fixture_needs_force = fixture_changed
+            if fixture_changed and not args.force and not args.dry_run:
                 raise FileExistsError(
                     f"Refusing to overwrite existing fixture {fixture_path} (bytes differ). "
                     "Re-run with --force to overwrite."
                 )
         else:
             fixture_changed = True
+            fixture_needs_force = False
 
         current_expectations: dict[str, Any] = {}
         if expectations_path.exists():
@@ -488,12 +493,20 @@ def main() -> int:
                     f"Expected {expectations_path} to be a JSON object mapping names -> expectations."
                 )
 
-        _updated, expectations_changed = upsert_expectations_entry(
-            expectations=current_expectations,
-            workbook_name=display_name,
-            entry=entry,
-            force=args.force,
-        )
+        try:
+            _updated, expectations_changed = upsert_expectations_entry(
+                expectations=current_expectations,
+                workbook_name=display_name,
+                entry=entry,
+                force=args.force,
+            )
+        except FileExistsError:
+            if args.dry_run and not args.force:
+                # In dry-run mode we allow previewing changes even if it would require --force.
+                expectations_changed = True
+                expectations_needs_force = True
+            else:
+                raise
     except (FileExistsError, ValueError) as e:
         print(str(e))
         return 1
@@ -506,6 +519,10 @@ def main() -> int:
                     "expectations": str(expectations_path),
                     "fixture_changed": fixture_changed,
                     "expectations_changed": expectations_changed,
+                    "needs_force": {
+                        "fixture": fixture_needs_force,
+                        "expectations": expectations_needs_force,
+                    },
                     "dry_run": True,
                     "triage_report": None,
                 },

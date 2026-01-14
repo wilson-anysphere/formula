@@ -139,6 +139,86 @@ class PromotePublicCLITests(unittest.TestCase):
             finally:
                 promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
 
+    def test_main_dry_run_reports_need_force_on_existing_entries(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            public_dir.mkdir(parents=True, exist_ok=True)
+
+            # Existing fixture/expectations that will disagree with the new triage result.
+            old_bytes = _make_minimal_xlsx()
+            new_bytes = _make_minimal_xlsx()
+            # Make bytes differ while still being a valid XLSX zip.
+            new_bytes = new_bytes + b"\n"
+
+            fixture_path = public_dir / "case.xlsx.b64"
+            fixture_path.write_bytes(base64.encodebytes(old_bytes))
+            expectations_path = public_dir / "expectations.json"
+            expectations_path.write_text(
+                json.dumps(
+                    {"case.xlsx": {"open_ok": True, "round_trip_ok": True, "diff_critical_count": 0}},
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            input_path = tmp / "input.xlsx"
+            input_path.write_bytes(new_bytes)
+
+            fixture_before = fixture_path.read_bytes()
+            expectations_before = expectations_path.read_bytes()
+
+            original_run_public_triage = promote_mod._run_public_triage
+            try:
+                promote_mod._run_public_triage = (  # type: ignore[assignment]
+                    lambda wb, *, diff_limit=25, recalc=False, render_smoke=False: {
+                        "sha256": sha256_hex(wb.data),
+                        "result": {
+                            "open_ok": True,
+                            "round_trip_ok": True,
+                            "diff_critical_count": 1,
+                        },
+                    }
+                )
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    with mock.patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "promote_public.py",
+                            "--input",
+                            str(input_path),
+                            "--name",
+                            "case.xlsx",
+                            "--public-dir",
+                            str(public_dir),
+                            "--triage-out",
+                            str(triage_out),
+                            "--dry-run",
+                        ],
+                    ):
+                        rc = promote_mod.main()
+                self.assertEqual(rc, 0)
+                out = json.loads(stdout.getvalue())
+                self.assertTrue(out.get("dry_run"))
+                self.assertTrue(out.get("fixture_changed"))
+                self.assertTrue(out.get("expectations_changed"))
+                needs_force = out.get("needs_force") or {}
+                self.assertEqual(needs_force.get("fixture"), True)
+                self.assertEqual(needs_force.get("expectations"), True)
+
+                # Ensure we didn't mutate any tracked artifacts.
+                self.assertEqual(fixture_path.read_bytes(), fixture_before)
+                self.assertEqual(expectations_path.read_bytes(), expectations_before)
+                self.assertFalse(triage_out.exists())
+            finally:
+                promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
+
     def test_main_skips_triage_for_existing_public_fixture(self) -> None:
         with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
             tmp = Path(td)
