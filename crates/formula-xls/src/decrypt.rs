@@ -2258,8 +2258,18 @@ fn password_matches_verifier(
     rc4.apply_keystream(&mut verifier_hash[..]);
 
     let expected = Zeroizing::new(match hash_alg {
-        CryptoApiHashAlg::Sha1 => sha1_bytes(&[&verifier_plain[..]]).to_vec(),
-        CryptoApiHashAlg::Md5 => md5_bytes(&[&verifier_plain[..]]).to_vec(),
+        CryptoApiHashAlg::Sha1 => {
+            let mut digest = sha1_bytes(&[&verifier_plain[..]]);
+            let out = digest.to_vec();
+            digest.zeroize();
+            out
+        }
+        CryptoApiHashAlg::Md5 => {
+            let mut digest = md5_bytes(&[&verifier_plain[..]]);
+            let out = digest.to_vec();
+            digest.zeroize();
+            out
+        }
     });
 
     let verifier_hash_size = verifier.verifier_hash_size as usize;
