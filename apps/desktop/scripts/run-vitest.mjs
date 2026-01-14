@@ -2,26 +2,23 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeVitestArgs } from "../../../scripts/vitestArgs.mjs";
 
 // `pnpm -C apps/desktop vitest …` runs from within `apps/desktop/`, but some
 // callsites pass file paths rooted at the repo (e.g. `apps/desktop/src/...`).
 // Normalize those to paths relative to the desktop package so Vitest can find them.
 const PREFIX_POSIX = "apps/desktop/";
 const PREFIX_WIN = "apps\\desktop\\";
-let args = process.argv.slice(2);
-// pnpm forwards a literal `--` delimiter into scripts. Strip the first occurrence so:
-// - `pnpm -C apps/desktop vitest -- run <file>` behaves as expected
-// - wrappers still work if the script itself provides fixed args before the delimiter
-const delimiterIdx = args.indexOf("--");
-if (delimiterIdx >= 0) {
-  args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
-}
+const PREFIX_POSIX_DOT = `./${PREFIX_POSIX}`;
+const PREFIX_WIN_DOT = `.\\${PREFIX_WIN}`;
+// pnpm forwards literal `--` delimiters into scripts (npm/yarn muscle memory). Strip them so Vitest
+// doesn't interpret them as test patterns.
+let args = normalizeVitestArgs(process.argv.slice(2));
 
 const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
-  // Vitest treats `--silent <pattern>` as "silent has value <pattern>". Normalize to the
-  // explicit boolean form so `pnpm -C apps/desktop vitest --silent <file>` works.
-  if (arg === "--silent") return "--silent=true";
+  if (arg.startsWith(PREFIX_POSIX_DOT)) return arg.slice(PREFIX_POSIX_DOT.length);
+  if (arg.startsWith(PREFIX_WIN_DOT)) return arg.slice(PREFIX_WIN_DOT.length);
   if (arg.startsWith(PREFIX_POSIX)) return arg.slice(PREFIX_POSIX.length);
   if (arg.startsWith(PREFIX_WIN)) return arg.slice(PREFIX_WIN.length);
   return arg;
