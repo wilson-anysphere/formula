@@ -386,20 +386,42 @@ except Exception as e:
     print(str(e))
     raise SystemExit(2)
 
-doc_types = data.get("CFBundleDocumentTypes")
-if not doc_types:
-    print("CFBundleDocumentTypes is missing or empty")
-    raise SystemExit(1)
-
 found_exts = set()
-for doc in doc_types or []:
-    if not isinstance(doc, dict):
+
+doc_types = data.get("CFBundleDocumentTypes") or []
+if isinstance(doc_types, (list, tuple)):
+    for doc in doc_types:
+        if not isinstance(doc, dict):
+            continue
+        exts = doc.get("CFBundleTypeExtensions") or []
+        if isinstance(exts, str):
+            found_exts.add(exts.strip().lower().lstrip("."))
+        elif isinstance(exts, (list, tuple)):
+            for ext in exts:
+                if isinstance(ext, str) and ext.strip():
+                    found_exts.add(ext.strip().lower().lstrip("."))
+
+for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
+    decls = data.get(key) or []
+    if not isinstance(decls, (list, tuple)):
         continue
-    exts = doc.get("CFBundleTypeExtensions") or []
-    if isinstance(exts, (list, tuple)):
-        for ext in exts:
-            if isinstance(ext, str) and ext.strip():
-                found_exts.add(ext.strip().lower().lstrip("."))
+    for decl in decls:
+        if not isinstance(decl, dict):
+            continue
+        tags = decl.get("UTTypeTagSpecification") or {}
+        if not isinstance(tags, dict):
+            continue
+        raw_exts = tags.get("public.filename-extension")
+        if isinstance(raw_exts, str):
+            found_exts.add(raw_exts.strip().lower().lstrip("."))
+        elif isinstance(raw_exts, (list, tuple)):
+            for ext in raw_exts:
+                if isinstance(ext, str) and ext.strip():
+                    found_exts.add(ext.strip().lower().lstrip("."))
+
+if not found_exts:
+    print("No file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")
+    raise SystemExit(1)
 
 if required_ext not in found_exts:
     found = ", ".join(sorted(found_exts)) if found_exts else "(none)"
