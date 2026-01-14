@@ -707,7 +707,7 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
         });
     }
 
-    let header = StandardEncryptionHeader {
+    let mut header = StandardEncryptionHeader {
         flags,
         size_extra,
         alg_id,
@@ -758,6 +758,10 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
             }
         }
         CipherKind::Rc4 => {
+            // MS-OFFCRYPTO specifies that `keySize == 0` MUST be interpreted as 40-bit.
+            if header.key_size_bits == 0 {
+                header.key_size_bits = 40;
+            }
             if !matches!(header.key_size_bits, 40 | 56 | 128) {
                 return Err(OffcryptoError::UnsupportedAlgorithm(format!(
                     "keySize={} unsupported for algId=0x{:08x}",

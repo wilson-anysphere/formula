@@ -189,3 +189,45 @@ fn cryptoapi_rc4_40bit_keys_are_padded_to_16_bytes() {
     assert!(key[5..].iter().all(|b| *b == 0));
     assert_eq!(&key[..5], &hex_bytes("6ad7dedf2d")[..]);
 }
+
+#[test]
+fn cryptoapi_rc4_56bit_keys_are_7_bytes_and_not_padded() {
+    let password = "password";
+    let salt: Vec<u8> = (0u8..16).collect();
+
+    let h = cryptoapi::iterated_hash_from_password(
+        password,
+        &salt,
+        cryptoapi::STANDARD_SPIN_COUNT,
+        HashAlgorithm::Sha1,
+    )
+    .expect("iterated hash");
+
+    // For keySize=56, the key is the first 7 bytes of Hfinal (no zero padding).
+    let key =
+        cryptoapi::rc4_key_for_block(h.as_slice(), 0, 56, HashAlgorithm::Sha1).expect("56-bit key");
+    assert_eq!(key.len(), 7);
+    assert_eq!(key.as_slice(), hex_bytes("6ad7dedf2da351").as_slice());
+}
+
+#[test]
+fn cryptoapi_rc4_keysize_zero_is_interpreted_as_40bit() {
+    let password = "password";
+    let salt: Vec<u8> = (0u8..16).collect();
+
+    let h = cryptoapi::iterated_hash_from_password(
+        password,
+        &salt,
+        cryptoapi::STANDARD_SPIN_COUNT,
+        HashAlgorithm::Sha1,
+    )
+    .expect("iterated hash");
+
+    let key0 = cryptoapi::rc4_key_for_block(h.as_slice(), 0, 0, HashAlgorithm::Sha1)
+        .expect("keySize=0 must be accepted");
+    let key40 = cryptoapi::rc4_key_for_block(h.as_slice(), 0, 40, HashAlgorithm::Sha1)
+        .expect("40-bit key");
+    assert_eq!(key0.as_slice(), key40.as_slice());
+    assert_eq!(key0.len(), 16);
+    assert!(key0[5..].iter().all(|b| *b == 0));
+}

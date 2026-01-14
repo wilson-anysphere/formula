@@ -154,6 +154,8 @@ pub fn rc4_key_for_block(
     key_size_bits: u32,
     hash_alg: HashAlgorithm,
 ) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    // MS-OFFCRYPTO specifies that `keySize == 0` MUST be interpreted as 40-bit.
+    let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
     if key_size_bits % 8 != 0 {
         return Err(OffcryptoError::InvalidKeySizeBits { key_size_bits });
     }

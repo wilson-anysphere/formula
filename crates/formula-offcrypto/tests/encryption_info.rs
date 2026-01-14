@@ -5,6 +5,7 @@ use formula_offcrypto::{
 };
 
 const CALG_AES_128: u32 = 0x0000_660E;
+const CALG_RC4: u32 = 0x0000_6801;
 const CALG_SHA1: u32 = 0x0000_8004;
 
 fn utf16le_bytes(s: &str, terminated: bool) -> Vec<u8> {
@@ -182,6 +183,30 @@ fn parse_synthetic_standard_encryption_info_accepts_major_4_minor_2() {
         panic!("expected standard");
     };
     assert_eq!((version.major, version.minor), (4, 2));
+}
+
+#[test]
+fn parse_synthetic_standard_rc4_encryption_info_accepts_keysize_zero_as_40bit() {
+    // MS-OFFCRYPTO specifies that `EncryptionHeader.keySize == 0` MUST be interpreted as 40-bit
+    // for Standard/CryptoAPI RC4.
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI;
+    let bytes = build_standard_encryption_info(
+        header_flags,
+        &[], // empty CSPName
+        CALG_RC4,
+        CALG_SHA1,
+        0,  // keySize == 0 => 40-bit
+        16, // saltSize
+        20, // verifierHashSize (SHA1)
+        20, // encryptedVerifierHash length for RC4 is exact hash length (no AES padding)
+    );
+
+    let info = parse_encryption_info(&bytes).expect("parse");
+    let EncryptionInfo::Standard { header, .. } = info else {
+        panic!("expected standard");
+    };
+    assert_eq!(header.alg_id, CALG_RC4);
+    assert_eq!(header.key_size_bits, 40);
 }
 
 #[test]
