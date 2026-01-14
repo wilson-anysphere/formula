@@ -2098,9 +2098,10 @@ export class SpreadsheetApp {
           ({
             shouldEncryptCell: (cell) => encryptionPolicy?.shouldEncryptCell(cell) ?? false,
             keyForCell: (cell) => {
-            // Prefer reading the key id from an existing encrypted payload when available so
-            // clients can still decrypt/mutate encrypted cells even if the shared encryption
-            // policy metadata is missing/unsupported (or out of sync with ciphertext).
+              // Prefer reading the key id from an existing encrypted payload when available so
+              // clients can still decrypt/mutate encrypted cells even if the shared encryption
+              // policy metadata is missing/unsupported (or out of sync with ciphertext).
+              let hasEncPayload = false;
               let payloadKeyId: string | null = null;
               try {
                 const session = this.collabSession as any;
@@ -2120,18 +2121,32 @@ export class SpreadsheetApp {
                     const encRaw =
                       typeof (cellData as any)?.get === "function" ? (cellData as any).get("enc") : (cellData as any)?.enc;
                     if (encRaw === undefined) continue;
-                    if (!isEncryptedCellPayload(encRaw)) continue;
-                    payloadKeyId = encRaw.keyId;
-                    break;
+                    hasEncPayload = true;
+                    // Best-effort: treat any object with a string keyId as an encrypted payload
+                    // marker, even if the full schema is unsupported by this client.
+                    const keyId =
+                      typeof encRaw === "object" && encRaw && typeof (encRaw as any).keyId === "string"
+                        ? String((encRaw as any).keyId ?? "").trim()
+                        : isEncryptedCellPayload(encRaw)
+                          ? String((encRaw as any).keyId ?? "").trim()
+                          : "";
+                    if (keyId) {
+                      payloadKeyId = keyId;
+                      break;
+                    }
                   }
                 }
               } catch {
                 // ignore (best-effort key-id discovery)
               }
 
-              if (payloadKeyId) {
+              // If the cell is already encrypted, always resolve the key based on the ciphertext key id.
+              // Do not fall back to policy metadata; overwriting ciphertext with a different key id is
+              // rejected by the binder/session.
+              if (hasEncPayload) {
+                if (!payloadKeyId) return null;
                 const key = encryptionKeyStore.getCachedKey(collab.docId, payloadKeyId);
-                if (key) return key;
+                return key;
               }
 
               const policyKeyId = encryptionPolicy?.keyIdForCell(cell) ?? null;

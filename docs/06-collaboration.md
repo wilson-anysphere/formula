@@ -362,7 +362,7 @@ Desktop encryption commands (Command Palette):
   - Resolves legacy ranges stored with a sheet display name (instead of a stable `sheetId`) when possible, and avoids sheet id/name ambiguity (also canonicalizes stable ids via their display name to tolerate case-mismatched legacy ids).
   - If the encrypted range metadata is unreadable (unsupported schema), the command aborts with an error toast.
 - `collab.exportEncryptionKey` — export the key for the active cell’s encrypted range.
-  - Prefers the `keyId` embedded in an existing encrypted cell payload (if present), otherwise falls back to policy metadata.
+  - If the active cell already has an `enc` payload, exports the key for `enc.keyId` (no fallback). Otherwise, falls back to policy metadata.
   - If the key bytes are missing locally, it prompts to import the key first.
   - If the encrypted range policy metadata is unreadable (unsupported `metadata.encryptedRanges` schema) and the active cell does not already contain an `enc` payload, the UI cannot determine the key id and surfaces an error.
 - `collab.importEncryptionKey` — import a shared key string into the local key store.
@@ -373,9 +373,9 @@ Desktop encryption commands (Command Palette):
 Notes:
 
 - Desktop `CollabSession` wiring (`apps/desktop/src/app/spreadsheetApp.ts`) resolves encryption keys with this precedence:
-  1) If the cell already has a valid `enc` payload and the referenced key is available locally, use `enc.keyId`.
+  1) If the cell already has an `enc` payload, use its `keyId` (and only return a key if available locally).
   2) Otherwise, fall back to the shared encrypted-range policy (`metadata.encryptedRanges`) `keyIdForCell`.
-  - This allows clients to keep decrypting existing encrypted cells even if the policy metadata is missing/out-of-sync, while still supporting key rotation/overwrite flows when the old ciphertext key is unavailable.
+  - Note: encrypted cells are never overwritten using a different key id. If the ciphertext key is missing (or the payload schema is unsupported), the binder/session will reject edits and surface an actionable toast.
 - Plaintext is JSON `{ value, formula, format? }` and is bound to `{ docId, sheetId, row, col }` via AES-GCM Additional Authenticated Data (AAD) to prevent replay across docs/cells.
   - The encryption codec supports an optional `format` field.
   - By default (`encryption.encryptFormat` unset/false), `@formula/collab-session` + the desktop binder only encrypt `value`/`formula` and leave per-cell formatting stored separately under the shared plaintext `format` key (legacy behavior).

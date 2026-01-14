@@ -410,7 +410,7 @@ describe("SpreadsheetApp read-only collab UX", () => {
     root.remove();
   });
 
-  it("falls back to the policy keyId when an encrypted cell payload key is unavailable", async () => {
+  it("does not fall back to the policy keyId when an encrypted cell payload key is unavailable", async () => {
     const root = createRoot();
     const readOnlyIndicator = document.createElement("div");
     readOnlyIndicator.hidden = true;
@@ -464,16 +464,15 @@ describe("SpreadsheetApp read-only collab UX", () => {
     expect(capturedOptions).not.toBeNull();
     expect(typeof capturedOptions?.encryption?.keyForCell).toBe("function");
 
-    // Only cache the policy key. When the ciphertext key is unavailable, SpreadsheetApp should
-    // still return the policy key so clients can overwrite/rotate encrypted cells.
+    // Only cache the policy key. When the ciphertext key is unavailable, SpreadsheetApp must
+    // *not* fall back to the policy key id; overwriting ciphertext with a different key id is
+    // rejected by the binder/session.
     const store = app.getCollabEncryptionKeyStore();
     expect(store).not.toBeNull();
     await store!.set("doc-1", "policy-key", Buffer.alloc(32, 2).toString("base64"));
 
     const resolved = capturedOptions.encryption.keyForCell({ sheetId: "Sheet1", row: 0, col: 0 });
-    expect(resolved).toMatchObject({ keyId: "policy-key" });
-    expect(resolved?.keyBytes).toBeInstanceOf(Uint8Array);
-    expect(resolved?.keyBytes?.byteLength).toBe(32);
+    expect(resolved).toBeNull();
 
     app.destroy();
     root.remove();
