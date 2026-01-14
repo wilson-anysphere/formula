@@ -161,11 +161,16 @@ export function AddStepMenu(props: {
           schemaItem({
             id: "groupBy",
             label: t("queryEditor.addStep.op.groupBy"),
-            create: () => ({
-              type: "groupBy",
-              groupColumns: [firstColumnName],
-              aggregations: [{ column: secondColumnName, op: "count", as: t("queryEditor.addStep.op.groupBy.count") }],
-            }),
+            create: () => {
+              const groupColumns = [firstColumnName];
+              const baseAggName = t("queryEditor.addStep.op.groupBy.count");
+              const as = uniqueName(baseAggName, new Set(groupColumns));
+              return {
+                type: "groupBy",
+                groupColumns,
+                aggregations: [{ column: secondColumnName, op: "count", as }],
+              };
+            },
           }),
           schemaItem({
             id: "fillDown",

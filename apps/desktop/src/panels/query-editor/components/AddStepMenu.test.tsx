@@ -198,6 +198,35 @@ describe("AddStepMenu", () => {
     });
   });
 
+  it("generates a unique Group By aggregation name when it would collide with a group column name", async () => {
+    const preview = new DataTable(
+      [
+        { name: "Count Rows", type: "number" },
+        { name: "Other", type: "string" },
+      ],
+      [],
+    );
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query: baseQuery(), preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "Group By").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({
+      type: "groupBy",
+      groupColumns: ["Count Rows"],
+      aggregations: [{ column: "Other", op: "count", as: "Count Rows 1" }],
+    });
+  });
+
   it("disables schema-dependent operations when preview schema is missing", async () => {
     const onAddStep = vi.fn();
     await act(async () => {
