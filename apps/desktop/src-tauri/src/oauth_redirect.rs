@@ -1,5 +1,10 @@
 use std::collections::HashSet;
 
+use crate::oauth_redirect_ipc::{
+    MAX_PENDING_BYTES as MAX_OAUTH_REDIRECT_PENDING_BYTES,
+    MAX_PENDING_URLS as MAX_OAUTH_REDIRECT_PENDING_URLS,
+};
+
 /// Normalize OAuth redirect URLs passed to the desktop host.
 ///
 /// This filters and de-dupes a list of URL strings (argv, deep link plugin, etc) and returns only
@@ -15,12 +20,26 @@ use std::collections::HashSet;
 /// SECURITY: loopback URLs are accepted only when the scheme is `http`, an explicit non-zero port
 /// is present, and the host is a loopback host.
 pub fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
-    let mut seen = HashSet::<String>::new();
-    let mut out = Vec::new();
+    // Keep this bounded; argv / OS-delivered deep links should be treated as untrusted.
+    let mut seen =
+        HashSet::<String>::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
+    let mut out_rev = Vec::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
+    let mut bytes = 0usize;
 
-    for url in urls {
+    // Walk backwards so we keep the most recent entries, then reverse at the end to preserve the
+    // original order among kept URLs.
+    for url in urls.into_iter().rev() {
         let trimmed = url.trim().trim_matches('"');
         if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.len() > MAX_OAUTH_REDIRECT_PENDING_BYTES {
+            // Single oversized entry; skip rather than exceeding the deterministic cap.
+            continue;
+        }
+
+        if seen.contains(trimmed) {
             continue;
         }
 
@@ -38,13 +57,24 @@ pub fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
             continue;
         }
 
-        let normalized = trimmed.to_string();
-        if seen.insert(normalized.clone()) {
-            out.push(normalized);
+        if out_rev.len() >= MAX_OAUTH_REDIRECT_PENDING_URLS {
+            break;
         }
+
+        if bytes.saturating_add(trimmed.len()) > MAX_OAUTH_REDIRECT_PENDING_BYTES {
+            // Adding this (older) entry would exceed the byte cap; keep scanning in case smaller
+            // ones still fit.
+            continue;
+        }
+
+        let normalized = trimmed.to_string();
+        bytes += normalized.len();
+        seen.insert(normalized.clone());
+        out_rev.push(normalized);
     }
 
-    out
+    out_rev.reverse();
+    out_rev
 }
 
 #[cfg(test)]
@@ -114,5 +144,48 @@ mod tests {
         ]);
 
         assert_eq!(out, vec!["formula://oauth/callback?code=123".to_string()]);
+    }
+
+    #[test]
+    fn caps_oauth_redirect_urls_by_count_dropping_oldest() {
+        let urls: Vec<String> = (0..(MAX_OAUTH_REDIRECT_PENDING_URLS + 3))
+            .map(|idx| format!("formula://u{idx}"))
+            .collect();
+
+        let out = normalize_oauth_redirect_request_urls(urls);
+        assert_eq!(out.len(), MAX_OAUTH_REDIRECT_PENDING_URLS);
+
+        let expected: Vec<String> = (3..(MAX_OAUTH_REDIRECT_PENDING_URLS + 3))
+            .map(|idx| format!("formula://u{idx}"))
+            .collect();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn caps_oauth_redirect_urls_by_total_bytes_dropping_oldest_deterministically() {
+        // Use fixed-size strings so the expected trim point is deterministic.
+        let entry_len = 4096;
+        let prefix_len = "formula://000-".len();
+        let payload = "x".repeat(entry_len - prefix_len);
+        let urls: Vec<String> = (0..MAX_OAUTH_REDIRECT_PENDING_URLS)
+            .map(|i| format!("formula://{i:03}-{payload}"))
+            .collect();
+
+        assert_eq!(urls.len(), MAX_OAUTH_REDIRECT_PENDING_URLS);
+        assert_eq!(urls[0].len(), entry_len);
+
+        let out = normalize_oauth_redirect_request_urls(urls.clone());
+
+        let expected_len = MAX_OAUTH_REDIRECT_PENDING_BYTES / entry_len;
+        assert_eq!(out.len(), expected_len);
+
+        let total_bytes: usize = out.iter().map(|u| u.len()).sum();
+        assert!(
+            total_bytes <= MAX_OAUTH_REDIRECT_PENDING_BYTES,
+            "normalized bytes {total_bytes} exceeded cap {MAX_OAUTH_REDIRECT_PENDING_BYTES}"
+        );
+
+        let expected = urls[MAX_OAUTH_REDIRECT_PENDING_URLS - expected_len..].to_vec();
+        assert_eq!(out, expected);
     }
 }

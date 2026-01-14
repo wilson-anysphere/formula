@@ -34,7 +34,6 @@ use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -502,18 +501,9 @@ fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
 }
 
 fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
-    // Best-effort de-dupe (avoids double-opens if both argv and macOS open-document events fire).
-    let mut seen = HashSet::<String>::new();
-    let mut out = Vec::new();
-    for path in paths {
-        if path.trim().is_empty() {
-            continue;
-        }
-        if seen.insert(path.clone()) {
-            out.push(path);
-        }
-    }
-    out
+    // Keep the normalization logic in the `desktop` crate so it can be unit-tested without
+    // requiring the full Tauri/WebView toolchain.
+    open_file::normalize_open_file_request_paths(paths)
 }
 
 fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {

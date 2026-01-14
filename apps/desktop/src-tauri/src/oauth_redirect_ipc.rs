@@ -8,8 +8,8 @@
 /// many redirects before the frontend installs its event listeners (or a malicious sender provides
 /// a huge argv / single-instance payload). When the cap is exceeded, we drop the **oldest** URLs
 /// and keep the most recent ones so the latest user action wins.
-const MAX_PENDING_URLS: usize = 50;
-const MAX_PENDING_BYTES: usize = 128 * 1024;
+pub(crate) const MAX_PENDING_URLS: usize = 50;
+pub(crate) const MAX_PENDING_BYTES: usize = 128 * 1024;
 
 use std::collections::VecDeque;
 

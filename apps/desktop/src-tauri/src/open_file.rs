@@ -1,6 +1,11 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::file_io::looks_like_workbook;
+use crate::open_file_ipc::{
+    MAX_PENDING_BYTES as MAX_OPEN_FILE_PENDING_BYTES,
+    MAX_PENDING_PATHS as MAX_OPEN_FILE_PENDING_PATHS,
+};
 use url::Url;
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[
@@ -39,6 +44,63 @@ pub fn extract_open_file_paths_from_argv(argv: &[String], cwd: Option<&Path>) ->
     argv.iter()
         .filter_map(|arg| normalize_open_file_candidate(arg, cwd))
         .collect()
+}
+
+/// Normalize an "open file" request payload.
+///
+/// The OS can provide file-open events via argv (cold start) or via the single-instance plugin
+/// (warm start). Those payloads should be treated as untrusted: they can be arbitrarily large if a
+/// malicious sender invokes the app with a huge argv list.
+///
+/// This function:
+/// - drops empty/whitespace-only entries
+/// - de-dupes entries (best-effort)
+/// - bounds the output size to keep memory usage deterministic
+///
+/// When the cap is exceeded, we drop the **oldest** paths and keep the most recent ones ("latest
+/// user action wins"). The caps are aligned with the pending open-file IPC queue enforced by
+/// [`crate::open_file_ipc::OpenFileState`].
+pub fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::<String>::with_capacity(
+        MAX_OPEN_FILE_PENDING_PATHS.min(paths.len()),
+    );
+    let mut out_rev = Vec::with_capacity(MAX_OPEN_FILE_PENDING_PATHS.min(paths.len()));
+    let mut bytes = 0usize;
+
+    // Walk backwards so we keep the most recent file-open requests, then reverse at the end to
+    // preserve the original order among kept paths.
+    for path in paths.into_iter().rev() {
+        if path.trim().is_empty() {
+            continue;
+        }
+
+        if seen.contains(&path) {
+            continue;
+        }
+
+        let len = path.len();
+        if len > MAX_OPEN_FILE_PENDING_BYTES {
+            // Single oversized entry; skip rather than exceeding the deterministic cap.
+            continue;
+        }
+
+        if out_rev.len() >= MAX_OPEN_FILE_PENDING_PATHS {
+            break;
+        }
+
+        if bytes.saturating_add(len) > MAX_OPEN_FILE_PENDING_BYTES {
+            // Adding this (older) entry would exceed the byte cap; keep scanning older entries in
+            // case smaller ones still fit.
+            continue;
+        }
+
+        bytes += len;
+        seen.insert(path.clone());
+        out_rev.push(path);
+    }
+
+    out_rev.reverse();
+    out_rev
 }
 
 fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBuf> {
@@ -282,5 +344,56 @@ mod tests {
         let argv = vec!["formula-desktop".to_string(), "simple".to_string()];
         let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
         assert_eq!(paths, vec![renamed]);
+    }
+
+    #[test]
+    fn normalize_open_file_request_paths_dedupes_drops_empty_and_keeps_most_recent() {
+        let out = normalize_open_file_request_paths(vec![
+            "a.xlsx".to_string(),
+            "  ".to_string(),
+            "b.csv".to_string(),
+            "a.xlsx".to_string(),
+        ]);
+
+        // Keep the last occurrence of duplicates while preserving original order among kept items.
+        assert_eq!(out, vec!["b.csv".to_string(), "a.xlsx".to_string()]);
+    }
+
+    #[test]
+    fn normalize_open_file_request_paths_caps_by_count_dropping_oldest() {
+        let paths: Vec<String> = (0..(MAX_OPEN_FILE_PENDING_PATHS + 7))
+            .map(|idx| format!("p{idx}"))
+            .collect();
+        let out = normalize_open_file_request_paths(paths);
+
+        assert_eq!(out.len(), MAX_OPEN_FILE_PENDING_PATHS);
+        let expected: Vec<String> = (7..(MAX_OPEN_FILE_PENDING_PATHS + 7))
+            .map(|idx| format!("p{idx}"))
+            .collect();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn normalize_open_file_request_paths_caps_by_total_bytes_dropping_oldest_deterministically() {
+        // Use fixed-size strings so the expected trim point is deterministic.
+        let entry_len = 8192;
+        let payload = "x".repeat(entry_len - 4); // leave room for "{i:03}-"
+        let paths: Vec<String> = (0..MAX_OPEN_FILE_PENDING_PATHS)
+            .map(|i| format!("{i:03}-{payload}"))
+            .collect();
+
+        let out = normalize_open_file_request_paths(paths.clone());
+
+        let expected_len = MAX_OPEN_FILE_PENDING_BYTES / entry_len;
+        assert_eq!(out.len(), expected_len);
+
+        let total_bytes: usize = out.iter().map(|p| p.len()).sum();
+        assert!(
+            total_bytes <= MAX_OPEN_FILE_PENDING_BYTES,
+            "normalized bytes {total_bytes} exceeded cap {MAX_OPEN_FILE_PENDING_BYTES}"
+        );
+
+        let expected = paths[MAX_OPEN_FILE_PENDING_PATHS - expected_len..].to_vec();
+        assert_eq!(out, expected);
     }
 }
