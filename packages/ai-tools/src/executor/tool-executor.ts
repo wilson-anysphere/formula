@@ -713,7 +713,9 @@ export class ToolExecutor {
     const rowCount = range.endRow - range.startRow + 1;
     const colCount = range.endCol - range.startCol + 1;
     const includeFormulas = Boolean(params.include_formulas);
-    const includeFormulaValues = Boolean(this.options.include_formula_values);
+    // Only surface formula values when there is no DLP configured, or DLP is in pure ALLOW mode.
+    // Under REDACT, formula values are treated as unsafe (may depend on restricted cells).
+    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
 
     // Always materialize the read_range output; downstream enforcement may mutate in-place.
     const values: CellScalar[][] = Array.from({ length: rowCount }, () => new Array(colCount));
