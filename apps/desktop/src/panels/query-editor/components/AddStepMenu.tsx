@@ -25,6 +25,7 @@ export function AddStepMenu(props: {
   const [suggestions, setSuggestions] = useState<QueryOperation[] | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const aiRequestIdRef = useRef(0);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
@@ -237,17 +238,21 @@ export function AddStepMenu(props: {
   async function runAiSuggest(): Promise<void> {
     const trimmed = intent.trim();
     if (!trimmed) return;
+    const requestId = (aiRequestIdRef.current += 1);
     setAiLoading(true);
     setAiError(null);
     setSuggestions(null);
     try {
       const ops = await props.onAiSuggest?.(trimmed, props.aiContext);
+      if (requestId !== aiRequestIdRef.current) return;
       setSuggestions(ops ?? []);
     } catch (err) {
+      if (requestId !== aiRequestIdRef.current) return;
       setAiError(err instanceof Error ? err.message : String(err));
       setSuggestions(null);
     } finally {
-      setAiLoading(false);
+      // Only update loading state if this is still the latest request.
+      if (requestId === aiRequestIdRef.current) setAiLoading(false);
     }
   }
 
@@ -303,6 +308,12 @@ export function AddStepMenu(props: {
             value={intent}
             onChange={(e) => {
               setIntent(e.target.value);
+              if (aiLoading) {
+                // Treat edits during loading as a cancellation of the in-flight request:
+                // ignore its eventual response and stop showing a loading state.
+                aiRequestIdRef.current += 1;
+                setAiLoading(false);
+              }
               if (aiError) setAiError(null);
               if (suggestions) setSuggestions(null);
             }}

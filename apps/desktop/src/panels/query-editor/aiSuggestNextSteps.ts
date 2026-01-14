@@ -305,6 +305,8 @@ function coerceOperations(value: unknown, allowedColumns: Set<string>): QueryOpe
     ? value
     : isPlainObject(value) && Array.isArray((value as { operations?: unknown }).operations)
       ? ((value as { operations?: unknown }).operations as unknown[])
+      : isPlainObject(value) && typeof (value as { type?: unknown }).type === "string"
+        ? [value]
       : [];
   return operations
     .map((op) => coerceQueryOperation(op, allowedColumns))

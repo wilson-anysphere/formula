@@ -378,4 +378,56 @@ describe("AddStepMenu", () => {
     // Error state should not be confused with the empty suggestions state.
     expect(host?.textContent).not.toContain("No suggestions.");
   });
+
+  it("ignores stale AI suggestions when the intent changes during a request", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const query = baseQuery();
+    const aiContext = { query, preview };
+
+    const deferred = (() => {
+      let resolve!: (value: QueryOperation[]) => void;
+      const promise = new Promise<QueryOperation[]>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    })();
+
+    const onAiSuggest = vi.fn(() => deferred.promise);
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={() => {}} onAiSuggest={onAiSuggest} aiContext={aiContext} />);
+    });
+
+    const input = host!.querySelector("input.query-editor-add-step__ai-input") as HTMLInputElement;
+    const suggestButton = host!.querySelector("button.query-editor-add-step__ai-button") as HTMLButtonElement;
+
+    await act(async () => {
+      input.value = "filter to non-null";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      suggestButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAiSuggest).toHaveBeenCalledTimes(1);
+    expect(suggestButton.textContent).toContain("Suggesting");
+
+    // Change intent while the request is in flight.
+    await act(async () => {
+      input.value = "something else";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await flushMicrotasks(5);
+    });
+
+    expect(suggestButton.textContent).toContain("Suggest next");
+
+    // Resolve the original request; it should be ignored.
+    await act(async () => {
+      deferred.resolve([{ type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "isNotNull" } }]);
+      await flushMicrotasks(10);
+    });
+
+    expect(host!.querySelectorAll("button.query-editor-add-step__suggestion").length).toBe(0);
+  });
 });

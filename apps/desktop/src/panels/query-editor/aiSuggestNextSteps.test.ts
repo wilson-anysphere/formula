@@ -75,6 +75,19 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "take", count: 5 }]);
   });
 
+  it("accepts a single operation object response", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify({ type: "take", count: 3 }),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("keep top rows", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "take", count: 3 }]);
+  });
+
   it("when schema is missing, only allows schema-independent operations", async () => {
     chatMock.mockResolvedValue({
       message: {
