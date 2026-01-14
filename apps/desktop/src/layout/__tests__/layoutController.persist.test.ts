@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { LayoutController } from "../layoutController.js";
 import { LayoutWorkspaceManager, MemoryStorage } from "../layoutPersistence.js";
-import { MAX_GRID_ZOOM } from "@formula/grid";
+import { MAX_GRID_ZOOM } from "@formula/grid/node";
 
 describe("LayoutController persistence", () => {
   test("setSplitPaneScroll can be applied without persisting, then flushed with persistNow()", () => {
