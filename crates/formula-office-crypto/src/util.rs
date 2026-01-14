@@ -1,12 +1,44 @@
 use crate::error::OfficeCryptoError;
-
-use subtle::ConstantTimeEq as _;
+use subtle::{Choice, ConstantTimeEq};
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(test)]
 static CT_EQ_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// Compare two byte slices in (mostly) constant time.
+///
+/// This is intended for comparing password verifier digests to reduce timing side channels. Length
+/// mismatches return `false` and are handled without panicking or early-exiting on the first
+/// mismatched byte.
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    #[cfg(test)]
+    CT_EQ_CALLS.fetch_add(1, Ordering::Relaxed);
+
+    // We treat lengths as non-secret metadata, but still avoid early returns so callers don't
+    // accidentally reintroduce short-circuit timing differences.
+    let max_len = a.len().max(b.len());
+    let mut ok = Choice::from(1u8);
+    for i in 0..max_len {
+        let av = a.get(i).copied().unwrap_or(0);
+        let bv = b.get(i).copied().unwrap_or(0);
+        ok &= av.ct_eq(&bv);
+    }
+    ok &= Choice::from((a.len() == b.len()) as u8);
+
+    bool::from(ok)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_ct_eq_calls() {
+    CT_EQ_CALLS.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn ct_eq_call_count() -> usize {
+    CT_EQ_CALLS.load(Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EncryptionInfoKind {
@@ -143,29 +175,6 @@ pub(crate) fn checked_vec_len(total_size: u64) -> Result<usize, OfficeCryptoErro
     Ok(len)
 }
 
-/// Compare two byte slices in constant time.
-///
-/// This should be used for comparing password verifier digests (both Standard and Agile) to avoid
-/// obvious timing side channels from Rust's early-exit `==` / `!=` implementations.
-///
-/// Note: This does not aim to make the overall decryption flow perfectly side-channel resistant; it
-/// only hardens the digest comparison step.
-pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    #[cfg(test)]
-    CT_EQ_CALLS.fetch_add(1, Ordering::Relaxed);
-    bool::from(a.ct_eq(b))
-}
-
-#[cfg(test)]
-pub(crate) fn reset_ct_eq_calls() {
-    CT_EQ_CALLS.store(0, Ordering::Relaxed);
-}
-
-#[cfg(test)]
-pub(crate) fn ct_eq_call_count() -> usize {
-    CT_EQ_CALLS.load(Ordering::Relaxed)
-}
-
 /// Very lightweight ZIP validator for decrypted OOXML packages.
 ///
 /// This is intentionally stricter than just checking the `PK` prefix: when decrypting with the
@@ -240,4 +249,3 @@ pub(crate) fn looks_like_zip(bytes: &[u8]) -> bool {
 
     false
 }
-

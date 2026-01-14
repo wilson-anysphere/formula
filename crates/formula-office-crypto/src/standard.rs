@@ -352,16 +352,14 @@ pub(crate) fn decrypt_standard_encrypted_package(
     let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(info.header.alg_id_hash)?;
 
     match info.header.alg_id {
-        CALG_RC4 => {
-            decrypt_standard_encrypted_package_rc4(
-                info,
-                ciphertext,
-                total_size,
-                expected_len,
-                password,
-                hash_alg,
-            )
-        }
+        CALG_RC4 => decrypt_standard_encrypted_package_rc4(
+            info,
+            ciphertext,
+            total_size,
+            expected_len,
+            password,
+            hash_alg,
+        ),
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
             // MS-OFFCRYPTO Standard AES uses CryptoAPI `CryptDeriveKey` key derivation semantics
             // and encrypts the verifier + package with AES-ECB (no IV).
