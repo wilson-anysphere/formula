@@ -17,12 +17,23 @@ fi
 
 desktop_manifest="apps/desktop/src-tauri/Cargo.toml"
 
+mktemp_file() {
+  # `mktemp` behavior differs between GNU and BSD (macOS). GNU mktemp supports
+  # being called without a template; BSD mktemp requires one.
+  local tmp
+  if tmp="$(mktemp 2>/dev/null)"; then
+    echo "$tmp"
+    return 0
+  fi
+  mktemp -t formula-cargo-lock.XXXXXX
+}
+
 run_metadata() {
   local context="$1"
   shift
 
   local err
-  err="$(mktemp)"
+  err="$(mktemp_file)"
   if cargo metadata "$@" >/dev/null 2>"$err"; then
     rm -f "$err"
     return 0
