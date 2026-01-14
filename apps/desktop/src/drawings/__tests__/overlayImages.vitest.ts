@@ -63,6 +63,7 @@ async function flushMicrotasks(times = 4): Promise<void> {
 
 describe("DrawingOverlay images", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
