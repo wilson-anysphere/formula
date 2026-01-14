@@ -332,8 +332,8 @@ mod tests {
     fn source_guardrail_main_use_limited_string_for_oauth_redirect_uri() {
         let src = include_str!("main.rs");
         assert!(
-            src.contains("redirect_uri: LimitedString<MAX_IPC_URL_BYTES>"),
-            "expected `oauth_loopback_listen` to use `LimitedString<MAX_IPC_URL_BYTES>` for `redirect_uri`"
+            src.contains("redirect_uri: LimitedString<MAX_OAUTH_REDIRECT_URI_BYTES>"),
+            "expected `oauth_loopback_listen` to use `LimitedString<MAX_OAUTH_REDIRECT_URI_BYTES>` for `redirect_uri`"
         );
     }
 }
