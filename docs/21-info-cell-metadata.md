@@ -404,6 +404,7 @@ This section documents the “wiring points” for hosts.
   - `EngineClient.setWorkbookFileMetadata(directory, filename)`
     - `CELL("filename")` returns `""` until `filename` is known (Excel unsaved behavior)
     - `INFO("directory")` returns `#N/A` unless `EngineInfo.directory` is set, or both `filename` and a non-empty `directory` are known
+    - Passing `null` (or `""`) clears the corresponding field (empty strings are treated as unknown).
     - Note: in older/minimal WASM builds, `WasmWorkbook.setWorkbookFileMetadata` may be missing; the worker treats this as a no-op.
 
 - Formatting metadata (`CELL("protect")`, `CELL("prefix")`, `CELL("format")`, `CELL("color")`, `CELL("parentheses")`):
@@ -419,6 +420,7 @@ This section documents the “wiring points” for hosts.
   Notes:
   - These keys use **number format strings** and **layered styles** (sheet/col/row/range-run/cell); conditional formatting is ignored.
   - Style ids are workbook-global; `0` is always the default/empty style.
+  - `row`/`col` indices passed to these APIs use 0-based engine coordinates (row 0 = Excel row 1, col 0 = column A).
 
 - Column metadata (`CELL("width")`):
   - `EngineClient.setSheetDefaultColWidth(sheet, widthChars)` to set the sheet default width used for columns without explicit overrides (`null` clears back to Excel’s standard `8.43`).
