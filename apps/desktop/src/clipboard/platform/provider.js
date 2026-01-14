@@ -49,6 +49,23 @@ function hasTauri() {
 }
 
 /**
+ * Safe property access helper. Some hardened environments (or tests) may define getters that throw
+ * for blocked namespaces; treat those as "unavailable" rather than crashing clipboard operations.
+ *
+ * @param {any} obj
+ * @param {string} prop
+ * @returns {any | undefined}
+ */
+function safeGetProp(obj, prop) {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Parse a debug flag from common representations.
  *
  * Accepts:
@@ -714,9 +731,10 @@ function createTauriClipboardProvider() {
       }
 
       // 3) Fill missing plain text via the legacy Tauri plain text clipboard API.
-      if (!skippedOversizedPlainText && typeof merged.text !== "string" && tauriClipboard?.readText) {
+      const legacyReadText = safeGetProp(tauriClipboard, "readText");
+      if (!skippedOversizedPlainText && typeof merged.text !== "string" && typeof legacyReadText === "function") {
         try {
-          const text = await tauriClipboard.readText();
+          const text = await legacyReadText.call(tauriClipboard);
           if (isStringWithinUtf8Limit(text, MAX_RICH_TEXT_BYTES)) merged.text = text;
           if (typeof merged.text === "string" && path) path.push("legacy-plaintext:tauriClipboard.readText");
         } catch {
@@ -742,9 +760,10 @@ function createTauriClipboardProvider() {
       // Avoid sending extremely large plain-text payloads over the rich clipboard IPC path.
       // For oversized payloads, best-effort write plain text only.
       if (hasText && !textWithinLimit) {
-        if (tauriClipboard?.writeText) {
+        const legacyWriteText = safeGetProp(tauriClipboard, "writeText");
+        if (typeof legacyWriteText === "function") {
           try {
-            await tauriClipboard.writeText(text);
+            await legacyWriteText.call(tauriClipboard, text);
             if (path) {
               path.push("legacy-plaintext:tauriClipboard.writeText");
               clipboardDebug(true, "write path:", path.join(" -> "));
@@ -818,9 +837,10 @@ function createTauriClipboardProvider() {
         // If text was omitted, preserve rich-only writes and avoid clobbering the clipboard with
         // an empty `text/plain` payload.
         if (hasText) {
-          if (tauriClipboard?.writeText) {
+          const legacyWriteText = safeGetProp(tauriClipboard, "writeText");
+          if (typeof legacyWriteText === "function") {
             try {
-              await tauriClipboard.writeText(text);
+              await legacyWriteText.call(tauriClipboard, text);
               if (path) path.push("legacy-plaintext:tauriClipboard.writeText");
             } catch {
               if (path) path.push("web-clipboard");
