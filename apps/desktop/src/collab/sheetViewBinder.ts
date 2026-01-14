@@ -981,8 +981,22 @@ export function bindSheetViewToCollabSession(options: {
             }
           }
         }
+      } else if (path.length === 2 && path[1] === "view") {
+        // A change to the `view` map itself: filter by the *changed keys* (not the path),
+        // so unrelated view metadata (unknown keys) doesn't cause needless hydration.
+        const keys = event?.changes?.keys;
+        if (keys && typeof keys.has === "function") {
+          for (const key of VIEW_KEYS) {
+            if (key === "view") continue;
+            if (keys.has(key)) {
+              relevant = true;
+              break;
+            }
+          }
+        }
       } else {
         for (let i = 1; i < path.length; i += 1) {
+          if (path[i] === "view") continue;
           if (typeof path[i] === "string" && VIEW_KEYS.has(path[i])) {
             relevant = true;
             break;
