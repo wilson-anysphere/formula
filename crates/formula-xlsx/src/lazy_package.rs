@@ -222,7 +222,8 @@ impl XlsxLazyPackage {
             return;
         }
 
-        self.overrides.insert(canonical, PartOverride::Replace(bytes));
+        self.overrides
+            .insert(canonical, PartOverride::Replace(bytes));
     }
 
     /// Remove macro-related parts and relationships from the package on write.
@@ -235,11 +236,19 @@ impl XlsxLazyPackage {
     ///
     /// This controls how the workbook "main" content type is rewritten in `[Content_Types].xml`
     /// after stripping macros.
-    pub fn remove_vba_project_with_kind(&mut self, target_kind: WorkbookKind) -> Result<(), XlsxError> {
+    pub fn remove_vba_project_with_kind(
+        &mut self,
+        target_kind: WorkbookKind,
+    ) -> Result<(), XlsxError> {
         self.strip_macros = Some(target_kind);
         // Match `XlsxPackage::{remove_vba_project,remove_vba_project_with_kind}` semantics: stripping
         // macros rewrites the workbook main content type to the requested macro-free kind.
         self.workbook_kind = Some(target_kind);
+        // If callers already provided a `[Content_Types].xml` override (including via a prior
+        // `enforce_workbook_kind` call), keep it consistent with the macro-strip target. Otherwise
+        // we could strip macros and then re-apply a stale workbook content type override in the
+        // second streaming pass.
+        self.patch_content_types_override_for_kind(target_kind)?;
 
         // Prevent callers from reintroducing macro surfaces via overrides.
         let macro_override_keys: Vec<String> = self
@@ -255,6 +264,30 @@ impl XlsxLazyPackage {
         Ok(())
     }
 
+    fn patch_content_types_override_for_kind(
+        &mut self,
+        kind: WorkbookKind,
+    ) -> Result<(), XlsxError> {
+        let ct_name = "[Content_Types].xml";
+        let Some(op) = self.overrides.get(ct_name).cloned() else {
+            return Ok(());
+        };
+
+        let bytes = match op {
+            PartOverride::Replace(bytes) | PartOverride::Add(bytes) => bytes,
+            PartOverride::Remove => return Ok(()),
+        };
+
+        let Some(updated) = crate::rewrite_content_types_workbook_kind(&bytes, kind)? else {
+            return Ok(());
+        };
+
+        self.overrides
+            .insert(ct_name.to_string(), PartOverride::Replace(updated));
+
+        Ok(())
+    }
+
     /// Ensure `[Content_Types].xml` advertises the correct workbook content type for the requested
     /// workbook kind.
     pub fn enforce_workbook_kind(&mut self, kind: WorkbookKind) -> Result<(), XlsxError> {
@@ -265,6 +298,9 @@ impl XlsxLazyPackage {
         // here would force the slower two-pass `strip -> temp file -> apply overrides` path even
         // when there are otherwise no non-macro overrides.
         if self.strip_macros.is_some() {
+            // If callers already overrode `[Content_Types].xml`, keep it in sync so it doesn't
+            // reintroduce a stale workbook content type after macro stripping.
+            self.patch_content_types_override_for_kind(kind)?;
             return Ok(());
         }
 
@@ -311,7 +347,7 @@ impl XlsxLazyPackage {
             if !source_has_macros {
                 // Source is already macro-free; just apply overrides after forcing macro-related
                 // overrides to `Remove` and patching workbook kind.
-                let overrides = self.build_part_overrides(/*kind_already_handled=*/false)?;
+                let overrides = self.build_part_overrides(/*kind_already_handled=*/ false)?;
                 let input = self.source.open_reader()?;
                 patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
                     input,
@@ -327,10 +363,8 @@ impl XlsxLazyPackage {
 
             // If there are no non-macro overrides to apply afterwards, we can stream the macro
             // stripping directly into the output.
-            let has_non_macro_overrides = self
-                .overrides
-                .keys()
-                .any(|name| !is_macro_part_name(name));
+            let has_non_macro_overrides =
+                self.overrides.keys().any(|name| !is_macro_part_name(name));
             if !has_non_macro_overrides {
                 let input = self.source.open_reader()?;
                 strip_vba_project_streaming_with_kind(input, output, kind)?;
@@ -345,7 +379,7 @@ impl XlsxLazyPackage {
 
             // Second pass: apply explicit part overrides on top of the macro-stripped package.
             // Note: workbook kind is already handled by the macro-strip streaming pass.
-            let overrides = self.build_part_overrides(/*kind_already_handled=*/true)?;
+            let overrides = self.build_part_overrides(/*kind_already_handled=*/ true)?;
             tmp.seek(SeekFrom::Start(0))?;
             patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
                 &mut tmp,
@@ -356,7 +390,7 @@ impl XlsxLazyPackage {
             return Ok(());
         }
 
-        let overrides = self.build_part_overrides(/*kind_already_handled=*/false)?;
+        let overrides = self.build_part_overrides(/*kind_already_handled=*/ false)?;
         let input = self.source.open_reader()?;
         patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
             input,
@@ -375,14 +409,13 @@ impl XlsxLazyPackage {
     }
 
     fn effective_part_names(&self) -> impl Iterator<Item = &str> {
-        self.part_names.iter().map(|s| s.as_str()).chain(
-            self.overrides
-                .iter()
-                .filter_map(|(name, op)| match op {
-                    PartOverride::Remove => None,
-                    PartOverride::Replace(_) | PartOverride::Add(_) => Some(name.as_str()),
-                }),
-        )
+        self.part_names
+            .iter()
+            .map(|s| s.as_str())
+            .chain(self.overrides.iter().filter_map(|(name, op)| match op {
+                PartOverride::Remove => None,
+                PartOverride::Replace(_) | PartOverride::Add(_) => Some(name.as_str()),
+            }))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -420,7 +453,10 @@ impl XlsxLazyPackage {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn patched_content_types_for_kind(&self, kind: WorkbookKind) -> Result<Option<Vec<u8>>, XlsxError> {
+    fn patched_content_types_for_kind(
+        &self,
+        kind: WorkbookKind,
+    ) -> Result<Option<Vec<u8>>, XlsxError> {
         let ct_name = "[Content_Types].xml";
         match self.overrides.get(ct_name) {
             Some(PartOverride::Remove) => return Ok(None),
