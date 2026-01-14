@@ -117,6 +117,9 @@ class OracleMetrics:
     mismatches: int
     mismatch_rate: float
     max_mismatch_rate: float | None
+    include_tags: list[str] | None
+    exclude_tags: list[str] | None
+    max_cases: int | None
 
 
 def _parse_corpus_summary(path: Path, payload: Any) -> CorpusMetrics:
@@ -182,12 +185,32 @@ def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
     if max_rate_raw is not None:
         max_rate = _as_float(max_rate_raw, label="summary.maxMismatchRate", path=path)
 
+    include_tags = summary.get("includeTags")
+    if include_tags is not None and not (
+        isinstance(include_tags, list) and all(isinstance(t, str) for t in include_tags)
+    ):
+        raise SystemExit(f"Expected summary.includeTags to be an array of strings in {path}")
+
+    exclude_tags = summary.get("excludeTags")
+    if exclude_tags is not None and not (
+        isinstance(exclude_tags, list) and all(isinstance(t, str) for t in exclude_tags)
+    ):
+        raise SystemExit(f"Expected summary.excludeTags to be an array of strings in {path}")
+
+    max_cases_raw = summary.get("maxCases")
+    max_cases = None
+    if max_cases_raw is not None:
+        max_cases = _as_int(max_cases_raw, label="summary.maxCases", path=path)
+
     return OracleMetrics(
         path=path,
         total_cases=total,
         mismatches=mismatches,
         mismatch_rate=mismatch_rate,
         max_mismatch_rate=max_rate,
+        include_tags=include_tags,
+        exclude_tags=exclude_tags,
+        max_cases=max_cases,
     )
 
 
@@ -228,6 +251,23 @@ def _rate_status(rate: float | None, *, target: float) -> str:
     if rate is None:
         return "MISSING"
     return "PASS" if rate >= target else "FAIL"
+
+
+def _fmt_tags(tags: list[str] | None, *, empty_text: str) -> str:
+    if tags is None:
+        return "—"
+    tags = [t for t in tags if t]
+    if not tags:
+        return empty_text
+    return ", ".join(tags)
+
+
+def _fmt_max_cases(value: int | None) -> str:
+    if value is None:
+        return "—"
+    if value <= 0:
+        return "all"
+    return str(value)
 
 
 def main() -> int:
@@ -389,7 +429,14 @@ def main() -> int:
     else:
         lines.append("- Corpus summary: **MISSING**")
     if oracle:
-        lines.append(f"- Excel-oracle mismatch report: `{_fmt_path(repo_root, oracle.path)}`")
+        oracle_meta_parts: list[str] = []
+        oracle_meta_parts.append(f"cases: {oracle.total_cases}")
+        oracle_meta_parts.append(f"mismatches: {oracle.mismatches}")
+        oracle_meta_parts.append(f"includeTags: {_fmt_tags(oracle.include_tags, empty_text='<all>')}")
+        oracle_meta_parts.append(f"excludeTags: {_fmt_tags(oracle.exclude_tags, empty_text='<none>')}")
+        oracle_meta_parts.append(f"maxCases: {_fmt_max_cases(oracle.max_cases)}")
+        extra = f" ({', '.join(oracle_meta_parts)})" if oracle_meta_parts else ""
+        lines.append(f"- Excel-oracle mismatch report: `{_fmt_path(repo_root, oracle.path)}`{extra}")
     else:
         lines.append("- Excel-oracle mismatch report: **MISSING**")
     lines.append("")
