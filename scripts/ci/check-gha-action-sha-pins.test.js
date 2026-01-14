@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -38,7 +38,9 @@ function runYaml(yaml) {
 function runDir(files) {
   const tmpdir = mkdtempSync(path.join(os.tmpdir(), "formula-action-sha-pins-dir-"));
   for (const [name, content] of Object.entries(files)) {
-    writeFileSync(path.join(tmpdir, name), `${content}\n`, "utf8");
+    const filePath = path.join(tmpdir, name);
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${content}\n`, "utf8");
   }
   const proc = spawnSync("bash", [scriptPath, tmpdir], { cwd: repoRoot, encoding: "utf8" });
   rmSync(tmpdir, { recursive: true, force: true });
@@ -131,6 +133,27 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 `,
     "bad.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /actions\/checkout@v4/);
+});
+
+test("directory scan is recursive", { skip: !hasBash }, () => {
+  const proc = runDir({
+    "nested/ok.yml": `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+`,
+    "nested/deeper/bad.yml": `
 jobs:
   build:
     runs-on: ubuntu-24.04
