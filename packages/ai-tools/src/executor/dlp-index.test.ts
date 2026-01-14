@@ -9,7 +9,29 @@ import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 function instrumentRecordList(records: any[]) {
   let passes = 0;
   let elementGets = 0;
-  const proxy = new Proxy(records, {
+  let propGets = 0;
+  const objectProxyCache = new WeakMap<object, any>();
+
+  const wrapObject = (value: any): any => {
+    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value;
+    // Avoid proxying built-ins with internal slots (e.g. Map/Set) since their methods
+    // can throw when `this` is a Proxy.
+    if (value instanceof Map || value instanceof Set || value instanceof Date) return value;
+    const cached = objectProxyCache.get(value);
+    if (cached) return cached;
+    const proxy = new Proxy(value, {
+      get(target, prop, receiver) {
+        propGets += 1;
+        return wrapObject(Reflect.get(target, prop, receiver));
+      },
+    });
+    objectProxyCache.set(value, proxy);
+    return proxy;
+  };
+
+  const wrappedRecords = (records ?? []).map((r) => wrapObject(r));
+  const proxy = new Proxy(wrappedRecords, {
     get(target, prop, receiver) {
       if (prop === Symbol.iterator) {
         return function () {
@@ -24,7 +46,7 @@ function instrumentRecordList(records: any[]) {
       return Reflect.get(target, prop, receiver);
     }
   });
-  return { proxy, getPasses: () => passes, getElementGets: () => elementGets };
+  return { proxy, getPasses: () => passes, getElementGets: () => elementGets, getPropGets: () => propGets };
 }
 
 describe("ToolExecutor DLP indexing", () => {
@@ -39,7 +61,7 @@ describe("ToolExecutor DLP indexing", () => {
     // A single Restricted cell selector is sufficient to trigger a REDACT decision
     // for the selection. If ToolExecutor regresses to scanning `classification_records`
     // per cell, we'd see thousands of record passes over this list.
-    const { proxy: classification_records, getPasses, getElementGets } = instrumentRecordList([
+    const { proxy: classification_records, getPasses, getElementGets, getPropGets } = instrumentRecordList([
       {
         selector: { scope: "cell", documentId, sheetId, row: 0, col: 1 }, // B1
         classification: { level: "Restricted", labels: [] }
@@ -83,6 +105,8 @@ describe("ToolExecutor DLP indexing", () => {
     // Any per-cell scan regression would exceed this by orders of magnitude.
     expect(getPasses()).toBeLessThan(50);
     expect(getElementGets()).toBeLessThan(200);
+    // Defense-in-depth: catch per-cell scans even if the record list is cloned once and scanned repeatedly.
+    expect(getPropGets()).toBeLessThan(500);
   });
 
   it("read_range results match max-over-scopes semantics (document + sheet + column + range + cell)", async () => {

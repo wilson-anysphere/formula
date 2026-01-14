@@ -8,9 +8,29 @@ import { LocalClassificationStore } from "../../../../packages/security/dlp/src/
 function makeRecordListInstrumenter() {
   let passes = 0;
   let elementGets = 0;
+  let propGets = 0;
+  const objectProxyCache = new WeakMap<object, any>();
+
+  const wrapObject = (value: any): any => {
+    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value;
+    // Avoid proxying built-ins with internal slots (e.g. Map/Set) since their methods
+    // can throw when `this` is a Proxy.
+    if (value instanceof Map || value instanceof Set || value instanceof Date) return value;
+    const cached = objectProxyCache.get(value);
+    if (cached) return cached;
+    const proxy = new Proxy(value, {
+      get(target, prop, receiver) {
+        propGets += 1;
+        return wrapObject(Reflect.get(target, prop, receiver));
+      },
+    });
+    objectProxyCache.set(value, proxy);
+    return proxy;
+  };
 
   const wrap = (records: any[]) =>
-    new Proxy(records, {
+    new Proxy((records ?? []).map((r) => wrapObject(r)), {
       get(target, prop, receiver) {
         if (prop === Symbol.iterator) {
           return function () {
@@ -30,6 +50,7 @@ function makeRecordListInstrumenter() {
     wrap,
     getPasses: () => passes,
     getElementGets: () => elementGets,
+    getPropGets: () => propGets,
   };
 }
 
@@ -87,6 +108,8 @@ describe("AiCellFunctionEngine DLP indexing", () => {
       // A per-referenced-cell scan regression would multiply this by ~200.
       expect(instrumenter.getPasses()).toBeLessThan(50);
       expect(instrumenter.getElementGets()).toBeLessThan(20_000);
+      // Defense-in-depth: catch per-referenced-cell scans even if the record list is cloned once and scanned repeatedly.
+      expect(instrumenter.getPropGets()).toBeLessThan(200_000);
 
       await engine.waitForIdle();
       expect(llmClient.chat).toHaveBeenCalledTimes(1);
