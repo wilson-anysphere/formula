@@ -348,6 +348,8 @@ describe("SpreadsheetApp drawings header clipping", () => {
         new PointerEvent("pointerdown", {
           bubbles: true,
           cancelable: true,
+          pointerId: 1,
+          pointerType: "mouse",
           button: 0,
           clientX: headerWidth - 5,
           clientY: headerHeight + 5,
@@ -359,6 +361,8 @@ describe("SpreadsheetApp drawings header clipping", () => {
         new PointerEvent("pointerdown", {
           bubbles: true,
           cancelable: true,
+          pointerId: 2,
+          pointerType: "mouse",
           button: 0,
           clientX: headerWidth + 5,
           clientY: headerHeight + 5,

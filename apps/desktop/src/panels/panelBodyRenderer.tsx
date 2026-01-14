@@ -1,33 +1,21 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import { PanelIds } from "./panelRegistry.js";
-import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
-import { DataQueriesPanelContainer } from "./data-queries/DataQueriesPanelContainer.js";
-import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContainer.js";
-import { createAIAuditPanel } from "./ai-audit/index.js";
-import { mountPythonPanel } from "./python/index.js";
-import { VbaMigratePanel } from "./vba-migrate/index.js";
-import { createMarketplacePanel } from "./marketplace/index.js";
 import { SolverPanel } from "./solver/SolverPanel.js";
 import { ScenarioManagerPanel } from "./what-if/ScenarioManagerPanel.js";
 import { MonteCarloWizard } from "./what-if/MonteCarloWizard.js";
 import { createWhatIfApi } from "./what-if/api.js";
-import { ExtensionPanelBody } from "../extensions/ExtensionPanelBody.js";
-import { ExtensionsPanel } from "../extensions/ExtensionsPanel.js";
 import { SelectionPanePanel } from "./selection-pane/SelectionPanePanel.js";
 import type { ExtensionPanelBridge } from "../extensions/extensionPanelBridge.js";
 import type { DesktopExtensionHostManager } from "../extensions/extensionHostManager.js";
 import type { PanelRegistry } from "./panelRegistry.js";
-import { PivotBuilderPanelContainer } from "./pivot-builder/PivotBuilderPanelContainer.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
-import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver.js";
-import { CollabVersionHistoryPanel } from "./version-history/index.js";
-import { CollabBranchManagerPanel } from "./branch-manager/CollabBranchManagerPanel.js";
-import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.ts";
-import { verifyExtensionPackageV2Desktop } from "./marketplace/verifyExtensionPackageV2Desktop.ts";
-import { t } from "../i18n/index.js";
+
+type MarketplaceClient = import("@formula/extension-marketplace").MarketplaceClient;
+type WebExtensionManager = import("@formula/extension-marketplace").WebExtensionManager;
+
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
   /**
@@ -142,7 +130,9 @@ export interface PanelBodyRendererOptions {
   createChart?: SpreadsheetApi["createChart"];
   panelRegistry?: PanelRegistry;
   extensionPanelBridge?: ExtensionPanelBridge;
+  getExtensionPanelBridge?: () => ExtensionPanelBridge | null | undefined;
   extensionHostManager?: DesktopExtensionHostManager;
+  getExtensionHostManager?: () => DesktopExtensionHostManager | null | undefined;
   /**
    * Load the lazy extension host (used by built-in UI panels that want to show extension
    * contributions even when opened via layout restoration rather than an explicit command).
@@ -174,58 +164,85 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
   const domPanels = new Map<string, DomPanelInstance>();
   const whatIfApi = createWhatIfApi();
 
+  const getExtensionHostManager = (): DesktopExtensionHostManager | null =>
+    options.getExtensionHostManager?.() ?? options.extensionHostManager ?? null;
+  const getExtensionPanelBridge = (): ExtensionPanelBridge | null =>
+    options.getExtensionPanelBridge?.() ?? options.extensionPanelBridge ?? null;
+
   // Marketplace wiring (lazy so desktop builds without a marketplace service don't
   // eagerly touch IndexedDB / crypto).
-  let marketplaceClient: MarketplaceClient | null = null;
-  let marketplaceExtensionManager: WebExtensionManager | null = null;
-  let marketplaceExtensionHostManager:
-    | {
-        syncInstalledExtensions: () => Promise<void>;
-        reloadExtension: (id: string) => Promise<void>;
-        unloadExtension: (id: string) => Promise<void>;
-        resetExtensionState: (id: string) => Promise<void>;
+  type MarketplaceServices = {
+    marketplaceClient: MarketplaceClient;
+    extensionManager: WebExtensionManager;
+    extensionHostManager: {
+      syncInstalledExtensions: () => Promise<void>;
+      reloadExtension: (id: string) => Promise<void>;
+      unloadExtension: (id: string) => Promise<void>;
+      resetExtensionState: (id: string) => Promise<void>;
+    };
+  };
+
+  let marketplaceServicesPromise: Promise<MarketplaceServices> | null = null;
+
+  async function getMarketplaceServices(): Promise<MarketplaceServices> {
+    if (marketplaceServicesPromise) return marketplaceServicesPromise;
+
+    marketplaceServicesPromise = (async () => {
+      // Prefer using the DesktopExtensionHostManager's shared marketplace services so that:
+      // - installed extensions loaded at boot are tracked in a single WebExtensionManager instance
+      //   (so unload/update can revoke blob URLs correctly)
+      // - panel/UI code doesn't accidentally create a second manager with a separate loaded-state map
+      let marketplaceClient: MarketplaceClient | null = null;
+      let marketplaceExtensionManager: WebExtensionManager | null = null;
+
+      const extensionHostManager = getExtensionHostManager();
+      if (extensionHostManager) {
+        try {
+          marketplaceClient = extensionHostManager.getMarketplaceClient();
+          marketplaceExtensionManager = extensionHostManager.getMarketplaceExtensionManager();
+        } catch {
+          // ignore
+        }
       }
-    | null = null;
 
-  function getMarketplaceServices() {
-    // Prefer using the DesktopExtensionHostManager's shared marketplace services so that:
-    // - installed extensions loaded at boot are tracked in a single WebExtensionManager instance
-    //   (so unload/update can revoke blob URLs correctly)
-    // - panel/UI code doesn't accidentally create a second manager with a separate loaded-state map
-    if (options.extensionHostManager) {
-      marketplaceClient = options.extensionHostManager.getMarketplaceClient();
-      marketplaceExtensionManager = options.extensionHostManager.getMarketplaceExtensionManager();
-    }
+      const [{ MarketplaceClient, WebExtensionManager }, { getMarketplaceBaseUrl }, { verifyExtensionPackageV2Desktop }] =
+        await Promise.all([
+          import("@formula/extension-marketplace"),
+          import("./marketplace/getMarketplaceBaseUrl.ts"),
+          import("./marketplace/verifyExtensionPackageV2Desktop.ts"),
+        ]);
 
-    if (!marketplaceClient) {
-      marketplaceClient = marketplaceExtensionManager?.marketplaceClient ?? new MarketplaceClient({ baseUrl: getMarketplaceBaseUrl() });
-    }
+      if (!marketplaceClient) {
+        marketplaceClient =
+          (marketplaceExtensionManager as any)?.marketplaceClient ?? new MarketplaceClient({ baseUrl: getMarketplaceBaseUrl() });
+      }
 
-    if (!marketplaceExtensionManager) {
-      marketplaceExtensionManager = new WebExtensionManager({
-        marketplaceClient,
-        host: (options.extensionHostManager?.host as any) ?? null,
-        engineVersion: options.extensionHostManager?.engineVersion ?? "1.0.0",
-        verifyPackage: verifyExtensionPackageV2Desktop,
-      });
-    }
+      if (!marketplaceExtensionManager) {
+        marketplaceExtensionManager = new WebExtensionManager({
+          marketplaceClient,
+          host: (extensionHostManager?.host as any) ?? null,
+          engineVersion: extensionHostManager?.engineVersion ?? "1.0.0",
+          verifyPackage: verifyExtensionPackageV2Desktop,
+        });
+      }
 
-    if (!marketplaceExtensionHostManager) {
-      marketplaceExtensionHostManager = {
+      const marketplaceExtensionHostManager: MarketplaceServices["extensionHostManager"] = {
         syncInstalledExtensions: async () => {
           // Preserve the desktop "lazy-load extensions" behavior: allow users to install
           // extensions without immediately starting the extension host.
-          if (options.extensionHostManager && !options.extensionHostManager.ready) return;
+          const hostManager = getExtensionHostManager();
+          if (hostManager && !hostManager.ready) return;
           const manager = marketplaceExtensionManager!;
           await manager.loadAllInstalled().catch(() => {});
           try {
-            options.extensionHostManager?.notifyDidChange();
+            getExtensionHostManager()?.notifyDidChange();
           } catch {
             // ignore
           }
         },
         reloadExtension: async (id: string) => {
-          if (options.extensionHostManager && !options.extensionHostManager.ready) return;
+          const hostManager = getExtensionHostManager();
+          if (hostManager && !hostManager.ready) return;
           const manager = marketplaceExtensionManager!;
           try {
             if (manager.isLoaded(id)) {
@@ -234,20 +251,21 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
             await manager.loadInstalled(id);
           } finally {
             try {
-              options.extensionHostManager?.notifyDidChange();
+              hostManager?.notifyDidChange();
             } catch {
               // ignore
             }
           }
         },
         unloadExtension: async (id: string) => {
-          if (options.extensionHostManager && !options.extensionHostManager.ready) return;
+          const hostManager = getExtensionHostManager();
+          if (hostManager && !hostManager.ready) return;
           const manager = marketplaceExtensionManager!;
           try {
             await manager.unload(id);
           } finally {
             try {
-              options.extensionHostManager?.notifyDidChange();
+              hostManager?.notifyDidChange();
             } catch {
               // ignore
             }
@@ -258,19 +276,170 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           // extension host has not been started yet. This keeps Marketplace uninstall behavior
           // consistent with a clean slate reinstall.
           try {
-            await (options.extensionHostManager?.host as any)?.resetExtensionState?.(id);
+            await (getExtensionHostManager()?.host as any)?.resetExtensionState?.(id);
           } catch {
             // Best-effort: state cleanup should not block uninstall.
           }
         },
       };
+
+      return {
+        marketplaceClient,
+        extensionManager: marketplaceExtensionManager,
+        extensionHostManager: marketplaceExtensionHostManager,
+      };
+    })();
+
+    return marketplaceServicesPromise;
+  }
+
+  const LazyAIChatPanelContainer = React.lazy(() =>
+    import("./ai-chat/AIChatPanelContainer.js").then((mod) => ({ default: (mod as any).AIChatPanelContainer })),
+  );
+  const LazyQueryEditorPanelContainer = React.lazy(() =>
+    import("./query-editor/QueryEditorPanelContainer.js").then((mod) => ({ default: (mod as any).QueryEditorPanelContainer })),
+  );
+  const LazyPivotBuilderPanelContainer = React.lazy(() =>
+    import("./pivot-builder/PivotBuilderPanelContainer.js").then((mod) => ({ default: (mod as any).PivotBuilderPanelContainer })),
+  );
+  const LazyDataQueriesPanelContainer = React.lazy(() =>
+    import("./data-queries/DataQueriesPanelContainer.js").then((mod) => ({ default: (mod as any).DataQueriesPanelContainer })),
+  );
+  const LazyVbaMigratePanel = React.lazy(() =>
+    import("./vba-migrate/index.js").then((mod) => ({ default: (mod as any).VbaMigratePanel })),
+  );
+  const LazyExtensionsPanel = React.lazy(() =>
+    import("../extensions/ExtensionsPanel.js").then((mod) => ({ default: (mod as any).ExtensionsPanel })),
+  );
+  const LazyExtensionPanelBody = React.lazy(() =>
+    import("../extensions/ExtensionPanelBody.js").then((mod) => ({ default: (mod as any).ExtensionPanelBody })),
+  );
+  const LazyCollabVersionHistoryPanel = React.lazy(() =>
+    import("./version-history/CollabVersionHistoryPanel.js").then((mod) => ({
+      default: (mod as any).CollabVersionHistoryPanel,
+    })),
+  );
+  const LazyCollabBranchManagerPanel = React.lazy(() =>
+    import("./branch-manager/CollabBranchManagerPanel.js").then((mod) => ({
+      default: (mod as any).CollabBranchManagerPanel,
+    })),
+  );
+
+  function ExtensionsPanelLoader(props: {
+    onSyncExtensions?: (() => void) | undefined;
+    onExecuteCommand: (commandId: string, ...args: any[]) => Promise<unknown> | void;
+    onOpenPanel: (panelId: string) => void;
+  }) {
+    const [manager, setManager] = useState<DesktopExtensionHostManager | null>(() => getExtensionHostManager());
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+      let cancelled = false;
+      void (async () => {
+        try {
+          setError(null);
+          // Opening the Extensions panel is the primary trigger for extension host startup.
+          await options.ensureExtensionsLoaded?.();
+        } catch (err) {
+          setError(String((err as any)?.message ?? err));
+        } finally {
+          if (cancelled) return;
+          setManager(getExtensionHostManager());
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    if (!manager) {
+      return (
+        <div className={error ? "collab-panel__message collab-panel__message--error" : "collab-panel__message"}>
+          {error ? `Extensions unavailable: ${error}` : "Loading extensions…"}
+        </div>
+      );
     }
 
-    return {
-      marketplaceClient,
-      extensionManager: marketplaceExtensionManager,
-      extensionHostManager: marketplaceExtensionHostManager,
-    };
+    return (
+      <ExtensionsPanelWrapper
+        manager={manager}
+        onSyncExtensions={props.onSyncExtensions}
+        onExecuteCommand={props.onExecuteCommand}
+        onOpenPanel={props.onOpenPanel}
+      />
+    );
+  }
+
+  function ExtensionsPanelWrapper(props: {
+    manager: DesktopExtensionHostManager;
+    onSyncExtensions?: (() => void) | undefined;
+    onExecuteCommand: (commandId: string, ...args: any[]) => Promise<unknown> | void;
+    onOpenPanel: (panelId: string) => void;
+  }) {
+    const [marketplaceManager, setMarketplaceManager] = useState<any | null>(null);
+
+    useEffect(() => {
+      let disposed = false;
+      void getMarketplaceServices()
+        .then((services) => {
+          if (disposed) return;
+          setMarketplaceManager(services.extensionManager as any);
+        })
+        .catch(() => {
+          // ignore
+        });
+      return () => {
+        disposed = true;
+      };
+    }, []);
+
+    return (
+      <LazyExtensionsPanel
+        manager={props.manager}
+        webExtensionManager={marketplaceManager}
+        onSyncExtensions={props.onSyncExtensions}
+        onExecuteCommand={props.onExecuteCommand}
+        onOpenPanel={props.onOpenPanel}
+      />
+    );
+  }
+
+  function ExtensionPanelBodyLoader(props: { panelId: string }) {
+    const [bridge, setBridge] = useState<ExtensionPanelBridge | null>(() => getExtensionPanelBridge());
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+      let cancelled = false;
+      if (bridge) return;
+      void (async () => {
+        try {
+          setError(null);
+          await options.ensureExtensionsLoaded?.();
+        } catch (err) {
+          setError(String((err as any)?.message ?? err));
+        } finally {
+          if (cancelled) return;
+          setBridge(getExtensionPanelBridge());
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [bridge]);
+
+    if (!bridge) {
+      return (
+        <div className={error ? "collab-panel__message collab-panel__message--error" : "collab-panel__message"}>
+          {error ? `Extension panel unavailable: ${error}` : "Loading extension panel…"}
+        </div>
+      );
+    }
+
+    return (
+      <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+        <LazyExtensionPanelBody panelId={props.panelId} bridge={bridge} />
+      </React.Suspense>
+    );
   }
 
   function renderReactPanel(panelId: string, body: HTMLDivElement, element: React.ReactElement) {
@@ -319,19 +488,21 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <AIChatPanelContainer
-          key={workbookId ?? "default"}
-          getDocumentController={options.getDocumentController}
-          getSpreadsheetApp={options.getSpreadsheetApp}
-          getActiveSheetId={options.getActiveSheetId}
-          getSelection={options.getSelection as any}
-          getSearchWorkbook={options.getSearchWorkbook}
-          getCharts={options.getCharts as any}
-          getSelectedChartId={options.getSelectedChartId}
-          sheetNameResolver={options.sheetNameResolver}
-          workbookId={workbookId}
-          createChart={options.createChart}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <LazyAIChatPanelContainer
+            key={workbookId ?? "default"}
+            getDocumentController={options.getDocumentController}
+            getSpreadsheetApp={options.getSpreadsheetApp}
+            getActiveSheetId={options.getActiveSheetId}
+            getSelection={options.getSelection as any}
+            getSearchWorkbook={options.getSearchWorkbook}
+            getCharts={options.getCharts as any}
+            getSelectedChartId={options.getSelectedChartId}
+            sheetNameResolver={options.sheetNameResolver}
+            workbookId={workbookId}
+            createChart={options.createChart}
+          />
+        </React.Suspense>,
       );
       return;
     }
@@ -352,40 +523,30 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <QueryEditorPanelContainer
-          key={workbookId ?? "default"}
-          getDocumentController={options.getDocumentController}
-          getActiveSheetId={options.getActiveSheetId}
-          workbookId={workbookId}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <LazyQueryEditorPanelContainer
+            key={workbookId ?? "default"}
+            getDocumentController={options.getDocumentController}
+            getActiveSheetId={options.getActiveSheetId}
+            workbookId={workbookId}
+          />
+        </React.Suspense>,
       );
       return;
     }
 
-    if (panelId === PanelIds.EXTENSIONS && options.extensionHostManager && options.onExecuteExtensionCommand && options.onOpenExtensionPanel) {
-      // Extensions are lazy-loaded. If the Extensions panel is restored from persisted layout
-      // (rather than opened via the ribbon command), we still want it to trigger loading.
-      void options.ensureExtensionsLoaded?.().catch(() => {
-        // Best-effort: keep the panel UI responsive even if extensions fail to load.
-      });
+    if (panelId === PanelIds.EXTENSIONS && options.onExecuteExtensionCommand && options.onOpenExtensionPanel) {
       makeBodyFillAvailableHeight(body);
-      const marketplaceManager = (() => {
-        try {
-          return getMarketplaceServices().extensionManager;
-        } catch {
-          return null;
-        }
-      })();
       renderReactPanel(
         panelId,
         body,
-        <ExtensionsPanel
-          manager={options.extensionHostManager}
-          webExtensionManager={marketplaceManager}
-          onSyncExtensions={options.onSyncExtensions}
-          onExecuteCommand={options.onExecuteExtensionCommand}
-          onOpenPanel={options.onOpenExtensionPanel}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <ExtensionsPanelLoader
+            onSyncExtensions={options.onSyncExtensions}
+            onExecuteCommand={options.onExecuteExtensionCommand}
+            onOpenPanel={options.onOpenExtensionPanel}
+          />
+        </React.Suspense>,
       );
       return;
     }
@@ -395,15 +556,17 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <PivotBuilderPanelContainer
-          key={workbookId ?? "default"}
-          getDocumentController={options.getDocumentController}
-          getActiveSheetId={options.getActiveSheetId}
-          getSelection={options.getSelection as any}
-          sheetNameResolver={options.sheetNameResolver ?? null}
-          invoke={options.invoke as any}
-          drainBackendSync={options.drainBackendSync}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <LazyPivotBuilderPanelContainer
+            key={workbookId ?? "default"}
+            getDocumentController={options.getDocumentController}
+            getActiveSheetId={options.getActiveSheetId}
+            getSelection={options.getSelection as any}
+            sheetNameResolver={options.sheetNameResolver ?? null}
+            invoke={options.invoke as any}
+            drainBackendSync={options.drainBackendSync}
+          />
+        </React.Suspense>,
       );
       return;
     }
@@ -430,12 +593,14 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <DataQueriesPanelContainer
-          key={workbookId ?? "default"}
-          getDocumentController={options.getDocumentController}
-          workbookId={workbookId}
-          sheetNameResolver={options.sheetNameResolver ?? null}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <LazyDataQueriesPanelContainer
+            key={workbookId ?? "default"}
+            getDocumentController={options.getDocumentController}
+            workbookId={workbookId}
+            sheetNameResolver={options.sheetNameResolver ?? null}
+          />
+        </React.Suspense>,
       );
       return;
     }
@@ -443,14 +608,39 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     if (panelId === PanelIds.MARKETPLACE) {
       makeBodyFillAvailableHeight(body);
       renderDomPanel(panelId, body, (container) => {
-        const services = getMarketplaceServices();
-        const panel = createMarketplacePanel({
+        container.textContent = "Loading marketplace…";
+        let disposed = false;
+        let disposeFn: (() => void) | null = null;
+
+        void (async () => {
+          try {
+            const [{ createMarketplacePanel }, services] = await Promise.all([
+              import("./marketplace/index.js"),
+              getMarketplaceServices(),
+            ]);
+            if (disposed) return;
+            const panel = createMarketplacePanel({
+              container,
+              marketplaceClient: services.marketplaceClient,
+              extensionManager: services.extensionManager,
+              extensionHostManager: services.extensionHostManager,
+            });
+            disposeFn = panel.dispose;
+          } catch (err) {
+            if (disposed) return;
+            // eslint-disable-next-line no-console
+            console.error("[formula][desktop] Failed to load marketplace panel:", err);
+            container.textContent = `Failed to load marketplace: ${String((err as any)?.message ?? err)}`;
+          }
+        })();
+
+        return {
           container,
-          marketplaceClient: services.marketplaceClient,
-          extensionManager: services.extensionManager,
-          extensionHostManager: services.extensionHostManager,
-        });
-        return { container, dispose: panel.dispose };
+          dispose: () => {
+            disposed = true;
+            disposeFn?.();
+          },
+        };
       });
       return;
     }
@@ -458,80 +648,134 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     if (panelId === PanelIds.PYTHON) {
       makeBodyFillAvailableHeight(body);
       renderDomPanel(panelId, body, (container) => {
-        const dispose = mountPythonPanel({
-          // `DocumentControllerBridge` expects the desktop `DocumentController` shape.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          documentController: options.getDocumentController() as any,
+        container.textContent = "Loading Python…";
+
+        let disposed = false;
+        let disposeFn: (() => void) | null = null;
+
+        void (async () => {
+          try {
+            const { mountPythonPanel } = await import("./python/index.js");
+            if (disposed) return;
+            disposeFn = mountPythonPanel({
+              // `DocumentControllerBridge` expects the desktop `DocumentController` shape.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              documentController: options.getDocumentController() as any,
+              container,
+              getActiveSheetId: options.getActiveSheetId,
+            });
+          } catch (err) {
+            if (disposed) return;
+            // eslint-disable-next-line no-console
+            console.error("[formula][desktop] Failed to load python panel:", err);
+            container.textContent = `Failed to load Python: ${String((err as any)?.message ?? err)}`;
+          }
+        })();
+
+        return {
           container,
-          getActiveSheetId: options.getActiveSheetId,
-        });
-        return { container, dispose };
+          dispose: () => {
+            disposed = true;
+            try {
+              disposeFn?.();
+            } catch {
+              // ignore
+            }
+            if (!disposeFn) container.innerHTML = "";
+          },
+        };
       });
       return;
     }
 
     const panelDef = options.panelRegistry?.get(panelId) as any;
-    if (panelDef?.source?.kind === "extension" && options.extensionPanelBridge) {
+    if (panelDef?.source?.kind === "extension") {
       makeBodyFillAvailableHeight(body);
-      renderReactPanel(panelId, body, <ExtensionPanelBody panelId={panelId} bridge={options.extensionPanelBridge} />);
+      renderReactPanel(
+        panelId,
+        body,
+        <ExtensionPanelBodyLoader panelId={panelId} />,
+      );
       return;
     }
 
     if (panelId === PanelIds.AI_AUDIT) {
       makeBodyFillAvailableHeight(body);
       renderDomPanel(panelId, body, (container) => {
-        const panel = createAIAuditPanel({
+        container.textContent = "Loading audit log…";
+        let disposed = false;
+        let disposeFn: (() => void) | null = null;
+        let refreshFn: (() => Promise<void> | void) | undefined;
+
+        void (async () => {
+          try {
+            const { createAIAuditPanel } = await import("./ai-audit/index.js");
+            if (disposed) return;
+            const panel = createAIAuditPanel({
+              container,
+              initialWorkbookId: workbookId,
+              autoRefreshMs: 1_000,
+            });
+            disposeFn = panel.dispose;
+            refreshFn = panel.refresh;
+          } catch (err) {
+            if (disposed) return;
+            // eslint-disable-next-line no-console
+            console.error("[formula][desktop] Failed to load audit panel:", err);
+            container.textContent = `Failed to load audit panel: ${String((err as any)?.message ?? err)}`;
+          }
+        })();
+
+        return {
           container,
-          initialWorkbookId: workbookId,
-          autoRefreshMs: 1_000,
-        });
-        return { container, dispose: panel.dispose, refresh: panel.refresh };
+          dispose: () => {
+            disposed = true;
+            disposeFn?.();
+          },
+          refresh: () => refreshFn?.(),
+        };
       });
       return;
     }
 
     if (panelId === PanelIds.VERSION_HISTORY) {
-      makeBodyFillAvailableHeight(body);
       const session = options.getCollabSession?.() ?? null;
       if (!session) {
-        renderReactPanel(
-          panelId,
-          body,
-          <div className="collab-panel__message collab-panel__message--error">{t("versionHistory.panel.noSession")}</div>,
-        );
+        body.textContent = "Version history will appear here.";
         return;
       }
+      makeBodyFillAvailableHeight(body);
       renderReactPanel(
         panelId,
         body,
-        <CollabVersionHistoryPanel
-          session={session}
-          sheetNameResolver={options.sheetNameResolver ?? null}
-          createVersionStore={options.createVersionStore ?? options.createCollabVersioningStore}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <LazyCollabVersionHistoryPanel
+            session={session}
+            sheetNameResolver={options.sheetNameResolver ?? null}
+            createVersionStore={options.createVersionStore ?? options.createCollabVersioningStore}
+          />
+        </React.Suspense>,
       );
       return;
     }
 
     if (panelId === PanelIds.BRANCH_MANAGER) {
-      makeBodyFillAvailableHeight(body);
       const session = options.getCollabSession?.() ?? null;
       if (!session) {
-        renderReactPanel(
-          panelId,
-          body,
-          <div className="collab-panel__message collab-panel__message--error">Branch manager requires collaboration mode.</div>,
-        );
+        body.textContent = "Branch manager requires collaboration mode.";
         return;
       }
+      makeBodyFillAvailableHeight(body);
       renderReactPanel(
         panelId,
         body,
-        <CollabBranchManagerPanel
-          session={session}
-          sheetNameResolver={options.sheetNameResolver ?? null}
-          createBranchStore={options.createBranchStore ?? options.createCollabBranchStore}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <LazyCollabBranchManagerPanel
+            session={session}
+            sheetNameResolver={options.sheetNameResolver ?? null}
+            createBranchStore={options.createBranchStore ?? options.createCollabBranchStore}
+          />
+        </React.Suspense>,
       );
       return;
     }
@@ -547,13 +791,15 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <VbaMigratePanel
-          key={workbookId ?? "default"}
-          workbookId={workbookId}
-          invoke={options.invoke}
-          drainBackendSync={options.drainBackendSync}
-          getMacroUiContext={options.getMacroUiContext}
-        />,
+        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+          <LazyVbaMigratePanel
+            key={workbookId ?? "default"}
+            workbookId={workbookId}
+            invoke={options.invoke}
+            drainBackendSync={options.drainBackendSync}
+            getMacroUiContext={options.getMacroUiContext}
+          />
+        </React.Suspense>,
       );
       return;
     }

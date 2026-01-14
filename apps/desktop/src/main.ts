@@ -131,7 +131,7 @@ import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from
 import { loadCollabToken, preloadCollabTokenFromKeychain, storeCollabToken } from "./sharing/collabTokenStore.js";
 import { getWorkbookMutationPermission, READ_ONLY_SHEET_MUTATION_MESSAGE } from "./collab/permissionGuards";
 import { registerEncryptionUiCommands } from "./collab/encryption-ui/registerEncryptionUiCommands";
-import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
+import type { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
@@ -227,6 +227,72 @@ import {
 } from "./workbook/mergeFormattingIntoSnapshot.js";
 import { coerceSavePathToXlsx, getWorkbookFileMetadataFromWorkbookInfo } from "./workbook/workbookFileMetadata.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
+
+// ---------------------------------------------------------------------------
+// Startup instrumentation + two-phase boot
+// ---------------------------------------------------------------------------
+const STARTUP_DEBUG =
+  ((import.meta as any).env?.VITE_STARTUP_DEBUG ?? "") === "1" ||
+  ((import.meta as any).env?.VITE_STARTUP_DEBUG ?? "") === "true" ||
+  (((globalThis as any).process?.env as Record<string, unknown> | undefined)?.VITE_STARTUP_DEBUG ?? "") === "1";
+
+function startupMark(name: string): void {
+  try {
+    globalThis.performance?.mark?.(name);
+  } catch {
+    // ignore
+  }
+  if (STARTUP_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log(`[formula][desktop][startup] ${name}`);
+  }
+}
+
+async function startupImport<T>(name: string, importer: () => Promise<T>): Promise<T> {
+  startupMark(`formula:desktop:import:${name}:start`);
+  try {
+    const mod = await importer();
+    startupMark(`formula:desktop:import:${name}:end`);
+    return mod;
+  } catch (err) {
+    startupMark(`formula:desktop:import:${name}:error`);
+    throw err;
+  }
+}
+
+startupMark("formula:desktop:boot:start");
+
+// `requestAnimationFrame` fires before paint; the double-rAF pattern marks the first paint
+// *after* our entry module yields back to the browser.
+try {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        startupMark("formula:desktop:boot:first-render");
+      });
+    });
+  }
+} catch {
+  // ignore
+}
+
+type YjsModule = typeof import("yjs");
+let yjsModulePromise: Promise<YjsModule> | null = null;
+function importYjs(): Promise<YjsModule> {
+  if (!yjsModulePromise) {
+    yjsModulePromise = startupImport("yjs", () => import("yjs"));
+  }
+  return yjsModulePromise;
+}
+
+type ExtensionHostManagerModule = typeof import("./extensions/extensionHostManager.js");
+let extensionHostManagerModulePromise: Promise<ExtensionHostManagerModule> | null = null;
+function importExtensionHostManagerModule(): Promise<ExtensionHostManagerModule> {
+  if (!extensionHostManagerModulePromise) {
+    extensionHostManagerModulePromise = startupImport("extension-host-manager", () => import("./extensions/extensionHostManager.js"));
+  }
+  return extensionHostManagerModulePromise;
+}
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
 // Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
@@ -4267,6 +4333,24 @@ if (
   // Scripting + macro tooling is large and not needed to show the initial grid. Load it lazily.
   let scriptingWorkbook: DocumentControllerWorkbookAdapter | null = null;
   let scriptingWorkbookInitPromise: Promise<DocumentControllerWorkbookAdapter | null> | null = null;
+  let scriptEditorReady = false;
+  let pendingScriptEditorCode: string | null = null;
+
+  const dispatchScriptEditorSetCode = (code: string): void => {
+    try {
+      window.dispatchEvent(new CustomEvent("formula:script-editor:set-code", { detail: { code } }));
+    } catch {
+      // ignore
+    }
+  };
+
+  const flushPendingScriptEditorCode = (): void => {
+    if (!scriptEditorReady) return;
+    const code = pendingScriptEditorCode;
+    if (typeof code !== "string") return;
+    pendingScriptEditorCode = null;
+    dispatchScriptEditorSetCode(code);
+  };
 
   async function ensureScriptingWorkbook(): Promise<DocumentControllerWorkbookAdapter | null> {
     if (scriptingWorkbook) return scriptingWorkbook;
@@ -5168,6 +5252,8 @@ if (
   }
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
+  let extensionHostManager: DesktopExtensionHostManager | null = null;
+  let extensionHostManagerInitPromise: Promise<DesktopExtensionHostManager> | null = null;
 
   // Extensions can access spreadsheet data via `formula.cells.*` / `formula.events.*` and then write
   // arbitrary text to the system clipboard via `formula.clipboard.writeText()`. SpreadsheetApp's
@@ -5323,7 +5409,8 @@ if (
       if (collabSession) {
         const normalizedName = validateSheetName(sheetName, { sheets: workbookSheetStore.listAll() });
 
-        const existingIds = new Set(listSheetsFromCollabSession(collabSession).map((sheet) => sheet.id));
+        const existingSheets = listSheetsFromCollabSession(collabSession);
+        const existingIds = new Set(existingSheets.map((sheet) => sheet.id));
 
         const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
         const generateId = () => {
@@ -5339,16 +5426,34 @@ if (
           id = `${id}_${Math.random().toString(16).slice(2)}`;
         }
 
-        const inserted = tryInsertCollabSheet({
-          session: collabSession,
-          sheetId: id,
-          name: normalizedName,
-          visibility: "visible",
-          insertAfterSheetId: activeId,
-        });
-        if (!inserted.inserted) {
-          throw new Error(inserted.reason);
+        const permission = getWorkbookMutationPermission(collabSession);
+        if (!permission.allowed) {
+          throw new Error(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
         }
+
+        const sheetsArray: any = (collabSession as any)?.sheets ?? null;
+        const isYjsSheetsArray = Boolean(sheetsArray && typeof sheetsArray === "object" && sheetsArray.doc);
+        const Y = isYjsSheetsArray ? await importYjs() : null;
+
+        const activeIdx = existingSheets.findIndex((sheet) => sheet.id === activeId);
+        const insertIndex = activeIdx >= 0 ? activeIdx + 1 : collabSession.sheets.length;
+
+        collabSession.transactLocal(() => {
+          // Prefer inserting a real Y.Map when `session.sheets` is backed by Yjs.
+          // Some environments provide a lightweight `session.sheets` implementation that stores
+          // plain JS objects and does not attach Yjs types to a Y.Doc; in that case insert a
+          // plain `{ id, name, visibility }` entry instead.
+          if (isYjsSheetsArray && Y) {
+            const sheet = new Y.Map<unknown>();
+            // Attach first, then populate fields (Yjs types warn when accessed before attachment).
+            collabSession.sheets.insert(insertIndex, [sheet as any]);
+            sheet.set("id", id);
+            sheet.set("name", normalizedName);
+            sheet.set("visibility", "visible");
+          } else {
+            collabSession.sheets.insert(insertIndex, [{ id, name: normalizedName, visibility: "visible" } as any]);
+          }
+        });
 
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
@@ -5555,78 +5660,104 @@ if (
     };
   }
 
-  const extensionHostManager = new DesktopExtensionHostManager({
-    engineVersion: "1.0.0",
-    spreadsheetApi: extensionSpreadsheetApi,
-    clipboardWriteGuard,
-    clipboardApi: {
-      readText: async () => {
-        const provider = await getClipboardProvider();
-        const { text } = await provider.read();
-        return text ?? "";
-      },
-      writeText: async (text: string) => {
-        // Extensions can write arbitrary text to the system clipboard via `formula.clipboard.writeText()`.
-        //
-        // Enforce clipboard-copy DLP against the current UI selection (active-cell fallback) so
-        // extensions cannot bypass SpreadsheetApp's copy/cut policy enforcement by directly writing
-        // to the system clipboard.
-        //
-        // Note: DLP enforcement based on per-extension taint tracking (ranges read via `cells.*` and
-        // `events.*`) is handled separately by `clipboardWriteGuard`.
+  const ensureExtensionHostManager = async (): Promise<DesktopExtensionHostManager> => {
+    if (extensionHostManager) return extensionHostManager;
+    if (!extensionHostManagerInitPromise) {
+      extensionHostManagerInitPromise = (async () => {
+        const { DesktopExtensionHostManager } = await importExtensionHostManagerModule();
+        const manager = new DesktopExtensionHostManager({
+          engineVersion: "1.0.0",
+          spreadsheetApi: extensionSpreadsheetApi,
+          clipboardWriteGuard,
+          clipboardApi: {
+            readText: async () => {
+              const provider = await getClipboardProvider();
+              const { text } = await provider.read();
+              return text ?? "";
+            },
+            writeText: async (text: string) => {
+              // Extensions can write arbitrary text to the system clipboard via `formula.clipboard.writeText()`.
+              //
+              // Enforce clipboard-copy DLP against the current UI selection (active-cell fallback) so
+              // extensions cannot bypass SpreadsheetApp's copy/cut policy enforcement by directly writing
+              // to the system clipboard.
+              //
+              // Note: DLP enforcement based on per-extension taint tracking (ranges read via `cells.*` and
+              // `events.*`) is handled separately by `clipboardWriteGuard`.
+              try {
+                const sheetId = app.getCurrentSheetId();
+                const active = app.getActiveCell();
+                const selectionRanges = app.getSelectionRanges();
+                const rangesToCheck =
+                  selectionRanges.length > 0
+                    ? selectionRanges
+                    : [{ startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col }];
+
+                for (const range of rangesToCheck) {
+                  enforceExtensionClipboardDlpForRange({ sheetId, range: normalizeSelectionRange(range) });
+                }
+              } catch (err) {
+                const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+                if (isDlpViolation) {
+                  const message =
+                    typeof (err as any)?.message === "string" && String((err as any).message).trim().length > 0
+                      ? String((err as any).message)
+                      : "Clipboard copy is blocked by data loss prevention policy.";
+                  try {
+                    showToast(message, "error");
+                  } catch {
+                    // `showToast` requires a #toast-root; unit tests don't always include it.
+                  }
+                  // Surface DLP violations to the extension worker as a normal Error (serialized across
+                  // the worker boundary), preserving the `name` so extensions can detect policy blocks.
+                  if (err instanceof Error) {
+                    throw err;
+                  }
+                  const normalized = new Error(message);
+                  normalized.name = "DlpViolationError";
+                  throw normalized;
+                }
+                throw err;
+              }
+              const provider = await getClipboardProvider();
+              await provider.write({ text: String(text ?? "") });
+            },
+          },
+          uiApi: {
+            showMessage: async (message: string, type?: string) => {
+              showToast(String(message ?? ""), (type as any) ?? "info");
+            },
+            showInputBox: async (options: any) => showInputBox(options),
+            showQuickPick: async (items: any[], options: any) => showQuickPick(items, options),
+            onPanelCreated: (panel: any) => extensionPanelBridge?.onPanelCreated(panel),
+            onPanelHtmlUpdated: (panelId: string) => extensionPanelBridge?.onPanelHtmlUpdated(panelId),
+            onPanelMessage: (panelId: string, message: unknown) => extensionPanelBridge?.onPanelMessage(panelId, message),
+            onPanelDisposed: (panelId: string) => extensionPanelBridge?.onPanelDisposed(panelId),
+          },
+        });
+
+        extensionHostManager = manager;
+        extensionHostManagerForE2e = manager;
         try {
-          const sheetId = app.getCurrentSheetId();
-          const active = app.getActiveCell();
-          const selectionRanges = app.getSelectionRanges();
-          const rangesToCheck =
-            selectionRanges.length > 0
-              ? selectionRanges
-              : [{ startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col }];
-
-          for (const range of rangesToCheck) {
-            enforceExtensionClipboardDlpForRange({ sheetId, range: normalizeSelectionRange(range) });
-          }
-        } catch (err) {
-          const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
-          if (isDlpViolation) {
-            const message =
-              typeof (err as any)?.message === "string" && String((err as any).message).trim().length > 0
-                ? String((err as any).message)
-                : "Clipboard copy is blocked by data loss prevention policy.";
-            try {
-              showToast(message, "error");
-            } catch {
-              // `showToast` requires a #toast-root; unit tests don't always include it.
-            }
-            // Surface DLP violations to the extension worker as a normal Error (serialized across
-            // the worker boundary), preserving the `name` so extensions can detect policy blocks.
-            if (err instanceof Error) {
-              throw err;
-            }
-            const normalized = new Error(message);
-            normalized.name = "DlpViolationError";
-            throw normalized;
-          }
-          throw err;
+          // Surface to e2e/debug tooling as soon as the host is created.
+          (window as any).__formulaExtensionHostManager = manager;
+          (window as any).__formulaExtensionHost = manager.host ?? null;
+        } catch {
+          // ignore
         }
-        const provider = await getClipboardProvider();
-        await provider.write({ text: String(text ?? "") });
-      },
-    },
-    uiApi: {
-      showMessage: async (message: string, type?: string) => {
-        showToast(String(message ?? ""), (type as any) ?? "info");
-      },
-      showInputBox: async (options: any) => showInputBox(options),
-      showQuickPick: async (items: any[], options: any) => showQuickPick(items, options),
-      onPanelCreated: (panel: any) => extensionPanelBridge?.onPanelCreated(panel),
-      onPanelHtmlUpdated: (panelId: string) => extensionPanelBridge?.onPanelHtmlUpdated(panelId),
-      onPanelMessage: (panelId: string, message: unknown) => extensionPanelBridge?.onPanelMessage(panelId, message),
-      onPanelDisposed: (panelId: string) => extensionPanelBridge?.onPanelDisposed(panelId),
-    },
-  });
 
-  extensionHostManagerForE2e = extensionHostManager;
+        // Bridge extension webviews into the dock layout once the host exists.
+        extensionPanelBridge = new ExtensionPanelBridge({
+          host: manager.host as any,
+          panelRegistry,
+          layoutController: layoutController as any,
+        });
+
+        return manager;
+      })();
+    }
+    return extensionHostManagerInitPromise;
+  };
 
   const focusAfterSheetNavigationFromCommand = (): void => {
     if (!shouldRestoreFocusAfterSheetNavigation()) return;
@@ -5639,25 +5770,33 @@ if (
   focusAfterSheetNavigationFromCommandRef = focusAfterSheetNavigationFromCommand;
   registerEncryptionUiCommands({ commandRegistry, app });
 
-  extensionPanelBridge = new ExtensionPanelBridge({
-    host: extensionHostManager.host as any,
-    panelRegistry,
-    layoutController: layoutController as any,
-  });
-
   // Loading extensions spins up an additional Worker for each workbook tab. That can be
   // expensive in e2e + low-spec environments, so defer actually loading extensions until
   // the user opens the Extensions panel or invokes an extension command.
   let extensionsLoadPromise: Promise<void> | null = null;
 
   const ensureExtensionsLoaded = async () => {
-    if (extensionHostManager.ready) return;
+    const manager = await ensureExtensionHostManager();
+    if (manager.ready) return;
     if (!extensionsLoadPromise) {
-      extensionsLoadPromise = (async () => {
-        await extensionHostManager.loadBuiltInExtensions();
-      })();
+      extensionsLoadPromise = manager.loadBuiltInExtensions();
     }
     await extensionsLoadPromise;
+
+    // Once extensions are loaded, sync their contributions into the UI surfaces that
+    // were initialized earlier during boot (commands, panels, keybindings).
+    try {
+      updateKeybindingsRef?.();
+      syncContributedCommandsRef?.();
+      syncContributedPanelsRef?.();
+    } catch {
+      // ignore
+    }
+    try {
+      activateOpenExtensionPanels();
+    } catch {
+      // ignore
+    }
   };
 
   const executeExtensionCommand = async (commandId: string, ...args: any[]) => {
@@ -5703,11 +5842,12 @@ if (
   const builtinKeybindingHints = builtinKeybindingsCatalog;
 
   const syncContributedCommands = () => {
-    if (!extensionHostManager.ready || extensionHostManager.error) return;
+    const manager = extensionHostManager;
+    if (!manager?.ready || manager.error) return;
     try {
       commandRegistry.setExtensionCommands(
-        extensionHostManager.getContributedCommands(),
-        (commandId, ...args) => extensionHostManager.executeCommand(commandId, ...args),
+        manager.getContributedCommands(),
+        (commandId, ...args) => manager.executeCommand(commandId, ...args),
       );
     } catch (err) {
       showToast(`Failed to register extension commands: ${String((err as any)?.message ?? err)}`, "error");
@@ -5715,14 +5855,15 @@ if (
   };
 
   const syncContributedPanels = () => {
-    if (!extensionHostManager.ready || extensionHostManager.error) return;
-    const contributed = extensionHostManager.getContributedPanels() as Array<{ extensionId: string; id: string; title: string; icon?: string | null }>;
+    const manager = extensionHostManager;
+    if (!manager?.ready || manager.error) return;
+    const contributed = manager.getContributedPanels() as Array<{ extensionId: string; id: string; title: string; icon?: string | null }>;
     const contributedIds = new Set(contributed.map((p) => p.id));
 
     // Update the synchronous seed store from loaded extension manifests.
     if (contributedPanelsSeedStorage) {
       try {
-        const extensions = extensionHostManager.host.listExtensions?.() ?? [];
+        const extensions = manager.host.listExtensions?.() ?? [];
         const currentLoadedExtensionIds = new Set<string>();
         for (const ext of extensions as any[]) {
           const id = typeof ext?.id === "string" ? ext.id : null;
@@ -5840,16 +5981,16 @@ if (
   });
 
   const updateKeybindings = () => {
+    const manager = extensionHostManager;
     const contributed =
-      extensionHostManager.ready && !extensionHostManager.error
-        ? (extensionHostManager.getContributedKeybindings() as ContributedKeybinding[])
-        : [];
+      manager && manager.ready && !manager.error ? (manager.getContributedKeybindings() as ContributedKeybinding[]) : [];
     keybindingService.setExtensionKeybindings(contributed);
     updateRibbonShortcuts();
   };
 
   const activateOpenExtensionPanels = () => {
-    if (!extensionHostManager.ready || extensionHostManager.error) return;
+    const manager = extensionHostManager;
+    if (!manager?.ready || manager.error) return;
     if (!extensionPanelBridge) return;
     const layout = layoutController.layout;
     const openPanelIds = [
@@ -5865,14 +6006,6 @@ if (
     }
   };
 
-  extensionHostManager.subscribe(() => {
-    // Update keybinding hints before commands emit registry change events so the command
-    // palette renders shortcuts immediately after extensions finish loading.
-    updateKeybindings();
-    syncContributedCommands();
-    syncContributedPanels();
-    activateOpenExtensionPanels();
-  });
   syncContributedCommands();
   syncContributedPanels();
   updateKeybindings();
@@ -5893,13 +6026,13 @@ if (
     // If extensions are already loading (Extensions panel opened / command executed) or the host
     // is already ready, then sync any newly-installed extensions into the runtime and refresh
     // contributions.
-    if (!extensionHostManager.ready && !extensionsLoadPromise) return;
+    if (!extensionHostManager || (!extensionHostManager.ready && !extensionsLoadPromise)) return;
 
     void ensureExtensionsLoaded()
       .then(async () => {
         try {
           // Pick up any installs that happened after the initial `loadAllInstalled()` pass.
-          await extensionHostManager.getMarketplaceExtensionManager().loadAllInstalled();
+          await extensionHostManager?.getMarketplaceExtensionManager().loadAllInstalled();
         } catch {
           // ignore
         }
@@ -6330,7 +6463,8 @@ if (
       ];
     }
 
-    if (!extensionHostManager.ready) {
+    const manager = extensionHostManager;
+    if (!manager || !manager.ready) {
       // Extensions are loaded lazily. Show a non-blocking placeholder while the host spins up
       // so users understand why extension-contributed items are not immediately visible.
       menuItems.push({ type: "separator" });
@@ -6345,7 +6479,7 @@ if (
       return menuItems;
     }
 
-    if (extensionHostManager.error) {
+    if (manager.error) {
       menuItems.push({ type: "separator" });
       menuItems.push({
         type: "item",
@@ -6371,7 +6505,7 @@ if (
           : currentGridArea === "corner"
             ? CORNER_CONTEXT_MENU_ID
             : CELL_CONTEXT_MENU_ID;
-    const contributed = resolveMenuItems(extensionHostManager.getContributedMenu(menuId), contextKeys.asLookup());
+    const contributed = resolveMenuItems(manager.getContributedMenu(menuId), contextKeys.asLookup());
     if (contributed.length > 0) {
       menuItems.push({ type: "separator" });
       const model = buildContextMenuModel(contributed, commandRegistry);
@@ -6415,12 +6549,12 @@ if (
     // Extensions are lazy-loaded to keep startup light. Right-clicking should still
     // surface extension-contributed context menu items, so load them on-demand and
     // update the menu if it is still open.
-    if (!extensionHostManager.ready) {
+    if (!extensionHostManager?.ready) {
       void ensureExtensionsLoaded()
         .then(() => {
           if (session !== contextMenuSession) return;
           if (!contextMenu.isOpen()) return;
-          if (!extensionHostManager.ready) return;
+          if (!extensionHostManager?.ready) return;
           contextMenu.update(buildGridContextMenuItems());
         })
         .catch(() => {
@@ -6756,8 +6890,8 @@ if (
     },
     createChart: (spec) => app.addChart(spec),
     panelRegistry,
-    extensionPanelBridge: extensionPanelBridge ?? undefined,
-    extensionHostManager,
+    getExtensionPanelBridge: () => extensionPanelBridge,
+    getExtensionHostManager: () => extensionHostManager,
     ensureExtensionsLoaded,
     onExecuteExtensionCommand: executeExtensionCommand,
     onOpenExtensionPanel: openExtensionPanel,
@@ -7042,13 +7176,12 @@ if (
           };
 
           const openScriptEditor = (code: string) => {
+            pendingScriptEditorCode = code;
             const placement = getPanelPlacement(layoutController.layout, PanelIds.SCRIPT_EDITOR);
             if (placement.kind === "closed") layoutController.openPanel(PanelIds.SCRIPT_EDITOR);
-            const dispatch = () => {
-              window.dispatchEvent(new CustomEvent("formula:script-editor:set-code", { detail: { code } }));
-            };
             // Allow the layout to mount the panel before we attempt to populate the editor.
-            requestAnimationFrame(() => requestAnimationFrame(dispatch));
+            // If the panel is still being lazy-loaded, the mount path will flush the pending code once ready.
+            requestAnimationFrame(() => requestAnimationFrame(flushPendingScriptEditorCode));
           };
 
           const storedMacroKey = (id: string) => `formula:macros:${id}`;
@@ -7215,6 +7348,7 @@ if (
           container,
           dispose: () => {
             disposed = true;
+            scriptEditorReady = false;
             container.innerHTML = "";
           },
         };
@@ -7229,8 +7363,11 @@ if (
           }
 
           const mounted = mod.mountScriptEditorPanel({ workbook, container });
+          scriptEditorReady = true;
+          flushPendingScriptEditorCode();
           mount!.dispose = () => {
             disposed = true;
+            scriptEditorReady = false;
             try {
               mounted.dispose();
             } finally {
@@ -7239,6 +7376,7 @@ if (
           };
         })().catch((err) => {
           if (disposed) return;
+          scriptEditorReady = false;
           container.textContent = `Failed to load Script Editor: ${String(err)}`;
           reportLazyImportFailure("Script Editor", err);
         });
@@ -7318,7 +7456,7 @@ if (
     }
 
     const panelDef = panelRegistry.get(panelId) as any;
-    if (panelDef?.source?.kind === "extension" && !extensionHostManager.ready) {
+    if (panelDef?.source?.kind === "extension" && !extensionHostManager?.ready) {
       // If the user persisted an extension panel in their layout, ensure the extension host is
       // loaded so the view can activate and populate its webview.
       void ensureExtensionsLoaded();
@@ -10242,7 +10380,7 @@ async function openWorkbookFromPath(
     }
     activePanelWorkbookId = activeWorkbook.path ?? activeWorkbook.origin_path ?? path;
     syncTitlebar();
-    startPowerQueryService();
+    void startPowerQueryService();
     rerenderLayout?.();
 
     workbookSync = startWorkbookSync({
@@ -10282,7 +10420,7 @@ async function openWorkbookFromPath(
         });
       }
     }
-    startPowerQueryService();
+    void startPowerQueryService();
     throw err;
   }
 }
@@ -10442,7 +10580,7 @@ async function handleSaveAsPath(
   activePanelWorkbookId = savePath;
   // Ensure zoom persistence follows the workbook when its id changes (e.g. Save As).
   persistCurrentSharedGridZoom();
-  startPowerQueryService();
+  void startPowerQueryService();
   rerenderLayout?.();
 }
 
@@ -10515,7 +10653,7 @@ async function handleNewWorkbook(
     }
     activePanelWorkbookId = nextPanelWorkbookId;
     syncTitlebar();
-    startPowerQueryService();
+    void startPowerQueryService();
     rerenderLayout?.();
 
     workbookSync = startWorkbookSync({
@@ -10553,7 +10691,7 @@ async function handleNewWorkbook(
         });
       }
     }
-    startPowerQueryService();
+    void startPowerQueryService();
     throw err;
   }
 }
@@ -11399,4 +11537,31 @@ window.__formulaExtensionHost = extensionHostManagerForE2e?.host ?? null;
 window.__workbookSheetStore = workbookSheetStore;
 
 // Time-to-interactive instrumentation (best-effort, no-op for web builds).
-void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() }).catch(() => {});
+void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() })
+  .catch(() => {})
+  .finally(() => {
+    // Phase 2 boot: kick off heavy/optional subsystems after TTI so the first paint + initial
+    // spreadsheet interactions don't pay the parse/execute cost of rarely-used features.
+    startupMark("formula:desktop:boot:phase2-start");
+
+    const schedule = (task: () => void) => {
+      try {
+        const ric = (window as any).requestIdleCallback as ((cb: () => void, opts?: { timeout: number }) => void) | undefined;
+        if (typeof ric === "function") {
+          ric(task, { timeout: 5_000 });
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      setTimeout(task, 0);
+    };
+
+    schedule(() => {
+      // Power Query spins up a WASM/worker-backed engine and can be expensive to initialize.
+      // Start it in the background after TTI so query panels can appear instantly when opened.
+      if (tauriBackend) {
+        startPowerQueryService();
+      }
+    });
+  });

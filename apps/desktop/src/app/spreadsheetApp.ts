@@ -2732,6 +2732,10 @@ export class SpreadsheetApp {
         shouldHandlePointerDown: (e) => {
           if (this.formulaBar?.isFormulaEditing()) return false;
           const target = e.target as HTMLElement | null;
+          // Some unit tests invoke the capture handler directly with a synthetic PointerEvent
+          // which may not have a meaningful `.target`. Treat those as grid-surface events so
+          // click-to-select behaviors remain testable.
+          if (!target) return true;
           // Only treat pointerdown events originating from the grid surface (canvases/root) as
           // drawing selection/interaction. This avoids interfering with interactive DOM overlays
           // (scrollbars, outline buttons, comments panel, etc) even when drawings extend underneath them.
@@ -2739,6 +2743,9 @@ export class SpreadsheetApp {
             target === this.root ||
             target === this.selectionCanvas ||
             target === this.gridCanvas ||
+            target === this.drawingCanvas ||
+            target === this.chartCanvas ||
+            target === this.chartSelectionCanvas ||
             target === this.referenceCanvas ||
             target === this.auditingCanvas ||
             target === this.presenceCanvas;
@@ -2949,6 +2956,7 @@ export class SpreadsheetApp {
               // pointerdown; let normal grid range selection continue.
               if (this.formulaBar?.isFormulaEditing()) return false;
               const target = e.target as HTMLElement | null;
+              if (!target) return true;
               // Only treat pointerdown events originating from the grid surface (canvases/root) as
               // chart selection/drags. This avoids interfering with interactive DOM overlays
               // (scrollbars, outline buttons, comments panel, etc) even when a chart extends underneath them.
@@ -2956,6 +2964,9 @@ export class SpreadsheetApp {
                 target === this.root ||
                 target === this.selectionCanvas ||
                 target === this.gridCanvas ||
+                target === this.drawingCanvas ||
+                target === this.chartCanvas ||
+                target === this.chartSelectionCanvas ||
                 target === this.referenceCanvas ||
                 target === this.auditingCanvas ||
                 target === this.presenceCanvas

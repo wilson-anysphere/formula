@@ -55,6 +55,22 @@ const [{ createPanelBodyRenderer }, { PanelIds }] = await Promise.all([
   import("../panelRegistry.js"),
 ]);
 
+async function waitFor(assertion: () => void, timeoutMs = 2_000) {
+  const started = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      assertion();
+      return;
+    } catch (err) {
+      if (Date.now() - started > timeoutMs) throw err;
+    }
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    });
+  }
+}
+
 function clearAiStorage() {
   // Node 25 ships an experimental `globalThis.localStorage` accessor that throws
   // unless Node is started with `--localstorage-file`. Guard all access so our
@@ -93,6 +109,10 @@ describe("AI chat panel", () => {
       await act(async () => {
         renderer.renderPanelBody(PanelIds.AI_CHAT, body);
       });
+
+      await waitFor(() => {
+        expect(body.querySelector('[data-testid="ai-tab-chat"]')).toBeInstanceOf(HTMLButtonElement);
+      }, 10_000);
 
       expect(getDocumentController).toHaveBeenCalled();
       expect(mocks.getDesktopLLMClient).toHaveBeenCalled();

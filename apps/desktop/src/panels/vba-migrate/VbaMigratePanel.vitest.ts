@@ -17,6 +17,22 @@ function flushPromises() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
+async function waitFor(assertion: () => void, timeoutMs = 2_000) {
+  const started = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      assertion();
+      return;
+    } catch (err) {
+      if (Date.now() - started > timeoutMs) throw err;
+    }
+    await act(async () => {
+      await flushPromises();
+    });
+  }
+}
+
 function installTauriInvoke(invoke: (cmd: string, args?: any) => Promise<any>) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).__TAURI__ = { core: { invoke } };
@@ -66,7 +82,9 @@ describe("VbaMigratePanel", () => {
       await flushPromises();
     });
 
-    expect(invoke).toHaveBeenCalledWith("get_vba_project", { workbook_id: "workbook-1" });
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("get_vba_project", { workbook_id: "workbook-1" });
+    }, 10_000);
     expect(body.querySelector('[data-testid="vba-project-name"]')?.textContent).toContain("TestProject");
     expect(body.querySelector('[data-testid="vba-module-Module1"]')).toBeTruthy();
 

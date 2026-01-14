@@ -86,6 +86,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
   const [renameSheetId, setRenameSheetId] = React.useState<string | null>(null);
   const [renameDraft, setRenameDraft] = React.useState("");
   const renameDraftRef = React.useRef("");
+  const renameInputRef = React.useRef<HTMLInputElement | null>(null);
   const [deleteConfirmSheetId, setDeleteConfirmSheetId] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -181,9 +182,12 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     setBusy(true);
     setError(null);
     try {
-      // Read from a ref to ensure we commit the latest input value even when React
-      // batches state updates across multiple events (input + Enter in the same tick).
-      await host.renameSheetById(sheetId, renameDraftRef.current);
+      // Read from the live input (or a ref fallback) to ensure we commit the latest
+      // value even when React batches state updates across multiple events (input + Enter
+      // in the same tick).
+      const currentValue = renameInputRef.current?.value ?? renameDraftRef.current;
+      renameDraftRef.current = currentValue;
+      await host.renameSheetById(sheetId, currentValue);
       setRenameSheetId(null);
     } catch (err) {
       reportError(err);
@@ -434,6 +438,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                 {renameSheetId === sheet.id ? (
                   <input
                     type="text"
+                    ref={renameInputRef}
                     value={renameDraft}
                     onInput={(e) => {
                       const next = (e.target as HTMLInputElement).value;
