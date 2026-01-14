@@ -2167,6 +2167,27 @@ fn patch_cell_st<W: io::Write>(
         .checked_mul(2)
         .ok_or(Error::UnexpectedEof)?;
 
+    // If the string contents are unchanged (e.g. style-only edits), preserve the original
+    // wide-string payload bytes (including any rich/phonetic blocks) so we don't accidentally
+    // strip formatting metadata.
+    let existing_utf16 = payload
+        .get(ws.utf16_start..ws.utf16_end)
+        .ok_or(Error::UnexpectedEof)?;
+    let mut desired_utf16 = Vec::with_capacity(desired_utf16_len as usize);
+    for unit in text.encode_utf16() {
+        desired_utf16.extend_from_slice(&unit.to_le_bytes());
+    }
+    let preserve_wide_string_bytes = desired_cch == ws.cch && desired_utf16.as_slice() == existing_utf16;
+    if preserve_wide_string_bytes {
+        // Preserve the full payload bytes (including any unknown trailing bytes) and patch style
+        // in-place. This keeps diffs minimal and retains rich/phonetic payloads.
+        let mut patched = payload.to_vec();
+        patched[0..4].copy_from_slice(&col.to_le_bytes());
+        patched[4..8].copy_from_slice(&style.to_le_bytes());
+        write_record_preserving_varints(writer, biff12::CELL_ST, &patched, existing)?;
+        return Ok(());
+    }
+
     // [col:u32][style:u32] + [cch:u32][flags:u8][utf16...] + optional empty rich/phonetic blocks.
     let mut payload_len = 13u32
         .checked_add(desired_utf16_len)
@@ -2183,9 +2204,7 @@ fn patch_cell_st<W: io::Write>(
     writer.write_u32(style)?;
     writer.write_u32(desired_cch_u32)?;
     writer.write_raw(&[flags_u8])?;
-    for unit in text.encode_utf16() {
-        writer.write_raw(&unit.to_le_bytes())?;
-    }
+    writer.write_raw(&desired_utf16)?;
     if ws.flags & FLAG_RICH != 0 {
         writer.write_u32(0)?; // cRun
     }
