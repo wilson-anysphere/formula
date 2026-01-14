@@ -922,6 +922,11 @@ export function bindSheetViewToCollabSession(options: {
           if (deepEquals(beforeDrawings, afterDrawings)) continue;
 
           for (const sheet of sheetsToUpdate) {
+            // Some historical docs/tests may store sheet entries as plain objects in the Y.Array
+            // rather than Y.Maps. Hydration can still read from those, but we cannot write back.
+            if (!sheet || typeof sheet.get !== "function" || typeof sheet.set !== "function" || typeof sheet.delete !== "function") {
+              continue;
+            }
             const viewMap = ensureNestedYMap(sheet, "view");
             if (afterDrawings) {
               const cloned = cloneJsonValue(afterDrawings);

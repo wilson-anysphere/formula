@@ -41,5 +41,46 @@ describe("bindSheetViewToCollabSession (plain object sheet entries)", () => {
 
     binder.destroy();
   });
-});
 
+  it("does not crash when DocumentController emits drawingDeltas for a sheet stored as a plain object in Yjs", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<any>("sheets");
+
+    const sheetA = "sheet-1";
+    const sheetB = "sheet-2";
+
+    doc.transact(() => {
+      sheets.push([
+        { id: sheetA, view: { frozenRows: 0, frozenCols: 0 } },
+        (() => {
+          const map = new Y.Map<any>();
+          map.set("id", sheetB);
+          return map;
+        })(),
+      ]);
+    });
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId: sheetA, name: "Sheet1" });
+    document.addSheet({ sheetId: sheetB, name: "Sheet2" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    // Force a non-empty drawingsBySheet entry so deleteSheet emits drawingDeltas.
+    (document as any).drawingsBySheet.set(sheetA, [
+      {
+        id: "drawing-1",
+        zOrder: 0,
+        kind: { type: "shape", label: "Rect" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+      },
+    ]);
+
+    expect(() => document.deleteSheet(sheetA)).not.toThrow();
+
+    binder.destroy();
+  });
+});
