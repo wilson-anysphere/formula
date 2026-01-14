@@ -249,6 +249,49 @@ const SHEET_FORMATTING_METADATA_KEY: &str = "formula_ui_formatting";
 #[cfg(feature = "desktop")]
 const SHEET_FORMATTING_SCHEMA_VERSION: i64 = 1;
 
+#[cfg(any(feature = "desktop", test))]
+fn json_within_byte_limit(value: &JsonValue, max_bytes: usize, what: &str) -> Result<(), String> {
+    struct ByteLimitWriter {
+        remaining: usize,
+    }
+
+    impl std::io::Write for ByteLimitWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if buf.len() > self.remaining {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "payload too large",
+                ));
+            }
+            self.remaining -= buf.len();
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut writer = ByteLimitWriter {
+        remaining: max_bytes,
+    };
+    match serde_json::to_writer(&mut writer, value) {
+        Ok(()) => Ok(()),
+        Err(err) if err.is_io() => Err(format!("{what} is too large (max {max_bytes} bytes)")),
+        Err(_) => Err(format!("Failed to serialize {what} as JSON")),
+    }
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn validate_sheet_formatting_metadata_size(value: &JsonValue) -> Result<(), String> {
+    use crate::resource_limits::MAX_SHEET_FORMATTING_METADATA_BYTES;
+    json_within_byte_limit(
+        value,
+        MAX_SHEET_FORMATTING_METADATA_BYTES,
+        "Sheet formatting metadata",
+    )
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SheetRowFormatDelta {
@@ -279,11 +322,264 @@ pub struct SheetFormatRunDelta {
     pub format: JsonValue,
 }
 
+/// IPC-deserialized list of `SheetFormatRunDelta` with a maximum length.
+///
+/// This prevents a compromised webview from sending arbitrarily large `runs` arrays and forcing the
+/// backend to allocate an unbounded `Vec` during deserialization.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct LimitedSheetFormatRunDeltas(pub Vec<SheetFormatRunDelta>);
+
+impl<'de> Deserialize<'de> for LimitedSheetFormatRunDeltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedSheetFormatRunDeltas;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of format runs")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_SHEET_FORMATTING_RUNS_PER_COL;
+
+                if let Some(hint) = seq.size_hint() {
+                    if hint > MAX_SHEET_FORMATTING_RUNS_PER_COL {
+                        return Err(de::Error::custom(format!(
+                            "formatRunsByCol[].runs is too large (max {MAX_SHEET_FORMATTING_RUNS_PER_COL} runs per column)"
+                        )));
+                    }
+                }
+
+                let mut out = Vec::new();
+                while let Some(v) = seq.next_element::<SheetFormatRunDelta>()? {
+                    if out.len() >= MAX_SHEET_FORMATTING_RUNS_PER_COL {
+                        return Err(de::Error::custom(format!(
+                            "formatRunsByCol[].runs is too large (max {MAX_SHEET_FORMATTING_RUNS_PER_COL} runs per column)"
+                        )));
+                    }
+                    out.push(v);
+                }
+                Ok(LimitedSheetFormatRunDeltas(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SheetFormatRunsByColDelta {
     pub col: i64,
-    pub runs: Vec<SheetFormatRunDelta>,
+    pub runs: LimitedSheetFormatRunDeltas,
+}
+
+/// IPC-deserialized list of `SheetRowFormatDelta` with a maximum length.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct LimitedSheetRowFormatDeltas(pub Vec<SheetRowFormatDelta>);
+
+impl<'de> Deserialize<'de> for LimitedSheetRowFormatDeltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedSheetRowFormatDeltas;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of row formatting deltas")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_SHEET_FORMATTING_ROW_DELTAS;
+
+                if let Some(hint) = seq.size_hint() {
+                    if hint > MAX_SHEET_FORMATTING_ROW_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "rowFormats is too large (max {MAX_SHEET_FORMATTING_ROW_DELTAS} deltas)"
+                        )));
+                    }
+                }
+
+                let mut out = Vec::new();
+                while let Some(v) = seq.next_element::<SheetRowFormatDelta>()? {
+                    if out.len() >= MAX_SHEET_FORMATTING_ROW_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "rowFormats is too large (max {MAX_SHEET_FORMATTING_ROW_DELTAS} deltas)"
+                        )));
+                    }
+                    out.push(v);
+                }
+                Ok(LimitedSheetRowFormatDeltas(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
+/// IPC-deserialized list of `SheetColFormatDelta` with a maximum length.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct LimitedSheetColFormatDeltas(pub Vec<SheetColFormatDelta>);
+
+impl<'de> Deserialize<'de> for LimitedSheetColFormatDeltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedSheetColFormatDeltas;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of column formatting deltas")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_SHEET_FORMATTING_COL_DELTAS;
+
+                if let Some(hint) = seq.size_hint() {
+                    if hint > MAX_SHEET_FORMATTING_COL_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "colFormats is too large (max {MAX_SHEET_FORMATTING_COL_DELTAS} deltas)"
+                        )));
+                    }
+                }
+
+                let mut out = Vec::new();
+                while let Some(v) = seq.next_element::<SheetColFormatDelta>()? {
+                    if out.len() >= MAX_SHEET_FORMATTING_COL_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "colFormats is too large (max {MAX_SHEET_FORMATTING_COL_DELTAS} deltas)"
+                        )));
+                    }
+                    out.push(v);
+                }
+                Ok(LimitedSheetColFormatDeltas(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
+/// IPC-deserialized list of `SheetCellFormatDelta` with a maximum length.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct LimitedSheetCellFormatDeltas(pub Vec<SheetCellFormatDelta>);
+
+impl<'de> Deserialize<'de> for LimitedSheetCellFormatDeltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedSheetCellFormatDeltas;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of cell formatting deltas")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_SHEET_FORMATTING_CELL_DELTAS;
+
+                if let Some(hint) = seq.size_hint() {
+                    if hint > MAX_SHEET_FORMATTING_CELL_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "cellFormats is too large (max {MAX_SHEET_FORMATTING_CELL_DELTAS} deltas)"
+                        )));
+                    }
+                }
+
+                let mut out = Vec::new();
+                while let Some(v) = seq.next_element::<SheetCellFormatDelta>()? {
+                    if out.len() >= MAX_SHEET_FORMATTING_CELL_DELTAS {
+                        return Err(de::Error::custom(format!(
+                            "cellFormats is too large (max {MAX_SHEET_FORMATTING_CELL_DELTAS} deltas)"
+                        )));
+                    }
+                    out.push(v);
+                }
+                Ok(LimitedSheetCellFormatDeltas(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
+/// IPC-deserialized list of `SheetFormatRunsByColDelta` with a maximum length.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct LimitedSheetFormatRunsByColDeltas(pub Vec<SheetFormatRunsByColDelta>);
+
+impl<'de> Deserialize<'de> for LimitedSheetFormatRunsByColDeltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedSheetFormatRunsByColDeltas;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of format-run-by-column deltas")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_SHEET_FORMATTING_RUN_COLS;
+
+                if let Some(hint) = seq.size_hint() {
+                    if hint > MAX_SHEET_FORMATTING_RUN_COLS {
+                        return Err(de::Error::custom(format!(
+                            "formatRunsByCol is too large (max {MAX_SHEET_FORMATTING_RUN_COLS} columns)"
+                        )));
+                    }
+                }
+
+                let mut out = Vec::new();
+                while let Some(v) = seq.next_element::<SheetFormatRunsByColDelta>()? {
+                    if out.len() >= MAX_SHEET_FORMATTING_RUN_COLS {
+                        return Err(de::Error::custom(format!(
+                            "formatRunsByCol is too large (max {MAX_SHEET_FORMATTING_RUN_COLS} columns)"
+                        )));
+                    }
+                    out.push(v);
+                }
+                Ok(LimitedSheetFormatRunsByColDeltas(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -295,16 +591,16 @@ pub struct ApplySheetFormattingDeltasRequest {
     pub default_format: Option<Option<JsonValue>>,
     /// Row formatting deltas; `format: null` clears the override for that row.
     #[serde(default)]
-    pub row_formats: Option<Vec<SheetRowFormatDelta>>,
+    pub row_formats: Option<LimitedSheetRowFormatDeltas>,
     /// Column formatting deltas; `format: null` clears the override for that col.
     #[serde(default)]
-    pub col_formats: Option<Vec<SheetColFormatDelta>>,
+    pub col_formats: Option<LimitedSheetColFormatDeltas>,
     /// Replace range-run formatting for the specified columns (runs are replaced wholesale).
     #[serde(default)]
-    pub format_runs_by_col: Option<Vec<SheetFormatRunsByColDelta>>,
+    pub format_runs_by_col: Option<LimitedSheetFormatRunsByColDeltas>,
     /// Cell formatting deltas; `format: null` clears the override for that cell.
     #[serde(default)]
-    pub cell_formats: Option<Vec<SheetCellFormatDelta>>,
+    pub cell_formats: Option<LimitedSheetCellFormatDeltas>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -2547,7 +2843,7 @@ pub fn apply_sheet_formatting_deltas(
     if let Some(default_format) = payload.default_format {
         formatting_state.default_format = default_format.unwrap_or(JsonValue::Null);
     }
-    if let Some(deltas) = payload.row_formats {
+    if let Some(LimitedSheetRowFormatDeltas(deltas)) = payload.row_formats {
         for delta in deltas {
             if delta.row < 0 {
                 continue;
@@ -2559,7 +2855,7 @@ pub fn apply_sheet_formatting_deltas(
             }
         }
     }
-    if let Some(deltas) = payload.col_formats {
+    if let Some(LimitedSheetColFormatDeltas(deltas)) = payload.col_formats {
         for delta in deltas {
             if delta.col < 0 {
                 continue;
@@ -2571,13 +2867,14 @@ pub fn apply_sheet_formatting_deltas(
             }
         }
     }
-    if let Some(deltas) = payload.format_runs_by_col {
+    if let Some(LimitedSheetFormatRunsByColDeltas(deltas)) = payload.format_runs_by_col {
         for delta in deltas {
             if delta.col < 0 {
                 continue;
             }
             let mut runs = delta
                 .runs
+                .0
                 .into_iter()
                 .filter(|r| {
                     r.start_row >= 0 && r.end_row_exclusive > r.start_row && !r.format.is_null()
@@ -2602,7 +2899,7 @@ pub fn apply_sheet_formatting_deltas(
             }
         }
     }
-    if let Some(deltas) = payload.cell_formats {
+    if let Some(LimitedSheetCellFormatDeltas(deltas)) = payload.cell_formats {
         for delta in deltas {
             if delta.row < 0 || delta.col < 0 {
                 continue;
@@ -2619,10 +2916,10 @@ pub fn apply_sheet_formatting_deltas(
         }
     }
 
-    metadata_root.insert(
-        SHEET_FORMATTING_METADATA_KEY.to_string(),
-        serialize_formatting_state(formatting_state),
-    );
+    let next_formatting = serialize_formatting_state(formatting_state);
+    validate_sheet_formatting_metadata_size(&next_formatting)?;
+
+    metadata_root.insert(SHEET_FORMATTING_METADATA_KEY.to_string(), next_formatting);
     storage
         .set_sheet_metadata(sheet_uuid, Some(JsonValue::Object(metadata_root)))
         .map_err(|e| e.to_string())?;
@@ -5950,6 +6247,36 @@ mod tests {
     }
 
     #[test]
+    fn apply_sheet_formatting_deltas_request_rejects_too_many_runs_per_column() {
+        let max = crate::resource_limits::MAX_SHEET_FORMATTING_RUNS_PER_COL;
+
+        let mut runs = Vec::with_capacity(max + 1);
+        for idx in 0..=max {
+            runs.push(serde_json::json!({
+                "startRow": idx as i64,
+                "endRowExclusive": idx as i64 + 1,
+                "format": {}
+            }));
+        }
+
+        let value = serde_json::json!({
+            "sheetId": "Sheet1",
+            "formatRunsByCol": [{
+                "col": 0,
+                "runs": runs
+            }]
+        });
+
+        let err = serde_json::from_value::<ApplySheetFormattingDeltasRequest>(value)
+            .expect_err("expected run limit to be enforced during deserialization")
+            .to_string();
+        assert!(
+            err.contains("formatRunsByCol") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
     fn limited_vec_rejects_too_many_sheet_ids() {
         type ShortSheetId = LimitedString<4>;
         type SheetIds = LimitedVec<ShortSheetId, 4>;
@@ -5980,6 +6307,26 @@ mod tests {
         assert!(
             err.to_string().contains("max") && err.to_string().contains("4"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn sheet_formatting_metadata_size_check_rejects_oversized_payloads() {
+        let max = crate::resource_limits::MAX_SHEET_FORMATTING_METADATA_BYTES;
+
+        // JSON strings add 2 bytes for the surrounding quotes.
+        let ok = JsonValue::String("a".repeat(max.saturating_sub(2)));
+        assert!(
+            validate_sheet_formatting_metadata_size(&ok).is_ok(),
+            "expected max-sized payload to be accepted"
+        );
+
+        let too_big = JsonValue::String("a".repeat(max.saturating_sub(1)));
+        let err = validate_sheet_formatting_metadata_size(&too_big)
+            .expect_err("expected oversized payload to be rejected");
+        assert!(
+            err.contains("Sheet formatting metadata") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
         );
     }
 

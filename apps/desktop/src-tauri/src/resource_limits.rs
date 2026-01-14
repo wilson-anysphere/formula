@@ -135,3 +135,34 @@ pub const MAX_PYTHON_PROTOCOL_LINE_BYTES: usize = 1 * 1024 * 1024; // 1 MiB
 /// This is aligned with `MAX_RANGE_CELLS_PER_CALL` so a single "large range" operation doesn't
 /// immediately fail, but scripts that fan out to multiple large operations will be rejected.
 pub const MAX_PYTHON_UPDATES: usize = MAX_RANGE_CELLS_PER_CALL;
+
+/// Maximum number of row-formatting deltas accepted by `apply_sheet_formatting_deltas` in a single
+/// IPC call.
+///
+/// This bounds IPC allocations from untrusted WebView input and keeps the resulting persisted
+/// formatting snapshot reasonably sized.
+pub const MAX_SHEET_FORMATTING_ROW_DELTAS: usize = 50_000;
+
+/// Maximum number of column-formatting deltas accepted by `apply_sheet_formatting_deltas` in a
+/// single IPC call.
+pub const MAX_SHEET_FORMATTING_COL_DELTAS: usize = 20_000;
+
+/// Maximum number of cell-formatting deltas accepted by `apply_sheet_formatting_deltas` in a
+/// single IPC call.
+pub const MAX_SHEET_FORMATTING_CELL_DELTAS: usize = 200_000;
+
+/// Maximum number of columns that can have their range-run formatting replaced in a single
+/// `apply_sheet_formatting_deltas` call.
+pub const MAX_SHEET_FORMATTING_RUN_COLS: usize = 20_000;
+
+/// Maximum number of format runs allowed for a single column in `formatRunsByCol`.
+///
+/// Runs should be a compressed representation (ranges), so this can be kept fairly conservative.
+pub const MAX_SHEET_FORMATTING_RUNS_PER_COL: usize = 4_096;
+
+/// Maximum size (in bytes) of the per-sheet formatting metadata stored under
+/// `SHEET_FORMATTING_METADATA_KEY` (`formula_ui_formatting`).
+///
+/// The formatting snapshot is persisted into the workbook (and encrypted document store). This cap
+/// prevents a compromised WebView from writing arbitrarily large blobs to disk.
+pub const MAX_SHEET_FORMATTING_METADATA_BYTES: usize = 2 * 1024 * 1024; // 2 MiB
