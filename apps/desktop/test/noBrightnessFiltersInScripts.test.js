@@ -51,6 +51,8 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
 
   /** @type {{ re: RegExp, kind: string }[]} */
   const patterns = [
+    // CSS style strings (e.g. `style: "filter: brightness(0.9);"`).
+    { re: /\bfilter\s*:\s*(?<value>[^;"'`]*)/gi, kind: "filter" },
     // DOM style assignment (e.g. `el.style.filter = "brightness(0.9)"`)
     { re: /\.style\.filter\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.filter" },
     // setProperty("filter", "brightness(0.9)")
@@ -88,4 +90,3 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
     `Found brightness() filters in desktop UI scripts. Use tokens instead:\n${violations.map((v) => `- ${v}`).join("\n")}`,
   );
 });
-
