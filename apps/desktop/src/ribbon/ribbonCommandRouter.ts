@@ -4,6 +4,7 @@ import { isSpreadsheetEditingCommandBlockedError } from "../commands/spreadsheet
 import { PAGE_LAYOUT_COMMANDS } from "../commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "../commands/registerWorkbenchFileCommands.js";
 import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "../formatting/selectionSizeGuard.js";
 import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
@@ -121,7 +122,7 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
     }
 
     if (deps.app.isReadOnly?.() === true && !decision.allRangesBand) {
-      deps.showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+      showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
       safeFocusGrid(deps.app);
       return;
     }
