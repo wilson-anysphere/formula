@@ -692,3 +692,46 @@ test("buildContext: respects AbortSignal", async () => {
     name: "AbortError",
   });
 });
+
+test("buildContext: aborts if the signal is triggered while rendering attachment TSV previews", async () => {
+  const abortController = new AbortController();
+
+  const ragIndex = {
+    store: { size: 0 },
+    async indexSheet(sheet) {
+      // Return a minimal schema so ContextManager can build prompt sections without running
+      // schema inference on the sheet values (which could coerce cells to strings).
+      return {
+        schema: { name: sheet.name, tables: [], namedRanges: [], dataRegions: [] },
+        chunkCount: 0,
+      };
+    },
+    async search() {
+      return [];
+    },
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 10_000, ragIndex: /** @type {any} */ (ragIndex) });
+  const sheet = makeSheet([
+    [
+      {
+        toString() {
+          abortController.abort();
+          return "boom";
+        },
+      },
+    ],
+    ["still here"],
+  ]);
+
+  await assert.rejects(
+    cm.buildContext({
+      sheet,
+      query: "anything",
+      sampleRows: 0,
+      attachments: [{ type: "range", reference: "Sheet1!A1:A2" }],
+      signal: abortController.signal,
+    }),
+    { name: "AbortError" },
+  );
+});
