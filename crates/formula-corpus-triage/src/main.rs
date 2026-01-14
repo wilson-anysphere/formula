@@ -2209,6 +2209,56 @@ mod tests {
     }
 
     #[test]
+    fn strict_calc_chain_promotes_calcchain_diffs_to_critical() {
+        let expected = make_zip(&[("xl/workbook.xml", "<workbook/>")]);
+        let actual = make_zip(&[
+            ("xl/workbook.xml", "<workbook/>"),
+            ("xl/calcChain.xml", "<calcChain/>"),
+        ]);
+
+        let args = Args {
+            input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
+            password: None,
+            ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            ignore_paths_kind: Vec::new(),
+            ignore_paths_kind_in: Vec::new(),
+            ignore_presets: Vec::new(),
+            strict_calc_chain: false,
+            diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 1);
+        assert_eq!(details.counts.critical, 0);
+        assert_eq!(details.counts.warning, 1);
+        assert_eq!(details.top_differences.len(), 1);
+        assert_eq!(details.top_differences[0].part, "xl/calcChain.xml");
+        assert_eq!(details.top_differences[0].kind, "extra_part");
+        assert_eq!(details.top_differences[0].severity, "WARN");
+
+        let args = Args {
+            strict_calc_chain: true,
+            ..args
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 1);
+        assert_eq!(details.counts.critical, 1);
+        assert_eq!(details.counts.warning, 0);
+        assert_eq!(details.top_differences.len(), 1);
+        assert_eq!(details.top_differences[0].part, "xl/calcChain.xml");
+        assert_eq!(details.top_differences[0].kind, "extra_part");
+        assert_eq!(details.top_differences[0].severity, "CRITICAL");
+    }
+
+    #[test]
     fn skips_encrypted_workbooks_without_password_and_decrypts_with_password() {
         let password = "secret";
         let encrypted_bytes = encrypt_ooxml_agile(&plain_xlsx_bytes(), password);
