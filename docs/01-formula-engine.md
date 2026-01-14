@@ -185,6 +185,9 @@ engine expands the span into per-sheet keys using workbook sheet order returned 
 Expansion rules:
 
 * `workbook` is the raw string inside the brackets (e.g. `"Book.xlsx"` or `"C:\\path\\Book.xlsx"`).
+  * The engine currently treats the workbook identifier as an **opaque string** (no case folding,
+    no path normalization beyond the path-qualified ref canonicalization described below). Hosts
+    should normalize/match it as needed.
 * The returned sheet names must be **plain sheet names** (no `[workbook]` prefix).
 * Endpoint matching (`Sheet1` / `Sheet3`) is **case-insensitive**.
 * The returned sheet names are used **verbatim** (including case) when constructing per-sheet keys

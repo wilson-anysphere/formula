@@ -8286,6 +8286,10 @@ pub trait ExternalValueProvider: Send + Sync {
     /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"` or
     /// `"C:\\path\\Book.xlsx"`).
     ///
+    /// The engine currently treats workbook identifiers as opaque strings and does not perform any
+    /// additional normalization (case folding, path separator normalization, etc). Providers should
+    /// normalize/match this identifier as needed.
+    ///
     /// Returning `None` indicates that the sheet order is not available, in which case external
     /// 3D spans evaluate to `#REF!`.
     fn sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {
