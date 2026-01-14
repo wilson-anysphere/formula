@@ -367,6 +367,7 @@ export class DrawingOverlay {
   }
 
   resize(viewport: Viewport): void {
+    if (this.destroyed) return;
     this.canvas.width = Math.floor(viewport.width * viewport.dpr);
     this.canvas.height = Math.floor(viewport.height * viewport.dpr);
     this.canvas.style.width = `${viewport.width}px`;
@@ -1114,6 +1115,16 @@ export class DrawingOverlay {
     this.lastRenderArgs = null;
     this.pendingImageHydrations.clear();
     this.hydrationRerenderScheduled = false;
+
+    // Release the canvas backing store even if the DOM element is still referenced
+    // by a long-lived owner (tests/hot reload). Setting width/height resets the
+    // internal bitmap allocation.
+    try {
+      this.canvas.width = 0;
+      this.canvas.height = 0;
+    } catch {
+      // Best-effort: ignore canvas reset failures (e.g. mocked canvases).
+    }
   }
 
   /**

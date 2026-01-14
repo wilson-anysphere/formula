@@ -9,6 +9,7 @@ function createStubCanvasContext(): CanvasRenderingContext2D {
     drawImage: () => {},
     save: () => {},
     restore: () => {},
+    setTransform: () => {},
     beginPath: () => {},
     rect: () => {},
     clip: () => {},
@@ -358,5 +359,24 @@ describe("DrawingOverlay destroy()", () => {
 
     overlay.destroy();
     expect((overlay as any).spatialIndex.getObject(42)).toBeNull();
+  });
+
+  it("shrinks the canvas backing store on destroy", () => {
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const images: ImageStore = {
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+    overlay.resize(viewport);
+    expect(canvas.width).toBeGreaterThan(0);
+    expect(canvas.height).toBeGreaterThan(0);
+
+    overlay.destroy();
+    expect(canvas.width).toBe(0);
+    expect(canvas.height).toBe(0);
   });
 });
