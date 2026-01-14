@@ -49,10 +49,16 @@ fn extract_tauri_scheme_protocol_asset_resolver_block<'a>(handler_block: &'a str
     // This guardrail must ensure headers are applied on the *production* asset-serving path too.
     //
     // We avoid brittle brace parsing by slicing from the `asset_resolver().get(...)` call onwards.
+    //
+    // Prefer the explicit asset resolver call (current implementation), but fall back to
+    // `asset.csp_header` in case the resolver call is refactored into a helper function.
     let start_marker = "asset_resolver().get";
-    let start = handler_block.find(start_marker).unwrap_or_else(|| {
-        panic!("failed to find `{start_marker}` in the `tauri://` handler block")
-    });
+    let start = handler_block
+        .find(start_marker)
+        .or_else(|| handler_block.find("asset.csp_header"))
+        .unwrap_or_else(|| {
+            panic!("failed to find `{start_marker}` (or `asset.csp_header`) in the `tauri://` handler block")
+        });
 
     &handler_block[start..]
 }
