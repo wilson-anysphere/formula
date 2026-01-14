@@ -637,6 +637,116 @@ describe("SpreadsheetApp chart selection + drag", () => {
       else process.env.CANVAS_CHARTS = prior;
     }
   });
+
+  it("canvas charts mode: hit testing respects shared-grid pane clipping (frozen panes)", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Canvas Frozen Hit Test",
+        position: "A1",
+      });
+
+      const viewport = app.getDrawingInteractionViewport();
+      const originX = (viewport.headerOffsetX ?? 0) as number;
+      const originY = (viewport.headerOffsetY ?? 0) as number;
+
+      // This point is inside the chart bounds (it extends far beyond A1), but outside the
+      // top-left frozen pane (so it should not count as a hit because the chart is clipped).
+      dispatchPointerEvent(root, "pointerdown", { clientX: originX + 150, clientY: originY + 10, pointerId: 203 });
+      dispatchPointerEvent(root, "pointerup", { clientX: originX + 150, clientY: originY + 10, pointerId: 203 });
+      expect(app.getSelectedChartId()).toBe(null);
+
+      // This point lies in the visible (clipped) portion of the chart in the top-left pane.
+      dispatchPointerEvent(root, "pointerdown", { clientX: originX + 50, clientY: originY + 10, pointerId: 204 });
+      dispatchPointerEvent(root, "pointerup", { clientX: originX + 50, clientY: originY + 10, pointerId: 204 });
+      expect(app.getSelectedChartId()).toBe(result.chart_id);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
+
+  it("canvas charts mode: dragging a frozen chart into the scrollable pane accounts for scroll offsets", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 0, 1, { label: "Freeze Col" });
+      app.setScroll(200, 0);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Canvas Frozen Drag",
+        position: "A1",
+      });
+
+      const before = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(before).toBeTruthy();
+      expect(before!.anchor.kind).toBe("twoCell");
+
+      const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+      expect(rect).not.toBeNull();
+
+      const viewport = app.getDrawingInteractionViewport();
+      const originX = (viewport.headerOffsetX ?? 0) as number;
+      const originY = (viewport.headerOffsetY ?? 0) as number;
+
+      // Drag chart so its top-left ends up at x=150px in the cell-area (past the frozen boundary).
+      const startX = originX + rect.left + 10;
+      const startY = originY + rect.top + 10;
+      const endX = startX + (150 - rect.left);
+      const endY = startY;
+
+      dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 205 });
+      dispatchPointerEvent(root, "pointermove", { clientX: endX, clientY: endY, pointerId: 205 });
+      dispatchPointerEvent(root, "pointerup", { clientX: endX, clientY: endY, pointerId: 205 });
+
+      const after = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(after).toBeTruthy();
+      expect(after!.anchor.kind).toBe("twoCell");
+      const afterAnchor = after!.anchor as any;
+
+      // With scrollX=200, landing at x=150 should map to sheet-space x=350 => col 3.
+      expect(afterAnchor.fromCol).toBe(3);
+      expect(afterAnchor.toCol).toBe(8);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
 });
 
 describe("SpreadsheetApp chart selection + drag (legacy grid)", () => {
