@@ -328,6 +328,7 @@ def main() -> int:
                                     "expectations": str(expectations_path),
                                     "expectations_changed": False,
                                     "fixture_changed": False,
+                                    "needs_force": {"fixture": False, "expectations": False},
                                     "dry_run": args.dry_run,
                                     "triage_report": None,
                                     "skipped": "already_promoted",

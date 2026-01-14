@@ -564,7 +564,11 @@ class PromotePublicCLITests(unittest.TestCase):
                         rc = promote_mod.main()
                 self.assertEqual(rc, 0)
                 self.assertEqual(called["triage"], 0)
-                self.assertIn("already_promoted", stdout.getvalue())
+                out = json.loads(stdout.getvalue())
+                self.assertEqual(out.get("skipped"), "already_promoted")
+                needs_force = out.get("needs_force") or {}
+                self.assertEqual(needs_force.get("fixture"), False)
+                self.assertEqual(needs_force.get("expectations"), False)
             finally:
                 promote_mod._run_public_triage = original_run_public_triage  # type: ignore[assignment]
 
