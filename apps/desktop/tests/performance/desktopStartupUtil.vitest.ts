@@ -11,6 +11,7 @@ import {
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
   resolveDesktopStartupTargets,
+  sleep,
 } from './desktopStartupUtil.ts';
 
 describe('desktopStartupUtil parseStartupLine', () => {
@@ -228,6 +229,14 @@ describe('desktopStartupUtil buildBenchmarkResultFromValues', () => {
     expect(result.p99).toBe(3);
     expect(result.stdDev).toBeGreaterThan(0);
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('desktopStartupUtil sleep', () => {
+  it('rejects with "aborted" when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(sleep(1000, controller.signal)).rejects.toThrow('aborted');
   });
 });
 
