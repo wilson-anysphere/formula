@@ -1090,6 +1090,8 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   const requireRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+  const requireResolveRe = /\brequire\s*\.\s*resolve\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
+  const createRequireAssignRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*createRequire\s*\(/g;
   const candidateExtensions = opts.canExecuteTsx
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
     : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
@@ -1479,6 +1481,27 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
 
     /** @type {Array<{ specifier: string, typeOnly: boolean }>} */
     const imports = [];
+
+    /**
+     * `createRequire(...)` returns a CommonJS-style `require` function that can be named
+     * arbitrarily (e.g. `const requireFromHere = createRequire(...)`). Capture that alias so
+     * we can also detect missing workspace deps referenced via `alias("pkg")` /
+     * `alias.resolve("pkg")` in partial `node_modules` installs.
+     *
+     * @param {string} ident
+     */
+    function escapeIdent(ident) {
+      return ident.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    /** @type {Set<string>} */
+    const requireAliases = new Set();
+    if (text.includes("createRequire")) {
+      for (const match of text.matchAll(createRequireAssignRe)) {
+        const name = match[1];
+        if (name) requireAliases.add(name);
+      }
+    }
     for (const match of text.matchAll(importFromRe)) {
       const typeOnly = Boolean(match[1]);
       const specifier = match[2];
@@ -1499,6 +1522,26 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
     for (const match of text.matchAll(requireRe)) {
       const specifier = match[1];
       if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+    for (const match of text.matchAll(requireResolveRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+    for (const alias of requireAliases) {
+      const escaped = escapeIdent(alias);
+      const aliasRequireCallRe = new RegExp(`\\b${escaped}\\s*\\(\\s*["']([^"']+)["']\\s*\\)`, "g");
+      const aliasRequireResolveRe = new RegExp(
+        `\\b${escaped}\\s*\\.\\s*resolve\\(\\s*["']([^"']+)["']\\s*(?:\\)|,)`,
+        "g",
+      );
+      for (const match of text.matchAll(aliasRequireCallRe)) {
+        const specifier = match[1];
+        if (specifier) imports.push({ specifier, typeOnly: false });
+      }
+      for (const match of text.matchAll(aliasRequireResolveRe)) {
+        const specifier = match[1];
+        if (specifier) imports.push({ specifier, typeOnly: false });
+      }
     }
 
     for (const { specifier: raw, typeOnly } of imports) {
