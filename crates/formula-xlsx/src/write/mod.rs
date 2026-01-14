@@ -1410,12 +1410,18 @@ fn normalize_worksheet_comments(worksheet: &Worksheet) -> Vec<Comment> {
         .map(|(_, comment)| comment.clone())
         .collect();
     out.sort_by(|a, b| {
-        (a.cell_ref.row, a.cell_ref.col, comment_kind_rank(a.kind), &a.id).cmp(&(
-            b.cell_ref.row,
-            b.cell_ref.col,
-            comment_kind_rank(b.kind),
-            &b.id,
-        ))
+        (
+            a.cell_ref.row,
+            a.cell_ref.col,
+            comment_kind_rank(a.kind),
+            &a.id,
+        )
+            .cmp(&(
+                b.cell_ref.row,
+                b.cell_ref.col,
+                comment_kind_rank(b.kind),
+                &b.id,
+            ))
     });
     out
 }

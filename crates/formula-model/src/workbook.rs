@@ -72,7 +72,10 @@ pub struct Workbook {
     /// Workbook "ANSI" text codepage (BIFF `CODEPAGE` record).
     ///
     /// This is used when interpreting legacy 8-bit text (including Excel DBCS `*B` semantics).
-    #[serde(default = "default_codepage", skip_serializing_if = "is_default_codepage")]
+    #[serde(
+        default = "default_codepage",
+        skip_serializing_if = "is_default_codepage"
+    )]
     pub codepage: u16,
 
     /// Workbook theme palette used to resolve `Color::Theme` references.
@@ -577,7 +580,11 @@ impl Workbook {
             .pivot_tables
             .iter()
             .filter(|pivot| {
-                pivot_destination_is_on_sheet(&pivot.destination, source_sheet_id, source_sheet_name)
+                pivot_destination_is_on_sheet(
+                    &pivot.destination,
+                    source_sheet_id,
+                    source_sheet_name,
+                )
             })
             .cloned()
             .collect();
@@ -1570,10 +1577,12 @@ fn pivot_destination_is_on_sheet(
     match destination {
         PivotDestination::Cell { sheet_id: id, .. }
         | PivotDestination::Range { sheet_id: id, .. } => *id == sheet_id,
-        PivotDestination::CellName { sheet_name: name, .. }
-        | PivotDestination::RangeName { sheet_name: name, .. } => {
-            crate::formula_rewrite::sheet_name_eq_case_insensitive(name, sheet_name)
+        PivotDestination::CellName {
+            sheet_name: name, ..
         }
+        | PivotDestination::RangeName {
+            sheet_name: name, ..
+        } => crate::formula_rewrite::sheet_name_eq_case_insensitive(name, sheet_name),
     }
 }
 

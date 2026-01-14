@@ -371,6 +371,85 @@ pub enum ShowAsType {
     RankDescending,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// Layout options for how pivot row fields are rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    Compact,
+    Outline,
+    #[default]
+    Tabular,
+}
+
+/// Where subtotals are displayed within grouped pivot output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    Top,
+    Bottom,
+    #[default]
+    None,
+}
+
+/// Grand totals configuration for a pivot table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    #[serde(default = "default_true")]
+    pub rows: bool,
+    #[serde(default = "default_true")]
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+/// A report-filter field (the "Filters" area) in a pivot table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed item set (modeled as key parts so we can compare values across IPC boundaries).
+    ///
+    /// `None` means "(All)" / no filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+/// Canonical persisted pivot table configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub row_fields: Vec<PivotField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub column_fields: Vec<PivotField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub value_fields: Vec<ValueField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_fields: Vec<FilterField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculated_items: Vec<CalculatedItem>,
+    #[serde(default)]
+    pub layout: Layout,
+    #[serde(default)]
+    pub subtotals: SubtotalPosition,
+    #[serde(default)]
+    pub grand_totals: GrandTotals,
+}
+
 /// Configuration for a pivot table value field.
 ///
 /// This struct is part of the canonical pivot model (IPC/serialization friendly).
