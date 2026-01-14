@@ -469,9 +469,9 @@ impl CreatePivotTableRequest {
                 .into_iter()
                 .map(|vf| {
                     let field = vf.field;
-                    let name =
-                        vf.name
-                            .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, field));
+                    let name = vf
+                        .name
+                        .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, &field));
                     ValueField {
                         name,
                         source_field: PivotFieldRef::CacheFieldName(field),
@@ -1365,12 +1365,12 @@ impl PivotEngine {
     ) -> Option<CalculatedItemPlacement> {
         cfg.row_fields
             .iter()
-            .position(|f| matches!(&f.source_field, PivotFieldRef::CacheFieldName(name) if name == field))
+            .position(|f| f.source_field.as_cache_field_name() == Some(field))
             .map(CalculatedItemPlacement::Row)
             .or_else(|| {
                 cfg.column_fields
                     .iter()
-                    .position(|f| matches!(&f.source_field, PivotFieldRef::CacheFieldName(name) if name == field))
+                    .position(|f| f.source_field.as_cache_field_name() == Some(field))
                     .map(CalculatedItemPlacement::Column)
             })
     }

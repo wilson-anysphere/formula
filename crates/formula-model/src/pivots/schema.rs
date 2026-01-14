@@ -31,6 +31,17 @@ impl PivotFieldRef {
             _ => None,
         }
     }
+
+    /// Best-effort, human-friendly string representation of this ref.
+    ///
+    /// This is intended for diagnostics and UI; it is not a stable serialization format.
+    pub fn display_string(&self) -> String {
+        match self {
+            PivotFieldRef::CacheFieldName(name) => name.clone(),
+            PivotFieldRef::DataModelColumn { table, column } => format!("{table}[{column}]"),
+            PivotFieldRef::DataModelMeasure(name) => format!("[{name}]"),
+        }
+    }
 }
 
 impl fmt::Display for PivotFieldRef {
