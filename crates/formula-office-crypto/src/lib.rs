@@ -24,7 +24,7 @@ const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 ///
 /// `spinCount` is attacker-controlled in Agile-encrypted files; bounding it avoids CPU DoS from
 /// maliciously large values (Excel commonly uses 100,000).
-pub const DEFAULT_MAX_SPIN_COUNT: u32 = 10_000_000;
+pub const DEFAULT_MAX_SPIN_COUNT: u32 = 1_000_000;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum EncryptionScheme {

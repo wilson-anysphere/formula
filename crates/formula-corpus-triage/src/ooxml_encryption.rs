@@ -11,7 +11,7 @@ const BLOCK_KEY_VERIFIER_HASH: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x
 const BLOCK_KEY_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
 
 const ENCRYPTED_PACKAGE_CHUNK_SIZE: usize = 4096;
-const DEFAULT_MAX_SPIN_COUNT: u32 = 10_000_000;
+const DEFAULT_MAX_SPIN_COUNT: u32 = 1_000_000;
 
 #[derive(Debug, Copy, Clone)]
 enum HashAlgorithm {
