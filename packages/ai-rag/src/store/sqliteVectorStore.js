@@ -5,6 +5,49 @@ import { throwIfAborted } from "../utils/abort.js";
 const SCHEMA_VERSION = 2;
 
 function locateSqlJsFile(file, prefix = "") {
+  const isNodeLike = (() => {
+    try {
+      // `sql.js` uses a different loading strategy under Node (fs) vs browsers (fetch).
+      // Vitest runs ESM modules through Vite transforms which can rewrite module URLs into
+      // `/@fs/...` paths; those are valid *URLs* in the dev server, but not valid file-system
+      // paths. When we detect Node, normalize those paths back to real on-disk paths so
+      // sql.js can locate `sql-wasm.wasm` without throwing ENOENT.
+      // eslint-disable-next-line no-undef
+      return typeof process !== "undefined" && Boolean(process?.versions?.node);
+    } catch {
+      return false;
+    }
+  })();
+
+  const viteFsUrlToPath = (value) => {
+    if (!isNodeLike || typeof value !== "string") return null;
+    const normalizePathname = (pathname) => {
+      let out = decodeURIComponent(String(pathname ?? ""));
+      if (!out.startsWith("/")) out = `/${out}`;
+      // Windows file URLs can look like `/C:/...`; strip the leading slash.
+      if (/^\/[A-Za-z]:\//.test(out)) out = out.slice(1);
+      return out;
+    };
+
+    // Vite's dev server exposes absolute paths under `/@fs/<abs-path>`.
+    if (value.startsWith("/@fs/")) return normalizePathname(value.slice(4));
+    if (value.startsWith("@fs/")) return normalizePathname(value.slice(3));
+    // Some toolchains can accidentally join the `/@fs/...` path against a working directory,
+    // producing something like `/cwd/@fs/<abs-path>`. Detect and normalize those too.
+    const embedded = value.indexOf("/@fs/");
+    if (embedded !== -1) return normalizePathname(value.slice(embedded + 4));
+
+    // Some environments can hand us a full URL (e.g. `http://.../@fs/...`).
+    try {
+      const url = new URL(value);
+      if (url.pathname.startsWith("/@fs/")) return normalizePathname(url.pathname.slice(4));
+    } catch {
+      // ignore
+    }
+
+    return null;
+  };
+
   try {
     if (typeof import.meta.resolve === "function") {
       const resolved = import.meta.resolve(`sql.js/dist/${file}`);
@@ -14,6 +57,8 @@ function locateSqlJsFile(file, prefix = "") {
           if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
           return pathname;
         }
+        const vitePath = viteFsUrlToPath(resolved);
+        if (vitePath) return vitePath;
         return resolved;
       }
     }
@@ -22,7 +67,14 @@ function locateSqlJsFile(file, prefix = "") {
   }
   // Emscripten calls locateFile(path, prefix). When we can't fully resolve,
   // preserve the default behaviour (prefix + path).
-  return prefix ? `${prefix}${file}` : file;
+  if (prefix) {
+    const vitePrefix = viteFsUrlToPath(prefix);
+    if (vitePrefix) return `${vitePrefix}${file}`;
+    return `${prefix}${file}`;
+  }
+  const viteFile = viteFsUrlToPath(file);
+  if (viteFile) return viteFile;
+  return file;
 }
 
 const sqlJsPromises = new Map();

@@ -777,6 +777,9 @@ export class DrawingOverlay {
         screenRectScratch.y = rect.y - scrollY + headerOffsetY;
         screenRectScratch.width = rect.width;
         screenRectScratch.height = rect.height;
+        // Zero-size drawings can exist transiently (tests, partially-hydrated/corrupt documents).
+        // Skip decoding/raster work for them since there's nothing to draw.
+        if (!(screenRectScratch.width > 0 && screenRectScratch.height > 0)) continue;
         const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
@@ -815,6 +818,7 @@ export class DrawingOverlay {
         screenRectScratch.y = rect.y - scrollY + headerOffsetY;
         screenRectScratch.width = rect.width;
         screenRectScratch.height = rect.height;
+        if (!(screenRectScratch.width > 0 && screenRectScratch.height > 0)) continue;
         const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
         if (selectedId != null && obj.id === selectedId) {

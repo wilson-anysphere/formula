@@ -85,7 +85,15 @@ function coerceViteUrlToNodeFileUrl(href: string): string {
   // file:// URL rooted at the repository cwd.
   if (href.startsWith("/")) {
     const cwd = typeof (globalThis as any).process?.cwd === "function" ? (globalThis as any).process.cwd() : "";
-    if (cwd) return `file://${cwd}${href}`;
+    if (cwd) {
+      // Normalize Windows backslashes to URL-friendly forward slashes.
+      const cwdUrlPath = String(cwd).replace(/\\/g, "/");
+      const combined = `${cwdUrlPath}${href}`;
+      // If we ended up with a drive-letter path (e.g. `C:/...`), prefix `/` so the file URL
+      // uses a path component rather than treating `C:` as a hostname.
+      const urlPath = /^[A-Za-z]:\//.test(combined) ? `/${combined}` : combined;
+      return `file://${urlPath}`;
+    }
   }
 
   return href;
