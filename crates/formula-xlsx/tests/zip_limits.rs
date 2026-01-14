@@ -181,3 +181,29 @@ fn xlsxpackage_from_bytes_limited_enforces_total_budget() {
         ),
     }
 }
+
+#[test]
+fn xlsxpackage_from_bytes_limited_does_not_trust_zip_uncompressed_size_metadata_for_total_budget() {
+    // Create an 11-byte payload but forge the ZIP headers to claim the uncompressed size is only
+    // 10 bytes. When the total budget is 10 bytes, the package loader should still reject the
+    // entry after observing >10 bytes while reading, rather than trusting metadata alone.
+    let bytes = build_zip_bytes(&[("xl/a.bin", b"0123456789A")]); // 11 bytes
+    let bytes = patch_zip_entry_uncompressed_size(bytes, "xl/a.bin", 10);
+
+    let limits = XlsxPackageLimits {
+        max_part_bytes: 20,
+        max_total_bytes: 10,
+    };
+    let err = XlsxPackage::from_bytes_limited(&bytes, limits)
+        .expect_err("expected total-budget error");
+    match err {
+        XlsxError::PackageTooLarge { total, max } => {
+            assert_eq!(max, 10);
+            assert!(
+                total > max,
+                "expected reported total ({total}) to exceed max ({max})"
+            );
+        }
+        other => panic!("expected XlsxError::PackageTooLarge, got {other:?}"),
+    }
+}
