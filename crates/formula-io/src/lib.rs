@@ -1185,6 +1185,7 @@ pub fn open_workbook_model_with_password(
         }
         return open_workbook_model(path);
     };
+
     open_workbook_model_with_options(
         path,
         OpenOptions {
@@ -2651,7 +2652,6 @@ mod tests {
                 new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
-                clear_formula: false,
             });
 
             // Formula that evaluates to the error literal as a constant (PtgErr).
@@ -2665,7 +2665,6 @@ mod tests {
                 new_formula_flags: None,
                 shared_string_index: None,
                 new_style: None,
-                clear_formula: false,
             });
 
             // Validate after conversion.
