@@ -5945,6 +5945,8 @@ export class SpreadsheetApp {
       else accepted.push(file);
     }
 
+    const oversizedDimensions: Array<{ name: string; width: number; height: number }> = [];
+
     const toastSkippedOversized = () => {
       if (oversized.length === 0) return;
       const mb = Math.round(MAX_INSERT_IMAGE_BYTES / 1024 / 1024);
@@ -5961,8 +5963,31 @@ export class SpreadsheetApp {
       }
     };
 
+    const toastSkippedOversizedDimensions = () => {
+      if (oversizedDimensions.length === 0) return;
+      if (oversizedDimensions.length === 1) {
+        const entry = oversizedDimensions[0]!;
+        try {
+          showToast(`Image dimensions too large (${entry.width}x${entry.height}). Choose a smaller image.`, "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
+
+      const message = `Skipped ${oversizedDimensions.length} images with large dimensions: ${oversizedDimensions
+        .map((e) => (typeof e.name === "string" && e.name.trim() ? e.name.trim() : "unnamed"))
+        .join(", ")}`;
+      try {
+        showToast(message, "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+    };
+
     if (accepted.length === 0) {
       toastSkippedOversized();
+      toastSkippedOversizedDimensions();
       return;
     }
 
@@ -6124,10 +6149,32 @@ export class SpreadsheetApp {
     };
     const drawingIds = accepted.map(() => allocateDrawingId());
 
-    const prepared = await mapWithConcurrencyLimit(accepted, MAX_CONCURRENT_DECODES, async (file, i) => {
+    type PreparedPictureResult =
+      | { kind: "ok"; imageEntry: ImageEntry; drawing: DrawingObject }
+      | { kind: "skippedDimensions"; name: string; width: number; height: number };
+
+    const preparedResults = await mapWithConcurrencyLimit(
+      accepted,
+      MAX_CONCURRENT_DECODES,
+      async (file, i): Promise<PreparedPictureResult> => {
       const bytes = await readFileBytes(file);
       if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
         throw new Error(`File is too large (${bytes.byteLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
+      }
+
+      // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
+      const dims = readPngDimensions(bytes);
+      if (dims) {
+        const MAX_DIMENSION = 10_000;
+        const MAX_PIXELS = 50_000_000;
+        if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
+          return {
+            kind: "skippedDimensions",
+            name: typeof file?.name === "string" ? file.name : "",
+            width: dims.width,
+            height: dims.height,
+          };
+        }
       }
 
       const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
@@ -6198,8 +6245,21 @@ export class SpreadsheetApp {
         size: anchor.size,
       };
 
-      return { imageEntry, drawing };
-    });
+      return { kind: "ok", imageEntry, drawing };
+    },
+    );
+
+    const prepared: Array<{ imageEntry: ImageEntry; drawing: DrawingObject }> = [];
+    for (const entry of preparedResults) {
+      if (entry.kind === "ok") prepared.push({ imageEntry: entry.imageEntry, drawing: entry.drawing });
+      else oversizedDimensions.push({ name: entry.name, width: entry.width, height: entry.height });
+    }
+
+    if (prepared.length === 0) {
+      toastSkippedOversized();
+      toastSkippedOversizedDimensions();
+      return;
+    }
 
     this.document.beginBatch({ label: "Insert Picture" });
     try {
@@ -6246,6 +6306,7 @@ export class SpreadsheetApp {
       docAny.setSheetDrawings(sheetId, nextDrawings, { label: "Insert Picture" });
       this.document.endBatch();
       toastSkippedOversized();
+      toastSkippedOversizedDimensions();
     } catch (err) {
       this.document.cancelBatch();
       throw err;

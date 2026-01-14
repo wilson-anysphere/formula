@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
+import * as ui from "../../extensions/ui.js";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -182,6 +183,40 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
     await app.insertPicturesFromFiles([file]);
 
     expect(app.getSelectedChartId()).toBeNull();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("skips PNGs with extremely large dimensions and shows a toast", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    // Construct a minimal PNG header with an oversized IHDR width.
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    png.set([0x49, 0x48, 0x44, 0x52], 12); // IHDR
+    // width=10001, height=1 (big-endian)
+    png.set([0x00, 0x00, 0x27, 0x11], 16);
+    png.set([0x00, 0x00, 0x00, 0x01], 20);
+
+    const file = new File([png], "huge.png", { type: "image/png" });
+
+    const setSpy = vi.spyOn(app.getDrawingImages(), "set");
+    await app.insertPicturesFromFiles([file]);
+
+    expect(setSpy).not.toHaveBeenCalled();
+    expect((app.getDocument() as any).getSheetDrawings(sheetId)).toHaveLength(0);
+    expect(toastSpy).toHaveBeenCalledWith("Image dimensions too large (10001x1). Choose a smaller image.", "warning");
 
     app.destroy();
     root.remove();
