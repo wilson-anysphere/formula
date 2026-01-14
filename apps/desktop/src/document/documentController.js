@@ -1337,7 +1337,7 @@ function shiftFormatRunsByColForRowBandColumnShift(formatRunsByCol, params) {
  * @returns {number}
  */
 function normalizeFrozenCount(value) {
-  const num = Number(value);
+  const num = Number(unwrapSingletonId(value));
   if (!Number.isFinite(num)) return 0;
   return Math.max(0, Math.trunc(num));
 }
@@ -1474,7 +1474,7 @@ function stableDeepEqual(a, b) {
  */
 function normalizeSheetViewState(view) {
   const normalizeAxisSize = (value) => {
-    const num = Number(value);
+    const num = Number(unwrapSingletonId(value));
     if (!Number.isFinite(num)) return null;
     if (num <= 0) return null;
     return num;
@@ -1501,7 +1501,11 @@ function normalizeSheetViewState(view) {
     // - { regions: Array<{ range: {...} }> } (formula-model shape)
     /** @type {any[]} */
     const entries = (() => {
-      if (Array.isArray(raw)) return raw;
+      if (Array.isArray(raw)) {
+        // Some interop layers may wrap arrays as singleton arrays-of-arrays.
+        if (raw.length === 1 && Array.isArray(raw[0])) return raw[0];
+        return raw;
+      }
       if (typeof raw === "object" && Array.isArray(raw?.regions)) {
         return raw.regions.map((r) => r?.range ?? r);
       }
@@ -1517,10 +1521,10 @@ function normalizeSheetViewState(view) {
     for (const entry of entries) {
       if (!entry) continue;
       const range = entry?.range ?? entry;
-      const startRowNum = Number(range?.startRow ?? range?.start?.row);
-      const endRowNum = Number(range?.endRow ?? range?.end?.row);
-      const startColNum = Number(range?.startCol ?? range?.start?.col);
-      const endColNum = Number(range?.endCol ?? range?.end?.col);
+      const startRowNum = Number(unwrapSingletonId(range?.startRow ?? range?.start?.row));
+      const endRowNum = Number(unwrapSingletonId(range?.endRow ?? range?.end?.row));
+      const startColNum = Number(unwrapSingletonId(range?.startCol ?? range?.start?.col));
+      const endColNum = Number(unwrapSingletonId(range?.endCol ?? range?.end?.col));
       if (!Number.isInteger(startRowNum) || startRowNum < 0) continue;
       if (!Number.isInteger(endRowNum) || endRowNum < 0) continue;
       if (!Number.isInteger(startColNum) || startColNum < 0) continue;
@@ -1572,7 +1576,7 @@ function normalizeSheetViewState(view) {
       for (const entry of raw) {
         const index = Array.isArray(entry) ? entry[0] : entry?.index;
         const size = Array.isArray(entry) ? entry[1] : entry?.size;
-        const idx = Number(index);
+        const idx = Number(unwrapSingletonId(index));
         if (!Number.isInteger(idx) || idx < 0) continue;
         const normalized = normalizeAxisSize(size);
         if (normalized == null) continue;

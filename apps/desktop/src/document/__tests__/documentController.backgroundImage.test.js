@@ -110,3 +110,33 @@ test("applyState accepts singleton-wrapped backgroundImageId (interop)", () => {
   assert.equal(doc.getSheetBackgroundImageId("Sheet1"), "bg.png");
   assert.equal(doc.getSheetView("Sheet1").backgroundImageId, "bg.png");
 });
+
+test("applyExternalSheetViewDeltas accepts singleton-wrapped frozen counts (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalSheetViewDeltas([
+    {
+      sheetId: "Sheet1",
+      before: { frozenRows: 0, frozenCols: 0 },
+      after: { frozenRows: { 0: 2 }, frozenCols: [1] },
+    },
+  ]);
+
+  assert.equal(doc.getSheetView("Sheet1").frozenRows, 2);
+  assert.equal(doc.getSheetView("Sheet1").frozenCols, 1);
+});
+
+test("applyState accepts singleton-wrapped frozen counts (interop)", () => {
+  const doc = new DocumentController();
+
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      sheets: [{ id: "Sheet1", cells: [], frozenRows: { 0: 2 }, frozenCols: [1] }],
+      sheetOrder: ["Sheet1"],
+    }),
+  );
+
+  doc.applyState(snapshot);
+  assert.equal(doc.getSheetView("Sheet1").frozenRows, 2);
+  assert.equal(doc.getSheetView("Sheet1").frozenCols, 1);
+});

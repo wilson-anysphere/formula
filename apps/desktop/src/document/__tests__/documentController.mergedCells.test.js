@@ -64,3 +64,30 @@ test("encodeState/applyState roundtrip preserves merged cells", () => {
   assert.deepEqual(restored.getMergedRanges("Sheet1"), doc.getMergedRanges("Sheet1"));
 });
 
+test("applyState accepts singleton-wrapped mergedRanges coordinates (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          view: {
+            mergedRanges: [
+              { startRow: { 0: 0 }, endRow: [1], startCol: { 0: 0 }, endCol: [1] },
+            ],
+          },
+        },
+      ],
+      sheetOrder: ["Sheet1"],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
+});
