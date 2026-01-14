@@ -8237,6 +8237,15 @@ impl PivotRefreshContext for Engine {
     fn clear_range(&mut self, sheet: &str, range: Range) -> Result<(), EngineError> {
         Engine::clear_range(self, sheet, range, false)
     }
+
+    fn set_range_values(
+        &mut self,
+        sheet: &str,
+        range: Range,
+        values: &[Vec<Value>],
+    ) -> Result<(), EngineError> {
+        Engine::set_range_values(self, sheet, range, values, false)
+    }
 }
 
 fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {

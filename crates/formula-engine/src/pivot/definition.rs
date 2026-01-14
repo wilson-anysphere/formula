@@ -15,7 +15,10 @@ use crate::CellAddr;
 use formula_model::{sheet_name_eq_case_insensitive, CellRef, Range, Style, EXCEL_MAX_COLS};
 
 use super::source::coerce_pivot_value_with_number_format;
-use super::{PivotApplyOptions, PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult, PivotValue};
+use super::{
+    Layout, PivotApplyOptions, PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult,
+    PivotValue, ShowAsType,
+};
 
 /// Stable identifier for a pivot table stored in the engine.
 ///
@@ -580,6 +583,50 @@ pub(crate) trait PivotRefreshContext {
         }
         Ok(())
     }
+
+    /// Bulk-apply a rectangular range of values.
+    ///
+    /// Default implementation falls back to per-cell [`PivotRefreshContext::write_cell`] calls.
+    fn set_range_values(
+        &mut self,
+        sheet: &str,
+        range: Range,
+        values: &[Vec<crate::value::Value>],
+    ) -> Result<(), crate::EngineError> {
+        let expected_rows = range.height() as usize;
+        let expected_cols = range.width() as usize;
+
+        if values.len() != expected_rows {
+            let actual_cols = values.get(0).map(|row| row.len()).unwrap_or(0);
+            return Err(crate::EngineError::RangeValuesDimensionMismatch {
+                expected_rows,
+                expected_cols,
+                actual_rows: values.len(),
+                actual_cols,
+            });
+        }
+        for row in values {
+            if row.len() != expected_cols {
+                return Err(crate::EngineError::RangeValuesDimensionMismatch {
+                    expected_rows,
+                    expected_cols,
+                    actual_rows: values.len(),
+                    actual_cols: row.len(),
+                });
+            }
+        }
+
+        for (r_off, row_values) in values.iter().enumerate() {
+            let row = range.start.row + r_off as u32;
+            for (c_off, value) in row_values.iter().enumerate() {
+                let col = range.start.col + c_off as u32;
+                let addr = CellRef::new(row, col).to_a1();
+                self.write_cell(sheet, &addr, value.clone())?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub(crate) fn refresh_pivot(
@@ -640,41 +687,79 @@ pub(crate) fn refresh_pivot(
 
     let prev_output_range = def.last_output_range;
 
-    let pivot_cell_writes = result.to_cell_writes_with_formats(
-        super::CellRef {
-            row: def.destination.cell.row,
-            col: def.destination.cell.col,
-        },
-        &def.config,
-        &PivotApplyOptions {
-            apply_number_formats: def.apply_number_formats,
-            ..PivotApplyOptions::default()
-        },
-    );
+    let options = PivotApplyOptions {
+        apply_number_formats: def.apply_number_formats,
+        ..PivotApplyOptions::default()
+    };
+    let value_field_count = def.config.value_fields.len();
+    let row_label_width = match def.config.layout {
+        Layout::Compact => 1,
+        Layout::Outline | Layout::Tabular => def.config.row_fields.len(),
+    };
 
+    // Apply styles first so "precision as displayed" rounding (when enabled) sees the final number
+    // formats when we write values below.
     let mut style_cache: HashMap<String, u32> = HashMap::new();
     let date_system = ctx.date_system();
+    let mut values: Vec<Vec<crate::value::Value>> = Vec::with_capacity(rows as usize);
 
-    for write in pivot_cell_writes {
-        let addr = CellRef::new(write.row, write.col).to_a1();
+    for r in 0..rows as usize {
+        let mut row_out: Vec<crate::value::Value> = Vec::with_capacity(cols as usize);
+        let src_row = result.data.get(r);
+        for c in 0..cols as usize {
+            let pv = src_row
+                .and_then(|row| row.get(c))
+                .cloned()
+                .unwrap_or(PivotValue::Blank);
 
-        if let Some(fmt) = write.number_format.as_deref() {
-            let style_id = *style_cache.entry(fmt.to_string()).or_insert_with(|| {
-                ctx.intern_style(Style {
-                    number_format: Some(fmt.to_string()),
-                    ..Style::default()
-                })
-            });
-            ctx.set_cell_style_id(&def.destination.sheet, &addr, style_id)
-                .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
+            let number_format: Option<&str> = if matches!(pv, PivotValue::Date(_)) {
+                Some(options.default_date_number_format.as_str())
+            } else if options.apply_number_formats
+                && r > 0
+                && value_field_count > 0
+                && c >= row_label_width
+            {
+                let vf_idx = (c - row_label_width) % value_field_count;
+                let vf = &def.config.value_fields[vf_idx];
+                if let Some(fmt) = vf.number_format.as_deref() {
+                    Some(fmt)
+                } else if is_percent_show_as(vf.show_as) {
+                    Some(options.default_percent_number_format.as_str())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(fmt) = number_format {
+                let style_id = match style_cache.get(fmt) {
+                    Some(id) => *id,
+                    None => {
+                        let style_id = ctx.intern_style(Style {
+                            number_format: Some(fmt.to_string()),
+                            ..Style::default()
+                        });
+                        style_cache.insert(fmt.to_string(), style_id);
+                        style_id
+                    }
+                };
+                let addr = CellRef::new(
+                    def.destination.cell.row + r as u32,
+                    def.destination.cell.col + c as u32,
+                )
+                .to_a1();
+                ctx.set_cell_style_id(&def.destination.sheet, &addr, style_id)
+                    .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
+            }
+
+            row_out.push(pivot_value_to_engine_value(pv, date_system));
         }
-
-        // Write values after styles so "precision as displayed" rounding (when enabled) uses the
-        // final number format.
-        let v = pivot_value_to_engine_value(write.value, date_system);
-        ctx.write_cell(&def.destination.sheet, &addr, v)
-            .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
+        values.push(row_out);
     }
+
+    ctx.set_range_values(&def.destination.sheet, output_range, &values)
+        .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
 
     // Clear any stale cells from the previous output footprint that now fall outside the updated
     // output range.
@@ -734,6 +819,17 @@ fn pivot_value_to_engine_value(value: PivotValue, date_system: ExcelDateSystem) 
             }
         }
     }
+}
+
+fn is_percent_show_as(show_as: Option<ShowAsType>) -> bool {
+    matches!(
+        show_as.unwrap_or(ShowAsType::Normal),
+        ShowAsType::PercentOfGrandTotal
+            | ShowAsType::PercentOfRowTotal
+            | ShowAsType::PercentOfColumnTotal
+            | ShowAsType::PercentOf
+            | ShowAsType::PercentDifferenceFrom
+    )
 }
 
 fn stale_ranges(prev: Range, next: Range) -> Vec<Range> {
