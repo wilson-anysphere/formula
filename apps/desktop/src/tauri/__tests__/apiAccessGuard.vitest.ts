@@ -55,7 +55,7 @@ function collectTauriAliases(content: string): TauriAliasSets {
   // nested properties like `__TAURI__.core.invoke`), so we can then flag `tauri.dialog` /
   // `tauri.window` / `tauri.event` access even when the file doesn't mention `__TAURI__` again.
   const tauriRootAssignRe =
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__|__TAURI__)\b(?!\s*(?:\?\.|\.|\[))/g;
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__\b|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__\b|__TAURI__\b|\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]|(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\])(?!(?:\s*(?:\?\.|\.|\[)))/g;
 
   let match: RegExpExecArray | null = null;
   while ((match = tauriRootAssignRe.exec(content)) != null) {
@@ -67,7 +67,7 @@ function collectTauriAliases(content: string): TauriAliasSets {
   // Capture aliases to the plugin container objects:
   //   const plugin = (globalThis as any).__TAURI__?.plugin;
   const tauriPluginAssignRe =
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__|__TAURI__)\s*(?:\?\.|\.)\s*(plugin|plugins)\b(?!\s*(?:\?\.|\.|\[))/g;
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__|__TAURI__|\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]|(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\])\s*(?:\?\.|\.)\s*(plugin|plugins)\b(?!\s*(?:\?\.|\.|\[))/g;
 
   while ((match = tauriPluginAssignRe.exec(content)) != null) {
     const name = match[1];
@@ -145,31 +145,50 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*event\b/,
       /\b__TAURI__\s*(?:\?\.|\.)\s*plugin\s*(?:\?\.|\.)\s*event\b/,
       /\b__TAURI__\s*(?:\?\.|\.)\s*plugins\s*(?:\?\.|\.)\s*event\b/,
+      // Bracket access to the __TAURI__ global itself (e.g. globalThis["__TAURI__"].event).
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*event\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*plugin\s*(?:\?\.|\.)\s*event\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*plugins\s*(?:\?\.|\.)\s*event\b/,
       // Bracket access variants: __TAURI__["event"] / __TAURI__?.["event"] / __TAURI__["plugin"]["event"].
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]event['"]\s*\]/,
 
       // Window API access should go through getTauriWindowHandleOr{Null,Throw} or hasTauriWindow* helpers.
       /\b__TAURI__\s*(?:\?\.)\s*window\b/,
       /\b__TAURI__\s*\.\s*window\b/,
       /\b__TAURI__\s*(?:\?\.|\.)\s*plugin\s*(?:\?\.|\.)\s*window\b/,
       /\b__TAURI__\s*(?:\?\.|\.)\s*plugins\s*(?:\?\.|\.)\s*window\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*window\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*plugin\s*(?:\?\.|\.)\s*window\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*plugins\s*(?:\?\.|\.)\s*window\b/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
 
       // Dialog API access should go through tauri/api helpers (or `nativeDialogs` where appropriate).
       /\b__TAURI__\s*(?:\?\.)\s*dialog\b/,
       /\b__TAURI__\s*\.\s*dialog\b/,
       /\b__TAURI__\s*(?:\?\.|\.)\s*plugin\s*(?:\?\.|\.)\s*dialog\b/,
       /\b__TAURI__\s*(?:\?\.|\.)\s*plugins\s*(?:\?\.|\.)\s*dialog\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*dialog\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*plugin\s*(?:\?\.|\.)\s*dialog\b/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.|\.)\s*plugins\s*(?:\?\.|\.)\s*dialog\b/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
+      /\b(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
 
       // Destructuring patterns: `const { dialog } = globalThis.__TAURI__;`
-      /\b(?:const|let|var)\s*\{[\s\S]*?\b(?:dialog|event|window)\b[\s\S]*?\}\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__|__TAURI__)\b/,
+      /\b(?:const|let|var)\s*\{[\s\S]*?\b(?:dialog|event|window)\b[\s\S]*?\}\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__\b|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__\b|__TAURI__\b|\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]|(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\])/,
     ];
 
     for (const absPath of files) {
