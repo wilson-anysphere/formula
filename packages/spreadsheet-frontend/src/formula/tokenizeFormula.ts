@@ -322,6 +322,30 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
   return null;
 }
 
+function tryReadQuotedIdentifier(input: string, start: number): { text: string; end: number } | null {
+  if (input[start] !== "'") return null;
+
+  // Quoted identifiers use Excel-style escaping where `''` represents a literal `'` inside the
+  // identifier. This is primarily used for quoted sheet names (`'My Sheet'!A1`), but workbook-scoped
+  // external defined-name references are also commonly represented as a single quoted token:
+  //   `'[Book.xlsx]MyName'`
+  // so we tokenize it as an `identifier` for syntax highlighting.
+  let i = start + 1;
+  while (i < input.length) {
+    if (input[i] === "'") {
+      if (input[i + 1] === "'") {
+        i += 2;
+        continue;
+      }
+      return { text: input.slice(start, i + 1), end: i + 1 };
+    }
+    i += 1;
+  }
+
+  // Unterminated quote - best-effort: treat the rest of the input as the identifier.
+  return { text: input.slice(start), end: input.length };
+}
+
 function tryReadCellRef(input: string, start: number): { text: string; end: number } | null {
   let i = start;
   if (input[i] === "$") i += 1;
@@ -717,6 +741,13 @@ export function tokenizeFormula(input: string): FormulaToken[] {
     if (implicitStructured) {
       tokens.push({ type: "reference", text: implicitStructured.text, start: i, end: implicitStructured.end });
       i = implicitStructured.end;
+      continue;
+    }
+
+    const quotedIdent = tryReadQuotedIdentifier(input, i);
+    if (quotedIdent) {
+      tokens.push({ type: "identifier", text: quotedIdent.text, start: i, end: quotedIdent.end });
+      i = quotedIdent.end;
       continue;
     }
 

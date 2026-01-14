@@ -163,6 +163,19 @@ describe("tokenizeFormula", () => {
     expect(refs).toEqual(["[A1[Name.xlsx]Sheet1!A1"]);
   });
 
+  it("tokenizes workbook-scoped external defined names (quoted external name refs)", () => {
+    // The engine serializer emits workbook-scoped external defined names as a single quoted token:
+    //   `'[Book.xlsx]MyName'`
+    // Tokenize it as an identifier so syntax highlighting doesn't fall back to "unknown" tokens.
+    const tokens = tokenizeFormula("='[Book.xlsx]MyName'+1").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["identifier", "'[Book.xlsx]MyName'"],
+      ["operator", "+"],
+      ["number", "1"],
+    ]);
+  });
+
   it("tokenizes Excel structured references as single reference tokens", () => {
     const input = "=SUM(Table1[Amount])";
     const tokens = tokenizeFormula(input);
