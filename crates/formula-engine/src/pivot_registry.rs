@@ -1,10 +1,8 @@
-use crate::eval::CellAddr;
 use crate::editing::rewrite::{
-    rewrite_formula_for_range_map,
-    rewrite_formula_for_structural_edit,
-    RangeMapEdit,
+    rewrite_formula_for_range_map, rewrite_formula_for_structural_edit, RangeMapEdit,
     StructuralEdit,
 };
+use crate::eval::CellAddr;
 use crate::pivot::PivotTable;
 use formula_model::pivots::{parse_dax_column_ref, parse_dax_measure_ref, PivotFieldRef};
 use formula_model::{CellRef, Range};
@@ -100,7 +98,9 @@ impl PivotRegistryEntry {
             // cache contains multiple headers that normalize to the same string. In that case we
             // preserve the first inserted mapping; callers can still match by exact raw header.
             let raw_key = crate::value::casefold(&f.name);
-            cache_field_indices.entry(raw_key.clone()).or_insert(f.index);
+            cache_field_indices
+                .entry(raw_key.clone())
+                .or_insert(f.index);
             cache_field_names.entry(raw_key).or_insert(f.name.clone());
 
             let normalized = normalize_pivot_cache_field_name(&f.name);
@@ -115,31 +115,31 @@ impl PivotRegistryEntry {
 
         let resolve_cache_field =
             |field: &PivotFieldRef, key: &str| -> Result<(usize, String), PivotRegistryError> {
-            // Fast path: direct lookup by the canonical key.
-            if let Some(idx) = cache_field_indices.get(key).copied() {
+                // Fast path: direct lookup by the canonical key.
+                if let Some(idx) = cache_field_indices.get(key).copied() {
+                    let name = pivot
+                        .cache
+                        .fields
+                        .get(idx)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_else(|| field.to_string());
+                    return Ok((idx, name));
+                }
+
+                // Fallback: resolve the field ref against the cache field captions. This handles
+                // DAX-quoted column refs (`'Dim Product'[Category]`) and bracketed measure refs
+                // (`[Total Sales]`) when the cache stores a different textual form.
+                let Some(idx) = pivot.cache.field_index_ref(field) else {
+                    return Err(PivotRegistryError::MissingField(field.to_string()));
+                };
                 let name = pivot
                     .cache
                     .fields
                     .get(idx)
                     .map(|f| f.name.clone())
                     .unwrap_or_else(|| field.to_string());
-                return Ok((idx, name));
-            }
-
-            // Fallback: resolve the field ref against the cache field captions. This handles
-            // DAX-quoted column refs (`'Dim Product'[Category]`) and bracketed measure refs
-            // (`[Total Sales]`) when the cache stores a different textual form.
-            let Some(idx) = pivot.cache.field_index_ref(field) else {
-                return Err(PivotRegistryError::MissingField(field.to_string()));
+                Ok((idx, name))
             };
-            let name = pivot
-                .cache
-                .fields
-                .get(idx)
-                .map(|f| f.name.clone())
-                .unwrap_or_else(|| field.to_string());
-            Ok((idx, name))
-        };
 
         let mut field_positions: HashMap<String, PivotFieldPosition> = HashMap::new();
         let mut field_indices: HashMap<String, usize> = HashMap::new();
@@ -149,6 +149,7 @@ impl PivotRegistryEntry {
             let canonical_key = crate::value::casefold(canonical.as_ref());
             let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
             let normalized_key = crate::value::casefold(normalized.as_ref());
+            let display_key = crate::value::casefold(&f.source_field.to_string());
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -163,7 +164,12 @@ impl PivotRegistryEntry {
             if normalized_key != canonical_key {
                 cache_field_names.insert(normalized_key.clone(), cache_name.clone());
                 field_positions.insert(normalized_key.clone(), pos);
-                field_indices.insert(normalized_key, cache_idx);
+                field_indices.insert(normalized_key.clone(), cache_idx);
+            }
+            if display_key != canonical_key && display_key != normalized_key {
+                cache_field_names.insert(display_key.clone(), cache_name.clone());
+                field_positions.insert(display_key.clone(), pos);
+                field_indices.insert(display_key, cache_idx);
             }
         }
 
@@ -172,6 +178,7 @@ impl PivotRegistryEntry {
             let canonical_key = crate::value::casefold(canonical.as_ref());
             let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
             let normalized_key = crate::value::casefold(normalized.as_ref());
+            let display_key = crate::value::casefold(&f.source_field.to_string());
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -186,7 +193,12 @@ impl PivotRegistryEntry {
             if normalized_key != canonical_key {
                 cache_field_names.insert(normalized_key.clone(), cache_name.clone());
                 field_positions.insert(normalized_key.clone(), pos);
-                field_indices.insert(normalized_key, cache_idx);
+                field_indices.insert(normalized_key.clone(), cache_idx);
+            }
+            if display_key != canonical_key && display_key != normalized_key {
+                cache_field_names.insert(display_key.clone(), cache_name.clone());
+                field_positions.insert(display_key.clone(), pos);
+                field_indices.insert(display_key, cache_idx);
             }
         }
 
@@ -195,6 +207,7 @@ impl PivotRegistryEntry {
             let canonical_key = crate::value::casefold(canonical.as_ref());
             let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
             let normalized_key = crate::value::casefold(normalized.as_ref());
+            let display_key = crate::value::casefold(&f.source_field.to_string());
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -209,7 +222,12 @@ impl PivotRegistryEntry {
             if normalized_key != canonical_key {
                 cache_field_names.insert(normalized_key.clone(), cache_name.clone());
                 field_positions.insert(normalized_key.clone(), pos);
-                field_indices.insert(normalized_key, cache_idx);
+                field_indices.insert(normalized_key.clone(), cache_idx);
+            }
+            if display_key != canonical_key && display_key != normalized_key {
+                cache_field_names.insert(display_key.clone(), cache_name.clone());
+                field_positions.insert(display_key.clone(), pos);
+                field_indices.insert(display_key, cache_idx);
             }
         }
 
@@ -302,11 +320,9 @@ impl PivotRegistry {
                 // Sheet no longer exists; drop stale entry.
                 return false;
             };
-            let Some(new_dest) = rewrite_pivot_destination_for_structural_edit(
-                entry.destination,
-                ctx_sheet,
-                edit,
-            ) else {
+            let Some(new_dest) =
+                rewrite_pivot_destination_for_structural_edit(entry.destination, ctx_sheet, edit)
+            else {
                 return false;
             };
             entry.destination = new_dest;
@@ -349,12 +365,8 @@ fn rewrite_pivot_destination_for_structural_edit(
         CellRef::new(destination.end.row, destination.end.col),
     );
     let formula = format!("={range}");
-    let (out, _) = rewrite_formula_for_structural_edit(
-        &formula,
-        ctx_sheet,
-        crate::CellAddr::new(0, 0),
-        edit,
-    );
+    let (out, _) =
+        rewrite_formula_for_structural_edit(&formula, ctx_sheet, crate::CellAddr::new(0, 0), edit);
     let new_range = parse_a1_range_from_formula(&out)?;
     Some(PivotDestination {
         start: CellAddr {
@@ -378,12 +390,8 @@ fn rewrite_pivot_destination_for_range_map_edit(
         CellRef::new(destination.end.row, destination.end.col),
     );
     let formula = format!("={range}");
-    let (out, _) = rewrite_formula_for_range_map(
-        &formula,
-        ctx_sheet,
-        crate::CellAddr::new(0, 0),
-        edit,
-    );
+    let (out, _) =
+        rewrite_formula_for_range_map(&formula, ctx_sheet, crate::CellAddr::new(0, 0), edit);
     let new_range = parse_a1_range_from_formula(&out)?;
     Some(PivotDestination {
         start: CellAddr {

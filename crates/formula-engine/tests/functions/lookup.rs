@@ -1727,6 +1727,11 @@ fn getpivotdata_registry_resolves_data_model_field_refs_against_quoted_cache_hea
         sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Dim Product[Category]\", \"East\")"),
         Value::Number(250.0)
     );
+    // Accept DAX-quoted field strings as well (Excel often emits quoted table names).
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"'Dim Product'[Category]\", \"East\")"),
+        Value::Number(250.0)
+    );
 }
 
 #[test]
