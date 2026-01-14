@@ -47,10 +47,9 @@ fn password_utf16le_bytes(password: &str) -> Vec<u8> {
 /// for i in 0..50000:
 ///   H = Hash(LE32(i) || H)
 /// h_block = Hash(H || LE32(block_index))
+/// key_b = h_block[0 .. keySize/8]
 /// if keySize == 40:
-///   rc4_key = h_block[0..5] || 0x00 * 11   // 16 bytes total
-/// else:
-///   rc4_key = h_block[0 .. keySize/8]
+///   key_b = key_b || 0x00 * 11   // 16 bytes total
 /// ```
 pub(crate) fn derive_rc4_key_b(
     password: &str,
@@ -85,17 +84,13 @@ pub(crate) fn derive_rc4_key_b(
     buf.extend_from_slice(&h);
     buf.extend_from_slice(&block_index.to_le_bytes());
     let block_hash = hash(hash_alg, &buf);
-
-    // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the low 40 bits set
-    // and the remaining 88 bits zero. Using the raw 5-byte key changes RC4 KSA and yields the wrong
-    // keystream.
-    if key_len == 5 {
-        let mut out: Vec<u8> = block_hash.into_iter().take(5).collect();
-        out.resize(16, 0);
-        out
-    } else {
-        block_hash.into_iter().take(key_len).collect()
+    let mut key: Vec<u8> = block_hash.into_iter().take(key_len).collect();
+    if key_size_bits == 40 {
+        // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit key where only the first
+        // 5 bytes are derived and the remaining 11 bytes are zeros.
+        key.resize(16, 0);
     }
+    key
 }
 
 #[cfg(test)]
@@ -155,10 +150,11 @@ mod tests {
             0x0E, 0x0F,
         ];
 
-        // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
         let derived = derive_rc4_key_b(password, &salt, 40, 0, HashAlg::Sha1);
-        assert_eq!(derived, decode_hex("6ad7dedf2d0000000000000000000000"));
+        assert_eq!(
+            derived,
+            decode_hex("6ad7dedf2d0000000000000000000000")
+        );
         assert_eq!(derived.len(), 16);
-        assert!(derived[5..].iter().all(|b| *b == 0));
     }
 }

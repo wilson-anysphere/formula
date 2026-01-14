@@ -1200,6 +1200,6 @@ mod tests {
 
         let key_40 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 40)
             .expect("should derive sha1 rc4 block key");
-        assert_eq!(hex_lower(&key_40), "6ad7dedf2d");
+        assert_eq!(hex_lower(&key_40), "6ad7dedf2d0000000000000000000000");
     }
 }

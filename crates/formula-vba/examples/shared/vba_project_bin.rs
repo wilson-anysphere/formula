@@ -32,6 +32,10 @@ pub(crate) fn load_vba_project_bin(
     let bytes =
         std::fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
 
+    // This example helper supports decrypting the Standard/Agile `EncryptedPackage` OLE wrapper
+    // using `formula-office-crypto`, but that crate isn't enabled on wasm32 builds (and decrypted
+    // file I/O isn't a meaningful concept there anyway).
+    #[cfg(not(target_arch = "wasm32"))]
     if formula_office_crypto::is_encrypted_ooxml_ole(&bytes) {
         let password =
             password.ok_or_else(|| "password required for encrypted workbook".to_owned())?;
@@ -59,6 +63,8 @@ pub(crate) fn load_vba_project_bin(
             ),
         ));
     }
+    #[cfg(target_arch = "wasm32")]
+    let _ = password;
 
     Ok((bytes, path.display().to_string()))
 }
