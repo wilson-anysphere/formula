@@ -13,7 +13,7 @@ function getLineNumber(text, index) {
   return text.slice(0, Math.max(0, index)).split("\n").length;
 }
 
-test("what-if styles keep spacing on the shared --space-* scale", () => {
+test("what-if styles keep spacing on the shared --space-* scale (no hardcoded lengths)", () => {
   const cssPath = path.join(desktopRoot, "src", "styles", "what-if.css");
   const css = fs.readFileSync(cssPath, "utf8");
   const stripped = stripCssNonSemanticText(css);
