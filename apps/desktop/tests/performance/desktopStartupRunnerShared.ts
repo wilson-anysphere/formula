@@ -113,14 +113,15 @@ export function resolveDesktopStartupBenchKind(options: {
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 /**
- * Format an absolute path as repo-relative when possible.
+ * Format a path for perf logs/JSON.
  *
- * Useful for perf logs that run in CI (where absolute paths can be noisy), while still showing an
- * absolute path when the value points outside the repo.
+ * - Prefer repo-relative paths when the target is within the repo root.
+ * - Fall back to an absolute path when the target is outside the repo (to avoid noisy `../../..` paths).
  */
 export function formatPerfPath(path: string): string {
-  const relPath = relative(repoRoot, path);
-  if (relPath === '' || relPath.startsWith('..') || isAbsolute(relPath)) return path;
+  const absPath = resolve(repoRoot, path);
+  const relPath = relative(repoRoot, absPath);
+  if (relPath === '' || relPath.startsWith('..') || isAbsolute(relPath)) return absPath;
   return relPath;
 }
 
