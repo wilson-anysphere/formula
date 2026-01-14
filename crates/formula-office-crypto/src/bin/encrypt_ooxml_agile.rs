@@ -8,7 +8,7 @@ use formula_office_crypto::{encrypt_package_to_ole, EncryptOptions};
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() != 3 {
-        eprintln!("Usage: encrypt_ooxml_agile <input.xlsm> <output.xlsm> <password>");
+        eprintln!("Usage: encrypt_ooxml_agile <input_ooxml_zip> <output_encrypted_ooxml> <password>");
         std::process::exit(2);
     }
 
@@ -21,4 +21,3 @@ fn main() {
         encrypt_package_to_ole(&plaintext, &password, EncryptOptions::default()).expect("encrypt");
     std::fs::write(&output, encrypted).expect("write output");
 }
-
