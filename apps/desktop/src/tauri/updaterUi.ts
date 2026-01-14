@@ -790,7 +790,7 @@ function showUpdateReadyToast(update: { version: string }): void {
   toast.dataset.testid = "update-ready-toast";
   toast.style.display = "flex";
   toast.style.alignItems = "center";
-  toast.style.gap = "10px";
+  toast.style.gap = "calc(var(--space-4) + var(--space-1))";
 
   const message = document.createElement("div");
   const versionMessage = tWithVars("updater.updateAvailableMessage", { version: update.version });

@@ -14,8 +14,7 @@
   `dir` attribute changes (set by `setLocale()`):
 
     .toolbar {
-      padding-inline: 8px;
-      margin-inline-start: 4px;
+      padding-inline: var(--space-4);
+      margin-inline-start: var(--space-2);
     }
 */
-
