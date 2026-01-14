@@ -150,6 +150,49 @@ fn decrypts_standard_rc4_encrypted_package_when_size_header_high_dword_is_reserv
 }
 
 #[test]
+fn decrypts_standard_rc4_with_case_insensitive_stream_names() {
+    // Some OLE writers vary stream name casing; ensure we can still open/decrypt RC4 fixtures via
+    // the public `decrypt_encrypted_package()` convenience API.
+    let cursor = Cursor::new(STANDARD_RC4_FIXTURE.to_vec());
+    let mut ole_in = cfb::CompoundFile::open(cursor).expect("open input cfb");
+
+    let mut encryption_info = Vec::new();
+    ole_in
+        .open_stream("EncryptionInfo")
+        .or_else(|_| ole_in.open_stream("/EncryptionInfo"))
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole_in
+        .open_stream("EncryptedPackage")
+        .or_else(|_| ole_in.open_stream("/EncryptedPackage"))
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor).expect("create output cfb");
+    ole_out
+        .create_stream("encryptioninfo")
+        .expect("create encryptioninfo")
+        .write_all(&encryption_info)
+        .expect("write encryptioninfo");
+    ole_out
+        .create_stream("encryptedpackage")
+        .expect("create encryptedpackage")
+        .write_all(&encrypted_package)
+        .expect("write encryptedpackage");
+    let ole_bytes = ole_out.into_inner().into_inner();
+
+    let decrypted =
+        decrypt_encrypted_package(&ole_bytes, "password").expect("decrypt standard rc4");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
 fn standard_rc4_unsupported_algidhash_returns_unsupported_encryption() {
     // Requirement: Unsupported `algIdHash` values should return UnsupportedEncryption (not
     // InvalidPassword).
