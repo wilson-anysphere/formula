@@ -69,6 +69,8 @@ type HighlightSpan = {
 
 type HighlightSpanLike = HighlightSpan | FormulaToken;
 
+const RESOLVED_REFERENCE_TEXT_CACHE_LIMIT = 200;
+
 export class FormulaBarModel {
   #activeCell: ActiveCellInfo = { address: "A1", input: "", value: "" };
   #draft: string = "";
@@ -91,6 +93,9 @@ export class FormulaBarModel {
         optionsVersion: number;
         references: FormulaReference[];
       }
+    | null = null;
+  #resolvedReferenceTextCache:
+    | { optionsVersion: number; entries: Map<string, RangeAddress | null> }
     | null = null;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
@@ -165,6 +170,7 @@ export class FormulaBarModel {
     this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
     this.#aiGhostCache = null;
+    this.#resolvedReferenceTextCache = null;
   }
 
   /**
@@ -185,6 +191,7 @@ export class FormulaBarModel {
     this.#extractFormulaReferencesOptionsVersion += 1;
     // Clear any cached reference tokenization so we re-extract with the new options.
     this.#referenceExtractionCache = null;
+    this.#resolvedReferenceTextCache = null;
     if (this.#isEditing) {
       this.#updateReferenceHighlights();
       this.#updateHoverFromCursor();
@@ -221,21 +228,48 @@ export class FormulaBarModel {
    *   `ExtractFormulaReferencesOptions` (tables / resolveStructuredRef), if any.
    */
   resolveReferenceText(text: string): RangeAddress | null {
-    const trimmed = String(text ?? "").trim();
+    const raw = String(text ?? "");
+    if (!raw) return null;
+    const lastIndex = raw.length - 1;
+    const trimmed = isWhitespaceChar(raw[0] ?? "") || isWhitespaceChar(raw[lastIndex] ?? "") ? raw.trim() : raw;
     if (!trimmed) return null;
 
+    const currentOptionsVersion = this.#extractFormulaReferencesOptionsVersion;
+    let cache = this.#resolvedReferenceTextCache;
+    if (!cache || cache.optionsVersion !== currentOptionsVersion) {
+      cache = { optionsVersion: currentOptionsVersion, entries: new Map() };
+      this.#resolvedReferenceTextCache = cache;
+    }
+    if (cache.entries.has(trimmed)) {
+      return cache.entries.get(trimmed) ?? null;
+    }
+
     const a1 = parseSheetQualifiedA1Range(trimmed);
-    if (a1) return a1;
+    if (a1) {
+      cache.entries.set(trimmed, a1);
+      if (cache.entries.size > RESOLVED_REFERENCE_TEXT_CACHE_LIMIT) {
+        const oldest = cache.entries.keys().next().value;
+        if (typeof oldest === "string") cache.entries.delete(oldest);
+      }
+      return a1;
+    }
 
     const { references } = extractFormulaReferences(trimmed, undefined, undefined, this.#extractFormulaReferencesOptions ?? undefined);
     const first = references[0];
-    if (!first) return null;
-    // Avoid accidentally claiming a range for a more complex expression by requiring the
-    // extracted reference to cover the full input string.
-    if (first.start !== 0 || first.end !== trimmed.length) return null;
+    let resolved: RangeAddress | null = null;
+    if (first && first.start === 0 && first.end === trimmed.length) {
+      const r = first.range;
+      resolved = { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } };
+    }
 
-    const r = first.range;
-    return { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } };
+    cache.entries.set(trimmed, resolved);
+    if (cache.entries.size > RESOLVED_REFERENCE_TEXT_CACHE_LIMIT) {
+      // Map iteration order reflects insertion order; evict the oldest entry to keep this cache bounded.
+      const oldest = cache.entries.keys().next().value;
+      if (typeof oldest === "string") cache.entries.delete(oldest);
+    }
+
+    return resolved;
   }
 
   get activeCell(): ActiveCellInfo {
