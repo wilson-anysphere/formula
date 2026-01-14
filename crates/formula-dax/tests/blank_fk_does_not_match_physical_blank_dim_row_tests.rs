@@ -67,6 +67,57 @@ fn blank_fk_does_not_match_physical_blank_dim_row() {
 }
 
 #[test]
+fn blank_fk_does_not_match_physical_blank_dim_row_with_crossfilter_override() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    // A physical BLANK key row exists on the dimension side.
+    dim.push_row(vec![Value::Blank, "Phys".into()]).unwrap();
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Key", "Amount"]);
+    // Fact contains a BLANK FK row.
+    fact.push_row(vec![Value::Blank, 10.into()]).unwrap();
+    // Include at least one non-BLANK row so filtering to BLANK actually restricts the fact table.
+    fact.push_row(vec![1.into(), 20.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    // Single-direction relationship; enable bidirectional filtering via CROSSFILTER in the query.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty().with_column_equals("Fact", "Key", Value::Blank);
+
+    // With bidirectional filtering forced via CROSSFILTER(BOTH), a fact-side BLANK FK must not
+    // make a physical Dim[Key] = BLANK() row visible; only the virtual blank/unknown member should
+    // contribute.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(VALUES(Dim[Attr])), CROSSFILTER(Fact[Key], Dim[Key], \"BOTH\"))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
 fn blank_fk_does_not_match_physical_blank_dim_row_for_columnar_fact() {
     let mut model = DataModel::new();
 
