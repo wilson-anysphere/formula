@@ -173,6 +173,10 @@ export class EngineWorker {
     const worker = options.worker;
 
     const ready = new Promise<void>((resolve, reject) => {
+      // Use `let` so the `onReady` handler can safely reference it even in the (unlikely)
+      // event that a mock Worker posts "ready" synchronously.
+      let onAbort: (() => void) | null = null;
+
       const onReady = (event: MessageEvent<unknown>) => {
         const msg = event.data as WorkerOutboundMessage;
         if (msg && typeof msg === "object" && (msg as any).type === "ready") {
@@ -185,7 +189,7 @@ export class EngineWorker {
       };
       port.addEventListener("message", onReady);
 
-      const onAbort = () => {
+      onAbort = () => {
         port.removeEventListener("message", onReady);
         try {
           port.close?.();
