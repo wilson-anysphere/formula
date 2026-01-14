@@ -11,7 +11,10 @@
 use crate::cryptoapi;
 use crate::rc4::Rc4;
 use crate::standard::verify_verifier;
-use crate::{parse_encrypted_package_header, HashAlgorithm, OffcryptoError, StandardEncryptionInfo};
+use crate::{
+    parse_encrypted_package_header, HashAlgorithm, OffcryptoError, StandardEncryptionInfo,
+};
+use zeroize::Zeroizing;
 
 // CryptoAPI alg ids.
 const CALG_RC4: u32 = 0x0000_6801;
@@ -31,7 +34,10 @@ fn hash_algorithm_from_alg_id_hash(alg_id_hash: u32) -> Result<HashAlgorithm, Of
 /// Verify a password against the Standard RC4 verifier fields.
 ///
 /// Returns the CryptoAPI base hash `H` when the verifier check succeeds.
-pub fn verify_password(info: &StandardEncryptionInfo, password: &str) -> Result<Vec<u8>, OffcryptoError> {
+pub fn verify_password(
+    info: &StandardEncryptionInfo,
+    password: &str,
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     if info.header.alg_id != CALG_RC4 {
         return Err(OffcryptoError::UnsupportedAlgorithm(format!(
             "algId=0x{:08x}",
@@ -48,12 +54,12 @@ pub fn verify_password(info: &StandardEncryptionInfo, password: &str) -> Result<
     )?;
 
     let key0 = cryptoapi::rc4_key_for_block(&h, 0, info.header.key_size_bits, hash_alg)?;
-    let mut rc4 = Rc4::new(&key0);
+    let mut rc4 = Rc4::new(key0.as_slice());
 
     let mut verifier = info.verifier.encrypted_verifier;
     rc4.apply_keystream(&mut verifier);
 
-    let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
+    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
     rc4.apply_keystream(&mut verifier_hash);
 
     let hash_len = info.verifier.verifier_hash_size as usize;
@@ -106,8 +112,9 @@ pub fn decrypt_encrypted_package(
         out[out_offset..out_offset + chunk_len]
             .copy_from_slice(&encrypted_package_stream[in_offset..end]);
 
-        let key = cryptoapi::rc4_key_for_block(&h, block_index, info.header.key_size_bits, hash_alg)?;
-        let mut rc4 = Rc4::new(&key);
+        let key =
+            cryptoapi::rc4_key_for_block(&h, block_index, info.header.key_size_bits, hash_alg)?;
+        let mut rc4 = Rc4::new(key.as_slice());
         rc4.apply_keystream(&mut out[out_offset..out_offset + chunk_len]);
 
         in_offset = end;

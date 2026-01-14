@@ -6,6 +6,7 @@
 
 use crate::rc4::Rc4;
 use crate::{HashAlgorithm, OffcryptoError};
+use zeroize::Zeroizing;
 
 /// The fixed "spin count" used by Office for CryptoAPI standard encryption.
 ///
@@ -26,21 +27,21 @@ fn digest_len(hash_alg: HashAlgorithm) -> Result<usize, OffcryptoError> {
         // Standard/CryptoAPI encryption only uses SHA1/MD5.
         other => Err(OffcryptoError::InvalidEncryptionInfo {
             context: match other {
-                HashAlgorithm::Sha256
-                | HashAlgorithm::Sha384
-                | HashAlgorithm::Sha512 => "unsupported CryptoAPI hash algorithm",
+                HashAlgorithm::Sha256 | HashAlgorithm::Sha384 | HashAlgorithm::Sha512 => {
+                    "unsupported CryptoAPI hash algorithm"
+                }
                 _ => "unsupported CryptoAPI hash algorithm",
             },
         }),
     }
 }
 
-fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
+fn password_to_utf16le_bytes(password: &str) -> Zeroizing<Vec<u8>> {
     let mut out = Vec::with_capacity(password.len() * 2);
     for unit in password.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
-    out
+    Zeroizing::new(out)
 }
 
 /// Compute the CryptoAPI "iterated hash" `H` from `(password, salt, spin_count, hash_alg)`.
@@ -56,32 +57,42 @@ pub fn iterated_hash_from_password(
     salt: &[u8],
     spin_count: u32,
     hash_alg: HashAlgorithm,
-) -> Result<Vec<u8>, OffcryptoError> {
-    let _ = digest_len(hash_alg)?;
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    let digest_len = digest_len(hash_alg)?;
+    debug_assert!(digest_len <= crate::MAX_DIGEST_LEN);
 
     let password_utf16 = password_to_utf16le_bytes(password);
-    let mut buf = Vec::with_capacity(salt.len() + password_utf16.len());
-    buf.extend_from_slice(salt);
-    buf.extend_from_slice(&password_utf16);
 
-    let mut h = hash_alg.digest(&buf);
+    // Avoid per-iteration allocations: keep the current digest in a fixed buffer and overwrite it
+    // each round.
+    let mut h_buf: Zeroizing<[u8; crate::MAX_DIGEST_LEN]> =
+        Zeroizing::new([0u8; crate::MAX_DIGEST_LEN]);
+    hash_alg.digest_two_into(salt, &password_utf16, &mut h_buf[..digest_len]);
+
+    let mut round_buf: Zeroizing<[u8; crate::MAX_DIGEST_LEN]> =
+        Zeroizing::new([0u8; crate::MAX_DIGEST_LEN]);
     for i in 0..spin_count {
-        let mut round = Vec::with_capacity(4 + h.len());
-        round.extend_from_slice(&i.to_le_bytes());
-        round.extend_from_slice(&h);
-        h = hash_alg.digest(&round);
+        hash_alg.digest_two_into(
+            &i.to_le_bytes(),
+            &h_buf[..digest_len],
+            &mut round_buf[..digest_len],
+        );
+        h_buf[..digest_len].copy_from_slice(&round_buf[..digest_len]);
     }
 
-    Ok(h)
+    Ok(Zeroizing::new(h_buf[..digest_len].to_vec()))
 }
 
 /// Compute `Hfinal = Hash(H || LE32(block))`.
-pub fn block_hash(h: &[u8], block: u32, hash_alg: HashAlgorithm) -> Result<Vec<u8>, OffcryptoError> {
-    let _ = digest_len(hash_alg)?;
-    let mut buf = Vec::with_capacity(h.len() + 4);
-    buf.extend_from_slice(h);
-    buf.extend_from_slice(&block.to_le_bytes());
-    Ok(hash_alg.digest(&buf))
+pub fn block_hash(
+    h: &[u8],
+    block: u32,
+    hash_alg: HashAlgorithm,
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    let digest_len = digest_len(hash_alg)?;
+    let mut out = Zeroizing::new(vec![0u8; digest_len]);
+    hash_alg.digest_two_into(h, &block.to_le_bytes(), &mut out);
+    Ok(out)
 }
 
 /// CryptoAPI `CryptDeriveKey` expansion from a hash value.
@@ -93,7 +104,7 @@ pub fn crypt_derive_key(
     hash: &[u8],
     key_size_bits: u32,
     hash_alg: HashAlgorithm,
-) -> Result<Vec<u8>, OffcryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     let hash_len = digest_len(hash_alg)?;
     if hash.len() != hash_len {
         return Err(OffcryptoError::InvalidEncryptionInfo {
@@ -106,19 +117,30 @@ pub fn crypt_derive_key(
     let key_len = (key_size_bits / 8) as usize;
 
     // buf1 = (hash XOR 0x36) || 0x36*(64-hashLen)
-    let mut buf1 = vec![0x36u8; 64];
-    let mut buf2 = vec![0x5cu8; 64];
+    let mut buf1 = Zeroizing::new(vec![0x36u8; 64]);
+    let mut buf2 = Zeroizing::new(vec![0x5cu8; 64]);
     for i in 0..hash_len {
         buf1[i] ^= hash[i];
         buf2[i] ^= hash[i];
     }
-    let x1 = hash_alg.digest(&buf1);
-    let x2 = hash_alg.digest(&buf2);
+    let x1 = Zeroizing::new(hash_alg.digest(&buf1));
+    let x2 = Zeroizing::new(hash_alg.digest(&buf2));
 
-    let mut out = Vec::with_capacity(x1.len() + x2.len());
-    out.extend_from_slice(&x1);
-    out.extend_from_slice(&x2);
-    out.truncate(key_len);
+    if key_len > x1.len() + x2.len() {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "keySize too large for CryptoAPI derivation",
+        });
+    }
+
+    // Avoid `truncate()` (which can leave the unused bytes in the `Vec` spare capacity) by copying
+    // only the prefix we need.
+    let mut out = Zeroizing::new(vec![0u8; key_len]);
+    let x1_take = std::cmp::min(key_len, x1.len());
+    out[..x1_take].copy_from_slice(&x1[..x1_take]);
+    if x1_take < key_len {
+        let rem = key_len - x1_take;
+        out[x1_take..].copy_from_slice(&x2[..rem]);
+    }
     Ok(out)
 }
 
@@ -131,7 +153,7 @@ pub fn rc4_key_for_block(
     block: u32,
     key_size_bits: u32,
     hash_alg: HashAlgorithm,
-) -> Result<Vec<u8>, OffcryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     if key_size_bits % 8 != 0 {
         return Err(OffcryptoError::InvalidKeySizeBits { key_size_bits });
     }
@@ -144,13 +166,11 @@ pub fn rc4_key_for_block(
         });
     }
 
-    let mut key = hfinal[..key_len].to_vec();
-    if key_size_bits == 40 {
-        // CryptoAPI "40-bit RC4" keys are represented as a 16-byte key blob where the first 5 bytes
-        // contain key material and the remaining 11 bytes are zeros.
-        key.truncate(5);
-        key.resize(16, 0);
-    }
+    // CryptoAPI "40-bit RC4" keys are represented as a 16-byte key blob where the first 5 bytes
+    // contain key material and the remaining 11 bytes are zeros.
+    let out_len = if key_size_bits == 40 { 16 } else { key_len };
+    let mut key = Zeroizing::new(vec![0u8; out_len]);
+    key[..key_len].copy_from_slice(&hfinal[..key_len]);
     Ok(key)
 }
 
@@ -164,17 +184,16 @@ pub fn rc4_decrypt_stream(
     let mut out = ciphertext.to_vec();
     for (block, chunk) in out.chunks_exact_mut(RC4_BLOCK_LEN).enumerate() {
         let key = rc4_key_for_block(h, block as u32, key_size_bits, hash_alg)?;
-        let mut rc4 = Rc4::new(&key);
+        let mut rc4 = Rc4::new(key.as_slice());
         rc4.apply_keystream(chunk);
     }
     let rem = out.len() % RC4_BLOCK_LEN;
     if rem != 0 {
         let block = (out.len() / RC4_BLOCK_LEN) as u32;
         let key = rc4_key_for_block(h, block, key_size_bits, hash_alg)?;
-        let mut rc4 = Rc4::new(&key);
+        let mut rc4 = Rc4::new(key.as_slice());
         let start = out.len() - rem;
         rc4.apply_keystream(&mut out[start..]);
     }
     Ok(out)
 }
-

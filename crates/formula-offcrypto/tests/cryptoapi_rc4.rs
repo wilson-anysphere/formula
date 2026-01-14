@@ -11,8 +11,7 @@ fn cryptoapi_iterated_hash_and_block_hash_vectors() {
     let salt: Vec<u8> = (0u8..16).collect();
 
     // SHA1 vectors (spinCount = 50,000; password="password"; salt=00..0f)
-    let expected_h_sha1 =
-        hex_bytes("1b5972284eab6481eb6565a0985b334b3e65e041"); // 20 bytes
+    let expected_h_sha1 = hex_bytes("1b5972284eab6481eb6565a0985b334b3e65e041"); // 20 bytes
     let expected_block_sha1 = [
         "6ad7dedf2da3514b1d85eabee069d47dd058967f",
         "2ed4e8825cd48aa4a47994cda7415b4a9687377d",
@@ -27,14 +26,14 @@ fn cryptoapi_iterated_hash_and_block_hash_vectors() {
         HashAlgorithm::Sha1,
     )
     .expect("derive SHA1 iterated hash");
-    assert_eq!(h_sha1, expected_h_sha1);
+    assert_eq!(h_sha1.as_slice(), expected_h_sha1.as_slice());
 
     for (block, expected) in expected_block_sha1.iter().enumerate() {
-        let hfinal = cryptoapi::block_hash(&h_sha1, block as u32, HashAlgorithm::Sha1)
+        let hfinal = cryptoapi::block_hash(h_sha1.as_slice(), block as u32, HashAlgorithm::Sha1)
             .expect("SHA1 block hash");
         assert_eq!(
-            hfinal,
-            hex_bytes(expected),
+            hfinal.as_slice(),
+            hex_bytes(expected).as_slice(),
             "SHA1 block hash mismatch for block {block}"
         );
     }
@@ -55,14 +54,14 @@ fn cryptoapi_iterated_hash_and_block_hash_vectors() {
         HashAlgorithm::Md5,
     )
     .expect("derive MD5 iterated hash");
-    assert_eq!(h_md5, expected_h_md5);
+    assert_eq!(h_md5.as_slice(), expected_h_md5.as_slice());
 
     for (block, expected) in expected_block_md5.iter().enumerate() {
-        let hfinal = cryptoapi::block_hash(&h_md5, block as u32, HashAlgorithm::Md5)
+        let hfinal = cryptoapi::block_hash(h_md5.as_slice(), block as u32, HashAlgorithm::Md5)
             .expect("MD5 block hash");
         assert_eq!(
-            hfinal,
-            hex_bytes(expected),
+            hfinal.as_slice(),
+            hex_bytes(expected).as_slice(),
             "MD5 block hash mismatch for block {block}"
         );
     }
@@ -98,24 +97,27 @@ fn cryptoapi_rc4_key_is_raw_truncation_not_cryptderivekey() {
     ];
 
     for block in 0u32..4 {
-        let rc4_key = cryptoapi::rc4_key_for_block(&h_sha1, block, 128, HashAlgorithm::Sha1)
-            .expect("rc4 key");
+        let rc4_key =
+            cryptoapi::rc4_key_for_block(h_sha1.as_slice(), block, 128, HashAlgorithm::Sha1)
+                .expect("rc4 key");
         assert_eq!(
-            rc4_key,
-            hex_bytes(expected_hfinal_prefix_sha1[block as usize]),
+            rc4_key.as_slice(),
+            hex_bytes(expected_hfinal_prefix_sha1[block as usize]).as_slice(),
             "RC4 key mismatch for block {block}"
         );
 
-        let hfinal = cryptoapi::block_hash(&h_sha1, block, HashAlgorithm::Sha1).expect("hfinal");
-        let derived = cryptoapi::crypt_derive_key(&hfinal, 128, HashAlgorithm::Sha1)
+        let hfinal =
+            cryptoapi::block_hash(h_sha1.as_slice(), block, HashAlgorithm::Sha1).expect("hfinal");
+        let derived = cryptoapi::crypt_derive_key(hfinal.as_slice(), 128, HashAlgorithm::Sha1)
             .expect("cryptderivekey");
         assert_eq!(
-            derived,
-            hex_bytes(expected_cryptderivekey_sha1[block as usize]),
+            derived.as_slice(),
+            hex_bytes(expected_cryptderivekey_sha1[block as usize]).as_slice(),
             "CryptDeriveKey mismatch for block {block}"
         );
         assert_ne!(
-            rc4_key, derived,
+            rc4_key.as_slice(),
+            derived.as_slice(),
             "RC4 key must not use CryptDeriveKey transform"
         );
     }
@@ -142,24 +144,27 @@ fn cryptoapi_rc4_key_is_raw_truncation_not_cryptderivekey() {
     ];
 
     for block in 0u32..4 {
-        let rc4_key = cryptoapi::rc4_key_for_block(&h_md5, block, 128, HashAlgorithm::Md5)
-            .expect("rc4 key (md5)");
+        let rc4_key =
+            cryptoapi::rc4_key_for_block(h_md5.as_slice(), block, 128, HashAlgorithm::Md5)
+                .expect("rc4 key (md5)");
         assert_eq!(
-            rc4_key,
-            hex_bytes(expected_hfinal_md5[block as usize]),
+            rc4_key.as_slice(),
+            hex_bytes(expected_hfinal_md5[block as usize]).as_slice(),
             "MD5 RC4 key mismatch for block {block}"
         );
 
-        let hfinal = cryptoapi::block_hash(&h_md5, block, HashAlgorithm::Md5).expect("hfinal");
-        let derived = cryptoapi::crypt_derive_key(&hfinal, 128, HashAlgorithm::Md5)
+        let hfinal =
+            cryptoapi::block_hash(h_md5.as_slice(), block, HashAlgorithm::Md5).expect("hfinal");
+        let derived = cryptoapi::crypt_derive_key(hfinal.as_slice(), 128, HashAlgorithm::Md5)
             .expect("cryptderivekey (md5)");
         assert_eq!(
-            derived,
-            hex_bytes(expected_cryptderivekey_md5[block as usize]),
+            derived.as_slice(),
+            hex_bytes(expected_cryptderivekey_md5[block as usize]).as_slice(),
             "MD5 CryptDeriveKey mismatch for block {block}"
         );
         assert_ne!(
-            rc4_key, derived,
+            rc4_key.as_slice(),
+            derived.as_slice(),
             "RC4 key must not use CryptDeriveKey transform (MD5)"
         );
     }
@@ -178,9 +183,9 @@ fn cryptoapi_rc4_40bit_keys_are_padded_to_16_bytes() {
     )
     .expect("iterated hash");
 
-    let key = cryptoapi::rc4_key_for_block(&h, 0, 40, HashAlgorithm::Sha1).expect("40-bit key");
+    let key =
+        cryptoapi::rc4_key_for_block(h.as_slice(), 0, 40, HashAlgorithm::Sha1).expect("40-bit key");
     assert_eq!(key.len(), 16);
     assert!(key[5..].iter().all(|b| *b == 0));
     assert_eq!(&key[..5], &hex_bytes("6ad7dedf2d")[..]);
 }
-

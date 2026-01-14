@@ -1,3 +1,5 @@
+use zeroize::Zeroize;
+
 /// Minimal RC4 implementation (KSA + PRGA) used for CryptoAPI standard encryption.
 ///
 /// This is intentionally small and self-contained to avoid pulling in extra
@@ -35,5 +37,13 @@ impl Rc4 {
             let k = self.s[idx as usize];
             *b ^= k;
         }
+    }
+}
+
+impl Drop for Rc4 {
+    fn drop(&mut self) {
+        self.s.zeroize();
+        self.i.zeroize();
+        self.j.zeroize();
     }
 }
