@@ -5,6 +5,11 @@ type ActiveArgumentSpan = {
   span: { start: number; end: number };
 };
 
+type ActiveArgumentContext = {
+  fnName: string;
+  argIndex: number;
+};
+
 type GetActiveArgumentSpanOptions = {
   /**
    * Argument separator characters to treat as delimiting function arguments.
@@ -253,6 +258,151 @@ function popParenFrame(stack: StackFrame[]): void {
   }
 }
 
+function buildIsArgSeparator(
+  separatorsRaw: string | readonly string[] | undefined
+): (ch: string) => boolean {
+  const raw = separatorsRaw ?? [",", ";"];
+  const seps = Array.isArray(raw) ? raw : [raw];
+  const sep0 = seps[0] ?? ",";
+  const sep1 = seps[1] ?? null;
+  if (seps.length <= 1 || !sep1) {
+    return (ch) => ch === sep0;
+  }
+  if (seps.length === 2) {
+    return (ch) => ch === sep0 || ch === sep1;
+  }
+  return (ch) => seps.some((sep) => sep === ch);
+}
+
+function scanArgumentStack(formulaText: string, cursor: number, isArgSeparator: (ch: string) => boolean): StackFrame[] {
+  const stack: StackFrame[] = [];
+  let i = 0;
+  let inString = false;
+  let inSheetQuote = false;
+
+  while (i < cursor) {
+    const ch = formulaText[i];
+
+    if (inString) {
+      if (ch === '"') {
+        if (formulaText[i + 1] === '"') {
+          i += 2;
+          continue;
+        }
+        inString = false;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (inSheetQuote) {
+      if (ch === "'") {
+        // Excel escapes apostrophes in sheet names by doubling them: '' -> '
+        if (formulaText[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "'") {
+      inSheetQuote = true;
+      i += 1;
+      continue;
+    }
+
+    // Bracketed structured references/external refs should be treated as opaque. Otherwise
+    // column names like `Table1[Amount(USD)]` or escaped brackets like `A]]B` could be
+    // misread as nested calls / argument separators.
+    if (ch === "[") {
+      const end = findMatchingBracketEnd(formulaText, i);
+      if (!end || end > cursor) {
+        // Cursor is inside an unterminated bracket span - stop scanning, but keep the
+        // function stack intact so we can still return the enclosing function call.
+        i = cursor;
+        continue;
+      }
+      i = end;
+      continue;
+    }
+
+    if (isIdentifierStart(ch ?? "")) {
+      const start = i;
+      i += 1;
+      while (i < cursor && isIdentifierPart(formulaText[i] ?? "")) i += 1;
+      const name = formulaText.slice(start, i).toUpperCase();
+
+      // Excel permits whitespace between a function name and the opening paren, e.g. `SUM (A1)`.
+      // Skip whitespace so argument hints and previews remain stable even when users insert spaces/newlines.
+      let scan = i;
+      while (scan < cursor && isWhitespace(formulaText[scan] ?? "")) scan += 1;
+      const next = formulaText[scan];
+      if (next === "(" && scan < cursor) {
+        stack.push({ kind: "function", name, argIndex: 0, argStart: scan + 1, parenIndex: scan });
+        i = scan + 1;
+        continue;
+      }
+
+      continue;
+    }
+
+    if (ch === "(") {
+      stack.push({ kind: "group" });
+      i += 1;
+      continue;
+    }
+
+    if (ch === ")") {
+      popParenFrame(stack);
+      i += 1;
+      continue;
+    }
+
+    if (ch === "{") {
+      stack.push({ kind: "brace" });
+      i += 1;
+      continue;
+    }
+
+    if (ch === "}") {
+      popUntilKind(stack, "brace");
+      i += 1;
+      continue;
+    }
+
+    if (isArgSeparator(ch ?? "")) {
+      const top = stack[stack.length - 1];
+      if (top?.kind === "function") {
+        top.argIndex += 1;
+        top.argStart = i + 1;
+      }
+      i += 1;
+      continue;
+    }
+
+    i += 1;
+  }
+
+  return stack;
+}
+
+function findInnermostFunctionFrame(stack: StackFrame[]): Extract<StackFrame, { kind: "function" }> | null {
+  for (let s = stack.length - 1; s >= 0; s -= 1) {
+    const frame = stack[s];
+    if (frame?.kind === "function") return frame;
+  }
+  return null;
+}
+
 function findArgumentEnd(formulaText: string, start: number, isArgSeparator: (ch: string) => boolean): number {
   let inString = false;
   let inSheetQuote = false;
@@ -370,147 +520,36 @@ export function getActiveArgumentSpan(
   opts: GetActiveArgumentSpanOptions = {}
 ): ActiveArgumentSpan | null {
   const cursor = Math.max(0, Math.min(cursorIndex, formulaText.length));
-  const stack: StackFrame[] = [];
+  const isArgSeparator = buildIsArgSeparator(opts.argSeparators);
+  const stack = scanArgumentStack(formulaText, cursor, isArgSeparator);
+  const frame = findInnermostFunctionFrame(stack);
+  if (!frame) return null;
 
-  let i = 0;
-  let inString = false;
-  let inSheetQuote = false;
+  const boundary = findArgumentEnd(formulaText, frame.argStart, isArgSeparator);
 
-  const separatorsRaw = opts.argSeparators ?? [",", ";"];
-  const separators = Array.isArray(separatorsRaw) ? separatorsRaw : [separatorsRaw];
-  const isArgSeparator = (ch: string): boolean => separators.some((sep) => sep === ch);
+  let start = frame.argStart;
+  while (start < boundary && isWhitespace(formulaText[start] ?? "")) start += 1;
 
-  while (i < cursor) {
-    const ch = formulaText[i];
+  let end = boundary;
+  while (end > start && isWhitespace(formulaText[end - 1] ?? "")) end -= 1;
 
-    if (inString) {
-      if (ch === '"') {
-        if (formulaText[i + 1] === '"') {
-          i += 2;
-          continue;
-        }
-        inString = false;
-      }
-      i += 1;
-      continue;
-    }
+  return {
+    fnName: frame.name,
+    argIndex: frame.argIndex,
+    argText: formulaText.slice(start, end),
+    span: { start, end },
+  };
+}
 
-    if (inSheetQuote) {
-      if (ch === "'") {
-        // Excel escapes apostrophes in sheet names by doubling them: '' -> '
-        if (formulaText[i + 1] === "'") {
-          i += 2;
-          continue;
-        }
-        inSheetQuote = false;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (ch === '"') {
-      inString = true;
-      i += 1;
-      continue;
-    }
-
-    if (ch === "'") {
-      inSheetQuote = true;
-      i += 1;
-      continue;
-    }
-
-    // Bracketed structured references/external refs should be treated as opaque. Otherwise
-    // column names like `Table1[Amount(USD)]` or escaped brackets like `A]]B` could be
-    // misread as nested calls / argument separators.
-    if (ch === "[") {
-      const end = findMatchingBracketEnd(formulaText, i);
-      if (!end || end > cursor) {
-        // Cursor is inside an unterminated bracket span - stop scanning, but keep the
-        // function stack intact so we can still return the enclosing function call.
-        i = cursor;
-        continue;
-      }
-      i = end;
-      continue;
-    }
-
-    if (isIdentifierStart(ch)) {
-      const start = i;
-      i += 1;
-      while (i < cursor && isIdentifierPart(formulaText[i])) i += 1;
-      const name = formulaText.slice(start, i).toUpperCase();
-
-      // Excel permits whitespace between a function name and the opening paren, e.g. `SUM (A1)`.
-      // Skip whitespace so argument hints and previews remain stable even when users insert spaces/newlines.
-      let scan = i;
-      while (scan < cursor && isWhitespace(formulaText[scan] ?? "")) scan += 1;
-      const next = formulaText[scan];
-      if (next === "(" && scan < cursor) {
-        stack.push({ kind: "function", name, argIndex: 0, argStart: scan + 1, parenIndex: scan });
-        i = scan + 1;
-        continue;
-      }
-
-      continue;
-    }
-
-    if (ch === "(") {
-      stack.push({ kind: "group" });
-      i += 1;
-      continue;
-    }
-
-    if (ch === ")") {
-      popParenFrame(stack);
-      i += 1;
-      continue;
-    }
-
-    if (ch === "{") {
-      stack.push({ kind: "brace" });
-      i += 1;
-      continue;
-    }
-
-    if (ch === "}") {
-      popUntilKind(stack, "brace");
-      i += 1;
-      continue;
-    }
-
-    if (isArgSeparator(ch ?? "")) {
-      const top = stack[stack.length - 1];
-      if (top?.kind === "function") {
-        top.argIndex += 1;
-        top.argStart = i + 1;
-      }
-      i += 1;
-      continue;
-    }
-
-    i += 1;
-  }
-
-  for (let s = stack.length - 1; s >= 0; s -= 1) {
-    const frame = stack[s];
-    if (frame?.kind !== "function") continue;
-
-    const boundary = findArgumentEnd(formulaText, frame.argStart, isArgSeparator);
-
-    let start = frame.argStart;
-    while (start < boundary && isWhitespace(formulaText[start] ?? "")) start += 1;
-
-    let end = boundary;
-    while (end > start && isWhitespace(formulaText[end - 1] ?? "")) end -= 1;
-
-    return {
-      fnName: frame.name,
-      argIndex: frame.argIndex,
-      argText: formulaText.slice(start, end),
-      span: { start, end },
-    };
-  }
-
-  return null;
+export function getActiveArgumentContext(
+  formulaText: string,
+  cursorIndex: number,
+  opts: GetActiveArgumentSpanOptions = {}
+): ActiveArgumentContext | null {
+  const cursor = Math.max(0, Math.min(cursorIndex, formulaText.length));
+  const isArgSeparator = buildIsArgSeparator(opts.argSeparators);
+  const stack = scanArgumentStack(formulaText, cursor, isArgSeparator);
+  const frame = findInnermostFunctionFrame(stack);
+  if (!frame) return null;
+  return { fnName: frame.name, argIndex: frame.argIndex };
 }

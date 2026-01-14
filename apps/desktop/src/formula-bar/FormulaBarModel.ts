@@ -1,4 +1,4 @@
-import { getActiveArgumentSpan } from "./highlight/activeArgument.js";
+import { getActiveArgumentContext, getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
 import { parseA1Range, rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
@@ -420,6 +420,8 @@ export class FormulaBarModel {
     // formula locale ids to keep caching stable.
     const localeId = normalizeFormulaLocaleId(rawLocaleId) ?? "en-US";
     const argSeparator = inferArgSeparator(localeId);
+    const argSeparatorText = argSeparator.trim();
+    const argSeparatorChar = argSeparatorText.startsWith(";") ? ";" : ",";
 
     let ctxName: string | null = null;
     let ctxArgIndex: number | null = null;
@@ -429,7 +431,7 @@ export class FormulaBarModel {
       ctxName = ctx.name;
       ctxArgIndex = ctx.argIndex;
     } else {
-      let active = this.activeArgumentSpan(this.#cursorStart);
+      let active = getActiveArgumentContext(this.#draft, this.#cursorStart, { argSeparators: argSeparatorChar });
       ctxName = active?.fnName ?? null;
       ctxArgIndex = active?.argIndex ?? null;
 
@@ -441,7 +443,7 @@ export class FormulaBarModel {
         let scan = this.#cursorStart - 1;
         while (scan >= 0 && isWhitespaceChar(this.#draft[scan] ?? "")) scan -= 1;
         if (scan >= 0 && this.#draft[scan] === ")") {
-          active = this.activeArgumentSpan(scan);
+          active = getActiveArgumentContext(this.#draft, scan, { argSeparators: argSeparatorChar });
           ctxName = active?.fnName ?? null;
           ctxArgIndex = active?.argIndex ?? null;
         }
