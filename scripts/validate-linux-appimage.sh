@@ -218,6 +218,121 @@ if [ -z "$EXPECTED_IDENTIFIER" ]; then
 fi
 EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
 
+# Expected deep-link URL scheme handlers advertised via desktop integration.
+#
+# Source of truth is apps/desktop/src-tauri/tauri.conf.json → plugins.deep-link.desktop.schemes.
+# Accept either:
+#   - desktop: { schemes: ["formula"] }
+#   - desktop: [{ schemes: ["formula"] }, { schemes: ["formula-beta"] }]
+#
+# Default to "formula" if nothing is configured or the config cannot be parsed.
+declare -a EXPECTED_DEEP_LINK_SCHEMES=()
+if [ -f "$TAURI_CONF_PATH" ] && command -v python3 >/dev/null 2>&1; then
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then
+      EXPECTED_DEEP_LINK_SCHEMES+=("$line")
+    fi
+  done < <(
+    python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
+import json
+import re
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        conf = json.load(f)
+except Exception:
+    sys.exit(0)
+
+plugins = conf.get("plugins") or {}
+deep_link = plugins.get("deep-link") or {}
+desktop = deep_link.get("desktop")
+schemes = set()
+
+def normalize(value: str) -> str:
+    v = value.strip().lower()
+    v = re.sub(r"[:/]+$", "", v)
+    return v
+
+def add_from_protocol(protocol):
+    if not isinstance(protocol, dict):
+        return
+    raw = protocol.get("schemes")
+    values = []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = [v for v in raw if isinstance(v, str)]
+    for v in values:
+        norm = normalize(v)
+        if norm:
+            schemes.add(norm)
+
+if isinstance(desktop, list):
+    for protocol in desktop:
+        add_from_protocol(protocol)
+else:
+    add_from_protocol(desktop)
+
+for scheme in sorted(schemes):
+    print(scheme)
+PY
+  )
+fi
+
+if [ "${#EXPECTED_DEEP_LINK_SCHEMES[@]}" -eq 0 ] && [ -f "$TAURI_CONF_PATH" ] && command -v node >/dev/null 2>&1; then
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then
+      EXPECTED_DEEP_LINK_SCHEMES+=("$line")
+    fi
+  done < <(
+    node - "$TAURI_CONF_PATH" <<'NODE' 2>/dev/null || true
+const fs = require("node:fs");
+const configPath = process.argv[2];
+let conf;
+try {
+  conf = JSON.parse(fs.readFileSync(configPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+const deepLink = conf?.plugins?.["deep-link"];
+const desktop = deepLink?.desktop;
+const schemes = new Set();
+
+const normalize = (value) => String(value).trim().toLowerCase().replace(/[:/]+$/, "");
+
+const addFromProtocol = (protocol) => {
+  if (!protocol || typeof protocol !== "object") return;
+  const raw = protocol.schemes;
+  const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    const norm = normalize(v);
+    if (norm) schemes.add(norm);
+  }
+};
+
+if (Array.isArray(desktop)) {
+  for (const protocol of desktop) addFromProtocol(protocol);
+} else {
+  addFromProtocol(desktop);
+}
+
+if (schemes.size === 0) process.exit(0);
+for (const scheme of Array.from(schemes).sort()) console.log(scheme);
+NODE
+  )
+fi
+if [ "${#EXPECTED_DEEP_LINK_SCHEMES[@]}" -eq 0 ]; then
+  EXPECTED_DEEP_LINK_SCHEMES=("formula")
+fi
+declare -a EXPECTED_SCHEME_MIMES=()
+for scheme in "${EXPECTED_DEEP_LINK_SCHEMES[@]}"; do
+  EXPECTED_SCHEME_MIMES+=("x-scheme-handler/${scheme}")
+done
+
 discover_appimages() {
   local base="$1"
   if [ ! -d "$base" ]; then
@@ -562,10 +677,10 @@ validate_appimage() {
   local has_xlsx_mime=0
   local has_xlsx_integration=0
   local has_parquet_mime=0
-  local has_scheme_mime=0
   local bad_exec_count=0
-  local required_scheme_mime="x-scheme-handler/formula"
   local required_parquet_mime="application/vnd.apache.parquet"
+  # Track which expected URL scheme handlers appear in the desktop entry/entries.
+  declare -A found_scheme_mimes=()
 
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
@@ -582,6 +697,15 @@ validate_appimage() {
     if printf '%s' "$mime_value" | grep -Fqi "$required_parquet_mime"; then
       has_parquet_mime=1
     fi
+
+    local has_any_expected_scheme_in_file=0
+    local scheme_mime
+    for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
+      if printf '%s' "$mime_value" | grep -Fqi "$scheme_mime"; then
+        found_scheme_mimes["$scheme_mime"]=1
+        has_any_expected_scheme_in_file=1
+      fi
+    done
 
     if printf '%s' "$mime_value" | grep -Fqi "$required_xlsx_mime"; then
       has_xlsx_mime=1
@@ -606,9 +730,7 @@ validate_appimage() {
       fi
     fi
 
-    if printf '%s' "$mime_value" | grep -Fqi "$required_scheme_mime"; then
-      has_scheme_mime=1
-
+    if [ "$has_any_expected_scheme_in_file" -eq 1 ]; then
       # URL scheme handlers also require a placeholder token (%U/%u/%F/%f) in Exec= so the
       # OS passes the opened URL into the app.
       local exec_line
@@ -699,9 +821,16 @@ validate_appimage() {
     die "One or more .desktop entries had invalid Exec= lines for file association handling"
   fi
 
-  if [ "$has_scheme_mime" -ne 1 ]; then
-    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime}) for AppImage: $appimage_path" >&2
-    echo "${SCRIPT_NAME}: error: Expected MimeType= to include '${required_scheme_mime};'." >&2
+  declare -a missing_scheme_mimes=()
+  for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
+    if [ -z "${found_scheme_mimes["$scheme_mime"]+x}" ]; then
+      missing_scheme_mimes+=("$scheme_mime")
+    fi
+  done
+  if [ "${#missing_scheme_mimes[@]}" -ne 0 ]; then
+    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised the expected URL scheme handler(s) for AppImage: $appimage_path" >&2
+    echo "${SCRIPT_NAME}: error: Missing scheme handler(s): ${missing_scheme_mimes[*]}" >&2
+    echo "${SCRIPT_NAME}: error: Expected MimeType= to include: ${EXPECTED_SCHEME_MIMES[*]}" >&2
     echo "${SCRIPT_NAME}: error: MimeType entries found:" >&2
     for desktop_file in "${desktop_files[@]}"; do
       local rel
@@ -716,7 +845,7 @@ validate_appimage() {
         echo "  - ${rel}: (no MimeType= entry)" >&2
       fi
     done
-    die "No .desktop file advertised the URL scheme handler ${required_scheme_mime} for AppImage: $appimage_path"
+    die "Missing expected URL scheme handler(s) in .desktop file(s) for AppImage: $appimage_path"
   fi
 
   if [ "$has_xlsx_mime" -ne 1 ]; then

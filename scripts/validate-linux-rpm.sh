@@ -202,6 +202,113 @@ fi
 EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
 EXPECTED_MIME_DEFINITION_PATH="/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
 
+# Expected deep-link URL scheme handlers (x-scheme-handler/<scheme>) that should be
+# advertised by the installed desktop entry.
+#
+# Source of truth: apps/desktop/src-tauri/tauri.conf.json → plugins.deep-link.desktop.schemes.
+# Default to "formula" when missing/unparseable.
+declare -a EXPECTED_DEEP_LINK_SCHEMES=()
+if command -v python3 >/dev/null 2>&1; then
+  mapfile -t EXPECTED_DEEP_LINK_SCHEMES < <(
+    python3 - "$TAURI_CONF" <<'PY' 2>/dev/null || true
+import json
+import re
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        conf = json.load(f)
+except Exception:
+    sys.exit(0)
+
+plugins = conf.get("plugins") or {}
+deep_link = plugins.get("deep-link") or {}
+desktop = deep_link.get("desktop")
+schemes = set()
+
+def normalize(value: str) -> str:
+    v = value.strip().lower()
+    v = re.sub(r"[:/]+$", "", v)
+    return v
+
+def add_from_protocol(protocol):
+    if not isinstance(protocol, dict):
+        return
+    raw = protocol.get("schemes")
+    values = []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = [v for v in raw if isinstance(v, str)]
+    for v in values:
+        norm = normalize(v)
+        if norm:
+            schemes.add(norm)
+
+if isinstance(desktop, list):
+    for protocol in desktop:
+        add_from_protocol(protocol)
+else:
+    add_from_protocol(desktop)
+
+for scheme in sorted(schemes):
+    print(scheme)
+PY
+  )
+fi
+if [[ ${#EXPECTED_DEEP_LINK_SCHEMES[@]} -eq 0 ]] && command -v node >/dev/null 2>&1; then
+  mapfile -t EXPECTED_DEEP_LINK_SCHEMES < <(
+    node - "$TAURI_CONF" <<'NODE' 2>/dev/null || true
+const fs = require("node:fs");
+const configPath = process.argv[2];
+let conf;
+try {
+  conf = JSON.parse(fs.readFileSync(configPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+const deepLink = conf?.plugins?.["deep-link"];
+const desktop = deepLink?.desktop;
+const schemes = new Set();
+
+const normalize = (value) => String(value).trim().toLowerCase().replace(/[:/]+$/, "");
+
+const addFromProtocol = (protocol) => {
+  if (!protocol || typeof protocol !== "object") return;
+  const raw = protocol.schemes;
+  const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    const norm = normalize(v);
+    if (norm) schemes.add(norm);
+  }
+};
+
+if (Array.isArray(desktop)) {
+  for (const protocol of desktop) addFromProtocol(protocol);
+} else {
+  addFromProtocol(desktop);
+}
+
+if (schemes.size === 0) process.exit(0);
+for (const scheme of Array.from(schemes).sort()) console.log(scheme);
+NODE
+  )
+fi
+if [[ ${#EXPECTED_DEEP_LINK_SCHEMES[@]} -eq 0 ]]; then
+  EXPECTED_DEEP_LINK_SCHEMES=("formula")
+fi
+declare -a EXPECTED_SCHEME_MIMES=()
+for scheme in "${EXPECTED_DEEP_LINK_SCHEMES[@]}"; do
+  EXPECTED_SCHEME_MIMES+=("x-scheme-handler/${scheme}")
+done
+EXPECTED_SCHEME_MIMES_ENV="$(
+  IFS=';'
+  echo "${EXPECTED_SCHEME_MIMES[*]}"
+)"
+
 # RPM %{NAME} (package name) should match our decided package name. By default we keep this
 # in sync with tauri.conf.json mainBinaryName, but allow overriding just the *package name*
 # for validation purposes (some distros may prefer different naming conventions).
@@ -348,10 +455,9 @@ validate_desktop_mime_associations_extracted() {
   local has_xlsx_mime=0
   local has_xlsx_integration=0
   local has_parquet_mime=0
-  local has_scheme_mime=0
   local bad_exec_count=0
-  local required_scheme_mime="x-scheme-handler/formula"
   local required_parquet_mime="application/vnd.apache.parquet"
+  declare -A found_scheme_mimes=()
 
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
@@ -368,6 +474,15 @@ validate_desktop_mime_associations_extracted() {
     if printf '%s' "$mime_value" | grep -Fqi "$required_parquet_mime"; then
       has_parquet_mime=1
     fi
+
+    local has_any_expected_scheme_in_file=0
+    local scheme_mime
+    for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
+      if printf '%s' "$mime_value" | grep -Fqi "$scheme_mime"; then
+        found_scheme_mimes["$scheme_mime"]=1
+        has_any_expected_scheme_in_file=1
+      fi
+    done
 
     if printf '%s' "$mime_value" | grep -Fqi "$REQUIRED_XLSX_MIME"; then
       has_xlsx_mime=1
@@ -392,9 +507,7 @@ validate_desktop_mime_associations_extracted() {
       fi
     fi
 
-    if printf '%s' "$mime_value" | grep -Fqi "$required_scheme_mime"; then
-      has_scheme_mime=1
-
+    if [ "$has_any_expected_scheme_in_file" -eq 1 ]; then
       # URL scheme handlers also require a placeholder token (%U/%u/%F/%f) in Exec= so the
       # OS passes the opened URL into the app.
       local exec_line
@@ -484,9 +597,16 @@ validate_desktop_mime_associations_extracted() {
     return 1
   fi
 
-  if [ "$has_scheme_mime" -ne 1 ]; then
-    err "No extracted .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime})."
-    err "Expected MimeType= to include '${required_scheme_mime};'."
+  local -a missing_scheme_mimes=()
+  local scheme_mime
+  for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
+    if [ -z "${found_scheme_mimes["$scheme_mime"]+x}" ]; then
+      missing_scheme_mimes+=("$scheme_mime")
+    fi
+  done
+  if [ "${#missing_scheme_mimes[@]}" -ne 0 ]; then
+    err "No extracted .desktop MimeType= entry advertised the expected URL scheme handler(s): ${missing_scheme_mimes[*]}."
+    err "Expected MimeType= to include: ${EXPECTED_SCHEME_MIMES[*]}"
     err "MimeType entries found:"
     for desktop_file in "${desktop_files[@]}"; do
       local rel
@@ -817,8 +937,13 @@ validate_container() {
   container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'
   container_cmd+=$'required_xlsx_mime="'"${REQUIRED_XLSX_MIME}"$'"\n'
   container_cmd+=$'spreadsheet_mime_regex="'"${SPREADSHEET_MIME_REGEX}"$'"\n'
-  container_cmd+=$'required_scheme_mime="x-scheme-handler/formula"\n'
   container_cmd+=$'required_parquet_mime="application/vnd.apache.parquet"\n'
+  container_cmd+=$'expected_scheme_mimes_raw="${FORMULA_EXPECTED_SCHEME_MIMES:-}"\n'
+  container_cmd+=$'if [ -z "${expected_scheme_mimes_raw}" ]; then\n'
+  container_cmd+=$'  default_scheme="formula"\n'
+  container_cmd+=$'  expected_scheme_mimes_raw="x-scheme-handler/${default_scheme}"\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'IFS=";" read -r -a required_scheme_mimes <<< "${expected_scheme_mimes_raw}"\n'
   container_cmd+=$'desktop_files=(/usr/share/applications/*.desktop)\n'
   container_cmd+=$'if [ ! -e "${desktop_files[0]}" ]; then\n'
   container_cmd+=$'  echo "No .desktop files found under /usr/share/applications after RPM install." >&2\n'
@@ -856,7 +981,7 @@ validate_container() {
   container_cmd+=$'has_xlsx_mime=0\n'
   container_cmd+=$'has_xlsx_integration=0\n'
   container_cmd+=$'has_parquet_mime=0\n'
-  container_cmd+=$'has_scheme_mime=0\n'
+  container_cmd+=$'declare -A found_scheme_mimes=()\n'
   container_cmd+=$'bad_exec_count=0\n'
   container_cmd+=$'for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'  mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" | head -n 1 || true)"\n'
@@ -886,8 +1011,14 @@ validate_container() {
   container_cmd+=$'      bad_exec_count=$((bad_exec_count + 1))\n'
   container_cmd+=$'    fi\n'
   container_cmd+=$'  fi\n'
-  container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "${required_scheme_mime}"; then\n'
-  container_cmd+=$'    has_scheme_mime=1\n'
+  container_cmd+=$'  has_any_expected_scheme_in_file=0\n'
+  container_cmd+=$'  for scheme_mime in "${required_scheme_mimes[@]}"; do\n'
+  container_cmd+=$'    if [ -n "${scheme_mime}" ] && printf "%s" "${mime_value}" | grep -Fqi "${scheme_mime}"; then\n'
+  container_cmd+=$'      found_scheme_mimes["$scheme_mime"]=1\n'
+  container_cmd+=$'      has_any_expected_scheme_in_file=1\n'
+  container_cmd+=$'    fi\n'
+  container_cmd+=$'  done\n'
+  container_cmd+=$'  if [ "${has_any_expected_scheme_in_file}" -eq 1 ]; then\n'
   container_cmd+=$'    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"\n'
   container_cmd+=$'    if [ -z "${exec_line}" ]; then\n'
   container_cmd+=$'      echo "Installed desktop entry ${f} is missing an Exec= entry (required for URL scheme handlers)" >&2\n'
@@ -945,9 +1076,15 @@ validate_container() {
   container_cmd+=$'  done\n'
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
-  container_cmd+=$'if [ "${has_scheme_mime}" -ne 1 ]; then\n'
-  container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime})." >&2\n'
-  container_cmd+=$'  echo "Expected MimeType= to include ${required_scheme_mime};" >&2\n'
+  container_cmd+=$'missing_scheme_mimes=()\n'
+  container_cmd+=$'for scheme_mime in "${required_scheme_mimes[@]}"; do\n'
+  container_cmd+=$'  if [ -n "${scheme_mime}" ] && [ -z "${found_scheme_mimes["$scheme_mime"]+x}" ]; then\n'
+  container_cmd+=$'    missing_scheme_mimes+=("$scheme_mime")\n'
+  container_cmd+=$'  fi\n'
+  container_cmd+=$'done\n'
+  container_cmd+=$'if [ "${#missing_scheme_mimes[@]}" -ne 0 ]; then\n'
+  container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised the expected URL scheme handler(s): ${missing_scheme_mimes[*]}." >&2\n'
+  container_cmd+=$'  echo "Expected MimeType= to include: ${required_scheme_mimes[*]}" >&2\n'
   container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'    lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" || true)"\n'
   container_cmd+=$'    if [ -n "${lines}" ]; then\n'
@@ -986,6 +1123,7 @@ validate_container() {
   docker pull "${docker_platform_args[@]}" "${FEDORA_IMAGE}"
   docker run --rm \
     "${docker_platform_args[@]}" \
+    -e "FORMULA_EXPECTED_SCHEME_MIMES=${EXPECTED_SCHEME_MIMES_ENV}" \
     -v "${mount_dir}:/rpms:ro" \
     "${FEDORA_IMAGE}" \
     bash -lc "${container_cmd}"

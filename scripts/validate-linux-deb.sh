@@ -187,6 +187,113 @@ fi
 EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
 EXPECTED_MIME_DEFINITION_PATH="/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
 
+# Expected deep-link URL scheme handlers (x-scheme-handler/<scheme>) that should be
+# advertised by the installed desktop entry.
+#
+# Source of truth: apps/desktop/src-tauri/tauri.conf.json → plugins.deep-link.desktop.schemes.
+# Default to "formula" when missing/unparseable.
+declare -a EXPECTED_DEEP_LINK_SCHEMES=()
+if command -v python3 >/dev/null 2>&1; then
+  mapfile -t EXPECTED_DEEP_LINK_SCHEMES < <(
+    python3 - "$TAURI_CONF" <<'PY' 2>/dev/null || true
+import json
+import re
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        conf = json.load(f)
+except Exception:
+    sys.exit(0)
+
+plugins = conf.get("plugins") or {}
+deep_link = plugins.get("deep-link") or {}
+desktop = deep_link.get("desktop")
+schemes = set()
+
+def normalize(value: str) -> str:
+    v = value.strip().lower()
+    v = re.sub(r"[:/]+$", "", v)
+    return v
+
+def add_from_protocol(protocol):
+    if not isinstance(protocol, dict):
+        return
+    raw = protocol.get("schemes")
+    values = []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = [v for v in raw if isinstance(v, str)]
+    for v in values:
+        norm = normalize(v)
+        if norm:
+            schemes.add(norm)
+
+if isinstance(desktop, list):
+    for protocol in desktop:
+        add_from_protocol(protocol)
+else:
+    add_from_protocol(desktop)
+
+for scheme in sorted(schemes):
+    print(scheme)
+PY
+  )
+fi
+if [[ ${#EXPECTED_DEEP_LINK_SCHEMES[@]} -eq 0 ]] && command -v node >/dev/null 2>&1; then
+  mapfile -t EXPECTED_DEEP_LINK_SCHEMES < <(
+    node - "$TAURI_CONF" <<'NODE' 2>/dev/null || true
+const fs = require("node:fs");
+const configPath = process.argv[2];
+let conf;
+try {
+  conf = JSON.parse(fs.readFileSync(configPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+const deepLink = conf?.plugins?.["deep-link"];
+const desktop = deepLink?.desktop;
+const schemes = new Set();
+
+const normalize = (value) => String(value).trim().toLowerCase().replace(/[:/]+$/, "");
+
+const addFromProtocol = (protocol) => {
+  if (!protocol || typeof protocol !== "object") return;
+  const raw = protocol.schemes;
+  const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    const norm = normalize(v);
+    if (norm) schemes.add(norm);
+  }
+};
+
+if (Array.isArray(desktop)) {
+  for (const protocol of desktop) addFromProtocol(protocol);
+} else {
+  addFromProtocol(desktop);
+}
+
+if (schemes.size === 0) process.exit(0);
+for (const scheme of Array.from(schemes).sort()) console.log(scheme);
+NODE
+  )
+fi
+if [[ ${#EXPECTED_DEEP_LINK_SCHEMES[@]} -eq 0 ]]; then
+  EXPECTED_DEEP_LINK_SCHEMES=("formula")
+fi
+declare -a EXPECTED_SCHEME_MIMES=()
+for scheme in "${EXPECTED_DEEP_LINK_SCHEMES[@]}"; do
+  EXPECTED_SCHEME_MIMES+=("x-scheme-handler/${scheme}")
+done
+EXPECTED_SCHEME_MIMES_ENV="$(
+  IFS=';'
+  echo "${EXPECTED_SCHEME_MIMES[*]}"
+)"
+
 # Debian package name should typically match the main binary name, but allow overriding
 # just the Package field/doc dir name for validation purposes.
 EXPECTED_DEB_NAME="${FORMULA_DEB_NAME_OVERRIDE:-$EXPECTED_MAIN_BINARY}"
@@ -378,7 +485,6 @@ validate_desktop_integration_extracted() {
 
   local required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   local required_parquet_mime="application/vnd.apache.parquet"
-  local required_scheme_mime="x-scheme-handler/formula"
   local spreadsheet_mime_regex
   spreadsheet_mime_regex='xlsx|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
 
@@ -386,8 +492,8 @@ validate_desktop_integration_extracted() {
   local has_spreadsheet_mime=0
   local has_xlsx_integration=0
   local has_parquet_mime=0
-  local has_scheme_mime=0
   local bad_exec_count=0
+  declare -A found_scheme_mimes=()
 
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
@@ -403,8 +509,16 @@ validate_desktop_integration_extracted() {
       has_parquet_mime=1
     fi
 
-    if printf '%s' "$mime_value" | grep -Fqi "$required_scheme_mime"; then
-      has_scheme_mime=1
+    local has_any_expected_scheme_in_file=0
+    local scheme_mime
+    for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
+      if printf '%s' "$mime_value" | grep -Fqi "$scheme_mime"; then
+        found_scheme_mimes["$scheme_mime"]=1
+        has_any_expected_scheme_in_file=1
+      fi
+    done
+
+    if [[ "$has_any_expected_scheme_in_file" -eq 1 ]]; then
       local exec_line
       exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
       if [[ -z "$exec_line" ]]; then
@@ -452,8 +566,15 @@ validate_desktop_integration_extracted() {
     err "No extracted .desktop MimeType= entry advertised spreadsheet MIME types (expected xlsx/csv/etc)."
     return 1
   fi
-  if [[ "$has_scheme_mime" -ne 1 ]]; then
-    err "No extracted .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime})."
+  local -a missing_scheme_mimes=()
+  local scheme_mime
+  for scheme_mime in "${EXPECTED_SCHEME_MIMES[@]}"; do
+    if [[ -z "${found_scheme_mimes["$scheme_mime"]+x}" ]]; then
+      missing_scheme_mimes+=("$scheme_mime")
+    fi
+  done
+  if [[ ${#missing_scheme_mimes[@]} -ne 0 ]]; then
+    err "No extracted .desktop MimeType= entry advertised the expected URL scheme handler(s): ${missing_scheme_mimes[*]}"
     return 1
   fi
   if [[ "$bad_exec_count" -ne 0 ]]; then
@@ -599,7 +720,11 @@ validate_container() {
   note "Container validation (Ubuntu): ${deb_path}"
   note "Using image: ${UBUNTU_IMAGE}"
 
-  docker run --rm "${docker_platform_args[@]}" -v "${mount_dir}:/deb:ro" "${UBUNTU_IMAGE}" bash -euxo pipefail -c '
+  docker run --rm "${docker_platform_args[@]}" \
+    -e "FORMULA_EXPECTED_SCHEME_MIMES=${EXPECTED_SCHEME_MIMES_ENV}" \
+    -v "${mount_dir}:/deb:ro" \
+    "${UBUNTU_IMAGE}" \
+    bash -euxo pipefail -c '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends /deb/*.deb
@@ -662,7 +787,17 @@ validate_container() {
     echo "Installed desktop entry: ${desktop_file}"
     grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
     grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
-    grep -qi "x-scheme-handler/formula" "${desktop_file}"
+    expected_scheme_mimes_raw="${FORMULA_EXPECTED_SCHEME_MIMES:-}"
+    if [ -z "${expected_scheme_mimes_raw}" ]; then
+      default_scheme="formula"
+      expected_scheme_mimes_raw="x-scheme-handler/${default_scheme}"
+    fi
+    IFS=";" read -r -a expected_scheme_mimes <<< "${expected_scheme_mimes_raw}"
+    for scheme_mime in "${expected_scheme_mimes[@]}"; do
+      if [ -n "${scheme_mime}" ]; then
+        grep -Fqi "${scheme_mime}" "${desktop_file}"
+      fi
+    done
     grep -qi "application/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet" "${desktop_file}"
     grep -qi "application/vnd\\.apache\\.parquet" "${desktop_file}"
 
