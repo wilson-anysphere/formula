@@ -181,6 +181,45 @@ fn editing_cells_does_not_rewrite_drawing_parts_or_media() {
 }
 
 #[test]
+fn noop_save_preserves_drawing_parts_even_without_drawings_snapshot() {
+    let original_bytes = include_bytes!("../../../fixtures/xlsx/basic/image.xlsx");
+
+    let mut doc = load_from_bytes(original_bytes).expect("load fixture");
+    let sheet_id = doc.workbook.sheets[0].id;
+    // Simulate a document that has worksheet drawings populated but is missing the baseline
+    // `drawings_snapshot` (e.g. metadata was dropped while persisting/restoring state).
+    doc.xlsx_meta_mut().drawings_snapshot.remove(&sheet_id);
+
+    let saved = doc.save_to_vec().expect("save");
+
+    let before = XlsxPackage::from_bytes(original_bytes).expect("read original pkg");
+    let after = XlsxPackage::from_bytes(&saved).expect("read saved pkg");
+
+    assert_eq!(
+        before.part("xl/drawings/drawing1.xml").unwrap(),
+        after.part("xl/drawings/drawing1.xml").unwrap(),
+        "drawing XML should be preserved byte-for-byte on no-op save even without a snapshot"
+    );
+    assert_eq!(
+        before.part("xl/drawings/_rels/drawing1.xml.rels").unwrap(),
+        after.part("xl/drawings/_rels/drawing1.xml.rels").unwrap(),
+        "drawing relationship XML should be preserved byte-for-byte on no-op save even without a snapshot"
+    );
+    assert_eq!(
+        before.part("xl/media/image1.png").unwrap(),
+        after.part("xl/media/image1.png").unwrap(),
+        "image media bytes should be preserved byte-for-byte on no-op save even without a snapshot"
+    );
+    assert_eq!(
+        before
+            .part("xl/worksheets/_rels/sheet1.xml.rels")
+            .unwrap(),
+        after.part("xl/worksheets/_rels/sheet1.xml.rels").unwrap(),
+        "worksheet relationship part should be preserved byte-for-byte on no-op save even without a snapshot"
+    );
+}
+
+#[test]
 fn multi_sheet_noop_save_preserves_all_drawing_parts() {
     let original_bytes = build_two_sheet_drawing_workbook();
 
