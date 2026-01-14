@@ -175,6 +175,11 @@ function normalizeAxisKind(value: unknown): ChartAxisModel["kind"] {
   const kind = value.trim();
   if (kind === "category" || kind === "catAx") return "category";
   if (kind === "value" || kind === "valAx") return "value";
+  // Rust chart models include `date` + `series` axis kinds. The canvas chart
+  // renderer doesn't model these separately yet; treat them as category axes so
+  // they default to the X axis position when `axPos` is missing.
+  if (kind === "date" || kind === "dateAx") return "category";
+  if (kind === "series" || kind === "serAx") return "category";
   // Rust can serialize "unknown"; prefer value axis as a safe default.
   return "value";
 }

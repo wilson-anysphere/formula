@@ -122,6 +122,23 @@ describe("formulaModelChartModelToUiChartModel", () => {
     });
   });
 
+  it("treats date axes as category axes for layout", () => {
+    const input = {
+      chartKind: { kind: "line" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "line", grouping: null, axIds: [1, 2] },
+      axes: [
+        // Minimal date axis (note: no `position`/`axPos` in this stub).
+        { id: 1, kind: "date", scaling: { min: null, max: null, reverse: false } },
+      ],
+      series: [],
+      diagnostics: [],
+    };
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.axes?.[0]).toMatchObject({ kind: "category", position: "bottom" });
+  });
+
   it("converts a pie chart model (categories + values)", () => {
     const input = {
       chartKind: { kind: "pie" },
