@@ -127,6 +127,34 @@ class DocumentControllerStub {
     this._sheetViews.set(sheetId, after);
     this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
   }
+
+  /**
+   * @param {string} sheetId
+   * @param {any[]} drawings
+   */
+  setSheetDrawings(sheetId, drawings) {
+    const before = this.getSheetView(sheetId);
+    const after = { ...before };
+    const list = Array.isArray(drawings) ? drawings : [];
+    if (list.length > 0) after.drawings = list;
+    else delete after.drawings;
+    this._sheetViews.set(sheetId, after);
+    this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {any[]} ranges
+   */
+  setMergedRanges(sheetId, ranges) {
+    const before = this.getSheetView(sheetId);
+    const after = { ...before };
+    const list = Array.isArray(ranges) ? ranges : [];
+    if (list.length > 0) after.mergedRanges = list;
+    else delete after.mergedRanges;
+    this._sheetViews.set(sheetId, after);
+    this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
+  }
 }
 
 test("remote sheet view updates applied via sheetViewBinder are not echoed back into Yjs by the full binder (prevents undo pollution)", async () => {
@@ -364,6 +392,75 @@ test("local axis + background-image edits do not produce duplicate Yjs updates w
     await assertSingleUpdate(() => dc.setColWidth("Sheet1", 0, 120), "setColWidth");
     await assertSingleUpdate(() => dc.setRowHeight("Sheet1", 10, 55), "setRowHeight");
     await assertSingleUpdate(() => dc.setSheetBackgroundImageId("Sheet1", "bg.png"), "setSheetBackgroundImageId");
+  } finally {
+    doc.off("update", onUpdate);
+    sheetViewBinder.destroy();
+    fullBinder.destroy();
+    undoService.undoManager.destroy();
+    doc.destroy();
+  }
+});
+
+test("local drawings + merged-ranges edits do not produce duplicate Yjs updates when both binders are attached", async () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  doc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+  });
+
+  const binderOrigin = { type: "test:binder-origin" };
+  const undoService = createCollabUndoService({ doc, scope: [sheets], origin: binderOrigin });
+
+  const dc = new DocumentControllerStub();
+  const sheetViewBinder = bindSheetViewToCollabSession({
+    session: /** @type {any} */ ({ doc, sheets, localOrigins: new Set(), isReadOnly: () => false }),
+    documentController: /** @type {any} */ (dc),
+    origin: binderOrigin,
+  });
+  const fullBinder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController: dc,
+    undoService,
+    defaultSheetId: "Sheet1",
+  });
+
+  let binderOriginUpdates = 0;
+  const onUpdate = (_update, origin) => {
+    if (origin === binderOrigin) binderOriginUpdates += 1;
+  };
+
+  try {
+    await flushAsync(5);
+    undoService.undoManager.clear();
+    doc.on("update", onUpdate);
+
+    const assertSingleUpdate = async (fn, label) => {
+      binderOriginUpdates = 0;
+      fn();
+      await flushAsync(10);
+      assert.equal(binderOriginUpdates, 1, `expected exactly one binder-origin Yjs update for ${label}`);
+    };
+
+    await assertSingleUpdate(
+      () =>
+        dc.setSheetDrawings("Sheet1", [
+          {
+            id: "drawing-1",
+            zOrder: 0,
+            kind: { type: "image", imageId: "img-1" },
+            anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+          },
+        ]),
+      "setSheetDrawings",
+    );
+    await assertSingleUpdate(
+      () => dc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]),
+      "setMergedRanges",
+    );
   } finally {
     doc.off("update", onUpdate);
     sheetViewBinder.destroy();
