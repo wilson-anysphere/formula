@@ -101,6 +101,7 @@ function defaultStyleFromTheme(cssVarRoot?: HTMLElement | null): SelectionRender
 export class SelectionRenderer {
   private readonly cssVarRoot: HTMLElement | null;
   private readonly styleOverrides: Partial<SelectionRenderStyle> | null;
+  private readonly cellScratch: CellCoord = { row: 0, col: 0 };
 
   constructor(style: SelectionRenderStyle | null = null, options: SelectionRendererOptions = {}) {
     this.style = style;
@@ -289,8 +290,13 @@ export class SelectionRenderer {
       return null;
     }
 
-    const start = metrics.getCellRect({ row: visibleStartRow, col: visibleStartCol });
-    const end = metrics.getCellRect({ row: visibleEndRow, col: visibleEndCol });
+    const cellScratch = this.cellScratch;
+    cellScratch.row = visibleStartRow;
+    cellScratch.col = visibleStartCol;
+    const start = metrics.getCellRect(cellScratch);
+    cellScratch.row = visibleEndRow;
+    cellScratch.col = visibleEndCol;
+    const end = metrics.getCellRect(cellScratch);
     if (!start || !end) return null;
 
     const x = start.x;
@@ -318,10 +324,18 @@ export class SelectionRenderer {
       const clipRight = clip.x + clip.width;
       const clipBottom = clip.y + clip.height;
 
-      const topCell = metrics.getCellRect({ row: range.startRow, col: visibleStartCol });
-      const bottomCell = metrics.getCellRect({ row: range.endRow, col: visibleStartCol });
-      const leftCell = metrics.getCellRect({ row: visibleStartRow, col: range.startCol });
-      const rightCell = metrics.getCellRect({ row: visibleStartRow, col: range.endCol });
+      cellScratch.row = range.startRow;
+      cellScratch.col = visibleStartCol;
+      const topCell = metrics.getCellRect(cellScratch);
+      cellScratch.row = range.endRow;
+      cellScratch.col = visibleStartCol;
+      const bottomCell = metrics.getCellRect(cellScratch);
+      cellScratch.row = visibleStartRow;
+      cellScratch.col = range.startCol;
+      const leftCell = metrics.getCellRect(cellScratch);
+      cellScratch.row = visibleStartRow;
+      cellScratch.col = range.endCol;
+      const rightCell = metrics.getCellRect(cellScratch);
 
       const yTop = topCell ? topCell.y + 0.5 : null;
       const yBottom = bottomCell ? bottomCell.y + bottomCell.height - 0.5 : null;
