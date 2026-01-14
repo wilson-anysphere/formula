@@ -37,14 +37,8 @@ pub use definition::{
 };
 
 pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
-    match field {
-        PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
-        PivotFieldRef::DataModelColumn { table, column } => {
-            Cow::Owned(format!("{table}[{column}]"))
-        }
-        // Measures are stored without brackets; surface the raw name for now.
-        PivotFieldRef::DataModelMeasure(name) => Cow::Borrowed(name),
-    }
+    // Match pivot record sources using the canonical name defined by the pivot model.
+    field.canonical_name()
 }
 
 fn pivot_field_ref_from_legacy_string(raw: String) -> PivotFieldRef {
