@@ -4855,11 +4855,12 @@ export class DocumentController {
    *
    * @param {string} sheetId
    * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
-   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   * @param {{ label?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   insertCellsShiftRight(sheetId, range, options = {}) {
     this.#applyCellsShift(sheetId, range, "insertShiftRight", {
       label: options.label,
+      source: options.source,
       formulaRewrites: options.formulaRewrites,
     });
   }
@@ -4869,10 +4870,14 @@ export class DocumentController {
    *
    * @param {string} sheetId
    * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
-   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   * @param {{ label?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   insertCellsShiftDown(sheetId, range, options = {}) {
-    this.#applyCellsShift(sheetId, range, "insertShiftDown", { label: options.label, formulaRewrites: options.formulaRewrites });
+    this.#applyCellsShift(sheetId, range, "insertShiftDown", {
+      label: options.label,
+      source: options.source,
+      formulaRewrites: options.formulaRewrites,
+    });
   }
 
   /**
@@ -4880,10 +4885,14 @@ export class DocumentController {
    *
    * @param {string} sheetId
    * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
-   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   * @param {{ label?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   deleteCellsShiftLeft(sheetId, range, options = {}) {
-    this.#applyCellsShift(sheetId, range, "deleteShiftLeft", { label: options.label, formulaRewrites: options.formulaRewrites });
+    this.#applyCellsShift(sheetId, range, "deleteShiftLeft", {
+      label: options.label,
+      source: options.source,
+      formulaRewrites: options.formulaRewrites,
+    });
   }
 
   /**
@@ -4891,17 +4900,21 @@ export class DocumentController {
    *
    * @param {string} sheetId
    * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
-   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   * @param {{ label?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   deleteCellsShiftUp(sheetId, range, options = {}) {
-    this.#applyCellsShift(sheetId, range, "deleteShiftUp", { label: options.label, formulaRewrites: options.formulaRewrites });
+    this.#applyCellsShift(sheetId, range, "deleteShiftUp", {
+      label: options.label,
+      source: options.source,
+      formulaRewrites: options.formulaRewrites,
+    });
   }
 
   /**
    * @param {string} sheetId
    * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
    * @param {"insertShiftRight" | "insertShiftDown" | "deleteShiftLeft" | "deleteShiftUp"} kind
-   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   * @param {{ label?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   #applyCellsShift(sheetId, range, kind, options = {}) {
     const id = String(sheetId ?? "").trim();
@@ -5157,7 +5170,7 @@ export class DocumentController {
     const defaultLabel = kind === "insertShiftRight" || kind === "insertShiftDown" ? "Insert Cells" : "Delete Cells";
     this.#applyUserWorkbookEdits(
       { cellDeltas: deltas, rangeRunDeltas, sheetViewDeltas },
-      { label: options.label ?? defaultLabel },
+      { label: options.label ?? defaultLabel, source: options.source },
     );
   }
 

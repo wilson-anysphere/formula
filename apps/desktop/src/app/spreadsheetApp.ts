@@ -9453,9 +9453,17 @@ export class SpreadsheetApp {
 
     await this.applyStructuralEdit(op, (result) => {
       if (direction === "right") {
-        this.document.insertCellsShiftRight(sheetId, range, { label: "Insert Cells", formulaRewrites: result.formulaRewrites });
+        this.document.insertCellsShiftRight(sheetId, range, {
+          label: "Insert Cells",
+          source: "ribbon",
+          formulaRewrites: result.formulaRewrites,
+        });
       } else {
-        this.document.insertCellsShiftDown(sheetId, range, { label: "Insert Cells", formulaRewrites: result.formulaRewrites });
+        this.document.insertCellsShiftDown(sheetId, range, {
+          label: "Insert Cells",
+          source: "ribbon",
+          formulaRewrites: result.formulaRewrites,
+        });
       }
     }, { label: "Insert Cells" });
 
@@ -9482,9 +9490,17 @@ export class SpreadsheetApp {
 
     await this.applyStructuralEdit(op, (result) => {
       if (direction === "left") {
-        this.document.deleteCellsShiftLeft(sheetId, range, { label: "Delete Cells", formulaRewrites: result.formulaRewrites });
+        this.document.deleteCellsShiftLeft(sheetId, range, {
+          label: "Delete Cells",
+          source: "ribbon",
+          formulaRewrites: result.formulaRewrites,
+        });
       } else {
-        this.document.deleteCellsShiftUp(sheetId, range, { label: "Delete Cells", formulaRewrites: result.formulaRewrites });
+        this.document.deleteCellsShiftUp(sheetId, range, {
+          label: "Delete Cells",
+          source: "ribbon",
+          formulaRewrites: result.formulaRewrites,
+        });
       }
     }, { label: "Delete Cells" });
 
