@@ -214,7 +214,17 @@ fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             PivotFieldRef::DataModelColumn { table, column } => {
                 let table = format_dax_table_identifier(table.as_str());
                 let column = escape_dax_bracket_identifier(column);
-                write!(f, "{table}[{column}]")
+                // Match DAX/Excel display rules: table names are quoted when they contain spaces or
+                // other special characters. Within a quoted identifier, `'` is escaped as `''`.
+                let needs_quotes = table
+                    .chars()
+                    .any(|c| !c.is_ascii_alphanumeric() && c != '_');
+                if needs_quotes {
+                    let escaped_table = table.replace('\'', "''");
+                    write!(f, "'{escaped_table}'[{column}]")
+                } else {
+                    write!(f, "{table}[{column}]")
+                }
             }
             PivotFieldRef::DataModelMeasure(name) => {
                 let name = escape_dax_bracket_identifier(name);
