@@ -36,6 +36,31 @@ To generate oracle data locally you must have:
 - PowerShell (Windows PowerShell 5.1 or PowerShell 7+)
 - Python 3 (for comparison/reporting, optional if you only generate data)
 
+## Extract localized error-literal spellings (locale data)
+
+Some Excel locales display error literals differently from the canonical (en-US) spellings used by
+the engine (e.g. German `#WERT!` for `#VALUE!`, Spanish `#¡VALOR!` / `#¿NOMBRE?`).
+
+The committed upstream sources live under:
+
+`crates/formula-engine/src/locale/data/upstream/errors/*.tsv`
+
+To extract/verify the localized spellings against a **real Excel install** for the active Excel UI
+language, run (from repo root on Windows):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-error-literals.ps1 -Locale es-ES
+node scripts/generate-locale-error-tsvs.mjs
+```
+
+Notes / caveats:
+
+- Excel COM automation is Windows-only and requires Excel desktop installed.
+- The output reflects the **active Excel UI language**. Install the corresponding Office language
+  pack and set the Excel display language before extracting.
+- Newer error kinds (e.g. `#SPILL!`) may not exist in older Excel versions; the script will fail
+  rather than emitting a misleading mapping if Excel appears not to recognize an error literal.
+
 ## CI note (Excel availability)
 
 GitHub-hosted `windows-latest` runners typically **do not include Microsoft Excel**. To generate oracle data in CI you generally need a **self-hosted Windows runner** with Excel installed.

@@ -76,6 +76,10 @@ Upstream localized spellings (used to (re)generate the committed TSVs) live unde
 
 - `crates/formula-engine/src/locale/data/upstream/errors/*.tsv`
 
+To extract/verify localized spellings against a real Excel install, see:
+
+- `tools/excel-oracle/extract-error-literals.ps1`
+
 ## TSV format
 
 Each TSV file is a simple tab-separated mapping:
