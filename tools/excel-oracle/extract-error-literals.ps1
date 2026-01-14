@@ -193,12 +193,18 @@ try {
     try { $displayText = [string]$cell.Text } catch { $displayText = $null }
 
     $candidate = $formulaLocal
-    if ($candidate -is [string] -and $candidate.StartsWith("=")) {
-      $candidate = $candidate.Substring(1)
-    }
-    # Some Excel versions can show implicit-intersection `@` in FormulaLocal.
-    if ($candidate -is [string] -and $candidate.StartsWith("@")) {
-      $candidate = $candidate.Substring(1)
+    if ($candidate -is [string]) {
+      $candidate = $candidate.Trim()
+      # Defensive: Excel sometimes serializes formulas with extra leading markers
+      # like `=+...` or `=@...`. Strip these before inspecting prefixes.
+      while ($candidate.Length -gt 0) {
+        $ch = $candidate.Substring(0, 1)
+        if ($ch -eq "=" -or $ch -eq "@" -or $ch -eq "+") {
+          $candidate = $candidate.Substring(1)
+          continue
+        }
+        break
+      }
     }
     if ($candidate -is [string]) {
       $candidate = $candidate.Trim()
