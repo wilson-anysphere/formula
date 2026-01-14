@@ -259,7 +259,7 @@ mod tests {
         // Expected bytes computed independently with Python:
         //   buf = hash_value || 0x00*(64-hash_len)
         //   key = md5(buf^0x36) || md5(buf^0x5c)
-        //   return key[..16]
+        //   return key[..16]  (i.e. md5(buf^0x36))
         let expected: [u8; 16] = [
             0x21, 0xA4, 0xF9, 0x3F, 0x30, 0xEF, 0x88, 0x60, 0x3B, 0x66, 0x15, 0x32, 0x4E,
             0x70, 0x90, 0x1B,

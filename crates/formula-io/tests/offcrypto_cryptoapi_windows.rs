@@ -7,9 +7,12 @@ use windows_sys::Win32::Security::Cryptography::{
     CryptAcquireContextW, CryptCreateHash, CryptDeriveKey, CryptDestroyHash, CryptDestroyKey,
     CryptExportKey, CryptGetHashParam, CryptGetKeyParam, CryptHashData, CryptReleaseContext,
     CALG_AES_128,
-    CALG_AES_192, CALG_AES_256, CALG_SHA1, CRYPT_EXPORTABLE, CRYPT_VERIFYCONTEXT, HP_HASHVAL,
-    KP_KEYVAL, PROV_RSA_AES,
+    CALG_AES_192, CALG_AES_256, CALG_MD5, CALG_SHA1, CRYPT_EXPORTABLE, CRYPT_VERIFYCONTEXT,
+    HP_HASHVAL, KP_KEYVAL, PROV_RSA_AES,
 };
+
+// https://learn.microsoft.com/en-us/windows/win32/seccrypto/common-hresult-values
+const NTE_BAD_ALGID: u32 = 0x8009_0008;
 
 fn last_err() -> u32 {
     // SAFETY: safe FFI call.
@@ -54,16 +57,20 @@ impl Drop for CryptoProvider {
 struct CryptoHash(usize);
 
 impl CryptoHash {
-    fn new(provider: &CryptoProvider, alg_id_hash: u32) -> Self {
+    fn try_new(provider: &CryptoProvider, alg_id_hash: u32) -> Result<Self, u32> {
         let mut hhash = 0usize;
         // SAFETY: FFI call.
         let ok = unsafe { CryptCreateHash(provider.0, alg_id_hash, 0, 0, &mut hhash) };
-        assert_ne!(
-            ok, 0,
-            "CryptCreateHash(alg_id_hash={alg_id_hash:#x}) failed: {}",
-            last_err()
-        );
-        Self(hhash)
+        if ok == 0 {
+            return Err(last_err());
+        }
+        Ok(Self(hhash))
+    }
+
+    fn new(provider: &CryptoProvider, alg_id_hash: u32) -> Self {
+        Self::try_new(provider, alg_id_hash).unwrap_or_else(|err| {
+            panic!("CryptCreateHash(alg_id_hash={alg_id_hash:#x}) failed: {err}")
+        })
     }
 
     fn hash_data(&mut self, data: &[u8]) {
@@ -107,16 +114,24 @@ impl Drop for CryptoHash {
 struct CryptoKey(usize);
 
 impl CryptoKey {
-    fn derive(provider: &CryptoProvider, alg_id_key: u32, hash: &CryptoHash) -> Self {
+    fn try_derive(
+        provider: &CryptoProvider,
+        alg_id_key: u32,
+        hash: &CryptoHash,
+    ) -> Result<Self, u32> {
         let mut hkey = 0usize;
         // SAFETY: FFI call.
         let ok = unsafe { CryptDeriveKey(provider.0, alg_id_key, hash.0, CRYPT_EXPORTABLE, &mut hkey) };
-        assert_ne!(
-            ok, 0,
-            "CryptDeriveKey(alg_id_key={alg_id_key:#x}) failed: {}",
-            last_err()
-        );
-        Self(hkey)
+        if ok == 0 {
+            return Err(last_err());
+        }
+        Ok(Self(hkey))
+    }
+
+    fn derive(provider: &CryptoProvider, alg_id_key: u32, hash: &CryptoHash) -> Self {
+        Self::try_derive(provider, alg_id_key, hash).unwrap_or_else(|err| {
+            panic!("CryptDeriveKey(alg_id_key={alg_id_key:#x}) failed: {err}")
+        })
     }
 
     fn get_key_value(&self) -> Vec<u8> {
@@ -265,6 +280,21 @@ fn derive_key_and_hash(
     (hash_value, key_bytes)
 }
 
+fn try_derive_key_and_hash(
+    provider: &CryptoProvider,
+    alg_id_hash: u32,
+    alg_id_key: u32,
+    data: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), u32> {
+    let mut hash = CryptoHash::try_new(provider, alg_id_hash)?;
+    hash.hash_data(data);
+    let hash_value = hash.get_hash_value();
+
+    let key = CryptoKey::try_derive(provider, alg_id_key, &hash)?;
+    let key_bytes = key.get_key_value();
+    Ok((hash_value, key_bytes))
+}
+
 #[test]
 fn cryptderivekey_matches_cryptoapi_for_sha1_aes_key_sizes() {
     let provider = CryptoProvider::acquire();
@@ -286,6 +316,44 @@ fn cryptderivekey_matches_cryptoapi_for_sha1_aes_key_sizes() {
             expected_hash_value,
             "unexpected SHA-1 hash value from CryptoAPI (hash derivation mismatch)"
         );
+        let key_bytes = extract_session_key_bytes(&key_blob, key_len, alg_id_key);
+
+        let ours = crypt_derive_key(&hash_value, key_len, hash_alg);
+        assert_eq!(
+            key_bytes, ours,
+            "derived key mismatch for alg_id_key={alg_id_key:#x} key_len={key_len}"
+        );
+    }
+}
+
+#[test]
+fn cryptderivekey_matches_cryptoapi_for_md5_aes_key_sizes() {
+    let provider = CryptoProvider::acquire();
+    let alg_id_hash = CALG_MD5;
+    let hash_alg = HashAlg::from_calg_id(alg_id_hash).unwrap();
+
+    // Arbitrary-but-stable input for the hash object.
+    let data = b"formula-io offcrypto CryptDeriveKey cross-check";
+
+    for (alg_id_key, key_len) in [
+        (CALG_AES_256, 32usize),
+        (CALG_AES_192, 24usize),
+        (CALG_AES_128, 16usize),
+    ] {
+        let (hash_value, key_blob) =
+            match try_derive_key_and_hash(&provider, alg_id_hash, alg_id_key, data) {
+                Ok(v) => v,
+                Err(err) if err == NTE_BAD_ALGID => {
+                    // Some environments/providers disable MD5 (e.g. via FIPS policy). Skip the
+                    // cross-check in that case; the library's MD5 implementation is still covered
+                    // by deterministic unit tests.
+                    eprintln!("skipping MD5 CryptDeriveKey cross-check: CALG_MD5 unsupported (err={err})");
+                    return;
+                }
+                Err(err) => panic!(
+                    "CryptDeriveKey cross-check failed for alg_id_key={alg_id_key:#x} key_len={key_len}: {err}"
+                ),
+            };
         let key_bytes = extract_session_key_bytes(&key_blob, key_len, alg_id_key);
 
         let ours = crypt_derive_key(&hash_value, key_len, hash_alg);
