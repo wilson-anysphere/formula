@@ -16,7 +16,8 @@ use formula_xlsb::{
 };
 use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
-    read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
+    read_workbook_print_settings, read_workbook_print_settings_from_reader,
+    write_workbook_print_settings, WorkbookPrintSettings,
 };
 use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches,
@@ -33,6 +34,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::macro_trust::compute_macro_fingerprint;
+
+trait ReadSeek: Read + std::io::Seek {}
+impl<T: Read + std::io::Seek> ReadSeek for T {}
 
 const FORMULA_POWER_QUERY_PART: &str = "xl/formula/power-query.xml";
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
@@ -590,20 +594,49 @@ pub(crate) fn looks_like_workbook(path: &Path) -> bool {
 }
 
 fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
-    let origin_xlsx_bytes = Arc::<[u8]>::from(
-        std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
-    );
-    let workbook_model =
-        formula_xlsx::read_workbook_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-            .with_context(|| format!("parse xlsx {:?}", path))?;
-    let print_settings = read_workbook_print_settings(origin_xlsx_bytes.as_ref())
-        .ok()
-        .unwrap_or_default();
+    let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
+    let file_size = std::fs::metadata(path)
+        .with_context(|| format!("stat workbook {:?}", path))?
+        .len();
+
+    let origin_xlsx_bytes = if file_size <= max_origin_bytes as u64 {
+        Some(Arc::<[u8]>::from(
+            std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
+        ))
+    } else {
+        None
+    };
+
+    // Helper that returns a fresh `Read+Seek` handle for the workbook package.
+    //
+    // When `origin_xlsx_bytes` is retained this avoids touching the filesystem again; when it is
+    // not retained we fall back to `File::open` so large workbooks don't require a full `read()`
+    // into memory.
+    let open_reader = || -> anyhow::Result<Box<dyn ReadSeek>> {
+        if let Some(bytes) = origin_xlsx_bytes.as_ref() {
+            Ok(Box::new(Cursor::new(bytes.clone())))
+        } else {
+            Ok(Box::new(
+                std::fs::File::open(path).with_context(|| format!("open workbook {:?}", path))?,
+            ))
+        }
+    };
+
+    let workbook_model = formula_xlsx::read_workbook_from_reader(open_reader()?)
+        .with_context(|| format!("parse xlsx {:?}", path))?;
+
+    let print_settings = match origin_xlsx_bytes.as_deref() {
+        Some(bytes) => read_workbook_print_settings(bytes).ok().unwrap_or_default(),
+        None => open_reader()
+            .ok()
+            .and_then(|r| read_workbook_print_settings_from_reader(r).ok())
+            .unwrap_or_default(),
+    };
 
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
-        origin_xlsx_bytes: Some(origin_xlsx_bytes.clone()),
+        origin_xlsx_bytes: origin_xlsx_bytes.clone(),
         power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
@@ -626,22 +659,19 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
     //
     // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
     let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
-    out.vba_project_bin = formula_xlsx::read_part_from_reader(
-        Cursor::new(origin_xlsx_bytes.as_ref()),
-        "xl/vbaProject.bin",
-    )
-    .ok()
-    .flatten();
-    out.vba_project_signature_bin = formula_xlsx::read_part_from_reader(
-        Cursor::new(origin_xlsx_bytes.as_ref()),
-        "xl/vbaProjectSignature.bin",
-    )
-    .ok()
-    .flatten();
-    if let Ok(Some(power_query_xml)) = formula_xlsx::read_part_from_reader(
-        Cursor::new(origin_xlsx_bytes.as_ref()),
-        FORMULA_POWER_QUERY_PART,
-    ) {
+    out.vba_project_bin = open_reader()
+        .ok()
+        .and_then(|r| formula_xlsx::read_part_from_reader(r, "xl/vbaProject.bin").ok().flatten());
+    out.vba_project_signature_bin = open_reader().ok().and_then(|r| {
+        formula_xlsx::read_part_from_reader(r, "xl/vbaProjectSignature.bin")
+            .ok()
+            .flatten()
+    });
+    if let Some(power_query_xml) = open_reader().ok().and_then(|r| {
+        formula_xlsx::read_part_from_reader(r, FORMULA_POWER_QUERY_PART)
+            .ok()
+            .flatten()
+    }) {
         out.power_query_xml = Some(power_query_xml.clone());
         out.original_power_query_xml = Some(power_query_xml);
     }
@@ -649,31 +679,31 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
     {
         out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
     }
-    if let Ok(parts) =
-        formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-    {
-        for part in parts {
-            worksheet_parts_by_name.insert(part.name, part.worksheet_part);
+    if let Ok(reader) = open_reader() {
+        if let Ok(parts) = formula_xlsx::worksheet_parts_from_reader(reader) {
+            for part in parts {
+                worksheet_parts_by_name.insert(part.name, part.worksheet_part);
+            }
         }
     }
-    if let Ok(preserved) = formula_xlsx::drawingml::preserve_drawing_parts_from_reader(Cursor::new(
-        origin_xlsx_bytes.as_ref(),
-    )) {
-        if !preserved.is_empty() {
-            out.preserved_drawing_parts = Some(preserved);
+    if let Ok(reader) = open_reader() {
+        if let Ok(preserved) = formula_xlsx::drawingml::preserve_drawing_parts_from_reader(reader) {
+            if !preserved.is_empty() {
+                out.preserved_drawing_parts = Some(preserved);
+            }
         }
     }
-    if let Ok(preserved) = formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(
-        origin_xlsx_bytes.as_ref(),
-    )) {
-        if !preserved.is_empty() {
-            out.preserved_pivot_parts = Some(preserved);
+    if let Ok(reader) = open_reader() {
+        if let Ok(preserved) = formula_xlsx::pivots::preserve_pivot_parts_from_reader(reader) {
+            if !preserved.is_empty() {
+                out.preserved_pivot_parts = Some(preserved);
+            }
         }
     }
-    if let Ok(palette) =
-        formula_xlsx::theme_palette_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-    {
-        out.theme_palette = palette;
+    if let Ok(reader) = open_reader() {
+        if let Ok(palette) = formula_xlsx::theme_palette_from_reader(reader) {
+            out.theme_palette = palette;
+        }
     }
 
     out.sheets = workbook_model

@@ -54,3 +54,34 @@ pub const MAX_MARKETPLACE_PACKAGE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 /// the backend still treats them as untrusted input and enforces a cap to avoid large string
 /// allocations.
 pub const MAX_MARKETPLACE_HEADER_BYTES: usize = 4 * 1024; // 4 KiB
+
+/// Maximum size (in bytes) of the XLSX/XLSM package we will retain in
+/// [`crate::file_io::Workbook::origin_xlsx_bytes`].
+///
+/// Retaining the original package enables patch-based saves (we can patch edited worksheet XML
+/// onto the original ZIP). However, keeping arbitrarily large packages in memory is a footgun:
+/// a compromised webview can OOM the Rust backend by opening a huge workbook.
+///
+/// When a workbook exceeds this limit we still open it, but we *do not* keep the raw bytes.
+/// Subsequent saves fall back to the regeneration-based code path.
+pub const MAX_ORIGIN_XLSX_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+
+/// Maximum number of bytes allowed for `Workbook::origin_xlsx_bytes`.
+///
+/// This reads the `FORMULA_MAX_ORIGIN_XLSX_BYTES` environment variable.
+/// - In debug builds we allow any value (so developers can test both branches).
+/// - In release builds we only honor stricter values (tightening); relaxing the limit is ignored.
+pub fn max_origin_xlsx_bytes() -> usize {
+    let default = MAX_ORIGIN_XLSX_BYTES;
+    let Some(value) = std::env::var("FORMULA_MAX_ORIGIN_XLSX_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    else {
+        return default;
+    };
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
+}

@@ -7,7 +7,7 @@ use super::{
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use std::collections::{HashMap, HashSet};
-use std::io::{Cursor, Read, Seek, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -22,7 +22,18 @@ enum DefinedNameEdit {
 pub fn read_workbook_print_settings(
     xlsx_bytes: &[u8],
 ) -> Result<WorkbookPrintSettings, PrintError> {
-    let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
+    read_workbook_print_settings_from_reader(Cursor::new(xlsx_bytes))
+}
+
+/// Streaming variant of [`read_workbook_print_settings`].
+///
+/// This allows callers to extract print settings from an on-disk XLSX/XLSM package without first
+/// reading the entire ZIP container into memory.
+pub fn read_workbook_print_settings_from_reader<R: Read + Seek>(
+    mut reader: R,
+) -> Result<WorkbookPrintSettings, PrintError> {
+    reader.seek(SeekFrom::Start(0))?;
+    let mut zip = ZipArchive::new(reader)?;
     let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml")?;
     let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels")?;
 
