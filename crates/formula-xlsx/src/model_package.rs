@@ -120,7 +120,7 @@ pub struct WorkbookPackage {
 }
 
 impl WorkbookPackage {
-    /// Load a workbook package from in-memory `.xlsx` bytes.
+    /// Load a workbook package from in-memory `.xlsx`/`.xlsm` bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, WorkbookPackageError> {
         let package = XlsxPackage::from_bytes(bytes)?;
         Self::from_package(package)
@@ -258,7 +258,7 @@ impl WorkbookPackage {
         Self::from_bytes(&bytes)
     }
 
-    /// Serialize the workbook package to `.xlsx` bytes.
+    /// Serialize the workbook package to `.xlsx`/`.xlsm` bytes.
     pub fn write_to_bytes(&mut self) -> Result<Vec<u8>, WorkbookPackageError> {
         // Ensure we have xf indices for any styles referenced by stored cells.
         let style_ids = self

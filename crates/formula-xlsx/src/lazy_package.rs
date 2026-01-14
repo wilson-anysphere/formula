@@ -376,7 +376,7 @@ impl XlsxLazyPackage {
         Ok(())
     }
 
-    /// Serialize the package to `.xlsx` bytes.
+    /// Serialize the package to `.xlsx`/`.xlsm` bytes.
     pub fn write_to_bytes(&self) -> Result<Vec<u8>, XlsxError> {
         let mut cursor = Cursor::new(Vec::new());
         self.write_to(&mut cursor)?;
