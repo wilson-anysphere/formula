@@ -4,7 +4,7 @@ set -euo pipefail
 # Ensure TAURI_CLI_VERSION pins are consistent across workflows.
 #
 # Rationale:
-# - We install tauri-cli (cargo tauri) in multiple workflows (CI, release, bundle-size, smoke).
+# - We install tauri-cli (cargo tauri) in multiple workflows (CI, release, dry-run, bundle-size, smoke).
 # - Drifting pins can cause "CI green, release red" (or vice versa) due to toolchain differences.
 # - This script fails fast when the pins diverge, so version bumps are an explicit PR with CI signal.
 
