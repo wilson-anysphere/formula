@@ -260,6 +260,14 @@ Important: **masking is not confidentiality**. Masking is a UX/access-control me
 
 These checks also incorporate encryption invariants (e.g. refusing writes to encrypted cells when no key is available).
 
+Default behavior when permissions are unset:
+
+- If `setPermissions(...)` has never been called, `session.getRole()` returns `null` and role helpers default to:
+  - `session.isReadOnly() === false` (editable by default)
+  - `session.canComment() === false`, `session.canShare() === false`
+- `canReadCell` / `canEditCell` default to permissive role behavior, but still enforce **encryption invariants**
+  (encrypted cells require a key to read/write).
+
 #### Desktop binder permissions (`bindYjsToDocumentController`)
 
 The desktop binder can enforce permissions and masking at the UI projection layer:
