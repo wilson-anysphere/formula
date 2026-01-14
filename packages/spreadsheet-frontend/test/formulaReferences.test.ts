@@ -91,6 +91,13 @@ describe("extractFormulaReferences", () => {
     expect(references[1]?.range).toEqual({ sheet: "Sheet1:Sheet3", startRow: 1, startCol: 1, endRow: 1, endCol: 1 });
   });
 
+  it("parses 3D sheet-qualified refs with individually quoted sheet tokens", () => {
+    const { references } = extractFormulaReferences("=SUM('Sheet 1':'Sheet 3'!A1, 1)", 0, 0);
+    expect(references).toHaveLength(1);
+    expect(references[0]?.text).toBe("'Sheet 1':'Sheet 3'!A1");
+    expect(references[0]?.range).toEqual({ sheet: "Sheet 1:Sheet 3", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+  });
+
   it("detects the active reference at the caret (including token end)", () => {
     // =A1+B1, caret after final "1" should count as being in B1.
     const input = "=A1+B1";

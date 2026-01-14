@@ -266,12 +266,67 @@ function parseCellRef(cell: string): { row: number; col: number } | null {
 }
 
 function parseSheetAndRef(rangeRef: string): { sheet: string | undefined; ref: string } {
-  const match = /^(?:'((?:[^']|'')+)'|([^!]+))!(.+)$/.exec(rangeRef);
-  if (!match) return { sheet: undefined, ref: rangeRef };
+  if (!rangeRef.includes("!")) return { sheet: undefined, ref: rangeRef };
 
-  const rawSheet = match[1] ?? match[2];
-  const sheetName = rawSheet ? rawSheet.replace(/''/g, "'") : undefined;
-  return { sheet: sheetName, ref: match[3]! };
+  const scanQuotedToken = (start: number): { text: string; end: number } | null => {
+    if (rangeRef[start] !== "'") return null;
+    let i = start + 1;
+    while (i < rangeRef.length) {
+      if (rangeRef[i] === "'") {
+        // Escaped quote inside quoted identifier: '' -> '
+        if (rangeRef[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        const raw = rangeRef.slice(start + 1, i);
+        return { text: raw.replace(/''/g, "'"), end: i + 1 };
+      }
+      i += 1;
+    }
+    return null;
+  };
+
+  const scanUnquotedToken = (start: number): { text: string; end: number } | null => {
+    let i = start;
+    while (i < rangeRef.length) {
+      const ch = rangeRef[i] ?? "";
+      if (ch === ":" || ch === "!") break;
+      i += 1;
+    }
+    if (i === start) return null;
+    return { text: rangeRef.slice(start, i), end: i };
+  };
+
+  const scanNameToken = (start: number): { text: string; end: number } | null => {
+    if (rangeRef[start] === "'") return scanQuotedToken(start);
+    return scanUnquotedToken(start);
+  };
+
+  // Parse either:
+  // - Sheet!A1
+  // - Sheet1:Sheet3!A1
+  // - 'Sheet 1'!A1
+  // - 'Sheet 1':'Sheet 3'!A1
+  // - mixed quoting: Sheet1:'Sheet 3'!A1 / 'Sheet 1':Sheet3!A1
+  const first = scanNameToken(0);
+  if (!first) return { sheet: undefined, ref: rangeRef };
+
+  let pos = first.end;
+  if (rangeRef[pos] === ":") {
+    const second = scanNameToken(pos + 1);
+    if (!second) return { sheet: undefined, ref: rangeRef };
+    pos = second.end;
+    if (rangeRef[pos] !== "!") return { sheet: undefined, ref: rangeRef };
+    const sheet = `${first.text}:${second.text}`;
+    return { sheet, ref: rangeRef.slice(pos + 1) };
+  }
+
+  if (rangeRef[pos] === "!") {
+    return { sheet: first.text, ref: rangeRef.slice(pos + 1) };
+  }
+
+  // Not actually a sheet-qualified ref (e.g. might be `A1:B2`); treat as unqualified.
+  return { sheet: undefined, ref: rangeRef };
 }
 
 function parseA1RangeWithSheet(rangeRef: string): FormulaReferenceRange | null {
