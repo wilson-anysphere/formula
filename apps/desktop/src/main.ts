@@ -13,6 +13,7 @@ import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/command-palette.css";
 import "./styles/dialogs.css";
+import "./styles/print.css";
 import "./styles/sort-filter.css";
 import "./styles/extensions-ui.css";
 import "./styles/extensions.css";
@@ -39,6 +40,8 @@ import "./styles/solver.css";
 
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
+
+import { createLazyImport } from "./startup/lazyImport.js";
 
 import { SheetTabStrip } from "./sheets/SheetTabStrip";
 import { openOrganizeSheetsDialog } from "./sheets/OrganizeSheetsDialog";
@@ -70,25 +73,16 @@ import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
 import { resolveEnableDrawingInteractions } from "./drawings/drawingInteractionsFlag.js";
 import { FORMULA_AUDITING_RIBBON_COMMAND_IDS } from "./commands/formulaAuditingCommandIds.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
-import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
-import { GoalSeekDialog } from "./panels/what-if/GoalSeekDialog.js";
+import type { PanelBodyRenderer, PanelBodyRendererOptions } from "./panels/panelBodyRenderer.js";
 import { createWhatIfApi } from "./panels/what-if/api.js";
-import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
+import type { MacroRecorder } from "./macro-recorder/index.js";
 import { mountTitlebar } from "./titlebar/mountTitlebar.js";
-import {
-  renderMacroRunner,
-  TauriMacroBackend,
-  WebMacroBackend,
-  wrapTauriMacroBackendWithUiContext,
-  type MacroRunRequest,
-  type MacroTrustDecision,
-} from "./macros";
+import type { VbaEventMacrosHandle } from "./macros/event_macros";
+import type { MacroRunRequest, MacroTrustDecision } from "./macros/types.js";
 import { applyMacroCellUpdates } from "./macros/applyUpdates";
-import { fireWorkbookBeforeCloseBestEffort, installVbaEventMacros } from "./macros/event_macros";
-import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import type { DocumentController } from "./document/documentController.js";
-import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
+import type { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "./formatting/selectionSizeGuard.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t, tWithVars } from "./i18n/index.js";
@@ -118,15 +112,7 @@ import { checkForUpdatesFromCommandPalette } from "./tauri/updater.js";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
-import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
-import { oauthBroker } from "./power-query/oauthBroker.js";
-import {
-  DesktopPowerQueryService,
-  loadQueriesFromStorage,
-  saveQueriesToStorage,
-  setDesktopPowerQueryService,
-} from "./power-query/service.js";
-import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
+import type { DesktopPowerQueryService } from "./power-query/service.js";
 import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
@@ -185,9 +171,22 @@ import {
 import { tryInsertCollabSheet } from "./sheets/collabSheetMutations";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import { createAddSheetCommand, createDeleteActiveSheetCommand } from "./sheets/sheetCommands";
-import { NUMBER_FORMATS, type CellRange } from "./formatting/toolbar.js";
+import {
+  NUMBER_FORMATS,
+  toggleBold,
+  toggleItalic,
+  toggleStrikethrough,
+  toggleUnderline,
+  toggleWrap,
+  type CellRange,
+} from "./formatting/toolbar.js";
+import {
+  applyFormatAsTablePreset,
+  FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS,
+  estimateFormatAsTableBandedRowOps,
+} from "./formatting/formatAsTablePresets.js";
 import { computeFilterHiddenRows, computeUniqueFilterValues, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
-import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
+import type { CellRange as PrintCellRange, PageSetup } from "./print/index.js";
 import { AutoFilterDropdown, type TableViewRow } from "./table/index.js";
 import {
   getDefaultSeedStoreStorage,
@@ -282,6 +281,80 @@ function warnIfMissingCrossOriginIsolationInTauriProd(): void {
 }
 
 warnIfMissingCrossOriginIsolationInTauriProd();
+
+function reportLazyImportFailure(featureLabel: string, err: unknown): void {
+  console.error(`[formula][desktop] Failed to load ${featureLabel}:`, err);
+  try {
+    showToast(`Failed to load ${featureLabel}. Please reload the app.`, "error");
+  } catch {
+    // ignore (toast root missing / non-DOM contexts)
+  }
+}
+
+const loadPanelBodyRendererModule = createLazyImport(() => import("./panels/panelBodyRenderer.js"), {
+  label: "Panels",
+  onError: (err) => reportLazyImportFailure("Panels", err),
+});
+
+const loadScriptEditorPanelModule = createLazyImport(() => import("./panels/script-editor/index.js"), {
+  label: "Script Editor",
+  onError: (err) => reportLazyImportFailure("Script Editor", err),
+});
+
+const loadScriptingWorkbookAdapterModule = createLazyImport(() => import("./scripting/documentControllerWorkbookAdapter.js"), {
+  label: "Scripting",
+  onError: (err) => reportLazyImportFailure("Scripting", err),
+});
+
+const loadMacroRecorderModule = createLazyImport(() => import("./macro-recorder/index.js"), {
+  label: "Macro recorder",
+  onError: (err) => reportLazyImportFailure("Macro recorder", err),
+});
+
+const loadMacrosModule = createLazyImport(() => import("./macros/index.js"), {
+  label: "Macros",
+  onError: (err) => reportLazyImportFailure("Macros", err),
+});
+
+const loadVbaEventMacrosModule = createLazyImport(() => import("./macros/event_macros.js"), {
+  label: "VBA event macros",
+  onError: (err) => reportLazyImportFailure("VBA event macros", err),
+});
+
+const loadPowerQueryServiceModule = createLazyImport(() => import("./power-query/service.js"), {
+  label: "Power Query",
+  onError: (err) => reportLazyImportFailure("Power Query", err),
+});
+
+const loadPowerQueryRefreshStateStoreModule = createLazyImport(() => import("./power-query/refreshStateStore.js"), {
+  label: "Power Query refresh state",
+  onError: (err) => reportLazyImportFailure("Power Query refresh state", err),
+});
+
+const loadPowerQueryTableSignaturesModule = createLazyImport(() => import("./power-query/tableSignatures.js"), {
+  label: "Power Query signatures",
+  onError: (err) => reportLazyImportFailure("Power Query signatures", err),
+});
+
+const loadPowerQueryOauthBrokerModule = createLazyImport(() => import("./power-query/oauthBroker.js"), {
+  label: "Power Query OAuth",
+  onError: (err) => reportLazyImportFailure("Power Query OAuth", err),
+});
+
+const loadPageSetupDialogModule = createLazyImport(() => import("./print/PageSetupDialog.js"), {
+  label: "Page Setup",
+  onError: (err) => reportLazyImportFailure("Printing", err),
+});
+
+const loadPrintPreviewDialogModule = createLazyImport(() => import("./print/PrintPreviewDialog.js"), {
+  label: "Print Preview",
+  onError: (err) => reportLazyImportFailure("Printing", err),
+});
+
+const loadGoalSeekDialogModule = createLazyImport(() => import("./panels/what-if/GoalSeekDialog.js"), {
+  label: "Goal Seek",
+  onError: (err) => reportLazyImportFailure("Goal Seek", err),
+});
 
 let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
 
@@ -538,12 +611,13 @@ let pendingBackendSync: Promise<void> = Promise.resolve();
 let queuedInvoke: TauriInvoke | null = null;
 let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 let rerenderLayout: (() => void) | null = null;
-let vbaEventMacros: ReturnType<typeof installVbaEventMacros> | null = null;
+let vbaEventMacros: VbaEventMacrosHandle | null = null;
 let ribbonLayoutController: LayoutController | null = null;
 let activeMacroRecorder: MacroRecorder | null = null;
 type MacrosPanelFocusTarget = "runner-select" | "runner-run" | "runner-trust-center" | "recorder-start" | "recorder-stop";
 let pendingMacrosPanelFocus: MacrosPanelFocusTarget | null = null;
 let ensureExtensionsLoadedRef: (() => Promise<void>) | null = null;
+let ensureMacroRecorderRef: (() => Promise<MacroRecorder | null>) | null = null;
 let syncContributedCommandsRef: (() => void) | null = null;
 let syncContributedPanelsRef: (() => void) | null = null;
 let updateKeybindingsRef: (() => void) | null = null;
@@ -2646,6 +2720,11 @@ let powerQueryServiceWorkbookId: string | null = null;
 let stopPowerQueryTrayListener: (() => void) | null = null;
 const powerQueryTrayJobs = new Set<string>();
 let powerQueryTrayHadError = false;
+let powerQueryServiceStartToken = 0;
+type PowerQueryServiceModule = typeof import("./power-query/service.js");
+let powerQueryServiceModule: PowerQueryServiceModule | null = null;
+let powerQueryServiceInitPromise: Promise<void> | null = null;
+let powerQueryServiceInitWorkbookId: string | null = null;
 
 function updateTrayFromPowerQuery(): void {
   const status = powerQueryTrayJobs.size > 0 ? "syncing" : powerQueryTrayHadError ? "error" : "idle";
@@ -2657,45 +2736,87 @@ function currentPowerQueryWorkbookId(): string {
 }
 
 function startPowerQueryService(): void {
-  stopPowerQueryService();
   const serviceWorkbookId = currentPowerQueryWorkbookId();
-  powerQueryServiceWorkbookId = serviceWorkbookId;
-  powerQueryService = new DesktopPowerQueryService({
-    workbookId: serviceWorkbookId,
-    document: app.getDocument(),
-    concurrency: 1,
-    batchSize: 1024,
-  });
-  setDesktopPowerQueryService(serviceWorkbookId, powerQueryService);
 
-  stopPowerQueryTrayListener?.();
-  powerQueryTrayJobs.clear();
-  powerQueryTrayHadError = false;
-  updateTrayFromPowerQuery();
+  // Already running (or already starting) for this workbook id.
+  if (powerQueryService && powerQueryServiceWorkbookId === serviceWorkbookId) return;
+  if (powerQueryServiceInitPromise && powerQueryServiceInitWorkbookId === serviceWorkbookId) return;
 
-  stopPowerQueryTrayListener = powerQueryService.onEvent((evt) => {
-    if (!evt || typeof evt !== "object") return;
-    const type = (evt as any).type;
-    if (type !== "apply:started" && type !== "apply:completed" && type !== "apply:cancelled" && type !== "apply:error") return;
-    const jobId = (evt as any).jobId;
-    if (typeof jobId !== "string" || jobId.trim() === "") return;
+  stopPowerQueryService();
+  const startToken = ++powerQueryServiceStartToken;
+  powerQueryServiceInitWorkbookId = serviceWorkbookId;
 
-    if (type === "apply:started") {
-      powerQueryTrayHadError = false;
-      powerQueryTrayJobs.add(jobId);
-    } else {
-      powerQueryTrayJobs.delete(jobId);
-      if (type === "apply:error") powerQueryTrayHadError = true;
-    }
+  let initPromise: Promise<void>;
+  initPromise = (async () => {
+    const mod = await loadPowerQueryServiceModule();
+    if (!mod) return;
+    powerQueryServiceModule = mod;
 
+    // Bail if another start/stop happened while the chunk was loading.
+    if (startToken !== powerQueryServiceStartToken) return;
+
+    powerQueryServiceWorkbookId = serviceWorkbookId;
+    const service = new mod.DesktopPowerQueryService({
+      workbookId: serviceWorkbookId,
+      document: app.getDocument(),
+      concurrency: 1,
+      batchSize: 1024,
+    });
+    powerQueryService = service;
+    mod.setDesktopPowerQueryService(serviceWorkbookId, service);
+
+    stopPowerQueryTrayListener?.();
+    powerQueryTrayJobs.clear();
+    powerQueryTrayHadError = false;
     updateTrayFromPowerQuery();
-  });
+
+    stopPowerQueryTrayListener = service.onEvent((evt) => {
+      if (!evt || typeof evt !== "object") return;
+      const type = (evt as any).type;
+      if (type !== "apply:started" && type !== "apply:completed" && type !== "apply:cancelled" && type !== "apply:error") return;
+      const jobId = (evt as any).jobId;
+      if (typeof jobId !== "string" || jobId.trim() === "") return;
+
+      if (type === "apply:started") {
+        powerQueryTrayHadError = false;
+        powerQueryTrayJobs.add(jobId);
+      } else {
+        powerQueryTrayJobs.delete(jobId);
+        if (type === "apply:error") powerQueryTrayHadError = true;
+      }
+
+      updateTrayFromPowerQuery();
+    });
+  })()
+    .catch((err) => {
+      console.error("Failed to start Power Query service:", err);
+      showToast(`Failed to start Power Query service: ${String(err)}`, "error");
+    })
+    .finally(() => {
+      if (powerQueryServiceInitPromise === initPromise) {
+        powerQueryServiceInitPromise = null;
+        powerQueryServiceInitWorkbookId = null;
+      }
+    });
+
+  powerQueryServiceInitPromise = initPromise;
 }
 
 function stopPowerQueryService(): void {
+  // Invalidate any in-flight lazy initialization.
+  powerQueryServiceStartToken += 1;
+  powerQueryServiceInitPromise = null;
+  powerQueryServiceInitWorkbookId = null;
+
   const existingWorkbookId = powerQueryServiceWorkbookId;
   powerQueryServiceWorkbookId = null;
-  if (existingWorkbookId) setDesktopPowerQueryService(existingWorkbookId, null);
+  if (existingWorkbookId && powerQueryServiceModule) {
+    try {
+      powerQueryServiceModule.setDesktopPowerQueryService(existingWorkbookId, null);
+    } catch {
+      // ignore
+    }
+  }
   stopPowerQueryTrayListener?.();
   stopPowerQueryTrayListener = null;
   powerQueryService?.dispose();
@@ -2706,7 +2827,8 @@ function stopPowerQueryService(): void {
   updateTrayFromPowerQuery();
 }
 
-startPowerQueryService();
+// Defer Power Query startup work so the initial grid render + time-to-interactive aren't
+// blocked by parsing/executing Power Query (connectors, auth flows, etc).
 window.addEventListener("unload", () => stopPowerQueryService());
 
 type SelectionRect = {
@@ -4071,51 +4193,108 @@ if (
   }
 
   const panelMounts = new Map<string, { container: HTMLElement; dispose: () => void }>();
+  // Scripting + macro tooling is large and not needed to show the initial grid. Load it lazily.
+  let scriptingWorkbook: DocumentControllerWorkbookAdapter | null = null;
+  let scriptingWorkbookInitPromise: Promise<DocumentControllerWorkbookAdapter | null> | null = null;
 
-  const scriptingWorkbook = new DocumentControllerWorkbookAdapter(app.getDocument(), {
-    sheetNameResolver,
-    getActiveSheetName: () => app.getCurrentSheetId(),
-    getSelection: () => {
-      const ranges = app.getSelectionRanges();
-      const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
-      return { sheetName: app.getCurrentSheetId(), address: formatRangeAddress(first) };
-    },
-    setSelection: (sheetName, address) => {
-      const range = parseRangeAddress(address);
-      if (range.startRow === range.endRow && range.startCol === range.endCol) {
-        app.activateCell({ sheetId: sheetName, row: range.startRow, col: range.startCol });
-        return;
-      }
-      app.selectRange({
-        sheetId: sheetName,
-        range: { startRow: range.startRow, startCol: range.startCol, endRow: range.endRow, endCol: range.endCol },
-      });
-    },
-    onDidMutate: () => {
-      // SpreadsheetApp doesn't currently subscribe to DocumentController changes; it re-renders
-      // directly after user-initiated edits. Scripts mutate the document out-of-band, so we
-      // force a repaint after each script-side mutation.
-      app.refresh();
-    },
-  });
+  async function ensureScriptingWorkbook(): Promise<DocumentControllerWorkbookAdapter | null> {
+    if (scriptingWorkbook) return scriptingWorkbook;
+    if (!scriptingWorkbookInitPromise) {
+      scriptingWorkbookInitPromise = (async () => {
+        const mod = await loadScriptingWorkbookAdapterModule();
+        if (!mod) return null;
+        const adapter = new mod.DocumentControllerWorkbookAdapter(app.getDocument(), {
+          sheetNameResolver,
+          getActiveSheetName: () => app.getCurrentSheetId(),
+          getSelection: () => {
+            const ranges = app.getSelectionRanges();
+            const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+            return { sheetName: app.getCurrentSheetId(), address: formatRangeAddress(first) };
+          },
+          setSelection: (sheetName, address) => {
+            const range = parseRangeAddress(address);
+            if (range.startRow === range.endRow && range.startCol === range.endCol) {
+              app.activateCell({ sheetId: sheetName, row: range.startRow, col: range.startCol });
+              return;
+            }
+            app.selectRange({
+              sheetId: sheetName,
+              range: { startRow: range.startRow, startCol: range.startCol, endRow: range.endRow, endCol: range.endCol },
+            });
+          },
+          onDidMutate: () => {
+            // SpreadsheetApp doesn't currently subscribe to DocumentController changes; it re-renders
+            // directly after user-initiated edits. Scripts mutate the document out-of-band, so we
+            // force a repaint after each script-side mutation.
+            app.refresh();
+          },
+        });
+        scriptingWorkbook = adapter;
+        return adapter;
+      })();
+    }
+    return scriptingWorkbookInitPromise;
+  }
 
-  const macroRecorder = new MacroRecorder(scriptingWorkbook);
-  activeMacroRecorder = macroRecorder;
+  let macroRecorder: MacroRecorder | null = null;
+  let macroRecorderInitPromise: Promise<MacroRecorder | null> | null = null;
+  let stopMacroRecorderSelectionSync: (() => void) | null = null;
 
-  // SpreadsheetApp selection changes live outside the DocumentController mutation stream. Emit
-  // selectionChanged events from the UI so the macro recorder can capture selection steps.
-  let lastSelectionKey = "";
-  scriptingWorkbook.events.on("selectionChanged", (evt: any) => {
-    lastSelectionKey = `${evt.sheetName}:${evt.address}`;
-  });
-  app.subscribeSelection((selection) => {
-    const first = selection.ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
-    const address = formatRangeAddress(first);
-    const sheetName = app.getCurrentSheetId();
-    const key = `${sheetName}:${address}`;
-    if (key === lastSelectionKey) return;
-    scriptingWorkbook.events.emit("selectionChanged", { sheetName, address });
-  });
+  async function ensureMacroRecorder(): Promise<MacroRecorder | null> {
+    if (macroRecorder) return macroRecorder;
+    if (!macroRecorderInitPromise) {
+      macroRecorderInitPromise = (async () => {
+        const workbook = await ensureScriptingWorkbook();
+        if (!workbook) return null;
+
+        const mod = await loadMacroRecorderModule();
+        if (!mod) return null;
+
+        const recorder = new mod.MacroRecorder(workbook);
+        macroRecorder = recorder;
+        activeMacroRecorder = recorder;
+
+        // SpreadsheetApp selection changes live outside the DocumentController mutation stream. Emit
+        // selectionChanged events from the UI so the macro recorder can capture selection steps.
+        let lastSelectionKey = "";
+        try {
+          (workbook as any).events?.on?.("selectionChanged", (evt: any) => {
+            lastSelectionKey = `${evt.sheetName}:${evt.address}`;
+          });
+        } catch {
+          // ignore
+        }
+
+        stopMacroRecorderSelectionSync?.();
+        stopMacroRecorderSelectionSync = app.subscribeSelection((selection) => {
+          const first = selection.ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+          const address = formatRangeAddress(first);
+          const sheetName = app.getCurrentSheetId();
+          const key = `${sheetName}:${address}`;
+          if (key === lastSelectionKey) return;
+          try {
+            (workbook as any).events?.emit?.("selectionChanged", { sheetName, address });
+          } catch {
+            // ignore
+          }
+        });
+
+        window.addEventListener(
+          "unload",
+          () => {
+            stopMacroRecorderSelectionSync?.();
+            stopMacroRecorderSelectionSync = null;
+          },
+          { once: true },
+        );
+
+        return recorder;
+      })();
+    }
+    return macroRecorderInitPromise;
+  }
+
+  ensureMacroRecorderRef = ensureMacroRecorder;
 
   function zoneVisible(zone: { panels: string[]; collapsed: boolean }) {
     return zone.panels.length > 0 && !zone.collapsed;
@@ -6432,22 +6611,11 @@ if (
     true,
   );
 
-  let macrosBackend: unknown | null = null;
-  const getMacrosBackend = () => {
-    if (macrosBackend) return macrosBackend as any;
-    try {
-      macrosBackend = new TauriMacroBackend();
-    } catch {
-      macrosBackend = new WebMacroBackend({
-        getDocumentController: () => app.getDocument(),
-        getActiveSheetId: () => app.getCurrentSheetId(),
-        sheetNameResolver,
-      });
-    }
-    return macrosBackend as any;
-  };
+  let panelBodyRenderer: PanelBodyRenderer | null = null;
+  let panelBodyRendererInitPromise: Promise<PanelBodyRenderer | null> | null = null;
+  let macrosPanelRenderToken = 0;
 
-  const panelBodyRenderer = createPanelBodyRenderer({
+  const panelBodyRendererOptions: PanelBodyRendererOptions = {
     getDocumentController: () => app.getDocument(),
     getSpreadsheetApp: () => app,
     getActiveSheetId: () => app.getCurrentSheetId(),
@@ -6512,9 +6680,26 @@ if (
       activateOpenExtensionPanels();
     },
     renderMacrosPanel: (body) => {
+      const renderToken = ++macrosPanelRenderToken;
+      (body as any).__formulaMacrosRenderToken = renderToken;
       body.textContent = "Loading macros…";
-      queueMicrotask(() => {
-        try {
+
+      const schedule =
+        typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => window.setTimeout(cb, 0);
+      schedule(() => {
+        void (async () => {
+          const isStale = () => (body as any).__formulaMacrosRenderToken !== renderToken;
+
+          const macrosMod = await loadMacrosModule();
+          if (!macrosMod) {
+            if (isStale()) return;
+            body.textContent = "Failed to load macros.";
+            return;
+          }
+
+          const recorderMod = await loadMacroRecorderModule();
+
+          if (isStale()) return;
           body.replaceChildren();
           body.classList.add("macros-panel");
 
@@ -6529,12 +6714,27 @@ if (
 
           const scriptStorageId = activePanelWorkbookId;
 
+          const scriptBackend = new macrosMod.WebMacroBackend({
+            getDocumentController: () => app.getDocument(),
+            getActiveSheetId: () => app.getCurrentSheetId(),
+            sheetNameResolver,
+          });
+
+          const scriptBackendForWorkbook = {
+            listMacros: async (_workbookId: string) => await scriptBackend.listMacros(scriptStorageId),
+            getMacroSecurityStatus: async (_workbookId: string) => await scriptBackend.getMacroSecurityStatus(scriptStorageId),
+            setMacroTrust: async (_workbookId: string, decision: MacroTrustDecision) =>
+              await scriptBackend.setMacroTrust(scriptStorageId, decision),
+            runMacro: async (request: MacroRunRequest) => await scriptBackend.runMacro({ ...request, workbookId: scriptStorageId }),
+          };
+
           // Prefer a composite backend in desktop builds: run VBA via Tauri (when available),
           // and run modern scripts (TypeScript/Python) via the web backend + local storage.
           const backend = (() => {
+            if (!isTauriInvokeAvailable()) return scriptBackendForWorkbook;
             try {
-              const baseBackend = new TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
-              const tauriBackend = wrapTauriMacroBackendWithUiContext(
+              const baseBackend = new macrosMod.TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
+              const tauriBackend = macrosMod.wrapTauriMacroBackendWithUiContext(
                 baseBackend,
                 () => {
                   const selection = currentSelectionRect();
@@ -6557,14 +6757,8 @@ if (
                     await new Promise<void>((resolve) => queueMicrotask(resolve));
                     await drainBackendSync();
                   },
-                }
+                },
               );
-
-              const scriptBackend = new WebMacroBackend({
-                getDocumentController: () => app.getDocument(),
-                getActiveSheetId: () => app.getCurrentSheetId(),
-                sheetNameResolver,
-              });
 
               /** @type {Map<string, "tauri" | "web">} */
               const macroOrigin = new Map<string, "tauri" | "web">();
@@ -6592,83 +6786,84 @@ if (
                 runMacro: async (request: MacroRunRequest) => {
                   const origin = macroOrigin.get(request.macroId);
                   if (origin === "web") {
-                    return scriptBackend.runMacro({ ...request, workbookId: scriptStorageId });
+                    return await scriptBackend.runMacro({ ...request, workbookId: scriptStorageId });
                   }
 
-                  return tauriBackend.runMacro(request);
+                  return await tauriBackend.runMacro(request);
                 },
               };
-            } catch {
-              return getMacrosBackend();
+            } catch (err) {
+              console.warn("[formula][desktop] Failed to create Tauri macros backend; falling back to web backend:", err);
+              return scriptBackendForWorkbook;
             }
-           })();
- 
-           const focusMacrosPanelElement = (el: HTMLElement | null) => {
-             if (!el) return;
-             try {
-               el.focus();
-             } catch {
-               // Best-effort: ignore focus errors (e.g. element not focusable in a headless environment).
-             }
-           };
+          })();
 
-           const refreshRunner = async () => {
-             await renderMacroRunner(runnerPanel, backend, workbookId, {
-               onApplyUpdates: async (updates) => {
-                 if (vbaEventMacros) {
-                   await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
-                   return;
-                 }
+          const focusMacrosPanelElement = (el: HTMLElement | null) => {
+            if (!el) return;
+            try {
+              el.focus();
+            } catch {
+              // Best-effort: ignore focus errors (e.g. element not focusable in a headless environment).
+            }
+          };
 
-                 const doc = app.getDocument();
-                 doc.beginBatch({ label: "Run macro" });
-                 let committed = false;
-                 try {
-                   applyMacroCellUpdates(doc, updates);
-                   committed = true;
-                 } finally {
-                   if (committed) doc.endBatch();
-                   else doc.cancelBatch();
-                 }
-                 app.refresh();
-                 await app.whenIdle();
-                 app.refresh();
-               },
-             });
+          const refreshRunner = async () => {
+            await macrosMod.renderMacroRunner(runnerPanel, backend as any, workbookId, {
+              onApplyUpdates: async (updates) => {
+                if (vbaEventMacros) {
+                  await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
+                  return;
+                }
 
-             const focusTarget = pendingMacrosPanelFocus;
-             if (!focusTarget) return;
+                const doc = app.getDocument();
+                doc.beginBatch({ label: "Run macro" });
+                let committed = false;
+                try {
+                  applyMacroCellUpdates(doc, updates);
+                  committed = true;
+                } finally {
+                  if (committed) doc.endBatch();
+                  else doc.cancelBatch();
+                }
+                app.refresh();
+                await app.whenIdle();
+                app.refresh();
+              },
+            });
 
-             if (focusTarget === "runner-select") {
-               focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
-               pendingMacrosPanelFocus = null;
-               return;
-             }
+            const focusTarget = pendingMacrosPanelFocus;
+            if (!focusTarget) return;
 
-             if (focusTarget === "runner-run") {
-               const runButton = runnerPanel.querySelector<HTMLButtonElement>('[data-testid="macro-runner-run"]');
-               if (runButton && !runButton.disabled) {
-                 focusMacrosPanelElement(runButton);
-               } else {
-                 focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
-               }
-               pendingMacrosPanelFocus = null;
-               return;
-             }
+            if (focusTarget === "runner-select") {
+              focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
+              pendingMacrosPanelFocus = null;
+              return;
+            }
 
-             if (focusTarget === "runner-trust-center") {
-               const trustCenterButton = runnerPanel.querySelector<HTMLButtonElement>('[data-testid="macro-runner-trust-center"]');
-               if (trustCenterButton && !trustCenterButton.disabled) {
-                 focusMacrosPanelElement(trustCenterButton);
-               } else {
-                 focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
-               }
-               pendingMacrosPanelFocus = null;
-             }
-           };
+            if (focusTarget === "runner-run") {
+              const runButton = runnerPanel.querySelector<HTMLButtonElement>('[data-testid="macro-runner-run"]');
+              if (runButton && !runButton.disabled) {
+                focusMacrosPanelElement(runButton);
+              } else {
+                focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
+              }
+              pendingMacrosPanelFocus = null;
+              return;
+            }
 
-           const title = document.createElement("div");
-           title.textContent = "Macro Recorder";
+            if (focusTarget === "runner-trust-center") {
+              const trustCenterButton = runnerPanel.querySelector<HTMLButtonElement>('[data-testid="macro-runner-trust-center"]');
+              if (trustCenterButton && !trustCenterButton.disabled) {
+                focusMacrosPanelElement(trustCenterButton);
+              } else {
+                focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
+              }
+              pendingMacrosPanelFocus = null;
+            }
+          };
+
+          const title = document.createElement("div");
+          title.textContent = "Macro Recorder";
           title.className = "macros-panel__title";
           recorderPanel.appendChild(title);
 
@@ -6680,25 +6875,25 @@ if (
           buttons.className = "macros-panel__buttons";
           recorderPanel.appendChild(buttons);
 
-	          const startButton = document.createElement("button");
-	          startButton.dataset["testid"] = "macros-recorder-start";
-	          startButton.type = "button";
-	          startButton.textContent = "Start Recording";
-	          buttons.appendChild(startButton);
+          const startButton = document.createElement("button");
+          startButton.dataset["testid"] = "macros-recorder-start";
+          startButton.type = "button";
+          startButton.textContent = "Start Recording";
+          buttons.appendChild(startButton);
 
-	          const stopButton = document.createElement("button");
-	          stopButton.dataset["testid"] = "macros-recorder-stop";
-	          stopButton.type = "button";
-	          stopButton.textContent = "Stop Recording";
-	          buttons.appendChild(stopButton);
+          const stopButton = document.createElement("button");
+          stopButton.dataset["testid"] = "macros-recorder-stop";
+          stopButton.type = "button";
+          stopButton.textContent = "Stop Recording";
+          buttons.appendChild(stopButton);
 
-	          if (pendingMacrosPanelFocus === "recorder-start") {
-	            focusMacrosPanelElement(startButton);
-	            pendingMacrosPanelFocus = null;
-	          } else if (pendingMacrosPanelFocus === "recorder-stop") {
-	            focusMacrosPanelElement(stopButton);
-	            pendingMacrosPanelFocus = null;
-	          }
+          if (pendingMacrosPanelFocus === "recorder-start") {
+            focusMacrosPanelElement(startButton);
+            pendingMacrosPanelFocus = null;
+          } else if (pendingMacrosPanelFocus === "recorder-stop") {
+            focusMacrosPanelElement(stopButton);
+            pendingMacrosPanelFocus = null;
+          }
 
           const copyTsButton = document.createElement("button");
           copyTsButton.type = "button";
@@ -6800,64 +6995,124 @@ if (
             }
           };
 
-          const currentActions = () => macroRecorder.getOptimizedActions();
+          let recorder: MacroRecorder | null = null;
+          let recorderLoaded = false;
+
+          const currentActions = () => recorder?.getOptimizedActions() ?? [];
 
           const updateRecorderUi = () => {
-            status.textContent = macroRecorder.recording ? "Recording…" : "Not recording";
-            const raw = macroRecorder.getRawActions();
-            const optimized = macroRecorder.getOptimizedActions();
+            if (!recorderLoaded) {
+              status.textContent = "Loading…";
+              meta.textContent = "";
+              preview.textContent = "";
+              return;
+            }
+            if (!recorder) {
+              status.textContent = "Macro recorder not available.";
+              meta.textContent = "";
+              preview.textContent = "";
+              return;
+            }
+
+            status.textContent = recorder.recording ? "Recording…" : "Not recording";
+            const raw = recorder.getRawActions();
+            const optimized = recorder.getOptimizedActions();
             meta.textContent = `Recorded: ${raw.length} steps · Optimized: ${optimized.length} steps`;
             preview.textContent = optimized.length ? JSON.stringify(optimized, null, 2) : "(no recorded actions)";
           };
 
           startButton.onclick = () => {
-            macroRecorder.start();
+            if (!recorder) return;
+            recorder.start();
             updateRecorderUi();
           };
 
           stopButton.onclick = () => {
-            macroRecorder.stop();
+            recorder?.stop();
             updateRecorderUi();
           };
 
           copyTsButton.onclick = async () => {
+            if (!recorderMod) return;
             const actions = currentActions();
             if (actions.length === 0) return;
-            await copyText(generateTypeScriptMacro(actions));
+            await copyText(recorderMod.generateTypeScriptMacro(actions));
           };
 
           copyPyButton.onclick = async () => {
+            if (!recorderMod) return;
             const actions = currentActions();
             if (actions.length === 0) return;
-            await copyText(generatePythonMacro(actions));
+            await copyText(recorderMod.generatePythonMacro(actions));
           };
 
           openScriptEditorButton.onclick = () => {
+            if (!recorderMod) return;
             const actions = currentActions();
             if (actions.length === 0) return;
-            openScriptEditor(generateTypeScriptMacro(actions));
+            openScriptEditor(recorderMod.generateTypeScriptMacro(actions));
           };
 
-           saveButton.onclick = async () => {
-             const actions = currentActions();
-             if (actions.length === 0) return;
+          saveButton.onclick = async () => {
+            if (!recorderMod) return;
+            const actions = currentActions();
+            if (actions.length === 0) return;
             const name = await showInputBox({ prompt: "Macro name:", value: "Recorded Macro" });
             if (!name) return;
-            saveScriptsToStorage(name, { ts: generateTypeScriptMacro(actions), py: generatePythonMacro(actions) });
+            saveScriptsToStorage(name, { ts: recorderMod.generateTypeScriptMacro(actions), py: recorderMod.generatePythonMacro(actions) });
             await refreshRunner();
           };
 
           updateRecorderUi();
 
+          void ensureMacroRecorder()
+            .then((value) => {
+              recorderLoaded = true;
+              recorder = value;
+              updateRecorderUi();
+            })
+            .catch(() => {
+              recorderLoaded = true;
+              recorder = null;
+              updateRecorderUi();
+            });
+
           void refreshRunner().catch((err) => {
             runnerPanel.textContent = `Failed to load macros: ${String(err)}`;
           });
-        } catch (err) {
-          body.textContent = `Macros backend not available: ${String(err)}`;
-        }
+        })().catch((err) => {
+          if ((body as any).__formulaMacrosRenderToken !== renderToken) return;
+          body.textContent = `Failed to load macros: ${String(err)}`;
+        });
       });
     },
-  });
+  };
+
+  async function ensurePanelBodyRenderer(): Promise<PanelBodyRenderer | null> {
+    if (panelBodyRenderer) return panelBodyRenderer;
+    if (!panelBodyRendererInitPromise) {
+      panelBodyRendererInitPromise = (async () => {
+        const mod = await loadPanelBodyRendererModule();
+        if (!mod) return null;
+        try {
+          const renderer = mod.createPanelBodyRenderer(panelBodyRendererOptions);
+          panelBodyRenderer = renderer;
+          return renderer;
+        } catch (err) {
+          panelBodyRenderer = null;
+          panelBodyRendererInitPromise = null;
+          reportLazyImportFailure("Panels", err);
+          return null;
+        }
+      })();
+    }
+    const renderer = await panelBodyRendererInitPromise;
+    if (!renderer) {
+      // Allow retry (e.g. transient chunk load failures).
+      panelBodyRendererInitPromise = null;
+    }
+    return renderer;
+  }
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
     if (panelId === PanelIds.SCRIPT_EDITOR) {
@@ -6865,9 +7120,40 @@ if (
       if (!mount) {
         const container = document.createElement("div");
         container.className = "panel-body__container";
-        const mounted = mountScriptEditorPanel({ workbook: scriptingWorkbook, container });
-        mount = { container, dispose: mounted.dispose };
+        container.textContent = "Loading Script Editor…";
+
+        let disposed = false;
+        mount = {
+          container,
+          dispose: () => {
+            disposed = true;
+            container.innerHTML = "";
+          },
+        };
         panelMounts.set(panelId, mount);
+
+        void (async () => {
+          const [mod, workbook] = await Promise.all([loadScriptEditorPanelModule(), ensureScriptingWorkbook()]);
+          if (disposed) return;
+          if (!mod || !workbook) {
+            container.textContent = "Script Editor unavailable.";
+            return;
+          }
+
+          const mounted = mod.mountScriptEditorPanel({ workbook, container });
+          mount!.dispose = () => {
+            disposed = true;
+            try {
+              mounted.dispose();
+            } finally {
+              container.innerHTML = "";
+            }
+          };
+        })().catch((err) => {
+          if (disposed) return;
+          container.textContent = `Failed to load Script Editor: ${String(err)}`;
+          reportLazyImportFailure("Script Editor", err);
+        });
       }
 
       body.replaceChildren();
@@ -6948,6 +7234,23 @@ if (
       // If the user persisted an extension panel in their layout, ensure the extension host is
       // loaded so the view can activate and populate its webview.
       void ensureExtensionsLoaded();
+    }
+
+    if (panelId === PanelIds.DATA_QUERIES || panelId === PanelIds.QUERY_EDITOR) {
+      startPowerQueryService();
+    }
+
+    if (!panelBodyRenderer) {
+      body.textContent = "Loading panel…";
+      void ensurePanelBodyRenderer().then((renderer) => {
+        if (!body.isConnected) return;
+        if (!renderer) {
+          body.textContent = "Failed to load panel.";
+          return;
+        }
+        rerenderLayout?.();
+      });
+      return;
     }
 
     panelBodyRenderer.renderPanelBody(panelId, body);
@@ -7299,7 +7602,7 @@ if (
     renderFloating();
 
     const openPanels = openPanelIds();
-    panelBodyRenderer.cleanup(openPanels);
+    panelBodyRenderer?.cleanup(openPanels);
     const openSet = new Set(openPanels);
     for (const [panelId, mount] of panelMounts.entries()) {
       if (openSet.has(panelId)) continue;
@@ -7681,12 +7984,52 @@ registerDesktopCommands({
     setPendingMacrosPanelFocus: (target) => {
       pendingMacrosPanelFocus = target;
     },
-    startMacroRecorder: () => activeMacroRecorder?.start(),
+    startMacroRecorder: () => {
+      const ensure = ensureMacroRecorderRef;
+      if (!ensure) {
+        activeMacroRecorder?.start();
+        return;
+      }
+      void ensure()
+        .then((recorder) => recorder?.start())
+        .catch((err) => {
+          console.error("Failed to start macro recorder:", err);
+          showToast(`Failed to start macro recorder: ${String(err)}`, "error");
+        });
+    },
     stopMacroRecorder: () => activeMacroRecorder?.stop(),
     isTauri: () => isTauriInvokeAvailable(),
   },
   dataQueriesHandlers: {
-    getPowerQueryService: () => powerQueryService,
+    getPowerQueryService: () => {
+      if (powerQueryService) return powerQueryService as any;
+      startPowerQueryService();
+
+      const waitForService = async () => {
+        // `startPowerQueryService` is fire-and-forget; wait for the current init promise
+        // (if any) and then verify we have a service.
+        const init = powerQueryServiceInitPromise;
+        if (init) await init;
+        const service = powerQueryService;
+        if (!service) throw new Error("Queries service not available");
+        await service.ready;
+        return service;
+      };
+
+      return {
+        ready: waitForService().then(() => undefined),
+        getQueries: () => powerQueryService?.getQueries() ?? [],
+        refreshAll: () => {
+          startPowerQueryService();
+          return {
+            promise: waitForService().then(async (service) => {
+              const handle = service.refreshAll();
+              return await handle.promise;
+            }),
+          };
+        },
+      };
+    },
     showToast,
     notify,
     focusAfterExecute: () => app.focus(),
@@ -8033,6 +8376,23 @@ function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (ne
 
   function Wrapper() {
     const [value, setValue] = React.useState<PageSetup>(args.initialValue);
+    const [printModule, setPrintModule] = React.useState<Awaited<ReturnType<typeof loadPageSetupDialogModule>>>(null);
+    const [loadFailed, setLoadFailed] = React.useState(false);
+
+    React.useEffect(() => {
+      let cancelled = false;
+      void loadPageSetupDialogModule().then((mod) => {
+        if (cancelled) return;
+        if (!mod) {
+          setLoadFailed(true);
+          return;
+        }
+        setPrintModule(mod);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
 
     const handleChange = React.useCallback(
       (next: PageSetup) => {
@@ -8042,7 +8402,20 @@ function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (ne
       [args],
     );
 
-    return React.createElement(PageSetupDialog, { value, onChange: handleChange, onClose: close });
+    if (loadFailed) {
+      return React.createElement(
+        "div",
+        { className: "dialog__loading" },
+        React.createElement("div", null, "Failed to load Page Setup dialog."),
+        React.createElement("button", { type: "button", onClick: close }, "Close"),
+      );
+    }
+
+    if (!printModule) {
+      return React.createElement("div", { className: "dialog__loading" }, "Loading…");
+    }
+
+    return React.createElement(printModule.PageSetupDialog, { value, onChange: handleChange, onClose: close });
   }
 
   root.render(React.createElement(Wrapper));
@@ -8298,15 +8671,48 @@ function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string
   const root = createRoot(container);
 
   const close = () => dialog.close();
-  root.render(
-    React.createElement(PrintPreviewDialog, {
+  function Wrapper() {
+    const [printModule, setPrintModule] = React.useState<Awaited<ReturnType<typeof loadPrintPreviewDialogModule>>>(null);
+    const [loadFailed, setLoadFailed] = React.useState(false);
+
+    React.useEffect(() => {
+      let cancelled = false;
+      void loadPrintPreviewDialogModule().then((mod) => {
+        if (cancelled) return;
+        if (!mod) {
+          setLoadFailed(true);
+          return;
+        }
+        setPrintModule(mod);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    if (loadFailed) {
+      return React.createElement(
+        "div",
+        { className: "dialog__loading" },
+        React.createElement("div", null, "Failed to load Print Preview."),
+        React.createElement("button", { type: "button", onClick: close }, "Close"),
+      );
+    }
+
+    if (!printModule) {
+      return React.createElement("div", { className: "dialog__loading" }, "Loading…");
+    }
+
+    return React.createElement(printModule.PrintPreviewDialog, {
       pdfBytes: args.bytes,
       filename: args.filename,
       autoPrint: Boolean(args.autoPrint),
       onDownload: () => downloadBytes(args.bytes, args.filename, "application/pdf"),
       onClose: close,
-    }),
-  );
+    });
+  }
+
+  root.render(React.createElement(Wrapper));
 
   dialog.addEventListener(
     "close",
@@ -8369,6 +8775,23 @@ function showGoalSeekDialogModal(): void {
 
   function Wrapper() {
     const [open, setOpen] = React.useState(true);
+    const [goalSeekModule, setGoalSeekModule] = React.useState<Awaited<ReturnType<typeof loadGoalSeekDialogModule>>>(null);
+    const [loadFailed, setLoadFailed] = React.useState(false);
+
+    React.useEffect(() => {
+      let cancelled = false;
+      void loadGoalSeekDialogModule().then((mod) => {
+        if (cancelled) return;
+        if (!mod) {
+          setLoadFailed(true);
+          return;
+        }
+        setGoalSeekModule(mod);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
 
     React.useEffect(() => {
       if (open) return;
@@ -8388,7 +8811,20 @@ function showGoalSeekDialogModal(): void {
       };
     }, [open]);
 
-    return React.createElement(GoalSeekDialog, { api: whatIfApi, open, onClose: () => setOpen(false) });
+    if (loadFailed) {
+      return React.createElement(
+        "div",
+        { className: "dialog__loading" },
+        React.createElement("div", null, "Failed to load Goal Seek dialog."),
+        React.createElement("button", { type: "button", onClick: () => setOpen(false) }, "Close"),
+      );
+    }
+
+    if (!goalSeekModule) {
+      return React.createElement("div", { className: "dialog__loading" }, "Loading…");
+    }
+
+    return React.createElement(goalSeekModule.GoalSeekDialog, { api: whatIfApi, open, onClose: () => setOpen(false) });
   }
 
   root.render(React.createElement(Wrapper));
@@ -9642,8 +10078,9 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // Reset Power Query table signatures before applying the snapshot so any
   // in-flight query executions cannot reuse cached table results from a
   // previously-opened workbook.
-  refreshTableSignaturesFromBackend(doc, [], { workbookSignature });
-  refreshDefinedNameSignaturesFromBackend(doc, [], { workbookSignature });
+  const signaturesMod = await loadPowerQueryTableSignaturesModule();
+  signaturesMod?.refreshTableSignaturesFromBackend(doc, [], { workbookSignature });
+  signaturesMod?.refreshDefinedNameSignaturesFromBackend(doc, [], { workbookSignature });
 
   // Keep the WASM formula engine's workbook file metadata (directory/filename) in sync with the
   // desktop workbook identity so `CELL("filename")` / `INFO("directory")` update immediately.
@@ -9652,7 +10089,6 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // observes the correct path without needing an extra recalculation pass.
   const workbookFileMetadata = getWorkbookFileMetadataFromWorkbookInfo(info);
   await app.setWorkbookFileMetadata(workbookFileMetadata.directory, workbookFileMetadata.filename, { syncEngine: false });
-
   await app.restoreDocumentState(snapshot);
 
   // Hydrate worksheet background images (`<picture r:id="...">`) from the opened XLSX package.
@@ -9680,7 +10116,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     const sheet_id = rawSheetId ? workbookSheetStore.resolveIdByName(rawSheetId) ?? rawSheetId : rawSheetId;
     return { ...(table as any), sheet_id };
   });
-  refreshTableSignaturesFromBackend(doc, normalizedTables as any, { workbookSignature });
+  signaturesMod?.refreshTableSignaturesFromBackend(doc, normalizedTables as any, { workbookSignature });
   const normalizedDefinedNames = definedNames.map((entry) => {
     const refers_to = typeof (entry as any)?.refers_to === "string" ? String((entry as any).refers_to) : "";
     const { sheetName: explicitSheetName } = splitSheetQualifier(refers_to);
@@ -9689,7 +10125,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     const sheetIdFromScope = rawScopeSheet ? workbookSheetStore.resolveIdByName(rawScopeSheet) ?? rawScopeSheet : null;
     return { ...(entry as any), sheet_id: sheetIdFromScope ?? sheetIdFromRef };
   });
-  refreshDefinedNameSignaturesFromBackend(doc, normalizedDefinedNames as any, { workbookSignature });
+  signaturesMod?.refreshDefinedNameSignaturesFromBackend(doc, normalizedDefinedNames as any, { workbookSignature });
 
   for (const entry of definedNames) {
     const name = typeof (entry as any)?.name === "string" ? String((entry as any).name) : "";
@@ -9787,7 +10223,10 @@ async function openWorkbookFromPath(
 
     if (hadActiveWorkbook && queuedInvoke) {
       try {
-        await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        const mod = await loadVbaEventMacrosModule();
+        if (mod) {
+          await mod.fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        }
         // Applying macro updates may schedule backend sync in a microtask; drain it to avoid
         // interleaving stale edits with the next workbook load.
         await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -9821,7 +10260,13 @@ async function openWorkbookFromPath(
     });
 
     if (queuedInvoke) {
-      vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+      void (async () => {
+        const mod = await loadVbaEventMacrosModule();
+        if (!mod) return;
+        vbaEventMacros = mod.installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+      })().catch((err) => {
+        console.error("Failed to install VBA event macros:", err);
+      });
     }
 
     // Each workbook has its own persisted zoom. Restore it (or reset to the default zoom)
@@ -9837,7 +10282,13 @@ async function openWorkbookFromPath(
         engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
       });
       if (queuedInvoke) {
-        vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        void (async () => {
+          const mod = await loadVbaEventMacrosModule();
+          if (!mod) return;
+          vbaEventMacros = mod.installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        })().catch((err) => {
+          console.error("Failed to install VBA event macros:", err);
+        });
       }
     }
     startPowerQueryService();
@@ -9866,19 +10317,25 @@ async function copyPowerQueryPersistence(fromWorkbookId: string, toWorkbookId: s
   // but we still mirror them to localStorage during the migration window. Copy the mirror when
   // the workbook id changes (e.g. Save As from an unsaved session) so UI state remains stable.
   try {
-    const queries = loadQueriesFromStorage(fromWorkbookId);
-    if (queries.length > 0) saveQueriesToStorage(toWorkbookId, queries);
+    const mod = await loadPowerQueryServiceModule();
+    if (mod) {
+      const queries = mod.loadQueriesFromStorage(fromWorkbookId);
+      if (queries.length > 0) mod.saveQueriesToStorage(toWorkbookId, queries);
+    }
   } catch {
     // Ignore storage failures (disabled storage, quota, etc).
   }
 
   // Scheduled refresh metadata is persisted via the RefreshStateStore abstraction.
   try {
-    const fromStore = createPowerQueryRefreshStateStore({ workbookId: fromWorkbookId });
-    const toStore = createPowerQueryRefreshStateStore({ workbookId: toWorkbookId });
-    const state = await fromStore.load();
-    if (state && Object.keys(state).length > 0) {
-      await toStore.save(state);
+    const mod = await loadPowerQueryRefreshStateStoreModule();
+    if (mod) {
+      const fromStore = mod.createPowerQueryRefreshStateStore({ workbookId: fromWorkbookId });
+      const toStore = mod.createPowerQueryRefreshStateStore({ workbookId: toWorkbookId });
+      const state = await fromStore.load();
+      if (state && Object.keys(state).length > 0) {
+        await toStore.save(state);
+      }
     }
   } catch {
     // Best-effort: persistence should never block saving.
@@ -10042,7 +10499,10 @@ async function handleNewWorkbook(
 
     if (hadActiveWorkbook && queuedInvoke) {
       try {
-        await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        const mod = await loadVbaEventMacrosModule();
+        if (mod) {
+          await mod.fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        }
         await new Promise<void>((resolve) => queueMicrotask(resolve));
         await drainBackendSync();
       } catch (err) {
@@ -10073,7 +10533,13 @@ async function handleNewWorkbook(
     });
 
     if (queuedInvoke) {
-      vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+      void (async () => {
+        const mod = await loadVbaEventMacrosModule();
+        if (!mod) return;
+        vbaEventMacros = mod.installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+      })().catch((err) => {
+        console.error("Failed to install VBA event macros:", err);
+      });
     }
 
     // New workbooks should not inherit zoom from the prior workbook; treat zoom as a per-workbook
@@ -10087,7 +10553,13 @@ async function handleNewWorkbook(
         engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
       });
       if (queuedInvoke) {
-        vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        void (async () => {
+          const mod = await loadVbaEventMacrosModule();
+          if (!mod) return;
+          vbaEventMacros = mod.installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        })().catch((err) => {
+          console.error("Failed to install VBA event macros:", err);
+        });
       }
     }
     startPowerQueryService();
@@ -10160,7 +10632,9 @@ try {
     runWorkbookBeforeClose: async () => {
       commitAllPendingEditsForCommand();
       if (!queuedInvoke) return;
-      await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+      const mod = await loadVbaEventMacrosModule();
+      if (!mod) return;
+      await mod.fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     },
     drainBackendSync,
     quitApp: async () => {
@@ -10217,7 +10691,13 @@ try {
   const oauthRedirectListener = listen("oauth-redirect", (event) => {
     const redirectUrl = (event as any)?.payload;
     if (typeof redirectUrl !== "string" || redirectUrl.trim() === "") return;
-    oauthBroker.observeRedirect(redirectUrl);
+    void (async () => {
+      const mod = await loadPowerQueryOauthBrokerModule();
+      if (!mod) return;
+      mod.oauthBroker.observeRedirect(redirectUrl);
+    })().catch((err) => {
+      console.error("Failed to handle oauth redirect:", err);
+    });
   });
 
   // Signal that we're ready to receive (and flush any queued) oauth-redirect events.
@@ -10808,7 +11288,10 @@ try {
       if (shouldRunBeforeCloseMacro && queuedInvoke) {
         try {
           // Best-effort Workbook_BeforeClose for tray/menu close flows (no prompt).
-          await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+          const mod = await loadVbaEventMacrosModule();
+          if (mod) {
+            await mod.fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+          }
         } catch (err) {
           console.warn("Workbook_BeforeClose event macro failed:", err);
         }
