@@ -1,3 +1,4 @@
+import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
 import { pickImagesFromTauriDialog, readBinaryFile } from "./pickImagesFromTauriDialog.js";
 
 export interface PickLocalImageFilesOptions {
@@ -108,9 +109,21 @@ async function pickLocalImageFilesViaTauriDialog(options: PickLocalImageFilesOpt
   const out: File[] = [];
   for (const path of selected) {
     const name = basename(path);
-    const bytes = await readBinaryFile(path);
-    const mimeType = guessImageMimeType(name);
-    out.push(new FileCtor([bytes], name, { type: mimeType }));
+    try {
+      const bytes = await readBinaryFile(path);
+      const mimeType = guessImageMimeType(name);
+      out.push(new FileCtor([bytes], name, { type: mimeType }));
+    } catch (err) {
+      const message = String((err as any)?.message ?? err);
+      // Oversized images should be skipped (with user feedback handled by the insertion layer).
+      // Return a lightweight placeholder with a `size` above the cap so callers can filter + toast
+      // without allocating the full byte payload.
+      if (message.toLowerCase().includes("file is too large")) {
+        out.push({ name, type: guessImageMimeType(name), size: MAX_INSERT_IMAGE_BYTES + 1 } as any as File);
+        continue;
+      }
+      throw err;
+    }
   }
   return out;
 }
