@@ -272,6 +272,44 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    // DAX identifiers can be written either as bare identifiers (`Table`) or as quoted identifiers
+    // (`'Table Name'`). Quoting is required when the identifier contains whitespace or characters
+    // outside the typical `[A-Za-z0-9_]` set.
+    //
+    // This is a best-effort heuristic used only for display formatting. It intentionally errs on
+    // the side of quoting (quoting is always accepted by DAX, while an invalid bare identifier is
+    // not).
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return true;
+    }
+
+    for (idx, ch) in raw.chars().enumerate() {
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            continue;
+        }
+        if ch.is_ascii_digit() {
+            // DAX bare identifiers cannot start with a digit.
+            if idx == 0 {
+                return true;
+            }
+            continue;
+        }
+
+        // Anything else (including whitespace, punctuation, and non-ASCII) requires quoting.
+        return true;
+    }
+
+    false
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // DAX uses single quotes for quoting table identifiers. Single quotes inside the identifier
+    // are escaped by doubling them (`''`).
+    format!("'{}'", raw.replace('\'', "''"))
+}
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
