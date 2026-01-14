@@ -252,9 +252,15 @@ async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, ma
       format = decryptedFormat;
       formatKey = stableStringify(format);
     }
-  } else if (typeof cell.has === "function" ? cell.has("format") : cell.get("format") !== undefined) {
-    format = cell.get("format") ?? null;
-    formatKey = stableStringify(format);
+  } else {
+    // Backwards-compatible alias: some legacy clients stored per-cell formatting under `style`
+    // instead of `format`. Prefer `format` when present.
+    const raw = cell.get("format");
+    const rawOrStyle = raw === undefined ? cell.get("style") : raw;
+    if (rawOrStyle !== undefined) {
+      format = rawOrStyle ?? null;
+      formatKey = stableStringify(format);
+    }
   }
   if (formula) {
     return { value: null, formula, format, formatKey, hasEnc, maskedForEncryption };
@@ -1354,7 +1360,16 @@ export function bindYjsToDocumentController(options) {
         if (typeof rawKey !== "string") continue;
 
         const changes = event?.changes?.keys;
-        if (changes && !(changes.has("value") || changes.has("formula") || changes.has("format") || changes.has("enc"))) {
+        if (
+          changes &&
+          !(
+            changes.has("value") ||
+            changes.has("formula") ||
+            changes.has("format") ||
+            changes.has("style") ||
+            changes.has("enc")
+          )
+        ) {
           continue;
         }
 
@@ -1641,10 +1656,13 @@ export function bindYjsToDocumentController(options) {
 
           // When `encryptFormat` is enabled, encrypted cells must not leak plaintext `format`.
           if (!encryptedPayload || !encryptFormat) {
+            // Always scrub legacy `style` to converge on the canonical `format` key.
             if (styleId === 0) {
               cell.delete("format");
+              cell.delete("style");
             } else {
               cell.set("format", format);
+              cell.delete("style");
             }
           } else {
             cell.delete("format");
