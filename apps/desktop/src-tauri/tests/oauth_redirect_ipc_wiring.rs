@@ -74,9 +74,8 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
     );
 
     // Extra guardrail: the backend should only flip *oauth-redirect* readiness in response to the
-    // frontend readiness signal. If `mark_ready_and_drain` starts getting called on the
-    // `SharedOauthRedirectState` elsewhere (e.g. during startup), cold-start redirects can be
-    // emitted before the JS listener exists.
+    // frontend readiness signal. If `mark_ready_and_drain` starts getting called elsewhere (e.g.
+    // during startup), cold-start redirects can be emitted before the JS listener exists.
     let mut oauth_redirect_ready_calls = 0;
     for (idx, _) in main_rs.match_indices("state::<SharedOauthRedirectState>") {
         let window = main_rs
@@ -88,7 +87,35 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
     }
     assert_eq!(
         oauth_redirect_ready_calls, 1,
-        "expected exactly one mark_ready_and_drain call associated with SharedOauthRedirectState in desktop main.rs, found {oauth_redirect_ready_calls}"
+        "expected exactly one mark_ready_and_drain call associated with SharedOauthRedirectState in desktop main.rs (readiness should only flip in response to oauth-redirect-ready), found {oauth_redirect_ready_calls}"
+    );
+
+    // Guardrail: the ready listener must verify the webview origin before flushing pending URLs.
+    let mark_ready_idx = listener_body.find(".mark_ready_and_drain(").expect(
+        "OAUTH_REDIRECT_READY_EVENT listener must call mark_ready_and_drain to flush queued URLs",
+    );
+    let state_idx = listener_body.find("state::<SharedOauthRedirectState>").expect(
+        "OAUTH_REDIRECT_READY_EVENT listener must reference SharedOauthRedirectState before flushing queued URLs",
+    );
+    assert!(
+        state_idx < mark_ready_idx,
+        "expected SharedOauthRedirectState lookup to occur before mark_ready_and_drain inside OAUTH_REDIRECT_READY_EVENT listener"
+    );
+
+    let trusted_origin_idx = listener_body.find("is_trusted_app_origin").expect(
+        "OAUTH_REDIRECT_READY_EVENT listener must reject untrusted origins before flushing queued URLs",
+    );
+    assert!(
+        trusted_origin_idx < mark_ready_idx,
+        "expected trusted origin check to occur before mark_ready_and_drain inside OAUTH_REDIRECT_READY_EVENT listener"
+    );
+
+    let stable_origin_idx = listener_body.find("ensure_stable_origin").expect(
+        "OAUTH_REDIRECT_READY_EVENT listener must enforce stable origin before flushing queued URLs",
+    );
+    assert!(
+        stable_origin_idx < mark_ready_idx,
+        "expected stable origin check to occur before mark_ready_and_drain inside OAUTH_REDIRECT_READY_EVENT listener"
     );
 
     let emits_oauth_redirect = listener_body.contains("emit_oauth_redirect_event")
