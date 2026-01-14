@@ -19,8 +19,8 @@ use crate::error::OfficeCryptoError;
 use crate::util::{
     checked_vec_len, ct_eq, parse_encrypted_package_original_size, EncryptionInfoHeader,
 };
-use zeroize::Zeroizing;
 use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
 const BLOCK_KEY_VERIFIER_HASH_VALUE: &[u8; 8] = b"\xD7\xAA\x0F\x6D\x30\x61\x34\x4E";
@@ -131,7 +131,9 @@ pub(crate) fn parse_agile_encryption_info(
     let end = header
         .header_offset
         .checked_add(header.header_size as usize)
-        .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptionInfo XML size overflow".to_string()))?;
+        .ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("EncryptionInfo XML size overflow".to_string())
+        })?;
     let bounded = bytes.get(..end).ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("EncryptionInfo XML size out of range".to_string())
     })?;
@@ -442,14 +444,18 @@ pub(crate) fn decrypt_agile_encrypted_package(
         let last_padded = if rem == 0 {
             0usize
         } else {
-            rem.checked_add(15)
-                .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptedPackage expected length overflow".to_string()))?
-                / 16
+            rem.checked_add(15).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "EncryptedPackage expected length overflow".to_string(),
+                )
+            })? / 16
                 * 16
         };
-        full_segments_len
-            .checked_add(last_padded)
-            .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptedPackage expected length overflow".to_string()))?
+        full_segments_len.checked_add(last_padded).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat(
+                "EncryptedPackage expected length overflow".to_string(),
+            )
+        })?
     };
     if ciphertext.len() < required_ciphertext_len {
         return Err(OfficeCryptoError::InvalidFormat(format!(
@@ -680,7 +686,6 @@ pub(crate) fn decrypt_agile_encrypted_package(
             let expected_hmac = expected_hmac.as_slice();
             let hmac_key_plain = hmac_key_plain.as_slice();
             let hash_size = *hash_size;
-
             // Validate data integrity (HMAC).
             //
             // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream
@@ -702,8 +707,9 @@ pub(crate) fn decrypt_agile_encrypted_package(
 
             let computed_hmac_ciphertext_full =
                 compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext)?;
-            let computed_hmac_ciphertext =
-                computed_hmac_ciphertext_full.get(..hash_size).ok_or_else(|| {
+            let computed_hmac_ciphertext = computed_hmac_ciphertext_full
+                .get(..hash_size)
+                .ok_or_else(|| {
                     OfficeCryptoError::InvalidFormat(
                         "HMAC output shorter than hashSize".to_string(),
                     )
@@ -732,8 +738,9 @@ pub(crate) fn decrypt_agile_encrypted_package(
                     })?,
                     &out,
                 )?;
-                let computed_hmac_plaintext_with_size =
-                    computed_hmac_plaintext_with_size_full.get(..hash_size).ok_or_else(|| {
+                let computed_hmac_plaintext_with_size = computed_hmac_plaintext_with_size_full
+                    .get(..hash_size)
+                    .ok_or_else(|| {
                         OfficeCryptoError::InvalidFormat(
                             "HMAC output shorter than hashSize".to_string(),
                         )
@@ -975,37 +982,32 @@ fn compute_hmac(
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     match hash_alg {
         HashAlgorithm::Md5 => {
-            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha1 => {
-            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha256 => {
-            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha384 => {
-            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha512 => {
-            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(data);
             Ok(mac.finalize().into_bytes().to_vec())
         }
@@ -1020,41 +1022,36 @@ fn compute_hmac_two(
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     match hash_alg {
         HashAlgorithm::Md5 => {
-            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(part1);
             mac.update(part2);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha1 => {
-            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(part1);
             mac.update(part2);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha256 => {
-            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(part1);
             mac.update(part2);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha384 => {
-            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(part1);
             mac.update(part2);
             Ok(mac.finalize().into_bytes().to_vec())
         }
         HashAlgorithm::Sha512 => {
-            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string())
-            })?;
+            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key)
+                .map_err(|_| OfficeCryptoError::InvalidFormat("invalid HMAC key".to_string()))?;
             mac.update(part1);
             mac.update(part2);
             Ok(mac.finalize().into_bytes().to_vec())
@@ -1722,6 +1719,109 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn agile_makekey_from_password_vector_matches_msoffcrypto_tool() {
+        // Test vector sourced from `msoffcrypto-tool` (Python) `ecma376_agile.py` docstring for
+        // `ECMA376Agile.makekey_from_password`.
+        let password = "Password1234_";
+        let salt_value: [u8; 16] = [
+            0x4c, 0x72, 0x5d, 0x45, 0xdc, 0x61, 0x0f, 0x93, 0x94, 0x12, 0xa0, 0x4d, 0xa7, 0x91,
+            0x04, 0x66,
+        ];
+        let encrypted_key_value: [u8; 32] = [
+            0xa1, 0x6c, 0xd5, 0x16, 0x5a, 0x7a, 0xb9, 0xd2, 0x71, 0x11, 0x3e, 0xd3, 0x86, 0xa7,
+            0x8c, 0xf4, 0x96, 0x92, 0xe8, 0xe5, 0x27, 0xb0, 0xc5, 0xfc, 0x00, 0x55, 0xed, 0x08,
+            0x0b, 0x7c, 0xb9, 0x4b,
+        ];
+        let expected_key: [u8; 32] = [
+            0x40, 0x20, 0x66, 0x09, 0xd9, 0xfa, 0xad, 0xf2, 0x4b, 0x07, 0x6a, 0xeb, 0xf2, 0xc4,
+            0x35, 0xb7, 0x42, 0x92, 0xc8, 0xb8, 0xa7, 0xaa, 0x81, 0xbc, 0x67, 0x9b, 0xe8, 0x97,
+            0x11, 0xb0, 0x2a, 0xc2,
+        ];
+
+        let pw_utf16 = password_to_utf16le(password);
+        let hash_alg = HashAlgorithm::Sha512;
+        let derived_key = derive_agile_key(
+            hash_alg,
+            &salt_value,
+            &pw_utf16,
+            100_000,
+            256 / 8,
+            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+        );
+        let key = aes_cbc_decrypt(derived_key.as_slice(), &salt_value, &encrypted_key_value)
+            .expect("decrypt encryptedKeyValue");
+        assert_eq!(key.as_slice(), expected_key);
+    }
+
+    #[test]
+    fn agile_verify_password_vector_matches_msoffcrypto_tool() {
+        // Test vector sourced from `msoffcrypto-tool` (Python) `ecma376_agile.py` docstring for
+        // `ECMA376Agile.verify_password`.
+        let salt_value: [u8; 16] = [
+            0xcb, 0xca, 0x1c, 0x99, 0x93, 0x43, 0xfb, 0xad, 0x92, 0x07, 0x56, 0x34, 0x15, 0x00,
+            0x34, 0xb0,
+        ];
+        let encrypted_verifier_hash_input: [u8; 16] = [
+            0x39, 0xee, 0xa5, 0x4e, 0x26, 0xe5, 0x14, 0x79, 0x8c, 0x28, 0x4b, 0xc7, 0x71, 0x4d,
+            0x38, 0xac,
+        ];
+        let encrypted_verifier_hash_value: [u8; 64] = [
+            0x14, 0x37, 0x6d, 0x6d, 0x81, 0x73, 0x34, 0xe6, 0xb0, 0xff, 0x4f, 0xd8, 0x22, 0x1a,
+            0x7c, 0x67, 0x8e, 0x5d, 0x8a, 0x78, 0x4e, 0x8f, 0x99, 0x9f, 0x4c, 0x18, 0x89, 0x30,
+            0xc3, 0x6a, 0x4b, 0x29, 0xc5, 0xb3, 0x33, 0x60, 0x5b, 0x5c, 0xd4, 0x03, 0xb0, 0x50,
+            0x03, 0xad, 0xcf, 0x18, 0xcc, 0xa8, 0xcb, 0xab, 0x8d, 0xeb, 0xe3, 0x73, 0xc6, 0x56,
+            0x04, 0xa0, 0xbe, 0xcf, 0xae, 0x5c, 0x0a, 0xd0,
+        ];
+
+        let hash_alg = HashAlgorithm::Sha512;
+        let key_bytes = 256 / 8;
+        let expected_hash_len = hash_alg.digest_len();
+
+        let verify = |password: &str| -> bool {
+            let pw_utf16 = password_to_utf16le(password);
+
+            let k1 = derive_agile_key(
+                hash_alg,
+                &salt_value,
+                &pw_utf16,
+                100_000,
+                key_bytes,
+                BLOCK_KEY_VERIFIER_HASH_INPUT,
+            );
+            let verifier_input =
+                aes_cbc_decrypt(k1.as_slice(), &salt_value, &encrypted_verifier_hash_input)
+                    .expect("decrypt encryptedVerifierHashInput");
+            let computed_hash = hash_alg.digest(&verifier_input);
+
+            let k2 = derive_agile_key(
+                hash_alg,
+                &salt_value,
+                &pw_utf16,
+                100_000,
+                key_bytes,
+                BLOCK_KEY_VERIFIER_HASH_VALUE,
+            );
+            let expected_hash =
+                aes_cbc_decrypt(k2.as_slice(), &salt_value, &encrypted_verifier_hash_value)
+                    .expect("decrypt encryptedVerifierHashValue");
+
+            ct_eq(
+                &computed_hash[..expected_hash_len],
+                &expected_hash[..expected_hash_len],
+            )
+        };
+
+        assert!(
+            verify("Password1234_"),
+            "expected verifier to accept correct password"
+        );
+        assert!(
+            !verify("wrong password"),
+            "expected verifier to reject incorrect password"
+        );
+    }
+
     pub(crate) fn agile_encryption_info_fixture() -> Vec<u8> {
         // A small, deterministic Agile EncryptionInfo fixture for parsing tests.
         let xml = agile_descriptor_fixture_xml();
@@ -2074,8 +2174,8 @@ pub(crate) mod tests {
 
         // HMAC key/value fields with non-zero trailing bytes.
         let hmac_key_plain = vec![0x22u8; digest_len];
-        let computed_hmac = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package)
-            .expect("compute hmac");
+        let computed_hmac =
+            compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package).expect("compute hmac");
         assert_eq!(computed_hmac.len(), digest_len);
 
         let mut hmac_key_plain_padded = hmac_key_plain.clone();
@@ -2399,9 +2499,8 @@ pub(crate) mod tests {
         let info = parsed_info();
 
         let mut encrypted_package = Vec::new();
-        encrypted_package.extend_from_slice(
-            &(crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE + 1).to_le_bytes(),
-        );
+        encrypted_package
+            .extend_from_slice(&(crate::MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE + 1).to_le_bytes());
         let err = decrypt_agile_encrypted_package(
             &info,
             &encrypted_package,
