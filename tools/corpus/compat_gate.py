@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.add_argument("--min-open-rate", type=float)
     parser.add_argument("--min-calc-rate", type=float)
+    parser.add_argument("--min-calc-cell-fidelity", type=float)
     parser.add_argument("--min-render-rate", type=float)
     parser.add_argument("--min-round-trip-rate", type=float)
 
@@ -75,12 +76,13 @@ def main(argv: list[str] | None = None) -> int:
     if (
         args.min_open_rate is None
         and args.min_calc_rate is None
+        and args.min_calc_cell_fidelity is None
         and args.min_render_rate is None
         and args.min_round_trip_rate is None
     ):
         print(
             "CORPUS GATE ERROR: No thresholds configured. Pass at least one of "
-            "--min-open-rate/--min-round-trip-rate/--min-calc-rate/--min-render-rate."
+            "--min-open-rate/--min-round-trip-rate/--min-calc-rate/--min-calc-cell-fidelity/--min-render-rate."
         )
         return 2
 
@@ -158,6 +160,67 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    calc_cells = summary.get("calculate_cells")
+    if calc_cells is None:
+        calc_cells = {}
+    if not isinstance(calc_cells, dict):
+        print(
+            f"CORPUS GATE ERROR: Expected {summary_path} field 'calculate_cells' to be an object "
+            f"(got {type(calc_cells).__name__})"
+        )
+        return 2
+
+    calc_cell_fidelity = calc_cells.get("fidelity")
+    calc_formula_cells = calc_cells.get("formula_cells")
+    calc_mismatched_cells = calc_cells.get("mismatched_cells")
+
+    if calc_cell_fidelity is None:
+        calc_cell_fidelity_float: float | None = None
+    elif isinstance(calc_cell_fidelity, bool):
+        print(
+            f"CORPUS GATE ERROR: summary.json field calculate_cells.fidelity must be a float, got bool"
+        )
+        return 2
+    elif isinstance(calc_cell_fidelity, (int, float)):
+        calc_cell_fidelity_float = float(calc_cell_fidelity)
+    else:
+        print(
+            f"CORPUS GATE ERROR: summary.json field calculate_cells.fidelity must be a float, got {type(calc_cell_fidelity).__name__}"
+        )
+        return 2
+
+    def _get_cell_count(name: str, value: Any) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            print(
+                f"CORPUS GATE ERROR: summary.json field calculate_cells.{name} must be an int, got bool"
+            )
+            raise RuntimeError
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        print(
+            f"CORPUS GATE ERROR: summary.json field calculate_cells.{name} must be an int, got {type(value).__name__}"
+        )
+        raise RuntimeError
+
+    try:
+        calc_formula_cells_int = _get_cell_count("formula_cells", calc_formula_cells)
+        calc_mismatched_cells_int = _get_cell_count("mismatched_cells", calc_mismatched_cells)
+    except RuntimeError:
+        return 2
+
+    if args.min_calc_cell_fidelity is not None:
+        if calc_cell_fidelity_float is None or not calc_formula_cells_int:
+            print(
+                "CORPUS GATE ERROR: --min-calc-cell-fidelity was set but calculate_cells.fidelity is unavailable "
+                "(triage must run with --recalc and have cached formula values). Remove --min-calc-cell-fidelity "
+                "or enable recalculation checks."
+            )
+            return 2
+
     if args.min_render_rate is not None and render_attempted == 0:
         print(
             "CORPUS GATE ERROR: --min-render-rate was set but no render results were attempted "
@@ -170,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         "open": _rate(open_ok, total),
         # Calculate/render are optional steps: compute rates among attempted workbooks only.
         "calculate": (calc_ok / calc_attempted) if calc_attempted else None,
+        "calc_cell_fidelity": calc_cell_fidelity_float,
         "render": (render_ok / render_attempted) if render_attempted else None,
         "round_trip": _rate(rt_ok, total),
     }
@@ -177,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     labels = {
         "open": "open",
         "calculate": "calculate",
+        "calc_cell_fidelity": "calc-cell-fidelity",
         "render": "render",
         "round_trip": "round-trip",
     }
@@ -184,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     thresholds: dict[str, float | None] = {
         "open": args.min_open_rate,
         "calculate": args.min_calc_rate,
+        "calc_cell_fidelity": args.min_calc_cell_fidelity,
         "render": args.min_render_rate,
         "round_trip": args.min_round_trip_rate,
     }
@@ -204,6 +270,10 @@ def main(argv: list[str] | None = None) -> int:
                 details = _fmt_rate(open_ok, total)
             elif metric == "calculate":
                 details = _fmt_rate(calc_ok, calc_attempted)
+            elif metric == "calc_cell_fidelity":
+                mm = calc_mismatched_cells_int or 0
+                fc = calc_formula_cells_int or 0
+                details = f"{mm}/{fc} ({metric_rate:.2%})"
             elif metric == "render":
                 details = _fmt_rate(render_ok, render_attempted)
             else:
@@ -222,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"open={_fmt_pct(actual['open'])}",
                     f"round-trip={_fmt_pct(actual['round_trip'])}",
                     f"calculate={_fmt_pct(actual['calculate'])}",
+                    f"calc-cells={_fmt_pct(actual['calc_cell_fidelity'])}",
                     f"render={_fmt_pct(actual['render'])}",
                 ]
             )
@@ -238,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"open={_fmt_pct(actual['open'])}",
                 f"round-trip={_fmt_pct(actual['round_trip'])}",
                 f"calculate={_fmt_pct(actual['calculate'])}",
+                f"calc-cells={_fmt_pct(actual['calc_cell_fidelity'])}",
                 f"render={_fmt_pct(actual['render'])}",
             ]
         )

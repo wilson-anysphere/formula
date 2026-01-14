@@ -321,6 +321,113 @@ class CompatGateTests(unittest.TestCase):
             self.assertEqual(rc, 2, out)
             self.assertIn("no calculate results were attempted", out)
 
+    def test_calc_cell_fidelity_gate_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 10,
+                            "calculate_attempted": 10,
+                            "render_ok": 0,
+                            "round_trip_ok": 10,
+                        },
+                        "calculate_cells": {
+                            "formula_cells": 1000,
+                            "mismatched_cells": 1,
+                            "fidelity": 0.999,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-cell-fidelity",
+                        "0.999",
+                    ]
+                )
+            self.assertEqual(rc, 0, buf.getvalue())
+
+    def test_calc_cell_fidelity_gate_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 10,
+                            "calculate_attempted": 10,
+                            "render_ok": 0,
+                            "round_trip_ok": 10,
+                        },
+                        "calculate_cells": {
+                            "formula_cells": 1000,
+                            "mismatched_cells": 5,
+                            "fidelity": 0.995,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-cell-fidelity",
+                        "0.999",
+                    ]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 1, out)
+            self.assertIn("calc-cell-fidelity", out)
+
+    def test_calc_cell_fidelity_gate_errors_when_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            summary_path = Path(td) / "summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "total": 10,
+                            "open_ok": 10,
+                            "calculate_ok": 10,
+                            "calculate_attempted": 10,
+                            "render_ok": 0,
+                            "round_trip_ok": 10,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(
+                    [
+                        "--summary-json",
+                        str(summary_path),
+                        "--min-calc-cell-fidelity",
+                        "0.999",
+                    ]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 2, out)
+            self.assertIn("CORPUS GATE ERROR", out)
+
 
 if __name__ == "__main__":
     unittest.main()

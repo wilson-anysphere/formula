@@ -524,6 +524,7 @@ Supported thresholds:
 - `--min-open-rate`
 - `--min-round-trip-rate`
 - `--min-calc-rate` *(when triage is run with `--recalc`; measured among workbooks where calculation was attempted)*
+- `--min-calc-cell-fidelity` *(when triage is run with `--recalc`; cell-level fidelity across attempted formula cells, requires cached values)*
 - `--min-render-rate` *(when triage is run with `--render-smoke`; measured among workbooks where render was attempted)*
 
 ### Optional performance gates (scheduled/private)
