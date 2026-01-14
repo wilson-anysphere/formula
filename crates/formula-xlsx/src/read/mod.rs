@@ -3448,9 +3448,12 @@ fn parse_sqref_ranges(val: &str) -> Vec<Range> {
 }
 
 fn normalize_data_validation_formula(raw: &str) -> String {
-    // Data validation formulas are stored without a leading `=` in the model. Preserve the text
-    // exactly as it appears in the worksheet XML, but strip a single leading `=` if present.
-    raw.strip_prefix('=').unwrap_or(raw).to_string()
+    // Data validation formulas are stored without a leading `=` in the model and without
+    // `_xlfn.` function prefixes (to match how we normalize cell formulas). Preserve the text
+    // exactly as it appears in the worksheet XML, but strip:
+    // - a single leading `=` if present
+    // - any `_xlfn.` prefixes that appear at function-call boundaries
+    crate::formula_text::strip_xlfn_prefixes(raw.strip_prefix('=').unwrap_or(raw))
 }
 
 fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<(Vec<Range>, DataValidation)> {
@@ -3482,14 +3485,11 @@ fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<
             b"showInputMessage" => show_input_message = parse_xml_bool(&val),
             b"showErrorMessage" => show_error_message = parse_xml_bool(&val),
             b"showDropDown" => {
-                // NOTE: Despite the name, OOXML's `showDropDown` is historically inverted:
-                // `showDropDown="1"` means "suppress the in-cell dropdown arrow" in Excel.
+                // NOTE: Excel's `showDropDown` is historically inverted relative to the UI:
+                // `showDropDown="1"` means "suppress the in-cell dropdown arrow".
                 //
-                // See: ECMA-376 (SpreadsheetML) `CT_DataValidation` / `showDropDown` and
-                // https://learn.microsoft.com/en-us/openspecs/office_standards/ms-xlsx/
-                //
-                // We store `show_drop_down` using Excel UI semantics (true = arrow shown).
-                show_drop_down = Some(!parse_xml_bool(&val));
+                // We store the raw OOXML value in `show_drop_down` for round-trip fidelity.
+                show_drop_down = Some(parse_xml_bool(&val));
             }
             b"promptTitle" => prompt_title = Some(val),
             b"prompt" => prompt_body = Some(val),
@@ -3506,13 +3506,8 @@ fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<
         return None;
     }
 
-    // Only list validations use Excel's in-cell dropdown affordance. Excel shows the arrow by
-    // default when the `showDropDown` attribute is missing.
-    let show_drop_down = if kind == DataValidationKind::List {
-        show_drop_down.unwrap_or(true)
-    } else {
-        false
-    };
+    // OOXML `showDropDown` defaults to false when omitted.
+    let show_drop_down = show_drop_down.unwrap_or(false);
 
     let input_message = if prompt_title.is_some() || prompt_body.is_some() {
         Some(DataValidationInputMessage {
@@ -3582,14 +3577,11 @@ fn parse_data_validation_start<R: std::io::BufRead>(
             b"showInputMessage" => show_input_message = parse_xml_bool(&val),
             b"showErrorMessage" => show_error_message = parse_xml_bool(&val),
             b"showDropDown" => {
-                // NOTE: Despite the name, OOXML's `showDropDown` is historically inverted:
-                // `showDropDown="1"` means "suppress the in-cell dropdown arrow" in Excel.
+                // NOTE: Excel's `showDropDown` is historically inverted relative to the UI:
+                // `showDropDown="1"` means "suppress the in-cell dropdown arrow".
                 //
-                // See: ECMA-376 (SpreadsheetML) `CT_DataValidation` / `showDropDown` and
-                // https://learn.microsoft.com/en-us/openspecs/office_standards/ms-xlsx/
-                //
-                // We store `show_drop_down` using Excel UI semantics (true = arrow shown).
-                show_drop_down = Some(!parse_xml_bool(&val));
+                // We store the raw OOXML value in `show_drop_down` for round-trip fidelity.
+                show_drop_down = Some(parse_xml_bool(&val));
             }
             b"promptTitle" => prompt_title = Some(val),
             b"prompt" => prompt_body = Some(val),
@@ -3647,13 +3639,8 @@ fn parse_data_validation_start<R: std::io::BufRead>(
 
     let kind = kind.expect("checked in should_store");
 
-    // Only list validations use Excel's in-cell dropdown affordance. Excel shows the arrow by
-    // default when the `showDropDown` attribute is missing.
-    let show_drop_down = if kind == DataValidationKind::List {
-        show_drop_down.unwrap_or(true)
-    } else {
-        false
-    };
+    // OOXML `showDropDown` defaults to false when omitted.
+    let show_drop_down = show_drop_down.unwrap_or(false);
 
     let input_message = if prompt_title.is_some() || prompt_body.is_some() {
         Some(DataValidationInputMessage {

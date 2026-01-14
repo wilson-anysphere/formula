@@ -19,33 +19,38 @@ pub fn resolve_target(source_part: &str, target: &str) -> String {
 pub fn resolve_target_candidates(source_part: &str, target: &str) -> Vec<String> {
     let raw = resolve_target_inner(source_part, target);
 
+    // Fast path: if the target path has no percent escapes *and* no characters we can reasonably
+    // percent-encode (today: spaces), there is no alternate candidate.
     let source_part_seps = normalize_separators(source_part);
     let target_seps = normalize_separators(target);
     let stripped = strip_uri_suffixes(target_seps.as_ref());
+    if !stripped.contains('%') && !stripped.contains(' ') {
+        return vec![raw];
+    }
 
-    let mut out = vec![raw.clone()];
+    let mut candidates = vec![raw.clone()];
 
-    // If the relationship target uses percent-encoding, also try a decoded path (some producers
-    // percent-encode relationship targets while storing ZIP entry names unescaped).
+    // If the relationship target is percent-encoded but the stored ZIP entry name is unescaped,
+    // include the best-effort percent-decoded candidate.
     if let Cow::Owned(decoded) = percent_decode_best_effort(stripped) {
         let decoded_resolved =
             resolve_target_from_stripped(source_part_seps.as_ref(), decoded.as_str());
         if decoded_resolved != raw {
-            out.push(decoded_resolved);
+            candidates.push(decoded_resolved);
         }
     }
 
-    // Conversely, some producers write relationship targets with unescaped spaces, while storing
-    // ZIP entry names percent-encoded. Try an encoded variant as a best-effort fallback.
+    // If the relationship target contains unescaped spaces (producer bug) but the stored ZIP entry
+    // name is percent-encoded, include an encoded candidate.
     if let Cow::Owned(encoded) = percent_encode_best_effort(stripped) {
         let encoded_resolved =
             resolve_target_from_stripped(source_part_seps.as_ref(), encoded.as_str());
-        if !out.iter().any(|v| v == &encoded_resolved) {
-            out.push(encoded_resolved);
+        if !candidates.iter().any(|c| c == &encoded_resolved) {
+            candidates.push(encoded_resolved);
         }
     }
 
-    out
+    candidates
 }
 
 fn strip_uri_suffixes(target: &str) -> &str {
@@ -132,14 +137,13 @@ fn percent_decode_best_effort(input: &str) -> Cow<'_, str> {
 }
 
 fn percent_encode_best_effort(input: &str) -> Cow<'_, str> {
-    // Best-effort: today we only need to support spaces, which are invalid in relationship target
-    // URIs but may show up in some producer-generated `.rels` parts. Excel stores some parts with
-    // percent-encoded names (`%20`) so we need to be able to map between the forms.
-    if !input.as_bytes().iter().any(|b| *b == b' ') {
+    // Relationship targets are URIs, so spaces should be percent-encoded as `%20`. Some producers
+    // emit literal spaces; tolerate those by generating an alternate candidate.
+    if !input.as_bytes().contains(&b' ') {
         return Cow::Borrowed(input);
     }
 
-    let mut out = String::with_capacity(input.len());
+    let mut out = String::with_capacity(input.len() + 2);
     for ch in input.chars() {
         if ch == ' ' {
             out.push_str("%20");
