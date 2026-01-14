@@ -153,6 +153,176 @@ fn build_snowflake_model_with_columnar_sales() -> DataModel {
     model
 }
 
+fn build_three_hop_snowflake_model() -> DataModel {
+    let mut model = DataModel::new();
+
+    let mut divisions = Table::new("Divisions", vec!["DivisionId", "DivisionName"]);
+    divisions
+        .push_row(vec![1.into(), Value::from("D1")])
+        .unwrap();
+    model.add_table(divisions).unwrap();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "DivisionId", "CategoryName"]);
+    categories
+        .push_row(vec![10.into(), 1.into(), Value::from("Cat")])
+        .unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![100.into(), 10.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales
+        .push_row(vec![1.into(), 100.into(), 10.0.into()])
+        .unwrap(); // D1
+    sales
+        .push_row(vec![2.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product -> Products blank row -> Categories blank row -> Divisions blank row
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Categories_Divisions".into(),
+            from_table: "Categories".into(),
+            from_column: "DivisionId".into(),
+            to_table: "Divisions".into(),
+            to_column: "DivisionId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+}
+
+fn build_three_hop_snowflake_model_with_columnar_sales() -> DataModel {
+    let mut model = DataModel::new();
+
+    let mut divisions = Table::new("Divisions", vec!["DivisionId", "DivisionName"]);
+    divisions
+        .push_row(vec![1.into(), Value::from("D1")])
+        .unwrap();
+    model.add_table(divisions).unwrap();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "DivisionId", "CategoryName"]);
+    categories
+        .push_row(vec![10.into(), 1.into(), Value::from("Cat")])
+        .unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![100.into(), 10.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "SaleId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "ProductId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+    sales.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(10.0),
+    ]); // D1
+    sales.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(5.0),
+    ]); // unknown product -> Products blank row -> Categories blank row -> Divisions blank row
+    model
+        .add_table(Table::from_columnar("Sales", sales.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Categories_Divisions".into(),
+            from_table: "Categories".into(),
+            from_column: "DivisionId".into(),
+            to_table: "Divisions".into(),
+            to_column: "DivisionId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+}
+
 fn build_snowflake_model_with_alternate_product_category_relationship() -> DataModel {
     let mut model = DataModel::new();
 
@@ -1651,5 +1821,228 @@ fn pivot_grouping_includes_blank_category_group_for_unmatched_fact_keys_across_s
     assert_eq!(
         result.rows,
         vec![vec![Value::from("A"), 10.0.into()], vec![Value::Blank, 5.0.into()]]
+    );
+}
+
+#[test]
+fn deep_snowflake_values_include_blank_member_across_multiple_hops() {
+    let model = build_three_hop_snowflake_model();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(VALUES(Divisions[DivisionName]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Divisions[DivisionName])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn deep_snowflake_values_include_blank_member_across_multiple_hops_columnar_fact() {
+    let model = build_three_hop_snowflake_model_with_columnar_sales();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(VALUES(Divisions[DivisionName]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Divisions[DivisionName])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn deep_snowflake_filter_excludes_unmatched_fact_rows_when_upstream_dimension_filtered_out() {
+    let model = build_three_hop_snowflake_model();
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty().with_column_equals("Divisions", "DivisionName", "D1".into());
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUM(Sales[Amount])",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        10.0.into()
+    );
+
+    let group_by = vec![GroupByColumn::new("Divisions", "DivisionName")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+    let result = pivot(&model, "Sales", &group_by, &measures, &filter).unwrap();
+    assert_eq!(result.rows, vec![vec![Value::from("D1"), 10.0.into()]]);
+}
+
+#[test]
+fn deep_snowflake_filter_excludes_unmatched_fact_rows_when_upstream_dimension_filtered_out_columnar_fact(
+) {
+    let model = build_three_hop_snowflake_model_with_columnar_sales();
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty().with_column_equals("Divisions", "DivisionName", "D1".into());
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUM(Sales[Amount])",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        10.0.into()
+    );
+
+    let group_by = vec![GroupByColumn::new("Divisions", "DivisionName")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+    let result = pivot(&model, "Sales", &group_by, &measures, &filter).unwrap();
+    assert_eq!(result.rows, vec![vec![Value::from("D1"), 10.0.into()]]);
+}
+
+#[test]
+fn deep_snowflake_products_blank_filtered_out_under_upstream_filter_even_with_crossfilter_reverse() {
+    // Same semantic guard as the 2-hop snowflake test, but with a deeper chain:
+    // Divisions -> Categories -> Products -> Sales.
+    //
+    // Filter Divisions to D1 (excluding BLANK) while reversing Sales->Products relationship so the
+    // division filter does not restrict Sales. Unmatched Sales rows remain visible, but the
+    // intermediate Products blank member should still be filtered out (since it belongs to the
+    // blank Divisions member).
+    let model = build_three_hop_snowflake_model();
+    let engine = DaxEngine::new();
+
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &[
+                "Divisions[DivisionName] = \"D1\"",
+                "CROSSFILTER(Sales[ProductId], Products[ProductId], ONEWAY_LEFTFILTERSRIGHT)",
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUM(Sales[Amount])",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        15.0.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(VALUES(Products[ProductId]))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Products[ProductId])",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+}
+
+#[test]
+fn deep_snowflake_products_blank_filtered_out_under_upstream_filter_even_with_crossfilter_reverse_columnar_fact(
+) {
+    let model = build_three_hop_snowflake_model_with_columnar_sales();
+    let engine = DaxEngine::new();
+
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &[
+                "Divisions[DivisionName] = \"D1\"",
+                "CROSSFILTER(Sales[ProductId], Products[ProductId], ONEWAY_LEFTFILTERSRIGHT)",
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUM(Sales[Amount])",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        15.0.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(VALUES(Products[ProductId]))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Products[ProductId])",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
     );
 }
