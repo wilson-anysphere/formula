@@ -230,10 +230,10 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     // Spreadsheet selection changes while editing should update the Name Box display,
     // but must not overwrite the in-progress draft or active cell being edited.
-    view.setActiveCell({ address: "B2", input: "new", value: null });
+    view.setActiveCell({ address: "B2", input: "new", value: null, nameBox: "Sheet2!B2" });
 
     const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
-    expect(address.value).toBe("B2");
+    expect(address.value).toBe("Sheet2!B2");
 
     expect(view.model.isEditing).toBe(true);
     expect(view.model.draft).toBe("editing");
