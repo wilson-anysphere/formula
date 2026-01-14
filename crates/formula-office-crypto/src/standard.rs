@@ -502,13 +502,13 @@ fn verify_password_standard_rc4_key_style(
             // Some real-world CryptoAPI RC4 producers treat 40-bit keys as a 16-byte key blob where
             // the remaining bytes are zero. Try that as a compatibility fallback.
             if key0.len() == 5 {
-                let mut padded_key = [0u8; 16];
+                let mut padded_key = Zeroizing::new([0u8; 16]);
                 padded_key[..5].copy_from_slice(key0);
                 match verify_password_standard_with_key_and_mode(
                     header,
                     verifier,
                     hash_alg,
-                    padded_key.as_slice(),
+                    &padded_key[..],
                 ) {
                     Ok(_) => Ok(Rc4KeyStyle::Padded40Bit),
                     Err(OfficeCryptoError::InvalidPassword) => {
@@ -941,9 +941,9 @@ fn decrypt_standard_encrypted_package_rc4(
                 rc4_xor_in_place(&key, chunk)?;
             }
             Rc4KeyStyle::Padded40Bit => {
-                let mut padded_key = [0u8; 16];
+                let mut padded_key = Zeroizing::new([0u8; 16]);
                 padded_key[..5].copy_from_slice(&key);
-                rc4_xor_in_place(padded_key.as_slice(), chunk)?;
+                rc4_xor_in_place(&padded_key[..], chunk)?;
             }
         }
         block_index = block_index.checked_add(1).ok_or_else(|| {
