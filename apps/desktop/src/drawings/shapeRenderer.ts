@@ -463,8 +463,8 @@ function parseBold(node: XmlElementLike | null): boolean | undefined {
   const bAttr = getAttribute(node, "b");
   if (bAttr == null) return undefined;
   const normalized = bAttr.trim().toLowerCase();
-  if (normalized === "1" || normalized === "true") return true;
-  if (normalized === "0" || normalized === "false") return false;
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
   return undefined;
 }
 

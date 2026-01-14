@@ -156,4 +156,30 @@ describe("parseShapeRenderSpec", () => {
     });
     expect(spec?.labelFontSizePx).toBeCloseTo(18.666, 2);
   });
+
+  it('treats DrawingML "on"/"off" boolean values as true/false (label bold)', () => {
+    const raw = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr wrap="square" anchor="t"/>
+          <a:lstStyle/>
+          <a:p>
+            <a:pPr algn="ctr">
+              <a:defRPr sz="1400">
+                <a:solidFill><a:srgbClr val="00FF00"/></a:solidFill>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:pPr>
+            <a:r><a:rPr b="on"/><a:t>Hello Shape</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+        <xdr:spPr>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        </xdr:spPr>
+      </xdr:sp>
+    `;
+
+    const spec = parseShapeRenderSpec(raw);
+    expect(spec?.labelBold).toBe(true);
+  });
 });
