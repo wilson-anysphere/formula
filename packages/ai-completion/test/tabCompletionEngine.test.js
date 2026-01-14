@@ -651,6 +651,29 @@ test("Range suggestions still work when grouping parens include whitespace (=SUM
   );
 });
 
+test("Range suggestions work with a unary '-' prefix (=SUM(-A → =SUM(-A1:A10))", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=SUM(-A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(-A1:A10)"),
+    `Expected a unary '-' range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions do not delete trailing whitespace (pure insertion)", async () => {
   const engine = new TabCompletionEngine();
 

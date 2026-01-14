@@ -2145,29 +2145,36 @@ function ratioBoost(prefix, full) {
 }
 
 /**
- * Split a range/schema prefix into leading grouping parentheses (and any whitespace immediately
- * following them) and the remaining "inner" prefix.
+ * Split an argument prefix into a leading "expression wrapper" prefix and the remaining "inner" prefix.
+ *
+ * Supported wrappers:
+ * - Grouping parentheses: `(` ... (with any whitespace immediately after the `(`)
+ * - Unary operators: `+`, `-`, `@` (implicit intersection) (with optional whitespace after the operator)
  *
  * Examples:
- * - "(A"     -> { groupPrefix: "(",   innerPrefix: "A" }
- * - "(( A"   -> { groupPrefix: "(( ", innerPrefix: "A" }
- * - "( (A"   -> { groupPrefix: "( (", innerPrefix: "A" }
+ * - "(A"      -> { groupPrefix: "(",    innerPrefix: "A" }
+ * - "(( A"    -> { groupPrefix: "(( ",  innerPrefix: "A" }
+ * - "( -A"    -> { groupPrefix: "( -",  innerPrefix: "A" }
+ * - "-A"      -> { groupPrefix: "-",    innerPrefix: "A" }
+ * - "- A"     -> { groupPrefix: "- ",   innerPrefix: "A" }
+ * - "@Sheet"  -> { groupPrefix: "@",    innerPrefix: "Sheet" }
  *
- * This lets range/schema suggestions work inside grouped expressions (e.g. `=SUM((A<tab>`),
- * while still enforcing the formula bar's "pure insertion" constraint by preserving the exact
- * user-typed prefix.
+ * This lets range/schema/arg-value suggestions work inside grouped or unary expressions
+ * (e.g. `=SUM(-A<tab>`, `=SUM((A<tab>`), while still enforcing the formula bar's "pure insertion"
+ * constraint by preserving the exact user-typed prefix.
  *
  * @param {string} text
  * @returns {{ groupPrefix: string, innerPrefix: string }}
  */
 function splitLeadingGroupingParens(text) {
   const raw = typeof text === "string" ? text : "";
-  if (!raw || raw[0] !== "(") return { groupPrefix: "", innerPrefix: raw };
+  if (!raw) return { groupPrefix: "", innerPrefix: "" };
 
   let i = 0;
   let prefixEnd = 0;
   while (i < raw.length) {
-    if (raw[i] !== "(") break;
+    const ch = raw[i];
+    if (ch !== "(" && ch !== "+" && ch !== "-" && ch !== "@") break;
     i += 1;
     while (i < raw.length && /\s/.test(raw[i])) i += 1;
     prefixEnd = i;
