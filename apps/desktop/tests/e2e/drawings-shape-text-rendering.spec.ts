@@ -224,11 +224,23 @@ test.describe("drawing shape text rendering regressions", () => {
       };
       const imageData = ctx.getImageData(samplePx.x, samplePx.y, samplePx.width, samplePx.height);
       let nonTransparent = 0;
-      for (let i = 3; i < imageData.data.length; i += 4) {
-        if (imageData.data[i] !== 0) nonTransparent += 1;
+      let sumR = 0;
+      let sumG = 0;
+      let sumB = 0;
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        const a = imageData.data[i + 3] ?? 0;
+        if (a === 0) continue;
+        nonTransparent += 1;
+        sumR += imageData.data[i] ?? 0;
+        sumG += imageData.data[i + 1] ?? 0;
+        sumB += imageData.data[i + 2] ?? 0;
       }
 
-      return { nonTransparent, sampleRect };
+      const avgR = nonTransparent > 0 ? sumR / nonTransparent : 0;
+      const avgG = nonTransparent > 0 ? sumG / nonTransparent : 0;
+      const avgB = nonTransparent > 0 ? sumB / nonTransparent : 0;
+
+      return { nonTransparent, avgR, avgG, avgB, sampleRect };
     }, { fixture });
 
     expect(
@@ -237,5 +249,10 @@ test.describe("drawing shape text rendering regressions", () => {
         result.sampleRect,
       )})`,
     ).toBeGreaterThan(0);
+
+    // The fixture text is explicitly `srgbClr val="00FF00"` (green); ensure we aren't falling back
+    // to default black placeholder label rendering.
+    expect(result.avgG).toBeGreaterThan(result.avgR + 20);
+    expect(result.avgG).toBeGreaterThan(result.avgB + 20);
   });
 });
