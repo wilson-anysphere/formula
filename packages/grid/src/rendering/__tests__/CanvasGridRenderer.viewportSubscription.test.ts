@@ -112,6 +112,45 @@ describe("CanvasGridRenderer.subscribeViewport", () => {
     expect(listener.mock.calls[0]?.[0]?.reason).toBe("axisSize");
   });
 
+  it("fires for frozen pane changes", () => {
+    const renderer = createRenderer();
+
+    const listener = vi.fn();
+    renderer.subscribeViewport(listener, { animationFrame: true });
+
+    renderer.setFrozen(1, 1);
+    flushRaf();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0]?.[0]?.reason).toBe("frozen");
+  });
+
+  it("fires for resize", () => {
+    const renderer = createRenderer();
+
+    const listener = vi.fn();
+    renderer.subscribeViewport(listener, { animationFrame: true });
+
+    renderer.resize(400, 300, 1);
+    flushRaf();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0]?.[0]?.reason).toBe("resize");
+  });
+
+  it("fires for zoom", () => {
+    const renderer = createRenderer();
+
+    const listener = vi.fn();
+    renderer.subscribeViewport(listener, { animationFrame: true });
+
+    renderer.setZoom(2);
+    flushRaf();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0]?.[0]?.reason).toBe("zoom");
+  });
+
   it("coalesces multiple changes into a single callback when animationFrame is enabled", () => {
     const renderer = createRenderer();
 
@@ -159,4 +198,3 @@ describe("CanvasGridRenderer.subscribeViewport", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 });
-
