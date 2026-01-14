@@ -152,6 +152,78 @@ describe("DrawingInteractionController image resize aspect ratio", () => {
     });
   });
 
+  it("keeps the original aspect ratio when Shift is held during north-west corner resize", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    let objects: DrawingObject[] = [createImageObject()];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    // Start resizing from the north-west corner.
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 0, clientY: 0, pointerId: 1 }));
+
+    // Drag left while holding Shift; height should be adjusted to keep 2:1.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: -50, clientY: 0, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+    });
+  });
+
+  it("keeps the original aspect ratio when Shift is held during north-east corner resize", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    let objects: DrawingObject[] = [createImageObject()];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    // Start resizing from the north-east corner.
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 200, clientY: 0, pointerId: 1 }));
+
+    // Drag right while holding Shift; height should be adjusted to keep 2:1.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 250, clientY: 0, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+    });
+  });
+
+  it("keeps the original aspect ratio when Shift is held during south-west corner resize", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    let objects: DrawingObject[] = [createImageObject()];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    // Start resizing from the south-west corner.
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 0, clientY: 100, pointerId: 1 }));
+
+    // Drag left while holding Shift; height should be adjusted to keep 2:1.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: -50, clientY: 100, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+    });
+  });
+
   it("does not lock aspect ratio when resizing from an edge handle (even for images)", () => {
     const el = new StubEventTarget({ left: 0, top: 0 });
     let objects: DrawingObject[] = [createImageObject()];
