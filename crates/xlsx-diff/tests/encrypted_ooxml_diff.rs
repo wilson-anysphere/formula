@@ -61,8 +61,10 @@ fn diff_agile_fixture_against_plain_no_differences() -> Result<()> {
 #[test]
 fn diff_standard_fixture_against_plain_no_differences() -> Result<()> {
     let plain = fixture_path("plaintext.xlsx");
-    let encrypted = fixture_path("standard.xlsx");
-    assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
+    for encrypted in ["standard.xlsx", "standard-4.2.xlsx"] {
+        let encrypted = fixture_path(encrypted);
+        assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
+    }
     Ok(())
 }
 
