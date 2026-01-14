@@ -47,19 +47,10 @@ fn agile_encrypt_decrypt_round_trip() {
 
 #[test]
 fn wrong_password_fails() {
-    let zip = basic_xlsx_fixture_bytes();
-    let ole = encrypt_package_to_ole(
-        zip,
-        "password",
-        EncryptOptions {
-            spin_count: FAST_TEST_SPIN_COUNT,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
+    let ole = agile_ole_fixture();
 
     let err =
-        decrypt_encrypted_package_ole(&ole, "not-the-password").expect_err("expected failure");
+        decrypt_encrypted_package_ole(ole, "not-the-password").expect_err("expected failure");
     assert!(
         matches!(err, OfficeCryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
