@@ -660,6 +660,16 @@ validate_static() {
     fi
   done
 
+  # We ship a shared-mime-info definition for Parquet so `*.parquet` resolves to our
+  # advertised MIME type (`application/vnd.apache.parquet`) on distros that don't
+  # include it by default.
+  if ! grep -qx "/usr/share/mime/packages/app.formula.desktop.xml" <<<"${file_list}"; then
+    err "RPM payload missing Parquet shared-mime-info definition: /usr/share/mime/packages/app.formula.desktop.xml"
+    err "First 200 lines of rpm file list:"
+    echo "${file_list}" | head -n 200 >&2
+    exit 1
+  fi
+
   # If we are skipping the container install step, still validate the `.desktop` file
   # advertises spreadsheet (xlsx) associations by extracting the payload.
   if [[ "${NO_CONTAINER}" -eq 1 ]]; then
@@ -707,6 +717,8 @@ validate_container() {
   container_cmd+=$'test -x "${binary_path}"\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/LICENSE\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/NOTICE\n'
+  container_cmd+=$'test -f /usr/share/mime/packages/app.formula.desktop.xml\n'
+  container_cmd+=$'grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2\n'
   container_cmd+=$'\n'
   container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'
   container_cmd+=$'required_xlsx_mime="'"${REQUIRED_XLSX_MIME}"$'"\n'

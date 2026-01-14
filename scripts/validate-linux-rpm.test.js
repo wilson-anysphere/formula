@@ -223,6 +223,7 @@ test(
       [
         `/usr/bin/${expectedMainBinary}`,
         "/usr/share/applications/formula.desktop",
+        "/usr/share/mime/packages/app.formula.desktop.xml",
         `/usr/share/doc/${expectedRpmName}/LICENSE`,
         `/usr/share/doc/${expectedRpmName}/NOTICE`,
       ].join("\n"),
@@ -258,6 +259,7 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -383,6 +385,31 @@ test("validate-linux-rpm fails when NOTICE is missing", { skip: !hasBash }, () =
   assert.match(proc.stderr, /NOTICE/i);
 });
 
+test("validate-linux-rpm fails when Parquet shared-mime-info definition is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  const requiresFile = writeDefaultRequiresFile(tmp);
+  writeFileSync(
+    listFile,
+    [
+      "/usr/bin/formula-desktop",
+      "/usr/share/applications/formula.desktop",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile, fakeRequiresFile: requiresFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Parquet shared-mime-info/i);
+});
+
 test("validate-linux-rpm fails when rpm --info query fails", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
   const binDir = join(tmp, "bin");
@@ -503,6 +530,7 @@ test("validate-linux-rpm fails when extracted .desktop is missing MimeType=", { 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -531,6 +559,7 @@ test("validate-linux-rpm fails when extracted .desktop lacks xlsx integration", 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -558,6 +587,7 @@ test("validate-linux-rpm fails when extracted .desktop Exec= lacks a file placeh
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
