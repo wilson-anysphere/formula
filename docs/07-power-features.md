@@ -846,7 +846,8 @@ Engine adapter notes (in-tree today):
 
 - `what_if::EngineWhatIfModel` (defined in [`what_if/engine_model.rs`](../crates/formula-engine/src/what_if/engine_model.rs)) defaults to **single-threaded** recalculation (`RecalcMode::SingleThreaded`) to reduce per-iteration overhead; hosts can opt into `RecalcMode::MultiThreaded` via `EngineWhatIfModel::with_recalc_mode(...)`.
 - `EngineWhatIfModel` does **not** validate that referenced sheets exist:
-  - `Engine::get_cell_value` treats missing sheets as blank (`0` for numeric reads).
+  - `Engine::get_cell_value` treats missing sheets as blank.
+    - Because What‑If tools require numeric `CellValue::Number(..)` values for targets/outputs, missing-sheet reads will typically surface as `WhatIfError::NonNumericCell` (blank is not numeric).
   - `Engine::set_cell_value` creates missing sheets on demand.
   - Hosts (and any future WASM bindings) should generally reject missing sheets to avoid accidentally creating new ones due to typos.
 - `EngineWhatIfModel` intentionally exposes a *scalar-only* view of engine values:
