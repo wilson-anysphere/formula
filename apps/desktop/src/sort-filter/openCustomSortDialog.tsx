@@ -76,33 +76,42 @@ function colIndexToLabel(index: number): string {
   return out || "A";
 }
 
+const NUMERIC_LITERAL_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
 function deriveColumnsFromSelection(params: {
   host: CustomSortDialogHost;
   sheetId: string;
   selection: Range;
-}): { columns: Array<{ index: number; name: string }>; headerDetected: boolean } {
+}): { headerColumns: Array<{ index: number; name: string }>; fallbackColumns: Array<{ index: number; name: string }>; initialHasHeader: boolean } {
   const selection = normalizeRange(params.selection);
   const width = selection.endCol - selection.startCol + 1;
-  // Use *sheet* column letters (A/B/C/...) for the selected columns so the dialog
-  // is intuitive even when the selection starts mid-sheet.
-  const labels = Array.from({ length: width }, (_, idx) => colIndexToLabel(selection.startCol + idx));
+  const fallbackLabels = Array.from({ length: width }, (_, idx) => colIndexToLabel(idx));
+  const fallbackColumns = fallbackLabels.map((name, index) => ({ index, name }));
 
-  const rawHeaderTexts = labels.map((_fallback, idx) => {
-    const value = params.host.getCellValue(params.sheetId, { row: selection.startRow, col: selection.startCol + idx });
+  const rawHeaderTexts = fallbackLabels.map((_fallback, idx) => {
+    const value = params.host.getCellValue(params.sheetId, {
+      row: selection.startRow,
+      col: selection.startCol + idx,
+    });
     const text = value == null ? "" : String(value);
     return text.trim();
   });
 
-  const headerDetected = rawHeaderTexts.some((t) => t !== "");
-  const headerTexts = rawHeaderTexts.map((text, idx) => (text ? text : labels[idx]!));
+  const headerTexts = rawHeaderTexts.map((text, idx) => (text ? text : fallbackLabels[idx]!));
+  const headerColumns = fallbackLabels.map((_fallback, idx) => ({
+    index: idx,
+    name: headerTexts[idx]!,
+  }));
 
-  return {
-    columns: labels.map((fallback, idx) => ({
-      index: idx,
-      name: headerDetected ? headerTexts[idx]! : fallback,
-    })),
-    headerDetected,
-  };
+  const initialHasHeader = rawHeaderTexts.some((text) => {
+    if (!text) return false;
+    const upper = text.toUpperCase();
+    if (upper === "TRUE" || upper === "FALSE") return false;
+    if (NUMERIC_LITERAL_RE.test(text)) return false;
+    return true;
+  });
+
+  return { headerColumns, fallbackColumns, initialHasHeader };
 }
 
 export function openCustomSortDialog(host: CustomSortDialogHost): void {
@@ -128,11 +137,11 @@ export function openCustomSortDialog(host: CustomSortDialogHost): void {
   }
 
   const sheetId = host.getSheetId();
-  const { columns, headerDetected } = deriveColumnsFromSelection({ host, sheetId, selection });
+  const { headerColumns, fallbackColumns, initialHasHeader } = deriveColumnsFromSelection({ host, sheetId, selection });
 
   const initial: SortSpec = {
     keys: [{ column: 0, order: "ascending" }],
-    hasHeader: headerDetected,
+    hasHeader: initialHasHeader,
   };
 
   const dialog = document.createElement("dialog");
@@ -173,7 +182,8 @@ export function openCustomSortDialog(host: CustomSortDialogHost): void {
 
   root.render(
     <SortDialog
-      columns={columns}
+      columns={headerColumns}
+      fallbackColumns={fallbackColumns}
       initial={initial}
       onCancel={() => closeDialog(dialog, "cancel")}
       onApply={(spec) => {

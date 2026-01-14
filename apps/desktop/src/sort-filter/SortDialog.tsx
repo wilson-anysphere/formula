@@ -3,6 +3,12 @@ import type { SortKey, SortOrder, SortSpec } from "./types";
 
 export type SortDialogProps = {
   columns: { index: number; name: string }[];
+  /**
+   * Optional fallback column labels used when `hasHeader` is false (Excel-style A/B/C).
+   *
+   * When omitted, `columns` is used for both modes.
+   */
+  fallbackColumns?: { index: number; name: string }[];
   initial: SortSpec;
   onCancel: () => void;
   onApply: (spec: SortSpec) => void;
@@ -15,6 +21,7 @@ function nextOrder(order: SortOrder): SortOrder {
 export function SortDialog(props: SortDialogProps) {
   const [keys, setKeys] = useState<SortKey[]>(props.initial.keys);
   const [hasHeader, setHasHeader] = useState<boolean>(props.initial.hasHeader);
+  const visibleColumns = hasHeader ? props.columns : props.fallbackColumns ?? props.columns;
 
   return (
     <div className="formula-sort-dialog" data-testid="sort-dialog">
@@ -43,7 +50,7 @@ export function SortDialog(props: SortDialogProps) {
                 setKeys((prev) => prev.map((k, idx) => (idx === i ? { ...k, column: col } : k)));
               }}
             >
-              {props.columns.map((c) => (
+              {visibleColumns.map((c) => (
                 <option key={c.index} value={c.index}>
                   {c.name}
                 </option>
@@ -73,7 +80,7 @@ export function SortDialog(props: SortDialogProps) {
             setKeys((prev) => [
               ...prev,
               {
-                column: props.columns[0]?.index ?? 0,
+                column: visibleColumns[0]?.index ?? 0,
                 order: "ascending",
               },
             ])
@@ -99,4 +106,3 @@ export function SortDialog(props: SortDialogProps) {
     </div>
   );
 }
-
