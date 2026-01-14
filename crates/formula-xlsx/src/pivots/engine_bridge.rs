@@ -523,7 +523,6 @@ pub fn pivot_table_to_engine_config_with_styles(
                         item,
                     )))
                 });
-            let base_field = base_field.map(Into::into);
 
             Some(ValueField {
                 source_field: PivotFieldRef::CacheFieldName(source_field_name),
