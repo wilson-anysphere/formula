@@ -222,7 +222,11 @@ def _validate_against_function_catalog(
 
     The goal of the Excel-oracle corpus is to provide end-to-end coverage for
     all deterministic functions. We intentionally exclude volatile functions
-    from the corpus because they cannot be pinned/stably compared.
+    from the default corpus because they cannot be pinned/stably compared.
+
+    For local debugging, callers can set `allow_volatile=True`. When doing so, prefer also setting
+    `allowed_volatile` to explicitly scope which volatile functions are permitted (so we don't
+    silently expand the volatile surface area over time).
 
     Coverage is computed from `case.formula` (the formula under test). Input-cell
     formulas are allowed (e.g. `=NA()` to seed an error value), but do not count
@@ -446,7 +450,8 @@ def main() -> int:
             "Include volatile function cases (e.g. CELL/INFO) for local debugging only. "
             "The generated cases.json is deterministic, but Excel results for these cases depend on "
             "workbook/environment state, so they cannot be pinned/stably compared. Do not commit or "
-            "pin this output."
+            "pin this output. Currently this flag only enables CELL/INFO; other volatile functions "
+            "remain forbidden."
         ),
     )
     args = parser.parse_args()
