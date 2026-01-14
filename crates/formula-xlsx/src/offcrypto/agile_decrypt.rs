@@ -7,7 +7,7 @@ use base64::Engine as _;
 use digest::Digest as _;
 use hmac::{Hmac, Mac};
 
-use super::aes_cbc::decrypt_aes_cbc_no_padding;
+use super::aes_cbc::{decrypt_aes_cbc_no_padding, AES_BLOCK_SIZE};
 use super::crypto::{
     derive_iv, derive_key, hash_password, segment_block_key, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
@@ -64,6 +64,26 @@ pub fn decrypt_agile_encrypted_package(
     password: &str,
 ) -> Result<Vec<u8>> {
     let info = parse_agile_encryption_info(encryption_info)?;
+
+    // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
+    // ensure we can report which field was malformed.
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashInput",
+        &info.password_key.encrypted_verifier_hash_input,
+    )?;
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashValue",
+        &info.password_key.encrypted_verifier_hash_value,
+    )?;
+    validate_ciphertext_block_aligned("encryptedKeyValue", &info.password_key.encrypted_key_value)?;
+    validate_ciphertext_block_aligned(
+        "dataIntegrity.encryptedHmacKey",
+        &info.data_integrity.encrypted_hmac_key,
+    )?;
+    validate_ciphertext_block_aligned(
+        "dataIntegrity.encryptedHmacValue",
+        &info.data_integrity.encrypted_hmac_value,
+    )?;
 
     // 1) Verify password and unwrap the package key ("keyValue").
     let password_hash = hash_password(
@@ -186,15 +206,21 @@ pub fn decrypt_agile_encrypted_package(
     // 2) Decrypt EncryptedPackage stream to plaintext ZIP bytes.
     let (declared_len, ciphertext) = parse_encrypted_package_stream(encrypted_package)?;
 
-    if ciphertext.len() % info.key_data.block_size != 0 {
+    if ciphertext.len() % AES_BLOCK_SIZE != 0 {
         return Err(OffCryptoError::CiphertextNotBlockAligned {
-            ciphertext_len: ciphertext.len(),
-            block_size: info.key_data.block_size,
+            field: "EncryptedPackage",
+            len: ciphertext.len(),
         });
     }
 
     let mut plaintext = Vec::with_capacity(ciphertext.len());
     for (idx, chunk) in ciphertext.chunks(SEGMENT_SIZE).enumerate() {
+        if chunk.len() % AES_BLOCK_SIZE != 0 {
+            return Err(OffCryptoError::CiphertextNotBlockAligned {
+                field: "EncryptedPackage",
+                len: chunk.len(),
+            });
+        }
         let block_key = segment_block_key(idx as u32);
         let iv = derive_iv_or_err(
             &info.key_data.salt_value,
@@ -286,6 +312,16 @@ pub fn decrypt_agile_encrypted_package(
     }
 
     Ok(plaintext)
+}
+
+fn validate_ciphertext_block_aligned(field: &'static str, ciphertext: &[u8]) -> Result<()> {
+    if ciphertext.len() % AES_BLOCK_SIZE != 0 {
+        return Err(OffCryptoError::CiphertextNotBlockAligned {
+            field,
+            len: ciphertext.len(),
+        });
+    }
+    Ok(())
 }
 
 fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[u8])> {

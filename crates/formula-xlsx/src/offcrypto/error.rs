@@ -1,4 +1,4 @@
-use super::aes_cbc::{AesCbcDecryptError, AES_BLOCK_SIZE};
+use super::aes_cbc::AesCbcDecryptError;
 use super::crypto::CryptoError;
 use thiserror::Error;
 
@@ -105,12 +105,9 @@ pub enum OffCryptoError {
     EncryptedPackageTooShort { len: usize },
 
     #[error(
-        "EncryptedPackage ciphertext length {ciphertext_len} is not a multiple of the block size ({block_size} bytes)"
+        "{field} ciphertext length {len} is not a multiple of the AES block size (16 bytes)"
     )]
-    CiphertextNotBlockAligned {
-        ciphertext_len: usize,
-        block_size: usize,
-    },
+    CiphertextNotBlockAligned { field: &'static str, len: usize },
 
     #[error(
         "decrypted EncryptedPackage is truncated: header declares {declared_len} bytes but only {available_len} bytes are available"
@@ -156,8 +153,10 @@ impl From<AesCbcDecryptError> for OffCryptoError {
                 }
             }
             AesCbcDecryptError::InvalidCiphertextLength(len) => Self::CiphertextNotBlockAligned {
-                ciphertext_len: len,
-                block_size: AES_BLOCK_SIZE,
+                // The caller is expected to validate ciphertext lengths and surface a more specific
+                // `field` string. Keep a deterministic fallback for any unexpected propagation.
+                field: "ciphertext",
+                len,
             },
         }
     }
@@ -207,16 +206,15 @@ mod tests {
             matches!(
                 off,
                 OffCryptoError::CiphertextNotBlockAligned {
-                    ciphertext_len: 15,
-                    block_size: AES_BLOCK_SIZE
+                    field: "ciphertext",
+                    len: 15
                 }
             ),
             "expected CiphertextNotBlockAligned, got {off:?}"
         );
         assert!(
-            off.to_string().to_lowercase().contains("encryptedpackage")
-                || off.to_string().to_lowercase().contains("encryption"),
-            "message should mention encryption context: {}",
+            off.to_string().to_lowercase().contains("ciphertext length"),
+            "message should mention ciphertext length context: {}",
             off
         );
     }

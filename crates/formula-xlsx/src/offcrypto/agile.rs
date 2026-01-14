@@ -351,13 +351,23 @@ fn decrypt_key_encryptor_blob(
         },
         AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
             OffCryptoError::CiphertextNotBlockAligned {
-                ciphertext_len,
-                block_size: AES_BLOCK_SIZE,
+                field: "ciphertext",
+                len: ciphertext_len,
             }
         }
     })?;
 
     Ok(buf)
+}
+
+fn validate_ciphertext_block_aligned(field: &'static str, ciphertext: &[u8]) -> Result<()> {
+    if ciphertext.len() % AES_BLOCK_SIZE != 0 {
+        return Err(OffCryptoError::CiphertextNotBlockAligned {
+            field,
+            len: ciphertext.len(),
+        });
+    }
+    Ok(())
 }
 
 /// Decrypt the password key-encryptor values and validate the password via verifier hashes.
@@ -382,6 +392,10 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
     })?;
 
     // Decrypt verifierHashInput and verifierHashValue for password verification.
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashInput",
+        &key_encryptor.encrypted_verifier_hash_input,
+    )?;
     let verifier_hash_input = decrypt_key_encryptor_blob(
         &password_hash,
         key_encryptor,
@@ -393,6 +407,10 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
         .ok_or_else(|| OffCryptoError::WrongPassword)?
         .to_vec();
 
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashValue",
+        &key_encryptor.encrypted_verifier_hash_value,
+    )?;
     let verifier_hash_value = decrypt_key_encryptor_blob(
         &password_hash,
         key_encryptor,
@@ -410,6 +428,7 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
     }
 
     // Decrypt the package key (`keyValue`).
+    validate_ciphertext_block_aligned("encryptedKeyValue", &key_encryptor.encrypted_key_value)?;
     let key_value = decrypt_key_encryptor_blob(
         &password_hash,
         key_encryptor,
@@ -425,8 +444,16 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
     // Decrypt HMAC key/value (if present).
     let (hmac_key, hmac_value) = match info.data_integrity.as_ref() {
         Some(di) => {
+            validate_ciphertext_block_aligned(
+                "dataIntegrity.encryptedHmacKey",
+                &di.encrypted_hmac_key,
+            )?;
             let raw_key =
                 decrypt_key_encryptor_blob(&password_hash, key_encryptor, &HMAC_KEY_BLOCK, &di.encrypted_hmac_key)?;
+            validate_ciphertext_block_aligned(
+                "dataIntegrity.encryptedHmacValue",
+                &di.encrypted_hmac_value,
+            )?;
             let raw_val = decrypt_key_encryptor_blob(
                 &password_hash,
                 key_encryptor,
@@ -484,8 +511,8 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
     let ciphertext = &encrypted_package_stream[8..];
     if ciphertext.len() % AES_BLOCK_SIZE != 0 {
         return Err(OffCryptoError::CiphertextNotBlockAligned {
-            ciphertext_len: ciphertext.len(),
-            block_size: AES_BLOCK_SIZE,
+            field: "EncryptedPackage",
+            len: ciphertext.len(),
         });
     }
 
@@ -497,6 +524,12 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
     while offset < ciphertext.len() && out.len() < declared_len {
         let remaining = ciphertext.len() - offset;
         let seg_len = remaining.min(SEGMENT_LEN);
+        if seg_len % AES_BLOCK_SIZE != 0 {
+            return Err(OffCryptoError::CiphertextNotBlockAligned {
+                field: "EncryptedPackage",
+                len: seg_len,
+            });
+        }
 
         let iv = derive_segment_iv(
             &key_data.salt_value,
@@ -518,8 +551,8 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
             },
             AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
                 OffCryptoError::CiphertextNotBlockAligned {
-                    ciphertext_len,
-                    block_size: AES_BLOCK_SIZE,
+                    field: "EncryptedPackage",
+                    len: ciphertext_len,
                 }
             }
         })?;
