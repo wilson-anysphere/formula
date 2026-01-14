@@ -6562,11 +6562,12 @@ export class DocumentController {
     const rawImagesField = parsed?.images ?? parsed?.metadata?.images ?? null;
     if (Array.isArray(rawImagesField)) {
       for (const image of rawImagesField) {
+        const rawId = unwrapSingletonId(image?.id);
         const id =
-          typeof image?.id === "string"
-            ? image.id.trim()
-            : typeof image?.id === "number" && Number.isFinite(image.id)
-              ? String(image.id)
+          typeof rawId === "string"
+            ? rawId.trim()
+            : typeof rawId === "number" && Number.isFinite(rawId)
+              ? String(rawId)
               : "";
         if (!id) continue;
         addImageEntry(id, image);
@@ -6662,7 +6663,7 @@ export class DocumentController {
       return out;
     };
     for (const sheet of sheets) {
-      const rawId = sheet?.id;
+      const rawId = unwrapSingletonId(sheet?.id);
       const sheetId =
         typeof rawId === "string" ? rawId.trim() : typeof rawId === "number" && Number.isFinite(rawId) ? String(rawId) : "";
       if (!sheetId) continue;
@@ -6741,7 +6742,13 @@ export class DocumentController {
       const desiredOrder = [];
       const seen = new Set();
       for (const raw of rawSheetOrder) {
-        const id = typeof raw === "string" ? raw.trim() : typeof raw === "number" && Number.isFinite(raw) ? String(raw) : "";
+        const unwrapped = unwrapSingletonId(raw);
+        const id =
+          typeof unwrapped === "string"
+            ? unwrapped.trim()
+            : typeof unwrapped === "number" && Number.isFinite(unwrapped)
+              ? String(unwrapped)
+              : "";
         if (!id) continue;
         if (seen.has(id)) continue;
         if (!nextSheets.has(id)) continue;

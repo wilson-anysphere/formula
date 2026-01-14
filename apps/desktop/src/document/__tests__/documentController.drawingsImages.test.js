@@ -285,9 +285,11 @@ test("applyState accepts drawings with singleton-wrapped ids (interop)", () => {
   const snapshot = new TextEncoder().encode(
     JSON.stringify({
       schemaVersion: 1,
+      sheetOrder: [{ 0: "Sheet1" }],
       sheets: [
         {
-          id: "Sheet1",
+          // Interop layers may wrap sheet ids similarly to drawing ids.
+          id: { 0: "Sheet1" },
           name: "Sheet1",
           visibility: "visible",
           frozenRows: 0,
@@ -319,6 +321,33 @@ test("applyState accepts drawings with singleton-wrapped ids (interop)", () => {
   assert.equal(drawings.length, 1);
   assert.equal(drawings[0].id, 1);
   assert.equal(drawings[0].zOrder, 3);
+});
+
+test("applyState accepts images array entries with singleton-wrapped ids (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+        },
+      ],
+      images: [{ id: { 0: "img1.png" }, bytes: [1, 2, 3], mimeType: "image/png" }],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const image = doc.getImage("img1.png");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
 });
 
 test("setSheetDrawings accepts singleton-wrapped numeric ids (interop)", () => {
