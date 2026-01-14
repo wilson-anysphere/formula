@@ -16258,6 +16258,15 @@ export class SpreadsheetApp {
     // tag the event so the shared-grid selection canvas can ignore it (Excel-like behavior).
     if (!this.sharedGrid && !isPrimaryClick) return;
     if (this.sharedGrid && !(isPrimaryClick || isContextClick)) return;
+    // When a context-click already hit a drawing object handled by a DrawingInteractionController
+    // (notably canvas charts rendered as drawing objects), the event is tagged so downstream
+    // handlers can ignore it without stopping propagation.
+    //
+    // In that case, do not compete by selecting an underlying workbook drawing: charts render
+    // above drawings in `?canvasCharts=1` mode, so the object hit by the chart controller should
+    // remain selected.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (isContextClick && (e as any).__formulaDrawingContextClick) return;
     const target = e.target as HTMLElement | null | undefined;
     // When the dedicated DrawingInteractionController is enabled, it owns selection/dragging.
     //

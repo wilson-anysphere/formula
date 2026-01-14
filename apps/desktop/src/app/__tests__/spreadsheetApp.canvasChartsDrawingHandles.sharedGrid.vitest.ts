@@ -237,5 +237,79 @@ describe("SpreadsheetApp canvas charts vs drawing handles (shared grid)", () => 
     app.destroy();
     root.remove();
   });
-});
 
+  it("selects a ChartStore chart over an overlapping drawing on right-click when drawing interactions are disabled", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+    expect(app.getGridMode()).toBe("shared");
+    // This regression relies on canvas charts being handled by a DrawingInteractionController.
+    expect((app as any).chartDrawingInteraction).toBeTruthy();
+
+    // Move the active cell away from A1 so we can detect unwanted selection changes.
+    app.activateCell({ row: 5, col: 5 }, { scrollIntoView: false, focus: false });
+    const beforeActive = app.getActiveCell();
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+
+    const { chart_id: chartId } = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Overlapping chart",
+      position: "A1",
+    });
+    const chartDrawingId = chartIdToDrawingId(chartId);
+    // Place chart on top of the drawing (canvas charts render above drawings).
+    (app as any).chartStore.updateChartAnchor(chartId, {
+      kind: "absolute",
+      xEmu: pxToEmu(0),
+      yEmu: pxToEmu(0),
+      cxEmu: pxToEmu(100),
+      cyEmu: pxToEmu(100),
+    });
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    // jsdom returns a zero-sized client rect for canvases by default; interaction controllers
+    // use `getBoundingClientRect()` to convert clientX/Y into local coordinates.
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+    const clientX = rowHeaderWidth + 10;
+    const clientY = colHeaderHeight + 10;
+
+    // Sanity: hit test should see the chart above the drawing at this point.
+    expect(app.hitTestDrawingAtClientPoint(clientX, clientY)?.id).toBe(chartDrawingId);
+
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+
+    const down = createPointerLikeMouseEvent("pointerdown", { clientX, clientY, button: 2 });
+    selectionCanvas.dispatchEvent(down);
+
+    expect((down as any).__formulaDrawingContextClick).toBe(true);
+    expect(app.getSelectedChartId()).toBe(chartId);
+    expect(app.getSelectedDrawingId()).toBe(chartDrawingId);
+    expect(app.getActiveCell()).toEqual(beforeActive);
+    expect(down.defaultPrevented).toBe(false);
+    expect(bubbled).toHaveBeenCalledTimes(1);
+
+    app.destroy();
+    root.remove();
+  });
+});
