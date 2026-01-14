@@ -277,6 +277,7 @@ export class DrawingOverlay {
   private colorTokens: OverlayColorTokens | null = null;
   private orderedObjects: DrawingObject[] = [];
   private orderedObjectsSource: DrawingObject[] | null = null;
+  private themeObserver: MutationObserver | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -287,6 +288,26 @@ export class DrawingOverlay {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("overlay canvas 2d context not available");
     this.ctx = ctx;
+    this.installThemeObserver();
+  }
+
+  private installThemeObserver(): void {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    if (!root) return;
+    if (typeof MutationObserver !== "function") return;
+
+    try {
+      this.themeObserver?.disconnect();
+      this.themeObserver = new MutationObserver(() => {
+        // Defer recomputing CSS vars until the next render; we only need to
+        // invalidate cached tokens here.
+        this.refreshThemeTokens();
+      });
+      this.themeObserver.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    } catch {
+      this.themeObserver = null;
+    }
   }
 
   resize(viewport: Viewport): void {
@@ -684,6 +705,8 @@ export class DrawingOverlay {
     this.renderAbort?.abort();
     this.renderAbort = null;
     this.renderSeq += 1;
+    this.themeObserver?.disconnect();
+    this.themeObserver = null;
     this.bitmapCache.clear();
     this.shapeTextCache.clear();
     this.cssVarStyle = undefined;

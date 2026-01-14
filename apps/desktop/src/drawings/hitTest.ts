@@ -110,7 +110,40 @@ export function buildHitTestIndex(
   const zoom = Number.isFinite(opts?.zoom) && (opts!.zoom as number) > 0 ? (opts!.zoom as number) : 1;
 
   // Walk from top to bottom (highest zOrder first).
-  const ordered = [...objects].sort((a, b) => b.zOrder - a.zOrder);
+  //
+  // Perf: avoid allocating/sorting when callers already keep objects zOrder-sorted
+  // ascending (back-to-front). In that common case we only need to reverse the
+  // iteration order for hit testing (top-to-bottom).
+  let isAscending = true;
+  let isStrictDescending = true;
+  for (let i = 1; i < objects.length; i += 1) {
+    const prev = objects[i - 1]!.zOrder;
+    const curr = objects[i]!.zOrder;
+    if (prev > curr) isAscending = false;
+    // Strict descending requires every step to strictly decrease; equal zOrders
+    // must fall back to a stable sort so hit testing matches render order.
+    if (prev <= curr) isStrictDescending = false;
+    if (!isAscending && !isStrictDescending) break;
+  }
+
+  const ordered: DrawingObject[] = (() => {
+    if (isAscending) {
+      const reversed = new Array<DrawingObject>(objects.length);
+      for (let i = 0; i < objects.length; i += 1) {
+        reversed[i] = objects[objects.length - 1 - i]!;
+      }
+      return reversed;
+    }
+
+    if (isStrictDescending) {
+      // Already top-to-bottom with unique zOrders.
+      return objects as DrawingObject[];
+    }
+
+    const sorted = [...objects].sort((a, b) => a.zOrder - b.zOrder);
+    sorted.reverse();
+    return sorted;
+  })();
   const bounds: Rect[] = new Array(ordered.length);
   const aabbs: Rect[] = new Array(ordered.length);
   const transformCos = new Float64Array(ordered.length);

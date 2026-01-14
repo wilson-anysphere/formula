@@ -58,9 +58,9 @@ describe("DrawingInteractionController hit-test perf", () => {
 
     const sortSpy = vi.spyOn(Array.prototype, "sort");
 
-    // First pointer move builds the index (one sort).
+    // First pointer move builds the index (should not sort when objects are already zOrder-sorted).
     pointerMove!({ clientX: 25, clientY: 25, pointerId: 1 });
-    expect(sortSpy).toHaveBeenCalledTimes(1);
+    expect(sortSpy).toHaveBeenCalledTimes(0);
 
     // Subsequent moves should reuse the cached index (no more sorts).
     sortSpy.mockClear();

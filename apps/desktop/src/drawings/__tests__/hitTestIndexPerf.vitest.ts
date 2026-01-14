@@ -39,7 +39,8 @@ describe("drawings hit test index perf", () => {
     // `buildHitTestIndex` is allowed to sort once; `hitTestDrawings` should not sort.
     const sortSpy = vi.spyOn(Array.prototype, "sort");
     const index = buildHitTestIndex(objects, geom, { bucketSizePx: 128 });
-    expect(sortSpy).toHaveBeenCalledTimes(1);
+    // Objects are already zOrder-sorted, so index build should avoid sorting.
+    expect(sortSpy).toHaveBeenCalledTimes(0);
     sortSpy.mockClear();
 
     for (let i = 0; i < 200; i += 1) {
