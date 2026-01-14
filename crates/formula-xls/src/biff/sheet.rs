@@ -195,6 +195,17 @@ const MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE: usize = 8;
 const RECORD_VERTICALPAGEBREAKS: u16 = 0x001A;
 const RECORD_HORIZONTALPAGEBREAKS: u16 = 0x001B;
 
+/// Hard cap on the number of BIFF records scanned while searching for manual page breaks.
+///
+/// The `.xls` importer performs multiple best-effort passes over each worksheet substream. Without
+/// a cap, a crafted workbook with millions of cell records can force excessive work even when a
+/// particular feature (like page breaks) is absent.
+#[cfg(not(test))]
+const MAX_RECORDS_SCANNED_PER_SHEET_PAGE_BREAK_SCAN: usize = 500_000;
+// Keep unit tests fast by using a smaller cap.
+#[cfg(test)]
+const MAX_RECORDS_SCANNED_PER_SHEET_PAGE_BREAK_SCAN: usize = 1_000;
+
 const ROW_HEIGHT_TWIPS_MASK: u16 = 0x7FFF;
 const ROW_HEIGHT_DEFAULT_FLAG: u16 = 0x8000;
 const ROW_OPTION_HIDDEN: u16 = 0x0020;
@@ -906,6 +917,7 @@ pub(crate) fn parse_biff_sheet_manual_page_breaks(
     let mut out = BiffSheetManualPageBreaks::default();
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+    let mut scanned = 0usize;
 
     while let Some(next) = iter.next() {
         let record = match next {
@@ -917,6 +929,17 @@ pub(crate) fn parse_biff_sheet_manual_page_breaks(
         };
 
         if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        scanned = scanned.saturating_add(1);
+        if scanned > MAX_RECORDS_SCANNED_PER_SHEET_PAGE_BREAK_SCAN {
+            push_warning_bounded_force(
+                &mut out.warnings,
+                format!(
+                    "too many BIFF records while scanning sheet manual page breaks (cap={MAX_RECORDS_SCANNED_PER_SHEET_PAGE_BREAK_SCAN}); stopping early"
+                ),
+            );
             break;
         }
 
@@ -5169,6 +5192,83 @@ mod tests {
         assert_eq!(
             parsed.manual_page_breaks.col_breaks_after,
             BTreeSet::from([2u32])
+        );
+    }
+
+    #[test]
+    fn manual_page_break_scan_stops_after_record_cap() {
+        let cap = MAX_RECORDS_SCANNED_PER_SHEET_PAGE_BREAK_SCAN;
+        assert!(cap >= 10, "test requires cap >= 10");
+
+        let mut horizontal = Vec::new();
+        horizontal.extend_from_slice(&1u16.to_le_bytes()); // cbrk
+        horizontal.extend_from_slice(&2u16.to_le_bytes()); // row
+        horizontal.extend_from_slice(&0u16.to_le_bytes()); // colStart
+        horizontal.extend_from_slice(&0u16.to_le_bytes()); // colEnd
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+        for _ in 0..(cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        // This record should be ignored because the scan stops at the record cap.
+        stream.extend_from_slice(&record(RECORD_HORIZONTALPAGEBREAKS, &horizontal));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_manual_page_breaks(&stream, 0).expect("parse");
+        assert!(parsed.manual_page_breaks.row_breaks_after.is_empty());
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("manual page breaks")),
+            "expected record-cap warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn manual_page_break_record_cap_warning_is_forced_when_warnings_full() {
+        let record_cap = MAX_RECORDS_SCANNED_PER_SHEET_PAGE_BREAK_SCAN;
+        assert!(
+            record_cap > MAX_WARNINGS_PER_SHEET + 10,
+            "test requires record cap to exceed warning cap"
+        );
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill the warning buffer with truncated HorizontalPageBreaks records.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 10) {
+            stream.extend_from_slice(&record(RECORD_HORIZONTALPAGEBREAKS, &[]));
+        }
+
+        // Exceed the record-scan cap.
+        for _ in 0..(record_cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_manual_page_breaks(&stream, 0).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET + 1,
+            "warnings should remain capped; warnings={:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("manual page breaks")),
+            "expected forced record-cap warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression marker should remain last; warnings={:?}",
+            parsed.warnings
         );
     }
 
