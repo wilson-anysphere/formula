@@ -5,6 +5,7 @@ import { rewriteDocumentFormulasForSheetDelete } from "./sheetFormulaRewrite";
 import { listSheetsFromCollabSession } from "./collabWorkbookSheetStore";
 import { tryInsertCollabSheet } from "./collabSheetMutations";
 import { generateDefaultSheetName, type WorkbookSheetStore } from "./workbookSheetStore";
+import { pickAdjacentVisibleSheetId } from "./sheetNavigation";
 
 export type ToastFn = (message: string, kind?: any, options?: any) => void;
 export type ConfirmFn = (message: string) => Promise<boolean>;
@@ -153,16 +154,9 @@ export function createDeleteActiveSheetCommand(params: {
       if (!ok) return;
 
       const deletedName = sheet.name;
-      const sheetOrder = store.listAll().map((s) => s.name);
-      const nextActiveId = (() => {
-        // Mirror Excel: when deleting the active sheet, activate the next visible sheet to the right
-        // if possible; otherwise fall back to the previous visible sheet.
-        const allSheets = store.listAll();
-        const visibleSheets = allSheets.filter((s) => s.visibility === "visible");
-        const idx = visibleSheets.findIndex((s) => s.id === activeId);
-        if (idx === -1) return null;
-        return visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null;
-      })();
+      const allSheets = store.listAll();
+      const sheetOrder = allSheets.map((s) => s.name);
+      const nextActiveId = pickAdjacentVisibleSheetId(allSheets, activeId);
 
       try {
         // In local mode, this routes the sheet delete through the existing sheet-store -> DocumentController

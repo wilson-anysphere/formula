@@ -8,6 +8,7 @@ import { showQuickPick } from "../extensions/ui.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
 import type { SheetMeta, SheetVisibility, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
+import { pickAdjacentVisibleSheetId } from "./sheetNavigation";
 
 type SheetTabPaletteEntry = {
   label: string;
@@ -537,8 +538,7 @@ export function SheetTabStrip({
           const wasActive = sheet.id === activeSheetIdRef.current;
           let nextActiveId: string | null = null;
           if (wasActive) {
-            const idx = visibleSheets.findIndex((s) => s.id === sheet.id);
-            nextActiveId = idx === -1 ? null : (visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null);
+            nextActiveId = pickAdjacentVisibleSheetId(visibleSheets, sheet.id);
           }
 
           try {
@@ -794,16 +794,10 @@ export function SheetTabStrip({
     if (!ok) return;
 
     const deletedName = sheet.name;
-    const sheetOrder = store.listAll().map((s) => s.name);
-    let nextActiveId: string | null = null;
-    if (sheet.id === activeSheetIdRef.current) {
-      // Mirror Excel: when deleting the active sheet, activate the next visible sheet to the right
-      // if possible; otherwise fall back to the previous visible sheet.
-      const allSheets = store.listAll();
-      const visibleSheets = allSheets.filter((s) => s.visibility === "visible");
-      const idx = visibleSheets.findIndex((s) => s.id === sheet.id);
-      nextActiveId = idx === -1 ? null : (visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null);
-    }
+    const allSheets = store.listAll();
+    const sheetOrder = allSheets.map((s) => s.name);
+    const nextActiveId =
+      sheet.id === activeSheetIdRef.current ? pickAdjacentVisibleSheetId(allSheets, sheet.id) : null;
 
     try {
       await onPersistSheetDelete?.(sheet.id);

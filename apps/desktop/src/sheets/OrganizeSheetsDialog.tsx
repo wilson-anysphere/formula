@@ -5,6 +5,7 @@ import { markKeybindingBarrier } from "../keybindingBarrier.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
 
 import { rewriteDocumentFormulasForSheetDelete } from "./sheetFormulaRewrite";
+import { pickAdjacentVisibleSheetId } from "./sheetNavigation";
 import type { SheetMeta, WorkbookSheetStore } from "./workbookSheetStore";
 
 export type OrganizeSheetsDialogHost = {
@@ -246,9 +247,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
 
       let nextActiveId: string | null = null;
       if (wasActive) {
-        const visibleSheets = store.listAll().filter((s) => s.visibility === "visible");
-        const idx = visibleSheets.findIndex((s) => s.id === sheet.id);
-        nextActiveId = idx === -1 ? null : (visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null);
+        nextActiveId = pickAdjacentVisibleSheetId(store.listAll(), sheet.id);
       }
 
       try {
@@ -308,9 +307,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
       // if possible; otherwise fall back to the previous visible sheet.
       let nextActiveId: string | null = null;
       if (wasActive) {
-        const visibleSheets = allSheets.filter((s) => s.visibility === "visible");
-        const idx = visibleSheets.findIndex((s) => s.id === sheet.id);
-        nextActiveId = idx === -1 ? null : (visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null);
+        nextActiveId = pickAdjacentVisibleSheetId(allSheets, sheet.id);
       }
 
       try {
