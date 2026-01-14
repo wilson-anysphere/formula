@@ -248,4 +248,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("ACCRINT", 7), "boolean", "Expected ACCRINT calc_method to be boolean");
   assert.equal(registry.getFunction("COUPDAYBS")?.args?.[2]?.name, "frequency", "Expected COUPDAYBS arg3 to be frequency");
   assert.equal(registry.getFunction("TBILLYIELD")?.args?.[2]?.name, "pr", "Expected TBILLYIELD arg3 to be pr");
+
+  // Odd-period bond functions should keep frequency/basis positions aligned.
+  assert.equal(registry.getFunction("ODDLPRICE")?.args?.[6]?.name, "frequency", "Expected ODDLPRICE arg7 to be frequency");
+  assert.ok(registry.getFunction("ODDLPRICE")?.args?.[7]?.optional, "Expected ODDLPRICE basis to be optional");
+  assert.equal(registry.getFunction("ODDFPRICE")?.args?.[7]?.name, "frequency", "Expected ODDFPRICE arg8 to be frequency");
+  assert.ok(registry.getFunction("ODDFPRICE")?.args?.[8]?.optional, "Expected ODDFPRICE basis to be optional");
 });
