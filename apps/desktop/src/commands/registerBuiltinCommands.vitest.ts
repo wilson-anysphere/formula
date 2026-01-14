@@ -713,6 +713,55 @@ describe("registerBuiltinCommands: view toggles", () => {
 });
 
 describe("registerBuiltinCommands: core editing/view/audit commands", () => {
+  it("no-ops view/audit commands when the desktop shell reports editing via the global edit flag", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      isEditing: vi.fn(() => false),
+      setShowFormulas: vi.fn(),
+      toggleShowFormulas: vi.fn(),
+      clearAuditing: vi.fn(),
+      toggleAuditingPrecedents: vi.fn(),
+      toggleAuditingDependents: vi.fn(),
+      toggleAuditingTransitive: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+      await commandRegistry.executeCommand("view.toggleShowFormulas");
+      await commandRegistry.executeCommand("view.toggleShowFormulas", true);
+      await commandRegistry.executeCommand("audit.togglePrecedents");
+      await commandRegistry.executeCommand("audit.toggleDependents");
+      await commandRegistry.executeCommand("audit.tracePrecedents");
+      await commandRegistry.executeCommand("audit.traceDependents");
+      await commandRegistry.executeCommand("audit.traceBoth");
+      await commandRegistry.executeCommand("audit.clearAuditing");
+      await commandRegistry.executeCommand("audit.toggleTransitive");
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(app.setShowFormulas).not.toHaveBeenCalled();
+    expect(app.toggleShowFormulas).not.toHaveBeenCalled();
+    expect(app.clearAuditing).not.toHaveBeenCalled();
+    expect(app.toggleAuditingPrecedents).not.toHaveBeenCalled();
+    expect(app.toggleAuditingDependents).not.toHaveBeenCalled();
+    expect(app.toggleAuditingTransitive).not.toHaveBeenCalled();
+    expect(app.focus).not.toHaveBeenCalled();
+  });
+
   it("registers required commands and respects edit-state guards", async () => {
     const commandRegistry = new CommandRegistry();
     const layoutController = {
