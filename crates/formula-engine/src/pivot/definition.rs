@@ -638,10 +638,7 @@ pub(crate) fn refresh_pivot(
     }
     let output_range = Range::new(def.destination.cell, CellRef::new(end_row, end_col));
 
-    // Clear the previous output footprint now that the new output range has been validated.
-    if let Some(prev) = def.last_output_range {
-        ctx.clear_range(&def.destination.sheet, prev).ok();
-    }
+    let prev_output_range = def.last_output_range;
 
     let pivot_cell_writes = result.to_cell_writes_with_formats(
         super::CellRef {
@@ -677,6 +674,17 @@ pub(crate) fn refresh_pivot(
         let v = pivot_value_to_engine_value(write.value, date_system);
         ctx.write_cell(&def.destination.sheet, &addr, v)
             .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
+    }
+
+    // Clear any stale cells from the previous output footprint that now fall outside the updated
+    // output range.
+    //
+    // This is done after successfully writing the new output so refresh failures (e.g. due to
+    // out-of-bounds anchors) do not wipe the prior rendered pivot.
+    if let Some(prev) = prev_output_range {
+        for stale in stale_ranges(prev, output_range) {
+            ctx.clear_range(&def.destination.sheet, stale).ok();
+        }
     }
 
     def.last_output_range = Some(output_range);
@@ -726,4 +734,42 @@ fn pivot_value_to_engine_value(value: PivotValue, date_system: ExcelDateSystem) 
             }
         }
     }
+}
+
+fn stale_ranges(prev: Range, next: Range) -> Vec<Range> {
+    let Some(inter) = prev.intersection(&next) else {
+        return vec![prev];
+    };
+
+    let mut out = Vec::new();
+
+    // Bands above/below the intersection span the full previous width.
+    if prev.start.row < inter.start.row {
+        out.push(Range::new(
+            prev.start,
+            CellRef::new(inter.start.row.saturating_sub(1), prev.end.col),
+        ));
+    }
+    if inter.end.row < prev.end.row {
+        out.push(Range::new(
+            CellRef::new(inter.end.row.saturating_add(1), prev.start.col),
+            prev.end,
+        ));
+    }
+
+    // Bands left/right span the overlapping rows.
+    if prev.start.col < inter.start.col {
+        out.push(Range::new(
+            CellRef::new(inter.start.row, prev.start.col),
+            CellRef::new(inter.end.row, inter.start.col.saturating_sub(1)),
+        ));
+    }
+    if inter.end.col < prev.end.col {
+        out.push(Range::new(
+            CellRef::new(inter.start.row, inter.end.col.saturating_add(1)),
+            CellRef::new(inter.end.row, prev.end.col),
+        ));
+    }
+
+    out
 }
