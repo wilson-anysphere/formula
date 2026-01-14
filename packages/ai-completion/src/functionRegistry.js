@@ -1656,6 +1656,52 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ADDRESS",
+    description: "Creates a cell reference as text, given specified row and column numbers.",
+    args: [
+      { name: "row_num", type: "number" },
+      { name: "column_num", type: "number" },
+      { name: "abs_num", type: "number", optional: true },
+      { name: "a1", type: "boolean", optional: true },
+      { name: "sheet_text", type: "string", optional: true },
+    ],
+  },
+  {
+    name: "INDIRECT",
+    description: "Returns the reference specified by a text string.",
+    args: [
+      { name: "ref_text", type: "string" },
+      { name: "a1", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "INFO",
+    description: "Returns information about the current operating environment.",
+    args: [
+      { name: "type_text", type: "string" },
+    ],
+  },
+  {
+    name: "IMAGE",
+    description: "Inserts an image from a given URL or data source.",
+    args: [
+      { name: "source", type: "string" },
+      { name: "alt_text", type: "string", optional: true },
+      { name: "sizing", type: "number", optional: true },
+      { name: "height", type: "number", optional: true },
+      { name: "width", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "NUMBERVALUE",
+    description: "Converts text to a number in a locale-independent way, using custom separators.",
+    args: [
+      { name: "text", type: "value" },
+      { name: "decimal_separator", type: "string", optional: true },
+      { name: "group_separator", type: "string", optional: true },
+    ],
+  },
+  {
     name: "SHEET",
     description: "Returns the sheet number of the referenced sheet.",
     args: [

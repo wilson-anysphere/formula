@@ -219,6 +219,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
     registry.getFunction("HYPERLINK")?.args?.[1]?.optional,
     "Expected HYPERLINK friendly_name to be optional"
   );
+  assert.equal(registry.getArgType("INFO", 0), "string", "Expected INFO type_text to be a string");
+  assert.equal(registry.getArgType("INDIRECT", 0), "string", "Expected INDIRECT ref_text to be a string");
+  assert.equal(registry.getArgType("ADDRESS", 4), "string", "Expected ADDRESS sheet_text to be a string");
+  assert.equal(registry.getArgType("NUMBERVALUE", 1), "string", "Expected NUMBERVALUE decimal_separator to be a string");
+  assert.equal(registry.getArgType("NUMBERVALUE", 2), "string", "Expected NUMBERVALUE group_separator to be a string");
+  assert.equal(registry.getArgType("IMAGE", 0), "string", "Expected IMAGE source to be a string");
 
   // Date/time helpers with more descriptive arg naming
   assert.equal(registry.getFunction("DAYS")?.args?.[0]?.name, "end_date", "Expected DAYS arg1 to be end_date");
