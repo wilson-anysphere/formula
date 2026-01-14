@@ -24,6 +24,23 @@ export interface DrawingInteractionCallbacks {
   getViewport(): Viewport;
   getObjects(): DrawingObject[];
   setObjects(next: DrawingObject[]): void;
+  /**
+   * Commit the final drawing state to the backing document/store.
+   *
+   * This is called once per gesture (pointerup) so implementations can avoid
+   * spamming document/collaboration updates during pointermove.
+   */
+  commitObjects?(next: DrawingObject[]): void;
+  /**
+   * Begin an undo batch for an interaction gesture.
+   *
+   * Implementations should call `DocumentController.beginBatch` (or equivalent).
+   */
+  beginBatch?(options: { label: string }): void;
+  /** End the current undo batch. */
+  endBatch?(): void;
+  /** Cancel the current undo batch (Esc / pointercancel). */
+  cancelBatch?(): void;
   onSelectionChange?(selectedId: number | null): void;
   /**
    * Optional focus request hook for integrations that want drawing selection to
@@ -60,7 +77,7 @@ export class DrawingInteractionController {
   private hitTestIndexObjects: readonly DrawingObject[] | null = null;
   private hitTestIndexZoom: number = 1;
   private dragging:
-    | { id: number; startX: number; startY: number; startObjects: DrawingObject[] }
+    | { id: number; startX: number; startY: number; startObjects: DrawingObject[]; pointerId: number }
     | null = null;
   private resizing:
     | {
@@ -69,6 +86,7 @@ export class DrawingInteractionController {
         startX: number;
         startY: number;
         startObjects: DrawingObject[];
+        pointerId: number;
         transform?: DrawingTransform;
         startWidthPx: number;
         startHeightPx: number;
@@ -84,6 +102,7 @@ export class DrawingInteractionController {
         centerY: number;
         startRotationDeg: number;
         startObjects: DrawingObject[];
+        pointerId: number;
         transform?: DrawingTransform;
       }
     | null = null;
@@ -96,6 +115,7 @@ export class DrawingInteractionController {
       return false;
     }
   })();
+  private escapeListenerAttached = false;
 
   constructor(
     private readonly element: HTMLElement,
@@ -108,7 +128,7 @@ export class DrawingInteractionController {
     this.element.addEventListener("pointermove", this.onPointerMove, this.listenerOptions);
     this.element.addEventListener("pointerleave", this.onPointerLeave, this.listenerOptions);
     this.element.addEventListener("pointerup", this.onPointerUp, this.listenerOptions);
-    this.element.addEventListener("pointercancel", this.onPointerUp, this.listenerOptions);
+    this.element.addEventListener("pointercancel", this.onPointerCancel, this.listenerOptions);
   }
 
   dispose(): void {
@@ -116,7 +136,8 @@ export class DrawingInteractionController {
     this.element.removeEventListener("pointermove", this.onPointerMove, this.listenerOptions);
     this.element.removeEventListener("pointerleave", this.onPointerLeave, this.listenerOptions);
     this.element.removeEventListener("pointerup", this.onPointerUp, this.listenerOptions);
-    this.element.removeEventListener("pointercancel", this.onPointerUp, this.listenerOptions);
+    this.element.removeEventListener("pointercancel", this.onPointerCancel, this.listenerOptions);
+    this.detachEscapeListener();
   }
 
   setSelectedId(id: number | null): void {
@@ -145,6 +166,47 @@ export class DrawingInteractionController {
     // `stopImmediatePropagation` isn't strictly required for the grid-root capture use case,
     // but it makes arbitration resilient when multiple listeners are attached to the same element.
     if (typeof anyEvent.stopImmediatePropagation === "function") anyEvent.stopImmediatePropagation();
+  }
+
+  private readonly onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    if (!this.dragging && !this.resizing && !this.rotating) return;
+    e.preventDefault();
+    this.cancelActiveGesture();
+  };
+
+  private attachEscapeListener(): void {
+    if (this.escapeListenerAttached) return;
+    if (typeof window === "undefined") return;
+    window.addEventListener("keydown", this.onKeyDown);
+    this.escapeListenerAttached = true;
+  }
+
+  private detachEscapeListener(): void {
+    if (!this.escapeListenerAttached) return;
+    if (typeof window === "undefined") return;
+    window.removeEventListener("keydown", this.onKeyDown);
+    this.escapeListenerAttached = false;
+  }
+
+  private trySetPointerCapture(pointerId: number): void {
+    const fn = (this.element as any)?.setPointerCapture;
+    if (typeof fn !== "function") return;
+    try {
+      fn.call(this.element, pointerId);
+    } catch {
+      // Best-effort: some environments (jsdom) may not fully implement pointer capture.
+    }
+  }
+
+  private tryReleasePointerCapture(pointerId: number): void {
+    const fn = (this.element as any)?.releasePointerCapture;
+    if (typeof fn !== "function") return;
+    try {
+      fn.call(this.element, pointerId);
+    } catch {
+      // ignore
+    }
   }
 
   private readonly onPointerDown = (e: PointerEvent) => {
@@ -188,7 +250,7 @@ export class DrawingInteractionController {
           index.bounds[selectedIndex!],
           this.scratchRect,
         );
-        if (hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform)) {
+        if (hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform) && !isNonPrimaryMouseButton) {
           const centerX = selectedBounds.x + selectedBounds.width / 2;
           const centerY = selectedBounds.y + selectedBounds.height / 2;
           const startAngleRad = Math.atan2(y - centerY, x - centerX);
@@ -196,7 +258,9 @@ export class DrawingInteractionController {
           this.stopPointerEvent(e);
           this.callbacks.requestFocus?.();
           this.activeRect = rect;
-          this.element.setPointerCapture(e.pointerId);
+          this.trySetPointerCapture(e.pointerId);
+          this.callbacks.beginBatch?.({ label: "Rotate Picture" });
+          this.attachEscapeListener();
           this.rotating = {
             id: selectedObject.id,
             startAngleRad,
@@ -204,6 +268,7 @@ export class DrawingInteractionController {
             centerY,
             startRotationDeg,
             startObjects: objects,
+            pointerId: e.pointerId,
             transform: selectedObject.transform,
           };
           this.element.style.cursor = cursorForRotationHandle(true);
@@ -214,17 +279,16 @@ export class DrawingInteractionController {
         if (handle && !isNonPrimaryMouseButton) {
           this.stopPointerEvent(e);
           this.activeRect = rect;
-          try {
-            this.element.setPointerCapture(e.pointerId);
-          } catch {
-            // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-          }
+          this.trySetPointerCapture(e.pointerId);
+          this.callbacks.beginBatch?.({ label: "Resize Picture" });
+          this.attachEscapeListener();
           this.resizing = {
             id: selectedObject.id,
             handle,
             startX: x,
             startY: y,
             startObjects: objects,
+            pointerId: e.pointerId,
             transform: selectedObject.transform,
             startWidthPx: selectedBounds.width,
             startHeightPx: selectedBounds.height,
@@ -262,19 +326,18 @@ export class DrawingInteractionController {
     this.stopPointerEvent(e);
     this.callbacks.requestFocus?.();
     this.activeRect = rect;
-    try {
-      this.element.setPointerCapture(e.pointerId);
-    } catch {
-      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-    }
+    this.trySetPointerCapture(e.pointerId);
     const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
     if (handle) {
+      this.callbacks.beginBatch?.({ label: "Resize Picture" });
+      this.attachEscapeListener();
       this.resizing = {
         id: hit.object.id,
         handle,
         startX: x,
         startY: y,
         startObjects: objects,
+        pointerId: e.pointerId,
         transform: hit.object.transform,
         startWidthPx: hit.bounds.width,
         startHeightPx: hit.bounds.height,
@@ -285,11 +348,14 @@ export class DrawingInteractionController {
       };
       this.element.style.cursor = cursorForResizeHandleWithTransform(handle, hit.object.transform);
     } else {
+      this.callbacks.beginBatch?.({ label: "Move Picture" });
+      this.attachEscapeListener();
       this.dragging = {
         id: hit.object.id,
         startX: x,
         startY: y,
         startObjects: objects,
+        pointerId: e.pointerId,
       };
       this.element.style.cursor = "move";
     }
@@ -297,6 +363,7 @@ export class DrawingInteractionController {
 
   private readonly onPointerMove = (e: PointerEvent) => {
     if (this.rotating) {
+      if (e.pointerId !== this.rotating.pointerId) return;
       this.stopPointerEvent(e);
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
@@ -321,6 +388,7 @@ export class DrawingInteractionController {
     }
 
     if (this.resizing) {
+      if (e.pointerId !== this.resizing.pointerId) return;
       this.stopPointerEvent(e);
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
@@ -375,6 +443,7 @@ export class DrawingInteractionController {
     }
 
     if (this.dragging) {
+      if (e.pointerId !== this.dragging.pointerId) return;
       this.stopPointerEvent(e);
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
@@ -405,6 +474,8 @@ export class DrawingInteractionController {
     const resizing = this.resizing;
     const rotating = this.rotating;
     if (!dragging && !resizing && !rotating) return;
+    const active = dragging ?? resizing ?? rotating;
+    if (e.pointerId !== active.pointerId) return;
 
     this.stopPointerEvent(e);
 
@@ -412,8 +483,7 @@ export class DrawingInteractionController {
     // while pointerup updates preserved DrawingML fragments (`rawXml`, `xlsx.pic_xml`)
     // so inner `<a:xfrm>` values (when present) stay consistent with the new anchor.
     const objects = this.callbacks.getObjects();
-
-    const active = dragging ?? resizing ?? rotating;
+    let finalObjects = objects;
     const startObj = active.startObjects.find((o) => o.id === active.id);
     const currentObj = objects.find((o) => o.id === active.id);
 
@@ -443,7 +513,8 @@ export class DrawingInteractionController {
       }
 
       if (patched !== currentObj) {
-        this.callbacks.setObjects(objects.map((obj) => (obj.id === active.id ? patched : obj)));
+        finalObjects = objects.map((obj) => (obj.id === active.id ? patched : obj));
+        this.callbacks.setObjects(finalObjects);
       }
     }
 
@@ -454,13 +525,46 @@ export class DrawingInteractionController {
     this.resizing = null;
     this.rotating = null;
     this.activeRect = null;
-    try {
-      this.element.releasePointerCapture(e.pointerId);
-    } catch {
-      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-    }
+    this.detachEscapeListener();
+    this.tryReleasePointerCapture(active.pointerId);
     this.updateCursor(x, y);
+
+    try {
+      this.callbacks.commitObjects?.(finalObjects);
+    } finally {
+      this.callbacks.endBatch?.();
+    }
   };
+
+  private readonly onPointerCancel = (e: PointerEvent) => {
+    const active = this.dragging ?? this.resizing ?? this.rotating;
+    if (!active) return;
+    if (e.pointerId !== active.pointerId) return;
+    this.stopPointerEvent(e);
+    this.cancelActiveGesture();
+  };
+
+  private cancelActiveGesture(): void {
+    const active = this.dragging ?? this.resizing ?? this.rotating;
+    if (!active) return;
+
+    const startObjects = active.startObjects;
+    const pointerId = active.pointerId;
+
+    this.dragging = null;
+    this.resizing = null;
+    this.rotating = null;
+    this.activeRect = null;
+    this.detachEscapeListener();
+    this.tryReleasePointerCapture(pointerId);
+
+    // Revert the live in-memory state and cancel the undo batch.
+    this.callbacks.setObjects(startObjects);
+    this.callbacks.cancelBatch?.();
+
+    // Cursor best-effort: we may not have a meaningful point after cancel.
+    this.element.style.cursor = "default";
+  }
 
   private readonly onPointerLeave = () => {
     // Avoid leaving the resize/move cursor stuck when the pointer leaves the overlay canvas.
