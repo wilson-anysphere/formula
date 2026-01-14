@@ -543,17 +543,27 @@ describe("ToolExecutor", () => {
     workbook.setCell(parseA1Cell("Sheet1!A5"), {
       value: { type: "image", value: { image_id: "img_5", alt_text: "Alt (snake_case)" } } as any,
     });
+    workbook.setCell(parseA1Cell("Sheet1!A6"), {
+      value: { type: "image", value: { id: "img_6", altText: "Alt (id)" } } as any,
+    });
 
     const result = await executor.execute({
       name: "read_range",
-      parameters: { range: "Sheet1!A1:A5" },
+      parameters: { range: "Sheet1!A1:A6" },
     });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("read_range");
     if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
 
-    expect(result.data?.values).toEqual([["Product photo"], ["[Image]"], ["Logo"], ["[Image]"], ["Alt (snake_case)"]]);
+    expect(result.data?.values).toEqual([
+      ["Product photo"],
+      ["[Image]"],
+      ["Logo"],
+      ["[Image]"],
+      ["Alt (snake_case)"],
+      ["Alt (id)"],
+    ]);
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 

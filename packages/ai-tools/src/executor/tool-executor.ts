@@ -103,7 +103,7 @@ function looksLikeExcelInCellImageValue(value: unknown): boolean {
   if (typeof type === "string" && type.toLowerCase() === "image") {
     const inner = obj.value;
     if (inner && typeof inner === "object" && !Array.isArray(inner)) {
-      const innerImageId = (inner as any).imageId ?? (inner as any).image_id;
+      const innerImageId = (inner as any).imageId ?? (inner as any).image_id ?? (inner as any).id;
       if (typeof innerImageId === "string") return innerImageId.trim().length > 0;
     }
   }
