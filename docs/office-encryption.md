@@ -29,8 +29,8 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 ### Summary table
 | Format | Scheme | Marker | Implemented crypto | Notes / entry points |
 |---|---|---|---|---|
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`; `.xlsb` via `open_workbook_with_options`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` `minor=2` (major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ❌ not yet open end-to-end in `formula-io` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + Standard key derivation + verifier + AES-ECB `EncryptedPackage` decrypt; strict alg gating), `docs/offcrypto-standard-encryptedpackage.md` |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` `minor=2` (major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + Standard key derivation + verifier + AES-ECB `EncryptedPackage` decrypt; stricter alg gating), `docs/offcrypto-standard-encryptedpackage.md` |
 | Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
 Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors so
@@ -41,11 +41,13 @@ callers can decide whether to prompt for a password vs report “unsupported enc
     `Error::UnsupportedEncryption` (and `Error::UnsupportedOoxmlEncryption` for unknown/invalid
     `EncryptionInfo` versions).
   - With `formula-io/encrypted-workbooks`, the password-aware open APIs can decrypt and open
-    **Agile (4.4)** encrypted workbooks end-to-end, surfacing `PasswordRequired` / `InvalidPassword`
-    as expected.
-  - **Standard/CryptoAPI (minor=2)** is detected, but is not yet opened end-to-end in `formula-io`;
-    the password APIs currently preserve the `PasswordRequired` / `InvalidPassword` distinction as a
-    placeholder UX signal.
+    **Agile (4.4)** and **Standard/CryptoAPI** (minor=2; commonly `3.2`/`4.2`) encrypted
+    `.xlsx`/`.xlsm`/`.xlsb` workbooks in memory.
+    - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit it.
+  - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
+    is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` on success).
+  - `open_workbook_model_with_options` intentionally does not decrypt encrypted OOXML wrappers; use
+    `open_workbook_model_with_password` if you need a `formula_model::Workbook` from an encrypted file.
 - For legacy `.xls` BIFF `FILEPASS`:
   - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::EncryptedWorkbook`
   - `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)` surface
@@ -261,13 +263,12 @@ Implementation status:
 - `crates/formula-office-crypto` validates `dataIntegrity` and returns `IntegrityCheckFailed` on
   failure.
 - `formula-io` (behind the `encrypted-workbooks` feature):
-  - The password-aware open APIs use the `formula-xlsx` Agile decryptor and validate `dataIntegrity`
-    when opening encrypted `.xlsx`/`.xlsm`.
-  - Encrypted `.xlsb` payloads are decrypted but currently reported as
-    `Error::UnsupportedEncryptedWorkbookKind` by the `_with_password` helpers (use
-    `open_workbook_with_options` if you need `Workbook::Xlsb`).
-  - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not yet validate
-    `dataIntegrity` and is not yet wired into the high-level `open_workbook*` APIs.
+  - The legacy `_with_password` APIs use the `formula-xlsx` Agile decryptor and validate
+    `dataIntegrity` when it is present.
+  - `open_workbook_with_options` also validates `dataIntegrity` in the primary decrypt path; when
+    `<dataIntegrity>` is missing it falls back to a more permissive decrypt path (no integrity check).
+  - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not validate
+    `dataIntegrity`; the high-level `open_workbook*` APIs currently decrypt to in-memory buffers.
 - `crates/formula-offcrypto` parses `encryptedHmacKey`/`encryptedHmacValue` for completeness but does
   not currently validate them.
 - HMAC verification is strongly recommended when possible to distinguish wrong passwords from “ZIP

@@ -113,24 +113,27 @@ Current state in this repo (important nuance):
     `crates/formula-offcrypto`
   - Agile (4.4) parsing + decryption + `dataIntegrity` HMAC verification:
     `crates/formula-xlsx::offcrypto`
-- The high-level `formula-io` open path always detects encrypted OOXML wrappers early so callers don’t
-  accidentally route them through the wrong importer.
+- The high-level `formula-io` open path always provides **detection + error classification**
+  (`PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`) so callers can prompt for a
+  password and route errors correctly.
   - Without the `formula-io` cargo feature **`encrypted-workbooks`**, encrypted OOXML containers
     surface `Error::UnsupportedEncryption` (and `Error::UnsupportedOoxmlEncryption` for unknown/invalid
     `EncryptionInfo` versions).
   - With **`encrypted-workbooks`** enabled:
     - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::PasswordRequired` when no
       password is provided.
-    - The password-aware `_with_password` APIs can decrypt and open **Agile (4.4)** encrypted
-      `.xlsx`/`.xlsm` in memory (validates Agile `dataIntegrity` when present).
-    - Encrypted `.xlsb` payloads are detected/decrypted but currently reported as
-      `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by the `_with_password` helpers.
-    - **Standard/CryptoAPI** (`versionMinor == 2`) is detected, but is not yet decrypted/opened
-      end-to-end in the `formula-io` open APIs; the password APIs currently preserve the
-      `PasswordRequired` / `InvalidPassword` distinction as a placeholder UX signal.
-    - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
-      `crates/formula-io/src/encrypted_package_reader.rs`, but is not yet wired into the high-level
-      `open_workbook*` APIs.
+    - The password-aware `open_workbook_with_password` / `open_workbook_model_with_password` can
+      decrypt and open **Agile (4.4)** and **Standard/CryptoAPI** (minor=2; major ∈ {2,3,4}) encrypted
+      `.xlsx`/`.xlsm`/`.xlsb` workbooks in memory.
+      - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit
+        it.
+    - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
+      is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` on success).
+  - `open_workbook_model_with_options` intentionally does not decrypt encrypted OOXML wrappers; use
+    `open_workbook_model_with_password` for encrypted OOXML → `formula_model::Workbook`.
+  - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
+    `crates/formula-io/src/encrypted_package_reader.rs`, but the high-level `open_workbook*` APIs
+    currently decrypt to in-memory buffers.
 
 When triaging user reports, the most important thing is to capture the `EncryptionInfo` version
 because it determines which scheme you’re dealing with:
@@ -158,17 +161,14 @@ match open_workbook_with_password(path, None) {
         let password = "correct horse battery staple";
         match open_workbook_with_password(path, Some(password)) {
             Ok(workbook) => {
-                // With `formula-io/encrypted-workbooks` enabled, this succeeds for Agile (4.4)
-                // encrypted `.xlsx`/`.xlsm` when the password is correct.
+                // With `formula-io/encrypted-workbooks` enabled, this succeeds for Agile (4.4) and
+                // Standard/CryptoAPI (minor=2) encrypted `.xlsx`/`.xlsm`/`.xlsb` when the password is
+                // correct.
                 let _ = workbook;
             }
             Err(Error::InvalidPassword { .. }) => {
-                // Wrong password, integrity mismatch, or an encrypted format that isn't opened yet
-                // in this layer (for example Standard/CryptoAPI `versionMinor == 2`).
-            }
-            Err(Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }) => {
-                // The file decrypted successfully, but the payload is an `.xlsb` workbook which
-                // `open_workbook_with_password` doesn't open yet.
+                // Wrong password, integrity mismatch, unsupported encryption parameters, or when
+                // `encrypted-workbooks` is not enabled.
             }
             Err(other) => return Err(other),
         }
@@ -197,9 +197,9 @@ match open_workbook_model_with_password("book.xlsx", Some("...")) {
 }
 ```
 
-Note: `open_workbook_with_password` / `open_workbook_model_with_password` currently only open
-decrypted `.xlsx`/`.xlsm` payloads; encrypted `.xlsb` is reported as
-`Error::UnsupportedEncryptedWorkbookKind`.
+Note: when `formula-io/encrypted-workbooks` is enabled, `open_workbook_with_options` is the
+password-aware entrypoint when you need to pass additional open options. It can also decrypt and
+open encrypted OOXML wrappers when a password is provided.
 
 Behavior notes:
 
@@ -209,11 +209,10 @@ Behavior notes:
 - The `_with_password` variants are intended to work for both encrypted and unencrypted inputs; for
   unencrypted workbooks they behave like the non-password variants.
 - With `formula-io/encrypted-workbooks` enabled:
-  - The legacy `_with_password` variants can open Agile (4.4) encrypted `.xlsx`/`.xlsm`.
-  - Encrypted `.xlsb` payloads are currently reported as `UnsupportedEncryptedWorkbookKind` by the
-    `_with_password` helpers (use `open_workbook_with_options` if you need `Workbook::Xlsb`).
-  - Standard/CryptoAPI (`versionMinor == 2`) is detected but not opened; the password APIs preserve
-    the `PasswordRequired` / `InvalidPassword` distinction as a placeholder UX signal.
+  - The legacy `_with_password` variants can open Agile (4.4) and Standard/CryptoAPI (minor=2)
+    encrypted `.xlsx`/`.xlsm`/`.xlsb`.
+  - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
+    is provided.
 - Without `formula-io/encrypted-workbooks`, encrypted OOXML containers surface
   `Error::UnsupportedEncryption` (the password-aware entrypoints do not decrypt them end-to-end).
 
@@ -223,12 +222,12 @@ When handling user reports, these error variants map cleanly to “what happened
 
 | Error | Meaning | Typical remediation |
 |------|---------|---------------------|
-| `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. (For encrypted OOXML containers, this is only returned when `formula-io/encrypted-workbooks` is enabled.) | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
-| `InvalidPassword` | Password was provided but the workbook could not be opened/decrypted. This can mean “wrong password”, an Agile `dataIntegrity` mismatch, or that a detected-but-not-yet-opened encrypted format was encountered (e.g. Standard/CryptoAPI `versionMinor == 2`). | Ask the user to re-enter the password; confirm it opens in Excel with the same password. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
+| `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. (For encrypted OOXML containers, this is only returned when `formula-io/encrypted-workbooks` is enabled; otherwise they surface as `UnsupportedEncryption`.) | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
+| `InvalidPassword` | Password was provided but decryption/verification failed (wrong password, Agile `dataIntegrity` mismatch, unsupported encryption parameters, or a corrupt container). | Ask the user to re-enter the password and confirm it opens in Excel. If you control the build, ensure `formula-io/encrypted-workbooks` is enabled. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
 | `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard/CryptoAPI `minor == 2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
-| `UnsupportedEncryptedWorkbookKind` | The encrypted workbook decrypted successfully, but the decrypted payload kind isn’t supported by this API (e.g. an encrypted `.xlsb` opened via `open_workbook_with_password`). | Use an API that supports that kind (e.g. `open_workbook_with_options` for `.xlsb`), or ask for an unencrypted copy / different format. |
+| `UnsupportedEncryptedWorkbookKind` | The encrypted workbook decrypted successfully, but the decrypted payload kind isn’t supported by this API (rare; typically only encountered with synthetic/plaintext wrapper variants). | Use an API that supports that kind, or ask for an unencrypted copy / different format. |
 | `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))` (routes to the `.xls` importer for legacy `.xls`). If that still fails, the encryption scheme may be unsupported; ask the user to remove encryption in Excel or provide an unencrypted copy. |
-| `UnsupportedEncryption` | The workbook is encrypted, but this build/decryptor doesn’t support it (including “feature not enabled” for encrypted OOXML, or unsupported cipher/KDF parameters). | Capture the `EncryptionInfo` version and error string; consider enabling `formula-io/encrypted-workbooks` (Agile 4.4 only today) or ask the user to remove encryption in Excel and re-save. |
+| `UnsupportedEncryption` | The workbook is encrypted, but this build/decryptor doesn’t support it (including “feature not enabled” for encrypted OOXML, or unsupported cipher/KDF parameters). | Capture the `EncryptionInfo` version and error string; consider enabling `formula-io/encrypted-workbooks` (OOXML Agile 4.4 + Standard/CryptoAPI minor=2) or ask the user to remove encryption in Excel and re-save. |
 
 If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo`
 `major.minor` pair in the bug report (or at least whether `minor == 2` vs `4.4`).

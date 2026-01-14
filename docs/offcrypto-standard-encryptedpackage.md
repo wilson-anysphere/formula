@@ -5,23 +5,23 @@ This repo detects password-protected / encrypted OOXML workbooks as an **OLE/CFB
 
 High-level behavior in `formula-io`:
 
-- Encrypted OOXML wrappers (`EncryptionInfo` + `EncryptedPackage`) are detected early so callers can
-  decide whether to prompt for a password vs report “unsupported encryption”.
+- Encrypted OOXML wrappers (`EncryptionInfo` + `EncryptedPackage`) are detected and surfaced via
+  dedicated errors (`PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`) so callers
+  can prompt for a password and route “unsupported encryption” reports correctly.
 - Without the `formula-io` cargo feature **`encrypted-workbooks`**, encrypted OOXML containers surface
   `Error::UnsupportedEncryption` (and `Error::UnsupportedOoxmlEncryption` for unknown/invalid
   `EncryptionInfo` versions).
 - With **`encrypted-workbooks`** enabled:
-  - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::PasswordRequired` when no password
-    is provided.
-  - The password-aware entrypoints can decrypt and open **Agile (4.4)** encrypted `.xlsx`/`.xlsm`.
-    - Encrypted `.xlsb` payloads are decrypted but currently reported as
-      `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by the `_with_password` helpers.
-  - **Standard/CryptoAPI** (`versionMinor == 2`) is detected, but is not yet opened end-to-end in the
-    `formula-io` open APIs; the password APIs currently preserve the `PasswordRequired` /
-    `InvalidPassword` distinction as a placeholder UX signal.
+  - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::PasswordRequired` when no
+    password is provided.
+  - The password-aware entrypoints `open_workbook_with_password` /
+    `open_workbook_model_with_password` can decrypt and open both **Agile (4.4)** and
+    **Standard/CryptoAPI** (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`/`.xlsb`.
+  - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
+    is provided (returns a `Workbook::Xlsx` / `Workbook::Xlsb` on success).
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
-    `crates/formula-io/src/encrypted_package_reader.rs`, but is not yet wired into the high-level
-    `open_workbook*` APIs.
+    `crates/formula-io/src/encrypted_package_reader.rs`, but the high-level `open_workbook*` APIs
+    currently decrypt to in-memory buffers.
 
 Standard/CryptoAPI decryption primitives also exist in lower-level crates (notably
 `crates/formula-offcrypto` and `crates/formula-office-crypto`), but the full open-path plumbing is
