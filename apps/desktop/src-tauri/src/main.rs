@@ -2357,6 +2357,31 @@ fn main() {
                             handle_for_listener.unlisten(id);
                         }
 
+                        let Some(window) = handle_for_listener.get_webview_window("main") else {
+                            eprintln!(
+                                "[updater] received updater-ui-ready but main window is missing; skipping startup update check"
+                            );
+                            return;
+                        };
+
+                        let url = match window.url() {
+                            Ok(url) => url,
+                            Err(err) => {
+                                eprintln!(
+                                    "[updater] failed to read main window url for updater-ui-ready guard: {err}"
+                                );
+                                return;
+                            }
+                        };
+
+                        if !desktop::ipc_origin::is_trusted_app_origin(&url) {
+                            eprintln!(
+                                "[updater] ignoring updater-ui-ready from untrusted origin: {}",
+                                url
+                            );
+                            return;
+                        }
+
                         updater::spawn_update_check(
                             &handle_for_listener,
                             updater::UpdateCheckSource::Startup,
