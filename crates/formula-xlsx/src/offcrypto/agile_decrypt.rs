@@ -878,7 +878,32 @@ fn parse_key_data(
 ) -> Result<KeyData> {
     validate_cipher_settings(node)?;
 
+    let block_size = parse_usize_attr(node, "blockSize")?;
+    if block_size != AES_BLOCK_SIZE {
+        return Err(OffCryptoError::InvalidBlockSize { block_size });
+    }
+
+    let salt_size = parse_usize_attr(node, "saltSize")?;
+    if salt_size == 0 {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "keyData".to_string(),
+            attr: "saltSize".to_string(),
+            reason: "saltSize must be non-zero".to_string(),
+        });
+    }
+
     let salt_value = parse_base64_attr(node, "saltValue", opts)?;
+    if salt_value.len() != salt_size {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "keyData".to_string(),
+            attr: "saltValue".to_string(),
+            reason: format!(
+                "decoded saltValue length {} does not match saltSize {}",
+                salt_value.len(),
+                salt_size
+            ),
+        });
+    }
     let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
     let hash_size = parse_usize_attr(node, "hashSize")?;
 
@@ -890,7 +915,7 @@ fn parse_key_data(
     Ok(KeyData {
         salt_value,
         hash_algorithm,
-        block_size: parse_usize_attr(node, "blockSize")?,
+        block_size,
         key_bits: parse_usize_attr(node, "keyBits")?,
         hash_size,
     })
@@ -919,7 +944,32 @@ fn parse_password_key_encryptor(
         });
     }
 
+    let block_size = parse_usize_attr(node, "blockSize")?;
+    if block_size != AES_BLOCK_SIZE {
+        return Err(OffCryptoError::InvalidBlockSize { block_size });
+    }
+
+    let salt_size = parse_usize_attr(node, "saltSize")?;
+    if salt_size == 0 {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "encryptedKey".to_string(),
+            attr: "saltSize".to_string(),
+            reason: "saltSize must be non-zero".to_string(),
+        });
+    }
+
     let salt_value = parse_base64_attr(node, "saltValue", parse_opts)?;
+    if salt_value.len() != salt_size {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: "encryptedKey".to_string(),
+            attr: "saltValue".to_string(),
+            reason: format!(
+                "decoded saltValue length {} does not match saltSize {}",
+                salt_value.len(),
+                salt_size
+            ),
+        });
+    }
     let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
     let hash_size = parse_usize_attr(node, "hashSize")?;
 
@@ -932,7 +982,7 @@ fn parse_password_key_encryptor(
         salt_value,
         hash_algorithm,
         spin_count,
-        block_size: parse_usize_attr(node, "blockSize")?,
+        block_size,
         key_bits: parse_usize_attr(node, "keyBits")?,
         hash_size,
         encrypted_verifier_hash_input: parse_base64_attr(
@@ -1137,13 +1187,13 @@ mod tests {
         let xml = r#"
             <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
                         xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+              <keyData saltValue="AA==" saltSize="1" hashAlgorithm="SHA1" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
-                       keyBits="128" blockSize="16" />
+                        keyBits="128" blockSize="16" />
               <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA==" />
               <keyEncryptors>
                 <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                  <p:encryptedKey saltValue="AA==" saltSize="1" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
                                   cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
                                   keyBits="128" blockSize="16"
                                   encryptedVerifierHashInput="AA=="
@@ -1172,13 +1222,13 @@ mod tests {
         let xml = r#"
             <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
                         xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+              <keyData saltValue="AA==" saltSize="1" hashAlgorithm="SHA1" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                       keyBits="128" blockSize="16" />
+                        keyBits="128" blockSize="16" />
               <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA==" />
               <keyEncryptors>
                 <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-                  <p:encryptedKey saltValue="AA==" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
+                  <p:encryptedKey saltValue="AA==" saltSize="1" spinCount="1" hashAlgorithm="SHA1" hashSize="20"
                                   cipherAlgorithm="AES" cipherChaining="ChainingModeCFB"
                                   keyBits="128" blockSize="16"
                                   encryptedVerifierHashInput="AA=="
@@ -1194,6 +1244,74 @@ mod tests {
         assert!(
             matches!(err, OffCryptoError::UnsupportedCipherChaining { ref chaining } if chaining == "ChainingModeCFB"),
             "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_aes_block_size_not_16() {
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AAAAAAAAAAAAAAAAAAAAAA==" saltSize="16" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="32" />
+              <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA==" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey saltValue="AAAAAAAAAAAAAAAAAAAAAA==" saltSize="16" spinCount="1"
+                                  hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let encryption_info = wrap_encryption_info(xml);
+        let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw").unwrap_err();
+        assert!(matches!(
+            err,
+            OffCryptoError::InvalidBlockSize { block_size: 32 }
+        ));
+    }
+
+    #[test]
+    fn rejects_salt_value_len_mismatch() {
+        // Declares an 8-byte salt but provides a 16-byte saltValue.
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AAAAAAAAAAAAAAAAAAAAAA==" saltSize="8" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" />
+              <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA==" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey saltValue="AAAAAAAAAAAAAAAAAAAAAA==" saltSize="16" spinCount="1"
+                                  hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let encryption_info = wrap_encryption_info(xml);
+        let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw").unwrap_err();
+        assert!(
+            matches!(err, OffCryptoError::InvalidAttribute { .. }),
+            "expected InvalidAttribute, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("saltSize") && msg.contains("8") && msg.contains("16"),
+            "expected message to mention saltSize mismatch, got: {msg}"
         );
     }
 }
@@ -1365,17 +1483,17 @@ mod key_encryptor_tests {
             r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
                 xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
                 xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
-              <keyData saltValue="" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+              <keyData saltValue="AA==" saltSize="1" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
                        keyBits="128" blockSize="16" hashSize="20"/>
-              <dataIntegrity encryptedHmacKey="" encryptedHmacValue=""/>
+              <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA=="/>
               <keyEncryptors>
                 <keyEncryptor uri="{KEY_ENCRYPTOR_URI_CERTIFICATE}">
                   <c:encryptedKey/>
                 </keyEncryptor>
                 <keyEncryptor uri="{KEY_ENCRYPTOR_URI_PASSWORD}">
-                  <p:encryptedKey saltValue="" hashAlgorithm="SHA1" spinCount="1" cipherAlgorithm="AES"
+                  <p:encryptedKey saltValue="AA==" saltSize="1" hashAlgorithm="SHA1" spinCount="1" cipherAlgorithm="AES"
                                   cipherChaining="ChainingModeCBC" keyBits="128" blockSize="16" hashSize="20"
-                                  encryptedVerifierHashInput="" encryptedVerifierHashValue="" encryptedKeyValue=""/>
+                                  encryptedVerifierHashInput="AA==" encryptedVerifierHashValue="AA==" encryptedKeyValue="AA=="/>
                 </keyEncryptor>
               </keyEncryptors>
             </encryption>"#

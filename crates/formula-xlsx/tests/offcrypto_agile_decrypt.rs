@@ -158,17 +158,17 @@ fn agile_decrypt_errors_on_non_block_aligned_verifier_ciphertext() {
     let invalid = BASE64.encode([0u8; 15]); // 15 % 16 != 0
     let valid = BASE64.encode([0u8; 16]);
 
-    let xml = format!(
+  let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
             xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
   <keyData saltValue="{valid}" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-           blockSize="16" keyBits="128" hashSize="20" />
+           blockSize="16" keyBits="128" hashSize="20" saltSize="16" />
   <dataIntegrity encryptedHmacKey="{valid}" encryptedHmacValue="{valid}" />
   <keyEncryptors>
     <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
       <p:encryptedKey saltValue="{valid}" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                      spinCount="0" blockSize="16" keyBits="128" hashSize="20"
+                      spinCount="0" blockSize="16" keyBits="128" hashSize="20" saltSize="16"
                       encryptedVerifierHashInput="{invalid}"
                       encryptedVerifierHashValue="{valid}"
                       encryptedKeyValue="{valid}" />
