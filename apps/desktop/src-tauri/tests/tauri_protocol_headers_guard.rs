@@ -41,20 +41,179 @@ fn extract_tauri_scheme_protocol_handler_block<'a>(main_rs_src: &'a str) -> &'a 
 }
 
 fn extract_brace_block<'a>(src: &'a str, open_brace: usize) -> &'a str {
+    // Extract a `{ ... }` block while ignoring braces inside strings and comments.
+    //
+    // We can't rely on a full Rust parser in this guardrail test, but a naive brace counter is
+    // brittle because Rust format strings (`"{foo}"`) contain braces frequently.
     let bytes = src.as_bytes();
-    let mut depth: i32 = 0;
-    for i in open_brace..bytes.len() {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return &src[open_brace..=i];
+    assert!(
+        bytes.get(open_brace) == Some(&b'{'),
+        "expected `open_brace` to point at `{{`, got {:?} at byte offset {open_brace}",
+        bytes.get(open_brace).copied()
+    );
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Mode {
+        Code,
+        LineComment,
+        BlockComment { depth: usize },
+        NormalString { escape: bool },
+        RawString { hashes: usize },
+    }
+
+    let mut mode = Mode::Code;
+    let mut depth: i32 = 1;
+    let mut i = open_brace + 1;
+
+    while i < bytes.len() {
+        match mode {
+            Mode::Code => {
+                if bytes[i] == b'/' && i + 1 < bytes.len() {
+                    match bytes[i + 1] {
+                        b'/' => {
+                            mode = Mode::LineComment;
+                            i += 2;
+                            continue;
+                        }
+                        b'*' => {
+                            mode = Mode::BlockComment { depth: 1 };
+                            i += 2;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Raw string literals: r"..." / r#"..."# / br"..." / br#"..."#
+                if bytes[i] == b'r' {
+                    let mut j = i + 1;
+                    while j < bytes.len() && bytes[j] == b'#' {
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'"' {
+                        mode = Mode::RawString {
+                            hashes: j - (i + 1),
+                        };
+                        i = j + 1;
+                        continue;
+                    }
+                } else if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r' {
+                    let mut j = i + 2;
+                    while j < bytes.len() && bytes[j] == b'#' {
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'"' {
+                        mode = Mode::RawString {
+                            hashes: j - (i + 2),
+                        };
+                        i = j + 1;
+                        continue;
+                    }
+                }
+
+                // Normal string literals: "..." and b"..."
+                if bytes[i] == b'"' {
+                    mode = Mode::NormalString { escape: false };
+                    i += 1;
+                    continue;
+                }
+                if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                    mode = Mode::NormalString { escape: false };
+                    i += 2; // consume b"
+                    continue;
+                }
+
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return &src[open_brace..=i];
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            Mode::LineComment => {
+                if bytes[i] == b'\n' {
+                    mode = Mode::Code;
+                }
+                i += 1;
+            }
+            Mode::BlockComment {
+                depth: mut comment_depth,
+            } => {
+                if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    comment_depth += 1;
+                    mode = Mode::BlockComment {
+                        depth: comment_depth,
+                    };
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    comment_depth = comment_depth.saturating_sub(1);
+                    if comment_depth == 0 {
+                        mode = Mode::Code;
+                    } else {
+                        mode = Mode::BlockComment {
+                            depth: comment_depth,
+                        };
+                    }
+                    i += 2;
+                    continue;
+                }
+                // Keep scanning inside block comment.
+                mode = Mode::BlockComment {
+                    depth: comment_depth,
+                };
+                i += 1;
+            }
+            Mode::NormalString { mut escape } => {
+                if escape {
+                    escape = false;
+                    mode = Mode::NormalString { escape };
+                    i += 1;
+                    continue;
+                }
+                match bytes[i] {
+                    b'\\' => {
+                        escape = true;
+                        mode = Mode::NormalString { escape };
+                        i += 1;
+                    }
+                    b'"' => {
+                        mode = Mode::Code;
+                        i += 1;
+                    }
+                    _ => {
+                        mode = Mode::NormalString { escape };
+                        i += 1;
+                    }
                 }
             }
-            _ => {}
+            Mode::RawString { hashes } => {
+                if bytes[i] == b'"' {
+                    let mut ok = true;
+                    for k in 0..hashes {
+                        if i + 1 + k >= bytes.len() || bytes[i + 1 + k] != b'#' {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if ok {
+                        // Consume the closing delimiter (`"` plus `hashes` `#` characters).
+                        i += 1 + hashes;
+                        mode = Mode::Code;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
         }
     }
+
     panic!("unterminated brace block starting at byte offset {open_brace}");
 }
 
