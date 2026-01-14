@@ -356,12 +356,13 @@ is referenced.
 
 Attribution / provenance:
 
-- The committed fixture bytes were generated using Python +
-  [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) (see
-  [`fixtures/encrypted/ooxml/README.md`](../fixtures/encrypted/ooxml/README.md) for the exact tool
-  versions + passwords).
-- Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI),
-  but it is not used for the committed fixture bytes.
+- Most committed fixture bytes were generated using Python +
+  [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool), but some fixtures are generated
+  via Apache POI (for example `standard-4.2.xlsx`, `standard-unicode.xlsx`). See
+  [`fixtures/encrypted/ooxml/README.md`](../fixtures/encrypted/ooxml/README.md) for the canonical
+  per-fixture provenance + the exact tool versions/passwords.
+- Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI)
+  for creating new encrypted OOXML wrappers without Excel.
 
 ### Useful debugging tool
 
