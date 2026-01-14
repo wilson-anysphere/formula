@@ -33,6 +33,7 @@ function writeFakeAppImage(
     withMimeTypeEntry = true,
     execLine = "formula-desktop %U",
     appImageVersion = expectedVersion,
+    desktopEntryVersion = "",
   } = {},
 ) {
   const desktopMime = withXlsxMime
@@ -47,6 +48,7 @@ function writeFakeAppImage(
         "Name=Formula",
         `Exec=${execLine}`,
         ...(appImageVersion ? [`X-AppImage-Version=${appImageVersion}`] : []),
+        ...(desktopEntryVersion ? [`Version=${desktopEntryVersion}`] : []),
         ...(withMimeTypeEntry ? [`MimeType=${desktopMime}`] : []),
         "DESKTOP",
       ].join("\n")
@@ -174,3 +176,58 @@ test("validate-linux-appimage fails when Exec= lacks file placeholder", { skip: 
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /Exec=.*placeholder|invalid Exec=/i);
 });
+
+test(
+  "validate-linux-appimage accepts Version= when X-AppImage-Version is absent (semver-like)",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+    const appImagePath = join(tmp, "Formula.AppImage");
+    writeFakeAppImage(appImagePath, {
+      withDesktopFile: true,
+      withXlsxMime: true,
+      appImageVersion: "",
+      desktopEntryVersion: expectedVersion,
+    });
+
+    const proc = runValidator(appImagePath);
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
+  "validate-linux-appimage falls back to filename version when no version markers exist",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+    const appImagePath = join(tmp, `Formula-${expectedVersion}.AppImage`);
+    writeFakeAppImage(appImagePath, {
+      withDesktopFile: true,
+      withXlsxMime: true,
+      appImageVersion: "",
+      desktopEntryVersion: "",
+    });
+
+    const proc = runValidator(appImagePath);
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
+  "validate-linux-appimage fails when no version markers exist and filename lacks the version",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+    const appImagePath = join(tmp, "Formula.AppImage");
+    writeFakeAppImage(appImagePath, {
+      withDesktopFile: true,
+      withXlsxMime: true,
+      appImageVersion: "",
+      desktopEntryVersion: "",
+    });
+
+    const proc = runValidator(appImagePath);
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /filename did not contain expected version/i);
+  },
+);

@@ -93,8 +93,8 @@ esac
     rpm2cpioPath,
     `#!/usr/bin/env bash
 set -euo pipefail
-# Output ignored by our fake cpio.
-cat >/dev/null || true
+# The real rpm2cpio converts an RPM to a CPIO archive. Our fake cpio ignores stdin,
+# so we can just succeed without emitting anything.
 exit 0
 `,
     { encoding: "utf8" },
@@ -110,6 +110,7 @@ set -euo pipefail
 mkdir -p usr/share/applications
 cat > usr/share/applications/formula.desktop <<'DESKTOP'
 [Desktop Entry]
+Type=Application
 Name=Formula
 Exec=formula-desktop %U
 MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;
@@ -292,6 +293,30 @@ test("validate-linux-rpm fails when rpm --info query fails", { skip: !hasBash },
   });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /rpm --info query failed/i);
+});
+
+test("validate-linux-rpm fails when rpm --queryformat fails", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop"].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({
+    cwd: tmp,
+    rpmArg: "Formula.rpm",
+    fakeListFile: listFile,
+    fakeMode: "fail-queryformat",
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /rpm query failed for %\{VERSION\}/i);
 });
 
 test("validate-linux-rpm fails when RPM version does not match tauri.conf.json", { skip: !hasBash }, () => {

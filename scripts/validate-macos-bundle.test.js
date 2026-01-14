@@ -97,6 +97,10 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
+    const resourcesDir = join(appRoot, "Resources");
+    mkdirSync(resourcesDir, { recursive: true });
+    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
@@ -129,6 +133,10 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
+    const resourcesDir = join(appRoot, "Resources");
+    mkdirSync(resourcesDir, { recursive: true });
+    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: "com.example.wrong",
@@ -163,6 +171,10 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
+    const resourcesDir = join(appRoot, "Resources");
+    mkdirSync(resourcesDir, { recursive: true });
+    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
+    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
