@@ -49,6 +49,36 @@ afterEach(() => {
 });
 
 describe("OrganizeSheetsDialog", () => {
+  it("renders a tab color indicator when present", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible", tabColor: { rgb: "FFFF0000" } },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "s1";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    expect(dialog!.querySelector('[data-testid="organize-sheet-tab-color-s1"]')).toBeInstanceOf(HTMLElement);
+    expect(dialog!.querySelector('[data-testid="organize-sheet-tab-color-s2"]')).toBeNull();
+  });
+
   it("renames a sheet and rewrites formulas", async () => {
     const doc = new DocumentController();
     doc.setCellFormula("S1", { row: 0, col: 0 }, "='Budget'!A1");

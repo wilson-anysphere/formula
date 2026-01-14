@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import { markKeybindingBarrier } from "../keybindingBarrier.js";
+import { normalizeExcelColorToCss } from "../shared/colors.js";
 
 import { rewriteDocumentFormulasForSheetDelete } from "./sheetFormulaRewrite";
 import type { SheetMeta, WorkbookSheetStore } from "./workbookSheetStore";
@@ -358,6 +359,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         {sheets.map((sheet, index) => {
           const isActive = sheet.id === activeSheetId;
           const badge = visibilityBadgeLabel(sheet.visibility);
+          const tabColorCss = sheet.tabColor ? normalizeExcelColorToCss(sheet.tabColor) : undefined;
           const rowIsRenaming = renameSheetId === sheet.id;
           const rowIsConfirmingDelete = deleteConfirmSheetId === sheet.id;
           const hasAnyInlineModal = renameSheetId != null || deleteConfirmSheetId != null;
@@ -408,6 +410,14 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                   />
                 ) : (
                   <>
+                    {tabColorCss ? (
+                      <span
+                        className="organize-sheets-dialog__tab-color"
+                        style={{ backgroundColor: tabColorCss }}
+                        aria-label="Tab color"
+                        data-testid={`organize-sheet-tab-color-${sheet.id}`}
+                      />
+                    ) : null}
                     <span className="organize-sheets-dialog__name-text" data-testid={`organize-sheet-name-${sheet.id}`}>
                       {sheet.name}
                     </span>
