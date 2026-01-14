@@ -46,6 +46,25 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("shows 1-letter function suggestions inside argument lists when they exist (=SUM(T → includes T)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(T";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+    expect(dropdown?.textContent).toContain("T");
+
+    host.remove();
+  });
+
   it("preserves typed casing when inserting (e.g. =vlo → =vlookup()", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
