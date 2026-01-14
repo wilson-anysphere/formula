@@ -371,6 +371,40 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
+  it("does not surface unhandled rejections when chart selection overlay render rejects", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const err = new Error("boom");
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+
+      renderSpy.mockClear();
+      warnSpy.mockClear();
+      renderSpy.mockRejectedValueOnce(err);
+
+      (app as any).renderChartSelectionOverlay();
+      await Promise.resolve();
+
+      expect(warnSpy).toHaveBeenCalledWith("Chart selection overlay render failed", err);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("computes consistent render vs interaction viewports for drawings (headers + frozen panes)", async () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
