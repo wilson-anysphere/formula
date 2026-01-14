@@ -42,6 +42,7 @@ import {
   type RegionType,
   type RegionRef,
   type SystematicSamplingOptions,
+  valuesRangeToTsv,
 } from "../src/index.js";
 import type { SheetSchema } from "../src/schema.js";
   
@@ -67,6 +68,10 @@ type _ParseA1Range_NotAny = Assert<IsAny<ParsedRange> extends false ? true : fal
 type _ParseA1Range_Shape = Assert<
   ParsedRange extends { sheetName?: string; startRow: number; startCol: number; endRow: number; endCol: number } ? true : false
 >;
+
+// --- TSV ---
+type _ValuesRangeToTsv_NotAny = Assert<IsAny<typeof valuesRangeToTsv> extends false ? true : false>;
+type _ValuesRangeToTsv_Return = Assert<ReturnType<typeof valuesRangeToTsv> extends string ? true : false>;
 
 // --- DLP ---
 type DlpResult = ReturnType<typeof classifyText>;
@@ -129,6 +134,7 @@ type _WorkbookSchema_NotAny = Assert<IsAny<WorkbookSchema> extends false ? true 
 void EXCEL_MAX_ROWS;
 void EXCEL_MAX_COLS;
 const parsed = parseA1Range("$A$1:B2");
+void valuesRangeToTsv([["a"]], { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }, { maxRows: 1 });
 const dlp = classifyText("test@example.com");
 void dlp;
 const index = new RagIndex();
