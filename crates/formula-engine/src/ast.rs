@@ -1154,7 +1154,7 @@ fn fmt_ref_prefix(
         // When serializing back to formula text, keep the path prefix *outside* the `[workbook]`
         // bracket so any `[` / `]` characters in directory names (e.g. `C:\[foo]\`) do not need to
         // be escaped as workbook-prefix `]]` sequences.
-        let sep = book.rfind(['\\', '/'])?;
+        let sep = book.rfind(|c| c == '\\' || c == '/')?;
         let (prefix, base) = book.split_at(sep + 1);
         if base.is_empty() {
             None
@@ -1165,40 +1165,6 @@ fn fmt_ref_prefix(
 
     match (workbook.as_ref(), sheet.as_ref()) {
         (Some(book), Some(sheet_ref)) => {
-            // Path-qualified external workbook refs are serialized in an Excel-like form where the
-            // directory prefix is outside the `[Book.xlsx]` segment:
-            //
-            //   `'C:\path\[Book.xlsx]Sheet1'!A1`
-            //
-            // This avoids producing a workbook prefix like `[C:\path\Book.xlsx]Sheet1` that can
-            // become ambiguous/unparseable when the path contains `[`/`]` (e.g. `C:\[foo]\...`).
-            if let Some(sep) = book.rfind(|c| c == '\\' || c == '/') {
-                let (prefix, file) = book.split_at(sep + 1);
-                if !file.is_empty() {
-                    out.push('\'');
-                    fmt_sheet_name_escaped(out, prefix);
-                    out.push('[');
-                    fmt_sheet_name_escaped(out, file);
-                    out.push(']');
-                    match sheet_ref {
-                        SheetRef::Sheet(sheet) => fmt_sheet_name_escaped(out, sheet),
-                        SheetRef::SheetRange { start, end }
-                            if sheet_name_eq_case_insensitive(start, end) =>
-                        {
-                            fmt_sheet_name_escaped(out, start)
-                        }
-                        SheetRef::SheetRange { start, end } => {
-                            fmt_sheet_name_escaped(out, start);
-                            out.push(':');
-                            fmt_sheet_name_escaped(out, end);
-                        }
-                    }
-                    out.push('\'');
-                    out.push('!');
-                    return;
-                }
-            }
-
             // External references are written as `[Book.xlsx]Sheet1!A1`.
             //
             // If `book` is a path-qualified workbook id (e.g. `C:\path\Book.xlsx`), prefer the
