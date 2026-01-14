@@ -18,40 +18,6 @@ export interface AuditingOverlayOptions {
   getCellRect: (row: number, col: number) => Rect | null;
 }
 
-function withAlpha(color: string, alpha: number) {
-  return { color, alpha };
-}
-
-function drawCellHighlight(
-  ctx: CanvasRenderingContext2D,
-  rect: Rect,
-  options: { fill?: { color: string; alpha: number }; stroke?: { color: string; alpha: number }; strokeWidth?: number },
-) {
-  const { fill = null, stroke = null, strokeWidth = 2 } = options;
-
-  ctx.save();
-
-  if (fill) {
-    ctx.fillStyle = fill.color;
-    ctx.globalAlpha = fill.alpha;
-    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-  }
-
-  if (stroke) {
-    ctx.strokeStyle = stroke.color;
-    ctx.globalAlpha = stroke.alpha;
-    ctx.lineWidth = strokeWidth;
-    ctx.strokeRect(
-      rect.x + strokeWidth / 2,
-      rect.y + strokeWidth / 2,
-      rect.width - strokeWidth,
-      rect.height - strokeWidth,
-    );
-  }
-
-  ctx.restore();
-}
-
 export class AuditingOverlayRenderer {
   precedentFill: string;
   precedentStroke: string;
@@ -83,31 +49,38 @@ export class AuditingOverlayRenderer {
     const { getCellRect } = options ?? {};
     if (typeof getCellRect !== "function") return;
 
-    const precedentOptions = {
-      fill: withAlpha(this.precedentFill, this.fillAlpha),
-      stroke: withAlpha(this.precedentStroke, this.strokeAlpha),
-      strokeWidth: this.strokeWidth,
-    };
-    const dependentOptions = {
-      fill: withAlpha(this.dependentFill, this.fillAlpha),
-      stroke: withAlpha(this.dependentStroke, this.strokeAlpha),
-      strokeWidth: this.strokeWidth,
-    };
+    const strokeWidth = this.strokeWidth;
+    const halfStroke = strokeWidth / 2;
 
+    ctx.save();
+    ctx.lineWidth = strokeWidth;
+
+    ctx.fillStyle = this.precedentFill;
+    ctx.strokeStyle = this.precedentStroke;
     for (const addr of highlights.precedents) {
       const parsed = parseCellAddress(addr);
       if (!parsed) continue;
       const rect = getCellRect(parsed.row, parsed.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, precedentOptions);
+      ctx.globalAlpha = this.fillAlpha;
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.globalAlpha = this.strokeAlpha;
+      ctx.strokeRect(rect.x + halfStroke, rect.y + halfStroke, rect.width - strokeWidth, rect.height - strokeWidth);
     }
 
+    ctx.fillStyle = this.dependentFill;
+    ctx.strokeStyle = this.dependentStroke;
     for (const addr of highlights.dependents) {
       const parsed = parseCellAddress(addr);
       if (!parsed) continue;
       const rect = getCellRect(parsed.row, parsed.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, dependentOptions);
+      ctx.globalAlpha = this.fillAlpha;
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.globalAlpha = this.strokeAlpha;
+      ctx.strokeRect(rect.x + halfStroke, rect.y + halfStroke, rect.width - strokeWidth, rect.height - strokeWidth);
     }
+
+    ctx.restore();
   }
 }

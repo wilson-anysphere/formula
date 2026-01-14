@@ -19,8 +19,8 @@ function pickTextColor(backgroundColor) {
   return luma > 0.6 ? "#000000" : "#ffffff";
 }
 
-function normalizeRange(range) {
-  if (!range || typeof range !== "object") return null;
+function rectForRangeInto(getCellRect, range, out) {
+  if (!range || typeof range !== "object") return false;
 
   let startRow;
   let startCol;
@@ -50,36 +50,28 @@ function normalizeRange(range) {
     endRow = range.end.row;
     endCol = range.end.col;
   } else {
-    return null;
+    return false;
   }
 
-  const normalizedStartRow = Math.min(startRow, endRow);
-  const normalizedEndRow = Math.max(startRow, endRow);
-  const normalizedStartCol = Math.min(startCol, endCol);
-  const normalizedEndCol = Math.max(startCol, endCol);
+  const normalizedStartRow = Math.trunc(Math.min(startRow, endRow));
+  const normalizedEndRow = Math.trunc(Math.max(startRow, endRow));
+  const normalizedStartCol = Math.trunc(Math.min(startCol, endCol));
+  const normalizedEndCol = Math.trunc(Math.max(startCol, endCol));
 
-  return {
-    startRow: Math.trunc(normalizedStartRow),
-    startCol: Math.trunc(normalizedStartCol),
-    endRow: Math.trunc(normalizedEndRow),
-    endCol: Math.trunc(normalizedEndCol),
-  };
-}
-
-function rectForRange(getCellRect, range) {
-  const normalized = normalizeRange(range);
-  if (!normalized) return null;
-
-  const startRect = getCellRect(normalized.startRow, normalized.startCol);
-  const endRect = getCellRect(normalized.endRow, normalized.endCol);
-  if (!startRect || !endRect) return null;
+  const startRect = getCellRect(normalizedStartRow, normalizedStartCol);
+  const endRect = getCellRect(normalizedEndRow, normalizedEndCol);
+  if (!startRect || !endRect) return false;
 
   const x1 = Math.min(startRect.x, endRect.x);
   const y1 = Math.min(startRect.y, endRect.y);
   const x2 = Math.max(startRect.x + startRect.width, endRect.x + endRect.width);
   const y2 = Math.max(startRect.y + startRect.height, endRect.y + endRect.height);
 
-  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+  out.x = x1;
+  out.y = y1;
+  out.width = x2 - x1;
+  out.height = y2 - y1;
+  return true;
 }
 
 export class PresenceRenderer {
@@ -106,6 +98,8 @@ export class PresenceRenderer {
     this.font = font ?? `12px ${fontFamily}`;
 
     this._badgeWidthCache = new Map();
+    /** @type {Array<{ x: number; y: number; width: number; height: number }>} */
+    this._rectScratch = [];
   }
 
   clear(ctx) {
@@ -126,8 +120,7 @@ export class PresenceRenderer {
     ctx.lineWidth = this.cursorStrokeWidth;
     ctx.textBaseline = "top";
 
-    /** @type {Array<{ x: number; y: number; width: number; height: number }>} */
-    const rects = [];
+    const rects = this._rectScratch;
 
     for (const presence of presences) {
       const color = presence.color ?? "#4c8bf5";
@@ -136,21 +129,27 @@ export class PresenceRenderer {
         ctx.fillStyle = color;
         ctx.strokeStyle = color;
 
-        rects.length = 0;
+        let rectCount = 0;
         for (const selection of presence.selections) {
-          const rect = rectForRange(getCellRect, selection);
-          if (!rect) continue;
-          rects.push(rect);
+          let rect = rects[rectCount];
+          if (!rect) {
+            rect = { x: 0, y: 0, width: 0, height: 0 };
+            rects[rectCount] = rect;
+          }
+          if (!rectForRangeInto(getCellRect, selection, rect)) continue;
+          rectCount++;
         }
 
-        if (rects.length > 0) {
+        if (rectCount > 0) {
           ctx.globalAlpha = this.selectionFillAlpha;
-          for (const rect of rects) {
+          for (let i = 0; i < rectCount; i++) {
+            const rect = rects[i];
             ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
           }
 
           ctx.globalAlpha = this.selectionStrokeAlpha;
-          for (const rect of rects) {
+          for (let i = 0; i < rectCount; i++) {
+            const rect = rects[i];
             // Sub-pixel alignment for crisp borders.
             ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1);
           }
