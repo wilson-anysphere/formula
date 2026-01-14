@@ -90,6 +90,18 @@ mod encrypted_package_size_prefix_tests {
         );
         assert_eq!(parse_encrypted_package_size_prefix_bytes(prefix, None), 1u64 << 32);
     }
+
+    #[test]
+    fn falls_back_when_high_dword_is_reserved_and_size_is_implausible() {
+        // Some producers treat the header as (u32 size, u32 reserved) and write a non-zero reserved
+        // high DWORD. When the combined u64 value is not plausible for the ciphertext length, fall
+        // back to the low DWORD size.
+        let mut prefix = [0u8; 8];
+        prefix[..4].copy_from_slice(&10u32.to_le_bytes()); // low DWORD
+        prefix[4..].copy_from_slice(&1u32.to_le_bytes()); // reserved high DWORD
+
+        assert_eq!(parse_encrypted_package_size_prefix_bytes(prefix, Some(16)), 10);
+    }
 }
 // BIFF record ids for legacy `.xls` encryption detection.
 //

@@ -153,7 +153,8 @@ impl Rc4CryptoApiDecryptor {
         // `(u32 totalSize, u32 reserved)` (often with `reserved = 0`).
         //
         // For compatibility, when the high DWORD is non-zero and the combined 64-bit value is not
-        // plausible for the available ciphertext, fall back to the low DWORD.
+        // plausible for the available ciphertext, fall back to the low DWORD **only when it is
+        // non-zero** (so we don't misinterpret true 64-bit sizes that are exact multiples of 2^32).
         let lo = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
         let hi = u32::from_le_bytes([len_bytes[4], len_bytes[5], len_bytes[6], len_bytes[7]]);
         let plaintext_len_u64_raw = (lo as u64) | ((hi as u64) << 32);
@@ -236,6 +237,26 @@ mod tests {
             out.extend_from_slice(&ciphertext);
             out
         }
+    }
+
+    #[test]
+    fn encrypted_package_size_header_does_not_fall_back_when_low_dword_is_zero() {
+        // Ensure we don't misinterpret a true 64-bit size like 4GiB (low=0, high=1) as a 0-byte
+        // payload (which would incorrectly return Ok(empty)).
+        let decryptor = Rc4CryptoApiDecryptor {
+            password_hash: [0u8; 20],
+            key_len: 5,
+            hash_alg: HashAlg::Sha1,
+        };
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // low DWORD
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // high DWORD
+
+        let err = decryptor
+            .decrypt_encrypted_package(&bytes)
+            .expect_err("expected truncated ciphertext");
+        assert!(matches!(err, super::Rc4CryptoApiError::Truncated));
     }
 
     fn make_plaintext_pattern(len: usize) -> Vec<u8> {
