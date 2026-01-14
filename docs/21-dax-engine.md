@@ -189,7 +189,8 @@ Internally, `DataModel` materializes relationship metadata (`RelationshipInfo`),
     Scalable representation for **columnar many-to-many** relationships where the `to_table` side may
     contain a very large number of duplicate keys. Instead of storing `Vec<usize>` row lists per key,
     the engine stores only the **distinct key set** and relies on backend primitives like
-    `filter_eq` / `filter_in` to retrieve matching row indices on demand.
+    `filter_eq` / `filter_in` to retrieve matching row indices on demand. `BLANK` keys are excluded
+    (they do not participate in relationship joins).
 - `from_index: Option<HashMap<Value, Vec<usize>>>` mapping **from_table key → from_table row indices**  
   Materialized only for in-memory fact tables. For columnar fact tables it stays `None` and the engine
   relies on backend primitives like `filter_eq` / `filter_in` instead.
@@ -285,6 +286,11 @@ Tabular models behave as if the table on the `to_table` side of a relationship h
 
 - `BLANK`, or
 - not present in the dimension key column (when referential integrity is not enforced)
+
+Important nuance: in `formula-dax`, fact-side `BLANK` foreign keys always belong to this
+relationship-generated blank member, even if the dimension table contains a *physical* row whose key
+is `BLANK`. In other words, `BLANK` is treated as an **unmatchable** relationship join key during
+filter propagation and row-context navigation (`RELATED` / `RELATEDTABLE`).
 
 `formula-dax` models this row **virtually**:
 
