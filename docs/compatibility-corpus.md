@@ -129,7 +129,7 @@ python -m tools.corpus.triage \
   --expectations tools/corpus/public/expectations.json \
   --include-xlsb
 ```
-Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` round-trip and `xlsx-diff`
+Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` / `formula-xlsb` round-trip and `xlsx-diff`
 structural comparison, so a Rust toolchain must be available.
 
 Triage output layout (`--out-dir`):
