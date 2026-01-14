@@ -313,6 +313,10 @@ export class EngineWorker {
         }, timeoutMs);
       }
     });
+    // The connect handshake can be aborted/failed before we ever `await ready` (e.g. if the abort
+    // signal fires before the init message is posted). Attach a no-op rejection handler so a
+    // handshake rejection never surfaces as an unhandled rejection.
+    void ready.catch(() => {});
 
     const initMessage: InitMessage = {
       type: "init",
