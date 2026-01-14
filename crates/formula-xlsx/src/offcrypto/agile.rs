@@ -572,9 +572,40 @@ fn derive_segment_iv(
     segment_index: u32,
     hash_alg: HashAlgorithm,
     iv_len: usize,
-) -> Vec<u8> {
-    let mut iv = hash_bytes(hash_alg, &[salt, &segment_index.to_le_bytes()].concat());
-    iv.truncate(iv_len);
+) -> [u8; AES_BLOCK_SIZE] {
+    debug_assert_eq!(
+        iv_len, AES_BLOCK_SIZE,
+        "Agile keyData.blockSize must match AES block size"
+    );
+
+    let idx = segment_index.to_le_bytes();
+    let mut iv = [0u8; AES_BLOCK_SIZE];
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            let mut h = sha1::Sha1::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
+        }
+        HashAlgorithm::Sha256 => {
+            let mut h = sha2::Sha256::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
+        }
+        HashAlgorithm::Sha384 => {
+            let mut h = sha2::Sha384::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
+        }
+        HashAlgorithm::Sha512 => {
+            let mut h = sha2::Sha512::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_SIZE]);
+        }
+    }
     iv
 }
 
