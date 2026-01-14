@@ -1811,6 +1811,25 @@ test('NUMBERVALUE group_separator suggests ",", ".", and " "', async () => {
   }
 });
 
+test('TEXT format_text suggests common format strings', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TEXT(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const fmt of ['"0"', '"0.00"', '"0%"']) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=TEXT(A1, ${fmt}`),
+      `Expected TEXT to suggest format_text=${fmt}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("MATCH match_type suggests 0, 1, -1", async () => {
   const engine = new TabCompletionEngine();
 

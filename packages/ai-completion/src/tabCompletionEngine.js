@@ -1099,6 +1099,16 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     // match_end
     4: TEXT_MATCH_END_ENUM_0_1,
   },
+  TEXT: {
+    // format_text (in quotes)
+    1: [
+      { replacement: '"0"', displayText: '"0" (integer)', confidence: 0.67 },
+      { replacement: '"0.00"', displayText: '"0.00" (2 decimals)', confidence: 0.66 },
+      { replacement: '"0%"', displayText: '"0%" (percent)', confidence: 0.65 },
+      { replacement: '"$0.00"', displayText: '"$0.00" (currency)', confidence: 0.64 },
+      { replacement: '"yyyy-mm-dd"', displayText: '"yyyy-mm-dd" (date)', confidence: 0.63 },
+    ],
+  },
   TEXTJOIN: {
     // ignore_empty
     1: [
