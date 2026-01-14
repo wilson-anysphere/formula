@@ -152,6 +152,13 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("LET", 2), "value", "Expected LET calculation to be a value");
   assert.equal(registry.getArgType("LAMBDA", 0), "string", "Expected LAMBDA parameter1 to be string-like");
   assert.equal(registry.getArgType("LAMBDA", 1), "value", "Expected LAMBDA calculation to be a value");
+  assert.ok(registry.getFunction("AND")?.args?.[0]?.repeating, "Expected AND to accept repeating logical args");
+  assert.ok(registry.getFunction("OR")?.args?.[0]?.repeating, "Expected OR to accept repeating logical args");
+  assert.ok(registry.getFunction("XOR")?.args?.[0]?.repeating, "Expected XOR to accept repeating logical args");
+  assert.equal(registry.getFunction("NOT")?.args?.[0]?.name, "logical", "Expected NOT arg1 name to be logical");
+  assert.equal(registry.getFunction("CHOOSE")?.args?.[0]?.name, "index_num", "Expected CHOOSE arg1 name to be index_num");
+  assert.ok(registry.getFunction("CHOOSE")?.args?.[1]?.repeating, "Expected CHOOSE value args to repeat");
+  assert.equal(registry.getFunction("ERROR.TYPE")?.args?.[0]?.name, "error_val", "Expected ERROR.TYPE arg1 name to be error_val");
 
   // Legacy descriptive stats
   assert.ok(registry.isRangeArg("PERCENTILE", 0), "Expected PERCENTILE array to be a range");

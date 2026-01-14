@@ -1655,6 +1655,140 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "AND",
+    description: "Returns TRUE if all arguments evaluate to TRUE.",
+    args: [
+      { name: "logical1", type: "value", repeating: true },
+    ],
+  },
+  {
+    name: "OR",
+    description: "Returns TRUE if any argument evaluates to TRUE.",
+    args: [
+      { name: "logical1", type: "value", repeating: true },
+    ],
+  },
+  {
+    name: "XOR",
+    description: "Returns a logical exclusive OR of all arguments.",
+    args: [
+      { name: "logical1", type: "value", repeating: true },
+    ],
+  },
+  {
+    name: "NOT",
+    description: "Reverses the value of its argument.",
+    args: [
+      { name: "logical", type: "value" },
+    ],
+  },
+  {
+    name: "CHOOSE",
+    description: "Chooses a value from a list based on an index number.",
+    args: [
+      { name: "index_num", type: "number" },
+      { name: "value1", type: "value", repeating: true },
+    ],
+  },
+  {
+    name: "ISBLANK",
+    description: "Returns TRUE if the value is blank.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISERR",
+    description: "Returns TRUE if the value is any error value except #N/A.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISERROR",
+    description: "Returns TRUE if the value is any error value.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISLOGICAL",
+    description: "Returns TRUE if the value is a logical value.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISNA",
+    description: "Returns TRUE if the value is the #N/A error value.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISNONTEXT",
+    description: "Returns TRUE if the value is not text.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISNUMBER",
+    description: "Returns TRUE if the value is a number.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISOMITTED",
+    description: "Returns TRUE if the argument is omitted in a LAMBDA call.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISREF",
+    description: "Returns TRUE if the value is a reference.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ISTEXT",
+    description: "Returns TRUE if the value is text.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "N",
+    description: "Converts a value to a number.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "T",
+    description: "Converts its arguments to text.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "TYPE",
+    description: "Returns a number indicating the data type of a value.",
+    args: [
+      { name: "value", type: "value" },
+    ],
+  },
+  {
+    name: "ERROR.TYPE",
+    description: "Returns a number corresponding to an error type.",
+    args: [
+      { name: "error_val", type: "value" },
+    ],
+  },
+  {
     name: "IFS",
     description: "Checks whether one or more conditions are met and returns a value that corresponds to the first TRUE condition.",
     args: [
