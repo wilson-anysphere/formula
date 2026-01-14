@@ -237,6 +237,7 @@ export const ar = {
   "versionHistory.compare.sheetMetaField.tabColor": "لون علامة التبويب",
   "versionHistory.compare.sheetMetaField.frozenRows": "صفوف مجمّدة",
   "versionHistory.compare.sheetMetaField.frozenCols": "أعمدة مجمّدة",
+  "versionHistory.compare.sheetMetaField.backgroundImageId": "صورة الخلفية",
   "filterDropdown.filtered": "(مُصفّى)",
   "filterDropdown.search.placeholder": "بحث…",
   "filterDropdown.search.ariaLabel": "البحث في قيم التصفية",

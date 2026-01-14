@@ -13,7 +13,7 @@ type VersionManagerLike = {
   getVersion(versionId: string): Promise<{ snapshot: Uint8Array } | null>;
 };
 
-type SheetViewMeta = { frozenRows: number; frozenCols: number };
+type SheetViewMeta = { frozenRows: number; frozenCols: number; backgroundImageId?: string | null };
 type AddedSheet = { id: string; name: string | null; afterIndex: number; visibility?: string; tabColor?: string | null; view?: SheetViewMeta };
 type RemovedSheet = { id: string; name: string | null; beforeIndex: number; visibility?: string; tabColor?: string | null; view?: SheetViewMeta };
 type RenamedSheet = { id: string; beforeName: string | null; afterName: string | null };
@@ -111,6 +111,7 @@ function formatSheetMetaField(field: string): string {
   if (field === "tabColor") return t("versionHistory.compare.sheetMetaField.tabColor");
   if (field === "view.frozenRows") return t("versionHistory.compare.sheetMetaField.frozenRows");
   if (field === "view.frozenCols") return t("versionHistory.compare.sheetMetaField.frozenCols");
+  if (field === "view.backgroundImageId") return t("versionHistory.compare.sheetMetaField.backgroundImageId");
   return field;
 }
 function sheetDisplayName(sheetId: string, fallbackName: string | null, sheetNameResolver: SheetNameResolver | null): string {
@@ -504,6 +505,14 @@ export function VersionHistoryCompareSection({
                                     </div>
                                     <div className="collab-version-history__diff-row-value">
                                       <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.backgroundImageId")}:
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">
+                                        {summarizeJson(added.view?.backgroundImageId ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
                                         {t("versionHistory.compare.sheetMetaField.frozenRows")}:
                                       </span>{" "}
                                       <span className="collab-version-history__diff-value">{summarizeJson(added.view?.frozenRows ?? 0)}</span>
@@ -545,6 +554,14 @@ export function VersionHistoryCompareSection({
                                         {t("versionHistory.compare.sheetMetaField.tabColor")}:
                                       </span>{" "}
                                       <span className="collab-version-history__diff-value">{summarizeJson(removed.tabColor ?? null)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.backgroundImageId")}:
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">
+                                        {summarizeJson(removed.view?.backgroundImageId ?? null)}
+                                      </span>
                                     </div>
                                     <div className="collab-version-history__diff-row-value">
                                       <span className="collab-version-history__diff-row-label">

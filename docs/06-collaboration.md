@@ -1304,6 +1304,7 @@ The returned `WorkbookDiff` includes sheet-level metadata changes in `diff.sheet
 - `visibility` (`visible | hidden | veryHidden`)
 - `tabColor`: canonicalized to **8-digit uppercase ARGB** hex (e.g. `FF00FF00`) or `null` when cleared
 - frozen panes: `view.frozenRows`, `view.frozenCols`
+- background image: `view.backgroundImageId` (optional; only included when non-empty)
 
 Note: large sheet view maps (e.g. row/column size tables) are intentionally excluded from workbook diffs; only frozen pane counts are tracked.
 

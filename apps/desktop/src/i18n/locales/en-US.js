@@ -730,6 +730,7 @@ export const enUS = {
   "versionHistory.compare.sheetMetaField.tabColor": "Tab color",
   "versionHistory.compare.sheetMetaField.frozenRows": "Frozen rows",
   "versionHistory.compare.sheetMetaField.frozenCols": "Frozen columns",
+  "versionHistory.compare.sheetMetaField.backgroundImageId": "Background image",
   "formulaDiff.aria.emptyFormula": "Empty formula",
   "formulaDiff.label.diff": "Diff"
 };

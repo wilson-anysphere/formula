@@ -237,6 +237,7 @@ export const deDE = {
   "versionHistory.compare.sheetMetaField.tabColor": "Tab-Farbe",
   "versionHistory.compare.sheetMetaField.frozenRows": "Fixierte Zeilen",
   "versionHistory.compare.sheetMetaField.frozenCols": "Fixierte Spalten",
+  "versionHistory.compare.sheetMetaField.backgroundImageId": "Hintergrundbild",
   "filterDropdown.filtered": "(gefiltert)",
   "filterDropdown.search.placeholder": "Suchen…",
   "filterDropdown.search.ariaLabel": "Filterwerte suchen",
