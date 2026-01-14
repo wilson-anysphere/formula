@@ -375,6 +375,8 @@ mod tests {
             0x0E, 0x0F,
         ];
 
+        // With `keySize == 0`, MS-OFFCRYPTO specifies the effective key size is 40-bit, so the
+        // derived RC4 key is the first 5 bytes of `Hash(H || LE32(block))` (un-padded).
         let expected_key_material: [u8; 5] = [0x6A, 0xD7, 0xDE, 0xDF, 0x2D];
 
         let key_size_bits = 0;
