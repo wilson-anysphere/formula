@@ -276,7 +276,9 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     for node in doc.descendants().filter(|n| n.is_element()) {
         // Attribute hints.
         for attr in ["layoutId", "chartType"] {
-            if let Some(hint) = attribute_case_insensitive(node, attr).and_then(normalize_chart_ex_kind_hint) {
+            if let Some(hint) =
+                attribute_case_insensitive(node, attr).and_then(normalize_chart_ex_kind_hint)
+            {
                 if seen.insert(hint.clone()) {
                     out.push(hint);
                 }
@@ -837,7 +839,10 @@ fn parse_series_categories(
         .children()
         .any(|n| n.is_element() && matches!(n.tag_name().name(), "numRef" | "numLit"))
     {
-        return (None, parse_series_number_data(cat_node, diagnostics, context));
+        return (
+            None,
+            parse_series_number_data(cat_node, diagnostics, context),
+        );
     }
 
     (parse_series_text_data(cat_node, diagnostics, context), None)

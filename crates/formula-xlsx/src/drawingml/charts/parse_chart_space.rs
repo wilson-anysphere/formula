@@ -386,7 +386,8 @@ fn parse_plot_area_model(
             vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             first_slice_angle: child_attr(chart_node, "firstSliceAng", "val")
                 .and_then(|v| v.parse::<u32>().ok()),
-            hole_size: child_attr(chart_node, "holeSize", "val").and_then(|v| v.parse::<u32>().ok()),
+            hole_size: child_attr(chart_node, "holeSize", "val")
+                .and_then(|v| v.parse::<u32>().ok()),
         }),
         ChartKind::Line => PlotAreaModel::Line(LineChartModel {
             vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
@@ -551,7 +552,10 @@ fn parse_series_categories(
         .children()
         .any(|n| n.is_element() && matches!(n.tag_name().name(), "numRef" | "numLit"))
     {
-        return (None, parse_series_number_data(cat_node, diagnostics, context));
+        return (
+            None,
+            parse_series_number_data(cat_node, diagnostics, context),
+        );
     }
 
     (parse_series_text_data(cat_node, diagnostics, context), None)
@@ -732,14 +736,19 @@ fn warn_on_numeric_categories_with_non_numeric_axis(
 
     // For classic charts, numeric categories are typically paired with `<c:dateAx>`.
     // Scatter charts can have a `<c:valAx>` in the category position.
-    let has_date_ax = plot_area_node
+    let plot_area_children: Vec<_> = plot_area_node
         .children()
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_plot_area_axis_node))
+        .collect();
+    let has_date_ax = plot_area_children
+        .iter()
         .any(|n| n.is_element() && n.tag_name().name() == "dateAx");
-    let has_cat_ax = plot_area_node
-        .children()
+    let has_cat_ax = plot_area_children
+        .iter()
         .any(|n| n.is_element() && n.tag_name().name() == "catAx");
-    let has_val_ax = plot_area_node
-        .children()
+    let has_val_ax = plot_area_children
+        .iter()
         .any(|n| n.is_element() && n.tag_name().name() == "valAx");
 
     let category_axis_is_numeric = has_date_ax || (!has_cat_ax && has_val_ax);
