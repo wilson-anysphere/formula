@@ -2297,6 +2297,53 @@ mod tests {
     }
 
     #[test]
+    fn unmatched_fact_rows_retain_dense_does_not_read_past_len() {
+        // Ensure the Dense retain implementation never evaluates the predicate for rows >= len,
+        // even if unused bits in the last word are (incorrectly) set.
+        let len = 70usize;
+        let word_len = (len + 63) / 64;
+        assert_eq!(word_len, 2);
+
+        let mut bits = vec![0u64; word_len];
+        bits[0] |= 1u64 << 0; // row 0 (in-range)
+        bits[1] |= 1u64 << 5; // row 69 (in-range)
+        bits[1] |= 1u64 << 6; // row 70 (out-of-range for len=70)
+        assert_ne!(bits[1] & (1u64 << 6), 0);
+
+        // Count tracks bits within len only.
+        let mut rows = UnmatchedFactRows::Dense {
+            bits,
+            len,
+            count: 2,
+        };
+
+        rows.retain(|row| {
+            assert!(
+                *row < len,
+                "retain predicate must not be evaluated for rows >= len"
+            );
+            true
+        });
+
+        match &rows {
+            UnmatchedFactRows::Dense { bits, len, count } => {
+                assert_eq!(*len, 70);
+                assert_eq!(*count, 2);
+                assert_eq!(bits.len(), 2);
+                assert_eq!(bits[0], 1u64);
+                // Only row 69 remains set in the second word (bit 5); out-of-range bit 6 cleared.
+                assert_eq!(bits[1], 1u64 << 5);
+            }
+            UnmatchedFactRows::Sparse(_) => panic!("expected dense representation"),
+        }
+
+        let mut out = Vec::new();
+        rows.extend_into(&mut out);
+        out.sort_unstable();
+        assert_eq!(out, vec![0, 69]);
+    }
+
+    #[test]
     fn relationship_large_columnar_does_not_explode_memory() {
         if std::env::var_os("FORMULA_DAX_REL_BENCH").is_none() {
             return;
