@@ -29,7 +29,8 @@ fn fixture(path: &str) -> PathBuf {
 }
 
 fn read_ole_stream(raw_ole: &[u8], name: &str) -> Vec<u8> {
-    let cursor = Cursor::new(raw_ole.to_vec());
+    // Avoid copying the whole OLE container for stream extraction.
+    let cursor = Cursor::new(raw_ole);
     let mut ole = cfb::CompoundFile::open(cursor).expect("open OLE container");
     let mut stream = ole
         .open_stream(name)
