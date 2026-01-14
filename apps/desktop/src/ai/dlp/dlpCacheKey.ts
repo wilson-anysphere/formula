@@ -21,6 +21,11 @@ function safeStableJsonStringify(value: unknown): string {
   }
 }
 
+function safeStringCompare(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 // 64-bit FNV-1a hash (stable across runs; reduces collision risk vs 32-bit for DLP safety).
 const FNV1A64_OFFSET = 0xcbf29ce484222325n;
 const FNV1A64_PRIME = 0x100000001b3n;
@@ -55,7 +60,7 @@ function normalizeLabels(labelsRaw: unknown): string[] {
     })
     .map((l) => l.trim())
     .filter(Boolean);
-  return Array.from(new Set(normalized)).sort((a, b) => a.localeCompare(b));
+  return Array.from(new Set(normalized)).sort(safeStringCompare);
 }
 
 function normalizeClassificationForCacheKey(value: unknown): unknown {
@@ -152,7 +157,7 @@ function normalizedClassificationRecordKeysForCacheKey(records: unknown): string
   });
   // Ensure deterministic ordering even if the backing classification store does not
   // guarantee record order.
-  keys.sort((a, b) => a.localeCompare(b));
+  keys.sort(safeStringCompare);
   return keys;
 }
 
