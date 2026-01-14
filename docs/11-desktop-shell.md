@@ -1237,7 +1237,8 @@ Or build a normal debug binary (no `--release`) when you don't need full optimiz
 After building a packaged desktop app (so that `target/**/release/bundle/**` exists), you can generate a local size report via:
 
 ```bash
-(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
+# Ensure the build matches the repo's Cargo.toml release profile (codegen-units=1).
+CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
 python scripts/desktop_bundle_size_report.py
 ```
 
