@@ -56,21 +56,26 @@ fn standard_encrypt_decrypt_round_trip() {
     let zip = basic_xlsx_fixture_bytes();
     let password = "swordfish";
 
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            scheme: EncryptionScheme::Standard,
-            key_bits: 128,
-            hash_algorithm: HashAlgorithm::Sha1,
-            // Standard uses a fixed 50k spin count internally (CryptoAPI), but keep the option
-            // explicit so callers don't accidentally rely on Agile defaults.
-            spin_count: 50_000,
-        },
-    )
-    .expect("encrypt");
-    let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
-    assert_eq!(decrypted, zip);
+    // Standard encryption supports AES-128/192/256. Exercise all key sizes to ensure the
+    // CryptoAPI `CryptDeriveKey` expansion path works correctly for key lengths > SHA1 digest
+    // length (AES-192/256).
+    for key_bits in [128usize, 192, 256] {
+        let ole = encrypt_package_to_ole(
+            &zip,
+            password,
+            EncryptOptions {
+                scheme: EncryptionScheme::Standard,
+                key_bits,
+                hash_algorithm: HashAlgorithm::Sha1,
+                // Standard uses a fixed 50k spin count internally (CryptoAPI), but keep the option
+                // explicit so callers don't accidentally rely on Agile defaults.
+                spin_count: 50_000,
+            },
+        )
+        .expect("encrypt");
+        let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
+        assert_eq!(decrypted, zip, "key_bits={key_bits}");
+    }
 }
 
 #[test]
