@@ -24,7 +24,12 @@ early:
 - Extract the generated `*.AppImage` via `--appimage-extract` (no FUSE required)
 - Verify the extracted main ELF binary architecture via `readelf -h`
 - Run `ldd` and fail the workflow if any shared libraries are `not found`
-- Then validate desktop integration metadata from the extracted payload (file associations from `bundle.fileAssociations`, plus `formula://` deep links)
+- Then validate desktop integration metadata from the extracted payload:
+  - file associations from `bundle.fileAssociations` (including Parquet)
+  - deep-link scheme handler(s) (`x-scheme-handler/<scheme>`, e.g. `formula://...`)
+  - `Exec=` placeholder (`%u/%U/%f/%F`) so file opens + deep links can pass a path/URL
+  - OSS/compliance artifacts (`LICENSE`/`NOTICE`) under `/usr/share/doc/<mainBinaryName>/`
+  - Parquet shared-mime-info definition packaging (`/usr/share/mime/packages/<identifier>.xml` with a `*.parquet` glob)
 
 See `scripts/ci/check-appimage.sh`.
 See also `scripts/validate-linux-appimage.sh` (desktop integration metadata + bundle version checks vs `tauri.conf.json`).

@@ -13,9 +13,11 @@ If no arguments are provided, this script searches for AppImages under the usual
 Cargo/Tauri output directories (e.g. <target>/release/bundle/appimage/*.AppImage or
 <target>/<triple>/release/bundle/appimage/*.AppImage).
 
- Note: this smoke test only validates extraction + ELF/linker sanity. For desktop
- integration metadata checks (`.desktop` MimeType/Exec, file associations from
- `bundle.fileAssociations`, and `formula://` deep links), use:
+ Note: this smoke test validates extraction + ELF/linker sanity *plus* basic desktop
+ integration metadata (built `.desktop` MimeType/Exec entries, configured file
+ associations, deep-link scheme handlers, compliance artifacts, and Parquet MIME
+ definition packaging). For full AppImage validation (including version checks),
+ use:
    bash scripts/validate-linux-appimage.sh
 
  Environment overrides:
