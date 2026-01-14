@@ -61,7 +61,7 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | 10MB xlsx loaded | <200MB | Heap snapshot |
 | 100MB xlsx loaded | <500MB | Heap snapshot |
 | Memory per cell | <100 bytes | Calculated from heap |
-| Desktop idle RSS (empty workbook) | <100MB | CI benchmark `desktop.memory.idle_rss_mb.p95` (process RSS + child processes) |
+| Desktop idle RSS (empty workbook) | <100MB | CI benchmark `desktop.memory.idle_rss_mb.p95` (process RSS + child processes; Windows uses Working Set as the closest analogue) |
 
 ### Collaboration
 
@@ -169,6 +169,7 @@ These scripts are designed to be safe to run locally:
   - Legacy unscoped metric names (e.g. `desktop.startup.window_visible_ms.p95`) are kept as **aliases to cold** mode for backwards compatibility.
 - **`idleRssMb`**: resident set size (RSS) of the desktop process *plus child processes*, sampled
   after TTI + a "settle" delay. (Useful for regression tracking; RSS can double-count shared pages.)
+  - Note: on **Windows**, we approximate this using the process tree **Working Set** (closest OS analogue to RSS).
 - **Size**:
   - `apps/desktop/dist` is the Vite-built frontend asset directory embedded/served by Tauri.
   - `target/**/formula-desktop` is the built desktop executable.
@@ -327,6 +328,11 @@ async function runBenchmark(
 Note: This repository pins all third-party GitHub Actions to immutable commit SHAs (supply-chain
 hardening). CI enforces this via `scripts/ci/check-gha-action-sha-pins.sh`. The example workflow
 below uses action version tags for readability.
+
+In addition to the main Linux perf gates, the repo also runs a scheduled **cross-platform** desktop
+startup + idle-memory workflow (Linux/Windows/macOS) and uploads per-OS JSON artifacts:
+
+- `.github/workflows/desktop-perf-platform-matrix.yml`
 
 ```yaml
 # .github/workflows/perf.yml
