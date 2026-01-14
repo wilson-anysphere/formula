@@ -26,6 +26,13 @@ fn noop_save_preserves_drawing_parts_and_media_bytes() {
         after.part("xl/media/image1.png").unwrap(),
         "image media bytes should be preserved byte-for-byte on no-op save"
     );
+    assert_eq!(
+        before
+            .part("xl/worksheets/_rels/sheet1.xml.rels")
+            .unwrap(),
+        after.part("xl/worksheets/_rels/sheet1.xml.rels").unwrap(),
+        "worksheet relationship part should be preserved byte-for-byte on no-op save"
+    );
 }
 
 #[test]
@@ -57,5 +64,12 @@ fn editing_cells_does_not_rewrite_drawing_parts_or_media() {
         before.part("xl/media/image1.png").unwrap(),
         after.part("xl/media/image1.png").unwrap(),
         "image media bytes should be preserved byte-for-byte when editing unrelated cells"
+    );
+    assert_eq!(
+        before
+            .part("xl/worksheets/_rels/sheet1.xml.rels")
+            .unwrap(),
+        after.part("xl/worksheets/_rels/sheet1.xml.rels").unwrap(),
+        "worksheet relationship part should be preserved byte-for-byte when editing unrelated cells"
     );
 }
