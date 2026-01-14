@@ -208,7 +208,7 @@ abs_path() {
 # xlsx MIME type; we allow a small set of other spreadsheet-ish MIME types as a
 # fallback to avoid false negatives across distros.
 REQUIRED_XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-SPREADSHEET_MIME_REGEX='application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
+SPREADSHEET_MIME_REGEX='xlsx|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
 
 validate_desktop_mime_associations_extracted() {
   local rpm_path="$1"
@@ -260,6 +260,8 @@ validate_desktop_mime_associations_extracted() {
   local has_any_mimetype=0
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
+  local has_xlsx_integration=0
+  local bad_exec_count=0
 
   local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
@@ -276,9 +278,25 @@ validate_desktop_mime_associations_extracted() {
 
     if printf '%s' "$mime_value" | grep -Fqi "$REQUIRED_XLSX_MIME"; then
       has_xlsx_mime=1
+      has_xlsx_integration=1
+    fi
+    if printf '%s' "$mime_value" | grep -Fqi "xlsx"; then
+      has_xlsx_integration=1
     fi
     if printf '%s' "$mime_value" | grep -Eqi "$SPREADSHEET_MIME_REGEX"; then
       has_spreadsheet_mime=1
+
+      # File associations require a placeholder token (%U/%u/%F/%f) in Exec= so the
+      # OS passes the opened file path/URL into the app.
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [ -z "$exec_line" ]; then
+        err "Extracted desktop entry ${desktop_file#${tmpdir}/} is missing an Exec= entry (required for file associations)"
+        bad_exec_count=$((bad_exec_count + 1))
+      elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
+        err "Extracted desktop entry ${desktop_file#${tmpdir}/} Exec= does not include a file/URL placeholder (%U/%u/%F/%f): ${exec_line}"
+        bad_exec_count=$((bad_exec_count + 1))
+      fi
     fi
   done
 
@@ -288,6 +306,26 @@ validate_desktop_mime_associations_extracted() {
     err "Extracted .desktop files inspected:"
     for desktop_file in "${desktop_files[@]}"; do
       echo "  - ${desktop_file#${tmpdir}/}" >&2
+    done
+    return 1
+  fi
+
+  if [ "$has_xlsx_integration" -ne 1 ]; then
+    err "No extracted .desktop MimeType= entry advertised xlsx support (file associations missing)."
+    err "Expected MimeType= to include substring 'xlsx' or MIME '${REQUIRED_XLSX_MIME}'."
+    err "MimeType entries found:"
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#${tmpdir}/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
     done
     return 1
   fi
@@ -309,6 +347,11 @@ validate_desktop_mime_associations_extracted() {
         echo "  - ${rel}: (no MimeType= entry)" >&2
       fi
     done
+    return 1
+  fi
+
+  if [ "$bad_exec_count" -ne 0 ]; then
+    err "One or more extracted .desktop entries had invalid Exec= lines for file association handling."
     return 1
   fi
 
@@ -535,6 +578,8 @@ validate_container() {
   container_cmd+=$'has_any_mimetype=0\n'
   container_cmd+=$'has_spreadsheet_mime=0\n'
   container_cmd+=$'has_xlsx_mime=0\n'
+  container_cmd+=$'has_xlsx_integration=0\n'
+  container_cmd+=$'bad_exec_count=0\n'
   container_cmd+=$'for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'  mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" | head -n 1 || true)"\n'
   container_cmd+=$'  if [ -z "${mime_line}" ]; then\n'
@@ -544,9 +589,21 @@ validate_container() {
   container_cmd+=$'  mime_value="$(printf "%s" "${mime_line}" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"\n'
   container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "${required_xlsx_mime}"; then\n'
   container_cmd+=$'    has_xlsx_mime=1\n'
+  container_cmd+=$'    has_xlsx_integration=1\n'
+  container_cmd+=$'  fi\n'
+  container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "xlsx"; then\n'
+  container_cmd+=$'    has_xlsx_integration=1\n'
   container_cmd+=$'  fi\n'
   container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Eqi "${spreadsheet_mime_regex}"; then\n'
   container_cmd+=$'    has_spreadsheet_mime=1\n'
+  container_cmd+=$'    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"\n'
+  container_cmd+=$'    if [ -z "${exec_line}" ]; then\n'
+  container_cmd+=$'      echo "Installed desktop entry ${f} is missing an Exec= entry (required for file associations)" >&2\n'
+  container_cmd+=$'      bad_exec_count=$((bad_exec_count + 1))\n'
+  container_cmd+=$'    elif ! printf "%s" "${exec_line}" | grep -Eq "%[uUfF]"; then\n'
+  container_cmd+=$'      echo "Installed desktop entry ${f} Exec= does not include a file/URL placeholder (%U/%u/%F/%f): ${exec_line}" >&2\n'
+  container_cmd+=$'      bad_exec_count=$((bad_exec_count + 1))\n'
+  container_cmd+=$'    fi\n'
   container_cmd+=$'  fi\n'
   container_cmd+=$'done\n'
   container_cmd+=$'if [ "${has_any_mimetype}" -ne 1 ]; then\n'
@@ -554,6 +611,19 @@ validate_container() {
   container_cmd+=$'  echo "Expected MimeType to include spreadsheet MIME types (tauri.conf.json bundle.fileAssociations)." >&2\n'
   container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'    echo "  - ${f}" >&2\n'
+  container_cmd+=$'  done\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'if [ "${has_xlsx_integration}" -ne 1 ]; then\n'
+  container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised xlsx support (file associations missing)." >&2\n'
+  container_cmd+=$'  echo "Expected MimeType= to include substring xlsx or MIME ${required_xlsx_mime}." >&2\n'
+  container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'    lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" || true)"\n'
+  container_cmd+=$'    if [ -n "${lines}" ]; then\n'
+  container_cmd+=$'      while IFS= read -r l; do echo "  - ${f}: ${l}" >&2; done <<<"${lines}"\n'
+  container_cmd+=$'    else\n'
+  container_cmd+=$'      echo "  - ${f}: (no MimeType= entry)" >&2\n'
+  container_cmd+=$'    fi\n'
   container_cmd+=$'  done\n'
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
@@ -568,6 +638,10 @@ validate_container() {
   container_cmd+=$'      echo "  - ${f}: (no MimeType= entry)" >&2\n'
   container_cmd+=$'    fi\n'
   container_cmd+=$'  done\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'if [ "${bad_exec_count}" -ne 0 ]; then\n'
+  container_cmd+=$'  echo "One or more installed .desktop entries had invalid Exec= lines for file association handling." >&2\n'
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
   container_cmd+=$'if [ "${has_xlsx_mime}" -ne 1 ]; then\n'

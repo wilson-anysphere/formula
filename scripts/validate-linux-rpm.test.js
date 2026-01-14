@@ -122,6 +122,48 @@ exit 0
   chmodSync(cpioPath, 0o755);
 }
 
+function writeFakeRpmExtractTools(
+  binDir,
+  {
+    withMimeType = true,
+    mimeTypeLine = "MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;",
+    execLine = "Exec=formula-desktop %U",
+  } = {},
+) {
+  const rpm2cpioScript = `#!/usr/bin/env bash
+set -euo pipefail
+# The validator only uses rpm2cpio as part of a pipe into cpio; the test fakes
+# extraction by implementing a fake cpio that writes the desired files.
+exit 0
+`;
+  const rpm2cpioPath = join(binDir, "rpm2cpio");
+  writeFileSync(rpm2cpioPath, rpm2cpioScript, { encoding: "utf8" });
+  chmodSync(rpm2cpioPath, 0o755);
+
+  const desktopLines = [
+    "[Desktop Entry]",
+    "Type=Application",
+    "Name=Formula",
+    execLine,
+    ...(withMimeType ? [mimeTypeLine] : []),
+  ];
+
+  const cpioScript = `#!/usr/bin/env bash
+set -euo pipefail
+# Drain stdin so pipes don't break unexpectedly.
+cat >/dev/null || true
+
+mkdir -p usr/share/applications
+cat > usr/share/applications/formula.desktop <<'DESKTOP'
+${desktopLines.join("\n")}
+DESKTOP
+exit 0
+`;
+  const cpioPath = join(binDir, "cpio");
+  writeFileSync(cpioPath, cpioScript, { encoding: "utf8" });
+  chmodSync(cpioPath, 0o755);
+}
+
 function runValidator({ cwd, rpmArg, fakeListFile, fakeMode, fakeVersion, fakeName }) {
   const proc = spawnSync(
     "bash",
@@ -375,4 +417,83 @@ test("validate-linux-rpm fails when RPM name does not match tauri.conf.json", { 
   });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /RPM name mismatch/i);
+});
+
+test("validate-linux-rpm fails when extracted .desktop is missing MimeType=", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir, { withMimeType: false });
+
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    [
+      "/usr/bin/formula-desktop",
+      "/usr/share/applications/formula.desktop",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /No extracted \.desktop file contained a MimeType=/i);
+});
+
+test("validate-linux-rpm fails when extracted .desktop lacks xlsx integration", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  // Only advertise CSV (no xlsx substring + no canonical xlsx MIME).
+  writeFakeRpmExtractTools(binDir, { mimeTypeLine: "MimeType=text/csv;" });
+
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    [
+      "/usr/bin/formula-desktop",
+      "/usr/share/applications/formula.desktop",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /advertised xlsx support/i);
+});
+
+test("validate-linux-rpm fails when extracted .desktop Exec= lacks a file placeholder", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir, { execLine: "Exec=formula-desktop" });
+
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    [
+      "/usr/bin/formula-desktop",
+      "/usr/share/applications/formula.desktop",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /placeholder/i);
 });

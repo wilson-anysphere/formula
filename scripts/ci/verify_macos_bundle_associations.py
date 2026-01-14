@@ -197,18 +197,39 @@ def main() -> int:
     if not isinstance(plist, dict):
         raise SystemExit(f"unexpected plist type in {args.info_plist}: {type(plist)}")
 
-    registered_exts = extract_registered_extensions(plist)
+    doc_types = plist.get("CFBundleDocumentTypes")
+    if doc_types is None:
+        raise SystemExit("[macos] ERROR: CFBundleDocumentTypes missing from built Info.plist")
+    if not isinstance(doc_types, list):
+        raise SystemExit(
+            f"[macos] ERROR: CFBundleDocumentTypes has unexpected type {type(doc_types)} in {args.info_plist}"
+        )
+
+    document_type_exts = _extensions_from_document_types(doc_types)
+    uti_exts = _extensions_from_uti_declarations(plist)
+    registered_exts = document_type_exts | uti_exts
     registered_schemes = extract_url_schemes(plist)
 
     print(f"[macos] Info.plist: {args.info_plist}")
     print(f"[macos] Expected file extensions ({len(expected_exts)}): {_format_set(expected_exts)}")
     print(
-        f"[macos] Observed file extensions ({len(registered_exts)}): {_format_set(registered_exts)}"
+        f"[macos] Observed file extensions (CFBundleDocumentTypes, {len(document_type_exts)}): {_format_set(document_type_exts)}"
+    )
+    if uti_exts:
+        print(f"[macos] Observed file extensions (UT*TypeDeclarations, {len(uti_exts)}): {_format_set(uti_exts)}")
+    print(
+        f"[macos] Observed file extensions (combined, {len(registered_exts)}): {_format_set(registered_exts)}"
     )
     print(f"[macos] Expected URL schemes ({len(expected_schemes)}): {_format_set(expected_schemes)}")
     print(f"[macos] Observed URL schemes ({len(registered_schemes)}): {_format_set(registered_schemes)}")
 
-    missing_exts = expected_exts - registered_exts
+    if not document_type_exts:
+        print("[macos] ERROR: CFBundleDocumentTypes did not declare any CFBundleTypeExtensions", file=sys.stderr)
+        return 1
+
+    # File associations are driven by CFBundleDocumentTypes; UT*TypeDeclarations are helpful for
+    # defining custom UTIs but are not sufficient on their own to register "open with" handling.
+    missing_exts = expected_exts - document_type_exts
     missing_schemes = expected_schemes - registered_schemes
 
     if missing_exts or missing_schemes:
@@ -218,6 +239,12 @@ def main() -> int:
                 f"[macos] Missing extensions: {_format_set(missing_exts)}",
                 file=sys.stderr,
             )
+            missing_only_in_uti = missing_exts & uti_exts
+            if missing_only_in_uti:
+                print(
+                    f"[macos] Note: these extensions were present in UT*TypeDeclarations but missing from CFBundleDocumentTypes: {_format_set(missing_only_in_uti)}",
+                    file=sys.stderr,
+                )
         if missing_schemes:
             print(
                 f"[macos] Missing URL schemes: {_format_set(missing_schemes)}",

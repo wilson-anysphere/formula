@@ -390,20 +390,32 @@ except Exception as e:
     print(str(e))
     raise SystemExit(2)
 
-found_exts = set()
+doc_exts = set()
 
-doc_types = data.get("CFBundleDocumentTypes") or []
-if isinstance(doc_types, (list, tuple)):
-    for doc in doc_types:
-        if not isinstance(doc, dict):
-            continue
-        exts = doc.get("CFBundleTypeExtensions") or []
-        if isinstance(exts, str):
-            found_exts.add(exts.strip().lower().lstrip("."))
-        elif isinstance(exts, (list, tuple)):
-            for ext in exts:
-                if isinstance(ext, str) and ext.strip():
-                    found_exts.add(ext.strip().lower().lstrip("."))
+doc_types = data.get("CFBundleDocumentTypes")
+if doc_types is None:
+    print("CFBundleDocumentTypes missing from Info.plist")
+    raise SystemExit(1)
+if not isinstance(doc_types, (list, tuple)):
+    print(f"CFBundleDocumentTypes has unexpected type: {type(doc_types)}")
+    raise SystemExit(1)
+
+for doc in doc_types:
+    if not isinstance(doc, dict):
+        continue
+    exts = doc.get("CFBundleTypeExtensions") or []
+    if isinstance(exts, str):
+        normalized = exts.strip().lower().lstrip(".")
+        if normalized:
+            doc_exts.add(normalized)
+    elif isinstance(exts, (list, tuple)):
+        for ext in exts:
+            if isinstance(ext, str) and ext.strip():
+                normalized = ext.strip().lower().lstrip(".")
+                if normalized:
+                    doc_exts.add(normalized)
+
+found_exts = set(doc_exts)
 
 for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
     decls = data.get(key) or []
@@ -423,16 +435,19 @@ for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
                 if isinstance(ext, str) and ext.strip():
                     found_exts.add(ext.strip().lower().lstrip("."))
 
-if not found_exts:
-    print("No file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")
+if not doc_exts:
+    print("CFBundleDocumentTypes exists but did not contain any CFBundleTypeExtensions entries")
     raise SystemExit(1)
 
-if required_ext not in found_exts:
-    found = ", ".join(sorted(found_exts)) if found_exts else "(none)"
-    print(f"missing required extension '{required_ext}'. Found extensions: {found}")
+if required_ext not in doc_exts:
+    found = ", ".join(sorted(doc_exts)) if doc_exts else "(none)"
+    if required_ext in found_exts:
+        print(f"missing required extension '{required_ext}' in CFBundleDocumentTypes (found only in UT*TypeDeclarations). CFBundleDocumentTypes extensions: {found}")
+    else:
+        print(f"missing required extension '{required_ext}' in CFBundleDocumentTypes. CFBundleDocumentTypes extensions: {found}")
     raise SystemExit(1)
 
-missing_optional = [ext for ext in optional_exts if ext and ext not in found_exts]
+missing_optional = [ext for ext in optional_exts if ext and ext not in doc_exts]
 if missing_optional:
     # Return a human-readable warning string for the caller.
     print("missing optional extensions: " + ", ".join(missing_optional))
