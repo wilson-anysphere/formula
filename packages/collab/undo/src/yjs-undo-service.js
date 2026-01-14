@@ -1,21 +1,11 @@
 import * as Y from "yjs";
+import { isYAbstractType } from "@formula/collab-yjs-utils";
 
 const patchedItemConstructors = new WeakSet();
 const patchedAbstractTypeConstructors = new WeakSet();
-
-function isYjsAbstractTypeStruct(value) {
-  if (!value || typeof value !== "object") return false;
-  const maybe = value;
-  // Yjs `AbstractType` instances (Map/Array/Text/etc) support deep observers.
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  // Internal fields differ by type, but at least one of these is typically present.
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
 function patchForeignAbstractTypeConstructor(type) {
   if (!type || typeof type !== "object") return;
-  if (!isYjsAbstractTypeStruct(type)) return;
+  if (!isYAbstractType(type)) return;
   if (type instanceof Y.AbstractType) return;
   const ctor = type.constructor;
   if (!ctor || ctor === Y.AbstractType) return;
