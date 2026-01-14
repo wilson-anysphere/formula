@@ -246,7 +246,6 @@ const implementedCommandIds: string[] = [
   "pageLayout.arrange.bringForward",
   "pageLayout.arrange.selectionPane",
   "pageLayout.arrange.sendBackward",
-  "pageLayout.arrange.selectionPane",
   "pageLayout.export.exportPdf",
   "pageLayout.pageSetup.margins.custom",
   "pageLayout.pageSetup.margins.narrow",
