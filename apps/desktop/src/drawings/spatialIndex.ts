@@ -191,12 +191,212 @@ export class DrawingSpatialIndex {
     this.dirty = true;
   }
 
+  private computeBucketRange(aabb: Rect): {
+    minTileX: number;
+    maxTileX: number;
+    minTileY: number;
+    maxTileY: number;
+    isGlobal: boolean;
+  } {
+    const tileSize = this.tileSize;
+    const x1 = aabb.x;
+    const y1 = aabb.y;
+    const x2 = aabb.x + aabb.width;
+    const y2 = aabb.y + aabb.height;
+
+    const minTileX = Math.floor(x1 / tileSize);
+    const maxTileX = Math.floor(x2 / tileSize);
+    const minTileY = Math.floor(y1 / tileSize);
+    const maxTileY = Math.floor(y2 / tileSize);
+
+    const bucketsWide = maxTileX - minTileX + 1;
+    const bucketsHigh = maxTileY - minTileY + 1;
+    const bucketCount = bucketsWide * bucketsHigh;
+    const isGlobal = !Number.isFinite(bucketCount) || bucketCount > this.maxBucketsPerObject;
+
+    return { minTileX, maxTileX, minTileY, maxTileY, isGlobal };
+  }
+
+  private removeOrderedId(list: number[], id: number): void {
+    const targetOrder = this.orderById.get(id);
+    if (targetOrder == null || list.length === 0) {
+      const idx = list.indexOf(id);
+      if (idx >= 0) list.splice(idx, 1);
+      return;
+    }
+
+    // The list is sorted by `orderById` (unique per id), so we can binary search.
+    let lo = 0;
+    let hi = list.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const midId = list[mid]!;
+      const midOrder = this.orderById.get(midId);
+      if (midOrder == null) break;
+      if (midOrder === targetOrder) {
+        if (midId === id) list.splice(mid, 1);
+        else {
+          // Fallback: extremely unlikely corruption case.
+          const idx = list.indexOf(id);
+          if (idx >= 0) list.splice(idx, 1);
+        }
+        return;
+      }
+      if (midOrder < targetOrder) lo = mid + 1;
+      else hi = mid - 1;
+    }
+
+    // Fallback (should be rare): scan by id.
+    const idx = list.indexOf(id);
+    if (idx >= 0) list.splice(idx, 1);
+  }
+
+  private insertOrderedId(list: number[], id: number): void {
+    const targetOrder = this.orderById.get(id);
+    if (targetOrder == null) {
+      list.push(id);
+      return;
+    }
+
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const midId = list[mid]!;
+      const midOrder = this.orderById.get(midId);
+      if (midOrder == null) {
+        // Fallback: list contains an id we don't have ordering for (shouldn't happen).
+        let idx = 0;
+        for (; idx < list.length; idx += 1) {
+          const existingOrder = this.orderById.get(list[idx]!);
+          if (existingOrder == null || existingOrder > targetOrder) break;
+        }
+        list.splice(idx, 0, id);
+        return;
+      }
+      if (midOrder <= targetOrder) lo = mid + 1;
+      else hi = mid;
+    }
+    list.splice(lo, 0, id);
+  }
+
+  private updateObject(obj: DrawingObject, geom: GridGeometry, zoom: number): boolean {
+    const id = obj.id;
+    const oldRect = this.rectById.get(id);
+    const oldAabb = this.aabbById.get(id);
+    if (!oldRect || !oldAabb) return false;
+
+    const newRect = anchorToRectPx(obj.anchor, geom, zoom);
+    const newAabb = hasNonIdentityTransform(obj.transform) ? rectToAabb(newRect, obj.transform!) : newRect;
+
+    // Update caches first so insertion/removal helpers can resolve ordering.
+    this.rectById.set(id, newRect);
+    this.aabbById.set(id, newAabb);
+    this.objectById.set(id, obj);
+
+    const oldRange = this.computeBucketRange(oldAabb);
+    const newRange = this.computeBucketRange(newAabb);
+
+    const rangeEqual = (() => {
+      if (oldRange.isGlobal && newRange.isGlobal) return true;
+      return (
+        oldRange.isGlobal === newRange.isGlobal &&
+        oldRange.minTileX === newRange.minTileX &&
+        oldRange.maxTileX === newRange.maxTileX &&
+        oldRange.minTileY === newRange.minTileY &&
+        oldRange.maxTileY === newRange.maxTileY
+      );
+    })();
+
+    if (rangeEqual) return true;
+
+    if (oldRange.isGlobal) {
+      this.removeOrderedId(this.globalBucket, id);
+    } else {
+      for (let tx = oldRange.minTileX; tx <= oldRange.maxTileX; tx += 1) {
+        const col = this.buckets.get(tx);
+        if (!col) continue;
+        for (let ty = oldRange.minTileY; ty <= oldRange.maxTileY; ty += 1) {
+          const bucket = col.get(ty);
+          if (!bucket || bucket.length === 0) continue;
+          this.removeOrderedId(bucket, id);
+          if (bucket.length === 0) col.delete(ty);
+        }
+        if (col.size === 0) this.buckets.delete(tx);
+      }
+    }
+
+    if (newRange.isGlobal) {
+      this.insertOrderedId(this.globalBucket, id);
+      return true;
+    }
+
+    for (let tx = newRange.minTileX; tx <= newRange.maxTileX; tx += 1) {
+      let col = this.buckets.get(tx);
+      if (!col) {
+        col = new Map<number, number[]>();
+        this.buckets.set(tx, col);
+      }
+      for (let ty = newRange.minTileY; ty <= newRange.maxTileY; ty += 1) {
+        let bucket = col.get(ty);
+        if (!bucket) {
+          bucket = [];
+          col.set(ty, bucket);
+        }
+        this.insertOrderedId(bucket, id);
+      }
+    }
+
+    return true;
+  }
+
+  private tryIncrementalUpdate(objects: DrawingObject[], geom: GridGeometry, zoom: number): boolean {
+    const prevObjects = this.lastObjects;
+    if (!prevObjects) return false;
+    if (objects.length !== prevObjects.length) return false;
+    if (this.orderById.size !== prevObjects.length) return false;
+    if (this.objectById.size !== prevObjects.length) return false;
+
+    const changed: DrawingObject[] = [];
+    for (let i = 0; i < objects.length; i += 1) {
+      const next = objects[i]!;
+      const prev = prevObjects[i]!;
+      if (next.id !== prev.id) return false;
+      if (next.zOrder !== prev.zOrder) return false;
+      if (!this.objectById.has(next.id)) return false;
+      if (next !== prev) changed.push(next);
+    }
+
+    // Array reference changed but element identities did not; treat as no-op.
+    if (changed.length === 0) {
+      this.lastObjects = objects;
+      return true;
+    }
+
+    for (const obj of changed) {
+      if (!this.updateObject(obj, geom, zoom)) return false;
+    }
+
+    this.lastObjects = objects;
+    return true;
+  }
+
   /**
    * Rebuilds the entire index (unless inputs are unchanged and the index is not dirty).
    */
   rebuild(objects: DrawingObject[], geom: GridGeometry, zoom = 1): void {
     if (!this.dirty && this.lastObjects === objects && this.lastGeom === geom && this.lastZoom === zoom) {
       return;
+    }
+
+    // Fast path: when only a small number of objects change (e.g. dragging one picture),
+    // update those objects in-place rather than rebuilding every bucket.
+    //
+    // This keeps interactive gestures smooth even with thousands of drawings.
+    if (!this.dirty && this.lastGeom === geom && this.lastZoom === zoom) {
+      if (this.tryIncrementalUpdate(objects, geom, zoom)) {
+        return;
+      }
     }
 
     this.lastObjects = objects;

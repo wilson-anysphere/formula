@@ -85,6 +85,37 @@ describe("DrawingSpatialIndex", () => {
     expect(hit?.bounds).toEqual({ x: 0, y: 0, width: 100, height: 100 });
   });
 
+  it("rebuild incrementally updates only changed objects (avoids full bounds recompute)", () => {
+    const cellOriginPx = vi.fn(() => ({ x: 0, y: 0 }));
+    const spyGeom: GridGeometry = {
+      cellOriginPx,
+      cellSizePx: () => ({ width: 0, height: 0 }),
+    };
+
+    const objects: DrawingObject[] = [];
+    for (let i = 0; i < 10_000; i += 1) {
+      objects.push(absObject({ id: i, zOrder: i, x: i * 600, y: 0, w: 10, h: 10 }));
+    }
+
+    const index = new DrawingSpatialIndex({ tileSizePx: 512 });
+    index.rebuild(objects, spyGeom, 1);
+
+    cellOriginPx.mockClear();
+
+    // Cloning the array without changing object identities should be a no-op.
+    index.rebuild(objects.slice(), spyGeom, 1);
+    expect(cellOriginPx).toHaveBeenCalledTimes(0);
+
+    const moved = absObject({ id: 0, zOrder: 0, x: 6000, y: 0, w: 10, h: 10 });
+    const next = objects.slice();
+    next[0] = moved;
+
+    index.rebuild(next, spyGeom, 1);
+    // Only the changed object should require recomputing anchor geometry.
+    expect(cellOriginPx).toHaveBeenCalledTimes(1);
+    expect(index.getRect(0)).toEqual({ x: 6000, y: 0, width: 10, height: 10 });
+  });
+
   it("perf guard: query does not sort and returns a small subset", () => {
     const objects: DrawingObject[] = [];
     for (let i = 0; i < 10_000; i += 1) {
