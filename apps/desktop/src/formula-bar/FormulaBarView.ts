@@ -3077,7 +3077,9 @@ export class FormulaBarView {
     if (!this.root.isConnected) return;
     if (!this.model.isEditing) return;
 
-    const prevText = this.textarea.value;
+    // Selecting a function from the picker doesn't depend on reading the DOM value; prefer the
+    // model draft string to avoid allocating/copying very large textarea values.
+    const prevText = this.model.draft;
     const isEmpty = prevText.trim() === "";
     const start = Math.max(0, Math.min(selection.start, prevText.length));
     const end = Math.max(0, Math.min(selection.end, prevText.length));
