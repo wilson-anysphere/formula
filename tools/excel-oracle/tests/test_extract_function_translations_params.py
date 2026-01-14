@@ -41,6 +41,13 @@ class ExtractFunctionTranslationsScriptTests(unittest.TestCase):
             text,
         )
 
+        # Sentinel translations must match what we expect for a correctly configured Excel locale.
+        # (These are used only for warnings, but keeping them accurate prevents confusing output.)
+        self.assertIn('SUM = "SUMME"', text)
+        self.assertIn('IF = "WENN"', text)
+        self.assertIn('TRUE = "WAHR"', text)
+        self.assertIn('FALSE = "FALSCH"', text)
+
 
 if __name__ == "__main__":
     unittest.main()
