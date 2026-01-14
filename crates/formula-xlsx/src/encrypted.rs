@@ -26,21 +26,27 @@ fn looks_like_ole(bytes: &[u8]) -> bool {
     bytes.starts_with(&OLE_MAGIC)
 }
 
-fn open_stream<R: Read + std::io::Seek>(
+fn open_stream_case_tolerant<R: Read + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> Result<cfb::Stream<R>, std::io::Error> {
-    match ole.open_stream(name) {
-        Ok(s) => Ok(s),
-        Err(err1) => {
-            let with_slash = format!("/{name}");
-            ole.open_stream(&with_slash).map_err(|_err2| err1)
-        }
+    match crate::offcrypto::open_cfb_stream_best_effort(ole, name)? {
+        Some(stream) => Ok(stream),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("missing OLE stream {name}"),
+        )),
     }
 }
 
-fn stream_exists<R: Read + std::io::Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
-    open_stream(ole, name).is_ok()
+fn stream_exists_case_tolerant<R: Read + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> bool {
+    crate::offcrypto::open_cfb_stream_best_effort(ole, name)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 fn map_offcrypto_error(err: crate::offcrypto::OffCryptoError) -> EncryptedOoxmlError {
@@ -81,19 +87,21 @@ pub(crate) fn maybe_decrypt_office_encrypted_package<'a>(
     let Ok(mut ole) = cfb::CompoundFile::open(cursor) else {
         return Ok(Cow::Borrowed(bytes));
     };
-    if !(stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")) {
+    if !(stream_exists_case_tolerant(&mut ole, "EncryptionInfo")
+        && stream_exists_case_tolerant(&mut ole, "EncryptedPackage"))
+    {
         return Ok(Cow::Borrowed(bytes));
     }
 
     let mut encryption_info = Vec::new();
     {
-        let mut stream = open_stream(&mut ole, "EncryptionInfo")?;
+        let mut stream = open_stream_case_tolerant(&mut ole, "EncryptionInfo")?;
         stream.read_to_end(&mut encryption_info)?;
     }
 
     let mut encrypted_package = Vec::new();
     {
-        let mut stream = open_stream(&mut ole, "EncryptedPackage")?;
+        let mut stream = open_stream_case_tolerant(&mut ole, "EncryptedPackage")?;
         stream.read_to_end(&mut encrypted_package)?;
     }
 

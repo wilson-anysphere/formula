@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use formula_xlsx::{decrypt_ooxml_from_cfb, XlsxPackage};
@@ -21,6 +21,44 @@ fn decrypt_fixture(encrypted_name: &str) -> Vec<u8> {
     let mut ole = cfb::CompoundFile::open(cursor).expect("open OLE container");
     decrypt_ooxml_from_cfb(&mut ole, PASSWORD)
         .unwrap_or_else(|err| panic!("decrypt {encrypted_name} encrypted package: {err}"))
+}
+
+fn rewrite_fixture_with_lowercase_stream_names(encrypted_name: &str) -> Vec<u8> {
+    let path = fixture_path_buf(encrypted_name);
+    let bytes = std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
+
+    let cursor = Cursor::new(bytes);
+    let mut ole_in = cfb::CompoundFile::open(cursor).expect("open OLE container");
+
+    let mut encryption_info = Vec::new();
+    ole_in
+        .open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole_in
+        .open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    // Re-wrap the streams under different casing to ensure we can still decrypt the file.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor).expect("create OLE container");
+    ole_out
+        .create_stream("encryptioninfo")
+        .expect("create lowercase EncryptionInfo stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole_out
+        .create_stream("encryptedpackage")
+        .expect("create lowercase EncryptedPackage stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+
+    ole_out.into_inner().into_inner()
 }
 
 #[test]
@@ -154,6 +192,21 @@ fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
         let path = fixture_path_buf(encrypted);
         let bytes =
             std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
+
+        let pkg = XlsxPackage::from_bytes_with_password(&bytes, PASSWORD)
+            .unwrap_or_else(|err| panic!("from_bytes_with_password {encrypted}: {err}"));
+        assert!(
+            pkg.part_names()
+                .any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
+            "{encrypted}: decrypted package missing xl/workbook.xml"
+        );
+    }
+}
+
+#[test]
+fn xlsxpackage_from_bytes_with_password_accepts_case_insensitive_ole_stream_names() {
+    for encrypted in ["agile.xlsx", "standard.xlsx", "standard-rc4.xlsx"] {
+        let bytes = rewrite_fixture_with_lowercase_stream_names(encrypted);
 
         let pkg = XlsxPackage::from_bytes_with_password(&bytes, PASSWORD)
             .unwrap_or_else(|err| panic!("from_bytes_with_password {encrypted}: {err}"));

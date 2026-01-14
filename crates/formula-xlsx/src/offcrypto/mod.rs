@@ -222,7 +222,7 @@ fn read_cfb_stream_bytes<R: Read + Seek>(
     Ok(buf)
 }
 
-fn open_cfb_stream_best_effort<R: Read + Seek>(
+pub(crate) fn open_cfb_stream_best_effort<R: Read + Seek>(
     cfb: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> std::io::Result<Option<cfb::Stream<R>>> {
