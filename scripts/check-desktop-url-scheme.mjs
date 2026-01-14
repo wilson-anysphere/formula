@@ -255,12 +255,14 @@ function main() {
   validateParquetMimeDefinition(config);
 
   if (process.exitCode) {
-    err("\nDesktop URL scheme preflight failed. Fix the errors above before tagging a release.\n");
+    err(
+      "\nDesktop URL scheme + file association preflight failed. Fix the errors above before tagging a release.\n",
+    );
     return;
   }
 
   console.log(
-    `Desktop URL scheme preflight passed: ${REQUIRED_SCHEME}:// is configured for installers (and Info.plist declares it).`
+    `Desktop URL scheme + file association preflight passed: ${REQUIRED_SCHEME}:// is configured for installers (and Info.plist declares it), and bundle.fileAssociations includes .${REQUIRED_FILE_EXT}.`,
   );
 }
 
