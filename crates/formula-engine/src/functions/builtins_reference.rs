@@ -446,37 +446,98 @@ fn is_ident_cont_char(c: char) -> bool {
     matches!(c, '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
 }
 
-fn starts_like_a1_cell_ref(s: &str) -> bool {
-    // The lexer tokenizes A1-style cell references even when followed by additional identifier
-    // characters (e.g. `A1B`), so treat any sheet name *starting* with a valid A1 ref as requiring
-    // quotes. This matches `ast.rs` sheet-name formatting rules.
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    if bytes.get(i) == Some(&b'$') {
+fn starts_like_r1c1_ref(name: &str) -> bool {
+    fn parse_bracketed_offset(bytes: &[u8], mut i: usize) -> Option<usize> {
+        if bytes.get(i) != Some(&b'[') {
+            return None;
+        }
         i += 1;
+        if matches!(bytes.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        let start_digits = i;
+        while matches!(bytes.get(i), Some(b'0'..=b'9')) {
+            i += 1;
+        }
+        if i == start_digits {
+            return None;
+        }
+        if bytes.get(i) != Some(&b']') {
+            return None;
+        }
+        Some(i + 1)
     }
 
-    let start_letters = i;
-    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
-        i += 1;
+    fn parse_abs_coord(bytes: &[u8], mut i: usize) -> Option<usize> {
+        let start = i;
+        while matches!(bytes.get(i), Some(b'0'..=b'9')) {
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+        let raw = std::str::from_utf8(&bytes[start..i]).ok()?;
+        let v = raw.parse::<u32>().ok()?;
+        if v == 0 {
+            return None;
+        }
+        Some(i)
     }
-    if i == start_letters {
+
+    fn parse_coord(bytes: &[u8], i: usize) -> Option<(usize, bool)> {
+        if let Some(end) = parse_bracketed_offset(bytes, i) {
+            return Some((end, true));
+        }
+        if let Some(end) = parse_abs_coord(bytes, i) {
+            return Some((end, true));
+        }
+        Some((i, false))
+    }
+
+    fn accept_token(name: &str, token_len: usize) -> bool {
+        let bytes = name.as_bytes();
+        token_len == bytes.len() || bytes.get(token_len) == Some(&b'.')
+    }
+
+    let bytes = name.as_bytes();
+    if bytes.is_empty() {
         return false;
     }
 
-    if bytes.get(i) == Some(&b'$') {
-        i += 1;
+    // Cell ref: R<row> C<col>
+    if matches!(bytes.first(), Some(b'R' | b'r')) {
+        let mut i = 1;
+        if let Some((end, _)) = parse_coord(bytes, i) {
+            i = end;
+        }
+        if matches!(bytes.get(i), Some(b'C' | b'c')) {
+            i += 1;
+            if let Some((end, _)) = parse_coord(bytes, i) {
+                i = end;
+            }
+            if accept_token(name, i) {
+                return true;
+            }
+        }
+
+        // Row ref: R<row>
+        if accept_token(name, i) {
+            return true;
+        }
     }
 
-    let start_digits = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-    if i == start_digits {
-        return false;
+    // Col ref: C<col>
+    if matches!(bytes.first(), Some(b'C' | b'c')) {
+        let mut i = 1;
+        if let Some((end, _)) = parse_coord(bytes, i) {
+            i = end;
+        }
+        if accept_token(name, i) {
+            return true;
+        }
     }
 
-    crate::eval::parse_a1(&s[..i]).is_ok()
+    false
 }
 
 fn quote_sheet_name(name: &str) -> String {
@@ -485,16 +546,21 @@ fn quote_sheet_name(name: &str) -> String {
     }
 
     let starts_like_number = matches!(name.chars().next(), Some('0'..='9' | '.'));
-    let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
-        && matches!(name.chars().nth(1), Some('0'..='9' | '['));
-    let starts_like_a1 = starts_like_a1_cell_ref(name);
+    let starts_like_r1c1 = starts_like_r1c1_ref(name);
+    // A1-style cell references are lexed as `Cell(...)` tokens unless the next character would
+    // continue an identifier. This means sheet names that *equal* a valid A1 ref (or start with one
+    // followed by `.`) must be quoted to avoid ambiguity.
+    let looks_like_a1 = crate::eval::parse_a1(name).is_ok()
+        || name
+            .split_once('.')
+            .is_some_and(|(prefix, _)| crate::eval::parse_a1(prefix).is_ok());
     // The formula lexer treats TRUE/FALSE as booleans rather than identifiers; quoting is required
     // to disambiguate sheet names that match those keywords.
     let is_reserved = name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE");
     let needs_quote = starts_like_number
         || is_reserved
         || starts_like_r1c1
-        || starts_like_a1
+        || looks_like_a1
         || name.chars().any(|c| !is_ident_cont_char(c));
 
     if !needs_quote {

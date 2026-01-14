@@ -138,7 +138,17 @@ fn address_formats_a1_and_r1c1_styles() {
     );
     assert_eq!(
         sheet.eval("=ADDRESS(1,1,1,TRUE,\"A1B\")"),
-        Value::Text("'A1B'!$A$1".to_string())
+        Value::Text("A1B!$A$1".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,1,TRUE,\"A1.B\")"),
+        Value::Text("'A1.B'!$A$1".to_string())
+    );
+
+    // R1C1 sheet prefixes are quoted when they would otherwise be tokenized as R1C1 refs.
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,1,FALSE,\"RC\")"),
+        Value::Text("'RC'!R1C1".to_string())
     );
 
     // `sheet_text` is coerced to text using the workbook value locale.
