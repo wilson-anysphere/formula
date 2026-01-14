@@ -343,7 +343,8 @@ export function branchStateFromYjsDoc(doc) {
   /** @type {string[]} */
   const order = [];
 
-  for (const entry of sheetsArray.toArray()) {
+  for (let i = 0; i < sheetsArray.length; i++) {
+    const entry = sheetsArray.get(i);
     const id = coerceString(readYMapOrObject(entry, "id"));
     if (!id) continue;
     const name = coerceString(readYMapOrObject(entry, "name"));
@@ -680,7 +681,8 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       if (normalized.sheets.order.length > 0) {
         /** @type {Map<string, Y.Map<any>>} */
         const existingById = new Map();
-        for (const entry of sheetsArray.toArray()) {
+        for (let i = 0; i < sheetsArray.length; i++) {
+          const entry = sheetsArray.get(i);
           const id = coerceString(readYMapOrObject(entry, "id"));
           if (!id) continue;
           const map = getYMap(entry);
