@@ -176,7 +176,11 @@ function __handleMessage(message) {
               error: serializeErrorForTransport(error)
             });
           }
-        );
+        )
+        .catch(() => {
+          // Best-effort: if the transport is unavailable or response posting fails, avoid surfacing
+          // an unhandled rejection from this fire-and-forget message handler.
+        });
       return;
     }
     case "invoke_custom_function": {
@@ -204,7 +208,11 @@ function __handleMessage(message) {
               error: serializeErrorForTransport(error)
             });
           }
-        );
+        )
+        .catch(() => {
+          // Best-effort: if the transport is unavailable or response posting fails, avoid surfacing
+          // an unhandled rejection from this fire-and-forget message handler.
+        });
       return;
     }
     case "invoke_data_connector": {
@@ -243,7 +251,11 @@ function __handleMessage(message) {
               error: serializeErrorForTransport(error)
             });
           }
-        );
+        )
+        .catch(() => {
+          // Best-effort: if the transport is unavailable or response posting fails, avoid surfacing
+          // an unhandled rejection from this fire-and-forget message handler.
+        });
       return;
     }
     case "panel_message": {
