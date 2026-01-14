@@ -160,8 +160,9 @@ Table part parsing/writing lives in `crates/formula-xlsx/src/tables/xml.rs`.
 
 #### Table `<autoFilter>` (same semantics as worksheet `<autoFilter>`)
 
-`table*.xml` can contain an `<autoFilter>` element whose schema/behavior matches the worksheet-level
-`<autoFilter>` (same `filterColumn`/`filters`/`customFilters`/`dynamicFilter`/`sortState` vocabulary).
+A table part (`table.xml`, e.g. `xl/tables/table1.xml`) can contain an `<autoFilter>` element whose
+schema/behavior matches the worksheet-level `<autoFilter>` (same
+`filterColumn`/`filters`/`customFilters`/`dynamicFilter`/`sortState` vocabulary).
 
 - Worksheet autoFilter parsing/writing lives in `crates/formula-xlsx/src/autofilter/*` and is applied
   during round-trip patching in `crates/formula-xlsx/src/write/mod.rs`.
