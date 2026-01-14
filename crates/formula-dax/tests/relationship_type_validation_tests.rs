@@ -189,6 +189,96 @@ fn in_memory_relationship_rejects_boolean_text_join_column_types() {
 }
 
 #[test]
+fn mixed_storage_relationship_rejects_mismatched_join_column_types() {
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+
+    // Columnar dimension table with text keys.
+    let dim_schema = vec![ColumnSchema {
+        name: "Id".to_string(),
+        column_type: ColumnType::String,
+    }];
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[formula_columnar::Value::String(Arc::<str>::from("1"))]);
+
+    // In-memory fact table with numeric keys.
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id"]);
+    fact.push_row(vec![1.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    let err = model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap_err();
+
+    match err {
+        DaxError::RelationshipJoinColumnTypeMismatch {
+            from_type, to_type, ..
+        } => {
+            assert_eq!(from_type, "Number");
+            assert_eq!(to_type, "String");
+        }
+        other => panic!("expected RelationshipJoinColumnTypeMismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn mixed_storage_relationship_allows_numeric_like_join_types() {
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+
+    // Columnar dimension table with Currency keys (numeric-like in DAX).
+    let dim_schema = vec![ColumnSchema {
+        name: "Id".to_string(),
+        column_type: ColumnType::Currency { scale: 2 },
+    }];
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[formula_columnar::Value::Currency(100)]); // 1.00 at scale=2
+
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    // In-memory fact table with Number keys.
+    let mut fact = Table::new("Fact", vec!["Id"]);
+    fact.push_row(vec![1.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+}
+
+#[test]
 fn valid_relationships_still_work() {
     let mut model = DataModel::new();
 
