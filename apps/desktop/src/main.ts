@@ -41,6 +41,7 @@ import { ThemeController } from "./theme/themeController.js";
 
 import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands, mountRibbon } from "./ribbon/index.js";
 import { executeCellsStructuralRibbonCommand } from "./ribbon/cellsStructuralCommands";
+import { handleHomeCellsInsertDeleteCommand } from "./ribbon/homeCellsCommands.js";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCommandRegistryDisabling.js";
@@ -8556,6 +8557,12 @@ function handleRibbonCommand(commandId: string): void {
       case "home.number.moreFormats.formatCells": // legacy ribbon schema id
       case "home.cells.format.formatCells": // legacy ribbon schema id
         executeBuiltinCommand("format.openFormatCells");
+        return;
+      case "home.cells.insert.insertCells":
+      case "home.cells.delete.deleteCells":
+        void handleHomeCellsInsertDeleteCommand({ app, commandId, showQuickPick, showToast }).catch((err) => {
+          onRibbonCommandError(commandId, err);
+        });
         return;
       case "home.cells.insert.insertSheetRows":
       case "home.cells.insert.insertSheetColumns":

@@ -90,6 +90,8 @@ import {
   createEngineClient,
   engineApplyDeltas,
   engineHydrateFromDocument,
+  type EditOp,
+  type EditResult,
   type EngineClient
 } from "@formula/engine";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
@@ -5699,6 +5701,117 @@ export class SpreadsheetApp {
     }
     if (this.isEditing()) return;
     this.applyFillShortcut(direction, "series");
+  }
+
+  async insertCells(range: Range, direction: "right" | "down"): Promise<void> {
+    if (this.isEditing()) return;
+    const sheetId = this.sheetId;
+    const a1 = rangeToA1(range);
+
+    const op: EditOp =
+      direction === "right"
+        ? { type: "InsertCellsShiftRight", sheet: sheetId, range: a1 }
+        : { type: "InsertCellsShiftDown", sheet: sheetId, range: a1 };
+
+    await this.applyStructuralEdit(op, (result) => {
+      if (direction === "right") {
+        this.document.insertCellsShiftRight(sheetId, range, { label: "Insert Cells", formulaRewrites: result.formulaRewrites });
+      } else {
+        this.document.insertCellsShiftDown(sheetId, range, { label: "Insert Cells", formulaRewrites: result.formulaRewrites });
+      }
+    }, { label: "Insert Cells" });
+
+    this.refresh();
+    this.focus();
+  }
+
+  async deleteCells(range: Range, direction: "left" | "up"): Promise<void> {
+    if (this.isEditing()) return;
+    const sheetId = this.sheetId;
+    const a1 = rangeToA1(range);
+
+    const op: EditOp =
+      direction === "left"
+        ? { type: "DeleteCellsShiftLeft", sheet: sheetId, range: a1 }
+        : { type: "DeleteCellsShiftUp", sheet: sheetId, range: a1 };
+
+    await this.applyStructuralEdit(op, (result) => {
+      if (direction === "left") {
+        this.document.deleteCellsShiftLeft(sheetId, range, { label: "Delete Cells", formulaRewrites: result.formulaRewrites });
+      } else {
+        this.document.deleteCellsShiftUp(sheetId, range, { label: "Delete Cells", formulaRewrites: result.formulaRewrites });
+      }
+    }, { label: "Delete Cells" });
+
+    this.refresh();
+    this.focus();
+  }
+
+  private async applyStructuralEdit(
+    op: EditOp,
+    applyToDocument: (result: EditResult) => void,
+    options: { label: string },
+  ): Promise<void> {
+    const engine = this.wasmEngine;
+    if (!engine) {
+      showToast("This command requires the WASM engine.");
+      return;
+    }
+
+    this.wasmSyncSuspended = true;
+    try {
+      // Ensure the engine has processed all prior deltas before we apply a structural op.
+      await this.wasmSyncPromise.catch(() => {});
+
+      let result: EditResult | null = null;
+      let opError: unknown = null;
+      let docError: unknown = null;
+
+      await this.enqueueWasmSync(async (worker) => {
+        try {
+          result = await worker.applyOperation(op);
+        } catch (err) {
+          opError = err;
+          throw err;
+        }
+      });
+
+      if (opError || !result) {
+        const message = opError instanceof Error ? opError.message : String(opError ?? "unknown error");
+        showToast(`Failed to apply ${options.label}: ${message}`, "error");
+        return;
+      }
+
+      try {
+        applyToDocument(result);
+      } catch (err) {
+        console.error("[formula][desktop] Failed to apply structural edit to document:", err);
+        docError = err;
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to apply ${options.label}: ${message}`, "error");
+      }
+
+      // Re-hydrate the WASM engine from the DocumentController to avoid incremental delta loops.
+      this.clearComputedValuesByCoord();
+      let hydrateError: unknown = null;
+      await this.enqueueWasmSync(async (worker) => {
+        try {
+          const changes = await engineHydrateFromDocument(worker, this.document);
+          this.applyComputedChanges(changes);
+        } catch (err) {
+          hydrateError = err;
+          throw err;
+        }
+      });
+      if (hydrateError) {
+        const message = hydrateError instanceof Error ? hydrateError.message : String(hydrateError);
+        showToast(`Failed to sync ${options.label} to engine: ${message}`, "error");
+      }
+
+      if (docError) return;
+    } finally {
+      this.wasmSyncSuspended = false;
+    }
   }
 
   selectCurrentRegion(): void {

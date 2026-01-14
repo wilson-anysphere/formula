@@ -4195,6 +4195,238 @@ export class DocumentController {
   }
 
   /**
+   * Insert cells in the given range, shifting cells right (Excel semantics).
+   *
+   * Note: this currently shifts only stored cell states (value/formula/styleId). Callers can
+   * optionally provide engine-computed `formulaRewrites` (from `@formula/engine` applyOperation)
+   * to update formula text.
+   *
+   * @param {string} sheetId
+   * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
+   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   */
+  insertCellsShiftRight(sheetId, range, options = {}) {
+    this.#applyCellsShift(sheetId, range, "insertShiftRight", {
+      label: options.label,
+      formulaRewrites: options.formulaRewrites,
+    });
+  }
+
+  /**
+   * Insert cells in the given range, shifting cells down (Excel semantics).
+   *
+   * @param {string} sheetId
+   * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
+   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   */
+  insertCellsShiftDown(sheetId, range, options = {}) {
+    this.#applyCellsShift(sheetId, range, "insertShiftDown", { label: options.label, formulaRewrites: options.formulaRewrites });
+  }
+
+  /**
+   * Delete cells in the given range, shifting cells left (Excel semantics).
+   *
+   * @param {string} sheetId
+   * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
+   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   */
+  deleteCellsShiftLeft(sheetId, range, options = {}) {
+    this.#applyCellsShift(sheetId, range, "deleteShiftLeft", { label: options.label, formulaRewrites: options.formulaRewrites });
+  }
+
+  /**
+   * Delete cells in the given range, shifting cells up (Excel semantics).
+   *
+   * @param {string} sheetId
+   * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
+   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   */
+  deleteCellsShiftUp(sheetId, range, options = {}) {
+    this.#applyCellsShift(sheetId, range, "deleteShiftUp", { label: options.label, formulaRewrites: options.formulaRewrites });
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {CellRange | { startRow: number, endRow: number, startCol: number, endCol: number } | string} range
+   * @param {"insertShiftRight" | "insertShiftDown" | "deleteShiftLeft" | "deleteShiftUp"} kind
+   * @param {{ label?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
+   */
+  #applyCellsShift(sheetId, range, kind, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+
+    // Normalize range shapes (A1 string / {start,end} / {startRow,endRow,startCol,endCol}).
+    const rect = (() => {
+      if (typeof range === "string") {
+        const r = parseRangeA1(range);
+        return { startRow: r.start.row, endRow: r.end.row, startCol: r.start.col, endCol: r.end.col };
+      }
+      if (range && typeof range === "object") {
+        if ("start" in range && "end" in range) {
+          const r = normalizeRange(range);
+          return { startRow: r.start.row, endRow: r.end.row, startCol: r.start.col, endCol: r.end.col };
+        }
+        if ("startRow" in range && "endRow" in range && "startCol" in range && "endCol" in range) {
+          const startRow = Math.min(range.startRow, range.endRow);
+          const endRow = Math.max(range.startRow, range.endRow);
+          const startCol = Math.min(range.startCol, range.endCol);
+          const endCol = Math.max(range.startCol, range.endCol);
+          return { startRow, endRow, startCol, endCol };
+        }
+      }
+      throw new Error(`Invalid range: ${String(range)}`);
+    })();
+
+    const width = rect.endCol - rect.startCol + 1;
+    const height = rect.endRow - rect.startRow + 1;
+    if (width <= 0 || height <= 0) return;
+
+    // Ensure the target sheet exists (DocumentController materializes sheets lazily).
+    this.model.getCell(id, 0, 0);
+    const sheet = this.model.sheets.get(id);
+    if (!sheet) return;
+
+    /** @type {Map<string, Set<string>>} */
+    const affectedKeysBySheet = new Map();
+    const addAffectedKey = (targetSheetId, key) => {
+      if (!targetSheetId || !key) return;
+      let set = affectedKeysBySheet.get(targetSheetId);
+      if (!set) {
+        set = new Set();
+        affectedKeysBySheet.set(targetSheetId, set);
+      }
+      set.add(key);
+    };
+
+    /** @type {Map<string, CellState>} */
+    const movedDestByKey = new Map();
+    /** @type {Set<string>} */
+    const clearedKeys = new Set();
+
+    const inRowBand = (row) => row >= rect.startRow && row <= rect.endRow;
+    const inColBand = (col) => col >= rect.startCol && col <= rect.endCol;
+
+    const shouldMove = (row, col) => {
+      if (kind === "insertShiftRight") return inRowBand(row) && col >= rect.startCol;
+      if (kind === "insertShiftDown") return inColBand(col) && row >= rect.startRow;
+      if (kind === "deleteShiftLeft") return inRowBand(row) && col > rect.endCol;
+      if (kind === "deleteShiftUp") return inColBand(col) && row > rect.endRow;
+      return false;
+    };
+
+    const shouldDelete = (row, col) => {
+      if (kind === "deleteShiftLeft" || kind === "deleteShiftUp") {
+        return inRowBand(row) && inColBand(col);
+      }
+      return false;
+    };
+
+    const deltaRow = (() => {
+      if (kind === "insertShiftDown") return height;
+      if (kind === "deleteShiftUp") return -height;
+      return 0;
+    })();
+    const deltaCol = (() => {
+      if (kind === "insertShiftRight") return width;
+      if (kind === "deleteShiftLeft") return -width;
+      return 0;
+    })();
+
+    // Compute sparse move/delete sets by scanning stored cells only.
+    for (const [key, cell] of sheet.cells.entries()) {
+      if (!cell) continue;
+      const coord = parseRowColKey(key);
+      const row = coord.row;
+      const col = coord.col;
+
+      if (shouldMove(row, col)) {
+        const destRow = row + deltaRow;
+        const destCol = col + deltaCol;
+        if (destRow < 0 || destRow > EXCEL_MAX_ROW || destCol < 0 || destCol > EXCEL_MAX_COL) {
+          throw new Error("Shift would move cells out of bounds.");
+        }
+        const destKey = `${destRow},${destCol}`;
+        movedDestByKey.set(destKey, cloneCellState(cell));
+
+        clearedKeys.add(key);
+        addAffectedKey(id, key);
+        addAffectedKey(id, destKey);
+        continue;
+      }
+
+      if (shouldDelete(row, col)) {
+        clearedKeys.add(key);
+        addAffectedKey(id, key);
+      }
+    }
+
+    /** @type {Map<string, Map<string, string>>} */
+    const rewriteAfterBySheet = new Map();
+    const formulaRewrites = Array.isArray(options.formulaRewrites) ? options.formulaRewrites : [];
+    for (const rewrite of formulaRewrites) {
+      const targetSheetId = String(rewrite?.sheet ?? rewrite?.sheetId ?? "").trim();
+      if (!targetSheetId) continue;
+      const address = typeof rewrite?.address === "string" ? rewrite.address : "";
+      if (!address) continue;
+
+      let coord;
+      try {
+        coord = parseA1(address);
+      } catch {
+        continue;
+      }
+      let perSheet = rewriteAfterBySheet.get(targetSheetId);
+      if (!perSheet) {
+        perSheet = new Map();
+        rewriteAfterBySheet.set(targetSheetId, perSheet);
+      }
+      if (typeof rewrite?.after !== "string") continue;
+      const key = `${coord.row},${coord.col}`;
+      addAffectedKey(targetSheetId, key);
+      perSheet.set(key, rewrite.after);
+    }
+
+    /** @type {CellDelta[]} */
+    const deltas = [];
+    for (const [targetSheetId, keys] of affectedKeysBySheet.entries()) {
+      // Ensure sheet exists for rewrite-only updates.
+      this.model.getCell(targetSheetId, 0, 0);
+      for (const key of keys) {
+        const coord = parseRowColKey(key);
+        const row = coord.row;
+        const col = coord.col;
+
+        const before = this.model.getCell(targetSheetId, row, col);
+
+        /** @type {CellState} */
+        let afterState;
+        if (targetSheetId === id && movedDestByKey.has(key)) {
+          afterState = cloneCellState(movedDestByKey.get(key));
+        } else if (targetSheetId === id && clearedKeys.has(key)) {
+          afterState = emptyCellState();
+        } else {
+          afterState = cloneCellState(before);
+        }
+
+        const rewrites = rewriteAfterBySheet.get(targetSheetId);
+        const rewritten = rewrites?.get(key);
+        if (typeof rewritten === "string") {
+          afterState.formula = normalizeFormula(rewritten);
+          if (afterState.formula != null) {
+            afterState.value = null;
+          }
+        }
+
+        if (cellStateEquals(before, afterState)) continue;
+        deltas.push({ sheetId: targetSheetId, row, col, before, after: cloneCellState(afterState) });
+      }
+    }
+
+    const defaultLabel = kind === "insertShiftRight" || kind === "insertShiftDown" ? "Insert Cells" : "Delete Cells";
+    this.#applyUserDeltas(deltas, { label: options.label ?? defaultLabel });
+  }
+
+  /**
    * Apply a formatting patch to a range.
    *
    * @param {string} sheetId
