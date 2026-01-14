@@ -2737,6 +2737,28 @@ test("Argument value suggestions use catalog arg_types (RANDBETWEEN suggests num
   );
 });
 
+test("RANDBETWEEN suggests a left-cell reference for plain numeric args", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=RANDBETWEEN(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDBETWEEN(A1"),
+    `Expected RANDBETWEEN to suggest A1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDBETWEEN(1"),
+    `Expected RANDBETWEEN to still suggest numeric placeholders, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Value-arg suggestions are pure insertions (ABS suggests left cell only when prefix matches)", async () => {
   const engine = new TabCompletionEngine();
 

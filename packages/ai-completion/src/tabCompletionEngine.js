@@ -1300,6 +1300,22 @@ export class TabCompletionEngine {
         return closed.length > 0 ? closed : fallbackFunctionSuggestions();
       }
 
+      // For plain numeric args (no enum semantics), prefer referencing the cell to the left.
+      // This avoids the common "1/0" placeholder suggestions for scalar params that are often
+      // cell-referenced in real-world spreadsheets.
+      if (cellRef.col > 0) {
+        const leftA1 = `${columnIndexToLetter(cellRef.col - 1)}${cellRef.row + 1}`;
+        if (!typedPrefix || (startsWithIgnoreCase(leftA1, typedPrefix) && typedPrefix.length < leftA1.length)) {
+          const completed = completeIdentifier(leftA1, typedPrefix);
+          suggestions.push({
+            text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
+            displayText: completed,
+            type: "function_arg",
+            confidence: 0.41,
+          });
+        }
+      }
+
       for (const n of ["1", "0"]) {
         addReplacement({ replacement: n, confidence: 0.4 });
       }
