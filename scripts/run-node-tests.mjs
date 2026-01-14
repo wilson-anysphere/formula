@@ -206,6 +206,20 @@ testConcurrency = Math.max(1, Math.min(testConcurrency, maxTestConcurrency));
 const e2eTestFiles = runnableTestFiles.filter((file) => file.endsWith(".e2e.test.js"));
 const nonE2eTestFiles = runnableTestFiles.filter((file) => !file.endsWith(".e2e.test.js"));
 
+// Extension-host tests start sandboxed Worker threads and can be sensitive to CPU contention when
+// run alongside other heavyweight suites. Running them in their own `node --test` invocation keeps
+// the overall repo suite stable while still allowing reasonable parallelism within the extension
+// host tests themselves.
+/** @type {string[]} */
+const extensionHostTestFiles = [];
+/** @type {string[]} */
+const nonExtensionHostTestFiles = [];
+for (const file of nonE2eTestFiles) {
+  const rel = path.relative(repoRoot, file).split(path.sep).join("/");
+  if (rel.startsWith("packages/extension-host/test/")) extensionHostTestFiles.push(file);
+  else nonExtensionHostTestFiles.push(file);
+}
+
 // Some unit tests still start sync-server child processes (via `startSyncServer`).
 // Running multiple of those alongside other suites can be noisy/flaky under load.
 // Detect and serialize them as a separate batch.
@@ -214,7 +228,7 @@ const syncServerTestFiles = [];
 /** @type {string[]} */
 const unitTestFiles = [];
 const syncServerRe = /\bstartSyncServer\b/;
-for (const file of nonE2eTestFiles) {
+for (const file of nonExtensionHostTestFiles) {
   const text = await readFile(file, "utf8").catch(() => "");
   if (syncServerRe.test(text)) syncServerTestFiles.push(file);
   else unitTestFiles.push(file);
@@ -266,6 +280,8 @@ let exitCode = 0;
 exitCode = await runTestFilesIndividually(e2eTestFiles, 1);
 if (exitCode !== 0) process.exit(exitCode);
 exitCode = await runTestFilesIndividually(syncServerTestFiles, 1);
+if (exitCode !== 0) process.exit(exitCode);
+exitCode = await runTestBatch(extensionHostTestFiles, testConcurrency);
 if (exitCode !== 0) process.exit(exitCode);
 exitCode = await runTestBatch(unitTestFiles, testConcurrency);
 process.exit(exitCode);
