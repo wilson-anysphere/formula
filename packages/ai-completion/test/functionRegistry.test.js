@@ -123,10 +123,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("BESSELK", 0), "value", "Expected BESSELK x to be value-like");
   assert.equal(registry.getArgType("BESSELY", 0), "value", "Expected BESSELY x to be value-like");
   assert.equal(registry.getArgType("DELTA", 0), "value", "Expected DELTA number1 to be value-like");
-  assert.equal(registry.getArgType("DELTA", 1), "number", "Expected DELTA number2 to be numeric");
+  assert.equal(registry.getArgType("DELTA", 1), "value", "Expected DELTA number2 to be value-like");
   assert.ok(registry.getFunction("DELTA")?.args?.[1]?.optional, "Expected DELTA number2 to be optional");
   assert.equal(registry.getArgType("GESTEP", 0), "value", "Expected GESTEP number to be value-like");
-  assert.equal(registry.getArgType("GESTEP", 1), "number", "Expected GESTEP step to be numeric");
+  assert.equal(registry.getArgType("GESTEP", 1), "value", "Expected GESTEP step to be value-like");
   assert.ok(registry.getFunction("GESTEP")?.args?.[1]?.optional, "Expected GESTEP step to be optional");
   assert.equal(registry.getArgType("COSH", 0), "value", "Expected COSH number to be value-like");
   assert.equal(registry.getArgType("SINH", 0), "value", "Expected SINH number to be value-like");

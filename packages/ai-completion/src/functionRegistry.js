@@ -448,7 +448,7 @@ const CURATED_FUNCTIONS = [
     description: "Tests whether two values are equal.",
     args: [
       { name: "number1", type: "value" },
-      { name: "number2", type: "number", optional: true },
+      { name: "number2", type: "value", optional: true },
     ],
   },
   {
@@ -456,7 +456,7 @@ const CURATED_FUNCTIONS = [
     description: "Tests whether a number is greater than or equal to a threshold.",
     args: [
       { name: "number", type: "value" },
-      { name: "step", type: "number", optional: true },
+      { name: "step", type: "value", optional: true },
     ],
   },
   {
@@ -2318,8 +2318,8 @@ const CURATED_FUNCTIONS = [
     description: "Returns a reference offset from a given reference.",
     args: [
       { name: "reference", type: "range" },
-      { name: "rows", type: "number" },
-      { name: "cols", type: "number" },
+      { name: "rows", type: "value" },
+      { name: "cols", type: "value" },
       { name: "height", type: "number", optional: true },
       { name: "width", type: "number", optional: true },
     ],

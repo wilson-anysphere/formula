@@ -5604,6 +5604,60 @@ test("BITLSHIFT shift_amount suggests a left-cell reference (value-like arg)", a
   );
 });
 
+test("OFFSET rows suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=OFFSET(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=OFFSET(A1, B1"),
+    `Expected OFFSET to suggest B1 for rows, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("DELTA number2 suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=DELTA(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=DELTA(A1, B1"),
+    `Expected DELTA to suggest B1 for number2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("GESTEP step suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=GESTEP(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=GESTEP(A1, B1"),
+    `Expected GESTEP to suggest B1 for step, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 
