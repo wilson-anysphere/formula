@@ -7446,7 +7446,15 @@ export class SpreadsheetApp {
       this.clearComputedValuesByCoord();
       const prevActiveSheetId = this.sheetId;
       const prevSheetOrder = this.document.getSheetIds();
-      this.document.applyState(snapshot);
+      // DocumentController emits a synchronous `change` event during `applyState(...)`. Several
+      // listeners (including the active-sheet guard) need access to the pre-restore ordering so
+      // we can choose an Excel-like adjacent visible sheet when the active sheet disappears.
+      this.undoRedoSheetOrderSnapshot = prevSheetOrder;
+      try {
+        this.document.applyState(snapshot);
+      } finally {
+        this.undoRedoSheetOrderSnapshot = null;
+      }
       // The DocumentController snapshot format can include workbook-scoped image bytes
       // (`snapshot.images`). Keep the UI-level in-cell image store aligned with the
       // newly-restored workbook so `CellValue::Image` references can resolve.

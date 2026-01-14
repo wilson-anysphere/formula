@@ -128,7 +128,9 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
     const app = new SpreadsheetApp(createRoot(), createStatus());
     try {
       seedThreeSheets(app);
+      const activateSpy = vi.spyOn(app, "activateSheet");
       app.activateSheet("Sheet2");
+      activateSpy.mockClear();
 
       // Restore a snapshot that removes Sheet2 but keeps Sheet1 + Sheet3.
       const snapshotDoc = new DocumentController();
@@ -140,6 +142,9 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
 
       // Excel-like: prefer the next visible sheet to the right (Sheet3), not the first sheet.
       expect(app.getCurrentSheetId()).toBe("Sheet3");
+      // Active sheet deletion during applyState occurs *after* the change event is emitted, so the
+      // restore logic updates the sheet id directly (no intermediate activateSheet calls).
+      expect(activateSpy).not.toHaveBeenCalled();
     } finally {
       app.destroy();
     }
@@ -149,7 +154,9 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
     const app = new SpreadsheetApp(createRoot(), createStatus());
     try {
       seedThreeSheets(app);
+      const activateSpy = vi.spyOn(app, "activateSheet");
       app.activateSheet("Sheet2");
+      activateSpy.mockClear();
 
       // Restore a snapshot where Sheet2 still exists but is hidden.
       const snapshotDoc = new DocumentController();
@@ -162,9 +169,10 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
       await app.restoreDocumentState(snapshot);
 
       expect(app.getCurrentSheetId()).toBe("Sheet3");
+      expect(activateSpy).toHaveBeenCalledTimes(1);
+      expect(activateSpy).toHaveBeenCalledWith("Sheet3");
     } finally {
       app.destroy();
     }
   });
 });
-
