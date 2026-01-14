@@ -97,9 +97,6 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "insert.illustrations.pictures.stockImages",
   "insert.illustrations.pictures.onlinePictures",
   "insert.illustrations.onlinePictures",
-
-  // --- Page Layout / Arrange --------------------------------------------------
-  // (Removed: these ids are now registered commands; they should not be exempt.)
 ]);
 
 function isExemptViaPattern(_commandId: string): boolean {
