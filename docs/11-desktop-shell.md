@@ -139,6 +139,7 @@ Notes:
   - `.github/workflows/desktop-perf-platform-matrix.yml`
     - per-OS artifacts: `desktop-perf-<os>`
     - cross-OS merged artifact: `desktop-perf-platform-matrix` (`desktop-perf-platform-matrix.json`)
+    - pinned runner matrix: `ubuntu-24.04`, `windows-2022`, `macos-14`
     - includes best-effort WebView runtime metadata (WebKitGTK / WKWebView / WebView2 version) to help attribute regressions to runner image updates
     - manual `workflow_dispatch` runs can override run counts/timeouts via inputs: `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs` (and can optionally restrict the OS via `os`)
   
