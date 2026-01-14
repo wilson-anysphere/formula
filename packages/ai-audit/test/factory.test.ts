@@ -267,6 +267,8 @@ describe("createDefaultAIAuditStore", () => {
 
     const store = await createDefaultAIAuditStore();
     expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(IndexedDbAIAuditStore);
   });
 
   it("defaults to MemoryAIAuditStore in Node runtimes (no window)", async () => {
