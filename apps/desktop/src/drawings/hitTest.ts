@@ -577,7 +577,12 @@ function pointInTransformedRect(x: number, y: number, rect: Rect, cos: number, s
   if (flags & 2) ly = -ly;
   const hw = rect.width / 2;
   const hh = rect.height / 2;
-  return lx >= -hw && lx <= hw && ly >= -hh && ly <= hh;
+  // Account for floating-point drift when `cos`/`sin` come from angles like 90°
+  // where values are extremely close to 0/1. Without a tiny epsilon we can miss
+  // hits that are conceptually on the boundary (e.g. resize-handle centers for
+  // rotated objects).
+  const eps = 1e-6;
+  return lx >= -hw - eps && lx <= hw + eps && ly >= -hh - eps && ly <= hh + eps;
 }
 
 function rectToAabb(rect: Rect, cos: number, sin: number, flags: number): Rect {
