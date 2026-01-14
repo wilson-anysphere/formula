@@ -210,58 +210,111 @@ pub fn agile_secret_key_from_password_with_options(
         info.spin_count,
     );
 
-    // Block 1: decrypt verifierHashInput.
+    // Derive keys once; only IV handling changes between modes.
     let key1 = crate::derive_encryption_key(
         &h,
         &VERIFIER_HASH_INPUT_BLOCK,
         info.password_hash_algorithm,
         info.password_key_bits,
     )?;
-    let verifier_hash_input =
-        crate::aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &info.password_salt)?;
-    if verifier_hash_input.len() < VERIFIER_HASH_INPUT_LEN {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "decrypted verifierHashInput is truncated",
-        });
-    }
-
-    // Block 2: decrypt verifierHashValue and verify.
     let key2 = crate::derive_encryption_key(
         &h,
         &VERIFIER_HASH_VALUE_BLOCK,
         info.password_hash_algorithm,
         info.password_key_bits,
     )?;
-    let verifier_hash_value =
-        crate::aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &info.password_salt)?;
-
-    let digest_len = info.password_hash_algorithm.digest_len();
-    if verifier_hash_value.len() < digest_len {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "decrypted verifierHashValue is truncated",
-        });
-    }
-    verify_password(
-        &verifier_hash_input[..VERIFIER_HASH_INPUT_LEN],
-        &verifier_hash_value,
-        info.password_hash_algorithm,
-    )?;
-
-    // Block 3: decrypt encryptedKeyValue (secret key).
     let key3 = crate::derive_encryption_key(
         &h,
         &KEY_VALUE_BLOCK,
         info.password_hash_algorithm,
         info.password_key_bits,
     )?;
-    let key_value =
-        crate::aes_cbc_decrypt(&info.encrypted_key_value, &key3, &info.password_salt)?;
-    if key_value.len() < key_len {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "decrypted keyValue is truncated",
-        });
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum PasswordKeyIvMode {
+        /// MS-OFFCRYPTO spec behavior: use the raw password `saltValue` as the AES-CBC IV.
+        Salt,
+        /// Compatibility behavior observed in some producers: use per-blob derived IVs
+        /// (`Hash(saltValue || blockKey)[:16]`).
+        Derived,
     }
-    Ok(Zeroizing::new(key_value[..key_len].to_vec()))
+
+    let try_mode = |mode: PasswordKeyIvMode| -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+        let decrypt_with_ivs =
+            |iv_vhi: &[u8], iv_vhv: &[u8], iv_kv: &[u8]| -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+                // Decrypt verifierHashInput.
+                let verifier_hash_input = crate::aes_cbc_decrypt(
+                    &info.encrypted_verifier_hash_input,
+                    &key1,
+                    iv_vhi,
+                )?;
+                if verifier_hash_input.len() < VERIFIER_HASH_INPUT_LEN {
+                    return Err(OffcryptoError::InvalidEncryptionInfo {
+                        context: "decrypted verifierHashInput is truncated",
+                    });
+                }
+
+                // Decrypt verifierHashValue and verify.
+                let verifier_hash_value = crate::aes_cbc_decrypt(
+                    &info.encrypted_verifier_hash_value,
+                    &key2,
+                    iv_vhv,
+                )?;
+
+                let digest_len = info.password_hash_algorithm.digest_len();
+                if verifier_hash_value.len() < digest_len {
+                    return Err(OffcryptoError::InvalidEncryptionInfo {
+                        context: "decrypted verifierHashValue is truncated",
+                    });
+                }
+                verify_password(
+                    &verifier_hash_input[..VERIFIER_HASH_INPUT_LEN],
+                    &verifier_hash_value,
+                    info.password_hash_algorithm,
+                )?;
+
+                // Decrypt encryptedKeyValue (secret key).
+                let key_value = crate::aes_cbc_decrypt(&info.encrypted_key_value, &key3, iv_kv)?;
+                if key_value.len() < key_len {
+                    return Err(OffcryptoError::InvalidEncryptionInfo {
+                        context: "decrypted keyValue is truncated",
+                    });
+                }
+                Ok(Zeroizing::new(key_value[..key_len].to_vec()))
+            };
+
+        match mode {
+            PasswordKeyIvMode::Salt => decrypt_with_ivs(
+                &info.password_salt,
+                &info.password_salt,
+                &info.password_salt,
+            ),
+            PasswordKeyIvMode::Derived => {
+                let iv1 = crate::derive_iv_from_salt(
+                    &info.password_salt,
+                    &VERIFIER_HASH_INPUT_BLOCK,
+                    info.password_hash_algorithm,
+                )?;
+                let iv2 = crate::derive_iv_from_salt(
+                    &info.password_salt,
+                    &VERIFIER_HASH_VALUE_BLOCK,
+                    info.password_hash_algorithm,
+                )?;
+                let iv3 = crate::derive_iv_from_salt(
+                    &info.password_salt,
+                    &KEY_VALUE_BLOCK,
+                    info.password_hash_algorithm,
+                )?;
+                decrypt_with_ivs(&iv1, &iv2, &iv3)
+            }
+        }
+    };
+
+    match try_mode(PasswordKeyIvMode::Salt) {
+        Ok(key) => Ok(key),
+        Err(OffcryptoError::InvalidPassword) => try_mode(PasswordKeyIvMode::Derived),
+        Err(other) => Err(other),
+    }
 }
 
 #[cfg(test)]
@@ -389,6 +442,74 @@ mod tests {
         let out = agile_secret_key_from_password(&info, password).unwrap();
         assert_eq!(out.as_slice(), secret_key_plain.as_slice());
         assert_eq!(iterated_hash_call_count(), 1);
+    }
+
+    #[test]
+    fn agile_secret_key_from_password_falls_back_to_derived_iv() {
+        let password = "password";
+        let salt = vec![0x11u8; 16];
+        let spin_count = 1000;
+        let hash_algorithm = HashAlgorithm::Sha1;
+        let key_bits = 128usize;
+
+        // Build an AgileEncryptionInfo with verifier/keyValue blobs encrypted using derived IVs
+        // (Hash(saltValue || blockKey)[:16]) instead of the raw salt bytes.
+        let password_utf16le = crate::password_to_utf16le_bytes(password);
+        let h = agile_iterated_hash(&password_utf16le, &salt, hash_algorithm, spin_count);
+
+        let key1 = crate::derive_encryption_key(&h, &VERIFIER_HASH_INPUT_BLOCK, hash_algorithm, key_bits)
+            .unwrap();
+        let key2 =
+            crate::derive_encryption_key(&h, &VERIFIER_HASH_VALUE_BLOCK, hash_algorithm, key_bits)
+                .unwrap();
+        let key3 =
+            crate::derive_encryption_key(&h, &KEY_VALUE_BLOCK, hash_algorithm, key_bits).unwrap();
+
+        let iv1 = crate::derive_iv_from_salt(&salt, &VERIFIER_HASH_INPUT_BLOCK, hash_algorithm).unwrap();
+        let iv2 = crate::derive_iv_from_salt(&salt, &VERIFIER_HASH_VALUE_BLOCK, hash_algorithm).unwrap();
+        let iv3 = crate::derive_iv_from_salt(&salt, &KEY_VALUE_BLOCK, hash_algorithm).unwrap();
+        assert_ne!(
+            &iv1[..],
+            &salt[..],
+            "derived-IV scheme should not accidentally match the raw salt IV"
+        );
+
+        let verifier_hash_input_plain = vec![0x22u8; VERIFIER_HASH_INPUT_LEN];
+        let encrypted_verifier_hash_input =
+            encrypt_aes128_cbc_no_padding(&key1, &iv1, &verifier_hash_input_plain);
+
+        let digest = hash_algorithm.digest(&verifier_hash_input_plain);
+        let verifier_hash_value_plain = zero_pad_to_aes_block(digest.clone());
+        let encrypted_verifier_hash_value =
+            encrypt_aes128_cbc_no_padding(&key2, &iv2, &verifier_hash_value_plain);
+
+        let secret_key_plain = vec![0x33u8; key_bits / 8];
+        let encrypted_key_value = encrypt_aes128_cbc_no_padding(&key3, &iv3, &secret_key_plain);
+
+        let info = AgileEncryptionInfo {
+            key_data_salt: Vec::new(),
+            key_data_hash_algorithm: hash_algorithm,
+            key_data_block_size: 16,
+            data_integrity: None,
+            spin_count,
+            password_salt: salt,
+            password_hash_algorithm: hash_algorithm,
+            password_key_bits: key_bits,
+            encrypted_key_value,
+            encrypted_verifier_hash_input,
+            encrypted_verifier_hash_value,
+        };
+
+        // Setup above called `agile_iterated_hash`.
+        reset_iterated_hash_calls();
+
+        let out = agile_secret_key_from_password(&info, password).unwrap();
+        assert_eq!(out.as_slice(), secret_key_plain.as_slice());
+        assert_eq!(
+            iterated_hash_call_count(),
+            1,
+            "expected iterated hash to be computed once even when trying both IV schemes"
+        );
     }
 
     #[test]
