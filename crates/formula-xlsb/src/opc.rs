@@ -2487,9 +2487,29 @@ mod zip_guardrail_tests {
         let _lock = ENV_LOCK.lock().unwrap();
         let _max_pkg = EnvVarGuard::set(ENV_MAX_XLSB_PACKAGE_BYTES, "20");
 
-        // This does not need to be a valid ZIP. The size cap should fail fast before any parsing.
+        struct PanicOnReadCursor {
+            inner: Cursor<Vec<u8>>,
+        }
+
+        impl Read for PanicOnReadCursor {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                panic!("unexpected read: open_from_reader should fail fast based on stream length");
+            }
+        }
+
+        impl Seek for PanicOnReadCursor {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+
+        // This does not need to be a valid ZIP. The size cap should fail fast before any parsing,
+        // without reading from the stream.
         let bytes = vec![0u8; 21];
-        let err = XlsbWorkbook::open_from_reader_with_options(Cursor::new(bytes), OpenOptions::default())
+        let reader = PanicOnReadCursor {
+            inner: Cursor::new(bytes),
+        };
+        let err = XlsbWorkbook::open_from_reader_with_options(reader, OpenOptions::default())
             .err()
             .expect("expected package too large error");
 
