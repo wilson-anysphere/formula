@@ -621,6 +621,24 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       expect(selectSpy).toHaveBeenCalledWith(1);
 
+      // Pointerdowns on non-grid overlays (e.g. scrollbars/outline) should not affect drawing selection.
+      selectSpy.mockClear();
+      const overlay = document.createElement("div");
+      root.appendChild(overlay);
+      dispatchPointerEvent(overlay, "pointerdown", {
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        pointerId: 2,
+        button: 0,
+      });
+      dispatchPointerEvent(overlay, "pointerup", {
+        clientX: 48 + 5,
+        clientY: 24 + 5,
+        pointerId: 2,
+        button: 0,
+      });
+      expect(selectSpy).not.toHaveBeenCalled();
+
       app.destroy();
       root.remove();
     } finally {

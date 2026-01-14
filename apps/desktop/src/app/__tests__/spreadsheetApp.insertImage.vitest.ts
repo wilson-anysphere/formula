@@ -170,6 +170,9 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     expect(stored).toBeTruthy();
     expect(stored.bytes).toEqual(bytes);
 
+    // Insert should also select the new drawing (used by overlay handles + split view).
+    expect(app.getSelectedDrawingId()).toBe(obj.id);
+
     app.destroy();
     root.remove();
   });
