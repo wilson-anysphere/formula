@@ -95,8 +95,9 @@ Optional budget enforcement (MB = 1,000,000 bytes):
 
 ## Dist asset breakdown (static assets)
 
-The desktop build includes large static assets (notably Pyodide under `public/pyodide/`), which can dominate the
-packaged app footprint even when JS bundle sizes are stable.
+The desktop build can include large static assets (Pyodide being the biggest when bundled), which can dominate the
+packaged app footprint even when JS bundle sizes are stable. By default, Pyodide is downloaded on-demand at runtime
+and is **not** included in `dist/` unless bundling is explicitly enabled.
 
 To see which files contribute most to `apps/desktop/dist/`, run:
 
@@ -276,8 +277,6 @@ This app’s Vite dev/preview servers are configured to enable that:
 
 For packaged (production) Tauri builds, the same headers are configured via
 `app.security.headers` in `apps/desktop/src-tauri/tauri.conf.json` (see `docs/11-desktop-shell.md`).
-
-Additionally, Pyodide assets are self-hosted under the same origin at:
 
 Packaged desktop builds download Pyodide assets **on-demand** into an app-data
 cache and serve them to the WebView via the `pyodide://` protocol (COOP/COEP
