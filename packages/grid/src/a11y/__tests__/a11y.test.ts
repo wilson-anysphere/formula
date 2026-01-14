@@ -102,6 +102,20 @@ describe("a11y helpers", () => {
     );
   });
 
+  it("trims image alt text when the cell value is blank", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 1 && col === 1
+          ? { row, col, value: null, image: { imageId: "img1", altText: "  Logo  " } }
+          : { row, col, value: null }
+    };
+
+    expect(describeCellForA11y({ selection: { row: 1, col: 1 }, range: null, provider, headerRows: 1, headerCols: 1 })).toBe(
+      "Active cell A1, value Logo. Selection none."
+    );
+    expect(describeActiveCellLabel({ row: 1, col: 1 }, provider, 1, 1)).toBe("Cell A1, value Logo.");
+  });
+
   it("falls back to [Image] when the cell value is blank and no alt text is present", () => {
     const provider: CellProvider = {
       getCell: (row, col) => (row === 1 && col === 1 ? { row, col, value: null, image: { imageId: "img1" } } : { row, col, value: null })
@@ -131,4 +145,3 @@ describe("a11y helpers", () => {
     expect(describeActiveCellLabel({ row: 1, col: 1 }, provider, 1, 1)).toBe("Cell A1, value [Image].");
   });
 });
-

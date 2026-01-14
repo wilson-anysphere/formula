@@ -46,7 +46,8 @@ export function describeActiveCellLabel(
   const cell = provider.getCell(selection.row, selection.col);
   let valueText = formatCellDisplayText(cell?.value ?? null);
   if (valueText.trim() === "" && cell?.image) {
-    valueText = cell.image.altText?.trim() ? cell.image.altText : "[Image]";
+    const altText = cell.image.altText?.trim();
+    valueText = altText ? altText : "[Image]";
   }
   const valueDescription = valueText.trim() === "" ? "blank" : valueText;
   return `Cell ${address}, value ${valueDescription}.`;
@@ -69,7 +70,8 @@ export function describeCell(
   const cell = provider.getCell(selection.row, selection.col);
   let valueText = formatCellDisplayText(cell?.value ?? null);
   if (valueText.trim() === "" && cell?.image) {
-    valueText = cell.image.altText?.trim() ? cell.image.altText : "[Image]";
+    const altText = cell.image.altText?.trim();
+    valueText = altText ? altText : "[Image]";
   }
   const valueDescription = valueText.trim() === "" ? "blank" : valueText;
 
