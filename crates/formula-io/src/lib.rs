@@ -2296,16 +2296,42 @@ fn parse_standard_encryption_info_lenient(
         return Err(formula_offcrypto::OffcryptoError::UnsupportedExternalEncryption);
     }
 
+    let size_extra = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.sizeExtra")?;
+    let alg_id = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.algId")?;
+    let alg_id_hash = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.algIdHash")?;
+    let key_size_bits = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.keySize")?;
+    let provider_type = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.providerType")?;
+    let reserved1 = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.reserved1")?;
+    let reserved2 = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.reserved2")?;
+
+    // `EncryptionInfo.header_size` is the total byte length of the `EncryptionHeader` blob.
+    // `EncryptionHeader.sizeExtra` describes trailing algorithm-specific bytes at the end of that
+    // blob. The CSPName byte length is therefore:
+    //   header_size - 32 - sizeExtra
+    //
+    // (32 = 8 DWORD fixed header fields). `sizeExtra` may be odd, so we must compute the CSPName
+    // length after subtracting it to avoid incorrectly requiring `header_size - 32` to be even.
+    let size_extra_usize = usize::try_from(size_extra).unwrap_or(usize::MAX);
+    if header_bytes.len() < hpos + size_extra_usize {
+        return Err(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionHeader.sizeExtra does not fit into declared header_size",
+        });
+    }
+    let csp_name_bytes_len = header_bytes.len() - hpos - size_extra_usize;
+    let csp_name_bytes = &header_bytes[hpos..hpos + csp_name_bytes_len];
+    let csp_name = decode_utf16le_z_lossy(csp_name_bytes)?;
+    let _header_extra = &header_bytes[hpos + csp_name_bytes_len..];
+
     let header = formula_offcrypto::StandardEncryptionHeader {
         flags,
-        size_extra: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.sizeExtra")?,
-        alg_id: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.algId")?,
-        alg_id_hash: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.algIdHash")?,
-        key_size_bits: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.keySize")?,
-        provider_type: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.providerType")?,
-        reserved1: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.reserved1")?,
-        reserved2: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.reserved2")?,
-        csp_name: decode_utf16le_z_lossy(&header_bytes[hpos..])?,
+        size_extra,
+        alg_id,
+        alg_id_hash,
+        key_size_bits,
+        provider_type,
+        reserved1,
+        reserved2,
+        csp_name,
     };
 
     let salt_size = read_u32_le(encryption_info, &mut pos, "EncryptionVerifier.saltSize")? as usize;
@@ -2339,6 +2365,62 @@ fn parse_standard_encryption_info_lenient(
             encrypted_verifier_hash,
         },
     })
+}
+
+#[cfg(all(test, feature = "encrypted-workbooks"))]
+mod parse_standard_encryption_info_lenient_tests {
+    use super::parse_standard_encryption_info_lenient;
+
+    fn utf16le_bytes(s: &str, terminated: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        for cu in s.encode_utf16() {
+            out.extend_from_slice(&cu.to_le_bytes());
+        }
+        if terminated {
+            out.extend_from_slice(&0u16.to_le_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn parse_standard_encryption_info_lenient_honors_size_extra_for_csp_name() {
+        const CALG_RC4: u32 = 0x0000_6801;
+        const CALG_SHA1: u32 = 0x0000_8004;
+
+        let size_extra = 1u32;
+        let header_extra = [0xFFu8];
+        let csp_name_bytes = utf16le_bytes("CSP", false);
+
+        let mut header_bytes = Vec::new();
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
+        header_bytes.extend_from_slice(&size_extra.to_le_bytes()); // sizeExtra
+        header_bytes.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
+        header_bytes.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // keySize (0 => 40-bit for RC4)
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+        header_bytes.extend_from_slice(&csp_name_bytes);
+        header_bytes.extend_from_slice(&header_extra);
+
+        let mut encryption_info = Vec::new();
+        encryption_info.extend_from_slice(&3u16.to_le_bytes()); // versionMajor
+        encryption_info.extend_from_slice(&2u16.to_le_bytes()); // versionMinor
+        encryption_info.extend_from_slice(&0u32.to_le_bytes()); // versionFlags
+        encryption_info.extend_from_slice(&(header_bytes.len() as u32).to_le_bytes());
+        encryption_info.extend_from_slice(&header_bytes);
+
+        // EncryptionVerifier.
+        encryption_info.extend_from_slice(&16u32.to_le_bytes()); // saltSize
+        encryption_info.extend(1u8..=16); // salt bytes
+        encryption_info.extend_from_slice(&[0xAA; 16]); // encryptedVerifier
+        encryption_info.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize
+        encryption_info.extend_from_slice(&[0xBB; 20]); // encryptedVerifierHash
+
+        let info = parse_standard_encryption_info_lenient(&encryption_info).expect("parse");
+        assert_eq!(info.header.size_extra, size_extra);
+        assert_eq!(info.header.csp_name, "CSP");
+    }
 }
 
 #[cfg(feature = "encrypted-workbooks")]
