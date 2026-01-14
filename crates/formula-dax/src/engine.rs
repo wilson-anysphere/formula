@@ -5049,7 +5049,11 @@ fn propagate_filter(
                             out
                         })
                 } else {
-                    let visible_rows: Vec<usize> = to_set.iter_ones().collect();
+                    let physical_rows = to_table.row_count();
+                    let visible_rows: Vec<usize> = to_set
+                        .iter_ones()
+                        .filter(|&idx| idx < physical_rows)
+                        .collect();
 
                     if visible_rows.is_empty() {
                         Vec::new()
