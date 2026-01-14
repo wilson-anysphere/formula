@@ -194,6 +194,9 @@ RC4(key=block0, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
 
 ### MD5 (`CALG_MD5`)
 
+Some Standard/CryptoAPI files use `CALG_MD5` instead of `CALG_SHA1` for the fixed-spin password
+hashing loop and block-key derivation.
+
 Parameters:
 
 - password: `"password"`
