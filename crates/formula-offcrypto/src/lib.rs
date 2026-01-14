@@ -3454,76 +3454,43 @@ pub fn decrypt_encrypted_package(
     password: &str,
     options: DecryptOptions,
 ) -> Result<Vec<u8>, OffcryptoError> {
+    // First validate `EncryptedPackage` framing without doing expensive password derivation.
+    //
+    // This avoids spending CPU on KDF work for inputs that cannot be decrypted due to obvious
+    // truncation/size errors.
+    let pkg_header = parse_encrypted_package_header(encrypted_package)?;
+    let total_size = pkg_header.original_size;
+    let output_len = usize::try_from(total_size)
+        .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+    // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
+    isize::try_from(output_len).map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+    let ciphertext_len = encrypted_package.len() - 8;
+    if ciphertext_len < output_len {
+        return Err(OffcryptoError::EncryptedPackageSizeMismatch {
+            total_size,
+            ciphertext_len,
+        });
+    }
+
     let info = parse_encryption_info(encryption_info)?;
 
-    // Reject clearly malformed `EncryptedPackage` streams before expensive password derivation.
-    //
-    // This surfaces actionable structural errors (truncation / framing) and prevents doing large
-    // KDF work on inputs that cannot be decrypted.
+    // Additional framing invariants depend on the encryption scheme:
+    // - AES-based schemes require block-aligned ciphertext.
     match &info {
-        EncryptionInfo::Standard { header, .. } => {
-            let pkg_header = parse_encrypted_package_header(encrypted_package)?;
-            let ciphertext_len = encrypted_package.len() - 8;
-
-            let total_size = pkg_header.original_size;
-            let output_len = usize::try_from(total_size)
-                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
-            // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
-            isize::try_from(output_len)
-                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
-
-            match header.alg_id {
-                // Standard RC4 uses a stream cipher; the ciphertext does not need to be AES block-aligned.
-                CALG_RC4 => {
-                    if ciphertext_len < output_len {
-                        return Err(OffcryptoError::EncryptedPackageSizeMismatch {
-                            total_size,
-                            ciphertext_len,
-                        });
-                    }
+        EncryptionInfo::Standard { header, .. } => match header.alg_id {
+            CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+                if ciphertext_len % AES_BLOCK_SIZE != 0 {
+                    return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
                 }
-                // Standard AES variants: ciphertext must be AES-block aligned.
-                CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
-                    if ciphertext_len % AES_BLOCK_SIZE != 0 {
-                        return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
-                    }
-                    if ciphertext_len < output_len {
-                        return Err(OffcryptoError::EncryptedPackageSizeMismatch {
-                            total_size,
-                            ciphertext_len,
-                        });
-                    }
-                }
-                // `parse_encryption_info` rejects other algorithms.
-                _ => {}
             }
-        }
+            CALG_RC4 => {
+                // RC4 is a stream cipher; ciphertext does not need to be AES-block aligned.
+            }
+            _ => {}
+        },
         EncryptionInfo::Agile { .. } => {
-            let header = parse_encrypted_package_header(encrypted_package)?;
-            let ciphertext_len = encrypted_package.len() - 8;
             if ciphertext_len % AES_BLOCK_SIZE != 0 {
                 return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
-            }
-
-            let total_size = header.original_size;
-            let output_len = usize::try_from(total_size)
-                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
-            // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
-            isize::try_from(output_len)
-                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
-
-            // Mirror `agile_decrypt_package`'s plausibility guard: the declared plaintext size should
-            // not be wildly larger than the available ciphertext.
-            let plausible_max = (encrypted_package.len() as u64).saturating_mul(2);
-            if total_size > plausible_max {
-                return Err(OffcryptoError::EncryptedPackageSizeOverflow { total_size });
-            }
-
-            if total_size > ciphertext_len as u64 {
-                return Err(OffcryptoError::EncryptedPackageSizeMismatch {
-                    total_size,
-                    ciphertext_len,
-                });
             }
         }
         EncryptionInfo::Unsupported { version } => {
@@ -3810,6 +3777,8 @@ fn open_stream_best_effort<F: Seek>(
     ))
 }
 
+// Property tests use `proptest`, which pulls in OS-specific dependencies that do not compile for
+// `wasm32-unknown-unknown`. CI still `cargo check`s this crate for wasm, so gate these tests off.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod fuzz_tests;
 
