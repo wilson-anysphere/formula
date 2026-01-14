@@ -979,3 +979,174 @@ fn relatedtable_cascades_blank_rows_across_snowflake_hops_columnar_fact() {
 
     assert_eq!(value, 5.0.into());
 }
+
+#[test]
+fn snowflake_filter_excludes_unmatched_fact_rows_when_blank_category_filtered_out() {
+    // Scenario:
+    // - Sales contains an unknown ProductId (no matching Products row).
+    // - That creates a virtual blank row in Products, which in turn belongs to the blank
+    //   Categories member through the Products -> Categories relationship.
+    //
+    // When a filter on Categories excludes BLANK (e.g. CategoryName = "A"), the blank Categories
+    // member is not visible, so the virtual blank Products member should also be filtered out.
+    // Consequently, the unmatched Sales row should not be included in measures grouped by, or
+    // filtered by, Categories.
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales.push_row(vec![100.into(), 10.into(), 10.0.into()]).unwrap(); // A
+    sales
+        .push_row(vec![101.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product -> Products blank row -> Categories blank row
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let filter = FilterContext::empty().with_column_equals("Categories", "CategoryName", "A".into());
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUM(Sales[Amount])",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 10.0.into());
+
+    let group_by = vec![GroupByColumn::new("Categories", "CategoryName")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+    let result = pivot(&model, "Sales", &group_by, &measures, &filter).unwrap();
+
+    assert_eq!(result.rows, vec![vec![Value::from("A"), 10.0.into()]]);
+}
+
+#[test]
+fn snowflake_filter_excludes_unmatched_fact_rows_when_blank_category_filtered_out_columnar_fact() {
+    // Same scenario as `snowflake_filter_excludes_unmatched_fact_rows_when_blank_category_filtered_out`,
+    // but with a columnar fact table (exercises `unmatched_fact_rows` without a `from_index`).
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "SaleId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "ProductId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+    sales.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(10.0),
+    ]); // A
+    sales.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(5.0),
+    ]); // unknown product -> Products blank row -> Categories blank row
+    model
+        .add_table(Table::from_columnar("Sales", sales.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let filter = FilterContext::empty().with_column_equals("Categories", "CategoryName", "A".into());
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUM(Sales[Amount])",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 10.0.into());
+
+    let group_by = vec![GroupByColumn::new("Categories", "CategoryName")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+    let result = pivot(&model, "Sales", &group_by, &measures, &filter).unwrap();
+
+    assert_eq!(result.rows, vec![vec![Value::from("A"), 10.0.into()]]);
+}

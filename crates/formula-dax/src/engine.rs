@@ -20,7 +20,7 @@ use formula_columnar::BitVec;
 use ordered_float::OrderedFloat;
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::OnceLock;
 
@@ -5441,6 +5441,15 @@ pub(crate) fn resolve_row_sets(
         }
     }
 
+    // `blank_row_allowed` determines whether unmatched keys on the fact side should be treated as
+    // belonging to the relationship-generated blank/unknown member on the lookup side. In
+    // snowflake schemas, filters on higher-level dimensions can exclude BLANK and should cascade
+    // down to intermediate dimensions, making their virtual blank members invisible as well.
+    //
+    // Example: Categories(filter excludes BLANK) -> Products(blank member filtered out) ->
+    // Sales(unmatched ProductId rows excluded).
+    let blank_allowed = compute_blank_row_allowed_map(model, filter, &override_pairs);
+
     let trace_enabled = resolve_row_sets_trace_enabled();
     let mut iterations = 0usize;
     let mut propagate_calls = 0usize;
@@ -5476,7 +5485,7 @@ pub(crate) fn resolve_row_sets(
                         propagate_calls += 1;
                     }
                     let changed_to_one =
-                        propagate_filter(model, &mut sets, relationship, Direction::ToOne, filter)?;
+                        propagate_filter(model, &mut sets, relationship, Direction::ToOne, &blank_allowed)?;
                     if trace_enabled && changed_to_one {
                         propagate_changes += 1;
                     }
@@ -5491,7 +5500,7 @@ pub(crate) fn resolve_row_sets(
                         &mut sets,
                         relationship,
                         Direction::ToMany,
-                        filter,
+                        &blank_allowed,
                     )?;
                     if trace_enabled && changed_to_many {
                         propagate_changes += 1;
@@ -5506,7 +5515,7 @@ pub(crate) fn resolve_row_sets(
                             &mut sets,
                             relationship,
                             Direction::ToOne,
-                            filter,
+                            &blank_allowed,
                         )?;
                         if trace_enabled && changed_to_one {
                             propagate_changes += 1;
@@ -5524,7 +5533,7 @@ pub(crate) fn resolve_row_sets(
                         &mut sets,
                         relationship,
                         Direction::ToMany,
-                        filter,
+                        &blank_allowed,
                     )?;
                     if trace_enabled && changed_to_many {
                         propagate_changes += 1;
@@ -5539,7 +5548,7 @@ pub(crate) fn resolve_row_sets(
                             &mut sets,
                             relationship,
                             Direction::ToOne,
-                            filter,
+                            &blank_allowed,
                         )?;
                         if trace_enabled && changed_to_one {
                             propagate_changes += 1;
@@ -5617,7 +5626,7 @@ fn propagate_filter(
     sets: &mut HashMap<String, BitVec>,
     relationship: &RelationshipInfo,
     direction: Direction,
-    filter: &FilterContext,
+    blank_allowed: &HashMap<String, bool>,
 ) -> DaxResult<bool> {
     match direction {
         Direction::ToMany => {
@@ -5633,7 +5642,7 @@ fn propagate_filter(
                 .get(to_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
 
-            let blank_row_allowed = blank_row_allowed(filter, to_table_name);
+            let blank_row_allowed = blank_allowed.get(to_table_name).copied().unwrap_or(true);
 
             // If `to_table` is unfiltered (including the relationship's implicit blank/unknown
             // member), it should not restrict `from_table`.
@@ -6025,6 +6034,73 @@ fn propagate_filter(
             Ok(changed)
         }
     }
+}
+
+fn compute_blank_row_allowed_map(
+    model: &DataModel,
+    filter: &FilterContext,
+    override_pairs: &HashSet<(&str, &str)>,
+) -> HashMap<String, bool> {
+    // Start with the explicit/lexical filter checks (row filters and column filters on the table
+    // itself).
+    let mut allowed: HashMap<String, bool> = model
+        .tables
+        .iter()
+        .map(|(name, _)| (name.clone(), blank_row_allowed(filter, name)))
+        .collect();
+
+    // Any table that has BLANK explicitly filtered out makes its relationship-generated blank
+    // member invisible. That exclusion cascades down snowflake chains because the blank member of
+    // a fact/dimension table belongs to the blank member of its lookup tables.
+    let mut queue: VecDeque<String> = allowed
+        .iter()
+        .filter_map(|(table, is_allowed)| (!is_allowed).then_some(table.clone()))
+        .collect();
+
+    while let Some(to_table) = queue.pop_front() {
+        for (idx, relationship) in model.relationships().iter().enumerate() {
+            if relationship.to_table_key != to_table {
+                continue;
+            }
+
+            let pair = (
+                relationship.from_table_key.as_str(),
+                relationship.to_table_key.as_str(),
+            );
+            let is_active = if override_pairs.contains(&pair) {
+                filter.active_relationship_overrides.contains(&idx)
+            } else {
+                relationship.rel.is_active
+            };
+
+            if !is_active
+                || matches!(
+                    filter.cross_filter_overrides.get(&idx).copied(),
+                    Some(RelationshipOverride::Disabled)
+                )
+            {
+                continue;
+            }
+
+            // If CROSSFILTER forces the relationship to propagate only in the reverse direction,
+            // filters on `to_table` do not restrict `from_table`, so BLANK exclusion should not
+            // cascade.
+            if matches!(
+                filter.cross_filter_overrides.get(&idx).copied(),
+                Some(RelationshipOverride::OneWayReverse)
+            ) {
+                continue;
+            }
+
+            let from_table = relationship.from_table_key.clone();
+            if allowed.get(&from_table).copied().unwrap_or(true) {
+                allowed.insert(from_table.clone(), false);
+                queue.push_back(from_table);
+            }
+        }
+    }
+
+    allowed
 }
 
 fn bitvec_any_removed(prev: &BitVec, next: &BitVec) -> bool {
