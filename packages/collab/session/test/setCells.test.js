@@ -117,6 +117,28 @@ test("CollabSession setCells rejects unparseable cell keys when permissions are 
   doc.destroy();
 });
 
+test("CollabSession setCells rejects non-string cell keys (no Yjs mutation)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, schema: { autoInit: false } });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  await assert.rejects(
+    // @ts-expect-error intentionally invalid type
+    session.setCells([{ cellKey: null, value: "hacked" }]),
+    /Invalid cellKey/,
+  );
+
+  assert.deepEqual(session.cells.toJSON(), {});
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession setCells still parses supported legacy key formats when permissions are configured (viewer)", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
