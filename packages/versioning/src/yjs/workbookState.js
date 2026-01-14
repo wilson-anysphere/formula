@@ -265,7 +265,9 @@ export function workbookStateFromYjsDoc(doc) {
   // Track sheet ids that should appear in `cellsBySheet`:
   // - sheet ids from the `sheets` metadata root (even if the sheet has no cells)
   // - sheet ids observed in the `cells` root (even if the sheet metadata is missing)
-  const sheetIds = new Set(sheets.map((s) => s.id));
+  // Avoid allocating an intermediate `sheets.map(...)` array; `sheetOrder` already contains
+  // the ids in insertion order.
+  const sheetIds = new Set(sheetOrder);
   const cellsMap = getMapRoot(doc, "cells");
 
   /** @type {Map<string, Map<string, any>>} */
@@ -279,14 +281,10 @@ export function workbookStateFromYjsDoc(doc) {
     if (!cells) {
       cells = new Map();
       groupedCells.set(parsed.sheetId, cells);
+      sheetIds.add(parsed.sheetId);
     }
     mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData);
   });
-  // Avoid `sheetIds.add(...)` for every cell key (which can be millions of entries);
-  // groupedCells already keys by sheet id, so add each sheet id once.
-  for (const sheetId of groupedCells.keys()) {
-    sheetIds.add(sheetId);
-  }
 
   /** @type {Map<string, { cells: Map<string, any> }>} */
   const cellsBySheet = new Map();
