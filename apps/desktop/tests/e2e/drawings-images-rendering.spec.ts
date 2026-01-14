@@ -128,141 +128,102 @@ test.describe("drawing + image rendering regressions", () => {
     expect(Number(z!.chart)).toBeLessThan(Number(z!.drawing));
     expect(Number(z!.drawing)).toBeLessThan(Number(z!.selection));
 
-    const result = await page.evaluate(async ({ fixture }) => {
-      const { anchorToRectPx } = await import("/src/drawings/overlay.ts");
+    // Inject a DrawingML-style floating image drawing and image bytes, then assert that the
+    // drawing layer canvas eventually contains non-transparent pixels within the drawing bounds.
+    //
+    // NOTE: This intentionally uses the SpreadsheetApp debug hooks (`getDrawingsDebugState`) rather
+    // than reaching into private overlay internals like `drawingOverlay.geom`.
+    await page.evaluate(
+      ({ fixture }) => {
+        const app = (window as any).__formulaApp;
+        if (!app) throw new Error("Missing window.__formulaApp");
 
-      const app = (window as any).__formulaApp;
-      if (!app) throw new Error("Missing window.__formulaApp");
+        const doc = app.getDocument?.();
+        if (!doc) throw new Error("Missing SpreadsheetApp.getDocument()");
+        if (typeof doc.setImage !== "function") {
+          throw new Error("Missing DocumentController.setImage()");
+        }
 
-      const overlay = (app as any).drawingOverlay;
-      if (!overlay) throw new Error("Missing SpreadsheetApp.drawingOverlay");
-      const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]');
-      if (!canvas) throw new Error("Missing drawing-layer-canvas element");
+        const bytes = Uint8Array.from(atob(fixture.imagePngBase64), (c) => c.charCodeAt(0));
+        doc.setImage(fixture.imageId, { bytes, mimeType: "image/png" });
 
-      const bytes = Uint8Array.from(atob(fixture.imagePngBase64), (c) => c.charCodeAt(0));
-      const doc = app.getDocument?.();
-      if (!doc) throw new Error("Missing SpreadsheetApp.getDocument()");
-      if (typeof doc.setImage !== "function") {
-        throw new Error("Missing DocumentController.setImage()");
-      }
-      doc.setImage(fixture.imageId, { bytes, mimeType: "image/png" });
+        if (typeof doc.setSheetDrawings !== "function") {
+          throw new Error("Missing DocumentController.setSheetDrawings()");
+        }
+        const sheetId = app.getCurrentSheetId?.();
+        if (!sheetId) throw new Error("Missing SpreadsheetApp.getCurrentSheetId()");
 
-      if (typeof doc.setSheetDrawings !== "function") {
-        throw new Error("Missing DocumentController.setSheetDrawings()");
-      }
-
-      // Capture the *app-driven* render pass (DocumentController change -> SpreadsheetApp.renderDrawings -> DrawingOverlay.render).
-      // This is more realistic than calling `overlay.render(...)` directly and will fail if the integration
-      // between document drawings and the overlay regresses.
-      const origRender = overlay.render.bind(overlay);
-      (overlay as any).render = (objects: any, viewport: any, ...rest: any[]) => {
-        const promise = origRender(objects, viewport, ...rest);
-        (window as any).__testLastDrawingOverlayRender = { promise, objects, viewport };
-        return promise;
-      };
-      (window as any).__testLastDrawingOverlayRender = null;
-
-      const sheetId = app.getCurrentSheetId?.();
-      if (!sheetId) throw new Error("Missing SpreadsheetApp.getCurrentSheetId()");
-
-      // Store a formula-model style drawing object (JSON-serializable) and let SpreadsheetApp convert it
-      // through `convertModelWorksheetDrawingsToUiDrawingObjects(...)`.
-      doc.setSheetDrawings(sheetId, [
-        {
-          id: "1",
-          zOrder: 0,
-          kind: { type: "image", imageId: fixture.imageId },
-          anchor: {
-            type: "twoCell",
-            from: {
-              cell: { row: fixture.anchor.fromRow, col: fixture.anchor.fromCol },
-              offset: { xEmu: fixture.anchor.fromColOff, yEmu: fixture.anchor.fromRowOff },
-            },
-            to: {
-              cell: { row: fixture.anchor.toRow, col: fixture.anchor.toCol },
-              offset: { xEmu: fixture.anchor.toColOff, yEmu: fixture.anchor.toRowOff },
+        doc.setSheetDrawings(sheetId, [
+          {
+            id: "1",
+            zOrder: 0,
+            kind: { type: "image", imageId: fixture.imageId },
+            anchor: {
+              type: "twoCell",
+              from: {
+                cell: { row: fixture.anchor.fromRow, col: fixture.anchor.fromCol },
+                offset: { xEmu: fixture.anchor.fromColOff, yEmu: fixture.anchor.fromRowOff },
+              },
+              to: {
+                cell: { row: fixture.anchor.toRow, col: fixture.anchor.toCol },
+                offset: { xEmu: fixture.anchor.toColOff, yEmu: fixture.anchor.toRowOff },
+              },
             },
           },
-        },
-      ]);
+        ]);
+      },
+      { fixture },
+    );
 
-      const waitForOverlayRender = async (): Promise<{ promise: Promise<void>; objects: any[]; viewport: any }> => {
-        const start =
-          typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
-        const timeoutMs = 5_000;
-        while (true) {
-          const last = (window as any).__testLastDrawingOverlayRender as
-            | { promise: Promise<void>; objects: any[]; viewport: any }
-            | null;
-          const renderedHasImage = Array.isArray(last?.objects)
-            ? last!.objects.some((o) => o?.kind?.type === "image" && o?.kind?.imageId === fixture.imageId)
-            : false;
-          if (last && renderedHasImage) return last;
+    await expect
+      .poll(
+        async () => {
+          return await page.evaluate(() => {
+            const app = (window as any).__formulaApp;
+            if (!app) return 0;
+            if (typeof app.getDrawingsDebugState !== "function") return 0;
 
-          const now =
-            typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
-          if (now - start > timeoutMs) {
-            throw new Error(
-              `Timed out waiting for SpreadsheetApp to invoke DrawingOverlay.render with imageId=${fixture.imageId} after setSheetDrawings`,
-            );
-          }
-          await new Promise<void>((resolve) => {
-            if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
-            else setTimeout(resolve, 0);
+            const state = app.getDrawingsDebugState();
+            const drawings = Array.isArray(state?.drawings) ? state.drawings : [];
+            const image = drawings.find((d: any) => d?.kind === "image");
+            const rect = image?.rectPx;
+            if (!rect) return 0;
+
+            const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]');
+            if (!canvas) return 0;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return 0;
+
+            const bounds = canvas.getBoundingClientRect();
+            const viewportW = Math.max(1, Math.floor(bounds.width));
+            const viewportH = Math.max(1, Math.floor(bounds.height));
+            const centerX = rect.x + rect.width / 2;
+            const centerY = rect.y + rect.height / 2;
+
+            const size = 20;
+            const x = Math.max(0, Math.floor(centerX - size / 2));
+            const y = Math.max(0, Math.floor(centerY - size / 2));
+            const w = Math.min(Math.floor(size), Math.max(1, viewportW - x));
+            const h = Math.min(Math.floor(size), Math.max(1, viewportH - y));
+
+            const dpr = canvas.width / Math.max(1, bounds.width);
+            const samplePx = {
+              x: Math.max(0, Math.floor(x * dpr)),
+              y: Math.max(0, Math.floor(y * dpr)),
+              width: Math.max(1, Math.floor(w * dpr)),
+              height: Math.max(1, Math.floor(h * dpr)),
+            };
+            const imageData = ctx.getImageData(samplePx.x, samplePx.y, samplePx.width, samplePx.height);
+            let count = 0;
+            for (let i = 3; i < imageData.data.length; i += 4) {
+              if (imageData.data[i] !== 0) count += 1;
+            }
+            return count;
           });
-        }
-      };
-
-      const last = await waitForOverlayRender();
-
-      await last.promise;
-
-      const geom = (overlay as any).geom;
-      if (!geom) throw new Error("Missing DrawingOverlay.geom");
-      const obj = (last.objects as any[]).find((o) => o?.kind?.type === "image" && o?.kind?.imageId === fixture.imageId);
-      if (!obj) throw new Error("Expected rendered image object to exist");
-      const viewport = last.viewport;
-      if (!viewport) throw new Error("Missing drawing overlay viewport from render()");
-      const headerOffsetX = typeof viewport.headerOffsetX === "number" && Number.isFinite(viewport.headerOffsetX) ? viewport.headerOffsetX : 0;
-      const headerOffsetY = typeof viewport.headerOffsetY === "number" && Number.isFinite(viewport.headerOffsetY) ? viewport.headerOffsetY : 0;
-      const rect = anchorToRectPx(obj.anchor, geom);
-      const sampleRect = (() => {
-        const centerX = rect.x + rect.width / 2 - viewport.scrollX + headerOffsetX;
-        const centerY = rect.y + rect.height / 2 - viewport.scrollY + headerOffsetY;
-        const size = 20;
-        const x = Math.max(0, Math.floor(centerX - size / 2));
-        const y = Math.max(0, Math.floor(centerY - size / 2));
-        const w = Math.min(Math.floor(size), Math.max(1, Math.floor(viewport.width) - x));
-        const h = Math.min(Math.floor(size), Math.max(1, Math.floor(viewport.height) - y));
-        return { x, y, width: w, height: h };
-      })();
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Missing 2d context");
-      // `getImageData` uses device-pixel coordinates, not the CSS pixel coordinates
-      // we render at after applying the DPR transform.
-      const dpr = typeof viewport.dpr === "number" && viewport.dpr > 0 ? viewport.dpr : window.devicePixelRatio || 1;
-      const samplePx = {
-        x: Math.max(0, Math.floor(sampleRect.x * dpr)),
-        y: Math.max(0, Math.floor(sampleRect.y * dpr)),
-        width: Math.max(1, Math.floor(sampleRect.width * dpr)),
-        height: Math.max(1, Math.floor(sampleRect.height * dpr)),
-      };
-      const imageData = ctx.getImageData(samplePx.x, samplePx.y, samplePx.width, samplePx.height);
-      let nonTransparent = 0;
-      for (let i = 3; i < imageData.data.length; i += 4) {
-        if (imageData.data[i] !== 0) nonTransparent += 1;
-      }
-
-      return { nonTransparent, sampleRect };
-    }, { fixture });
-
-    expect(
-      result.nonTransparent,
-      `expected overlay canvas to contain non-transparent pixels near rendered floating image (sample=${JSON.stringify(
-        result.sampleRect,
-      )})`,
-    ).toBeGreaterThan(0);
+        },
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
   });
 
   test("renders images-in-cells image-in-cell.xlsx as an in-cell image (shared grid)", async ({ page }) => {
