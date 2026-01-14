@@ -451,7 +451,10 @@ export class FormulaBarFunctionAutocompleteController {
         this.#selectedIndex = i;
         this.#syncSelection();
       });
-      button.addEventListener("click", () => this.acceptSelected());
+      button.addEventListener("click", () => {
+        this.#selectedIndex = i;
+        this.acceptSelected();
+      });
 
       const name = document.createElement("div");
       name.className = "formula-bar-function-autocomplete-name";

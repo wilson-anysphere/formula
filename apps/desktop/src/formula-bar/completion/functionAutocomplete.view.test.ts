@@ -170,18 +170,20 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
-    view.textarea.value = "=VLO";
+    // Use a prefix with multiple options so we verify the click chooses the right one
+    // (not just the current selection).
+    view.textarea.value = "=COU";
     view.textarea.setSelectionRange(4, 4);
     view.textarea.dispatchEvent(new Event("input"));
 
     const item = host.querySelector<HTMLButtonElement>(
-      '[data-testid="formula-function-autocomplete-item"][data-name="VLOOKUP"]',
+      '[data-testid="formula-function-autocomplete-item"][data-name="COUNTIF"]',
     );
     expect(item).not.toBeNull();
 
     item?.click();
 
-    expect(view.model.draft).toBe("=VLOOKUP(");
+    expect(view.model.draft).toBe("=COUNTIF(");
     expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
     expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
 
