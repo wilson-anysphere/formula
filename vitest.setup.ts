@@ -1,3 +1,5 @@
+import { afterEach } from "vitest";
+
 class MemoryLocalStorage implements Storage {
   private readonly store = new Map<string, string>();
 
@@ -73,3 +75,12 @@ if (typeof (globalThis as any).PointerEvent === "undefined" && typeof (globalThi
   // eslint-disable-next-line no-global-assign
   (globalThis as any).PointerEvent = PointerEventShim;
 }
+
+// Several desktop features share state via globals owned by the desktop shell (e.g.
+// `__formulaSpreadsheetIsEditing`, `__formulaSpreadsheetIsReadOnly`). Unit tests sometimes set these
+// to emulate split-view editing / collab permissions. Clean them up after each test to avoid
+// cross-test leakage (which can lead to extremely confusing, order-dependent failures).
+afterEach(() => {
+  delete (globalThis as any).__formulaSpreadsheetIsEditing;
+  delete (globalThis as any).__formulaSpreadsheetIsReadOnly;
+});
