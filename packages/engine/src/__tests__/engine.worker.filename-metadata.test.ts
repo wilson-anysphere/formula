@@ -173,6 +173,75 @@ describe("engine.worker workbook file metadata integration", () => {
     }
   });
 
+  it('prefers EngineInfo.directory over workbook file metadata for INFO("directory")', async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [
+            { address: "A1", value: '=INFO("directory")', sheet: "Sheet1" },
+            { address: "A2", value: '=CELL("filename")', sheet: "Sheet1" },
+          ],
+        },
+      });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setWorkbookFileMetadata",
+        params: { directory: "/workbook", filename: "book.xlsx" },
+      });
+      await sendRequest(port, { type: "request", id: 3, method: "recalculate", params: {} });
+
+      let resp = await sendRequest(port, { type: "request", id: 4, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/workbook/");
+
+      resp = await sendRequest(port, { type: "request", id: 5, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/workbook/[book.xlsx]Sheet1");
+
+      // Host-provided INFO("directory") override should win over workbook file metadata.
+      await sendRequest(port, {
+        type: "request",
+        id: 6,
+        method: "setEngineInfo",
+        params: { info: { directory: "/host" } },
+      });
+      await sendRequest(port, { type: "request", id: 7, method: "recalculate", params: {} });
+
+      resp = await sendRequest(port, { type: "request", id: 8, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/host/");
+
+      // CELL("filename") continues to use workbook file metadata (not the host override).
+      resp = await sendRequest(port, { type: "request", id: 9, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/workbook/[book.xlsx]Sheet1");
+
+      // Clearing the override restores workbook-metadata behavior.
+      await sendRequest(port, {
+        type: "request",
+        id: 10,
+        method: "setEngineInfo",
+        params: { info: { directory: "" } },
+      });
+      await sendRequest(port, { type: "request", id: 11, method: "recalculate", params: {} });
+      resp = await sendRequest(port, { type: "request", id: 12, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/workbook/");
+    } finally {
+      dispose();
+    }
+  });
+
   it('updates CELL("filename") results after setWorkbookFileMetadata', async () => {
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });

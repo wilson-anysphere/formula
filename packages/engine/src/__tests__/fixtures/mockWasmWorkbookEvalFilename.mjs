@@ -67,6 +67,7 @@ export class WasmWorkbook {
   constructor() {
     this.directory = null;
     this.filename = null;
+    this.infoDirectory = null;
     this.inputsBySheet = new Map();
     this.valuesBySheet = new Map();
   }
@@ -88,6 +89,16 @@ export class WasmWorkbook {
   setWorkbookFileMetadata(directory, filename) {
     this.directory = directory ?? null;
     this.filename = filename ?? null;
+  }
+
+  setEngineInfo(info) {
+    if (!info || typeof info !== "object") {
+      throw new Error("setEngineInfo: info must be an object");
+    }
+    if ("directory" in info) {
+      const raw = info.directory;
+      this.infoDirectory = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+    }
   }
 
   setCell(address, value, sheet) {
@@ -149,9 +160,13 @@ export class WasmWorkbook {
               computed = dir ? `${dir}[${this.filename}]${refSheetName ?? sheetName}` : `[${this.filename}]${refSheetName ?? sheetName}`;
             }
           } else if (matchesInfoDirectory(input)) {
-            const dirRaw = typeof this.directory === "string" ? this.directory : "";
-            const dir = dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
-            computed = this.filename && dir ? dir : "#N/A";
+            if (this.infoDirectory) {
+              computed = workbookDirForExcel(this.infoDirectory);
+            } else {
+              const dirRaw = typeof this.directory === "string" ? this.directory : "";
+              const dir = dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
+              computed = this.filename && dir ? dir : "#N/A";
+            }
           }
         } else {
           computed = input;
