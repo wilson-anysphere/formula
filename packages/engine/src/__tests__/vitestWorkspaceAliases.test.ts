@@ -15,14 +15,16 @@ vi.mock("@formula/text-layout", () => ({
 
 describe("Vitest workspace aliases", () => {
   it("can import @formula/fill-engine", async () => {
-    const mod = await import("@formula/fill-engine");
+    // `tsc` does not read the Vitest/Vite `resolve.alias` config. Cast the specifier to `any` so
+    // typechecking doesn't require the workspace package to exist in `node_modules`, while runtime
+    // Vitest still exercises the alias resolution behavior.
+    const mod = (await import("@formula/fill-engine" as any)) as any;
     expect(typeof mod.computeFillEdits).toBe("function");
   });
 
   it("can import @formula/grid/node when @formula/text-layout is mocked", async () => {
-    const mod = await import("@formula/grid/node");
+    const mod = (await import("@formula/grid/node" as any)) as any;
     expect(typeof mod.DEFAULT_GRID_FONT_FAMILY).toBe("string");
     expect(typeof mod.LruCache).toBe("function");
   });
 });
-

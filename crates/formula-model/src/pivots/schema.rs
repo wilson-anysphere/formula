@@ -226,6 +226,7 @@ impl fmt::Display for PivotFieldRef {
     }
 }
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    let raw = raw.trim();
     let mut chars = raw.chars();
     let Some(first) = chars.next() else {
         return true;
