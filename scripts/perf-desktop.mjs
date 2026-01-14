@@ -69,7 +69,7 @@ function isSubpath(parentDir, maybeChild) {
   return true;
 }
 
-function formatLogPath(p) {
+function formatPerfPath(p) {
   const abs = path.resolve(path.isAbsolute(p) ? p : path.resolve(repoRoot, p));
   const rel = path.relative(repoRoot, abs);
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return abs;
@@ -495,11 +495,11 @@ function reportSize({ env }) {
     failed = true;
   } else {
     // eslint-disable-next-line no-console
-    console.log(`[desktop-size] wrote binary bloat JSON: ${formatLogPath(binJsonOut)}`);
+    console.log(`[desktop-size] wrote binary bloat JSON: ${formatPerfPath(binJsonOut)}`);
   }
 
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
-  const distLabel = formatLogPath(distDir);
+  const distLabel = formatPerfPath(distDir);
   if (existsSync(distDir)) {
     const total = dirSizeBytes(distDir);
     const totalMb = bytesToMb(total);
@@ -515,7 +515,7 @@ function reportSize({ env }) {
       // eslint-disable-next-line no-console
       console.log("[desktop-size] largest dist assets:");
       for (const f of largest) {
-        const rel = formatLogPath(f.path);
+        const rel = formatPerfPath(f.path);
         // eslint-disable-next-line no-console
         console.log(`  - ${humanBytes(f.size).padStart(10)}  ${rel}`);
       }
@@ -559,11 +559,11 @@ function reportSize({ env }) {
     const sizeMb = bytesToMb(size);
     const binStatus = binaryTargetMb == null || sizeMb <= binaryTargetMb ? "PASS" : "FAIL";
     if (binaryTargetMb != null && binStatus === "FAIL") failed = true;
-    // eslint-disable-next-line no-console
-    console.log(
-      `\n[desktop-size] binary: ${humanBytes(size)} (${formatMb(sizeMb)})  (${formatLogPath(binPath)})` +
-        (binaryTargetMb == null ? "" : `  ${binStatus} target=${formatMb(binaryTargetMb)}`),
-    );
+      // eslint-disable-next-line no-console
+      console.log(
+        `\n[desktop-size] binary: ${humanBytes(size)} (${formatMb(sizeMb)})  (${formatPerfPath(binPath)})` +
+          (binaryTargetMb == null ? "" : `  ${binStatus} target=${formatMb(binaryTargetMb)}`),
+      );
   } else {
     // eslint-disable-next-line no-console
     console.log(
@@ -649,7 +649,7 @@ function main() {
   ensureCleanPerfHome(perfHome);
 
   // eslint-disable-next-line no-console
-  console.log(`[perf-desktop] Using isolated desktop HOME root=${formatLogPath(perfHome)}`);
+  console.log(`[perf-desktop] Using isolated desktop HOME root=${formatPerfPath(perfHome)}`);
   // eslint-disable-next-line no-console
   console.log(
     "[perf-desktop] Tip: set FORMULA_PERF_PRESERVE_HOME=1 to avoid clearing the perf HOME between runs.\n" +
