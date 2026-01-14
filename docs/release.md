@@ -1031,6 +1031,9 @@ docker run --rm -it \
   '
 ```
 
+Note: the container install smoke test runs on the **same CPU architecture as the host**. Validate
+ARM64 `.deb` packages on an ARM64 host/runner (or use QEMU/binfmt emulation).
+
 To run the same install smoke test CI uses (includes Docker platform pinning and extra diagnostics), run:
 
 ```bash
