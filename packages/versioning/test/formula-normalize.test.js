@@ -23,3 +23,17 @@ test("normalizeFormula preserves whitespace inside external workbook prefixes (i
   assert.notEqual(withSpace, withoutSpace);
 });
 
+test("normalizeFormula handles workbook prefixes containing '[' (non-nesting) and continues normalization after the prefix", () => {
+  // Workbook names may contain literal `[` characters. Unlike structured references, workbook
+  // prefixes are not nested, so `[A1[Name.xlsx]Sheet1!A1` is valid and the bracket span ends at
+  // the first (non-escaped) `]`.
+  //
+  // Regression: the fallback normalizer must still remove whitespace *after* the prefix (e.g. the
+  // space after the comma), rather than treating the `[` inside the workbook name as introducing
+  // nesting and bailing out early.
+  const withSpace = normalizeFormula("=SUM([A1[Name.xlsx]Sheet1!A1, 1)");
+  const withoutSpace = normalizeFormula("=SUM([A1[Name.xlsx]Sheet1!A1,1)");
+
+  assert.equal(withSpace, "=SUM([A1[NAME.XLSX]SHEET1!A1,1)");
+  assert.equal(withSpace, withoutSpace);
+});

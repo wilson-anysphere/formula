@@ -148,10 +148,35 @@ function normalizeFormulaFallbackText(input) {
   let inString = false;
   let inQuotedSheet = false;
 
-  const findMatchingBracketEnd = (start) => {
-    // Excel structured references and external workbook references can include literal `]`
-    // characters inside `[...]` segments by escaping them as `]]`. That makes naive depth counting
-    // incorrect when trying to find the end of a bracket span.
+  const UNICODE_LETTER_RE = (() => {
+    try {
+      return new RegExp("^\\p{Alphabetic}$", "u");
+    } catch {
+      return null;
+    }
+  })();
+
+  const UNICODE_ALNUM_RE = (() => {
+    try {
+      return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+    } catch {
+      return null;
+    }
+  })();
+
+  const isUnicodeAlphabetic = (ch) => {
+    if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+    return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z");
+  };
+
+  const isUnicodeAlphanumeric = (ch) => {
+    if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+    return isUnicodeAlphabetic(ch) || (ch >= "0" && ch <= "9");
+  };
+
+  const findMatchingStructuredRefBracketEnd = (start) => {
+    // Excel structured references escape closing brackets inside items by doubling: `]]` -> `]`.
+    // That makes naive depth counting incorrect when trying to find the end of a bracket span.
     //
     // We use a small backtracking matcher:
     // - On `[` increase depth.
@@ -210,6 +235,52 @@ function normalizeFormulaFallbackText(input) {
       i += 1;
     }
   };
+
+  const findWorkbookPrefixEnd = (start) => {
+    // External workbook prefixes escape closing brackets by doubling: `]]` -> literal `]`.
+    //
+    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+    if (input[start] !== "[") return null;
+    let i = start + 1;
+    while (i < input.length) {
+      if (input[i] === "]") {
+        if (input[i + 1] === "]") {
+          i += 2;
+          continue;
+        }
+        return i + 1;
+      }
+      i += 1;
+    }
+    return null;
+  };
+
+  const findWorkbookPrefixEndIfValid = (start) => {
+    const end = findWorkbookPrefixEnd(start);
+    if (!end) return null;
+    if (end >= input.length) return null;
+
+    // Heuristic: only treat this as an external workbook prefix if it is followed by an unquoted
+    // sheet name and `!` (e.g. `[Book.xlsx]Sheet1!A1`). This avoids incorrectly treating other
+    // bracket constructs as workbook prefixes.
+    const first = input[end] ?? "";
+    if (!(first === "_" || isUnicodeAlphabetic(first))) return null;
+
+    let i = end + 1;
+    while (i < input.length) {
+      const ch = input[i] ?? "";
+      if (ch === "!") return end;
+      if (ch === "_" || ch === "." || ch === ":" || isUnicodeAlphanumeric(ch)) {
+        i += 1;
+        continue;
+      }
+      break;
+    }
+    return null;
+  };
+
+  const findMatchingBracketEnd = (start) =>
+    findMatchingStructuredRefBracketEnd(start) ?? findWorkbookPrefixEndIfValid(start);
 
   for (let i = 0; i < input.length; i += 1) {
     const ch = input[i];
