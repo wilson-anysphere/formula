@@ -8379,8 +8379,9 @@ export class SpreadsheetApp {
       // Keep the legacy outline->engine hidden cache coherent so subsequent unhide operations can
       // diff correctly (the sync logic does not query the engine for hidden state).
       if (this.gridMode === "legacy") {
+        const outline = this.getOutlineForSheet(this.sheetId);
         const hiddenCols: number[] = [];
-        for (const [summaryIndex, entry] of this.outline.cols.entries) {
+        for (const [summaryIndex, entry] of outline.cols.entries) {
           if (!isHidden(entry.hidden)) continue;
           const col = summaryIndex - 1;
           if (col < 0 || col >= this.limits.maxCols) continue;
@@ -20023,6 +20024,8 @@ export class SpreadsheetApp {
     if (this.gridMode !== "legacy") return;
     if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
+    const outline = this.getOutlineForSheet(this.sheetId);
+
     // If the engine instance was replaced (e.g. re-init), resync even if the outline state
     // appears unchanged.
     if (this.lastSyncedHiddenColsEngine !== this.wasmEngine) {
@@ -20032,7 +20035,7 @@ export class SpreadsheetApp {
     }
 
     const hiddenCols: number[] = [];
-    for (const [summaryIndex, entry] of this.outline.cols.entries) {
+    for (const [summaryIndex, entry] of outline.cols.entries) {
       if (!isHidden(entry.hidden)) continue;
       // Outline indices are 1-based; engine uses 0-based column indices.
       const col = summaryIndex - 1;
