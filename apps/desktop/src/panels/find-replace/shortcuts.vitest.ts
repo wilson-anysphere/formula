@@ -76,6 +76,9 @@ describe("find/replace shortcuts", () => {
     // state so Find/Replace shortcuts are eligible to fire.
     contextKeys.set("focus.inTextInput", false);
     contextKeys.set("spreadsheet.isEditing", false);
+    // Replace is gated behind the read-only context key; default it to editable so the
+    // shortcut binding can fire in this unit test.
+    contextKeys.set("spreadsheet.isReadOnly", false);
     const keybindingService = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
     keybindingService.setBuiltinKeybindings(builtinKeybindings);
     const disposeKeybindings = keybindingService.installWindowListener(window);
