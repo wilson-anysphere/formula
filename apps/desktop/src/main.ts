@@ -10691,6 +10691,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
           }
         }
       }
+
+      // SpreadsheetApp's legacy renderer caches row/col visibility to avoid consulting outline state
+      // for every paint. When the active sheet id stays the same across workbook opens (e.g. two
+      // unrelated workbooks both have `Sheet1`), `restoreDocumentState` may not rebuild those caches,
+      // which can cause imported hidden columns to render as visible until the user interacts.
+      //
+      // Rebuild the caches eagerly after seeding imported hidden columns so the first post-open
+      // render matches Excel.
+      const rebuildAxisVisibilityCache = (app as any).rebuildAxisVisibilityCache as (() => void) | undefined;
+      if (typeof rebuildAxisVisibilityCache === "function") rebuildAxisVisibilityCache.call(app);
     } catch (err) {
       console.warn("[formula][desktop] Failed to seed imported hidden columns:", err);
     }
