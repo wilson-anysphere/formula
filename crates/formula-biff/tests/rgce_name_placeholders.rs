@@ -65,6 +65,22 @@ fn decodes_value_class_ptg_namex_with_implicit_intersection_prefix() {
 }
 
 #[test]
+fn decodes_array_class_ptg_name_to_safe_placeholder() {
+    let rgce = ptg_name(123, 0x63);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Name_123");
+    assert_parseable(&text);
+}
+
+#[test]
+fn decodes_array_class_ptg_namex_to_safe_placeholder() {
+    let rgce = ptg_namex(0, 1, 0x79);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "ExternName_IXTI0_N1");
+    assert_parseable(&text);
+}
+
+#[test]
 fn decodes_ptg_name_as_udf_function_name_via_sentinel_funcvar() {
     // Name-based UDF call pattern:
     //   args..., PtgName(func), PtgFuncVar(argc+1, 0x00FF)
