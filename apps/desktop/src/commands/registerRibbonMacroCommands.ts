@@ -77,7 +77,7 @@ export function registerRibbonMacroCommands(params: {
         return "Delete Macro…";
       case "view.macros.recordMacro":
       case "developer.code.recordMacro":
-        return "Record Macro";
+        return "Record Macro…";
       case "view.macros.recordMacro.stop":
       case "developer.code.recordMacro.stop":
         return "Stop Recording";
@@ -89,9 +89,9 @@ export function registerRibbonMacroCommands(params: {
       case "developer.code.macros":
         return "Macros…";
       case "developer.code.macroSecurity":
-        return "Macro Security";
+        return "Macro Security…";
       case "developer.code.macroSecurity.trustCenter":
-        return "Trust Center";
+        return "Trust Center…";
       default:
         return commandId;
     }
