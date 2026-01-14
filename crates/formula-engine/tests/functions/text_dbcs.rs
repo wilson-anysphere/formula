@@ -259,6 +259,44 @@ fn phonetic_metadata_is_cleared_when_copy_range_overwrites_cell() {
 }
 
 #[test]
+fn phonetic_metadata_is_cleared_when_fill_overwrites_cell() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    sheet.set("B1", "東京");
+
+    sheet.apply_operation(EditOp::Fill {
+        sheet: "Sheet1".to_string(),
+        src: Range::from_a1("B1").expect("range"),
+        dst: Range::from_a1("A1").expect("range"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("東京".to_string())
+    );
+}
+
+#[test]
+fn phonetic_metadata_is_cleared_when_move_range_overwrites_cell() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    sheet.set("B1", "東京");
+
+    sheet.apply_operation(EditOp::MoveRange {
+        sheet: "Sheet1".to_string(),
+        src: Range::from_a1("B1").expect("range"),
+        dst_top_left: CellRef::from_a1("A1").expect("cell"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("東京".to_string())
+    );
+}
+
+#[test]
 fn phonetic_propagates_errors() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=1/0");
