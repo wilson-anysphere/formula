@@ -49,8 +49,17 @@ class ActionableError extends Error {
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json";
-const tauriConfigPath = path.join(repoRoot, tauriConfigRelativePath);
+const defaultTauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json";
+const tauriConfigPath = (() => {
+  const override = process.env.FORMULA_TAURI_CONF_PATH;
+  if (override && String(override).trim()) {
+    const p = String(override).trim();
+    return path.isAbsolute(p) ? p : path.join(repoRoot, p);
+  }
+  return path.join(repoRoot, defaultTauriConfigRelativePath);
+})();
+const tauriConfigRelativePath =
+  path.relative(repoRoot, tauriConfigPath) || defaultTauriConfigRelativePath;
 const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
 const GITHUB_API_BASE = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
 
@@ -541,6 +550,7 @@ function usage() {
       "  GITHUB_TOKEN       GitHub token with permission to read release assets",
       "  GH_TOKEN           Alternative token env var (supported for local runs)",
       "  GITHUB_API_URL     GitHub API base URL (default: https://api.github.com)",
+      "  FORMULA_TAURI_CONF_PATH Optional override for apps/desktop/src-tauri/tauri.conf.json (absolute or repo-relative)",
       "",
       "Examples:",
       `  ${cmd} --tag v0.2.3 --repo wilson/formula`,

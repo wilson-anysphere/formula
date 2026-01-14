@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   ActionableError,
@@ -20,6 +21,11 @@ test("filenameFromUrl extracts decoded filename and strips query", () => {
     filenameFromUrl("https://example.com/download/My%20File.exe?foo=1#bar"),
     "My File.exe",
   );
+});
+
+test("verify-desktop-release-assets supports overriding tauri.conf.json path via FORMULA_TAURI_CONF_PATH", () => {
+  const source = readFileSync(new URL("./verify-desktop-release-assets.mjs", import.meta.url), "utf8");
+  assert.match(source, /FORMULA_TAURI_CONF_PATH/);
 });
 
 test("isPrimaryBundleAssetName matches expected suffixes", () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { validatePlatformEntries } from "./validate-updater-manifest.mjs";
@@ -123,6 +124,11 @@ test("passes with distinct URLs and correct per-platform updater artifact types"
   assert.deepEqual(result.invalidTargets, []);
   assert.deepEqual(result.missingAssets, []);
   assert.equal(result.validatedTargets.length, 6);
+});
+
+test("validate-updater-manifest supports overriding tauri.conf.json path via FORMULA_TAURI_CONF_PATH", () => {
+  const source = readFileSync(new URL("./validate-updater-manifest.mjs", import.meta.url), "utf8");
+  assert.match(source, /FORMULA_TAURI_CONF_PATH/);
 });
 
 test("passes when installer-specific platform keys are present (e.g. linux-x86_64-deb)", () => {

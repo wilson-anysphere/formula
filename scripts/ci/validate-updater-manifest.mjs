@@ -27,6 +27,19 @@ import {
   parseTauriUpdaterSignature,
 } from "./tauri-minisign.mjs";
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const defaultTauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json";
+const tauriConfigPath = (() => {
+  const override = process.env.FORMULA_TAURI_CONF_PATH;
+  if (override && String(override).trim()) {
+    const p = String(override).trim();
+    return path.isAbsolute(p) ? p : path.join(repoRoot, p);
+  }
+  return path.join(repoRoot, defaultTauriConfigRelativePath);
+})();
+const tauriConfigRelativePath =
+  path.relative(repoRoot, tauriConfigPath) || defaultTauriConfigRelativePath;
+
 /**
  * @param {string} message
  */
@@ -862,18 +875,17 @@ async function main() {
   // Verify the manifest signature file matches latest.json. This catches a particularly nasty
   // failure mode where concurrent jobs upload mismatched latest.json/latest.json.sig pairs.
   try {
-    const tauriConfigPath = "apps/desktop/src-tauri/tauri.conf.json";
     const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
     const pubkey = tauriConfig?.plugins?.updater?.pubkey;
     if (typeof pubkey !== "string" || pubkey.trim().length === 0) {
       errors.push(
-        `Cannot verify latest.json.sig: missing plugins.updater.pubkey in ${tauriConfigPath}.`,
+        `Cannot verify latest.json.sig: missing plugins.updater.pubkey in ${tauriConfigRelativePath}.`,
       );
     } else if (pubkey.trim().includes("REPLACE_WITH")) {
       // This should already be guarded by scripts/check-updater-config.mjs, but keep the
       // validator robust to future config changes.
       errors.push(
-        `Cannot verify latest.json.sig: updater pubkey looks like a placeholder value in ${tauriConfigPath}.`,
+        `Cannot verify latest.json.sig: updater pubkey looks like a placeholder value in ${tauriConfigRelativePath}.`,
       );
     } else {
       updaterPubkey = parseTauriUpdaterPubkey(pubkey);
