@@ -188,6 +188,19 @@ test("binder skips persisting shared-state writes when canWriteSharedState is fa
   dc.setRangeRuns("Sheet1", 0, [{ startRow: 0, endRowExclusive: 10, styleId: 1 }]);
   assert.deepEqual(dc.getRangeRuns("Sheet1", 0), []);
 
+  // Patching existing range-run formatting (without introducing new formatted coverage) is allowed
+  // to remain local-only. This matches DocumentController's band-format behavior, which patches
+  // existing range runs so defaults win over higher-precedence formatting.
+  {
+    // Seed an existing run without emitting a local change event (simulates Yjs hydration).
+    const sheet = new Map();
+    sheet.set(0, [{ startRow: 0, endRowExclusive: 10, styleId: 1 }]);
+    dc._rangeRunsBySheet.set("Sheet1", sheet);
+
+    dc.setRangeRuns("Sheet1", 0, [{ startRow: 0, endRowExclusive: 10, styleId: 2 }]);
+    assert.deepEqual(dc.getRangeRuns("Sheet1", 0), [{ startRow: 0, endRowExclusive: 10, styleId: 2 }]);
+  }
+
   // None of the above local-only mutations should have been persisted into Yjs.
   assert.deepEqual(Buffer.from(Y.encodeStateAsUpdate(ydoc)), before);
 
