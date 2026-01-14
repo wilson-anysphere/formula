@@ -35,6 +35,10 @@ function normalizeFrozenCount(value) {
   return Math.max(0, Math.trunc(num));
 }
 
+// Drawing ids can be authored via remote/shared state (sheet view state). Keep validation strict
+// so BranchService normalization/merges don't deep-clone pathological ids (e.g. multi-megabyte strings).
+const MAX_DRAWING_ID_STRING_CHARS = 4096;
+
 /**
  * @param {any} value
  * @returns {{
@@ -182,7 +186,28 @@ function normalizeSheetView(value) {
         }
       }
       if (!isRecord(json)) continue;
-      out.push(structuredClone(json));
+
+      const rawId = json.id;
+      let normalizedId;
+      if (typeof rawId === "string") {
+        if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) continue;
+        const trimmed = rawId.trim();
+        if (!trimmed) continue;
+        normalizedId = trimmed;
+      } else if (typeof rawId === "number") {
+        if (!Number.isSafeInteger(rawId)) continue;
+        normalizedId = rawId;
+      } else {
+        continue;
+      }
+
+      try {
+        const cloned = structuredClone(json);
+        cloned.id = normalizedId;
+        out.push(cloned);
+      } catch {
+        // ignore malformed/non-cloneable drawing entries
+      }
     }
 
     out.sort((a, b) => {
