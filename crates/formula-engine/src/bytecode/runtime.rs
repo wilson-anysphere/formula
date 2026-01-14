@@ -141,12 +141,27 @@ fn cmp_sheet_ids_in_tab_order(grid: &dyn Grid, a: &SheetId, b: &SheetId) -> Orde
                 (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
                     match grid.external_sheet_order(a_wb) {
                         Some(order) => {
-                            let a_idx = order.iter().position(|s| {
-                                formula_model::sheet_name_eq_case_insensitive(s, a_sheet)
-                            });
-                            let b_idx = order.iter().position(|s| {
-                                formula_model::sheet_name_eq_case_insensitive(s, b_sheet)
-                            });
+                            let mut a_idx: Option<usize> = None;
+                            let mut b_idx: Option<usize> = None;
+                            for (idx, name) in order.iter().enumerate() {
+                                if a_idx.is_none()
+                                    && formula_model::sheet_name_eq_case_insensitive(
+                                        name, a_sheet,
+                                    )
+                                {
+                                    a_idx = Some(idx);
+                                }
+                                if b_idx.is_none()
+                                    && formula_model::sheet_name_eq_case_insensitive(
+                                        name, b_sheet,
+                                    )
+                                {
+                                    b_idx = Some(idx);
+                                }
+                                if a_idx.is_some() && b_idx.is_some() {
+                                    break;
+                                }
+                            }
                             match (a_idx, b_idx) {
                                 (Some(a_idx), Some(b_idx)) => {
                                     a_idx.cmp(&b_idx).then_with(|| a_key.cmp(b_key))

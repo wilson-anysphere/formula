@@ -15312,7 +15312,7 @@ fn expand_external_sheet_span_key(
 ) -> Option<Vec<String>> {
     let provider = provider?;
     let (workbook, start, end) = crate::eval::split_external_sheet_span_key(key)?;
-    let sheet_names = provider.sheet_order(workbook)?;
+    let sheet_names = provider.workbook_sheet_names(workbook)?;
 
     let mut start_idx: Option<usize> = None;
     let mut end_idx: Option<usize> = None;

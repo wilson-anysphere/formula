@@ -3282,13 +3282,22 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 }
 
                 let (workbook, start, end) = crate::eval::split_external_sheet_span_key(key)?;
-                let order = self.resolver.external_sheet_order(workbook)?;
-                let start_idx = order
-                    .iter()
-                    .position(|s| sheet_name_eq_case_insensitive(s, start))?;
-                let end_idx = order
-                    .iter()
-                    .position(|s| sheet_name_eq_case_insensitive(s, end))?;
+                let order = self.resolver.workbook_sheet_names(workbook)?;
+                let mut start_idx: Option<usize> = None;
+                let mut end_idx: Option<usize> = None;
+                for (idx, name) in order.iter().enumerate() {
+                    if start_idx.is_none() && sheet_name_eq_case_insensitive(name, start) {
+                        start_idx = Some(idx);
+                    }
+                    if end_idx.is_none() && sheet_name_eq_case_insensitive(name, end) {
+                        end_idx = Some(idx);
+                    }
+                    if start_idx.is_some() && end_idx.is_some() {
+                        break;
+                    }
+                }
+                let start_idx = start_idx?;
+                let end_idx = end_idx?;
                 let (start_idx, end_idx) = if start_idx <= end_idx {
                     (start_idx, end_idx)
                 } else {

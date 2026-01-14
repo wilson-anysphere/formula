@@ -536,12 +536,27 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
                         match self.resolver.workbook_sheet_names(a_wb) {
                             Some(order) => {
-                                let a_idx = order.iter().position(|s| {
-                                    formula_model::sheet_name_eq_case_insensitive(s, a_sheet)
-                                });
-                                let b_idx = order.iter().position(|s| {
-                                    formula_model::sheet_name_eq_case_insensitive(s, b_sheet)
-                                });
+                                let mut a_idx: Option<usize> = None;
+                                let mut b_idx: Option<usize> = None;
+                                for (idx, name) in order.iter().enumerate() {
+                                    if a_idx.is_none()
+                                        && formula_model::sheet_name_eq_case_insensitive(
+                                            name, a_sheet,
+                                        )
+                                    {
+                                        a_idx = Some(idx);
+                                    }
+                                    if b_idx.is_none()
+                                        && formula_model::sheet_name_eq_case_insensitive(
+                                            name, b_sheet,
+                                        )
+                                    {
+                                        b_idx = Some(idx);
+                                    }
+                                    if a_idx.is_some() && b_idx.is_some() {
+                                        break;
+                                    }
+                                }
                                 match (a_idx, b_idx) {
                                     (Some(a_idx), Some(b_idx)) => {
                                         a_idx.cmp(&b_idx).then_with(|| a_key.cmp(b_key))
@@ -1418,12 +1433,22 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 // workbook sheet order supplied by the resolver.
                 let (workbook, start, end) = split_external_sheet_span_key(key)?;
                 let order = self.resolver.workbook_sheet_names(workbook)?;
-                let start_idx = order
-                    .iter()
-                    .position(|s| formula_model::sheet_name_eq_case_insensitive(s, start))?;
-                let end_idx = order
-                    .iter()
-                    .position(|s| formula_model::sheet_name_eq_case_insensitive(s, end))?;
+                let mut start_idx: Option<usize> = None;
+                let mut end_idx: Option<usize> = None;
+                for (idx, name) in order.iter().enumerate() {
+                    if start_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, start)
+                    {
+                        start_idx = Some(idx);
+                    }
+                    if end_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, end) {
+                        end_idx = Some(idx);
+                    }
+                    if start_idx.is_some() && end_idx.is_some() {
+                        break;
+                    }
+                }
+                let start_idx = start_idx?;
+                let end_idx = end_idx?;
                 let (start_idx, end_idx) = if start_idx <= end_idx {
                     (start_idx, end_idx)
                 } else {
