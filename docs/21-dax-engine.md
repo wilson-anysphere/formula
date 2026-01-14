@@ -76,7 +76,10 @@ This backend is used heavily in tests.
 
 Created via `Table::from_columnar(name, formula_columnar::ColumnarTable)`:
 
-- Immutable: `push_row` and adding calculated columns are **not supported**.
+- Immutable: `push_row` is not supported.
+- Calculated columns **are supported**: `DataModel::add_calculated_column` computes the expression
+  eagerly and materializes the results by appending an encoded column to the underlying
+  `formula_columnar::ColumnarTable` (copy-on-write; may clone when shared).
 - Provides accelerations used by common aggregations and the pivot engine:
   - column statistics (`stats_*`)
   - dictionary value enumeration
