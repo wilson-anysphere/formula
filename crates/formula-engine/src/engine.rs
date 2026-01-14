@@ -370,6 +370,11 @@ struct Workbook {
     /// This is intentionally separate from `sheets`/`sheet_keys` so sheet ids remain stable when
     /// users reorder worksheet tabs.
     sheet_order: Vec<SheetId>,
+    /// Cached mapping from stable sheet id to its current workbook tab-order index.
+    ///
+    /// The vector length always matches `sheet_keys.len()`. Deleted/missing sheet ids have a
+    /// value of `usize::MAX`.
+    sheet_tab_index_by_id: Vec<usize>,
     names: HashMap<String, DefinedName>,
     styles: StyleTable,
     workbook_directory: Option<String>,
@@ -420,16 +425,23 @@ impl Workbook {
         // key).
         self.sheet_display_name_to_id.insert(key, id);
         self.sheet_order.push(id);
+        self.sheet_tab_index_by_id.push(self.sheet_order.len().saturating_sub(1));
         id
     }
-    fn tab_index_by_sheet_id(&self) -> Vec<usize> {
-        let mut tab_index = vec![usize::MAX; self.sheet_keys.len()];
+    fn rebuild_sheet_tab_index_by_id(&mut self) {
+        // Keep the cache aligned with the stable sheet-id space.
+        self.sheet_tab_index_by_id
+            .resize(self.sheet_keys.len(), usize::MAX);
+        self.sheet_tab_index_by_id.fill(usize::MAX);
         for (idx, sheet_id) in self.sheet_order.iter().copied().enumerate() {
-            if let Some(slot) = tab_index.get_mut(sheet_id) {
+            if let Some(slot) = self.sheet_tab_index_by_id.get_mut(sheet_id) {
                 *slot = idx;
             }
         }
-        tab_index
+    }
+
+    fn tab_index_by_sheet_id(&self) -> &[usize] {
+        &self.sheet_tab_index_by_id
     }
 
     fn sheet_id_by_key(&self, sheet_key: &str) -> Option<SheetId> {
@@ -584,10 +596,12 @@ impl Workbook {
             "sheet order must contain exactly the workbook's live sheets"
         );
         self.sheet_order = new_order;
+        self.rebuild_sheet_tab_index_by_id();
     }
 
     fn sheet_order_index(&self, sheet: SheetId) -> Option<usize> {
-        self.sheet_order.iter().position(|&id| id == sheet)
+        let idx = *self.sheet_tab_index_by_id.get(sheet)?;
+        (idx != usize::MAX).then_some(idx)
     }
 
     /// Reorder a worksheet id within the workbook's tab order.
@@ -610,6 +624,7 @@ impl Workbook {
         // `new_index` is expressed in terms of the final tab order; inserting at that index after
         // removal produces the expected result (Vec::insert supports `index == len`).
         self.sheet_order.insert(new_index, id);
+        self.rebuild_sheet_tab_index_by_id();
         true
     }
     /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
@@ -825,8 +840,8 @@ impl RecalcValueChangeCollector {
         let tab_index_by_sheet = workbook.tab_index_by_sheet_id();
         let mut after: Vec<(CellKey, Value)> = self.after.into_iter().collect();
         after.sort_by(|(a_key, _), (b_key, _)| {
-            sheet_tab_key(a_key.sheet, &tab_index_by_sheet)
-                .cmp(&sheet_tab_key(b_key.sheet, &tab_index_by_sheet))
+            sheet_tab_key(a_key.sheet, tab_index_by_sheet)
+                .cmp(&sheet_tab_key(b_key.sheet, tab_index_by_sheet))
                 .then_with(|| a_key.addr.row.cmp(&b_key.addr.row))
                 .then_with(|| a_key.addr.col.cmp(&b_key.addr.col))
         });
@@ -1927,6 +1942,7 @@ impl Engine {
             *name = None;
         }
         self.workbook.sheet_order.retain(|&id| id != deleted_sheet_id);
+        self.workbook.rebuild_sheet_tab_index_by_id();
 
         // Drop any sheet-scoped state for the deleted worksheet.
         if let Some(sheet_state) = self.workbook.sheets.get_mut(deleted_sheet_id) {
@@ -5873,7 +5889,6 @@ impl Engine {
 
             // Dynamic-reference formulas (e.g. INDIRECT/OFFSET) must be evaluated serially so we
             // can trace their runtime precedents and update the dependency graph deterministically.
-            let tab_index_by_sheet_id = self.workbook.tab_index_by_sheet_id();
             for (k, compiled) in &dynamic_tasks {
                 let ctx = crate::eval::EvalContext {
                     current_sheet: k.sheet,
@@ -5927,24 +5942,27 @@ impl Engine {
                     value_changes.as_deref_mut(),
                 );
 
-                let traced_precedents = if used_bytecode_trace {
-                    let guard = match bytecode_trace.lock() {
-                        Ok(g) => g,
-                        Err(poisoned) => poisoned.into_inner(),
-                    };
-                    guard.precedents(|sheet_id| {
-                        tab_index_by_sheet_id
-                            .get(sheet_id)
-                            .copied()
-                            .unwrap_or(usize::MAX)
-                    })
-                } else {
-                    trace.borrow().precedents(|sheet_id| {
-                        tab_index_by_sheet_id
-                            .get(sheet_id)
-                            .copied()
-                            .unwrap_or(usize::MAX)
-                    })
+                let traced_precedents = {
+                    let tab_index_by_sheet_id = self.workbook.tab_index_by_sheet_id();
+                    if used_bytecode_trace {
+                        let guard = match bytecode_trace.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        guard.precedents(|sheet_id| {
+                            tab_index_by_sheet_id
+                                .get(sheet_id)
+                                .copied()
+                                .unwrap_or(usize::MAX)
+                        })
+                    } else {
+                        trace.borrow().precedents(|sheet_id| {
+                            tab_index_by_sheet_id
+                                .get(sheet_id)
+                                .copied()
+                                .unwrap_or(usize::MAX)
+                        })
+                    }
                 };
                 let expr = compiled.ast();
 
@@ -9714,7 +9732,7 @@ fn precedent_node_cmp(
 
 fn sort_and_dedup_nodes(nodes: &mut Vec<PrecedentNode>, workbook: &Workbook) {
     let tab_index_by_sheet = workbook.tab_index_by_sheet_id();
-    nodes.sort_by(|a, b| precedent_node_cmp(a, b, &tab_index_by_sheet));
+    nodes.sort_by(|a, b| precedent_node_cmp(a, b, tab_index_by_sheet));
     nodes.dedup();
 }
 
@@ -10606,7 +10624,7 @@ struct Snapshot {
     sheet_order: Vec<SheetId>,
     /// Mapping from stable sheet id to its current tab-order index.
     ///
-    /// The vector length matches `sheet_names_by_id.len()`. Deleted/missing sheet ids have a value
+    /// The vector length matches `sheet_keys_by_id.len()`. Deleted/missing sheet ids have a value
     /// of `usize::MAX`.
     tab_index_by_sheet_id: Vec<usize>,
     sheet_dimensions: Vec<(u32, u32)>,
@@ -10657,7 +10675,7 @@ impl Snapshot {
         let sheet_display_names_by_id = workbook.sheet_display_names.clone();
         let sheet_key_to_id = workbook.sheet_key_to_id.clone();
         let sheet_display_name_to_id = workbook.sheet_display_name_to_id.clone();
-        let tab_index_by_sheet_id = workbook.tab_index_by_sheet_id();
+        let tab_index_by_sheet_id = workbook.tab_index_by_sheet_id().to_vec();
         let workbook_directory = workbook.workbook_directory.clone();
         let workbook_filename = workbook.workbook_filename.clone();
         let sheet_dimensions = workbook
