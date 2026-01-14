@@ -176,10 +176,20 @@ fn agile_ooxml_fixtures_pin_expected_encryption_info_parameters() {
                 block_size: 16,
             },
         ),
+        (
+            "agile-unicode-excel.xlsx",
+            ExpectedAgileParams {
+                spin_count: 100_000,
+                hash_algorithm: "SHA512",
+                cipher_algorithm: "AES",
+                cipher_chaining: "ChainingModeCBC",
+                key_bits: 256,
+                block_size: 16,
+            },
+        ),
     ];
 
     for (fixture, expected) in cases {
         assert_agile_fixture_params(fixture, expected);
     }
 }
-
