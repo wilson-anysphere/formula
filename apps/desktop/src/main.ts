@@ -194,7 +194,7 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
-import { computeFilterHiddenRows, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
+import { computeFilterHiddenRows, computeUniqueFilterValues, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import { AutoFilterDropdown, type TableViewRow } from "./table/index.js";
 import {
@@ -8477,13 +8477,12 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
     app.focus();
     return false;
   }
-  const absCol = range.startCol + colId;
 
-  // Build dialog rows for the active column only (enough to compute distinct values + selection state).
-  const dialogRows: TableViewRow[] = [];
-  for (let row = dataStartRow; row <= range.endRow; row += 1) {
-    dialogRows.push({ row, values: [getRibbonAutoFilterCellText(sheetId, { row, col: absCol })] });
-  }
+  const getValue = (row: number, col: number) => getRibbonAutoFilterCellText(sheetId, { row, col });
+  // Build the dialog list from distinct values only. Avoid allocating a row entry per data row,
+  // which can be expensive for large selections.
+  const uniqueValues = computeUniqueFilterValues({ range, headerRows, colId, getValue });
+  const dialogRows: TableViewRow[] = uniqueValues.map((value, idx) => ({ row: idx, values: [value] }));
 
   const existing = ribbonAutoFilterStore.get(sheetId, rangeA1);
   const initialSelected = existing?.filterColumns.find((c) => c.colId === colId)?.values ?? null;
@@ -8495,7 +8494,6 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
   }
 
   const next = ribbonAutoFilterStore.setColumn(sheetId, rangeA1, { headerRows, colId, values: selected });
-  const getValue = (row: number, col: number) => getRibbonAutoFilterCellText(sheetId, { row, col });
   const hiddenRows = computeFilterHiddenRows({ range, headerRows: next.headerRows, filterColumns: next.filterColumns, getValue });
 
   // Clear prior filter-hidden flags in the target range before applying the new filter.

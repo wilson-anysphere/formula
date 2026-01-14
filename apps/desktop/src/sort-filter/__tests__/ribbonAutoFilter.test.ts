@@ -47,6 +47,26 @@ describe("Ribbon AutoFilter row computation", () => {
     ).toEqual(["x", "y"]);
   });
 
+  it("sorts blank values last (Excel-like)", () => {
+    const values = [
+      ["Header"],
+      [""],
+      ["b"],
+      ["a"],
+      [""],
+    ];
+    const getValue = (row: number, col: number) => values[row]?.[col] ?? "";
+
+    expect(
+      computeUniqueFilterValues({
+        range: { startRow: 0, endRow: 4, startCol: 0, endCol: 0 },
+        headerRows: 1,
+        colId: 0,
+        getValue,
+      }),
+    ).toEqual(["a", "b", ""]);
+  });
+
   it("hides rows that do not match selected values", () => {
     const values = [
       ["Header"],
@@ -108,4 +128,3 @@ describe("Ribbon AutoFilter row computation", () => {
     ).toEqual([2, 3]);
   });
 });
-
