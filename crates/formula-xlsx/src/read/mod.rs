@@ -245,8 +245,13 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     // not fail workbook load.
     let person_part_names: Vec<String> = archive
         .file_names()
-        .map(|name| name.strip_prefix('/').unwrap_or(name).to_string())
-        .filter(|name| name.starts_with("xl/persons/") && name.ends_with(".xml"))
+        .filter_map(|name| {
+            let name = name.strip_prefix('/').unwrap_or(name);
+            // Be tolerant to case and path separators to match `open_zip_part`.
+            let normalized = name.replace('\\', "/").to_ascii_lowercase();
+            (normalized.starts_with("xl/persons/") && normalized.ends_with(".xml"))
+                .then_some(normalized)
+        })
         .collect();
     let persons = crate::comments::import::collect_persons(
         WORKBOOK_PART,
@@ -958,14 +963,23 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     // not fail workbook load.
     let person_part_names: Vec<String> = parts
         .keys()
-        .filter(|name| name.starts_with("xl/persons/") && name.ends_with(".xml"))
-        .cloned()
+        .filter_map(|name| {
+            // Be tolerant to case and path separators so we still discover persons parts in
+            // packages that violate the canonical `xl/persons/*.xml` casing.
+            let normalized = name
+                .strip_prefix('/')
+                .unwrap_or(name)
+                .replace('\\', "/")
+                .to_ascii_lowercase();
+            (normalized.starts_with("xl/persons/") && normalized.ends_with(".xml"))
+                .then_some(normalized)
+        })
         .collect();
     let persons = crate::comments::import::collect_persons(
         WORKBOOK_PART,
         workbook_rels,
         person_part_names,
-        |target| parts.get(target).map(|bytes| Cow::Borrowed(bytes.as_slice())),
+        |target| part_bytes_tolerant(&parts, target).map(Cow::Borrowed),
     );
 
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
@@ -1077,7 +1091,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
                 &worksheet_part,
                 rels_xml_bytes,
                 &persons,
-                |target| parts.get(target).map(|bytes| Cow::Borrowed(bytes.as_slice())),
+                |target| part_bytes_tolerant(&parts, target).map(Cow::Borrowed),
             );
 
             ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).map_err(|err| match err {
