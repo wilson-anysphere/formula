@@ -138,3 +138,17 @@ test("engine formulaRewrites can target sheets by display name (not stable id)",
   // Defensive: ensure we didn't accidentally create a new sheet with id "Budget".
   assert.equal(doc.model.sheets.has("Budget"), false);
 });
+
+test("insertRows throws when canEditCell blocks an affected cell (atomic structural edit)", () => {
+  const doc = new DocumentController({
+    canEditCell: (cell) => !(cell.sheetId === "Sheet1" && cell.row === 1 && cell.col === 0), // block A2
+  });
+
+  doc.setCellValue("Sheet1", "A1", "moved");
+
+  assert.throws(() => doc.insertRows("Sheet1", 0, 1, { label: "Insert Rows" }), /permission/i);
+
+  // Ensure we did not partially apply the shift.
+  assert.equal(doc.getCell("Sheet1", "A1").value, "moved");
+  assert.equal(doc.getCell("Sheet1", "A2").value, null);
+});

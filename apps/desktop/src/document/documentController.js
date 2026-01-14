@@ -4818,6 +4818,19 @@ export class DocumentController {
       });
     }
 
+    // Structural row/col edits must be applied atomically. Since `#applyUserWorkbookEdits`
+    // filters cell deltas individually via `canEditCell`, reject the entire operation
+    // up front when any affected cell is not editable.
+    if (typeof this.canEditCell === "function") {
+      for (const delta of cellDeltas) {
+        if (!this.canEditCell({ sheetId: delta.sheetId, row: delta.row, col: delta.col })) {
+          throw new Error(
+            `Cannot ${mode === "insert" ? "insert" : "delete"} ${axis === "row" ? "rows" : "columns"} because you don't have permission to edit one or more affected cells.`,
+          );
+        }
+      }
+    }
+
     // Sheet view delta.
     if (!sheetViewStateEquals(beforeView, normalizedView)) {
       sheetViewDeltas.push({ sheetId: id, before: beforeView, after: normalizedView });
