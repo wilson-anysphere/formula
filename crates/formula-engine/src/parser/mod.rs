@@ -1961,13 +1961,13 @@ impl<'a> Lexer<'a> {
         let sign = match self.peek_char() {
             Some('+') => {
                 self.bump();
-                1i32
+                1i64
             }
             Some('-') => {
                 self.bump();
-                -1i32
+                -1i64
             }
-            _ => 1i32,
+            _ => 1i64,
         };
         let digits = self.take_while(is_digit);
         if digits.is_empty() {
@@ -1978,8 +1978,14 @@ impl<'a> Lexer<'a> {
         }
         self.bump(); // ']'
 
-        let mag: i32 = digits.parse().ok()?;
-        Some(sign.saturating_mul(mag))
+        // Offsets are stored as i32s in the AST/IR. Parse via i64 so we can accept the full i32
+        // range, including `-2147483648` (which requires parsing a magnitude of `2147483648`).
+        let mag: i64 = digits.parse().ok()?;
+        let value = sign.checked_mul(mag)?;
+        if value < i64::from(i32::MIN) || value > i64::from(i32::MAX) {
+            return None;
+        }
+        Some(value as i32)
     }
 }
 

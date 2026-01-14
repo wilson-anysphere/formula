@@ -1,5 +1,5 @@
 use formula_engine::{
-    parse_formula, CellAddr, Expr, NameRef, ParseOptions, ReferenceStyle, SerializeOptions,
+    parse_formula, CellAddr, Coord, Expr, NameRef, ParseOptions, ReferenceStyle, SerializeOptions,
 };
 
 fn roundtrip(formula: &str, opts: ParseOptions, ser: SerializeOptions) {
@@ -123,4 +123,21 @@ fn r1c1_does_not_mislex_function_calls_starting_with_rc_prefix() {
     opts.reference_style = ReferenceStyle::R1C1;
     // Unknown functions are legal in the syntax; they should still parse.
     parse_formula("=RCAR(1)", opts).unwrap();
+}
+
+#[test]
+fn r1c1_parses_i32_min_offsets() {
+    let mut opts = ParseOptions::default();
+    opts.reference_style = ReferenceStyle::R1C1;
+    let ast = parse_formula("=R[-2147483648]C", opts).unwrap();
+
+    let Expr::CellRef(cell_ref) = &ast.expr else {
+        panic!("expected cell ref");
+    };
+    assert_eq!(cell_ref.row, Coord::Offset(i32::MIN));
+    assert_eq!(cell_ref.col, Coord::Offset(0));
+
+    let mut ser = SerializeOptions::default();
+    ser.reference_style = ReferenceStyle::R1C1;
+    assert_eq!(ast.to_string(ser).unwrap(), "=R[-2147483648]C");
 }
