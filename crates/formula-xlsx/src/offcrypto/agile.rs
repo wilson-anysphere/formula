@@ -4,13 +4,13 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use digest::Digest as _;
 
+use super::encryption_info::decode_encryption_info_xml_text;
 use crate::offcrypto::{
     decode_base64_field_limited, decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key,
     derive_segment_iv, extract_encryption_info_xml, hash_password, AesCbcDecryptError, HashAlgorithm,
     OffCryptoError, ParseOptions, Result, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK,
     VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK, AES_BLOCK_SIZE,
 };
-use super::encryption_info::decode_encryption_info_xml_text;
 
 const OOXML_PASSWORD_KEY_ENCRYPTOR_URI: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
@@ -81,20 +81,22 @@ pub fn parse_agile_encrypted_key(xml: &[u8], opts: &DecryptOptions) -> Result<Ag
             .unwrap_or(first)
     };
 
-    let spin_str = node.attribute("spinCount").ok_or_else(|| {
-        OffCryptoError::MissingRequiredAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "spinCount".to_string(),
-        }
-    })?;
+    let spin_str =
+        node.attribute("spinCount")
+            .ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "spinCount".to_string(),
+            })?;
 
-    let spin_count = spin_str.trim().parse::<u32>().map_err(|e| {
-        OffCryptoError::InvalidAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "spinCount".to_string(),
-            reason: format!("expected unsigned 32-bit integer: {e}"),
-        }
-    })?;
+    let spin_count =
+        spin_str
+            .trim()
+            .parse::<u32>()
+            .map_err(|e| OffCryptoError::InvalidAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "spinCount".to_string(),
+                reason: format!("expected unsigned 32-bit integer: {e}"),
+            })?;
 
     if spin_count > opts.max_spin_count {
         return Err(OffCryptoError::SpinCountTooLarge {
@@ -166,19 +168,22 @@ fn parse_required_attr<'a>(
     node: roxmltree::Node<'a, 'a>,
     attr: &str,
 ) -> Result<&'a str> {
-    node.attribute(attr).ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
-        element: element.to_string(),
-        attr: attr.to_string(),
-    })
+    node.attribute(attr)
+        .ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
+            element: element.to_string(),
+            attr: attr.to_string(),
+        })
 }
 
 fn parse_u32_attr(element: &str, node: roxmltree::Node<'_, '_>, attr: &str) -> Result<u32> {
     let raw = parse_required_attr(element, node, attr)?;
-    raw.trim().parse::<u32>().map_err(|e| OffCryptoError::InvalidAttribute {
-        element: element.to_string(),
-        attr: attr.to_string(),
-        reason: format!("expected u32, got {raw:?}: {e}"),
-    })
+    raw.trim()
+        .parse::<u32>()
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: element.to_string(),
+            attr: attr.to_string(),
+            reason: format!("expected u32, got {raw:?}: {e}"),
+        })
 }
 
 fn decode_b64_attr(
@@ -246,7 +251,10 @@ fn validate_aes_cbc_params(
 pub fn parse_agile_encryption_info_stream(
     encryption_info_stream: &[u8],
 ) -> Result<AgileEncryptionInfo> {
-    parse_agile_encryption_info_stream_with_options(encryption_info_stream, &ParseOptions::default())
+    parse_agile_encryption_info_stream_with_options(
+        encryption_info_stream,
+        &ParseOptions::default(),
+    )
 }
 
 /// Parse an Agile Encryption `EncryptionInfo` stream with explicit parsing limits.
@@ -277,10 +285,10 @@ pub fn parse_agile_encryption_info_stream_with_options(
             element: "keyData".to_string(),
         })?;
 
-    let key_data_cipher_algorithm = parse_required_attr("keyData", key_data_node, "cipherAlgorithm")?
-        .to_string();
-    let key_data_cipher_chaining = parse_required_attr("keyData", key_data_node, "cipherChaining")?
-        .to_string();
+    let key_data_cipher_algorithm =
+        parse_required_attr("keyData", key_data_node, "cipherAlgorithm")?.to_string();
+    let key_data_cipher_chaining =
+        parse_required_attr("keyData", key_data_node, "cipherChaining")?.to_string();
     let key_data_key_bits = parse_u32_attr("keyData", key_data_node, "keyBits")?;
     let key_data_block_size = parse_u32_attr("keyData", key_data_node, "blockSize")?;
     validate_aes_cbc_params(
@@ -327,7 +335,12 @@ pub fn parse_agile_encryption_info_stream_with_options(
         .find(|n| n.is_element() && n.tag_name().name() == "dataIntegrity")
         .map(|node| -> Result<AgileDataIntegrity> {
             Ok(AgileDataIntegrity {
-                encrypted_hmac_key: decode_b64_attr("dataIntegrity", node, "encryptedHmacKey", opts)?,
+                encrypted_hmac_key: decode_b64_attr(
+                    "dataIntegrity",
+                    node,
+                    "encryptedHmacKey",
+                    opts,
+                )?,
                 encrypted_hmac_value: decode_b64_attr(
                     "dataIntegrity",
                     node,
@@ -355,9 +368,11 @@ pub fn parse_agile_encryption_info_stream_with_options(
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "keyEncryptor")
     {
-        let uri = key_encryptor.attribute("uri").ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
-            element: "keyEncryptor".to_string(),
-            attr: "uri".to_string(),
+        let uri = key_encryptor.attribute("uri").ok_or_else(|| {
+            OffCryptoError::MissingRequiredAttribute {
+                element: "keyEncryptor".to_string(),
+                attr: "uri".to_string(),
+            }
         })?;
 
         if !available_uris.iter().any(|u| u == uri) {
@@ -454,7 +469,11 @@ pub fn parse_agile_encryption_info_stream_with_options(
     let password_key_encryptor = AgilePasswordKeyEncryptor {
         salt_value: key_encryptor_salt_value,
         spin_count,
-        hash_algorithm: parse_hash_algorithm_attr("encryptedKey", encrypted_key_node, "hashAlgorithm")?,
+        hash_algorithm: parse_hash_algorithm_attr(
+            "encryptedKey",
+            encrypted_key_node,
+            "hashAlgorithm",
+        )?,
         cipher_algorithm: key_encryptor_cipher_algorithm,
         cipher_chaining: key_encryptor_cipher_chaining,
         key_bits: key_encryptor_key_bits,
@@ -472,7 +491,12 @@ pub fn parse_agile_encryption_info_stream_with_options(
             "encryptedVerifierHashValue",
             opts,
         )?,
-        encrypted_key_value: decode_b64_attr("encryptedKey", encrypted_key_node, "encryptedKeyValue", opts)?,
+        encrypted_key_value: decode_b64_attr(
+            "encryptedKey",
+            encrypted_key_node,
+            "encryptedKeyValue",
+            opts,
+        )?,
     };
 
     let mut warnings = Vec::new();
@@ -524,17 +548,24 @@ fn decrypt_key_encryptor_blob(
     let key_len = (key_encryptor.key_bits / 8) as usize;
     let iv_len = key_encryptor.block_size as usize;
 
-    let key =
-        derive_key(password_hash, block_key, key_len, key_encryptor.hash_algorithm).map_err(|e| match e {
-            crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
-                OffCryptoError::UnsupportedHashAlgorithm { hash: name }
-            }
-            crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+    let key = derive_key(
+        password_hash,
+        block_key,
+        key_len,
+        key_encryptor.hash_algorithm,
+    )
+    .map_err(|e| match e {
+        crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+            OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+        }
+        crate::offcrypto::CryptoError::InvalidParameter(reason) => {
+            OffCryptoError::InvalidAttribute {
                 element: "encryptedKey".to_string(),
                 attr: "keyBits".to_string(),
                 reason: reason.to_string(),
-            },
-        })?;
+            }
+        }
+    })?;
     // MS-OFFCRYPTO: for password key-encryptor fields (`p:encryptedKey`), the AES-CBC IV is the
     // `saltValue` itself (truncated to `blockSize`). The `block_key` is used only for key derivation.
     let iv = key_encryptor
@@ -581,7 +612,10 @@ fn validate_ciphertext_block_aligned(field: &'static str, ciphertext: &[u8]) -> 
 }
 
 /// Decrypt the password key-encryptor values and validate the password via verifier hashes.
-pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<AgileDecryptedKeys> {
+pub fn decrypt_agile_keys(
+    info: &AgileEncryptionInfo,
+    password: &str,
+) -> Result<AgileDecryptedKeys> {
     let key_encryptor = &info.password_key_encryptor;
 
     let password_hash = hash_password(
@@ -594,11 +628,13 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
         crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
             OffCryptoError::UnsupportedHashAlgorithm { hash: name }
         }
-        crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
-            element: "encryptedKey".to_string(),
-            attr: "saltValue".to_string(),
-            reason: reason.to_string(),
-        },
+        crate::offcrypto::CryptoError::InvalidParameter(reason) => {
+            OffCryptoError::InvalidAttribute {
+                element: "encryptedKey".to_string(),
+                attr: "saltValue".to_string(),
+                reason: reason.to_string(),
+            }
+        }
     })?;
 
     // Decrypt verifierHashInput and verifierHashValue for password verification.
@@ -656,38 +692,57 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
         Some(di) => {
             // MS-OFFCRYPTO: `dataIntegrity` blobs are encrypted using the *package key*, and IVs are
             // derived from `keyData/@saltValue` and fixed block keys.
-            validate_ciphertext_block_aligned("dataIntegrity.encryptedHmacKey", &di.encrypted_hmac_key)?;
-            validate_ciphertext_block_aligned("dataIntegrity.encryptedHmacValue", &di.encrypted_hmac_value)?;
+            validate_ciphertext_block_aligned(
+                "dataIntegrity.encryptedHmacKey",
+                &di.encrypted_hmac_key,
+            )?;
+            validate_ciphertext_block_aligned(
+                "dataIntegrity.encryptedHmacValue",
+                &di.encrypted_hmac_value,
+            )?;
 
             let key_data = &info.key_data;
             let iv_len = key_data.block_size as usize;
 
-            let iv_key = derive_iv(&key_data.salt_value, &HMAC_KEY_BLOCK, iv_len, key_data.hash_algorithm)
-                .map_err(|e| match e {
-                    crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
-                        OffCryptoError::UnsupportedHashAlgorithm { hash: name }
-                    }
-                    crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+            let iv_key = derive_iv(
+                &key_data.salt_value,
+                &HMAC_KEY_BLOCK,
+                iv_len,
+                key_data.hash_algorithm,
+            )
+            .map_err(|e| match e {
+                crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+                    OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+                }
+                crate::offcrypto::CryptoError::InvalidParameter(reason) => {
+                    OffCryptoError::InvalidAttribute {
                         element: "keyData".to_string(),
                         attr: "saltValue".to_string(),
                         reason: reason.to_string(),
-                    },
-                })?;
+                    }
+                }
+            })?;
             let mut raw_key = di.encrypted_hmac_key.clone();
             decrypt_aes_cbc_no_padding_in_place(&package_key, &iv_key, &mut raw_key)?;
 
-            let iv_val =
-                derive_iv(&key_data.salt_value, &HMAC_VALUE_BLOCK, iv_len, key_data.hash_algorithm)
-                    .map_err(|e| match e {
-                        crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
-                            OffCryptoError::UnsupportedHashAlgorithm { hash: name }
-                        }
-                        crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
-                            element: "keyData".to_string(),
-                            attr: "saltValue".to_string(),
-                            reason: reason.to_string(),
-                        },
-                    })?;
+            let iv_val = derive_iv(
+                &key_data.salt_value,
+                &HMAC_VALUE_BLOCK,
+                iv_len,
+                key_data.hash_algorithm,
+            )
+            .map_err(|e| match e {
+                crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+                    OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+                }
+                crate::offcrypto::CryptoError::InvalidParameter(reason) => {
+                    OffCryptoError::InvalidAttribute {
+                        element: "keyData".to_string(),
+                        attr: "saltValue".to_string(),
+                        reason: reason.to_string(),
+                    }
+                }
+            })?;
             let mut raw_val = di.encrypted_hmac_value.clone();
             decrypt_aes_cbc_no_padding_in_place(&package_key, &iv_val, &mut raw_val)?;
             let hmac_len = info.key_data.hash_size as usize;
@@ -783,13 +838,14 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
             ),
         })?;
 
-    let declared_len: usize = declared_len_u64
-        .try_into()
-        .map_err(|_| OffCryptoError::InvalidAttribute {
-            element: "EncryptedPackage".to_string(),
-            attr: "originalSize".to_string(),
-            reason: format!("orig_size {declared_len_u64} does not fit into usize"),
-        })?;
+    let declared_len: usize =
+        declared_len_u64
+            .try_into()
+            .map_err(|_| OffCryptoError::InvalidAttribute {
+                element: "EncryptedPackage".to_string(),
+                attr: "originalSize".to_string(),
+                reason: format!("orig_size {declared_len_u64} does not fit into usize"),
+            })?;
 
     if (ciphertext.len() as u64) < expected_min_ciphertext_len {
         return Err(OffCryptoError::DecryptedLengthShorterThanHeader {
@@ -818,21 +874,27 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
             key_data.hash_algorithm,
         )?;
         let mut decrypted = ciphertext[offset..offset + seg_len].to_vec();
-        decrypt_aes_cbc_no_padding_in_place(package_key, &iv, &mut decrypted).map_err(|err| match err {
-            AesCbcDecryptError::UnsupportedKeyLength(key_len) => OffCryptoError::InvalidAttribute {
-                element: "keyData".to_string(),
-                attr: "keyBits".to_string(),
-                reason: format!("derived key length {key_len} is not a supported AES key size"),
-            },
-            AesCbcDecryptError::InvalidIvLength(iv_len) => OffCryptoError::InvalidAttribute {
-                element: "keyData".to_string(),
-                attr: "blockSize".to_string(),
-                reason: format!("derived IV length {iv_len} does not match AES block size"),
-            },
-            AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
-                OffCryptoError::CiphertextNotBlockAligned {
-                    field: "EncryptedPackage",
-                    len: ciphertext_len,
+        decrypt_aes_cbc_no_padding_in_place(package_key, &iv, &mut decrypted).map_err(|err| {
+            match err {
+                AesCbcDecryptError::UnsupportedKeyLength(key_len) => {
+                    OffCryptoError::InvalidAttribute {
+                        element: "keyData".to_string(),
+                        attr: "keyBits".to_string(),
+                        reason: format!(
+                            "derived key length {key_len} is not a supported AES key size"
+                        ),
+                    }
+                }
+                AesCbcDecryptError::InvalidIvLength(iv_len) => OffCryptoError::InvalidAttribute {
+                    element: "keyData".to_string(),
+                    attr: "blockSize".to_string(),
+                    reason: format!("derived IV length {iv_len} does not match AES block size"),
+                },
+                AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
+                    OffCryptoError::CiphertextNotBlockAligned {
+                        field: "EncryptedPackage",
+                        len: ciphertext_len,
+                    }
                 }
             }
         })?;
@@ -870,7 +932,11 @@ pub fn decrypt_agile_encrypted_package_stream(
 ) -> Result<Vec<u8>> {
     let info = parse_agile_encryption_info_stream(encryption_info_stream)?;
     let keys = decrypt_agile_keys(&info, password)?;
-    decrypt_agile_encrypted_package_stream_with_key(encrypted_package_stream, &info.key_data, &keys.package_key)
+    decrypt_agile_encrypted_package_stream_with_key(
+        encrypted_package_stream,
+        &info.key_data,
+        &keys.package_key,
+    )
 }
 
 #[cfg(test)]
@@ -1121,8 +1187,8 @@ mod tests {
         let doc = roxmltree::Document::parse(xml).expect("parse xml");
         let node = doc.root_element();
 
-        let decoded =
-            decode_b64_attr("keyData", node, "saltValue", &ParseOptions::default()).expect("decode");
+        let decoded = decode_b64_attr("keyData", node, "saltValue", &ParseOptions::default())
+            .expect("decode");
         assert_eq!(decoded, vec![1, 2, 3, 4]);
     }
 
@@ -1139,7 +1205,10 @@ mod tests {
         let stream = wrap_xml_in_encryption_info_stream(&xml);
 
         let err = parse_agile_encryption_info_stream(&stream).unwrap_err();
-        assert!(matches!(err, OffCryptoError::InvalidBlockSize { block_size: 32 }));
+        assert!(matches!(
+            err,
+            OffCryptoError::InvalidBlockSize { block_size: 32 }
+        ));
     }
 
     #[test]
@@ -1303,10 +1372,18 @@ mod tests {
         // correct primitive): encrypted using the *package key* and IVs derived from keyData salt.
         let hmac_key_plain = (100u8..120).collect::<Vec<_>>(); // 20 bytes
         let hmac_value_plain = (200u8..220).collect::<Vec<_>>(); // 20 bytes
-        let iv_hmac_key =
-            derive_iv(&key_data_salt, &HMAC_KEY_BLOCK, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
-        let encrypted_hmac_key =
-            encrypt_aes_cbc_no_padding(&package_key, &iv_hmac_key, &zero_pad(hmac_key_plain.clone()));
+        let iv_hmac_key = derive_iv(
+            &key_data_salt,
+            &HMAC_KEY_BLOCK,
+            AES_BLOCK_SIZE,
+            key_data_hash_alg,
+        )
+        .unwrap();
+        let encrypted_hmac_key = encrypt_aes_cbc_no_padding(
+            &package_key,
+            &iv_hmac_key,
+            &zero_pad(hmac_key_plain.clone()),
+        );
         let iv_hmac_val = derive_iv(
             &key_data_salt,
             &HMAC_VALUE_BLOCK,
@@ -1362,11 +1439,17 @@ mod tests {
         let keys = decrypt_agile_keys(&parsed, password).expect("decrypt keys");
         assert_eq!(keys.package_key, package_key);
         assert_eq!(keys.hmac_key.as_deref(), Some(hmac_key_plain.as_slice()));
-        assert_eq!(keys.hmac_value.as_deref(), Some(hmac_value_plain.as_slice()));
+        assert_eq!(
+            keys.hmac_value.as_deref(),
+            Some(hmac_value_plain.as_slice())
+        );
 
-        let decrypted =
-            decrypt_agile_encrypted_package_stream(&encryption_info_stream, &encrypted_package, password)
-                .expect("decrypt package");
+        let decrypted = decrypt_agile_encrypted_package_stream(
+            &encryption_info_stream,
+            &encrypted_package,
+            password,
+        )
+        .expect("decrypt package");
         assert_eq!(decrypted, plaintext);
 
         let err = decrypt_agile_encrypted_package_stream(
@@ -1509,9 +1592,9 @@ mod tests {
                                   hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
-                </keyEncryptor>
-              </keyEncryptors>
-            </encryption>"#
+                 </keyEncryptor>
+               </keyEncryptors>
+              </encryption>"#
         );
 
         let stream = build_encryption_info_stream(&xml);
@@ -1573,9 +1656,9 @@ mod tests {
                                   hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
-                </keyEncryptor>
-              </keyEncryptors>
-            </encryption>"#
+                 </keyEncryptor>
+               </keyEncryptors>
+              </encryption>"#
         );
 
         let stream = build_encryption_info_stream(&xml);

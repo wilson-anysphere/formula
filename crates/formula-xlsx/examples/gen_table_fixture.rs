@@ -1,6 +1,6 @@
 use formula_model::table::{AutoFilter, FilterColumn, Table, TableColumn, TableStyleInfo};
-use formula_model::{FilterCriterion, FilterJoin, FilterValue};
 use formula_model::{Cell, CellRef, CellValue, Range, Workbook};
+use formula_model::{FilterCriterion, FilterJoin, FilterValue};
 
 fn main() {
     let mut workbook = Workbook::new();
