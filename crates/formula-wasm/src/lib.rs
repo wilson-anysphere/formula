@@ -7005,6 +7005,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_formula_partial_normalizes_xlfn_prefix_in_fallback_contexts() {
+        // Unterminated string literals cause `formula-engine::parse_formula_partial` to fail
+        // during lexing, which means we fall back to `scan_fallback_function_context`. Ensure
+        // those contexts are still normalized to match the canonical function catalog.
+        let ctx = scan_fallback_function_context(r#"=_xlfn.SEQUENCE(1,"hello"#, ',').unwrap();
+        assert_eq!(ctx.arg_index, 1);
+        assert_eq!(normalize_function_context_name(&ctx.name, None), "SEQUENCE");
+
+        // Locale-aware canonicalization should run before stripping the `_xlfn.` prefix.
+        let localized =
+            scan_fallback_function_context(r#"=_xlfn.SEQUENZ(1;"hallo"#, ';').unwrap();
+        assert_eq!(localized.arg_index, 1);
+        let de_de = get_locale("de-DE").expect("expected de-DE locale to be registered");
+        assert_eq!(
+            normalize_function_context_name(&localized.name, Some(de_de)),
+            "SEQUENCE"
+        );
+    }
+
+    #[test]
     fn fallback_context_scanner_handles_unterminated_quoted_identifier() {
         let ctx = scan_fallback_function_context("=SUM('My Sheet", ',').unwrap();
         assert_eq!(ctx.name, "SUM");
