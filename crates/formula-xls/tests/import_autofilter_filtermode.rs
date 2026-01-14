@@ -147,6 +147,42 @@ fn filtermode_does_not_reclassify_user_hidden_rows_outside_final_autofilter_rang
 }
 
 #[test]
+fn filtermode_does_not_override_outline_hidden_rows() {
+    let bytes = xls_fixture_builder::build_autofilter_filtermode_outline_hidden_rows_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilteredOutlineHiddenRows")
+        .expect("FilteredOutlineHiddenRows missing");
+
+    let af = sheet
+        .auto_filter
+        .as_ref()
+        .expect("expected sheet.auto_filter to be set");
+    assert_eq!(af.range, Range::from_a1("A1:B4").expect("valid range"));
+
+    // Row 2 (1-based) is hidden by a collapsed outline group. FILTERMODE should not reclassify it
+    // as filter-hidden, and it should not be surfaced as user-hidden.
+    let entry = sheet.row_outline_entry(2);
+    assert!(
+        entry.hidden.outline,
+        "expected row 2 to be outline-hidden; entry={entry:?}; warnings={:?}",
+        result.warnings
+    );
+    assert!(
+        !entry.hidden.filter,
+        "expected row 2 to not be filter-hidden; entry={entry:?}; warnings={:?}",
+        result.warnings
+    );
+    assert!(
+        !entry.hidden.user,
+        "expected row 2 to not be user-hidden; entry={entry:?}; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn warns_on_filtermode_and_sets_autofilter_from_sheet_stream_when_filterdatabase_missing() {
     let bytes = xls_fixture_builder::build_autofilter_filtermode_no_filterdatabase_fixture_xls();
     let result = import_fixture(&bytes);

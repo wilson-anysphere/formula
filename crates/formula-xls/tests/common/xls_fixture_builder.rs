@@ -3198,6 +3198,24 @@ pub fn build_autofilter_filtermode_hidden_rows_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture like [`build_autofilter_filtermode_hidden_rows_fixture_xls`], but
+/// where the hidden ROW record corresponds to an outline-hidden row (collapsed group).
+///
+/// The importer should preserve outline-hidden rows and not reclassify them as filter-hidden rows.
+pub fn build_autofilter_filtermode_outline_hidden_rows_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_filtermode_outline_hidden_rows_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture like [`build_autofilter_filtermode_fixture_xls`], but without a
 /// `_xlnm._FilterDatabase` defined name.
 ///
@@ -3384,6 +3402,56 @@ fn build_autofilter_filtermode_hidden_rows_workbook_stream() -> Vec<u8> {
     // -- Sheet -------------------------------------------------------------------
     let sheet_offset = globals.len();
     let sheet = build_autofilter_filtermode_hidden_rows_sheet_stream(xf_cell);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter_filtermode_outline_hidden_rows_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    // One "cell" XF for NUMBER records.
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "FilteredOutlineHiddenRows");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`).
+    //
+    // Use a filter range that includes the outline group summary row so the outline-hidden detail
+    // rows lie within the filter data range.
+    let filter_db_rgce = ptg_area(0, 3, 0, 1); // $A$1:$B$4
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_autofilter_filtermode_outline_hidden_rows_sheet_stream(xf_cell);
 
     // Patch BoundSheet offset.
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
@@ -3746,6 +3814,44 @@ fn build_autofilter_filtermode_hidden_rows_sheet_stream(xf_cell: u16) -> Vec<u8>
     let autofilter = autofilter_record(0, false, &doper1, &doper2);
     push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
     // FILTERMODE indicates an active filter state (filtered rows).
+    push_record(&mut sheet, RECORD_FILTERMODE, &[]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_autofilter_filtermode_outline_hidden_rows_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 4) cols [0, 2) so A1:B4 exists.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&4u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // WSBOOL: keep Excel's default worksheet boolean options so outline summary flags decode.
+    push_record(&mut sheet, RECORD_WSBOOL, &0x0C01u16.to_le_bytes());
+
+    // Outline rows:
+    // - Rows 2-3 (1-based) are detail rows: outline level 1 and hidden (collapsed).
+    // - Row 4 (1-based) is the collapsed summary row (level 0, collapsed).
+    push_record(&mut sheet, RECORD_ROW, &row_record(1, true, 1, false));
+    push_record(&mut sheet, RECORD_ROW, &row_record(2, true, 1, false));
+    push_record(&mut sheet, RECORD_ROW, &row_record(3, false, 0, true));
+
+    // A1: NUMBER cell to seed calamine's range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // AUTOFILTERINFO: 2 columns (A..B).
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &2u16.to_le_bytes());
+    // FILTERMODE: present (no payload).
     push_record(&mut sheet, RECORD_FILTERMODE, &[]);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
