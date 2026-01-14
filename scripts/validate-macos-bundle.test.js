@@ -154,6 +154,44 @@ test(
 );
 
 test(
+  "validate-macos-bundle falls back to mainBinaryName when CFBundleExecutable is missing",
+  { skip: !hasBash },
+  () => {
+    assert.ok(expectedIdentifier, "tauri.conf.json identifier must be non-empty for this test");
+    assert.ok(expectedVersion, "tauri.conf.json version must be non-empty for this test");
+
+    const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const mountPoint = join(tmp, "mnt");
+    const devEntry = "/dev/disk99s1";
+    mkdirSync(mountPoint, { recursive: true });
+    writeFakeMacOsTooling(binDir, { mountPoint, devEntry });
+
+    const appRoot = join(mountPoint, "Formula.app", "Contents");
+    const macosDir = join(appRoot, "MacOS");
+    mkdirSync(macosDir, { recursive: true });
+    writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(macosDir, "formula-desktop"), 0o755);
+
+    const schemesXml = `        <string>formula</string>`;
+    const extsXml = (expectedFileExtensions.length > 0 ? expectedFileExtensions : ["xlsx", "xls", "csv"])
+      .map((ext) => `        <string>${ext}</string>`)
+      .join("\n");
+    const infoPlistContent = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleIdentifier</key>\n  <string>${expectedIdentifier}</string>\n  <key>CFBundleShortVersionString</key>\n  <string>${expectedVersion}</string>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n${schemesXml}\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n${extsXml}\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
+    writeFileSync(join(appRoot, "Info.plist"), infoPlistContent, { encoding: "utf8" });
+    writeComplianceResources(appRoot);
+
+    const dmgPath = join(tmp, "Formula.dmg");
+    writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
+
+    const proc = runValidator({ dmgPath, binDir });
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
   "validate-macos-bundle fails when the expected URL scheme is missing",
   { skip: !hasBash },
   () => {
