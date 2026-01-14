@@ -207,6 +207,14 @@ export interface DlpOptions {
   sheet_name_resolver?: SheetNameResolverLike | null;
 }
 
+/**
+ * Input type for `ContextManager` DLP settings.
+ *
+ * ContextManager requires a document id when DLP is enabled. We support both camelCase
+ * (`documentId`) and snake_case (`document_id`) to match a variety of hosts.
+ */
+export type DlpOptionsInput = DlpOptions & ({ documentId: string } | { document_id: string });
+
 export type WorkbookRagOptions = {
   vectorStore: WorkbookRagVectorStore;
   /**
@@ -306,7 +314,7 @@ export class ContextManager {
       maxChunksPerRegion?: number;
     };
     signal?: AbortSignal;
-    dlp?: DlpOptions;
+    dlp?: DlpOptionsInput;
   }): Promise<BuildContextResult>;
 
   clearSheetIndexCache(options?: { clearStore?: boolean; signal?: AbortSignal }): Promise<void>;
@@ -320,7 +328,7 @@ export class ContextManager {
     skipIndexingWithDlp?: boolean;
     includePromptContext?: boolean;
     signal?: AbortSignal;
-    dlp?: DlpOptions;
+    dlp?: DlpOptionsInput;
   }): Promise<BuildWorkbookContextResult>;
 
   buildWorkbookContextFromSpreadsheetApi(params: {
@@ -355,7 +363,7 @@ export class ContextManager {
     skipIndexingWithDlp: true;
     includePromptContext?: boolean;
     signal?: AbortSignal;
-    dlp: DlpOptions;
+    dlp: DlpOptionsInput;
   }): Promise<BuildWorkbookContextResult>;
 
   buildWorkbookContextFromSpreadsheetApi(params: {
@@ -372,6 +380,6 @@ export class ContextManager {
     skipIndexingWithDlp?: boolean;
     includePromptContext?: boolean;
     signal?: AbortSignal;
-    dlp?: DlpOptions;
+    dlp?: DlpOptionsInput;
   }): Promise<BuildWorkbookContextResult>;
 }

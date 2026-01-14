@@ -21,6 +21,7 @@ import {
   type ContextSheet,
   type DlpClassificationRecord,
   type DlpOptions,
+  type DlpOptionsInput,
   type RetrievedSheetChunk,
   type RetrievedWorkbookChunk,
   type WorkbookChunkMetadata,
@@ -57,6 +58,7 @@ type _WorkbookIndexStatsShape = Assert<
 type _ContextSheetNotAny = Assert<IsAny<ContextSheet> extends false ? true : false>;
 type _DlpClassificationRecordNotAny = Assert<IsAny<DlpClassificationRecord> extends false ? true : false>;
 type _DlpOptionsNotAny = Assert<IsAny<DlpOptions> extends false ? true : false>;
+type _DlpOptionsInputNotAny = Assert<IsAny<DlpOptionsInput> extends false ? true : false>;
 type _SheetNameResolverNotAny = Assert<IsAny<SheetNameResolverLike> extends false ? true : false>;
 type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true : false>;
 type _SpreadsheetWithCellsNotAny = Assert<IsAny<SpreadsheetApiWithNonEmptyCells> extends false ? true : false>;
