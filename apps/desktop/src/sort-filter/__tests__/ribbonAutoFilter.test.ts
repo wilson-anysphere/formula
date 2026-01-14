@@ -67,6 +67,25 @@ describe("Ribbon AutoFilter row computation", () => {
     ).toEqual(["a", "b", ""]);
   });
 
+  it("sorts numeric strings using numeric collation (Excel-like)", () => {
+    const values = [
+      ["Header"],
+      ["2"],
+      ["10"],
+      ["1"],
+    ];
+    const getValue = (row: number, col: number) => values[row]?.[col] ?? "";
+
+    expect(
+      computeUniqueFilterValues({
+        range: { startRow: 0, endRow: 3, startCol: 0, endCol: 0 },
+        headerRows: 1,
+        colId: 0,
+        getValue,
+      }),
+    ).toEqual(["1", "2", "10"]);
+  });
+
   it("hides rows that do not match selected values", () => {
     const values = [
       ["Header"],

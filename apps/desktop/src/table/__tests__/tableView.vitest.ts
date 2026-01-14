@@ -12,4 +12,14 @@ describe("distinctColumnValues", () => {
 
     expect(distinctColumnValues(rows, 0)).toEqual(["a", "b", ""]);
   });
+
+  it("sorts numeric strings using numeric collation (Excel-like)", () => {
+    const rows: TableViewRow[] = [
+      { row: 0, values: ["2"] },
+      { row: 1, values: ["10"] },
+      { row: 2, values: ["1"] },
+    ];
+
+    expect(distinctColumnValues(rows, 0)).toEqual(["1", "2", "10"]);
+  });
 });
