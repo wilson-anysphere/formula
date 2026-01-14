@@ -152,9 +152,9 @@ def _append_error_summary(message: str, *, hints: list[str] | None = None) -> No
 
 def _relpath(path: Path, repo_root: Path) -> str:
     try:
-        return str(path.relative_to(repo_root))
+        return path.relative_to(repo_root).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def _render_markdown(
