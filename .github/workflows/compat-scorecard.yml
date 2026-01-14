@@ -6,9 +6,16 @@ on:
       - corpus
       - Excel Compatibility (Oracle)
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Optional commit SHA to generate a scorecard for (defaults to current ref SHA)."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
-  group: compat-scorecard-${{ github.event.workflow_run.head_sha }}
+  group: compat-scorecard-${{ github.event.workflow_run.head_sha || github.event.inputs.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -29,10 +36,13 @@ jobs:
       - name: Find related workflow runs (by head_sha)
         id: runs
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          TARGET_SHA: ${{ github.event.inputs.sha }}
         with:
           script: |
-            const sha = context.payload.workflow_run.head_sha;
-            const triggeredName = context.payload.workflow_run.name;
+            const manualSha = (process.env.TARGET_SHA || "").trim();
+            const sha = manualSha || (context.payload.workflow_run ? context.payload.workflow_run.head_sha : context.sha);
+            const triggeredName = context.payload.workflow_run ? context.payload.workflow_run.name : "manual";
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
