@@ -1091,9 +1091,14 @@ export class FormulaBarView {
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
-  #lastHintRenderKey: string | null = null;
+  #lastHintIsFormulaEditing: boolean | null = null;
+  #lastHintSyntaxKey: string | null = null;
+  #lastHint: ReturnType<FormulaBarModel["functionHint"]> | null = null;
+  #lastHintArgPreviewKey: string | null = null;
+  #lastHintArgPreviewRhs: string | null = null;
+  #lastErrorExplanation: ReturnType<FormulaBarModel["errorExplanation"]> | null = null;
   // Use a non-null sentinel so the first render always syncs the error panel state.
-  #lastErrorExplanationKey: string | null = "__init__";
+  #lastErrorExplanationAddress: string | null = "__init__";
   #lastShowEditingActions: boolean | null = null;
   #lastErrorFixAiDisabled: boolean | null = null;
   #lastErrorShowRangesDisabled: boolean | null = null;
@@ -3158,19 +3163,28 @@ export class FormulaBarView {
     }
 
     const syntaxKey = syntaxError ? `${syntaxError.span?.start ?? ""}:${syntaxError.span?.end ?? ""}:${syntaxError.message}` : "";
-    const hintKey = hint
-      ? `${hint.parts.map((part) => `${part.kind}:${part.text}`).join("")}|${hint.signature.summary?.trim?.() ?? ""}`
-      : "";
-    const previewKey =
-      wantsArgPreview && argPreviewKey
-        ? `${argPreviewKey}|${this.#argumentPreviewPending ? "pending" : "ready"}|${
-            this.#argumentPreviewPending ? "" : formatArgumentPreviewValue(this.#argumentPreviewValue)
-          }`
-        : "nopreview";
-    const nextHintRenderKey = `${isFormulaEditing ? "1" : "0"}|${syntaxKey}|${hintKey}|${previewKey}`;
+    const nextHintIsFormulaEditing = isFormulaEditing;
+    const nextHint = hint;
+    const nextArgPreviewKey = wantsArgPreview ? argPreviewKey : null;
+    const nextArgPreviewRhs = wantsArgPreview
+      ? this.#argumentPreviewPending
+        ? "…"
+        : formatArgumentPreviewValue(this.#argumentPreviewValue)
+      : null;
 
-    if (nextHintRenderKey !== this.#lastHintRenderKey) {
-      this.#lastHintRenderKey = nextHintRenderKey;
+    const hintChanged =
+      nextHintIsFormulaEditing !== this.#lastHintIsFormulaEditing ||
+      syntaxKey !== this.#lastHintSyntaxKey ||
+      nextHint !== this.#lastHint ||
+      nextArgPreviewKey !== this.#lastHintArgPreviewKey ||
+      nextArgPreviewRhs !== this.#lastHintArgPreviewRhs;
+
+    if (hintChanged) {
+      this.#lastHintIsFormulaEditing = nextHintIsFormulaEditing;
+      this.#lastHintSyntaxKey = syntaxKey;
+      this.#lastHint = nextHint;
+      this.#lastHintArgPreviewKey = nextArgPreviewKey;
+      this.#lastHintArgPreviewRhs = nextArgPreviewRhs;
       this.#hintEl.replaceChildren();
 
       if (syntaxError) {
@@ -3225,7 +3239,7 @@ export class FormulaBarView {
           previewEl.dataset.argStart = String(activeArgForPreview.span.start);
           previewEl.dataset.argEnd = String(activeArgForPreview.span.end);
 
-          const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
+          const rhs = nextArgPreviewRhs ?? "";
           const displayArgText =
             this.#argumentPreviewDisplayKey === argPreviewKey
               ? (this.#argumentPreviewDisplayExpr ?? "")
@@ -3242,11 +3256,10 @@ export class FormulaBarView {
     }
 
     const explanation = this.model.errorExplanation();
-    const explanationKey = explanation
-      ? `${this.model.activeCell.address}|${explanation.code}|${explanation.title}|${explanation.description}|${explanation.suggestions.join("\n")}`
-      : null;
-    if (explanationKey !== this.#lastErrorExplanationKey) {
-      this.#lastErrorExplanationKey = explanationKey;
+    const address = this.model.activeCell.address;
+    if (explanation !== this.#lastErrorExplanation || address !== this.#lastErrorExplanationAddress) {
+      this.#lastErrorExplanation = explanation;
+      this.#lastErrorExplanationAddress = address;
       if (!explanation) {
         this.root.classList.toggle("formula-bar--has-error", false);
         this.#errorButton.hidden = true;
@@ -3256,7 +3269,6 @@ export class FormulaBarView {
         this.#errorSuggestionsEl.replaceChildren();
         this.#setErrorPanelOpen(false, { restoreFocus: false });
       } else {
-        const address = this.model.activeCell.address;
         this.root.classList.toggle("formula-bar--has-error", true);
         this.#errorButton.hidden = false;
         this.#errorButton.disabled = false;
