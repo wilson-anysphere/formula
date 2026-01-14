@@ -34,6 +34,7 @@ fn imports_shared_formula_bodies_that_reference_defined_names_via_ptgname() {
     }
 
     let result = import_fixture(&bytes);
+
     let sheet = result
         .workbook
         .sheet_by_name("SharedName")
@@ -45,3 +46,4 @@ fn imports_shared_formula_bodies_that_reference_defined_names_via_ptgname() {
     assert_eq!(b2, "MyName");
     assert_parseable_formula(b2);
 }
+

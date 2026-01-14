@@ -631,6 +631,25 @@ pub fn build_table_formula_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing array formulas (`ARRAY` + `PtgExp`) whose array `rgce`
+/// references an external workbook (`SUPBOOK`/`EXTERNSHEET`) and an external name (`PtgNameX`).
+///
+/// The fixture contains a single sheet named `ArrayExt` with two independent array-formula ranges:
+/// - `B1:B2`: `'[Book1.xlsx]ExtSheet'!$A$1+1` via `PtgRef3d`
+/// - `C1:C2`: `'[Book1.xlsx]ExtSheet'!ExtDefined+1` via `PtgNameX`
+pub fn build_array_formula_external_refs_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_array_formula_external_refs_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_table_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -694,7 +713,6 @@ fn build_table_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
-
 /// Build a BIFF8 `.xls` fixture like [`build_shared_formula_area3d_fixture_xls`], but using a
 /// `PtgArea3d` token whose endpoints have *different* relative flags.
 ///
@@ -9091,6 +9109,70 @@ fn build_shared_formula_external_refs_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_array_formula_external_refs_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - One internal sheet (`ArrayExt`)
+    // - SUPBOOK[0]: internal workbook marker
+    // - SUPBOOK[1]: external workbook `Book1.xlsx` with sheet `ExtSheet`
+    // - EXTERNNAME entries for `PtgNameX` references
+    // - EXTERNSHEET[0] pointing at SUPBOOK[1] / ExtSheet
+    // - Worksheet `ArrayExt` containing two array-formula ranges:
+    //   - B1:B2: `'[Book1.xlsx]ExtSheet'!$A$1+1` via `PtgRef3d`
+    //   - C1:C2: `'[Book1.xlsx]ExtSheet'!ExtDefined+1` via `PtgNameX`
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table (style XFs + one cell XF).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "ArrayExt");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // External reference tables.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(1)); // internal workbook marker
+    push_record(
+        &mut globals,
+        RECORD_SUPBOOK,
+        &supbook_external("Book1.xlsx", &["ExtSheet"]),
+    );
+    push_record(
+        &mut globals,
+        RECORD_EXTERNNAME,
+        &externname_record("ExtDefined"),
+    );
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record_with_supbook(&[(1, 0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_array_formula_external_refs_sheet_stream(xf_cell);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+
+    globals
+}
+
 fn build_defined_name_calamine_workbook_stream() -> Vec<u8> {
     build_defined_name_calamine_workbook_stream_with_sheet_name("Sheet1")
 }
@@ -11502,6 +11584,76 @@ fn build_array_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell(1, base_col, xf_cell, 0.0, &ptg_exp(base_row, base_col)),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_array_formula_external_refs_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 3) => A1:C2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: NUMBER record (ensures calamine surfaces a non-empty range).
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // Array formula group #1: B1:B2, formula `'[Book1.xlsx]ExtSheet'!$A$1+1` (PtgRef3d + 1).
+    let base_b_row = 0u16;
+    let base_b_col = 1u16; // B
+    let array_b_rgce = [ptg_ref3d(0, 0, 0), vec![0x1E, 0x01, 0x00], vec![0x03]].concat();
+
+    // B1 FORMULA: PtgExp -> base cell (B1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(base_b_row, base_b_col, xf_cell, 0.0, &ptg_exp(base_b_row, base_b_col)),
+    );
+    // ARRAY record stores the shared rgce.
+    push_record(
+        &mut sheet,
+        RECORD_ARRAY,
+        &array_record_refu(base_b_row, 1, base_b_col as u8, base_b_col as u8, &array_b_rgce),
+    );
+    // B2 FORMULA: PtgExp -> base cell (B1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, base_b_col, xf_cell, 0.0, &ptg_exp(base_b_row, base_b_col)),
+    );
+
+    // Array formula group #2: C1:C2, formula `'[Book1.xlsx]ExtSheet'!ExtDefined+1` (PtgNameX + 1).
+    let base_c_row = 0u16;
+    let base_c_col = 2u16; // C
+    let array_c_rgce = [ptg_namex(0, 1), vec![0x1E, 0x01, 0x00], vec![0x03]].concat();
+
+    // C1 FORMULA: PtgExp -> base cell (C1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(base_c_row, base_c_col, xf_cell, 0.0, &ptg_exp(base_c_row, base_c_col)),
+    );
+    push_record(
+        &mut sheet,
+        RECORD_ARRAY,
+        &array_record_refu(base_c_row, 1, base_c_col as u8, base_c_col as u8, &array_c_rgce),
+    );
+    // C2 FORMULA: PtgExp -> base cell (C1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, base_c_col, xf_cell, 0.0, &ptg_exp(base_c_row, base_c_col)),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
