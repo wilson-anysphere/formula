@@ -31,3 +31,19 @@ fn converts_datetime_string_to_naive_date() {
         NaiveDate::from_ymd_opt(2024, 1, 15)
     );
 }
+
+#[test]
+fn converts_compact_ymd_to_naive_date() {
+    assert_eq!(
+        pivot_cache_datetime_to_naive_date("20240115"),
+        NaiveDate::from_ymd_opt(2024, 1, 15)
+    );
+}
+
+#[test]
+fn converts_excel_serial_date_to_naive_date() {
+    assert_eq!(
+        pivot_cache_datetime_to_naive_date("1"),
+        NaiveDate::from_ymd_opt(1900, 1, 1)
+    );
+}

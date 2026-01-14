@@ -5,8 +5,8 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::Reader;
 
+#[cfg(test)]
 use chrono::NaiveDate;
-use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
 use formula_model::pivots::ScalarValue;
 
 use super::cache_records::pivot_cache_datetime_to_naive_date;
@@ -168,19 +168,6 @@ impl PivotCacheDefinition {
                     ScalarValue::Blank
                 } else if let Some(date) = pivot_cache_datetime_to_naive_date(trimmed) {
                     ScalarValue::Date(date)
-                } else if let Ok(serial) = trimmed.parse::<f64>() {
-                    let serial = serial.trunc() as i32;
-                    if let Ok(excel_date) = serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900) {
-                        NaiveDate::from_ymd_opt(
-                            excel_date.year,
-                            excel_date.month as u32,
-                            excel_date.day as u32,
-                        )
-                        .map(ScalarValue::Date)
-                        .unwrap_or_else(|| ScalarValue::Text(s.clone()))
-                    } else {
-                        ScalarValue::Text(s.clone())
-                    }
                 } else {
                     ScalarValue::Text(s.clone())
                 }

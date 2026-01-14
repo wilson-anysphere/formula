@@ -5,6 +5,8 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::Reader;
 
+use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
+
 use crate::{XlsxDocument, XlsxError};
 
 /// A typed value found in a `<r>` record inside `pivotCacheRecords*.xml`.
@@ -461,12 +463,49 @@ fn parse_bool(v: Option<String>) -> PivotCacheValue {
 /// Timelines typically operate on the date component.
 pub fn pivot_cache_datetime_to_naive_date(v: &str) -> Option<NaiveDate> {
     let v = v.trim();
-    let date_part = v.split(['T', ' ']).next()?;
-    let mut parts = date_part.split('-');
-    let year = parts.next()?.parse::<i32>().ok()?;
-    let month = parts.next()?.parse::<u32>().ok()?;
-    let day = parts.next()?.parse::<u32>().ok()?;
-    NaiveDate::from_ymd_opt(year, month, day)
+    if v.is_empty() {
+        return None;
+    }
+
+    // Common case: RFC3339/ISO8601 strings such as `2024-01-15T00:00:00Z`.
+    let date_part = v.split(['T', ' ']).next().unwrap_or(v);
+    if date_part.len() >= 10 {
+        let mut parts = date_part.split('-');
+        if let (Some(year), Some(month), Some(day)) = (parts.next(), parts.next(), parts.next()) {
+            if let (Ok(year), Ok(month), Ok(day)) =
+                (year.parse::<i32>(), month.parse::<u32>(), day.parse::<u32>())
+            {
+                if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
+                    return Some(date);
+                }
+            }
+        }
+    }
+
+    // Some producers emit `YYYYMMDD`-style compact dates.
+    if date_part.len() == 8 && date_part.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+        let year = date_part[..4].parse::<i32>().ok()?;
+        let month = date_part[4..6].parse::<u32>().ok()?;
+        let day = date_part[6..8].parse::<u32>().ok()?;
+        if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
+            return Some(date);
+        }
+    }
+
+    // Fallback: interpret numeric `d` values as Excel serial dates. Pivot caches typically
+    // store dates using the 1900 date system.
+    if let Ok(serial) = date_part.parse::<f64>() {
+        let serial = serial.trunc() as i32;
+        if let Ok(excel_date) = serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900) {
+            return NaiveDate::from_ymd_opt(
+                excel_date.year,
+                excel_date.month as u32,
+                excel_date.day as u32,
+            );
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
