@@ -19,6 +19,7 @@ pub mod ipc_origin;
 pub mod ipc_limits;
 pub mod macro_trust;
 pub mod macros;
+#[cfg(any(feature = "desktop", test))]
 pub mod network_limits;
 pub mod open_file;
 pub mod open_file_ipc;
@@ -29,6 +30,7 @@ pub mod persistence;
 #[cfg(any(feature = "desktop", test))]
 mod power_query_validation;
 pub mod python;
+#[cfg(any(feature = "desktop", test))]
 pub mod network_fetch;
 pub mod resource_limits;
 pub(crate) mod sheet_name;
