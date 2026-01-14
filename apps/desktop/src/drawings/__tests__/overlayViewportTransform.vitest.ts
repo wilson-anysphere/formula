@@ -49,6 +49,48 @@ const geom: GridGeometry = {
 };
 
 describe("DrawingOverlay viewport transforms", () => {
+  it("offsets absolute anchors by the A1 origin when geometry is root-space (includes headers)", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+    const geomWithOrigin: GridGeometry = {
+      cellOriginPx: ({ row, col }) => ({ x: 40 + col * 100, y: 22 + row * 20 }),
+      cellSizePx: () => ({ width: 100, height: 20 }),
+    };
+    const overlay = new DrawingOverlay(canvas, images, geomWithOrigin);
+
+    const objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+        },
+        zOrder: 0,
+      },
+      {
+        id: 2,
+        kind: { type: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: 0, yEmu: 0 },
+          size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+        },
+        zOrder: 1,
+      },
+    ];
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 200, height: 200, dpr: 1 };
+    await overlay.render(objects, viewport);
+
+    const strokeRects = calls.filter((call) => call.method === "strokeRect").map((call) => call.args);
+    expect(strokeRects).toEqual([
+      [40, 22, 10, 10], // oneCell A1
+      [40, 22, 10, 10], // absolute(0,0) aligns with A1
+    ]);
+  });
+
   it("pins frozen-pane anchored objects while scrollable objects subtract scroll", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
