@@ -198,3 +198,19 @@ pub const MAX_SHEET_FORMATTING_RUNS_PER_COL: usize = 4_096;
 /// The formatting snapshot is persisted into the workbook (and encrypted document store). This cap
 /// prevents a compromised WebView from writing arbitrarily large blobs to disk.
 pub const MAX_SHEET_FORMATTING_METADATA_BYTES: usize = 2 * 1024 * 1024; // 2 MiB
+
+/// Maximum size (in bytes) of a single string cell value accepted over IPC (`set_cell` /
+/// `set_range`).
+///
+/// Rationale: Even with range-level cell count limits, a compromised webview could send a single
+/// huge string and force the backend to allocate excessive memory while deserializing the command
+/// payload. Excel caps cell text at 32,767 characters; we enforce a conservative per-cell byte
+/// limit to bound allocations while still allowing large (but reasonable) inputs.
+pub const MAX_CELL_VALUE_STRING_BYTES: usize = 64 * 1024; // 64 KiB
+
+/// Maximum size (in bytes) of a single cell formula accepted over IPC (`set_cell` / `set_range`).
+///
+/// Rationale: The formula parser enforces Excel's 8,192-character limit, but without an IPC-level
+/// bound a compromised webview can still force the backend to deserialize an arbitrarily large
+/// string before we ever attempt to parse it.
+pub const MAX_CELL_FORMULA_BYTES: usize = 32 * 1024; // 32 KiB

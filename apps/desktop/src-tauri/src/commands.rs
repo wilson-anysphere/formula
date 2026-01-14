@@ -14,6 +14,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use crate::macro_trust::MacroTrustDecision;
+use crate::resource_limits::{MAX_CELL_FORMULA_BYTES, MAX_CELL_VALUE_STRING_BYTES};
 #[cfg(feature = "desktop")]
 use crate::storage::collab_encryption_keys::{
     CollabEncryptionKeyEntry, CollabEncryptionKeyListEntry, CollabEncryptionKeyStore,
@@ -644,10 +645,253 @@ fn workbook_theme_palette(workbook: &crate::file_io::Workbook) -> Option<Workboo
     })
 }
 
+/// A string wrapper used for IPC inputs that enforces a maximum byte length during deserialization.
+///
+/// This is defensive: a compromised webview could otherwise send arbitrarily large strings and
+/// force the backend to allocate excessive memory while deserializing the command payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitedString<const MAX_BYTES: usize>(String);
+
+impl<const MAX_BYTES: usize> LimitedString<MAX_BYTES> {
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> AsRef<str> for LimitedString<MAX_BYTES> {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> From<LimitedString<MAX_BYTES>> for String {
+    fn from(value: LimitedString<MAX_BYTES>) -> Self {
+        value.0
+    }
+}
+
+impl<const MAX_BYTES: usize> Serialize for LimitedString<MAX_BYTES> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedString<MAX_BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LimitedStringVisitor<const MAX_BYTES: usize>;
+
+        impl<const MAX_BYTES: usize> LimitedStringVisitor<MAX_BYTES> {
+            fn validate<E>(value: &str) -> Result<(), E>
+            where
+                E: de::Error,
+            {
+                if value.len() > MAX_BYTES {
+                    return Err(E::custom(format!(
+                        "string is too large (max {MAX_BYTES} bytes)"
+                    )));
+                }
+                Ok(())
+            }
+        }
+
+        impl<'de, const MAX_BYTES: usize> de::Visitor<'de> for LimitedStringVisitor<MAX_BYTES> {
+            type Value = LimitedString<MAX_BYTES>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a string (max {MAX_BYTES} bytes)")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(v)?;
+                Ok(LimitedString(v.to_owned()))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(v)?;
+                Ok(LimitedString(v.to_owned()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(&v)?;
+                Ok(LimitedString(v))
+            }
+        }
+
+        deserializer.deserialize_str(LimitedStringVisitor::<MAX_BYTES>)
+    }
+}
+
+/// IPC-only cell value type that only accepts scalar JSON values.
+///
+/// This rejects arrays/objects immediately during deserialization to avoid allocating or
+/// materializing deeply nested JSON structures.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LimitedCellValue {
+    Null,
+    Bool(bool),
+    Number(f64),
+    String(LimitedString<MAX_CELL_VALUE_STRING_BYTES>),
+}
+
+impl LimitedCellValue {
+    pub fn into_json(self) -> Option<JsonValue> {
+        match self {
+            LimitedCellValue::Null => None,
+            LimitedCellValue::Bool(b) => Some(JsonValue::Bool(b)),
+            LimitedCellValue::Number(n) => Some(JsonValue::from(n)),
+            LimitedCellValue::String(s) => Some(JsonValue::String(s.into_inner())),
+        }
+    }
+}
+
+impl Serialize for LimitedCellValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            LimitedCellValue::Null => serializer.serialize_unit(),
+            LimitedCellValue::Bool(v) => serializer.serialize_bool(*v),
+            LimitedCellValue::Number(v) => serializer.serialize_f64(*v),
+            LimitedCellValue::String(v) => serializer.serialize_str(v.as_ref()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LimitedCellValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct CellValueVisitor;
+
+        impl<'de> de::Visitor<'de> for CellValueVisitor {
+            type Value = LimitedCellValue;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a scalar JSON value (null, boolean, number, or string)")
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LimitedCellValue::Null)
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LimitedCellValue::Null)
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LimitedCellValue::Bool(v))
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LimitedCellValue::Number(v as f64))
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LimitedCellValue::Number(v as f64))
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LimitedCellValue::Number(v))
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() > MAX_CELL_VALUE_STRING_BYTES {
+                    return Err(E::custom(format!(
+                        "cell value string is too large (max {MAX_CELL_VALUE_STRING_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedCellValue::String(LimitedString(v.to_owned())))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() > MAX_CELL_VALUE_STRING_BYTES {
+                    return Err(E::custom(format!(
+                        "cell value string is too large (max {MAX_CELL_VALUE_STRING_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedCellValue::String(LimitedString(v.to_owned())))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() > MAX_CELL_VALUE_STRING_BYTES {
+                    return Err(E::custom(format!(
+                        "cell value string is too large (max {MAX_CELL_VALUE_STRING_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedCellValue::String(LimitedString(v)))
+            }
+
+            fn visit_seq<A>(self, _seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                Err(de::Error::custom(
+                    "cell value must be a scalar (null, boolean, number, or string), not an array",
+                ))
+            }
+
+            fn visit_map<A>(self, _map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                Err(de::Error::custom(
+                    "cell value must be a scalar (null, boolean, number, or string), not an object",
+                ))
+            }
+        }
+
+        deserializer.deserialize_any(CellValueVisitor)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RangeCellEdit {
-    pub value: Option<JsonValue>,
-    pub formula: Option<String>,
+    pub value: Option<LimitedCellValue>,
+    pub formula: Option<LimitedString<MAX_CELL_FORMULA_BYTES>>,
 }
 
 /// IPC-deserialized matrix of cell edits with size limits applied during deserialization.
@@ -2488,15 +2732,21 @@ pub async fn set_cell(
     sheet_id: String,
     row: usize,
     col: usize,
-    value: Option<JsonValue>,
-    formula: Option<String>,
+    value: Option<LimitedCellValue>,
+    formula: Option<LimitedString<MAX_CELL_FORMULA_BYTES>>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         let updates = state
-            .set_cell(&sheet_id, row, col, value, formula)
+            .set_cell(
+                &sheet_id,
+                row,
+                col,
+                value.and_then(LimitedCellValue::into_json),
+                formula.map(Into::into),
+            )
             .map_err(app_error)?;
         Ok::<_, String>(updates.into_iter().map(cell_update_from_state).collect())
     })
@@ -2954,7 +3204,12 @@ pub async fn set_range(
             .into_iter()
             .map(|row| {
                 row.into_iter()
-                    .map(|c| (c.value, c.formula))
+                    .map(|c| {
+                        (
+                            c.value.and_then(LimitedCellValue::into_json),
+                            c.formula.map(Into::into),
+                        )
+                    })
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
@@ -6322,6 +6577,74 @@ mod tests {
             serde_json::from_value(value).expect("expected limited matrix to deserialize");
         assert_eq!(parsed.0.len(), 2);
         assert_eq!(parsed.0[0].len(), 2);
+    }
+
+    #[test]
+    fn cell_edit_ipc_rejects_object_and_array_values() {
+        let err = serde_json::from_str::<RangeCellEdit>(r#"{"value":{"a":1}}"#)
+            .expect_err("expected object value to be rejected");
+        assert!(
+            err.to_string().contains("scalar") && err.to_string().contains("object"),
+            "unexpected error: {err}"
+        );
+
+        let err = serde_json::from_str::<RangeCellEdit>(r#"{"value":[1,2,3]}"#)
+            .expect_err("expected array value to be rejected");
+        assert!(
+            err.to_string().contains("scalar") && err.to_string().contains("array"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn cell_edit_ipc_rejects_oversized_cell_value_strings() {
+        let max = crate::resource_limits::MAX_CELL_VALUE_STRING_BYTES;
+        let oversized = "x".repeat(max + 1);
+        let json = format!(r#"{{"value":"{oversized}"}}"#);
+        let err =
+            serde_json::from_str::<RangeCellEdit>(&json).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "expected error message to mention limit: {err}"
+        );
+    }
+
+    #[test]
+    fn cell_edit_ipc_rejects_oversized_formula_strings() {
+        let max = crate::resource_limits::MAX_CELL_FORMULA_BYTES;
+        let oversized = "x".repeat(max + 1);
+        let json = format!(r#"{{"formula":"{oversized}"}}"#);
+        let err =
+            serde_json::from_str::<RangeCellEdit>(&json).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "expected error message to mention limit: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_cell_value_deserializes_scalar_values() {
+        let parsed: LimitedCellValue =
+            serde_json::from_str("null").expect("expected null to deserialize");
+        assert_eq!(parsed, LimitedCellValue::Null);
+
+        let parsed: LimitedCellValue =
+            serde_json::from_str("true").expect("expected bool to deserialize");
+        assert_eq!(parsed, LimitedCellValue::Bool(true));
+
+        let parsed: LimitedCellValue =
+            serde_json::from_str("123").expect("expected number to deserialize");
+        match parsed {
+            LimitedCellValue::Number(n) => assert_eq!(n, 123.0),
+            other => panic!("unexpected value: {other:?}"),
+        }
+
+        let parsed: LimitedCellValue =
+            serde_json::from_str(r#""hello""#).expect("expected string to deserialize");
+        match parsed {
+            LimitedCellValue::String(s) => assert_eq!(s.as_ref(), "hello"),
+            other => panic!("unexpected value: {other:?}"),
+        }
     }
 
     #[test]
