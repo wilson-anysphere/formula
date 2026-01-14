@@ -201,8 +201,9 @@ Internally, `DataModel` materializes relationship metadata (`RelationshipInfo`),
   Materialized only for in-memory fact tables. For columnar fact tables it stays `None` and the engine
   relies on backend primitives like `filter_eq` / `filter_in` instead.
 - `unmatched_fact_rows: Option<UnmatchedFactRows>` containing **from_table rows whose foreign key is
-  `BLANK` or does not exist in `to_index`** (used for the virtual blank member behavior when
-  `from_index` is not materialized). `UnmatchedFactRows` is stored either as:
+  `BLANK` or does not exist in `to_index`**. This cache is used to implement Tabular's virtual
+  blank/unknown member semantics efficiently, and is especially important when `from_index` is not
+  materialized (columnar fact tables). `UnmatchedFactRows` is stored either as:
   - `Sparse(Vec<usize>)` for small sets, or
   - `Dense { bits: Vec<u64>, len, count }` for large sets (bitset representation).
 
