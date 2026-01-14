@@ -108,6 +108,65 @@ pub fn decrypt_standard_encrypted_package_stream(
     let orig_size_usize = usize::try_from(orig_size)
         .map_err(|_| EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size })?;
 
+    // --- Guardrails for malicious `orig_size` ---
+    //
+    // `EncryptedPackage` stores the unencrypted package size (`orig_size`) separately from the
+    // ciphertext bytes. A corrupt/malicious size can otherwise:
+    // - overflow segment math like `ceil(orig_size / 4096)` or `8 + i*4096`
+    // - induce large allocations (OOM) in naive implementations
+    //
+    // We keep these checks conservative to avoid rejecting valid-but-unusual files.
+
+    // Compute number of 4096-byte segments implied by `orig_size`, but do it in a way that cannot
+    // overflow (avoid `(orig_size + 4095) / 4096`).
+    let n_segments: u64 = if orig_size == 0 {
+        0
+    } else {
+        let seg = ENCRYPTED_PACKAGE_SEGMENT_LEN as u64;
+        (orig_size / seg) + u64::from(orig_size % seg != 0)
+    };
+
+    // Prevent overflow in ciphertext offset calculations like `8 + i*4096` by validating that the
+    // final segment start is representable (and plausible for the provided ciphertext length).
+    //
+    // We only need this for malformed inputs; for well-formed packages, `orig_size` and the
+    // ciphertext length agree.
+    if n_segments > 0 {
+        let seg_len_u64 = ENCRYPTED_PACKAGE_SEGMENT_LEN as u64;
+        let last_seg_start = n_segments
+            .saturating_sub(1)
+            .checked_mul(seg_len_u64)
+            .ok_or(EncryptedPackageError::ImplausibleOrigSize {
+                orig_size,
+                ciphertext_len: ciphertext.len(),
+            })?;
+
+        // Require at least one AES block of ciphertext for the final segment.
+        let min_ciphertext_needed = last_seg_start.checked_add(AES_BLOCK_LEN as u64).ok_or(
+            EncryptedPackageError::ImplausibleOrigSize {
+                orig_size,
+                ciphertext_len: ciphertext.len(),
+            },
+        )?;
+        if (ciphertext.len() as u64) < min_ciphertext_needed {
+            return Err(EncryptedPackageError::ImplausibleOrigSize {
+                orig_size,
+                ciphertext_len: ciphertext.len(),
+            });
+        }
+    }
+
+    // If ciphertext length is known (buffer-based decrypt), reject clearly implausible `orig_size`
+    // values. Allow up to one extra segment of slop to account for producer differences (e.g.
+    // padding to a 4096-byte boundary, OLE sector slack, etc).
+    let plausible_max = (ciphertext.len() as u64).saturating_add(ENCRYPTED_PACKAGE_SEGMENT_LEN as u64);
+    if orig_size > plausible_max {
+        return Err(EncryptedPackageError::ImplausibleOrigSize {
+            orig_size,
+            ciphertext_len: ciphertext.len(),
+        });
+    }
+
     // Guardrail: `EncryptedPackage` carries the original plaintext size separately. Treat inputs as
     // malformed when the ciphertext is too short to possibly contain `orig_size` bytes (accounting
     // for AES block padding).
@@ -141,15 +200,20 @@ pub fn decrypt_standard_encrypted_package_stream(
     // Using `orig_size` avoids allocating based on trailing ciphertext/padding bytes when the
     // `EncryptedPackage` stream is larger than the declared original size.
     let mut out = Vec::with_capacity(orig_size_usize);
-    let mut offset = 0usize;
     let mut segment_index: u32 = 0;
-    while offset < ciphertext.len() && out.len() < orig_size_usize {
-        let remaining = ciphertext.len() - offset;
-        let seg_len = if remaining > ENCRYPTED_PACKAGE_SEGMENT_LEN {
-            ENCRYPTED_PACKAGE_SEGMENT_LEN
-        } else {
-            remaining
-        };
+    while out.len() < orig_size_usize {
+        // Compute segment start as `8 + i*4096` using checked arithmetic to avoid integer overflow.
+        let seg_start = (segment_index as usize)
+            .checked_mul(ENCRYPTED_PACKAGE_SEGMENT_LEN)
+            .and_then(|v| v.checked_add(ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN))
+            .ok_or(EncryptedPackageError::SegmentIndexOverflow)?;
+
+        if seg_start >= encrypted_package_stream.len() {
+            break;
+        }
+
+        let remaining = encrypted_package_stream.len() - seg_start;
+        let seg_len = remaining.min(ENCRYPTED_PACKAGE_SEGMENT_LEN);
 
         // `seg_len` is either 0x1000 (full segment) or the final remainder. Since 0x1000 is a
         // multiple of 16, validating the entire ciphertext length above is sufficient to guarantee
@@ -161,7 +225,7 @@ pub fn decrypt_standard_encrypted_package_stream(
         }
 
         let iv = derive_segment_iv(salt, segment_index);
-        let mut decrypted = ciphertext[offset..offset + seg_len].to_vec();
+        let mut decrypted = encrypted_package_stream[seg_start..seg_start + seg_len].to_vec();
         decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut decrypted).map_err(|err| match err {
             AesCbcDecryptError::UnsupportedKeyLength(key_len) => {
                 EncryptedPackageError::InvalidAesKeyLength { key_len }
@@ -181,7 +245,6 @@ pub fn decrypt_standard_encrypted_package_stream(
         }
 
         out.extend_from_slice(&decrypted);
-        offset += seg_len;
         segment_index = segment_index
             .checked_add(1)
             .ok_or(EncryptedPackageError::SegmentIndexOverflow)?;
@@ -651,5 +714,55 @@ mod tests {
                 .expect("decrypt");
             assert_eq!(decrypted, plaintext, "failed for len={len}");
         }
+    }
+
+    #[test]
+    fn rejects_u64_max_orig_size_without_panicking() {
+        let key = fixed_key_16();
+        let salt = fixed_salt_16();
+
+        // Tiny `EncryptedPackage`: just the size prefix, no ciphertext.
+        let encrypted = u64::MAX.to_le_bytes().to_vec();
+        let res = std::panic::catch_unwind(|| decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt));
+        assert!(res.is_ok(), "decryptor should not panic on u64::MAX orig_size");
+        assert!(res.unwrap().is_err(), "expected error on u64::MAX orig_size");
+    }
+
+    #[test]
+    fn rejects_orig_size_larger_than_usize_max_when_possible() {
+        // On 64-bit, `usize::MAX == u64::MAX`, so the "+1" test case cannot be represented.
+        if usize::BITS >= 64 {
+            return;
+        }
+
+        let key = fixed_key_16();
+        let salt = fixed_salt_16();
+
+        let orig_size = (usize::MAX as u64) + 1;
+        let encrypted = orig_size.to_le_bytes().to_vec();
+        let res = std::panic::catch_unwind(|| decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt));
+        assert!(res.is_ok(), "decryptor should not panic on orig_size > usize::MAX");
+        let err = res.unwrap().expect_err("expected error on orig_size > usize::MAX");
+        assert_eq!(
+            err,
+            EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size }
+        );
+    }
+
+    #[test]
+    fn rejects_orig_size_that_would_overflow_naive_segment_math() {
+        let key = fixed_key_16();
+        let salt = fixed_salt_16();
+
+        // This value would overflow `(orig_size + 4095)` in naive `ceil(orig_size/4096)` math.
+        let orig_size = u64::MAX - 4094;
+        let encrypted = orig_size.to_le_bytes().to_vec();
+
+        let res = std::panic::catch_unwind(|| decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt));
+        assert!(
+            res.is_ok(),
+            "decryptor should not panic when computing segment counts/offsets"
+        );
+        assert!(res.unwrap().is_err(), "expected error on huge orig_size");
     }
 }

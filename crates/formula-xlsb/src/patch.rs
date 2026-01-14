@@ -1570,6 +1570,7 @@ fn convert_value_record_to_formula<W: io::Write>(
         )));
     }
 
+    // Value records do not carry formula flags; default to 0 unless the caller overrides.
     let flags = edit.new_formula_flags.unwrap_or(0);
     match &edit.new_value {
         CellValue::Number(v) => write_new_fmla_num(writer, col, style, *v, flags, rgce, rgcb),
