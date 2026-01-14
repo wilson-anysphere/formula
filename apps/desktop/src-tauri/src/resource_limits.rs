@@ -5,6 +5,10 @@
 //! conservative limits ensure the backend fails fast and deterministically instead of exhausting
 //! memory/CPU (OOM/freeze).
 
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
+
 /// Maximum number of filesystem entries processed by the `list_dir` command.
 ///
 /// The limit is enforced even when `recursive=false`, since a single directory can contain an
@@ -251,3 +255,117 @@ pub const MAX_PIVOT_FILTER_ALLOWED_VALUES: usize = 1_000;
 /// Pivot configs cross the IPC boundary as JSON. Bounding string sizes prevents a compromised
 /// webview from forcing large allocations and keeps pivot metadata reasonable.
 pub const MAX_PIVOT_TEXT_BYTES: usize = 4 * 1024; // 4 KiB
+
+/// A `String` wrapper that rejects inputs larger than `MAX_BYTES` during deserialization.
+///
+/// This is intended for privileged IPC endpoints: we want to fail fast *during* deserialization so
+/// a compromised WebView can't force large allocations by sending huge JSON strings.
+///
+/// Note: Some formats (e.g. JSON strings with escapes) may still require buffering/decoding inside
+/// the deserializer before a `&str` is available to the visitor. We still reject the vast majority
+/// of cases (including unescaped base64) without allocating by implementing `visit_borrowed_str`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct LimitedString<const MAX_BYTES: usize>(String);
+
+impl<const MAX_BYTES: usize> LimitedString<MAX_BYTES> {
+    #[inline]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> AsRef<str> for LimitedString<MAX_BYTES> {
+    #[inline]
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl<const MAX_BYTES: usize> std::ops::Deref for LimitedString<MAX_BYTES> {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl<const MAX_BYTES: usize> From<LimitedString<MAX_BYTES>> for String {
+    #[inline]
+    fn from(value: LimitedString<MAX_BYTES>) -> Self {
+        value.0
+    }
+}
+
+impl<const MAX_BYTES: usize> Serialize for LimitedString<MAX_BYTES> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedString<MAX_BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct LimitedStringVisitor<const MAX: usize>;
+
+        impl<'de, const MAX: usize> Visitor<'de> for LimitedStringVisitor<MAX> {
+            type Value = LimitedString<MAX>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a string up to {MAX} bytes")
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let len = value.as_bytes().len();
+                if len > MAX {
+                    return Err(E::custom(format!(
+                        "string exceeds maximum size ({len} > {MAX} bytes)"
+                    )));
+                }
+                Ok(LimitedString(value.to_owned()))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let len = value.as_bytes().len();
+                if len > MAX {
+                    return Err(E::custom(format!(
+                        "string exceeds maximum size ({len} > {MAX} bytes)"
+                    )));
+                }
+                Ok(LimitedString(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let len = value.as_bytes().len();
+                if len > MAX {
+                    return Err(E::custom(format!(
+                        "string exceeds maximum size ({len} > {MAX} bytes)"
+                    )));
+                }
+                Ok(LimitedString(value))
+            }
+        }
+
+        deserializer.deserialize_str(LimitedStringVisitor::<MAX_BYTES>)
+    }
+}

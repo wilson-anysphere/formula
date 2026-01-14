@@ -6308,10 +6308,12 @@ pub async fn read_clipboard(
 #[tauri::command]
 pub async fn write_clipboard(
     window: tauri::WebviewWindow,
-    text: String,
-    html: Option<String>,
-    rtf: Option<String>,
-    image_png_base64: Option<String>,
+    text: crate::resource_limits::LimitedString<{ crate::clipboard::MAX_RICH_TEXT_BYTES }>,
+    html: Option<crate::resource_limits::LimitedString<{ crate::clipboard::MAX_RICH_TEXT_BYTES }>>,
+    rtf: Option<crate::resource_limits::LimitedString<{ crate::clipboard::MAX_RICH_TEXT_BYTES }>>,
+    image_png_base64: Option<
+        crate::resource_limits::LimitedString<{ crate::clipboard::MAX_IMAGE_PNG_BASE64_BYTES }>,
+    >,
 ) -> Result<(), String> {
     ipc_origin::ensure_main_window_and_stable_origin(
         &window,
@@ -6320,10 +6322,10 @@ pub async fn write_clipboard(
     )?;
 
     let payload = crate::clipboard::ClipboardWritePayload {
-        text: Some(text),
-        html,
-        rtf,
-        image_png_base64,
+        text: Some(text.into_inner()),
+        html: html.map(crate::resource_limits::LimitedString::into_inner),
+        rtf: rtf.map(crate::resource_limits::LimitedString::into_inner),
+        image_png_base64: image_png_base64.map(crate::resource_limits::LimitedString::into_inner),
     };
     #[cfg(target_os = "macos")]
     {

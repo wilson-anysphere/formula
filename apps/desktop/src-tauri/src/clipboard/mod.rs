@@ -2,6 +2,8 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use crate::resource_limits::LimitedString;
+
 pub mod platform;
 
 mod cf_html;
@@ -36,7 +38,25 @@ pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 
 // Internal aliases used by the backend for "image" (PNG) and rich text limits.
 const MAX_IMAGE_BYTES: usize = MAX_PNG_BYTES;
-const MAX_RICH_TEXT_BYTES: usize = MAX_TEXT_BYTES;
+pub const MAX_RICH_TEXT_BYTES: usize = MAX_TEXT_BYTES;
+
+// We support optional `data:*;base64,` prefixes for backwards compatibility, but we intentionally
+// scan only a small prefix for the comma separator so malformed inputs like `data:AAAA...` don't
+// force an O(n) search over huge payloads.
+const DATA_URL_COMMA_SCAN_LIMIT: usize = 1024;
+
+const fn base64_encoded_len(decoded_len: usize) -> usize {
+    // Base64 encodes 3 bytes as 4 chars, rounded up.
+    ((decoded_len + 2) / 3) * 4
+}
+
+/// Maximum number of UTF-8 bytes accepted for `image_png_base64` over IPC.
+///
+/// This is a conservative cap on the encoded size, enforced during deserialization to prevent a
+/// compromised WebView from forcing large allocations. The decoded byte limit is still enforced by
+/// [`ClipboardWritePayload::validate`] as defense-in-depth.
+pub const MAX_IMAGE_PNG_BASE64_BYTES: usize =
+    base64_encoded_len(MAX_IMAGE_BYTES) + DATA_URL_COMMA_SCAN_LIMIT;
 
 // ---------------------------------------------------------------------------
 // Debug logging
@@ -92,7 +112,7 @@ fn normalize_base64_str(mut base64: &str) -> &str {
         let comma = base64
             .as_bytes()
             .iter()
-            .take(1024)
+            .take(DATA_URL_COMMA_SCAN_LIMIT)
             .position(|&b| b == b',');
         if let Some(comma) = comma {
             base64 = &base64[comma + 1..];
@@ -465,6 +485,34 @@ pub struct ClipboardWritePayload {
     pub image_png_base64: Option<String>,
 }
 
+/// IPC-only clipboard write payload.
+///
+/// This mirrors [`ClipboardWritePayload`] but uses bounded string types so oversized inputs fail
+/// fast during deserialization (before allocating multi-megabyte `String`s).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ClipboardWritePayloadIpc {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<LimitedString<MAX_RICH_TEXT_BYTES>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub html: Option<LimitedString<MAX_RICH_TEXT_BYTES>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rtf: Option<LimitedString<MAX_RICH_TEXT_BYTES>>,
+    /// PNG bytes encoded as base64.
+    #[serde(skip_serializing_if = "Option::is_none", alias = "png_base64", alias = "pngBase64")]
+    pub image_png_base64: Option<LimitedString<MAX_IMAGE_PNG_BASE64_BYTES>>,
+}
+
+impl From<ClipboardWritePayloadIpc> for ClipboardWritePayload {
+    fn from(value: ClipboardWritePayloadIpc) -> Self {
+        ClipboardWritePayload {
+            text: value.text.map(LimitedString::into_inner),
+            html: value.html.map(LimitedString::into_inner),
+            rtf: value.rtf.map(LimitedString::into_inner),
+            image_png_base64: value.image_png_base64.map(LimitedString::into_inner),
+        }
+    }
+}
+
 impl ClipboardWritePayload {
     fn validate_with_limits(
         &self,
@@ -645,13 +693,15 @@ pub async fn clipboard_read(window: tauri::WebviewWindow) -> Result<ClipboardCon
 #[tauri::command]
 pub async fn clipboard_write(
     window: tauri::WebviewWindow,
-    payload: ClipboardWritePayload,
+    payload: ClipboardWritePayloadIpc,
 ) -> Result<(), String> {
     crate::ipc_origin::ensure_main_window_and_stable_origin(
         &window,
         "clipboard access",
         crate::ipc_origin::Verb::Is,
     )?;
+
+    let payload: ClipboardWritePayload = payload.into();
 
     // See `clipboard_read` for why we dispatch to the main thread on macOS.
     #[cfg(target_os = "macos")]
@@ -1069,6 +1119,17 @@ mod tests {
                 .expect("deserialize write payload from pngBase64");
         assert_eq!(payload_from_png_base64.image_png_base64.as_deref(), Some("CQgH"));
 
+        let ipc_payload_from_png_base64: ClipboardWritePayloadIpc =
+            serde_json::from_value(serde_json::json!({ "pngBase64": "CQgH" }))
+                .expect("deserialize IPC write payload from pngBase64");
+        assert_eq!(
+            ipc_payload_from_png_base64
+                .image_png_base64
+                .as_ref()
+                .map(LimitedString::as_str),
+            Some("CQgH")
+        );
+
         let payload = ClipboardWritePayload {
             text: None,
             html: None,
@@ -1079,6 +1140,68 @@ mod tests {
         assert_eq!(
             payload_json.get("image_png_base64").and_then(|v| v.as_str()),
             Some("CQgH")
+        );
+    }
+
+    #[test]
+    fn limited_string_rejects_oversized_strings_during_deserialization() {
+        #[derive(Debug, Deserialize)]
+        struct TestPayload {
+            #[allow(dead_code)]
+            text: Option<LimitedString<5>>,
+        }
+
+        let err = serde_json::from_value::<TestPayload>(serde_json::json!({
+            "text": "123456"
+        }))
+        .expect_err("expected deserialization to fail");
+        assert!(
+            err.to_string().contains("exceeds maximum size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_string_rejects_oversized_base64_during_deserialization() {
+        #[derive(Debug, Deserialize)]
+        struct TestPayload {
+            #[allow(dead_code)]
+            #[serde(alias = "pngBase64")]
+            image_png_base64: Option<LimitedString<8>>,
+        }
+
+        let err = serde_json::from_value::<TestPayload>(serde_json::json!({
+            "pngBase64": "AAAAAAAAA"
+        }))
+        .expect_err("expected deserialization to fail");
+        assert!(
+            err.to_string().contains("exceeds maximum size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_string_allows_payloads_within_limits() {
+        #[derive(Debug, Deserialize)]
+        struct TestPayload {
+            text: Option<LimitedString<5>>,
+            #[serde(alias = "pngBase64")]
+            image_png_base64: Option<LimitedString<8>>,
+        }
+
+        let payload = serde_json::from_value::<TestPayload>(serde_json::json!({
+            "text": "12345",
+            "pngBase64": "AAAA"
+        }))
+        .expect("expected deserialization to succeed");
+
+        assert_eq!(
+            payload.text.map(LimitedString::into_inner),
+            Some("12345".to_string())
+        );
+        assert_eq!(
+            payload.image_png_base64.map(LimitedString::into_inner),
+            Some("AAAA".to_string())
         );
     }
 }
