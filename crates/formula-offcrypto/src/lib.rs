@@ -32,6 +32,7 @@ use zeroize::Zeroizing;
 
 const ITER_COUNT: u32 = 50_000;
 const SHA1_LEN: usize = 20;
+const MAX_DIGEST_LEN: usize = 64; // SHA-512
 const AES_BLOCK_SIZE: usize = 16;
 
 // Agile Encryption guardrails (MS-OFFCRYPTO uses 16-byte salts and AES block alignment).
@@ -262,13 +263,75 @@ impl HashAlgorithm {
         }
     }
 
-    pub(crate) fn digest(self, data: &[u8]) -> Vec<u8> {
+    pub(crate) fn digest_len(self) -> usize {
         match self {
-            HashAlgorithm::Sha1 => sha1::Sha1::digest(data).to_vec(),
-            HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
-            HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
-            HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
+            HashAlgorithm::Sha1 => 20,
+            HashAlgorithm::Sha256 => 32,
+            HashAlgorithm::Sha384 => 48,
+            HashAlgorithm::Sha512 => 64,
         }
+    }
+
+    pub(crate) fn digest_into(self, data: &[u8], out: &mut [u8]) {
+        debug_assert!(out.len() >= self.digest_len());
+        match self {
+            HashAlgorithm::Sha1 => {
+                let mut hasher = Sha1::new();
+                hasher.update(data);
+                out[..20].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha256 => {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(data);
+                out[..32].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha384 => {
+                let mut hasher = sha2::Sha384::new();
+                hasher.update(data);
+                out[..48].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha512 => {
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(data);
+                out[..64].copy_from_slice(&hasher.finalize());
+            }
+        }
+    }
+
+    pub(crate) fn digest_two_into(self, a: &[u8], b: &[u8], out: &mut [u8]) {
+        debug_assert!(out.len() >= self.digest_len());
+        match self {
+            HashAlgorithm::Sha1 => {
+                let mut hasher = Sha1::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..20].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha256 => {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..32].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha384 => {
+                let mut hasher = sha2::Sha384::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..48].copy_from_slice(&hasher.finalize());
+            }
+            HashAlgorithm::Sha512 => {
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..64].copy_from_slice(&hasher.finalize());
+            }
+        }
+    }
+
+    pub(crate) fn digest(self, data: &[u8]) -> Vec<u8> {
+        let mut out = vec![0u8; self.digest_len()];
+        self.digest_into(data, &mut out);
+        out
     }
 }
 
@@ -2127,24 +2190,6 @@ const BLK_KEY_VERIFIER_HASH_INPUT: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B
 const BLK_KEY_VERIFIER_HASH_VALUE: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
 const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
 
-fn hash_digest(algo: HashAlgorithm, data: &[u8]) -> Vec<u8> {
-    match algo {
-        HashAlgorithm::Sha1 => Sha1::digest(data).to_vec(),
-        HashAlgorithm::Sha256 => {
-            use sha2::Digest as _;
-            sha2::Sha256::digest(data).to_vec()
-        }
-        HashAlgorithm::Sha384 => {
-            use sha2::Digest as _;
-            sha2::Sha384::digest(data).to_vec()
-        }
-        HashAlgorithm::Sha512 => {
-            use sha2::Digest as _;
-            sha2::Sha512::digest(data).to_vec()
-        }
-    }
-}
-
 fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
     if bytes.len() >= out_len {
         return bytes[..out_len].to_vec();
@@ -2167,26 +2212,67 @@ fn derive_iterated_hash_from_password(
     // `spinCount` is attacker-controlled; enforce limits up front to avoid CPU DoS.
     check_spin_count(spin_count, limits)?;
 
-    // Initial round: hash(salt + password(UTF-16LE))
     let password_utf16 = Zeroizing::new(password_to_utf16le_bytes(password));
-    let mut buf = Zeroizing::new(Vec::with_capacity(salt_value.len() + password_utf16.len()));
-    buf.extend_from_slice(salt_value);
-    buf.extend_from_slice(&password_utf16[..]);
+    let digest_len = hash_algorithm.digest_len();
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
 
-    let mut hfinal = Zeroizing::new(hash_digest(hash_algorithm, &buf));
+    // Avoid per-iteration allocations (spinCount is often 100k):
+    // keep the current digest in a fixed buffer and overwrite it each round.
+    let mut h_buf: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
+    hash_algorithm.digest_two_into(
+        salt_value,
+        password_utf16.as_slice(),
+        &mut h_buf[..digest_len],
+    );
 
-    // Iteration 0..spin_count-1: hash(i_le + h)
-    for i in 0..spin_count {
-        if let Some(cb) = on_iteration.as_mut() {
-            cb(i);
+    match hash_algorithm {
+        HashAlgorithm::Sha1 => {
+            for i in 0..spin_count {
+                if let Some(cb) = on_iteration.as_mut() {
+                    cb(i);
+                }
+                let mut hasher = Sha1::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..20]);
+                h_buf[..20].copy_from_slice(&hasher.finalize());
+            }
         }
-        let mut round = Zeroizing::new(Vec::with_capacity(4 + hfinal.len()));
-        round.extend_from_slice(&i.to_le_bytes());
-        round.extend_from_slice(&hfinal[..]);
-        hfinal = Zeroizing::new(hash_digest(hash_algorithm, &round));
+        HashAlgorithm::Sha256 => {
+            for i in 0..spin_count {
+                if let Some(cb) = on_iteration.as_mut() {
+                    cb(i);
+                }
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..32]);
+                h_buf[..32].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha384 => {
+            for i in 0..spin_count {
+                if let Some(cb) = on_iteration.as_mut() {
+                    cb(i);
+                }
+                let mut hasher = sha2::Sha384::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..48]);
+                h_buf[..48].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha512 => {
+            for i in 0..spin_count {
+                if let Some(cb) = on_iteration.as_mut() {
+                    cb(i);
+                }
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..64]);
+                h_buf[..64].copy_from_slice(&hasher.finalize());
+            }
+        }
     }
 
-    Ok(hfinal)
+    Ok(Zeroizing::new(h_buf[..digest_len].to_vec()))
 }
 
 fn derive_encryption_key(
@@ -2202,11 +2288,17 @@ fn derive_encryption_key(
     }
     let key_len = key_bits / 8;
 
-    let mut buf = Zeroizing::new(Vec::with_capacity(h.len() + block_key.len()));
-    buf.extend_from_slice(h);
-    buf.extend_from_slice(block_key);
-    let hfinal = Zeroizing::new(hash_digest(hash_algorithm, &buf));
-    Ok(Zeroizing::new(normalize_key_material(&hfinal[..], key_len)))
+    // Avoid allocating a temporary `H || blockKey` buffer: hash with two updates into a fixed
+    // stack buffer.
+    let digest_len = hash_algorithm.digest_len();
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
+    let mut digest: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
+    hash_algorithm.digest_two_into(h, block_key, &mut digest[..digest_len]);
+
+    Ok(Zeroizing::new(normalize_key_material(
+        &digest[..digest_len],
+        key_len,
+    )))
 }
 
 fn derive_iv_from_salt(
@@ -2214,18 +2306,20 @@ fn derive_iv_from_salt(
     block_key: &[u8],
     hash_algorithm: HashAlgorithm,
 ) -> Result<[u8; 16], OffcryptoError> {
-    let mut buf = Zeroizing::new(Vec::with_capacity(salt.len() + block_key.len()));
-    buf.extend_from_slice(salt);
-    buf.extend_from_slice(block_key);
-    let digest = hash_digest(hash_algorithm, &buf);
+    // Avoid allocating a temporary `salt || blockKey` buffer: hash with two updates into a fixed
+    // stack buffer.
+    let digest_len = hash_algorithm.digest_len();
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
+    if digest_len < 16 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "hash output shorter than AES block size",
+        });
+    }
+    let mut digest: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
+    hash_algorithm.digest_two_into(salt, block_key, &mut digest[..digest_len]);
+
     let mut iv = [0u8; 16];
-    iv.copy_from_slice(
-        digest
-            .get(..16)
-            .ok_or(OffcryptoError::InvalidEncryptionInfo {
-                context: "hash output shorter than AES block size",
-            })?,
-    );
+    iv.copy_from_slice(&digest[..16]);
     Ok(iv)
 }
 

@@ -10,7 +10,10 @@ use formula_offcrypto::decrypt_standard_ooxml_from_bytes;
 use formula_offcrypto::{EncryptionType, OffcryptoError};
 
 fn fixture(path: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(path)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(path)
 }
 
 #[test]

@@ -20,6 +20,7 @@
 
 use crate::util::ct_eq;
 use crate::{AgileEncryptionInfo, DecryptOptions, HashAlgorithm, OffcryptoError};
+use sha1::Digest as _;
 use zeroize::Zeroizing;
 
 #[cfg(test)]
@@ -96,51 +97,51 @@ pub fn agile_iterated_hash(
     #[cfg(test)]
     ITERATED_HASH_CALLS.fetch_add(1, Ordering::Relaxed);
 
-    fn hash_into(hash_alg: HashAlgorithm, data: &[u8], out: &mut [u8]) {
-        match hash_alg {
-            HashAlgorithm::Sha1 => {
-                use sha1::Digest as _;
-                let digest = sha1::Sha1::digest(data);
-                out.copy_from_slice(&digest);
+    let digest_len = hash_output_len(hash_alg);
+    debug_assert!(digest_len <= crate::MAX_DIGEST_LEN);
+
+    // Avoid per-iteration allocations (spinCount is often 100k):
+    // keep the current digest in a fixed buffer and overwrite it each round.
+    let mut h_buf: Zeroizing<[u8; crate::MAX_DIGEST_LEN]> =
+        Zeroizing::new([0u8; crate::MAX_DIGEST_LEN]);
+    hash_alg.digest_two_into(salt, password_utf16le, &mut h_buf[..digest_len]);
+
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            for i in 0..spin_count {
+                let mut hasher = sha1::Sha1::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..20]);
+                h_buf[..20].copy_from_slice(&hasher.finalize());
             }
-            HashAlgorithm::Sha256 => {
-                use sha2::Digest as _;
-                let digest = sha2::Sha256::digest(data);
-                out.copy_from_slice(&digest);
+        }
+        HashAlgorithm::Sha256 => {
+            for i in 0..spin_count {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..32]);
+                h_buf[..32].copy_from_slice(&hasher.finalize());
             }
-            HashAlgorithm::Sha384 => {
-                use sha2::Digest as _;
-                let digest = sha2::Sha384::digest(data);
-                out.copy_from_slice(&digest);
+        }
+        HashAlgorithm::Sha384 => {
+            for i in 0..spin_count {
+                let mut hasher = sha2::Sha384::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..48]);
+                h_buf[..48].copy_from_slice(&hasher.finalize());
             }
-            HashAlgorithm::Sha512 => {
-                use sha2::Digest as _;
-                let digest = sha2::Sha512::digest(data);
-                out.copy_from_slice(&digest);
+        }
+        HashAlgorithm::Sha512 => {
+            for i in 0..spin_count {
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..64]);
+                h_buf[..64].copy_from_slice(&hasher.finalize());
             }
         }
     }
 
-    let digest_len = hash_output_len(hash_alg);
-    let mut h = Zeroizing::new(vec![0u8; digest_len]);
-
-    // Initial round: Hash(salt || password_utf16le)
-    let mut buf = Zeroizing::new(Vec::with_capacity(salt.len() + password_utf16le.len()));
-    buf.extend_from_slice(salt);
-    buf.extend_from_slice(password_utf16le);
-    hash_into(hash_alg, &buf[..], &mut h[..]);
-
-    // Iteration 0..spinCount-1: Hash(LE32(i) || H)
-    //
-    // Avoid allocating in the loop: reuse a fixed-size buffer and overwrite the hash output.
-    let mut round = Zeroizing::new(vec![0u8; 4 + digest_len]);
-    for i in 0..spin_count {
-        round[..4].copy_from_slice(&i.to_le_bytes());
-        round[4..].copy_from_slice(&h);
-        hash_into(hash_alg, &round[..], &mut h[..]);
-    }
-
-    h
+    Zeroizing::new(h_buf[..digest_len].to_vec())
 }
 
 /// Derive and decrypt the Agile secret key (encryptedKeyValue) *with password verification*.

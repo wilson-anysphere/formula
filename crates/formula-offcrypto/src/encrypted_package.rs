@@ -22,13 +22,12 @@ fn padded_aes_len(len: usize) -> usize {
 }
 
 fn checked_output_len(total_size: u64) -> Result<usize, OffcryptoError> {
-    let len =
-        usize::try_from(total_size).map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow {
-            total_size,
-        })?;
+    let len = usize::try_from(total_size)
+        .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
-    isize::try_from(len).map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+    isize::try_from(len)
+        .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     Ok(len)
 }
@@ -79,11 +78,8 @@ where
     }
 
     let mut out = Vec::new();
-    out.try_reserve_exact(output_len).map_err(|_| {
-        OffcryptoError::EncryptedPackageAllocationFailed {
-            total_size,
-        }
-    })?;
+    out.try_reserve_exact(output_len)
+        .map_err(|_| OffcryptoError::EncryptedPackageAllocationFailed { total_size })?;
     out.resize(output_len, 0);
 
     let mut remaining: u64 = total_size;
@@ -95,10 +91,13 @@ where
     while remaining > 0 {
         let plaintext_len = std::cmp::min(remaining, ENCRYPTED_PACKAGE_SEGMENT_LEN as u64) as usize;
         let ciphertext_len = padded_aes_len(plaintext_len);
-        let ciphertext =
-            reader.take(ciphertext_len, "EncryptedPackage.ciphertext_segment")?;
+        let ciphertext = reader.take(ciphertext_len, "EncryptedPackage.ciphertext_segment")?;
 
-        decrypt_block(block_index, ciphertext, &mut plaintext_buf[..ciphertext_len])?;
+        decrypt_block(
+            block_index,
+            ciphertext,
+            &mut plaintext_buf[..ciphertext_len],
+        )?;
 
         out[out_offset..out_offset + plaintext_len]
             .copy_from_slice(&plaintext_buf[..plaintext_len]);
@@ -142,38 +141,56 @@ pub fn agile_decrypt_package(
         return Err(OffcryptoError::EncryptedPackageSizeOverflow { total_size });
     }
 
-    let mut iv_seed = Vec::with_capacity(info.key_data_salt.len() + 4);
+    let digest_len = info.key_data_hash_algorithm.digest_len();
+    if digest_len < AES_BLOCK_LEN {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "hash output too short for AES IV",
+        });
+    }
+    let mut digest_buf = [0u8; crate::MAX_DIGEST_LEN];
 
     decrypt_encrypted_package(encrypted_package, |segment_index, ciphertext, plaintext| {
-        iv_seed.clear();
-        iv_seed.extend_from_slice(&info.key_data_salt);
-        iv_seed.extend_from_slice(&segment_index.to_le_bytes());
-
-        let digest = info.key_data_hash_algorithm.digest(&iv_seed);
         let mut iv = [0u8; 16];
-        iv.copy_from_slice(&digest[..16]);
+        info.key_data_hash_algorithm.digest_two_into(
+            &info.key_data_salt,
+            &segment_index.to_le_bytes(),
+            &mut digest_buf[..digest_len],
+        );
+        iv.copy_from_slice(&digest_buf[..AES_BLOCK_LEN]);
 
         plaintext.copy_from_slice(ciphertext);
         let pt_len = plaintext.len();
 
         match secret_key.len() {
             16 => {
-                let decryptor = Decryptor::<Aes128>::new_from_slices(secret_key, &iv)
-                    .map_err(|_| OffcryptoError::InvalidKeyLength { len: secret_key.len() })?;
+                let decryptor =
+                    Decryptor::<Aes128>::new_from_slices(secret_key, &iv).map_err(|_| {
+                        OffcryptoError::InvalidKeyLength {
+                            len: secret_key.len(),
+                        }
+                    })?;
                 decryptor
                     .decrypt_padded_mut::<NoPadding>(plaintext)
                     .map_err(|_| OffcryptoError::InvalidCiphertextLength { len: pt_len })?;
             }
             24 => {
-                let decryptor = Decryptor::<Aes192>::new_from_slices(secret_key, &iv)
-                    .map_err(|_| OffcryptoError::InvalidKeyLength { len: secret_key.len() })?;
+                let decryptor =
+                    Decryptor::<Aes192>::new_from_slices(secret_key, &iv).map_err(|_| {
+                        OffcryptoError::InvalidKeyLength {
+                            len: secret_key.len(),
+                        }
+                    })?;
                 decryptor
                     .decrypt_padded_mut::<NoPadding>(plaintext)
                     .map_err(|_| OffcryptoError::InvalidCiphertextLength { len: pt_len })?;
             }
             32 => {
-                let decryptor = Decryptor::<Aes256>::new_from_slices(secret_key, &iv)
-                    .map_err(|_| OffcryptoError::InvalidKeyLength { len: secret_key.len() })?;
+                let decryptor =
+                    Decryptor::<Aes256>::new_from_slices(secret_key, &iv).map_err(|_| {
+                        OffcryptoError::InvalidKeyLength {
+                            len: secret_key.len(),
+                        }
+                    })?;
                 decryptor
                     .decrypt_padded_mut::<NoPadding>(plaintext)
                     .map_err(|_| OffcryptoError::InvalidCiphertextLength { len: pt_len })?;
