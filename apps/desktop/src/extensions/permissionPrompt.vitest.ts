@@ -109,4 +109,42 @@ describe("createDesktopPermissionPrompt", () => {
     secondDialog?.querySelector<HTMLButtonElement>('button[data-testid="extension-permission-deny"]')?.click();
     await expect(second).resolves.toBe(false);
   });
+
+  it("waits for an existing open dialog to close before showing the prompt", async () => {
+    document.body.innerHTML = "";
+
+    const blocking = document.createElement("dialog");
+    blocking.setAttribute("open", "");
+    document.body.appendChild(blocking);
+
+    const prompt = createDesktopPermissionPrompt();
+    const resultPromise = prompt({
+      extensionId: "acme.example",
+      displayName: "Acme Extension",
+      permissions: ["network"],
+      request: { network: { host: "api.example.com" } },
+    });
+
+    // The prompt should not show while another dialog is open.
+    expect(document.querySelector('dialog[data-testid="extension-permission-prompt"]')).toBeNull();
+
+    // Close/remove the blocking dialog.
+    blocking.removeAttribute("open");
+    blocking.dispatchEvent(new Event("close"));
+    blocking.remove();
+
+    // Wait a tick for the prompt to render.
+    for (let i = 0; i < 10; i += 1) {
+      const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="extension-permission-prompt"]');
+      if (dialog) break;
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="extension-permission-prompt"]');
+    expect(dialog).not.toBeNull();
+
+    dialog?.querySelector<HTMLButtonElement>('button[data-testid="extension-permission-deny"]')?.click();
+    await expect(resultPromise).resolves.toBe(false);
+  });
 });

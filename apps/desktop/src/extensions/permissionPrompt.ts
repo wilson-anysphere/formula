@@ -27,6 +27,58 @@ function nextPermissionPromptTitleId(): string {
   return `extension-permission-prompt-title-${permissionPromptTitleId}`;
 }
 
+async function waitForNoOpenDialogs(): Promise<void> {
+  if (typeof document === "undefined") return;
+  if (!document.body) return;
+
+  while (true) {
+    const openModal = document.querySelector<HTMLDialogElement>("dialog[open]");
+    if (!openModal) return;
+
+    // Wait for the existing dialog to close or be removed before proceeding.
+    // This avoids attempting to open a permission prompt in a non-modal state
+    // (which would be inert behind the active modal and could hang extensions
+    // awaiting the user's response).
+    //
+    // Use a MutationObserver in addition to the close event to handle cases where
+    // the dialog is removed without dispatching `close` (tests/headless).
+    await new Promise<void>((resolve) => {
+      let resolved = false;
+
+      const finish = () => {
+        if (resolved) return;
+        resolved = true;
+        try {
+          openModal.removeEventListener("close", onClose);
+        } catch {
+          // ignore
+        }
+        try {
+          observer.disconnect();
+        } catch {
+          // ignore
+        }
+        resolve();
+      };
+
+      const onClose = () => finish();
+      openModal.addEventListener("close", onClose, { once: true });
+
+      const observer = new MutationObserver(() => {
+        if (!openModal.isConnected || !openModal.hasAttribute("open")) {
+          finish();
+        }
+      });
+      observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["open"],
+      });
+    });
+  }
+}
+
 function showModal(dialog: HTMLDialogElement): void {
   // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
   const showModalFn = (dialog as any).showModal as (() => void) | undefined;
@@ -83,6 +135,13 @@ async function promptOnce(req: ExtensionPermissionPromptRequest): Promise<boolea
     const ext = req.displayName ? `${req.displayName} (${req.extensionId})` : req.extensionId;
     const list = permissions.map((p) => formatPermissionLabel(p, req)).join(", ");
     return nativeDialogs.confirm(`Allow ${ext} to use: ${list}?`, { title: "Extension Permission Request" });
+  }
+
+  // If another modal dialog is already open (e.g. Print Preview), wait until it closes before
+  // presenting the permission prompt. This keeps the prompt interactive and avoids hangs where
+  // the prompt is opened in a non-modal state behind an inert backdrop.
+  if (document.querySelector("dialog[open]")) {
+    await waitForNoOpenDialogs();
   }
 
   const dialog = document.createElement("dialog");
