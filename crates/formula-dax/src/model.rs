@@ -534,7 +534,12 @@ pub(crate) enum ToIndex {
     /// Scalable representation for columnar many-to-many `to_table` lookups.
     KeySet {
         keys: HashSet<Value>,
-        /// Whether any key occurs more than once in the `to_table`.
+        /// Whether any **non-blank** key occurs more than once in the `to_table`.
+        ///
+        /// Physical BLANK keys do not participate in relationship joins (fact-side BLANK foreign
+        /// keys map to the relationship-generated virtual blank member). We therefore ignore
+        /// duplicate BLANK keys when deciding whether relationship traversal requires a
+        /// many-to-many expansion algorithm.
         has_duplicates: bool,
     },
 }
@@ -1170,7 +1175,12 @@ impl DataModel {
                             v.insert(RowSet::One(row_index));
                         }
                         Entry::Occupied(mut o) => {
-                            *has_duplicates = true;
+                            // Physical BLANK keys do not participate in relationship joins, so
+                            // ignore duplicate BLANK keys when deciding if the relationship can be
+                            // treated as "unique" for navigation/grouping purposes.
+                            if !o.key().is_blank() {
+                                *has_duplicates = true;
+                            }
                             o.get_mut().push(row_index);
                         }
                     },
@@ -1181,7 +1191,9 @@ impl DataModel {
                 } => {
                     // Columnar tables are immutable, so this should be unreachable. Keep the
                     // structure consistent in case a mutable columnar backend is introduced.
-                    if !keys.insert(key) {
+                    if key.is_blank() {
+                        // BLANK keys do not participate in joins.
+                    } else if !keys.insert(key) {
                         *has_duplicates = true;
                     }
                 }
@@ -1366,7 +1378,9 @@ impl DataModel {
             (TableStorage::Columnar(_), Cardinality::ManyToMany) => {
                 // Prefer backend distinct-value enumeration so we don't hash every row when the
                 // `to_table` is highly duplicated (a common columnar fact-table pattern).
-                let mut distinct_values = to_table.distinct_values_filtered(to_idx, None).unwrap_or_else(|| {
+                let distinct_values = to_table
+                    .distinct_values_filtered(to_idx, None)
+                    .unwrap_or_else(|| {
                     let mut seen = HashSet::<Value>::new();
                     let mut out = Vec::new();
                     for row in 0..to_table.row_count() {
@@ -1378,20 +1392,21 @@ impl DataModel {
                     out
                 });
 
-                // Defensive: ensure the distinct list includes BLANK when the column contains any
-                // blanks/nulls (some backends may omit it from distinct enumeration).
-                if to_table.stats_has_blank(to_idx).unwrap_or(false)
-                    && !distinct_values.iter().any(|v| v.is_blank())
-                {
-                    distinct_values.push(Value::Blank);
-                }
-
                 let mut keys = HashSet::<Value>::with_capacity(distinct_values.len());
                 for v in distinct_values {
+                    if v.is_blank() {
+                        continue;
+                    }
                     keys.insert(v);
                 }
 
-                let has_duplicates = keys.len() < to_table.row_count();
+                // `has_duplicates` is used to decide whether relationship traversal/grouping needs
+                // a many-to-many expansion algorithm. Physical BLANK keys never participate in
+                // joins, so compute duplication only across non-blank keys.
+                let non_blank_rows = to_table
+                    .stats_non_blank_count(to_idx)
+                    .unwrap_or_else(|| to_table.row_count());
+                let has_duplicates = keys.len() < non_blank_rows;
                 ToIndex::KeySet {
                     keys,
                     has_duplicates,
@@ -1417,7 +1432,12 @@ impl DataModel {
                                 v.insert(RowSet::One(row));
                             }
                             Entry::Occupied(mut o) => {
-                                has_duplicates = true;
+                                // Physical BLANK keys do not participate in relationship joins, so
+                                // ignore duplicate BLANK keys when deciding if the relationship can
+                                // be treated as "unique" for navigation/grouping purposes.
+                                if !o.key().is_blank() {
+                                    has_duplicates = true;
+                                }
                                 o.get_mut().push(row);
                             }
                         },
