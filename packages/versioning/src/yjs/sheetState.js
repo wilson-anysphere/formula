@@ -454,7 +454,17 @@ export function mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData) {
 
   if (isEncrypted) {
     const isCanonical = parsed.isCanonical === true;
-    if (!existing || !existingIsEncrypted || isCanonical) {
+    const existingHasPayload = existingIsEncrypted && existingEnc !== null;
+    const nextHasPayload = enc !== null;
+    const shouldReplace =
+      !existing ||
+      !existingIsEncrypted ||
+      // Prefer a ciphertext payload over an `enc: null` marker when duplicates exist.
+      (!existingHasPayload && nextHasPayload) ||
+      // Prefer the canonical key encoding when it doesn't downgrade a ciphertext payload.
+      (isCanonical && (nextHasPayload || !existingHasPayload));
+
+    if (shouldReplace) {
       // Preserve any existing format metadata if the preferred encrypted record
       // lacks it (e.g. canonical key created during encryption while a legacy
       // key still carries the existing format).

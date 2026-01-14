@@ -94,6 +94,39 @@ test("migrateLegacyCellKeys encrypted legacy cell must not leave plaintext behin
   assert.equal(migratedCell.get("formula"), undefined);
 });
 
+test("migrateLegacyCellKeys prefers encrypted payloads over enc=null markers across duplicate keys", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  const marker = new Y.Map();
+  marker.set("enc", null);
+  // Simulate a corrupt/foreign writer leaving plaintext behind alongside the marker.
+  marker.set("value", "plaintext-leak");
+  marker.set("formula", "=1");
+  cells.set("Sheet1:0:0", marker);
+
+  const enc = {
+    v: 1,
+    alg: "AES-256-GCM",
+    keyId: "k1",
+    ivBase64: "AA==",
+    tagBase64: "AA==",
+    ciphertextBase64: "AA==",
+  };
+  // Real ciphertext stored under legacy encoding.
+  cells.set("Sheet1:0,0", makeEncryptedCell(enc));
+
+  const result = migrateLegacyCellKeys(doc);
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 1 });
+
+  assert.equal(cells.has("Sheet1:0,0"), false);
+  const migratedCell = /** @type {any} */ (cells.get("Sheet1:0:0"));
+  assert.ok(migratedCell);
+  assert.deepEqual(migratedCell.get("enc"), enc);
+  assert.equal(migratedCell.get("value"), undefined);
+  assert.equal(migratedCell.get("formula"), undefined);
+});
+
 test("migrateLegacyCellKeys is idempotent", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");

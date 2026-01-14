@@ -714,9 +714,14 @@ export function branchStateFromYjsDoc(doc) {
       const existingHasEnc = existingEnc !== undefined;
       const existingHasPayload = existingHasEnc && existingEnc !== null;
       const nextHasPayload = cell.enc !== null;
-      // Prefer encrypted cells over plaintext, and prefer a non-null ciphertext
-      // payload over a null encryption marker when both exist.
-      if (!existing || !existingHasEnc || (existingHasEnc && !existingHasPayload && nextHasPayload) || isCanonical) {
+      const shouldReplace =
+        !existing ||
+        !existingHasEnc ||
+        // Prefer a ciphertext payload over an `enc: null` marker when duplicates exist.
+        (!existingHasPayload && nextHasPayload) ||
+        // Prefer the canonical key encoding when it doesn't downgrade a ciphertext payload.
+        (isCanonical && (nextHasPayload || !existingHasPayload));
+      if (shouldReplace) {
         cells[sheetId][addr] = cell;
       } else if (existingHasEnc && existing.format == null && cell.format != null) {
         cells[sheetId][addr] = { ...existing, format: cell.format };

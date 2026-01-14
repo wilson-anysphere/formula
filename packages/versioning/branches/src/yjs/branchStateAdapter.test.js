@@ -620,6 +620,40 @@ test("branchStateFromYjsDoc: treats enc=null markers as encrypted and ignores pl
   assert.deepEqual(state.cells.Sheet1.A1, { enc: null });
 });
 
+test("branchStateFromYjsDoc: prefers encrypted payloads over enc=null markers across legacy keys", () => {
+  const enc = {
+    v: 1,
+    alg: "AES-256-GCM",
+    keyId: "k1",
+    ivBase64: "iv",
+    tagBase64: "tag",
+    ciphertextBase64: "ct",
+  };
+
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const cells = doc.getMap("cells");
+    const cellEnc = new Y.Map();
+    cellEnc.set("enc", enc);
+    // Ciphertext stored under a legacy key encoding.
+    cells.set("Sheet1:0,0", cellEnc);
+
+    const cellMarker = new Y.Map();
+    cellMarker.set("enc", null);
+    // Marker stored under the canonical key; should not clobber the ciphertext.
+    cells.set("Sheet1:0:0", cellMarker);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.cells.Sheet1.A1, { enc });
+});
+
 test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: preserves enc=null markers", () => {
   const doc = new Y.Doc();
   doc.transact(() => {

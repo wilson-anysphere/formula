@@ -4,6 +4,7 @@ import test from "node:test";
 import * as Y from "yjs";
 
 import { diffYjsWorkbookSnapshots } from "./diffWorkbookSnapshots.js";
+import { sheetStateFromYjsDoc } from "./sheetState.js";
 
 function createWorkbookDoc() {
   const doc = new Y.Doc();
@@ -274,6 +275,29 @@ test("diffYjsWorkbookSnapshots: enc=null markers are not matched as moves agains
 
   assert.equal(sheetDiff.modified.length, 0);
   assert.equal(sheetDiff.formatOnly.length, 0);
+});
+
+test("sheetStateFromYjsDoc prefers ciphertext over enc=null markers across duplicate key encodings", () => {
+  const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
+
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  // Insert the legacy ciphertext first, then the canonical `enc:null` marker. Yjs map iteration
+  // order can vary in real docs, so this ensures we don't accidentally let a canonical marker
+  // overwrite a non-null ciphertext payload.
+  doc.transact(() => {
+    const legacy = new Y.Map();
+    legacy.set("enc", enc);
+    cells.set("Sheet1:0,0", legacy);
+
+    const marker = new Y.Map();
+    marker.set("enc", null);
+    cells.set("Sheet1:0:0", marker);
+  });
+
+  const state = sheetStateFromYjsDoc(doc, { sheetId: "Sheet1" });
+  assert.deepEqual(state.cells.get("r0c0")?.enc, enc);
 });
 
 test("diffYjsWorkbookSnapshots: encrypted format-only changes work even when format is only present on a legacy duplicate", () => {

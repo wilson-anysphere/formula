@@ -62,6 +62,22 @@ function isEncryptedCellValue(value: unknown): boolean {
   return (value as any).enc !== undefined;
 }
 
+function encValue(value: unknown): unknown | undefined {
+  const map = getYMapLike(value);
+  if (map) return map.get("enc");
+  if (!value || typeof value !== "object") return undefined;
+  return (value as any).enc;
+}
+
+function hasEncMarker(value: unknown): boolean {
+  return encValue(value) !== undefined;
+}
+
+function hasEncPayload(value: unknown): boolean {
+  const enc = encValue(value);
+  return enc !== undefined && enc !== null;
+}
+
 function deletePlaintextFields(value: unknown): void {
   const map = getYMapLike(value);
   if (map) {
@@ -185,21 +201,29 @@ function runMigrationDry(params: {
     const candidateCount = legacyKeys.length + (canonicalExists ? 1 : 0);
     if (candidateCount > 1) collisions += candidateCount - 1;
 
-    const canonicalEncrypted = canonicalExists && isEncryptedCellValue(canonicalValue);
-    let legacyEncryptedKey: string | null = null;
-    if (!canonicalEncrypted) {
-      for (const k of legacyKeys) {
-        if (isEncryptedCellValue(cells.get(k))) {
-          legacyEncryptedKey = k;
-          break;
-        }
+    const canonicalEncryptedMarker = canonicalExists && hasEncMarker(canonicalValue);
+    const canonicalEncryptedPayload = canonicalExists && hasEncPayload(canonicalValue);
+
+    let legacyEncryptedMarkerKey: string | null = null;
+    let legacyEncryptedPayloadKey: string | null = null;
+    for (const k of legacyKeys) {
+      const v = cells.get(k);
+      if (!hasEncMarker(v)) continue;
+      if (!legacyEncryptedMarkerKey) legacyEncryptedMarkerKey = k;
+      if (hasEncPayload(v)) {
+        legacyEncryptedPayloadKey = k;
+        break;
       }
     }
 
-    const hasEncrypted = canonicalEncrypted || legacyEncryptedKey != null;
+    const hasEncrypted = canonicalEncryptedMarker || legacyEncryptedMarkerKey != null;
     const shouldWriteCanonical = (() => {
       if (hasEncrypted) {
-        return !canonicalEncrypted && legacyEncryptedKey != null;
+        // Prefer ciphertext payloads over `enc: null` markers when duplicates exist.
+        if (canonicalEncryptedPayload) return false;
+        if (legacyEncryptedPayloadKey != null) return true;
+        // No ciphertext payload exists; only migrate an `enc` marker if the canonical key is missing.
+        return !canonicalEncryptedMarker && legacyEncryptedMarkerKey != null;
       }
       if (!canonicalExists) return true;
       if (conflict === "prefer-canonical") return false;
@@ -300,29 +324,44 @@ function runMigration(params: {
     if (candidateCount > 1) collisions += candidateCount - 1;
 
     // Determine whether any candidate is encrypted; encryption always wins.
-    const canonicalEncrypted = canonicalExists && isEncryptedCellValue(canonicalValue);
-    let legacyEncryptedKey: string | null = null;
-    if (!canonicalEncrypted) {
-      for (const k of legacyKeys) {
-        if (isEncryptedCellValue(cells.get(k))) {
-          legacyEncryptedKey = k;
-          break;
-        }
+    const canonicalEncryptedMarker = canonicalExists && hasEncMarker(canonicalValue);
+    const canonicalEncryptedPayload = canonicalExists && hasEncPayload(canonicalValue);
+
+    let legacyEncryptedMarkerKey: string | null = null;
+    let legacyEncryptedPayloadKey: string | null = null;
+    for (const k of legacyKeys) {
+      const v = cells.get(k);
+      if (!hasEncMarker(v)) continue;
+      if (!legacyEncryptedMarkerKey) legacyEncryptedMarkerKey = k;
+      if (hasEncPayload(v)) {
+        legacyEncryptedPayloadKey = k;
+        break;
       }
     }
 
-    const hasEncrypted = canonicalEncrypted || legacyEncryptedKey != null;
+    const hasEncrypted = canonicalEncryptedMarker || legacyEncryptedMarkerKey != null;
 
     let nextCanonicalValue: unknown = undefined;
     let shouldWriteCanonical = false;
 
     if (hasEncrypted) {
-      if (canonicalEncrypted) {
-        // Canonical is already encrypted; keep it, but ensure it does not retain
+      if (canonicalEncryptedPayload) {
+        // Canonical already has ciphertext; keep it, but ensure it does not retain
         // plaintext fields (defense-in-depth).
         if (!dryRun) deletePlaintextFields(canonicalValue);
-      } else if (legacyEncryptedKey) {
-        const legacyValue = cells.get(legacyEncryptedKey);
+      } else if (legacyEncryptedPayloadKey) {
+        // Prefer ciphertext payloads over `enc: null` markers.
+        const legacyValue = cells.get(legacyEncryptedPayloadKey);
+        nextCanonicalValue = cloneCellValue(legacyValue, MapCtor);
+        deletePlaintextFields(nextCanonicalValue);
+        shouldWriteCanonical = true;
+      } else if (canonicalEncryptedMarker) {
+        // Canonical has an `enc` marker (e.g. `enc: null`) and there is no ciphertext
+        // elsewhere. Keep it, but ensure it does not retain plaintext fields.
+        if (!dryRun) deletePlaintextFields(canonicalValue);
+      } else if (legacyEncryptedMarkerKey) {
+        // Canonical is unencrypted/missing, but a legacy key has an `enc` marker. Migrate it.
+        const legacyValue = cells.get(legacyEncryptedMarkerKey);
         nextCanonicalValue = cloneCellValue(legacyValue, MapCtor);
         deletePlaintextFields(nextCanonicalValue);
         shouldWriteCanonical = true;
