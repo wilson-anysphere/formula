@@ -247,6 +247,93 @@ describe("what-if UI components", () => {
     expect(normalizeHtmlForSnapshot(host.innerHTML)).toMatchSnapshot();
   });
 
+  it("GoalSeekDialog only calls onClose when clicking the backdrop (not inside the dialog)", async () => {
+    const api = createStubApi();
+    const onClose = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(GoalSeekDialog, { api, open: true, onClose }));
+    });
+
+    const dialog = host.querySelector('[data-testid="goal-seek-dialog"]') as HTMLElement | null;
+    expect(dialog).toBeTruthy();
+    const backdrop = host.querySelector(".what-if-dialog-overlay") as HTMLElement | null;
+    expect(backdrop).toBeTruthy();
+
+    // Click inside the dialog should not close (event target !== currentTarget).
+    await act(async () => {
+      dialog!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Clicking backdrop should close (event target === currentTarget).
+    await act(async () => {
+      backdrop!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("GoalSeekDialog restores focus to the previously focused element when closed", async () => {
+    const api = createStubApi();
+
+    function Wrapper() {
+      const [open, setOpen] = React.useState(false);
+      return React.createElement(
+        "div",
+        null,
+        React.createElement(
+          "button",
+          { type: "button", "data-testid": "goal-seek-open", onClick: () => setOpen(true) },
+          "Open",
+        ),
+        React.createElement(GoalSeekDialog, { api, open, onClose: () => setOpen(false) }),
+      );
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(Wrapper));
+    });
+
+    const opener = host.querySelector('[data-testid="goal-seek-open"]') as HTMLButtonElement | null;
+    expect(opener).toBeTruthy();
+
+    opener!.focus();
+    expect(document.activeElement).toBe(opener);
+
+    await act(async () => {
+      opener!.click();
+      await flushPromises();
+    });
+
+    const dialog = host.querySelector('[data-testid="goal-seek-dialog"]') as HTMLElement | null;
+    expect(dialog).toBeTruthy();
+
+    const dialogInputs = Array.from(dialog!.querySelectorAll("input")) as HTMLInputElement[];
+    expect(dialogInputs.length).toBeGreaterThanOrEqual(1);
+    expect(document.activeElement).toBe(dialogInputs[0]);
+
+    const closeBtn = Array.from(dialog!.querySelectorAll("button")).find((btn) => btn.textContent === "Close") as
+      | HTMLButtonElement
+      | undefined;
+    expect(closeBtn).toBeTruthy();
+
+    await act(async () => {
+      closeBtn!.click();
+      await flushPromises();
+    });
+
+    expect(host.querySelector('[data-testid="goal-seek-dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
   it("MonteCarloWizard renders responsive rows with accessible input labels (no inline styles)", async () => {
     const api = createStubApi();
 
