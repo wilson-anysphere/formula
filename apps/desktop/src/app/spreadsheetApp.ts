@@ -8839,7 +8839,7 @@ export class SpreadsheetApp {
         if (raw.length === 0) return [];
         if (raw.every(isUiDrawingObject)) return raw as DrawingObject[];
         // DocumentController drawings (or model objects) as a raw array (best-effort).
-        return convertDocumentSheetDrawingsToUiDrawingObjects(raw);
+        return convertDocumentSheetDrawingsToUiDrawingObjects(raw, { sheetId: this.sheetId });
       }
 
       if (isUiDrawingObject(raw)) return [raw];
@@ -8853,7 +8853,7 @@ export class SpreadsheetApp {
         if (Array.isArray(maybeWorksheet.objects)) {
           const list = maybeWorksheet.objects as unknown[];
           if (list.every(isUiDrawingObject)) return list as DrawingObject[];
-          return convertDocumentSheetDrawingsToUiDrawingObjects(list);
+          return convertDocumentSheetDrawingsToUiDrawingObjects(list, { sheetId: this.sheetId });
         }
       }
 

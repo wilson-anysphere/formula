@@ -653,13 +653,25 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
       return { type: "shape", ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
     case "chart": {
       const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
-      return { type: "chart", ...(chartId ? { chartId } : {}), ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+      // Mirror `convertModelDrawingObjectKind` behavior: some graphicFrames are not charts
+      // (e.g. SmartArt) and surface with `chartId/relId = "unknown"`. Treat those as unknown
+      // so placeholder labels can use `graphicFramePlaceholderLabel(...)`.
+      if (!chartId || chartId.trim() === "" || chartId === "unknown") {
+        const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
+        return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
+      }
+
+      return { type: "chart", chartId, ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
     }
     case "unknown":
       return { type: "unknown", ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
     case "chartPlaceholder": {
       const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
-      return { type: "chart", ...(chartId ? { chartId } : {}), ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
+      if (!chartId || chartId.trim() === "" || chartId === "unknown") {
+        const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
+        return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
+      }
+      return { type: "chart", chartId, ...(label ? { label } : {}), ...(rawXml ? { rawXml } : {}) };
     }
     default:
       return null;
@@ -676,23 +688,40 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
  *
  * Invalid entries are ignored (best-effort).
  */
-export function convertDocumentSheetDrawingsToUiDrawingObjects(drawingsJson: unknown): DrawingObject[] {
+export function convertDocumentSheetDrawingsToUiDrawingObjects(
+  drawingsJson: unknown,
+  context?: { sheetId?: string | number },
+): DrawingObject[] {
   if (!Array.isArray(drawingsJson)) return [];
 
+  const defaultSheetId = parseSheetId(context?.sheetId);
   const out: DrawingObject[] = [];
   for (const raw of drawingsJson) {
     try {
       if (isRecord(raw)) {
+        const anchorValue = pick(raw, ["anchor"]);
+        const anchorSheetId = (() => {
+          if (!isRecord(anchorValue)) return undefined;
+          return parseSheetId(pick(anchorValue, ["sheetId", "sheet_id"]));
+        })();
+        const sheetId = anchorSheetId ?? defaultSheetId;
+
         const kind = convertDocumentDrawingKindToUiKind(pick(raw, ["kind"]));
         if (kind) {
           const id = parseDrawingObjectId(pick(raw, ["id"]));
           const zOrder = readOptionalNumber(pick(raw, ["zOrder", "z_order"])) ?? 0;
           const size = convertDocumentDrawingSizeToEmu(pick(raw, ["size"]));
-          const anchor = convertDocumentDrawingAnchorToUiAnchor(pick(raw, ["anchor"]), size);
+          const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
           if (!anchor) continue;
           out.push({ id, kind, anchor, zOrder, ...(size ? { size } : {}) });
           continue;
         }
+
+        // If the drawing doesn't match the DocumentController schema, fall through to the
+        // formula-model adapter but preserve any known sheet context so chart placeholders can
+        // construct stable chart ids.
+        out.push(convertModelDrawingObjectToUiDrawingObject(raw, sheetId ? { sheetId } : undefined));
+        continue;
       }
 
       // Fallback to formula-model conversion (externally-tagged enums).

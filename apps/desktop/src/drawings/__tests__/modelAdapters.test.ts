@@ -332,4 +332,56 @@ describe("drawings/modelAdapters", () => {
     expect(ui.drawingsBySheetName.Sheet1).toHaveLength(1);
     expect(ui.drawingsBySheetName.Sheet1?.[0]?.kind).toEqual({ type: "image", imageId: "image1.png" });
   });
+
+  it("converts DocumentController cell-anchored drawings (pixel size) into UI drawing objects", () => {
+    const drawings = [
+      {
+        id: "d1",
+        zOrder: 1,
+        anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+        kind: { type: "image", imageId: "img1" },
+        size: { width: 120, height: 80 },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings, { sheetId: "Sheet1" });
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.kind).toEqual({ type: "image", imageId: "img1" });
+    expect(ui[0]?.anchor).toEqual({
+      type: "oneCell",
+      from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+      size: { cx: 120 * 9525, cy: 80 * 9525 },
+    });
+    expect(ui[0]?.zOrder).toBe(1);
+    expect(ui[0]?.size).toEqual({ cx: 120 * 9525, cy: 80 * 9525 });
+  });
+
+  it("treats DocumentController chart kind with relId/chartId=unknown as an unknown (SmartArt) kind", () => {
+    const rawXml = `<xdr:graphicFrame macro="">
+      <xdr:nvGraphicFramePr>
+        <xdr:cNvPr id="2" name="SmartArt 1"/>
+        <xdr:cNvGraphicFramePr/>
+      </xdr:nvGraphicFramePr>
+      <a:graphic>
+        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram">
+          <dgm:relIds r:dm="rId1" r:lo="rId2" r:qs="rId3" r:cs="rId4"/>
+        </a:graphicData>
+      </a:graphic>
+    </xdr:graphicFrame>`;
+
+    const drawings = [
+      {
+        id: "1",
+        zOrder: 0,
+        anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+        kind: { type: "chart", chartId: "unknown", rawXml },
+        size: { width: 10, height: 10 },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings, { sheetId: "Sheet1" });
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.kind).toMatchObject({ type: "unknown", rawXml });
+    expect(ui[0]?.kind.label).toBe("SmartArt 1");
+  });
 });
