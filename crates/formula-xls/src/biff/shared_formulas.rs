@@ -10,7 +10,7 @@
 //! surface such formulas, so the `.xls` importer uses this parser as a fallback to recover formula
 //! text for affected cells.
 
-use super::records;
+use super::{records, worksheet_formulas};
 
 /// SHRFMLA [MS-XLS 2.4.255]
 const RECORD_SHRFMLA: u16 = 0x04BC;
@@ -92,10 +92,12 @@ pub(crate) fn parse_biff_sheet_shared_formulas(
 fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<SharedFormulaDef> {
     // SHRFMLA [MS-XLS 2.4.255]
     //
-    // Producers in the wild appear to vary slightly in their record layout. Try a small set of
-    // plausible header shapes:
-    // - RefU (6 bytes): [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8]
-    // - Ref8 (8 bytes): [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
+    // The `SHRFMLA.rgce` token stream can be split across `CONTINUE` records. When a `PtgStr`
+    // (ShortXLUnicodeString) payload crosses a continuation boundary, Excel inserts an extra 1-byte
+    // "continued segment option flags" prefix at the start of the continued fragment.
+    //
+    // Naively concatenating record fragments therefore corrupts the rgce byte stream. Use the
+    // fragment-aware parser in `worksheet_formulas` so those continuation flag bytes are skipped.
     //
     // After the range header, accept an optional small prefix (0/2/4 bytes) followed by:
     //   [cce: u16][rgce: cce bytes]
@@ -139,7 +141,7 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
         })
     }
 
-    let parsed = super::worksheet_formulas::parse_biff8_shrfmla_record(record).ok()?;
+    let parsed = worksheet_formulas::parse_biff8_shrfmla_record(record).ok()?;
     if parsed.rgce.is_empty() {
         return None;
     }

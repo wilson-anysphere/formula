@@ -12,11 +12,8 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     formula_xls::import_xls_path(tmp.path()).expect("import xls")
 }
 
-#[test]
-fn imports_shared_formula_with_ptgstr_split_across_continue() {
-    let bytes = xls_fixture_builder::build_shared_formula_continued_ptgstr_fixture_xls();
-    let result = import_fixture(&bytes);
-
+fn assert_sharedstr_b2_formula(bytes: &[u8]) {
+    let result = import_fixture(bytes);
     let sheet = result
         .workbook
         .sheet_by_name("SharedStr")
@@ -33,3 +30,14 @@ fn imports_shared_formula_with_ptgstr_split_across_continue() {
     assert_parseable_formula(formula);
 }
 
+#[test]
+fn imports_shared_formula_with_ptgstr_split_across_continue() {
+    let bytes = xls_fixture_builder::build_shared_formula_continued_ptgstr_fixture_xls();
+    assert_sharedstr_b2_formula(&bytes);
+}
+
+#[test]
+fn imports_shared_formula_when_shrfmla_ptgstr_is_split_across_continue() {
+    let bytes = xls_fixture_builder::build_shared_formula_shrfmla_continued_ptgstr_fixture_xls();
+    assert_sharedstr_b2_formula(&bytes);
+}

@@ -564,6 +564,25 @@ pub fn build_shared_formula_shrfmla_range_cuse_ambiguity_fixture_xls() -> Vec<u8
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula range (`B1:B2`) where the shared
+/// `SHRFMLA.rgce` contains a `PtgStr` token that is split across a `CONTINUE` boundary.
+///
+/// When a `PtgStr` payload is continued, Excel inserts a 1-byte continued-segment option flags
+/// prefix at the start of the continued fragment. Consumers must skip that byte when reconstructing
+/// the canonical `rgce` stream.
+pub fn build_shared_formula_shrfmla_continued_ptgstr_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_shrfmla_continued_ptgstr_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2`:
 /// - `B1`: `SUM(A1,1)`
 /// - `B2`: `SUM(A2,1)` via `PtgExp` referencing `B1`
@@ -8106,6 +8125,66 @@ fn build_shared_formula_shrfmla_only_sheet_stream(
         RECORD_FORMULA,
         &formula_cell(1, 1, xf_cell, 0.0, &ptgexp_b1),
     );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_shrfmla_continued_ptgstr_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_shrfmla_continued_ptgstr_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedStr", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_shrfmla_continued_ptgstr_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0,2) cols [0,2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+
+    // Shared formula rgce: a string literal `"ABCDE"` represented as a single `PtgStr`.
+    //
+    // We split the physical SHRFMLA record across `CONTINUE` boundaries inside the string payload.
+    // The continued fragment starts with the required 1-byte continued-segment option flags prefix.
+    let literal = b"ABCDE";
+    let rgce: Vec<u8> = [vec![0x17, literal.len() as u8, 0u8], literal.to_vec()].concat();
+    let cce = rgce.len() as u16;
+
+    // Split after `"AB"` inside the string payload.
+    let first_rgce = &rgce[..(3 + 2)]; // ptg+len+flags + 2 chars
+    let remaining = &literal[2..]; // "CDE"
+
+    // SHRFMLA header: RefU (6) + cUse (2) + cce (2) + rgce...
+    //
+    // Range B1:B2 => rows 0..1, col 1.
+    let mut shrfmla_part1 = Vec::new();
+    shrfmla_part1.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+    shrfmla_part1.extend_from_slice(&1u16.to_le_bytes()); // rwLast
+    shrfmla_part1.push(1u8); // colFirst (B)
+    shrfmla_part1.push(1u8); // colLast (B)
+    shrfmla_part1.extend_from_slice(&0u16.to_le_bytes()); // cUse
+    shrfmla_part1.extend_from_slice(&cce.to_le_bytes());
+    shrfmla_part1.extend_from_slice(first_rgce);
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_part1);
+
+    // CONTINUE fragment: [continued_segment_flags][remaining string bytes]
+    let mut cont = Vec::new();
+    cont.push(0u8); // continued segment option flags (compressed 8-bit)
+    cont.extend_from_slice(remaining);
+    push_record(&mut sheet, RECORD_CONTINUE, &cont);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
