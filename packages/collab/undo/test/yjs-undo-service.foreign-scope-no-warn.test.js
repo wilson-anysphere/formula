@@ -2,36 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import * as Y from "yjs";
+import { replaceForeignRootType } from "@formula/collab-yjs-utils";
 import { requireYjsCjs } from "../../yjs-utils/test/require-yjs-cjs.js";
 
 import { REMOTE_ORIGIN, createCollabUndoService } from "../index.js";
-
-function replacePlaceholderRootType({ doc, name, existing, create }) {
-  const t = create();
-
-  // Mirror Yjs' `Doc.get()` behavior when turning an `AbstractType` placeholder
-  // root into a concrete type, but allow using a constructor from another Yjs
-  // module instance (ESM vs CJS).
-  t._map = existing?._map;
-  if (t._map instanceof Map) {
-    t._map.forEach((n) => {
-      for (; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  t._start = existing?._start;
-  for (let n = t._start; n !== null; n = n.right) {
-    n.parent = t;
-  }
-  t._length = existing?._length;
-
-  doc.share.set(name, t);
-  t._integrate?.(doc, null);
-
-  return t;
-}
 
 test("collab undo: does not warn [yjs#509] when scope contains a foreign root type (CJS constructor)", () => {
   const Ycjs = requireYjsCjs();
@@ -67,7 +41,7 @@ test("collab undo: does not warn [yjs#509] when scope contains a foreign root ty
   // instance as its nested values (mirrors `getCommentsRoot`).
   const MapCtor = nested.constructor;
   assert.equal(typeof MapCtor, "function", "expected nested comment map to have a constructor");
-  const foreignRoot = replacePlaceholderRootType({
+  const foreignRoot = replaceForeignRootType({
     doc,
     name: "comments",
     existing: placeholder,
@@ -141,7 +115,7 @@ test("collab undo: does not warn [yjs#509] when adding a foreign type to scope l
   const nested = content[content.length - 1];
   assert.ok(nested);
   const MapCtor = nested.constructor;
-  const foreignRoot = replacePlaceholderRootType({
+  const foreignRoot = replaceForeignRootType({
     doc,
     name: "comments",
     existing: placeholder,
