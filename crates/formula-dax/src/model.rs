@@ -636,61 +636,75 @@ impl DataModel {
         };
 
         if calc_count > 0 {
-            let mut row_ctx = RowContext::default();
-            row_ctx.push(table, row_index);
-            let engine = crate::engine::DaxEngine::new();
+            let calc_result: DaxResult<Vec<Value>> = (|| {
+                let mut row_ctx = RowContext::default();
+                row_ctx.push(table, row_index);
+                let engine = crate::engine::DaxEngine::new();
 
-            let topo_order = match self.calculated_column_order.get(table) {
-                Some(order) if order.len() == calc_count => order.clone(),
-                _ => {
-                    let order = self.build_calculated_column_order(table)?;
-                    self.calculated_column_order
-                        .insert(table.to_string(), order.clone());
-                    order
-                }
-            };
-
-            let calc_defs: Vec<CalculatedColumn> = topo_order
-                .into_iter()
-                .filter_map(|idx| self.calculated_columns.get(idx).cloned())
-                .collect();
-
-            for calc in calc_defs {
-                let value = engine.evaluate_expr(
-                    self,
-                    &calc.parsed,
-                    &FilterContext::default(),
-                    &row_ctx,
-                )?;
-                let col_idx = {
-                    let table_ref = self
-                        .tables
-                        .get(table)
-                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
-                    table_ref
-                        .column_idx(&calc.name)
-                        .ok_or_else(|| DaxError::UnknownColumn {
-                            table: table.to_string(),
-                            column: calc.name.clone(),
-                        })?
+                let topo_order = match self.calculated_column_order.get(table) {
+                    Some(order) if order.len() == calc_count => order.clone(),
+                    _ => {
+                        let order = self.build_calculated_column_order(table)?;
+                        self.calculated_column_order
+                            .insert(table.to_string(), order.clone());
+                        order
+                    }
                 };
 
-                let table_mut = self
-                    .tables
-                    .get_mut(table)
-                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
-                table_mut.set_value_by_idx(row_index, col_idx, value)?;
-            }
+                let calc_defs: Vec<CalculatedColumn> = topo_order
+                    .into_iter()
+                    .filter_map(|idx| self.calculated_columns.get(idx).cloned())
+                    .collect();
 
-            full_row = self
-                .tables
-                .get(table)
-                .map(|t| {
-                    (0..t.columns().len())
-                        .map(|idx| t.value_by_idx(row_index, idx).unwrap_or(Value::Blank))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or(full_row);
+                for calc in calc_defs {
+                    let value = engine.evaluate_expr(
+                        self,
+                        &calc.parsed,
+                        &FilterContext::default(),
+                        &row_ctx,
+                    )?;
+                    let col_idx = {
+                        let table_ref = self
+                            .tables
+                            .get(table)
+                            .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                        table_ref
+                            .column_idx(&calc.name)
+                            .ok_or_else(|| DaxError::UnknownColumn {
+                                table: table.to_string(),
+                                column: calc.name.clone(),
+                            })?
+                    };
+
+                    let table_mut = self
+                        .tables
+                        .get_mut(table)
+                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                    table_mut.set_value_by_idx(row_index, col_idx, value)?;
+                }
+
+                Ok(self
+                    .tables
+                    .get(table)
+                    .map(|t| {
+                        (0..t.columns().len())
+                            .map(|idx| t.value_by_idx(row_index, idx).unwrap_or(Value::Blank))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| full_row.clone()))
+            })();
+
+            match calc_result {
+                Ok(updated_row) => full_row = updated_row,
+                Err(err) => {
+                    // Keep insert_row atomic: if computing a calculated column fails, remove the
+                    // appended row before returning the error.
+                    if let Some(table_mut) = self.tables.get_mut(table) {
+                        table_mut.pop_row();
+                    }
+                    return Err(err);
+                }
+            }
         }
 
         let mut to_index_updates = Vec::new();

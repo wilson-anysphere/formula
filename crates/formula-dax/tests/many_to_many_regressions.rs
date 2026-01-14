@@ -424,3 +424,54 @@ fn insert_row_updates_inactive_m2m_indexes_used_by_userelationship() {
     // The default active relationship should not accidentally include it under the same Dim filter.
     assert_eq!(model.evaluate_measure("Total", &c_filter).unwrap(), Value::Blank);
 }
+
+#[test]
+fn insert_row_rolls_back_when_calculated_column_errors_under_m2m() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    model.add_table(Table::new("Fact", vec!["Id", "Key"])).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "DimAttr", "RELATED(Dim[Attr])")
+        .unwrap();
+
+    model.insert_row("Fact", vec![1.into(), 1.into()]).unwrap();
+    assert_eq!(model.table("Fact").unwrap().row_count(), 1);
+    assert_eq!(
+        model.table("Fact").unwrap().value(0, "DimAttr").unwrap(),
+        "A".into()
+    );
+
+    // Make the RELATED lookup ambiguous by inserting a second Dim row for the same key.
+    model
+        .insert_row("Dim", vec![1.into(), "B".into()])
+        .unwrap();
+
+    let err = model.insert_row("Fact", vec![2.into(), 1.into()]).unwrap_err();
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("ambig") || msg.contains("multiple") || msg.contains("more than one"),
+        "unexpected insert_row error: {err}"
+    );
+
+    // insert_row should be atomic: the row should not be present after the error.
+    assert_eq!(model.table("Fact").unwrap().row_count(), 1);
+}
