@@ -369,6 +369,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("COLUMNS", 0), "Expected COLUMNS array to be a range");
   assert.ok(registry.isRangeArg("ROW", 0), "Expected ROW reference to be a range");
   assert.ok(registry.isRangeArg("COLUMN", 0), "Expected COLUMN reference to be a range");
+  assert.ok(registry.isRangeArg("INDEX", 0), "Expected INDEX array to be a range");
+  assert.equal(registry.getArgType("INDEX", 1), "value", "Expected INDEX row_num to be value-like");
+  assert.equal(registry.getArgType("INDEX", 2), "value", "Expected INDEX column_num to be value-like");
+  assert.equal(registry.getArgType("INDEX", 3), "number", "Expected INDEX area_num to be numeric");
 
   // Reference/info helpers
   assert.ok(registry.isRangeArg("AREAS", 0), "Expected AREAS reference to be a range");
@@ -398,6 +402,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("PROB")?.args?.[3]?.optional, "Expected PROB upper_limit to be optional");
   assert.ok(registry.isRangeArg("SERIESSUM", 3), "Expected SERIESSUM coefficients to be a range");
   assert.equal(registry.getArgType("SERIESSUM", 0), "value", "Expected SERIESSUM x to be value-like");
+  assert.equal(registry.getArgType("SERIESSUM", 1), "value", "Expected SERIESSUM n to be value-like");
+  assert.equal(registry.getArgType("SERIESSUM", 2), "value", "Expected SERIESSUM m to be value-like");
 
   // Common distribution functions: keep cumulative flags boolean while treating scalar inputs as value-like.
   assert.equal(registry.getArgType("NORM.DIST", 0), "value", "Expected NORM.DIST x to be value-like");

@@ -2114,8 +2114,8 @@ const CURATED_FUNCTIONS = [
     description: "Returns the sum of a power series based on the formula.",
     args: [
       { name: "x", type: "value" },
-      { name: "n", type: "number" },
-      { name: "m", type: "number" },
+      { name: "n", type: "value" },
+      { name: "m", type: "value" },
       { name: "coefficients", type: "range" },
     ],
   },
@@ -2960,8 +2960,8 @@ const CURATED_FUNCTIONS = [
     description: "Returns the value of an element in a table or an array.",
     args: [
       { name: "array", type: "range" },
-      { name: "row_num", type: "number" },
-      { name: "column_num", type: "number", optional: true },
+      { name: "row_num", type: "value" },
+      { name: "column_num", type: "value", optional: true },
       { name: "area_num", type: "number", optional: true },
     ],
   },

@@ -4956,6 +4956,42 @@ test("SERIESSUM x suggests a left-cell reference (value-like)", async () => {
   );
 });
 
+test("SERIESSUM n suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SERIESSUM(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SERIESSUM(A1, B1"),
+    `Expected SERIESSUM to suggest a left-cell reference for n, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("INDEX row_num suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=INDEX(A1:B10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=INDEX(A1:B10, B1"),
+    `Expected INDEX to suggest a left-cell reference for row_num, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("QUARTILE.EXC quart suggests 1, 2, 3 (no 0/4)", async () => {
   const engine = new TabCompletionEngine();
 
