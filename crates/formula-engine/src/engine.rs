@@ -847,6 +847,11 @@ impl Engine {
     }
 
     /// Set (or clear) the explicit width override for a column.
+    ///
+    /// `width` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
+    /// This is the value shown in Excel's "Column Width" UI and persisted in `.xlsx` files.
+    ///
+    /// Pass `None` to clear the override back to the sheet default.
     pub fn set_col_width(&mut self, sheet: &str, col_0based: u32, width: Option<f32>) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         if self.workbook.grow_sheet_dimensions(
@@ -881,6 +886,9 @@ impl Engine {
     }
 
     /// Set whether a column is user-hidden.
+    ///
+    /// Note: Excel treats hidden state as distinct from width; a column can be hidden without
+    /// changing its stored width.
     pub fn set_col_hidden(&mut self, sheet: &str, col_0based: u32, hidden: bool) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         if self.workbook.grow_sheet_dimensions(

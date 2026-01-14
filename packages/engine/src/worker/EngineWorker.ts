@@ -312,6 +312,13 @@ export class EngineWorker {
     await this.invoke("setCellStyleId", { sheet, address, styleId }, options);
   }
 
+  /**
+   * Set (or clear) a per-column width override.
+   *
+   * `width` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
+   *
+   * Prefer `setColWidthChars(sheet, col, widthChars)` for an explicit unit name.
+   */
   async setColWidth(col: number, width: number | null, sheet?: string, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setColWidth", { sheet, col, width }, options);
