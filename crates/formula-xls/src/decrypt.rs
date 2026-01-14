@@ -468,7 +468,6 @@ fn is_never_encrypted_record(record_id: u16) -> bool {
 mod filepass_tests {
     use super::*;
     use formula_model::{CellRef, VerticalAlignment};
-    use std::io::{Cursor, Read};
     use std::path::PathBuf;
 
     fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
@@ -666,8 +665,15 @@ mod filepass_tests {
 
     #[test]
     fn decrypts_real_cryptoapi_fixture_and_preserves_workbook_globals_structure() {
-        // Regression guard for `.xls` files where workbook-global records after FILEPASS (XF/FONT/etc)
-        // must be decrypted so downstream BIFF parsers can import styles and other metadata.
+        // Regression guard for `.xls` files where workbook-global records after FILEPASS
+        // (XF/FONT/etc) must be decrypted so downstream BIFF parsers can import styles and other
+        // metadata.
+        //
+        // The fixture's Sheet1!A1 uses a non-default XF (vertical alignment = Top) so we can assert
+        // that:
+        // - workbook-globals (XF table) survived decryption,
+        // - style resolution can still see the non-default alignment, and
+        // - the XF remains "interesting" so the importer retains it.
         const PASSWORD: &str = "correct horse battery staple";
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -676,23 +682,10 @@ mod filepass_tests {
             .join("encrypted")
             .join("biff8_rc4_cryptoapi_pw_open.xls");
 
-        let bytes = std::fs::read(&path).expect("read fixture");
-        let cursor = Cursor::new(bytes);
-        let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
-
-        let mut workbook_stream = None;
-        for candidate in ["/Workbook", "/Book", "Workbook", "Book"] {
-            if let Ok(mut stream) = ole.open_stream(candidate) {
-                let mut buf = Vec::new();
-                stream.read_to_end(&mut buf).expect("read workbook stream");
-                workbook_stream = Some(buf);
-                break;
-            }
-        }
-        let workbook_stream = workbook_stream.expect("fixture missing workbook stream");
-
-        let decrypted =
-            decrypt_biff8_workbook_stream_rc4_cryptoapi(&workbook_stream, PASSWORD).expect("decrypt");
+        let workbook_stream =
+            crate::biff::read_workbook_stream_from_xls(&path).expect("read Workbook stream");
+        let decrypted = decrypt_biff8_workbook_stream_rc4_cryptoapi(&workbook_stream, PASSWORD)
+            .expect("decrypt");
 
         // The decryptor masks FILEPASS so parsers do not treat it as an encryption terminator.
         assert!(
@@ -730,23 +723,57 @@ mod filepass_tests {
         let biff_version = crate::biff::detect_biff_version(&decrypted);
         let codepage = crate::biff::parse_biff_codepage(&decrypted);
 
-        let globals =
-            crate::biff::globals::parse_biff_workbook_globals(&decrypted, biff_version, codepage)
-                .expect("parse workbook globals");
-        let bound_sheets =
-            crate::biff::parse_biff_bound_sheets(&decrypted, biff_version, codepage)
-                .expect("parse bound sheets");
+        let globals = crate::biff::parse_biff_workbook_globals(&decrypted, biff_version, codepage)
+            .expect("parse workbook globals");
+        assert!(
+            globals.xf_count() != 0,
+            "expected XF records to be parsed from decrypted workbook globals"
+        );
+
+        let bound_sheets = crate::biff::parse_biff_bound_sheets(&decrypted, biff_version, codepage)
+            .expect("parse bound sheets");
         assert!(!bound_sheets.is_empty(), "expected at least one bound sheet");
         let sheet0_offset = bound_sheets[0].offset;
 
         let cell_xfs =
-            crate::biff::sheet::parse_biff_sheet_cell_xf_indices_filtered(&decrypted, sheet0_offset, None)
+            crate::biff::parse_biff_sheet_cell_xf_indices_filtered(&decrypted, sheet0_offset, None)
                 .expect("parse cell xfs");
         let xf_idx = *cell_xfs
             .get(&CellRef::new(0, 0))
-            .expect("expected A1 xf index in sheet stream") as u32;
+            .expect("expected A1 xf index in sheet stream");
 
-        let style = globals.resolve_style(xf_idx);
+        // Sanity check: verify the decrypted sheet payload contains the expected A1 value (42.0).
+        {
+            let mut found = None;
+            for record in crate::biff::records::BestEffortSubstreamIter::from_offset(
+                &decrypted,
+                sheet0_offset,
+            )
+            .expect("sheet record iter")
+            {
+                // Stop before consuming the next substream.
+                if record.offset != sheet0_offset
+                    && crate::biff::records::is_bof_record(record.record_id)
+                {
+                    break;
+                }
+                // NUMBER [MS-XLS 2.4.164]
+                if record.record_id == 0x0203 && record.data.len() >= 14 {
+                    let row = u16::from_le_bytes([record.data[0], record.data[1]]);
+                    let col = u16::from_le_bytes([record.data[2], record.data[3]]);
+                    if row == 0 && col == 0 {
+                        let mut buf = [0u8; 8];
+                        buf.copy_from_slice(&record.data[6..14]);
+                        found = Some(f64::from_le_bytes(buf));
+                        break;
+                    }
+                }
+            }
+            assert_eq!(found, Some(42.0), "expected decrypted A1 NUMBER record");
+        }
+
+        // Style resolution should preserve non-default vertical alignment.
+        let style = globals.resolve_style(xf_idx as u32);
         assert_ne!(style, formula_model::Style::default());
         assert_eq!(
             style
@@ -755,6 +782,41 @@ mod filepass_tests {
                 .and_then(|alignment| alignment.vertical),
             Some(VerticalAlignment::Top),
             "expected A1 style to preserve vertical alignment from decrypted XF records"
+        );
+
+        // Inspect the raw decrypted XF record bytes backing the A1 style.
+        {
+            let mut seen = 0u16;
+            let mut alignment_byte = None;
+            let mut used_attr = None;
+            for record in crate::biff::records::BestEffortSubstreamIter::from_offset(&decrypted, 0)
+                .expect("globals record iter")
+            {
+                if record.record_id == 0x00E0 {
+                    if seen == xf_idx {
+                        alignment_byte = record.data.get(6).copied();
+                        used_attr = record.data.get(9).copied();
+                        break;
+                    }
+                    seen = seen.saturating_add(1);
+                }
+            }
+            assert_eq!(
+                alignment_byte,
+                Some(0),
+                "expected A1 XF alignment byte to encode vertical=Top"
+            );
+            assert_eq!(
+                used_attr,
+                Some(0x3F),
+                "expected A1 XF to have apply-all attribute flags"
+            );
+        }
+
+        let mask = globals.xf_is_interesting_mask();
+        assert!(
+            mask.get(xf_idx as usize).copied().unwrap_or(false),
+            "expected A1 XF to be marked as interesting so style import retains it"
         );
     }
 }
