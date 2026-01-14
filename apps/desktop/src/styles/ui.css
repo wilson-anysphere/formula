@@ -880,8 +880,8 @@ a:visited {
 }
 
 .grid__cell--selected {
-  background: var(--formula-grid-selection-fill, var(--selection-bg));
-  color: var(--formula-grid-cell-text, var(--selection-text));
+  background: var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
+  color: var(--formula-grid-cell-text, var(--text-primary));
   outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
   outline-offset: -2px;
 }
@@ -937,7 +937,7 @@ a:visited {
 .formula-table-filter-button:focus-visible {
   outline: none;
   border-color: var(--formula-grid-selection-border, var(--selection-border));
-  box-shadow: 0 0 0 2px var(--formula-grid-selection-fill, var(--selection-bg));
+  box-shadow: 0 0 0 2px var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
   opacity: 1;
 }
 
