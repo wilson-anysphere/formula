@@ -23,6 +23,23 @@ test("InMemoryVectorStore.search: returns deterministic id ordering when similar
   );
 });
 
+test("InMemoryVectorStore.search: accounts for extra embedding dimensions when computing cosine similarity", async () => {
+  const store = new InMemoryVectorStore();
+
+  // `chunk-long` shares the same prefix direction as the query but has a large extra
+  // component; it should not tie with the shorter, exact-match embedding.
+  await store.add([
+    { id: "chunk-long", embedding: [1, 0, 100], metadata: null, text: "long" },
+    { id: "chunk-short", embedding: [1, 0], metadata: null, text: "short" },
+  ]);
+
+  const results = await store.search([1, 0], 2);
+  assert.deepStrictEqual(
+    results.map((r) => r.item.id),
+    ["chunk-short", "chunk-long"],
+  );
+});
+
 test("InMemoryVectorStore.search: treats non-finite topK (NaN) as 'all results'", async () => {
   const store = new InMemoryVectorStore();
   const embedding = [1, 0, 0];

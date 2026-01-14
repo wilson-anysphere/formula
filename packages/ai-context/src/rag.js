@@ -42,6 +42,11 @@ function cosineSimilarity(a, b) {
     na += a[i] * a[i];
     nb += b[i] * b[i];
   }
+  // Treat missing dimensions as 0. If one vector is longer than the other, its
+  // extra components should still contribute to its norm; otherwise a prefix
+  // match could incorrectly produce a cosine similarity of 1.
+  for (let i = len; i < a.length; i++) na += a[i] * a[i];
+  for (let i = len; i < b.length; i++) nb += b[i] * b[i];
   if (na === 0 || nb === 0) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
