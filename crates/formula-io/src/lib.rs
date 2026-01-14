@@ -1954,27 +1954,6 @@ fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> 
     None
 }
 
-#[cfg(feature = "encrypted-workbooks")]
-fn zip_contains_workbook_bin(package_bytes: &[u8]) -> bool {
-    let Ok(archive) = zip::ZipArchive::new(std::io::Cursor::new(package_bytes)) else {
-        return false;
-    };
-
-    for name in archive.file_names() {
-        let mut normalized = name.trim_start_matches('/');
-        let replaced;
-        if normalized.contains('\\') {
-            replaced = normalized.replace('\\', "/");
-            normalized = &replaced;
-        }
-        if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
-            return true;
-        }
-    }
-
-    false
-}
-
 #[cfg(not(feature = "encrypted-workbooks"))]
 fn unsupported_office_ooxml_encryption(path: &Path) -> Error {
     Error::UnsupportedEncryption {
