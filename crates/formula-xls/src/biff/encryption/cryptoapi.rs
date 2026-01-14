@@ -1313,4 +1313,134 @@ mod tests {
             .expect("decrypt");
         assert_eq!(encrypted, plain);
     }
+
+    #[test]
+    fn decrypt_cryptoapi_legacy_accepts_raw_40_bit_rc4_keys() {
+        // Like `decrypt_cryptoapi_standard_accepts_raw_40_bit_rc4_keys`, but for the legacy BIFF8
+        // FILEPASS CryptoAPI layout (`wEncryptionInfo == 0x0004`) and the legacy absolute-position
+        // RC4 stream model.
+        let password = "pw";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
+            let mut out = Vec::with_capacity(4 + payload.len());
+            out.extend_from_slice(&record_id.to_le_bytes());
+            out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+            out.extend_from_slice(payload);
+            out
+        }
+
+        fn dummy_payload(len: usize, seed: u8) -> Vec<u8> {
+            (0..len)
+                .map(|i| {
+                    seed.wrapping_add((i as u8).wrapping_mul(31))
+                        .wrapping_add((i >> 8) as u8)
+                })
+                .collect()
+        }
+
+        // Deterministic salt/verifier for reproducibility.
+        let salt: [u8; 16] = core::array::from_fn(|i| 0x10u8.wrapping_add(i as u8));
+        let verifier_plain: [u8; 16] = core::array::from_fn(|i| 0xA0u8.wrapping_add(i as u8));
+        let verifier_hash_plain = sha1_bytes(&[&verifier_plain]);
+
+        // Encrypt verifier using the **raw 5-byte** RC4 key variant (no WinCrypt padding).
+        let key_material =
+            derive_key_material_legacy(CryptoApiHashAlg::Sha1, password, &salt).expect("kdf");
+        let key0_raw =
+            derive_block_key(CryptoApiHashAlg::Sha1, key_material.as_slice(), 0, 5, false);
+        let mut rc4 = Rc4::new(&key0_raw[..]);
+        drop(key0_raw);
+        let mut verifier_buf = [0u8; 36];
+        verifier_buf[..16].copy_from_slice(&verifier_plain);
+        verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
+        rc4.apply_keystream(&mut verifier_buf);
+        let encrypted_verifier: [u8; 16] = verifier_buf[..16].try_into().unwrap();
+        let encrypted_verifier_hash: [u8; 20] = verifier_buf[16..].try_into().unwrap();
+
+        // EncryptionHeader (32 bytes, no CSP name).
+        let mut enc_header = Vec::<u8>::new();
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+        enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
+        enc_header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIDHash
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // KeySize bits (0 => 40-bit)
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+
+        // EncryptionVerifier.
+        let mut enc_verifier = Vec::<u8>::new();
+        enc_verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+        enc_verifier.extend_from_slice(&salt);
+        enc_verifier.extend_from_slice(&encrypted_verifier);
+        enc_verifier.extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes());
+        enc_verifier.extend_from_slice(&encrypted_verifier_hash);
+
+        // FILEPASS payload (legacy layout B).
+        let mut filepass_payload = Vec::<u8>::new();
+        filepass_payload.extend_from_slice(&super::super::BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes()); // wEncryptionType
+        filepass_payload
+            .extend_from_slice(&super::super::BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY.to_le_bytes()); // wEncryptionInfo (0x0004)
+        filepass_payload.extend_from_slice(&4u16.to_le_bytes()); // vMajor
+        filepass_payload.extend_from_slice(&2u16.to_le_bytes()); // vMinor
+        filepass_payload.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        filepass_payload.extend_from_slice(&(enc_header.len() as u32).to_le_bytes()); // headerSize
+        filepass_payload.extend_from_slice(&enc_header);
+        filepass_payload.extend_from_slice(&enc_verifier);
+
+        // Build plaintext workbook stream.
+        let r1 = record(0x00FC, &dummy_payload(1000, 0x11));
+        let r2 = record(0x00FD, &dummy_payload(80, 0x22));
+        let bof = record(records::RECORD_BOF_BIFF8, &bof_payload);
+        let filepass = record(records::RECORD_FILEPASS, &filepass_payload);
+        let plain = [bof, filepass, r1, r2, record(records::RECORD_EOF, &[])].concat();
+
+        // Encrypt record payload bytes after FILEPASS using the legacy absolute-position stream
+        // mapping and the raw 5-byte key variant.
+        let encrypted_start = filepass_payload
+            .len()
+            .checked_add(4)
+            .and_then(|l| l.checked_add(bof_payload.len() + 4))
+            .unwrap();
+        let mut encrypted = plain.clone();
+
+        let mut offset = encrypted_start;
+        let mut stream_pos = encrypted_start;
+        while offset < encrypted.len() {
+            let remaining = encrypted.len().saturating_sub(offset);
+            if remaining < 4 {
+                break;
+            }
+
+            let record_id = u16::from_le_bytes([encrypted[offset], encrypted[offset + 1]]);
+            let len = u16::from_le_bytes([encrypted[offset + 2], encrypted[offset + 3]]) as usize;
+            let data_start = offset + 4;
+            let data_end = data_start + len;
+
+            // Record headers are not encrypted but still advance the CryptoAPI RC4 stream position.
+            stream_pos += 4;
+
+            // Avoid record types with special-case decryption behavior (we only emit dummy records
+            // here), but mirror the "never encrypted" list for completeness.
+            if !is_never_encrypted_record(record_id) && len > 0 {
+                decrypt_range_by_offset(
+                    &mut encrypted[data_start..data_end],
+                    stream_pos,
+                    CryptoApiHashAlg::Sha1,
+                    key_material.as_slice(),
+                    5,
+                    false,
+                );
+            }
+
+            stream_pos += len;
+            offset = data_end;
+        }
+
+        // Decrypt must recover the original plaintext stream.
+        crate::biff::encryption::decrypt_workbook_stream(&mut encrypted, password)
+            .expect("decrypt");
+        assert_eq!(encrypted, plain);
+    }
 }
