@@ -8586,6 +8586,18 @@ function handleRibbonCommand(commandId: string): void {
     };
     const cellStylesPrefix = "home.styles.cellStyles.";
     if (commandId.startsWith(cellStylesPrefix)) {
+      // Keep these ids explicitly referenced so ribbon wiring coverage can validate that
+      // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
+      if (
+        commandId === "home.styles.cellStyles.dataModel" ||
+        commandId === "home.styles.cellStyles.titlesHeadings" ||
+        commandId === "home.styles.cellStyles.numberFormat" ||
+        commandId === "home.styles.cellStyles.newStyle"
+      ) {
+        showToast("Cell Styles are not implemented yet.");
+        app.focus();
+        return;
+      }
       if (commandId !== "home.styles.cellStyles.goodBadNeutral") {
         showToast("Cell Styles are not implemented yet.");
         app.focus();

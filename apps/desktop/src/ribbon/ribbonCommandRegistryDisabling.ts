@@ -140,9 +140,13 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "data.sortFilter.sort.customSort",
 
   // --- Home → Styles ----------------------------------------------------------
-  // Cell Styles are currently handled via `main.ts` (not CommandRegistry yet). Only the
-  // Good/Bad/Neutral submenu is implemented today.
+  // Cell Styles are currently handled via `main.ts` (not CommandRegistry yet).
+  // Only the Good/Bad/Neutral submenu is implemented today; other menu items show a toast.
   "home.styles.cellStyles.goodBadNeutral",
+  "home.styles.cellStyles.dataModel",
+  "home.styles.cellStyles.titlesHeadings",
+  "home.styles.cellStyles.numberFormat",
+  "home.styles.cellStyles.newStyle",
   "home.styles.formatAsTable",
   "home.styles.formatAsTable.light",
   "home.styles.formatAsTable.medium",
