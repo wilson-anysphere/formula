@@ -13682,6 +13682,67 @@ fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_formula_sheet_name_unicode_sheet_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - Sheet 0: `数据` (full Unicode; stored using BIFF8 uncompressed UTF-16LE string encoding)
+    // - Sheet 1: `Ref`, with a formula in A1 that references `数据!$A$1` via `PtgRef3d` (EXTERNSHEET).
+    //
+    // This fixture exercises:
+    // - importing full Unicode BoundSheet names from BIFF8, and
+    // - rewriting/quoting sheet references in formulas so they are parseable by `formula-engine`.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["数据", "Ref"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables used by 3D formula tokens.
+    // - SUPBOOK: one internal workbook entry (marker name = 0x01)
+    // - EXTERNSHEET: one mapping for sheet index 0 (`数据`)
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 ------------------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
+
+    // -- Sheet 1 ------------------------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_ref3d_formula_sheet_stream(xf_cell));
+
+    globals
+}
+
 fn build_shared_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     // This workbook contains:
     // - Sheet 0: `Bad:Name` (invalid; will be sanitized to `Bad_Name` on import).
@@ -15946,6 +16007,25 @@ pub fn build_sanitized_sheet_name_internal_hyperlink_fixture_xls() -> Vec<u8> {
 /// sanitization (similar to how internal hyperlinks are already rewritten).
 pub fn build_formula_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_formula_sheet_name_sanitization_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where a cross-sheet formula references a Unicode (non-ASCII) sheet
+/// name.
+///
+/// This is used to verify that the `.xls` importer produces formula strings that remain parseable
+/// by `formula-engine` even when sheet names contain full Unicode characters.
+pub fn build_formula_sheet_name_unicode_sheet_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_formula_sheet_name_unicode_sheet_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
