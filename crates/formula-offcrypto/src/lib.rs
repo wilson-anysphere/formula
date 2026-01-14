@@ -3557,6 +3557,11 @@ pub fn decrypt_encrypted_package(
     // truncation/size errors.
     let pkg_header = parse_encrypted_package_header(encrypted_package)?;
     let total_size = pkg_header.original_size;
+    if let Some(max) = options.limits.max_output_size {
+        if total_size > max {
+            return Err(OffcryptoError::OutputTooLarge { total_size, max });
+        }
+    }
     let output_len = usize::try_from(total_size)
         .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
     // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.

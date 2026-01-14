@@ -1,8 +1,9 @@
 use formula_offcrypto::{
     decrypt_encrypted_package, decrypt_encrypted_package_ecb, parse_encrypted_package_header,
     parse_encryption_info, validate_agile_segment_decrypt_inputs,
-    validate_standard_encrypted_package_stream, DecryptOptions, OffcryptoError, StandardEncryptionHeader,
-    StandardEncryptionHeaderFlags, StandardEncryptionInfo, StandardEncryptionVerifier,
+    validate_standard_encrypted_package_stream, DecryptLimits, DecryptOptions, OffcryptoError,
+    StandardEncryptionHeader, StandardEncryptionHeaderFlags, StandardEncryptionInfo,
+    StandardEncryptionVerifier,
 };
 use std::io::{Cursor, Read};
 use std::path::PathBuf;
@@ -291,6 +292,67 @@ fn decrypt_encrypted_package_agile_rejects_size_mismatch_before_password_check()
         OffcryptoError::EncryptedPackageSizeMismatch {
             total_size: 32,
             ciphertext_len: 16
+        }
+    );
+}
+
+#[test]
+fn decrypt_encrypted_package_standard_rejects_output_too_large_before_password_check() {
+    let encryption_info = minimal_standard_encryption_info_bytes();
+
+    let total_size: u64 = 2 * 1024 * 1024; // 2MiB
+    let max: u64 = 1024 * 1024; // 1MiB
+
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&total_size.to_le_bytes());
+    encrypted_package.resize(8 + total_size as usize, 0);
+
+    let options = DecryptOptions {
+        verify_integrity: false,
+        limits: DecryptLimits {
+            max_output_size: Some(max),
+            ..Default::default()
+        },
+    };
+
+    let err = decrypt_encrypted_package(&encryption_info, &encrypted_package, "wrong-password", options)
+        .unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::OutputTooLarge {
+            total_size,
+            max,
+        }
+    );
+}
+
+#[test]
+fn decrypt_encrypted_package_agile_rejects_output_too_large_before_password_check() {
+    let encrypted = std::fs::read(fixture("inputs/example_password.xlsx")).expect("read fixture");
+    let encryption_info = extract_stream_bytes(&encrypted, "EncryptionInfo");
+
+    let total_size: u64 = 2 * 1024 * 1024; // 2MiB
+    let max: u64 = 1024 * 1024; // 1MiB
+
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&total_size.to_le_bytes());
+    encrypted_package.resize(8 + total_size as usize, 0);
+
+    let options = DecryptOptions {
+        verify_integrity: false,
+        limits: DecryptLimits {
+            max_output_size: Some(max),
+            ..Default::default()
+        },
+    };
+
+    let err = decrypt_encrypted_package(&encryption_info, &encrypted_package, "wrong-password", options)
+        .unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::OutputTooLarge {
+            total_size,
+            max,
         }
     );
 }
