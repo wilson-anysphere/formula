@@ -1097,6 +1097,96 @@ impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedScriptCode<MAX_BYT
 /// `pub fn ...` signature. Keeping the const generic expression behind a type alias avoids
 /// confusing that heuristic.
 pub type IpcScriptCode = LimitedScriptCode<{ crate::ipc_limits::MAX_SCRIPT_CODE_BYTES }>;
+/// IPC string wrapper for cell formula payloads with a maximum byte length.
+///
+/// This uses a cell-edit-specific error message so clients can distinguish formula-size failures
+/// from other IPC string limit failures.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitedCellFormula(String);
+
+impl LimitedCellFormula {
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for LimitedCellFormula {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<LimitedCellFormula> for String {
+    fn from(value: LimitedCellFormula) -> Self {
+        value.0
+    }
+}
+
+impl Serialize for LimitedCellFormula {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
+}
+
+impl<'de> Deserialize<'de> for LimitedCellFormula {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct FormulaVisitor;
+
+        impl FormulaVisitor {
+            fn validate<E>(value: &str) -> Result<(), E>
+            where
+                E: de::Error,
+            {
+                if value.len() > MAX_CELL_FORMULA_BYTES {
+                    return Err(E::custom(format!(
+                        "cell formula is too large (max {MAX_CELL_FORMULA_BYTES} bytes)"
+                    )));
+                }
+                Ok(())
+            }
+        }
+
+        impl<'de> de::Visitor<'de> for FormulaVisitor {
+            type Value = LimitedCellFormula;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a cell formula string (max {MAX_CELL_FORMULA_BYTES} bytes)")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(v)?;
+                Ok(LimitedCellFormula(v.to_owned()))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(v)?;
+                Ok(LimitedCellFormula(v.to_owned()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Self::validate::<E>(&v)?;
+                Ok(LimitedCellFormula(v))
+            }
+        }
+
+        deserializer.deserialize_str(FormulaVisitor)
+    }
+}
 
 /// IPC-only cell value type that only accepts scalar JSON values.
 ///
@@ -1253,7 +1343,7 @@ impl<'de> Deserialize<'de> for LimitedCellValue {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RangeCellEdit {
     pub value: Option<LimitedCellValue>,
-    pub formula: Option<LimitedString<MAX_CELL_FORMULA_BYTES>>,
+    pub formula: Option<LimitedCellFormula>,
 }
 
 /// IPC-deserialized matrix of cell edits with size limits applied during deserialization.
@@ -3857,7 +3947,7 @@ pub async fn set_cell(
     row: usize,
     col: usize,
     value: Option<LimitedCellValue>,
-    formula: Option<LimitedString<MAX_CELL_FORMULA_BYTES>>,
+    formula: Option<LimitedCellFormula>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
@@ -8317,7 +8407,7 @@ mod tests {
         let err =
             serde_json::from_str::<RangeCellEdit>(&json).expect_err("expected size limit to fail");
         assert!(
-            err.to_string().contains(&max.to_string()),
+            err.to_string().contains("cell formula") && err.to_string().contains(&max.to_string()),
             "expected error message to mention limit: {err}"
         );
     }
