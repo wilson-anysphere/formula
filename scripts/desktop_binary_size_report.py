@@ -27,6 +27,16 @@ class CmdResult:
     stdout: str
     stderr: str
 
+    @property
+    def combined(self) -> str:
+        out = self.stdout or ""
+        err = self.stderr or ""
+        if err.strip():
+            if out.strip():
+                return f"{out.rstrip()}\n{err.rstrip()}"
+            return err.rstrip()
+        return out.rstrip()
+
 
 def _human_bytes(size_bytes: int) -> str:
     size = float(size_bytes)
@@ -236,6 +246,8 @@ def _render_markdown(
     limit_mb: int | None,
     enforce: bool,
     cargo_bloat_version: str | None,
+    file_info: str | None,
+    stripped: bool | None,
     build_cmd: list[str] | None,
     crates_cmd: list[str] | None,
     crates_out: CmdResult | None,
@@ -263,6 +275,10 @@ def _render_markdown(
     lines.append(f"- Binary path: `{_relpath(bin_path, repo_root)}`")
     if bin_size_bytes is not None:
         lines.append(f"- Binary size: **{_human_bytes(bin_size_bytes)}** ({bin_size_bytes} bytes)")
+    if file_info:
+        lines.append(f"- File info: `{file_info}`")
+    if stripped is not None:
+        lines.append(f"- Stripped: **{'yes' if stripped else 'no'}**")
     if cargo_bloat_version:
         lines.append(f"- cargo-bloat: `{cargo_bloat_version}`")
     if limit_mb is None:
@@ -298,8 +314,7 @@ def _render_markdown(
         lines.append(f"`{_render_cmd(crates_cmd)}`")
         lines.append("")
         lines.append("```text")
-        combined = (crates_out.stdout + ("\n" + crates_out.stderr if crates_out.stderr.strip() else "")).rstrip()
-        lines.append(combined or "<no output>")
+        lines.append(crates_out.combined or "<no output>")
         lines.append("```")
         lines.append("")
 
@@ -310,8 +325,7 @@ def _render_markdown(
         lines.append(f"`{_render_cmd(symbols_cmd)}`")
         lines.append("")
         lines.append("```text")
-        combined = (symbols_out.stdout + ("\n" + symbols_out.stderr if symbols_out.stderr.strip() else "")).rstrip()
-        lines.append(combined or "<no output>")
+        lines.append(symbols_out.combined or "<no output>")
         lines.append("```")
         lines.append("")
 
@@ -323,8 +337,7 @@ def _render_markdown(
         lines.append(f"`{_render_cmd(llvm_size_cmd)}`")
         lines.append("")
         lines.append("```text")
-        combined = (llvm_size_out.stdout + ("\n" + llvm_size_out.stderr if llvm_size_out.stderr.strip() else "")).rstrip()
-        lines.append(combined or "<no output>")
+        lines.append(llvm_size_out.combined or "<no output>")
         lines.append("```")
         lines.append("")
 
@@ -461,6 +474,8 @@ def main() -> int:
                 limit_mb=limit_mb,
                 enforce=enforce,
                 cargo_bloat_version=None,
+                file_info=None,
+                stripped=None,
                 build_cmd=build_cmd,
                 crates_cmd=None,
                 crates_out=None,
@@ -497,6 +512,8 @@ def main() -> int:
             limit_mb=limit_mb,
             enforce=enforce,
             cargo_bloat_version=None,
+            file_info=None,
+            stripped=None,
             build_cmd=build_cmd,
             crates_cmd=None,
             crates_out=None,
@@ -521,6 +538,23 @@ def main() -> int:
     bin_size_bytes = bin_path.stat().st_size
     limit_bytes = limit_mb * 1000 * 1000 if limit_mb is not None else None
     over_limit = limit_bytes is not None and bin_size_bytes > limit_bytes
+
+    # Best-effort: show `file` output (helps spot unstripped/debug builds).
+    file_info: str | None = None
+    stripped: bool | None = None
+    file_tool = shutil.which("file")
+    if file_tool:
+        file_out = _run_capture([file_tool, str(bin_path)], cwd=repo_root)
+        if file_out.returncode == 0:
+            line = file_out.stdout.strip().splitlines()[0] if file_out.stdout.strip() else ""
+            if line:
+                _prefix, sep, rest = line.partition(":")
+                file_info = rest.strip() if sep else line.strip()
+                lowered = file_info.lower()
+                if "not stripped" in lowered:
+                    stripped = False
+                elif "stripped" in lowered:
+                    stripped = True
 
     # Preferred: cargo-bloat.
     cargo_bloat_probe = _run_capture(["cargo", "bloat", "--version"], cwd=repo_root)
@@ -617,6 +651,8 @@ def main() -> int:
         limit_mb=limit_mb,
         enforce=enforce,
         cargo_bloat_version=cargo_bloat_version,
+        file_info=file_info,
+        stripped=stripped,
         build_cmd=build_cmd,
         crates_cmd=crates_cmd,
         crates_out=crates_out,
