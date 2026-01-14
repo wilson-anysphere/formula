@@ -5496,6 +5496,10 @@ export class SpreadsheetApp {
         // *before* triggering any synchronous redraws (tests often stub `requestAnimationFrame` to run
         // immediately), so their cached series data is regenerated against the updated metadata.
         this.markFormulaChartsDirty();
+        // Selection summary (status bar Sum/Avg/Count) caches results keyed only on document content
+        // versions. Workbook metadata changes can affect computed values for formula cells without
+        // bumping those versions, so clear the cache to ensure the status bar re-evaluates.
+        this.selectionSummaryCache = null;
         // If the WASM engine is unavailable (missing bundle, init failure, etc) but we previously
         // cached computed values, clear them so the in-process evaluator is authoritative.
         // Otherwise `getCellComputedValue` may keep returning stale engine-derived values even

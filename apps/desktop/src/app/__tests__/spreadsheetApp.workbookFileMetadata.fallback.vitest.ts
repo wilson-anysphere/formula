@@ -125,6 +125,9 @@ describe("SpreadsheetApp workbook file metadata fallback evaluation", () => {
     // Seed formulas that depend on workbook metadata.
     doc.setCellFormula("Sheet1", { row: 0, col: 0 }, '=CELL("filename")');
     doc.setCellFormula("Sheet1", { row: 1, col: 0 }, '=INFO("directory")');
+    // Use a numeric wrapper around `CELL("filename")` so the selection summary (Sum/Avg) changes
+    // when workbook metadata becomes available.
+    doc.setCellFormula("Sheet1", { row: 0, col: 1 }, '=IF(CELL("filename")="",0,1)');
 
     // Force multi-sheet mode so SpreadsheetApp uses the in-process evaluator path
     // (engine computed-value cache is gated to single-sheet workbooks).
@@ -139,12 +142,17 @@ describe("SpreadsheetApp workbook file metadata fallback evaluation", () => {
     expect(provider).toBeTruthy();
     const invalidateSpy = vi.spyOn(provider, "invalidateAll");
 
+    // Prime the selection summary cache, then confirm it is invalidated on workbook metadata changes.
+    app.activateCell({ sheetId: "Sheet1", row: 0, col: 1 }, { focus: false, scrollIntoView: false });
+    expect(app.getSelectionSummary().sum).toBe(0);
+
     // Simulate Save As (directory + filename become known).
     await app.setWorkbookFileMetadata("/tmp/", "Book.xlsx");
     expect(invalidateSpy).toHaveBeenCalled();
 
     expect(app.getCellComputedValueForSheet("Sheet1", { row: 0, col: 0 })).toBe("/tmp/[Book.xlsx]Sheet1");
     expect(app.getCellComputedValueForSheet("Sheet1", { row: 1, col: 0 })).toBe("/tmp/");
+    expect(app.getSelectionSummary().sum).toBe(1);
 
     // Update identity again and ensure trailing separators match Excel semantics.
     await app.setWorkbookFileMetadata("/other", "New.xlsx");
@@ -160,4 +168,3 @@ describe("SpreadsheetApp workbook file metadata fallback evaluation", () => {
     root.remove();
   });
 });
-
