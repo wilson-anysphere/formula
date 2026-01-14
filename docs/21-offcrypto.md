@@ -178,15 +178,16 @@ by the decryptor.
 
 Encrypted workbook fixtures are stored under:
 
-- `fixtures/encrypted/ooxml/` (`agile.xlsx`, `standard.xlsx`)
+- `fixtures/encrypted/ooxml/` (`plaintext.xlsx`, `agile.xlsx`, `standard.xlsx`, `agile-empty-password.xlsx`)
 
 These are **vendored test fixtures** used by `crates/formula-io/tests/encrypted_ooxml.rs`.
 
 Attribution / provenance:
 
-- The fixtures are generated via an Apache POI-based generator (pinned jars + SHA256 verification)
-  under `tools/encrypted-ooxml-fixtures/`.
-- See `fixtures/encrypted/ooxml/README.md` for the regeneration recipe and tool versions.
+- The committed fixture bytes were generated using Python + `msoffcrypto-tool` (see
+  `fixtures/encrypted/ooxml/README.md` for the exact tool versions + passwords).
+- Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI),
+  but it is not used for the committed fixture bytes.
 
 ### Useful debugging tool
 
