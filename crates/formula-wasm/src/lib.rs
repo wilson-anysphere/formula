@@ -621,6 +621,21 @@ struct CalcSettingsInputDto {
     full_calc_on_load: bool,
     iterative: IterativeCalcSettingsInputDto,
 }
+
+/// Indicates whether formula strings in the workbook JSON payload are in canonical (en-US) syntax
+/// or localized according to `localeId`.
+///
+/// This is an additive field in the workbook JSON schema consumed/emitted by `WasmWorkbook`
+/// (`fromJson`/`toJson`). When absent, `fromJson` preserves legacy behavior: if `localeId` is a
+/// non-en-US locale, formula strings are treated as localized and canonicalized during import.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum WorkbookFormulaLanguageDto {
+    /// Canonical (en-US) formula text, using comma argument separators and `.` decimals.
+    Canonical,
+    /// Locale-dependent formula text, parsed according to the workbook `localeId`.
+    Localized,
+}
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ParseOptionsJsDto {
@@ -4336,6 +4351,8 @@ impl WasmWorkbook {
         struct WorkbookJson {
             #[serde(default, rename = "localeId")]
             locale_id: Option<String>,
+            #[serde(default, rename = "formulaLanguage")]
+            formula_language: Option<WorkbookFormulaLanguageDto>,
             #[serde(default, rename = "sheetOrder")]
             sheet_order: Option<Vec<String>>,
             /// Optional workbook text codepage (Windows codepage number).
@@ -4363,6 +4380,15 @@ impl WasmWorkbook {
         let parsed: WorkbookJson = serde_json::from_str(json)
             .map_err(|err| js_err(format!("invalid workbook json: {err}")))?;
 
+        let WorkbookJson {
+            locale_id,
+            formula_language,
+            sheet_order,
+            text_codepage,
+            sheets,
+        } = parsed;
+        let formula_language = formula_language.unwrap_or(WorkbookFormulaLanguageDto::Localized);
+
         let mut wb = WorkbookState::new_empty();
 
         // Best-effort: set workbook locale before importing cells so localized formulas and
@@ -4370,11 +4396,18 @@ impl WasmWorkbook {
         // are handled correctly during JSON hydration.
         //
         // Unknown locale ids are ignored for backwards compatibility (treat as en-US).
-        if let Some(locale_id) = parsed.locale_id.as_deref() {
-            wb.set_locale_id(locale_id);
+        //
+        // Note: `toJson()` currently always emits canonical (en-US) formula strings even when
+        // `localeId` is non-en-US. The `formulaLanguage` field disambiguates this: when it is set
+        // to `"canonical"`, we delay applying the workbook locale until after formula import so the
+        // canonical text is not reinterpreted using localized parsing rules.
+        if formula_language != WorkbookFormulaLanguageDto::Canonical {
+            if let Some(locale_id) = locale_id.as_deref() {
+                wb.set_locale_id(locale_id);
+            }
         }
 
-        if let Some(codepage) = parsed.text_codepage {
+        if let Some(codepage) = text_codepage {
             wb.engine.set_text_codepage(codepage);
         }
 
@@ -4384,19 +4417,19 @@ impl WasmWorkbook {
         // before importing cells. This is important for 3D references (e.g. `Sheet1:Sheet3!A1`) and
         // worksheet functions that consult sheet indices like `SHEET()`.
         let mut ensured: BTreeSet<String> = BTreeSet::new();
-        if let Some(order) = parsed.sheet_order.as_ref() {
+        if let Some(order) = sheet_order.as_ref() {
             for name in order {
                 if ensured.contains(name) {
                     continue;
                 }
-                if !parsed.sheets.contains_key(name) {
+                if !sheets.contains_key(name) {
                     continue;
                 }
                 wb.ensure_sheet(name);
                 ensured.insert(name.clone());
             }
         }
-        for sheet_name in parsed.sheets.keys() {
+        for sheet_name in sheets.keys() {
             if ensured.contains(sheet_name) {
                 continue;
             }
@@ -4404,7 +4437,7 @@ impl WasmWorkbook {
             ensured.insert(sheet_name.clone());
         }
 
-        for (sheet_name, sheet) in parsed.sheets {
+        for (sheet_name, sheet) in sheets {
             let display_name = wb.ensure_sheet(&sheet_name);
 
             if let Some(raw) = sheet.visibility.as_deref() {
@@ -4438,14 +4471,13 @@ impl WasmWorkbook {
                         .insert(display_name.clone(), color.clone());
                 }
             }
-
             // Apply sheet dimensions (when provided) before importing cells so large addresses
             // can be set without pre-populating the full grid.
             if sheet.row_count.is_some() || sheet.col_count.is_some() {
                 let rows = sheet.row_count.unwrap_or(EXCEL_MAX_ROWS);
                 let cols = sheet.col_count.unwrap_or(EXCEL_MAX_COLS);
                 if rows != EXCEL_MAX_ROWS || cols != EXCEL_MAX_COLS {
-                    wb.set_sheet_dimensions_internal(&sheet_name, rows, cols)?;
+                    wb.set_sheet_dimensions_internal(&display_name, rows, cols)?;
                 }
             }
 
@@ -4457,7 +4489,14 @@ impl WasmWorkbook {
                     // `null` cells are treated as absent (sparse semantics).
                     continue;
                 }
-                wb.set_cell_internal(&sheet_name, &address, input)?;
+                wb.set_cell_internal(&display_name, &address, input)?;
+            }
+        }
+
+        // Ensure the workbook locale is applied for subsequent edits/value coercion.
+        if formula_language == WorkbookFormulaLanguageDto::Canonical {
+            if let Some(locale_id) = locale_id.as_deref() {
+                wb.set_locale_id(locale_id);
             }
         }
 
@@ -5053,6 +5092,8 @@ impl WasmWorkbook {
         struct WorkbookJson<'a> {
             #[serde(default, skip_serializing_if = "Option::is_none", rename = "localeId")]
             locale_id: Option<&'a str>,
+            #[serde(rename = "formulaLanguage")]
+            formula_language: WorkbookFormulaLanguageDto,
             #[serde(default, skip_serializing_if = "Option::is_none", rename = "textCodepage")]
             text_codepage: Option<u16>,
             #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "sheetOrder")]
@@ -5112,6 +5153,10 @@ impl WasmWorkbook {
 
         // Preserve the workbook formula locale id so round-tripping through the JSON workbook
         // schema does not lose locale-aware formula input semantics.
+        //
+        // Note: `toJson()` always emits canonical (en-US) formulas today. The `formulaLanguage`
+        // field disambiguates this for `fromJson`, especially for comma-decimal locales like
+        // `de-DE` where canonical `,` argument separators could be misinterpreted as decimal commas.
         let locale_id = if self.inner.formula_locale.id == EN_US.id {
             None
         } else {
@@ -5129,6 +5174,7 @@ impl WasmWorkbook {
 
         serde_json::to_string(&WorkbookJson {
             locale_id,
+            formula_language: WorkbookFormulaLanguageDto::Canonical,
             text_codepage,
             sheet_order,
             sheets,

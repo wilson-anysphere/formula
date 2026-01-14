@@ -868,6 +868,49 @@ describeWasm("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("roundtrips toJson()/fromJson() for comma-decimal locales by disambiguating canonical formulas", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.loadWorkbookFromJson(
+        JSON.stringify({
+          localeId: "de-DE",
+          sheets: {
+            Sheet1: {
+              cells: {
+                // de-DE: semicolon argument separator.
+                A1: "=LOG(8;2)"
+              }
+            }
+          }
+        })
+      );
+
+      await engine.recalculate();
+      expect((await engine.getCell("A1")).value).toBe(3);
+
+      const exportedStr = await engine.toJson();
+      const exported = JSON.parse(exportedStr);
+      expect(exported.localeId).toBe("de-DE");
+      expect(exported.formulaLanguage).toBe("canonical");
+      expect(exported.sheets.Sheet1.cells.A1).toBe("=LOG(8,2)");
+
+      // Ensure `fromJson(toJson(x))` is stable for comma-decimal locales like de-DE.
+      await engine.loadWorkbookFromJson(exportedStr);
+      await engine.recalculate();
+      expect((await engine.getCell("A1")).value).toBe(3);
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("clears null entries passed to setRange and updates dependents", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);

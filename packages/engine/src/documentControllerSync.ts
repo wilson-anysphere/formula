@@ -40,6 +40,18 @@ export type EngineWorkbookJson = {
    */
   localeId?: string;
   /**
+   * Language/notation of formula strings in the workbook JSON payload.
+   *
+   * - `"canonical"`: en-US-style formula syntax (comma argument separators + `.` decimals). This is
+   *   what `WasmWorkbook.toJson()` emits today.
+   * - `"localized"`: formula syntax localized according to `localeId` (e.g. `;` separators + `,`
+   *   decimals for `de-DE`).
+   *
+   * When omitted, `WasmWorkbook.fromJson()` preserves legacy behavior: for non-en-US `localeId`
+   * values, formulas are treated as localized.
+   */
+  formulaLanguage?: "canonical" | "localized";
+  /**
    * Optional workbook legacy Windows text codepage (e.g. `932` for Shift-JIS).
    *
    * This is used by Excel's DBCS (`*B`) text functions (e.g. `LENB`) and by `ASC`/`DBCS`.
