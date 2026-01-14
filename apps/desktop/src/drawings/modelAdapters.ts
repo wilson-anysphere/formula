@@ -179,6 +179,7 @@ function stableHash53(input: string): number {
   const low32 = stableHash32(input);
   const high32 = stableHash32(`h:${input}`);
   // Use 21 high bits + 32 low bits => 53 bits.
+  // eslint-disable-next-line no-bitwise
   const high21 = high32 & 0x1fffff;
   return high21 * 2 ** 32 + low32;
 }
