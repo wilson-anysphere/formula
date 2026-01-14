@@ -374,6 +374,68 @@ describe("SpreadsheetApp worksheet background images", () => {
     }
   });
 
+  it("aborts + closes in-flight background decodes when image GC evicts the underlying bytes", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const fixtureBytes = readFileSync(resolveFixturePath("fixtures/xlsx/basic/background-image.xlsx"));
+      const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
+
+      const close = vi.fn();
+      const decodedBitmap = { width: 8, height: 8, close } as any;
+
+      let resolveDecode!: (value: any) => void;
+      const inflightDecode = new Promise<any>((resolve) => {
+        resolveDecode = resolve;
+      });
+      const createImageBitmapMock = vi.fn(() => inflightDecode);
+      vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      createPatternSpy.mockClear();
+      createdPatterns = [];
+      patternFillRects = [];
+
+      const doc = app.getDocument();
+      doc.setImage(imageEntry.id, { bytes: imageEntry.bytes, mimeType: imageEntry.mimeType });
+      doc.setSheetBackgroundImageId(app.getCurrentSheetId(), imageEntry.id);
+
+      // Decode should have started, but not completed yet.
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+      expect(createPatternSpy).not.toHaveBeenCalled();
+
+      // Simulate the image bytes being garbage-collected (the GC path deletes bytes directly from
+      // DocumentController caches without emitting a change event). Ensure the app aborts the in-flight
+      // decode so the decoded bitmap is closed when it resolves.
+      (app as any).workbookImageManager.setExternalImageIds([]);
+      await app.runImageGcNow({ force: true });
+
+      resolveDecode(decodedBitmap);
+      // Flush internal `.then` handlers (decode completion + abort cleanup).
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(close).toHaveBeenCalledTimes(1);
+      // The pattern should never have been applied since the bytes were evicted before decode completion.
+      expect(createPatternSpy).not.toHaveBeenCalled();
+      expect(patternFillRects.length).toBe(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("hydrates worksheet background images from the desktop workbook backend during workbook load", async () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
