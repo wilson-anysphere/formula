@@ -9794,6 +9794,11 @@ struct Snapshot {
     sheets: HashSet<SheetId>,
     sheet_names_by_id: Vec<Option<String>>,
     sheet_order: Vec<SheetId>,
+    /// Mapping from stable sheet id to its current tab-order index.
+    ///
+    /// The vector length matches `sheet_names_by_id.len()`. Deleted/missing sheet ids have a value
+    /// of `usize::MAX`.
+    tab_index_by_sheet_id: Vec<usize>,
     sheet_dimensions: Vec<(u32, u32)>,
     sheet_default_style_ids: Vec<Option<u32>>,
     sheet_default_col_width: Vec<Option<f32>>,
@@ -9839,6 +9844,7 @@ impl Snapshot {
         let sheet_order = workbook.sheet_ids_in_order().to_vec();
         let sheets: HashSet<SheetId> = sheet_order.iter().copied().collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
+        let tab_index_by_sheet_id = workbook.tab_index_by_sheet_id();
         let workbook_directory = workbook.workbook_directory.clone();
         let workbook_filename = workbook.workbook_filename.clone();
         let sheet_dimensions = workbook
@@ -10018,6 +10024,7 @@ impl Snapshot {
             sheets,
             sheet_names_by_id,
             sheet_order,
+            tab_index_by_sheet_id,
             workbook_directory,
             workbook_filename,
             sheet_dimensions,
@@ -10063,22 +10070,29 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
-        self.sheet_order.iter().position(|&id| id == sheet_id)
-    }
-
-    fn text_codepage(&self) -> u16 {
-        self.text_codepage
+        let idx = *self.tab_index_by_sheet_id.get(sheet_id)?;
+        (idx != usize::MAX).then_some(idx)
     }
 
     fn expand_sheet_span(&self, start_sheet_id: usize, end_sheet_id: usize) -> Option<Vec<usize>> {
-        let start_idx = self.sheet_order_index(start_sheet_id)?;
-        let end_idx = self.sheet_order_index(end_sheet_id)?;
+        let start_idx = *self.tab_index_by_sheet_id.get(start_sheet_id)?;
+        if start_idx == usize::MAX {
+            return None;
+        }
+        let end_idx = *self.tab_index_by_sheet_id.get(end_sheet_id)?;
+        if end_idx == usize::MAX {
+            return None;
+        }
         let (start_idx, end_idx) = if start_idx <= end_idx {
             (start_idx, end_idx)
         } else {
             (end_idx, start_idx)
         };
         Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
+    }
+
+    fn text_codepage(&self) -> u16 {
+        self.text_codepage
     }
 
     fn sheet_count(&self) -> usize {
@@ -11721,7 +11735,8 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
-        self.snapshot.sheet_order.iter().position(|id| *id == sheet_id)
+        let idx = *self.snapshot.tab_index_by_sheet_id.get(sheet_id)?;
+        (idx != usize::MAX).then_some(idx)
     }
 
     fn get_value_on_sheet(
