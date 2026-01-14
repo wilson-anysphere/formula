@@ -192,3 +192,27 @@ fn unmappable_semantics_are_consistent_across_dbcs_codepages_cp949() {
         Value::Number(2.0)
     );
 }
+
+#[test]
+fn unmappable_semantics_are_consistent_across_dbcs_codepages_cp950() {
+    let mut sheet = TestSheet::new(950);
+    let emoji = "\u{1F600}"; // 😀
+    let han = "\u{4E2D}"; // 中
+
+    assert_eq!(
+        sheet.eval(&format!("=LENB(\"{emoji}\")")),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        sheet.eval(&format!("=LENB(\"A{emoji}{han}\")")),
+        Value::Number(4.0)
+    );
+    assert_eq!(
+        sheet.eval(&format!("=LEFTB(\"{emoji}{han}\",2)")),
+        Value::Text(emoji.to_string())
+    );
+    assert_eq!(
+        sheet.eval(&format!("=FINDB(\"{han}\",\"{emoji}{han}\")")),
+        Value::Number(2.0)
+    );
+}
