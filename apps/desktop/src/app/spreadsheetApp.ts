@@ -16416,6 +16416,15 @@ export class SpreadsheetApp {
       } catch {
         // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
       }
+
+      // Persist the interaction to the DocumentController when supported (so drag/resize is undoable
+      // and survives cache invalidation). This mirrors DrawingInteractionController's commit flow.
+      const after = nextObjects.find((obj) => obj.id === gesture.objectId);
+      if (after) {
+        const kind = gesture.mode === "resize" ? "resize" : "move";
+        this.commitDrawingInteraction({ kind, id: gesture.objectId, after });
+      }
+
       // Ensure selection handles reflect the final position.
       this.renderSelection();
       return;

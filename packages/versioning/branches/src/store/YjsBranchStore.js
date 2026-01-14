@@ -30,13 +30,29 @@ async function importNodeZlib() {
   return import(/* @vite-ignore */ specifier);
 }
 
+/** @type {Promise<any> | null} */
+let nodeZlibPromise = null;
+
+function getNodeZlib() {
+  if (!nodeZlibPromise) nodeZlibPromise = importNodeZlib();
+  return nodeZlibPromise;
+}
+
+// Prefetch Node's zlib in Node runtimes so the first gzip operation (e.g. creating
+// the branching root commit) doesn't pay the dynamic import cost on the critical
+// path of UI mounting/tests.
+if (isNodeRuntime()) {
+  // Best-effort; the store will surface errors when it actually needs compression.
+  void getNodeZlib().catch(() => {});
+}
+
 /**
  * @param {Uint8Array} bytes
  * @returns {Promise<Uint8Array>}
  */
 async function gzipBytes(bytes) {
   if (isNodeRuntime()) {
-    const zlib = await importNodeZlib();
+    const zlib = await getNodeZlib();
     return new Uint8Array(zlib.gzipSync(bytes));
   }
 
@@ -58,7 +74,7 @@ async function gzipBytes(bytes) {
  */
 async function gunzipBytes(bytes) {
   if (isNodeRuntime()) {
-    const zlib = await importNodeZlib();
+    const zlib = await getNodeZlib();
     return new Uint8Array(zlib.gunzipSync(bytes));
   }
 
