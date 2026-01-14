@@ -19767,7 +19767,7 @@ export class SpreadsheetApp {
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     if (this.isReadOnly()) {
-      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
+      showCollabEditRejectedToast([{ rejectionKind: "insertPictures", rejectionReason: "permission" }]);
       return;
     }
 
