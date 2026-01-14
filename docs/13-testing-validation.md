@@ -895,6 +895,10 @@ name: Tests
 
 on: [push, pull_request]
 
+env:
+  # Keep in sync with `.nvmrc` and the pinned CI/release workflows to avoid drift.
+  NODE_VERSION: 22
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -903,7 +907,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           # Keep Node pinned to the same major used by CI/release workflows.
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
       - run: npm run test:unit
       - uses: codecov/codecov-action@v3
@@ -914,7 +918,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       # Pin Rust for deterministic builds (this repo uses rust-toolchain.toml).
       - uses: dtolnay/rust-toolchain@1.92.0
       - run: npm ci
@@ -926,7 +930,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
       - run: npx playwright install
       - run: npm run test:e2e
@@ -937,7 +941,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
       - run: npm run test:perf
       - uses: benchmark-action/github-action-benchmark@v1
@@ -952,7 +956,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
       - run: npm run test:excel-compat
 ```

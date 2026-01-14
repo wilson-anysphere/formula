@@ -321,6 +321,10 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Keep in sync with `.nvmrc` and the pinned CI/release workflows to avoid drift.
+  NODE_VERSION: 22
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
@@ -328,7 +332,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
       - run: npm run benchmark
       - uses: benchmark-action/github-action-benchmark@v1
