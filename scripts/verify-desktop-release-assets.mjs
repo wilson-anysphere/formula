@@ -551,7 +551,9 @@ function parseArgs(argv) {
     dryRun: false,
     verifyAssets: false,
     help: false,
-    allowWindowsMsi: false,
+    // Formula uses raw `.msi` as the Windows updater payload (see docs/desktop-updater-target-mapping.md),
+    // so allow it by default.
+    allowWindowsMsi: true,
     allowWindowsExe: false,
     expectedTargets: [],
     includeSigs: false,
@@ -945,6 +947,7 @@ function validateLatestJson(manifest, expectedVersion, assetsByName, opts = {}) 
       "linux-x86_64",
       "linux-aarch64",
     ];
+    const requiredPlatformKeySet = new Set(requiredPlatformKeys);
     for (const requiredKey of requiredPlatformKeys) {
       if (!Object.prototype.hasOwnProperty.call(platforms, requiredKey)) {
         errors.push(
@@ -975,16 +978,21 @@ function validateLatestJson(manifest, expectedVersion, assetsByName, opts = {}) 
         continue;
       }
 
-      const typeError = validateUpdaterFilenameForPlatform(platformKey, filename, opts);
-      if (typeError) {
-        const expected = expectedUpdaterExtensions(platformKey, opts);
-        errors.push(
-          [
-            `latest.json platforms[${JSON.stringify(platformKey)}].url points at ${JSON.stringify(url)}.`,
-            `Expected file extensions for this OS: ${expected.length > 0 ? expected.join(", ") : "(unknown)"}.`,
-            typeError,
-          ].join(" ")
-        );
+      // Only enforce "updater-friendly" artifact types for the required runtime `{os}-{arch}` keys.
+      // Some Tauri versions may also emit additional installer-specific keys of the form
+      // `{os}-{arch}-{bundle}` (e.g. linux-x86_64-deb) which are allowed to point at installers.
+      if (requiredPlatformKeySet.has(platformKey)) {
+        const typeError = validateUpdaterFilenameForPlatform(platformKey, filename, opts);
+        if (typeError) {
+          const expected = expectedUpdaterExtensions(platformKey, opts);
+          errors.push(
+            [
+              `latest.json platforms[${JSON.stringify(platformKey)}].url points at ${JSON.stringify(url)}.`,
+              `Expected file extensions for this OS: ${expected.length > 0 ? expected.join(", ") : "(unknown)"}.`,
+              typeError,
+            ].join(" ")
+          );
+        }
       }
 
       if (!assetsByName.has(filename)) {

@@ -331,7 +331,7 @@ test("validateLatestJson allows raw Windows .exe updater URLs when explicitly en
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_x64.exe", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.exe", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -341,11 +341,13 @@ test("validateLatestJson allows raw Windows .exe updater URLs when explicitly en
     "Formula.AppImage",
     "Formula_arm64.AppImage",
     "Formula_x64.exe",
-    "Formula_arm64.exe",
+    "Formula_arm64.msi",
     "Formula.app.tar.gz",
   ]);
 
-  assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets, { allowWindowsExe: true }));
+  assert.doesNotThrow(() =>
+    validateLatestJson(manifest, "0.1.0", assets, { allowWindowsExe: true }),
+  );
 });
 
 test("verifyUpdaterManifestSignature verifies latest.json.sig against latest.json with minisign pubkey", () => {
