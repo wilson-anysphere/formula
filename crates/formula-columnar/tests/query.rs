@@ -1523,7 +1523,7 @@ fn hash_full_outer_join_multi_includes_unmatched_right_rows_and_respects_nulls()
 }
 
 #[test]
-fn hash_join_multi_with_type_supports_inner_left_and_full_outer() {
+fn hash_join_multi_with_type_supports_inner_left_right_and_full_outer() {
     let schema = vec![
         ColumnSchema {
             name: "k1".to_owned(),
@@ -1577,6 +1577,15 @@ fn hash_join_multi_with_type_supports_inner_left_and_full_outer() {
         full.right_indices,
         vec![Some(0), None, None, Some(1), Some(2), Some(3)]
     );
+
+    let right_join = left
+        .hash_join_multi_with_type(&right, &[0, 1], &[0, 1], JoinType::Right)
+        .unwrap();
+    assert_eq!(right_join.left_indices, vec![Some(0), None, None, None]);
+    assert_eq!(
+        right_join.right_indices,
+        vec![Some(0), Some(1), Some(2), Some(3)]
+    );
 }
 
 #[test]
@@ -1607,6 +1616,10 @@ fn single_key_join_wrappers_match_multi_key_variants() {
     let left_join_multi = left.hash_left_join_multi(&right, &[0], &[0]).unwrap();
     assert_eq!(left_join, left_join_multi);
 
+    let right_join = left.hash_right_join(&right, 0, 0).unwrap();
+    let right_join_multi = left.hash_right_join_multi(&right, &[0], &[0]).unwrap();
+    assert_eq!(right_join, right_join_multi);
+
     let full = left.hash_full_outer_join(&right, 0, 0).unwrap();
     let full_multi = left
         .hash_full_outer_join_multi(&right, &[0], &[0])
@@ -1620,4 +1633,12 @@ fn single_key_join_wrappers_match_multi_key_variants() {
         .hash_join_multi_with_type(&right, &[0], &[0], JoinType::Left)
         .unwrap();
     assert_eq!(typed, typed_multi);
+
+    let typed_right = left
+        .hash_join_with_type(&right, 0, 0, JoinType::Right)
+        .unwrap();
+    let typed_right_multi = left
+        .hash_join_multi_with_type(&right, &[0], &[0], JoinType::Right)
+        .unwrap();
+    assert_eq!(typed_right, typed_right_multi);
 }

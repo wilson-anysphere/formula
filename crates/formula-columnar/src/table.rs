@@ -658,6 +658,16 @@ impl ColumnarTable {
         crate::query::hash_left_join(self, right, left_on, right_on)
     }
 
+    /// Hash join on a single key column (right join).
+    pub fn hash_right_join(
+        &self,
+        right: &ColumnarTable,
+        left_on: usize,
+        right_on: usize,
+    ) -> Result<crate::query::JoinResult<Option<usize>, usize>, crate::query::QueryError> {
+        crate::query::hash_right_join(self, right, left_on, right_on)
+    }
+
     /// Hash join on a single key column (full outer join).
     pub fn hash_full_outer_join(
         &self,
@@ -702,6 +712,16 @@ impl ColumnarTable {
         right_keys: &[usize],
     ) -> Result<crate::query::JoinResult<usize, Option<usize>>, crate::query::QueryError> {
         crate::query::hash_left_join_multi(self, right, left_keys, right_keys)
+    }
+
+    /// Hash join on multiple key columns (right join).
+    pub fn hash_right_join_multi(
+        &self,
+        right: &ColumnarTable,
+        left_keys: &[usize],
+        right_keys: &[usize],
+    ) -> Result<crate::query::JoinResult<Option<usize>, usize>, crate::query::QueryError> {
+        crate::query::hash_right_join_multi(self, right, left_keys, right_keys)
     }
 
     /// Hash join on multiple key columns (full outer join).

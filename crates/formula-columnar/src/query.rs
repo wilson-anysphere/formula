@@ -3347,6 +3347,8 @@ pub enum JoinType {
     Inner,
     /// Emit all left rows. Unmatched rows have `None` for the right index.
     Left,
+    /// Emit all right rows. Unmatched rows have `None` for the left index.
+    Right,
     /// Emit all rows from both sides. Unmatched rows have `None` for the missing partner index.
     FullOuter,
 }
@@ -3546,6 +3548,19 @@ pub fn hash_left_join(
     right_on: usize,
 ) -> Result<JoinResult<usize, Option<usize>>, QueryError> {
     hash_left_join_multi(left, right, &[left_on], &[right_on])
+}
+
+/// Hash join on a single key column (right join).
+///
+/// Rows from the right table with no match (or NULL key) are included with `None` for the left
+/// index.
+pub fn hash_right_join(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_on: usize,
+    right_on: usize,
+) -> Result<JoinResult<Option<usize>, usize>, QueryError> {
+    hash_right_join_multi(left, right, &[left_on], &[right_on])
 }
 
 /// Hash join on a single key column (full outer join).
@@ -3947,6 +3962,34 @@ pub fn hash_left_join_multi(
     )
 }
 
+/// Hash join on multiple key columns (right join).
+///
+/// Rows from the right table with no match (or NULL in any join key) are included with `None`
+/// for the left index.
+pub fn hash_right_join_multi(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_keys: &[usize],
+    right_keys: &[usize],
+) -> Result<JoinResult<Option<usize>, usize>, QueryError> {
+    hash_join_multi_core(
+        left,
+        right,
+        left_keys,
+        right_keys,
+        |out: &mut JoinResult<Option<usize>, usize>, l, r| {
+            out.left_indices.push(Some(l));
+            out.right_indices.push(r);
+        },
+        |_out: &mut JoinResult<Option<usize>, usize>, _l| {},
+        |out: &mut JoinResult<Option<usize>, usize>, r| {
+            out.left_indices.push(None);
+            out.right_indices.push(r);
+        },
+        true,
+    )
+}
+
 /// Hash join on multiple key columns (full outer join).
 ///
 /// Unmatched rows from either side are included with `None` for the missing partner index.
@@ -4016,6 +4059,22 @@ pub fn hash_join_multi_with_type(
             },
             |_out: &mut JoinResult<Option<usize>, Option<usize>>, _r| {},
             false,
+        ),
+        JoinType::Right => hash_join_multi_core(
+            left,
+            right,
+            left_keys,
+            right_keys,
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, l, r| {
+                out.left_indices.push(Some(l));
+                out.right_indices.push(Some(r));
+            },
+            |_out: &mut JoinResult<Option<usize>, Option<usize>>, _l| {},
+            |out: &mut JoinResult<Option<usize>, Option<usize>>, r| {
+                out.left_indices.push(None);
+                out.right_indices.push(Some(r));
+            },
+            true,
         ),
         JoinType::FullOuter => hash_join_multi_core(
             left,
