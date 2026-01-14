@@ -762,6 +762,61 @@ fn info_recalc_reflects_calc_settings() {
 }
 
 #[test]
+fn info_recalc_refreshes_after_calc_settings_change() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"recalc\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("Manual".to_string())
+    );
+
+    // Changing calculation mode should refresh INFO("recalc") on the next recalculation tick,
+    // even though no other cell values changed.
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..engine.calc_settings().clone()
+    });
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("Automatic".to_string())
+    );
+}
+
+#[test]
+fn info_recalc_refreshes_after_calc_settings_change_with_dynamic_key() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "recalc").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=INFO(A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("Manual".to_string())
+    );
+
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::AutomaticNoTable,
+        ..engine.calc_settings().clone()
+    });
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("Automatic except for tables".to_string())
+    );
+}
+
+#[test]
 fn info_and_cell_keys_are_trimmed_and_case_insensitive() {
     let mut sheet = TestSheet::new();
 
