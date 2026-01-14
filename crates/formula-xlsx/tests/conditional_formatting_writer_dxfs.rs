@@ -1,6 +1,9 @@
 use std::io::Cursor;
 
-use formula_model::{parse_range_a1, CfRule, CfRuleKind, CfRuleSchema, CfStyleOverride, Color, Workbook};
+use formula_model::{
+    parse_range_a1, CellIsOperator, CfRule, CfRuleKind, CfRuleSchema, CfStyleOverride, Color,
+    Workbook,
+};
 use roxmltree::Document;
 
 fn extract_cf_rule_dxf_ids(sheet_xml: &str) -> Vec<Option<u32>> {
@@ -9,6 +12,19 @@ fn extract_cf_rule_dxf_ids(sheet_xml: &str) -> Vec<Option<u32>> {
     doc.descendants()
         .filter(|n| n.is_element() && n.tag_name().name() == "cfRule" && n.tag_name().namespace() == Some(main_ns))
         .map(|n| n.attribute("dxfId").and_then(|v| v.parse::<u32>().ok()))
+        .collect()
+}
+
+fn extract_cf_rule_types(sheet_xml: &str) -> Vec<String> {
+    let doc = Document::parse(sheet_xml).expect("valid worksheet xml");
+    let main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    doc.descendants()
+        .filter(|n| {
+            n.is_element()
+                && n.tag_name().name() == "cfRule"
+                && n.tag_name().namespace() == Some(main_ns)
+        })
+        .map(|n| n.attribute("type").unwrap_or_default().to_string())
         .collect()
 }
 
@@ -92,6 +108,19 @@ fn build_workbook() -> Workbook {
             },
             dependencies: vec![],
         },
+        CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 4,
+            applies_to: vec![parse_range_a1("D1").unwrap()],
+            dxf_id: Some(1), // blue
+            stop_if_true: false,
+            kind: CfRuleKind::CellIs {
+                operator: CellIsOperator::GreaterThan,
+                formulas: vec!["=SEQUENCE(3)".to_string()],
+            },
+            dependencies: vec![],
+        },
     ];
     let s1_dxfs = vec![dxf_red.clone(), dxf_blue.clone()];
     wb.sheet_mut(sheet1_id)
@@ -162,8 +191,18 @@ fn workbook_writer_aggregates_dxfs_and_remaps_cf_rule_dxfid() {
     let sheet1_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     let sheet2_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet2.xml").unwrap()).unwrap();
 
-    assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None]);
+    assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None, Some(1)]);
     assert_eq!(extract_cf_rule_dxf_ids(sheet2_xml), vec![Some(1), Some(2)]);
+
+    assert_eq!(
+        extract_cf_rule_types(sheet1_xml),
+        vec![
+            "expression".to_string(),
+            "expression".to_string(),
+            "expression".to_string(),
+            "cellIs".to_string(),
+        ]
+    );
 
     // Regression test: writers must strip a leading `=` and apply `_xlfn.` prefixes to modern
     // functions inside conditional formatting formulas.
@@ -173,6 +212,7 @@ fn workbook_writer_aggregates_dxfs_and_remaps_cf_rule_dxfid() {
             "ROWS(_xlfn.SEQUENCE(3))=3".to_string(),
             "B1>0".to_string(),
             "C1>0".to_string(),
+            "_xlfn.SEQUENCE(3)".to_string(),
         ]
     );
 }
@@ -202,7 +242,7 @@ fn xlsxdocument_writer_aggregates_dxfs_and_remaps_cf_rule_dxfid() {
     let sheet1_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     let sheet2_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet2.xml").unwrap()).unwrap();
 
-    assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None]);
+    assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None, Some(1)]);
     assert_eq!(extract_cf_rule_dxf_ids(sheet2_xml), vec![Some(1), Some(2)]);
 
     assert_eq!(
@@ -211,6 +251,7 @@ fn xlsxdocument_writer_aggregates_dxfs_and_remaps_cf_rule_dxfid() {
             "ROWS(_xlfn.SEQUENCE(3))=3".to_string(),
             "B1>0".to_string(),
             "C1>0".to_string(),
+            "_xlfn.SEQUENCE(3)".to_string(),
         ]
     );
 }
@@ -283,6 +324,19 @@ fn xlsxdocument_roundtrip_injects_cf_and_remaps_cf_rule_dxfid() {
             },
             dependencies: vec![],
         },
+        CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 4,
+            applies_to: vec![parse_range_a1("D1").unwrap()],
+            dxf_id: Some(1), // blue
+            stop_if_true: false,
+            kind: CfRuleKind::CellIs {
+                operator: CellIsOperator::GreaterThan,
+                formulas: vec!["=SEQUENCE(3)".to_string()],
+            },
+            dependencies: vec![],
+        },
     ];
     doc.workbook
         .sheet_mut(sheet1_id)
@@ -335,7 +389,7 @@ fn xlsxdocument_roundtrip_injects_cf_and_remaps_cf_rule_dxfid() {
 
     let sheet1_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     let sheet2_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet2.xml").unwrap()).unwrap();
-    assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None]);
+    assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None, Some(1)]);
     assert_eq!(extract_cf_rule_dxf_ids(sheet2_xml), vec![Some(1), Some(2)]);
 
     assert_eq!(
@@ -344,6 +398,7 @@ fn xlsxdocument_roundtrip_injects_cf_and_remaps_cf_rule_dxfid() {
             "ROWS(_xlfn.SEQUENCE(3))=3".to_string(),
             "B1>0".to_string(),
             "C1>0".to_string(),
+            "_xlfn.SEQUENCE(3)".to_string(),
         ]
     );
 }
