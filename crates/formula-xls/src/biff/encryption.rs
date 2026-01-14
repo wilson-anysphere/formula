@@ -1456,67 +1456,6 @@ mod tests {
         Ok(())
     }
 
-    fn encrypt_payloads_after_filepass_xor_method1(
-        workbook_stream: &mut [u8],
-        start_offset: usize,
-        xor_array: &[u8; 16],
-    ) -> Result<(), DecryptError> {
-        let mut offset = start_offset;
-        while offset < workbook_stream.len() {
-            let remaining = workbook_stream.len().saturating_sub(offset);
-            if remaining < 4 {
-                // Allow trailing bytes after EOF in synthetic streams.
-                break;
-            }
-
-            let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-            let len =
-                u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
-
-            let data_start = offset + 4;
-            let data_end = data_start.checked_add(len).ok_or_else(|| {
-                DecryptError::InvalidFilePass("record length overflow while encrypting XOR".to_string())
-            })?;
-            if data_end > workbook_stream.len() {
-                return Err(DecryptError::InvalidFilePass(
-                    "record extends past end of stream while encrypting XOR".to_string(),
-                ));
-            }
-
-            // Mirror the decryption skip rules for MS-OFFCRYPTO/MS-XLS XOR obfuscation.
-            let mut encrypt_from = 0usize;
-            let skip_entire_payload = matches!(
-                record_id,
-                records::RECORD_BOF_BIFF8
-                    | records::RECORD_BOF_BIFF5
-                    | records::RECORD_FILEPASS
-                    | RECORD_INTERFACEHDR
-                    | RECORD_FILELOCK
-                    | RECORD_USREXCL
-                    | RECORD_RRDINFO
-                    | RECORD_RRDHEAD
-            );
-            if !skip_entire_payload {
-                if record_id == RECORD_BOUNDSHEET {
-                    encrypt_from = 4.min(len);
-                }
-
-                let payload = &mut workbook_stream[data_start..data_end];
-                for i in encrypt_from..payload.len() {
-                    let abs_pos = data_start + i;
-                    let mut value = payload[i];
-                    value = value.rotate_left(5);
-                    value ^= xor_array[abs_pos % 16];
-                    payload[i] = value;
-                }
-            }
-
-            offset = data_end;
-        }
-
-        Ok(())
-    }
-
     #[test]
     fn parses_biff5_xor_filepass() {
         let payload = [0x34, 0x12, 0x78, 0x56];
@@ -1901,6 +1840,168 @@ mod tests {
         (0..len)
             .map(|i| seed.wrapping_add((i as u8).wrapping_mul(31)).wrapping_add((i >> 8) as u8))
             .collect()
+    }
+
+    fn encrypt_payloads_after_filepass_xor_method1(
+        workbook_stream: &mut [u8],
+        start_offset: usize,
+        xor_array: &[u8; 16],
+    ) -> Result<(), DecryptError> {
+        let mut offset = start_offset;
+        while offset < workbook_stream.len() {
+            let remaining = workbook_stream.len().saturating_sub(offset);
+            if remaining < 4 {
+                // Some writers include trailing padding bytes after the final EOF record. Those bytes
+                // are not part of any record header/payload and should be ignored.
+                break;
+            }
+
+            let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+            let len =
+                u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+
+            let data_start = offset
+                .checked_add(4)
+                .ok_or_else(|| DecryptError::InvalidFilePass("BIFF record offset overflow".to_string()))?;
+            let data_end = data_start
+                .checked_add(len)
+                .ok_or_else(|| DecryptError::InvalidFilePass("BIFF record length overflow".to_string()))?;
+            if data_end > workbook_stream.len() {
+                return Err(DecryptError::InvalidFilePass(format!(
+                    "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream while encrypting XOR (len={}, end={data_end})",
+                    workbook_stream.len()
+                )));
+            }
+
+            // Mirror the decryptor's per-record skip rules for XOR obfuscation.
+            let mut encrypt_from = 0usize;
+            let skip_entire_payload = matches!(
+                record_id,
+                records::RECORD_BOF_BIFF8
+                    | records::RECORD_BOF_BIFF5
+                    | records::RECORD_FILEPASS
+                    | RECORD_INTERFACEHDR
+                    | RECORD_FILELOCK
+                    | RECORD_USREXCL
+                    | RECORD_RRDINFO
+                    | RECORD_RRDHEAD
+            );
+
+            if !skip_entire_payload {
+                if record_id == RECORD_BOUNDSHEET {
+                    // BoundSheet.lbPlyPos MUST NOT be encrypted.
+                    encrypt_from = 4.min(len);
+                }
+
+                let payload = &mut workbook_stream[data_start..data_end];
+                for i in encrypt_from..payload.len() {
+                    let abs_pos = data_start + i;
+                    let mut value = payload[i];
+                    value = value.rotate_left(5);
+                    value ^= xor_array[abs_pos % 16];
+                    payload[i] = value;
+                }
+            }
+
+            offset = data_end;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn xor_method1_password_is_truncated_to_15_bytes() {
+        // Excel legacy XOR "method1" passwords are effectively limited to 15 bytes. Extra characters
+        // are ignored (i.e. only the first 15 bytes are significant).
+        let base = "0123456789ABCDE"; // 15 ASCII chars
+        let password = format!("{base}X"); // 16th char should be ignored
+        let password_same_prefix = format!("{base}Y");
+        let wrong_password = "0123456789ABCDZ"; // differs within the first 15 chars
+
+        let candidates = xor_password_byte_candidates(&password);
+        assert_eq!(candidates[0].as_slice(), base.as_bytes());
+        assert_eq!(candidates[1].as_slice(), base.as_bytes());
+
+        let password_bytes = base.as_bytes();
+        let key = create_xor_key_method1(password_bytes);
+        let verifier = create_password_verifier_method1(password_bytes);
+        let xor_array = create_xor_array_method1(password_bytes, key);
+
+        // BIFF8 BOF payload (4 bytes) is sufficient for stream detection in this test.
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+        let filepass_payload = [
+            0x00, 0x00, // wEncryptionType (XOR)
+            key.to_le_bytes()[0],
+            key.to_le_bytes()[1],
+            verifier.to_le_bytes()[0],
+            verifier.to_le_bytes()[1],
+        ];
+
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &bof_payload));
+        let filepass_offset = plain.len();
+        plain.extend_from_slice(&record(records::RECORD_FILEPASS, &filepass_payload));
+        plain.extend_from_slice(&record(RECORD_DUMMY, &dummy_payload(64, 0x10)));
+        plain.extend_from_slice(&record(RECORD_EOF, &[]));
+
+        let encrypted_start = filepass_offset + 4 + filepass_payload.len();
+        let mut encrypted = plain.clone();
+        encrypt_payloads_after_filepass_xor_method1(&mut encrypted, encrypted_start, &xor_array)
+            .expect("encrypt");
+
+        for candidate in [password.as_str(), password_same_prefix.as_str(), base] {
+            let mut decrypted = encrypted.clone();
+            decrypt_workbook_stream(&mut decrypted, candidate).expect("decrypt");
+            assert_eq!(decrypted, plain);
+        }
+
+        let mut buf = encrypted.clone();
+        let err = decrypt_workbook_stream(&mut buf, wrong_password).expect_err("wrong password");
+        assert_eq!(err, DecryptError::WrongPassword);
+    }
+
+    #[test]
+    fn xor_method1_allows_empty_password_when_file_was_encrypted_with_empty_password() {
+        // The spec-defined XOR algorithm can be applied to an empty password (some third-party
+        // writers may emit such files). Ensure our method1 path handles it to avoid falling back to
+        // the legacy deterministic fixture scheme.
+        let password = "";
+        let password_bytes: &[u8] = &[];
+        let key = create_xor_key_method1(password_bytes);
+        let verifier = create_password_verifier_method1(password_bytes);
+        let xor_array = create_xor_array_method1(password_bytes, key);
+
+        assert_eq!(key, 0);
+        assert_eq!(verifier, 0xCE4B);
+
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+        let filepass_payload = [
+            0x00, 0x00, // wEncryptionType (XOR)
+            key.to_le_bytes()[0],
+            key.to_le_bytes()[1],
+            verifier.to_le_bytes()[0],
+            verifier.to_le_bytes()[1],
+        ];
+
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &bof_payload));
+        let filepass_offset = plain.len();
+        plain.extend_from_slice(&record(records::RECORD_FILEPASS, &filepass_payload));
+        plain.extend_from_slice(&record(RECORD_DUMMY, &dummy_payload(64, 0x11)));
+        plain.extend_from_slice(&record(RECORD_EOF, &[]));
+
+        let encrypted_start = filepass_offset + 4 + filepass_payload.len();
+        let mut encrypted = plain.clone();
+        encrypt_payloads_after_filepass_xor_method1(&mut encrypted, encrypted_start, &xor_array)
+            .expect("encrypt");
+
+        let mut decrypted = encrypted.clone();
+        decrypt_workbook_stream(&mut decrypted, password).expect("decrypt");
+        assert_eq!(decrypted, plain);
+
+        let mut buf = encrypted.clone();
+        let err = decrypt_workbook_stream(&mut buf, "not-empty").expect_err("wrong password");
+        assert_eq!(err, DecryptError::WrongPassword);
     }
 
     #[test]

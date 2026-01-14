@@ -48,6 +48,8 @@ Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` fi
 
 ### Password semantics (Excel legacy)
 
+- **XOR obfuscation:** legacy `.xls` passwords are effectively limited to **15 characters**; extra
+  characters are ignored.
 - **RC4 “standard” truncation:** only the first **15 UTF-16 code units** of the password are
   significant; extra characters are ignored (so a 16-character password and its first 15 characters
   are treated as equivalent).
