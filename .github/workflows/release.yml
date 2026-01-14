@@ -960,6 +960,20 @@ jobs:
           echo "CARGO_PROFILE_RELEASE_DEBUG=1" >> "$GITHUB_ENV"
           echo "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=packed" >> "$GITHUB_ENV"
 
+      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        # Run before uploading release assets so COI regressions fail the workflow
+        # before we publish installers.
+        #
+        # By default we run this on all platforms. Set FORMULA_COI_CHECK_ALL_PLATFORMS
+        # to 0/false to only run the check on Linux.
+        #
+        # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
+        if: >-
+          needs.preflight.outputs.upload == 'true'
+          && (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
+          && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc')
+        run: pnpm -C apps/desktop check:coi
+
       - name: Build and upload release assets (macOS universal)
         id: tauri_release_macos
         if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true'
@@ -1477,7 +1491,8 @@ jobs:
         # Run against the already-built Tauri artifacts from the previous step.
         # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
         if: >-
-          (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
+          needs.preflight.outputs.upload != 'true'
+          && (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
           && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc')
         run: pnpm -C apps/desktop check:coi -- --no-build
 
