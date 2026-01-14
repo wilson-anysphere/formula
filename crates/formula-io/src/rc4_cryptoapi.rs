@@ -858,7 +858,7 @@ mod tests {
     #[test]
     fn md5_sequential_reads_and_seek_work_with_40_bit_key() {
         let h = b"0123456789ABCDEF".to_vec(); // 16 bytes
-        let key_len = 5; // 40-bit (must be padded to 16 bytes for RC4)
+        let key_len = 5; // 40-bit (5-byte RC4 key)
 
         let mut plaintext = vec![0u8; RC4_BLOCK_SIZE * 2 + 64];
         for (i, b) in plaintext.iter_mut().enumerate() {
