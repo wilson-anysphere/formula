@@ -36,13 +36,13 @@ test("Home → Styles ribbon commands are registered in CommandRegistry and not 
   const main = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+  const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
   const homeStylesPath = path.join(__dirname, "..", "src", "commands", "registerHomeStylesCommands.ts");
-  const homeStylesCommands = fs.readFileSync(homeStylesPath, "utf8");
+  const homeStylesCommands = stripComments(fs.readFileSync(homeStylesPath, "utf8"));
 
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
-  const disabling = fs.readFileSync(disablingPath, "utf8");
+  const disabling = stripComments(fs.readFileSync(disablingPath, "utf8"));
   const routerPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRouter.ts");
   const router = stripComments(fs.readFileSync(routerPath, "utf8"));
 
