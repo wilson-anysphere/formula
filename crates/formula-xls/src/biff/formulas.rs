@@ -663,6 +663,45 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
             }
         }
 
+        // Array formulas are anchored at the base cell and display the same formula text for every
+        // cell in the group. If ARRAY definition records are missing but the base cell stores a
+        // full `FORMULA.rgce` token stream, recover follower cells by decoding the base cell's rgce
+        // in the base cell coordinate space (without materializing per-cell deltas).
+        if grbit.membership_hint() == Some(FormulaMembershipHint::Array) {
+            let base_coord = rgce::CellCoord::new(base_row, base_col);
+            let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(
+                base_rgce_bytes,
+                base_rgcb_bytes,
+                ctx,
+                Some(base_coord),
+            );
+            if !decoded.warnings.is_empty() {
+                for w in decoded.warnings {
+                    push_warning_bounded(
+                        &mut warnings,
+                        format!(
+                            "failed to fully decode recovered array formula at {}: {w}",
+                            CellRef::new(row, col).to_a1()
+                        ),
+                    );
+                }
+            }
+
+            if decoded.text.is_empty() {
+                push_warning_bounded(
+                    &mut warnings,
+                    format!(
+                        "failed to recover array formula at {}: decoded rgce produced empty text",
+                        CellRef::new(row, col).to_a1()
+                    ),
+                );
+                continue;
+            }
+
+            recovered.insert(CellRef::new(row, col), decoded.text);
+            continue;
+        }
+
         let Some(materialized) =
             materialize_biff8_rgce(base_rgce_bytes, base_row, base_col, row, col)
         else {
