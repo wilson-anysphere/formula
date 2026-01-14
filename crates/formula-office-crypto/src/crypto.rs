@@ -1020,6 +1020,29 @@ mod tests {
     }
 
     #[test]
+    fn standard_cryptoapi_aes_sha512_cryptderivekey_uses_128_byte_hash_blocks() {
+        // SHA-512 uses 128-byte hash blocks. This test ensures we don't accidentally hardcode the
+        // 64-byte MD5/SHA1 block size in the CryptoAPI `CryptDeriveKey` expansion.
+        //
+        // Vector computed independently with Python:
+        //   digest = sha512("hello")
+        //   D = digest || 0x00*(128-64)
+        //   inner = sha512(D XOR 0x36)
+        //   outer = sha512(D XOR 0x5c)
+        //   derived = inner || outer
+        //   key32 = derived[0..32]
+        let digest = hex_decode(
+            "9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca7\
+             2323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043",
+        );
+        let key = crypt_derive_key_aes(HashAlgorithm::Sha512, &digest, 32).expect("derive key");
+        assert_eq!(
+            key.as_slice(),
+            hex_decode("e7a0f3ab82059952fdc72379ef7c52e949be7820d2e5abf4c924c91e5c8156b6")
+        );
+    }
+
+    #[test]
     fn normalize_key_material_pads_with_0x36() {
         assert_eq!(
             normalize_key_material(&[0xAA, 0xBB], 5),
