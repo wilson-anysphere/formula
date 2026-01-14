@@ -449,6 +449,10 @@ export interface CollabSessionOptions {
      * `cellStructuralOps` Yjs log. When set, records older than `Date.now() - maxOpRecordAgeMs`
      * may be deleted by any client (best-effort).
      *
+     * Pruning is conservative: records are not deleted in the same op-log transaction
+     * they are added, so late-arriving/offline records have a chance to be ingested
+     * before being removed.
+     *
      * Defaults to null/disabled.
      */
     maxOpRecordAgeMs?: number | null;
