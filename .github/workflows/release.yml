@@ -229,9 +229,6 @@ jobs:
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
 
-      - name: Validate desktop URL scheme registration metadata (formula://)
-        run: node scripts/check-desktop-url-scheme.mjs
-
       - name: Validate Tauri updater signing secrets
         # Only enforce when we're publishing to a GitHub Release (tag push or workflow_dispatch upload=true).
         #
@@ -242,6 +239,9 @@ jobs:
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Validate desktop URL scheme registration metadata (formula://)
+        run: node scripts/check-desktop-url-scheme.mjs
 
       - name: Validate Windows WebView2 installer configuration
         run: node scripts/ci/check-webview2-install-mode.mjs
