@@ -36,3 +36,12 @@ test("release workflow validates built Windows bundles (MSI + NSIS) after build"
     /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+(?:\.\/)?scripts\/validate-windows-bundles\.ps1/,
   );
 });
+
+test("release workflow validates desktop compliance artifact bundling config (LICENSE/NOTICE)", async () => {
+  const text = await readReleaseWorkflow();
+  assert.match(
+    text,
+    /node\s+scripts\/ci\/check-desktop-compliance-artifacts\.mjs\b/,
+    `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs in preflight.`,
+  );
+});
