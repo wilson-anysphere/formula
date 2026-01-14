@@ -106,6 +106,15 @@ require_cmd() {
 
 require_docker() {
   command -v docker >/dev/null 2>&1 || die "docker is required for container validation (install docker or rerun with --no-container)"
+
+  # `docker` can exist on PATH even when the daemon isn't running (common on dev machines).
+  set +e
+  docker info >/dev/null 2>&1
+  local info_status=$?
+  set -e
+  if [[ "${info_status}" -ne 0 ]]; then
+    die "docker is installed but the daemon is not available (docker info failed). Start Docker or rerun with --no-container."
+  fi
 }
 
 detect_docker_platform() {
