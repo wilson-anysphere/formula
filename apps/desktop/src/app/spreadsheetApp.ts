@@ -12412,6 +12412,9 @@ export class SpreadsheetApp {
       ]);
       return;
     }
+    // Avoid starting a new primary edit session while any editor is active, including split-view
+    // secondary panes that report editing via `__formulaSpreadsheetIsEditing`.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     if (this.inlineEditController.isOpen()) return;
     if (this.editor.isOpen()) return;
     if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
@@ -13021,6 +13024,9 @@ export class SpreadsheetApp {
       }
       return;
     }
+    // DesktopSharedGrid can request an edit from pointer interactions (double click / typing).
+    // Do not open a primary editor while any edit session is active, including split-view secondary panes.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     if (this.editor.isOpen()) return;
     const headerRows = this.sharedHeaderRows();
     const headerCols = this.sharedHeaderCols();
@@ -22448,6 +22454,12 @@ export class SpreadsheetApp {
         return;
       }
       e.preventDefault();
+      // In split-view mode, the desktop shell can report an active secondary edit session even when
+      // SpreadsheetApp's primary editors are closed. Avoid starting a second edit session from the
+      // primary grid ("start typing to edit" Excel behavior).
+      if (this.isSpreadsheetEditingIncludingSecondary()) {
+        return;
+      }
       if (this.isReadOnly()) {
         const cell = this.selection.active;
         showCollabEditRejectedToast([

@@ -364,4 +364,56 @@ describe("SpreadsheetApp keyboard shortcuts respect split-view editing mode", ()
     app.destroy();
     root.remove();
   });
+
+  it("blocks start-typing cell edits while split-view editing is active", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    vi.spyOn(app as any, "getCellRect").mockReturnValue({ x: 0, y: 0, width: 100, height: 20 });
+    const editorOpenSpy = vi.spyOn((app as any).editor, "open").mockImplementation(() => {});
+
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "a", code: "KeyA", bubbles: true, cancelable: true }));
+    expect(editorOpenSpy).toHaveBeenCalledTimes(1);
+
+    editorOpenSpy.mockClear();
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", bubbles: true, cancelable: true }));
+    expect(editorOpenSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("blocks shared-grid edit requests while split-view editing is active", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sharedGrid = (app as any).sharedGrid;
+    expect(sharedGrid).toBeTruthy();
+
+    const editorOpenSpy = vi.spyOn((app as any).editor, "open").mockImplementation(() => {});
+    vi.spyOn(sharedGrid, "getCellRect").mockReturnValue({ x: 0, y: 0, width: 100, height: 20 });
+
+    sharedGrid.callbacks.onRequestCellEdit({ row: 1, col: 1, initialKey: "a" });
+    expect(editorOpenSpy).toHaveBeenCalledTimes(1);
+
+    editorOpenSpy.mockClear();
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    sharedGrid.callbacks.onRequestCellEdit({ row: 1, col: 1, initialKey: "b" });
+    expect(editorOpenSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });
