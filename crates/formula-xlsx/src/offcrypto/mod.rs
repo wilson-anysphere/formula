@@ -78,7 +78,7 @@ pub use agile::{
 };
 pub use agile_decrypt::{
     decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_stream,
-    decrypt_agile_encrypted_package_with_options,
+    decrypt_agile_encrypted_package_stream_with_options, decrypt_agile_encrypted_package_with_options,
     decrypt_agile_encrypted_package_with_warnings,
 };
 pub use warning::OffCryptoWarning;

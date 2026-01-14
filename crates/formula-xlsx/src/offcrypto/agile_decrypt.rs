@@ -523,7 +523,24 @@ pub fn decrypt_agile_encrypted_package_stream<R: Read + Seek, W: Write>(
     password: &str,
     out: &mut W,
 ) -> Result<u64> {
-    let info = parse_agile_encryption_info(encryption_info, &DecryptOptions::default(), None)?;
+    decrypt_agile_encrypted_package_stream_with_options(
+        encryption_info,
+        encrypted_package_stream,
+        password,
+        out,
+        &DecryptOptions::default(),
+    )
+}
+
+/// Like [`decrypt_agile_encrypted_package_stream`] but with configurable [`DecryptOptions`].
+pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Write>(
+    encryption_info: &[u8],
+    encrypted_package_stream: &mut R,
+    password: &str,
+    out: &mut W,
+    opts: &DecryptOptions,
+) -> Result<u64> {
+    let info = parse_agile_encryption_info(encryption_info, opts, None)?;
 
     // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
     // ensure we can report which field was malformed.
