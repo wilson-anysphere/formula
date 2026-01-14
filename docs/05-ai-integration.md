@@ -534,6 +534,9 @@ const workbookContext = await rag.buildWorkbookContextFromSpreadsheetApi({
   spreadsheet,
   workbookId,
   query,
+  // Optional: include cached computed formula results (when the SpreadsheetApi backend provides them).
+  // Default is false: formula cells are indexed by formula text only (safer; avoids stale/inferred values).
+  includeFormulaValues: false,
   dlp,
 });
 ```

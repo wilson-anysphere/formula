@@ -123,6 +123,15 @@ export interface DesktopRagService {
     spreadsheet: any;
     workbookId: string;
     query: string;
+    /**
+     * When true, formula cells may include their cached computed values (via `cell.value`)
+     * when building/indexing the workbook for retrieval.
+     *
+     * This is opt-in because many backends do not evaluate formulas and because cached
+     * results can be an inference channel when dependencies are not traced.
+     */
+    includeFormulaValues?: boolean;
+    include_formula_values?: boolean;
     attachments?: any[];
     topK?: number;
     includePromptContext?: boolean;
@@ -193,6 +202,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
   let indexedVersion: number | null = null;
   let indexedDlpKey: string | null = null;
   let indexedSheetNamesKey: string | null = null;
+  let indexedIncludeFormulaValues: boolean | null = null;
   let indexPromise: Promise<unknown> | null = null;
   let lastIndexStats: unknown = null;
 
@@ -375,7 +385,11 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     return ragPromise;
   }
 
-  async function ensureIndexed(spreadsheet: any, signal?: AbortSignal): Promise<void> {
+  async function ensureIndexed(
+    spreadsheet: any,
+    includeFormulaValues: boolean,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (disposed) throw new Error("DesktopRagService is disposed");
     throwIfAborted(signal);
 
@@ -394,7 +408,12 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
     const versionNow = currentVersion();
     const sheetNamesKeyNow = sheetNamesCacheKeyFor({ spreadsheet });
-    if (indexedVersion === versionNow && indexedSheetNamesKey === sheetNamesKeyNow) return;
+    if (
+      indexedVersion === versionNow &&
+      indexedSheetNamesKey === sheetNamesKeyNow &&
+      indexedIncludeFormulaValues === includeFormulaValues
+    )
+      return;
 
     const run = (async () => {
       throwIfAborted(signal);
@@ -404,6 +423,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
       const workbook = workbookFromSpreadsheetApi({
         spreadsheet,
         workbookId: options.workbookId,
+        includeFormulaValues,
         coordinateBase: "one",
         signal,
       });
@@ -412,6 +432,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
       indexedVersion = versionToIndex;
       indexedDlpKey = null;
       indexedSheetNamesKey = sheetNamesKeyToIndex;
+      indexedIncludeFormulaValues = includeFormulaValues;
     })();
 
     indexPromise = run;
@@ -433,6 +454,8 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     spreadsheet: any;
     workbookId: string;
     query: string;
+    includeFormulaValues?: boolean;
+    include_formula_values?: boolean;
     attachments?: any[];
     topK?: number;
     includePromptContext?: boolean;
@@ -441,6 +464,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
   }): Promise<any> {
     const signal = params.signal;
     throwIfAborted(signal);
+    const includeFormulaValues = params.includeFormulaValues === true || (params as any).include_formula_values === true;
     if (params.workbookId !== options.workbookId) {
       throw new Error(
         `DesktopRagService workbookId mismatch: expected "${options.workbookId}", got "${params.workbookId}"`,
@@ -454,11 +478,12 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     // Non-DLP mode: we manage incremental indexing externally and always run
     // ContextManager in "cheap" mode to avoid workbook scans.
     if (!hasDlp) {
-      await ensureIndexed(params.spreadsheet, signal);
+      await ensureIndexed(params.spreadsheet, includeFormulaValues, signal);
       throwIfAborted(signal);
 
       const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
         ...params,
+        includeFormulaValues,
         skipIndexing: true,
       } as any);
 
@@ -487,7 +512,11 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     throwIfAborted(signal);
 
     const versionNow = currentVersion();
-    const shouldIndex = indexedVersion !== versionNow || indexedDlpKey !== dlpKey || indexedSheetNamesKey !== sheetNamesKeyNow;
+    const shouldIndex =
+      indexedVersion !== versionNow ||
+      indexedDlpKey !== dlpKey ||
+      indexedSheetNamesKey !== sheetNamesKeyNow ||
+      indexedIncludeFormulaValues !== includeFormulaValues;
 
     if (shouldIndex) {
       const run = (async () => {
@@ -496,6 +525,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
         try {
           const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
             ...params,
+            includeFormulaValues,
             // DLP-safe full path: force a rescan/index so we can apply redaction before embedding.
             skipIndexing: false,
           } as any);
@@ -503,6 +533,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
           indexedVersion = versionToIndex;
           indexedDlpKey = dlpKey;
           indexedSheetNamesKey = sheetNamesKeyToIndex;
+          indexedIncludeFormulaValues = includeFormulaValues;
           return ctx;
         } catch (error) {
           // If DLP blocks cloud AI processing, ContextManager throws after indexing so we can
@@ -512,6 +543,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
             indexedVersion = versionToIndex;
             indexedDlpKey = dlpKey;
             indexedSheetNamesKey = sheetNamesKeyToIndex;
+            indexedIncludeFormulaValues = includeFormulaValues;
           }
           throw error;
         }
@@ -534,6 +566,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
     const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
       ...params,
+      includeFormulaValues,
       // When the DLP index is already up to date, avoid re-scanning the workbook for cells.
       skipIndexing: true,
       skipIndexingWithDlp: true,

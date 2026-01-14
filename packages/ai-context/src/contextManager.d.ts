@@ -380,6 +380,16 @@ export class ContextManager {
     spreadsheet: SpreadsheetApiLike;
     workbookId: string;
     query: string;
+    /**
+     * When true, formula cells may include their cached computed values (via `cell.value`)
+     * when building the RAG workbook from a SpreadsheetApi.
+     *
+     * This is opt-in because many SpreadsheetApi backends do not evaluate formulas and
+     * because cached formula results can be an inference channel when dependencies are
+     * not traced.
+     */
+    includeFormulaValues?: boolean;
+    include_formula_values?: boolean;
     attachments?: Attachment[];
     topK?: number;
     /**
@@ -397,6 +407,8 @@ export class ContextManager {
     spreadsheet: SpreadsheetApiLike;
     workbookId: string;
     query: string;
+    includeFormulaValues?: boolean;
+    include_formula_values?: boolean;
     attachments?: Attachment[];
     topK?: number;
     /**
@@ -419,6 +431,8 @@ export class ContextManager {
     spreadsheet: SpreadsheetApiWithNonEmptyCells;
     workbookId: string;
     query: string;
+    includeFormulaValues?: boolean;
+    include_formula_values?: boolean;
     attachments?: Attachment[];
     topK?: number;
     skipIndexing?: boolean;

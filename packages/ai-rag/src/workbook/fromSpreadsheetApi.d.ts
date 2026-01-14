@@ -6,6 +6,7 @@ export function workbookFromSpreadsheetApi(params: {
     ): Array<{ address: { sheet: string; row: number; col: number }; cell: { value?: any; formula?: string } }>;
   };
   workbookId: string;
+  includeFormulaValues?: boolean;
   coordinateBase?: "one" | "zero" | "auto";
   signal?: AbortSignal;
 }): any;

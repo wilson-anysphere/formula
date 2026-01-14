@@ -91,3 +91,37 @@ test("workbookFromSpreadsheetApi: drops formatting-only / empty entries", () => 
   const chunks = chunkWorkbook(workbook);
   assert.ok(!chunks.some((c) => c.kind === "dataRegion" && c.sheetName === "Sheet1"));
 });
+
+test("workbookFromSpreadsheetApi: drops cached formula values by default (includeFormulaValues=false)", () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Sheet1"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Sheet1");
+      return [{ address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: 2, formula: "=1+1" } }];
+    },
+  };
+
+  const workbook = workbookFromSpreadsheetApi({ spreadsheet, workbookId: "wb1" });
+  const cell = workbook.sheets[0].cells.get("0,0");
+  assert.equal(cell?.formula, "=1+1");
+  assert.equal(cell?.value, null);
+});
+
+test("workbookFromSpreadsheetApi: includeFormulaValues=true preserves cached formula values", () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Sheet1"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Sheet1");
+      return [{ address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: 2, formula: "=1+1" } }];
+    },
+  };
+
+  const workbook = workbookFromSpreadsheetApi({ spreadsheet, workbookId: "wb1", includeFormulaValues: true });
+  const cell = workbook.sheets[0].cells.get("0,0");
+  assert.equal(cell?.formula, "=1+1");
+  assert.equal(cell?.value, 2);
+});

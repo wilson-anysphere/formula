@@ -25,6 +25,7 @@ import { throwIfAborted } from "../utils/abort.js";
  *     listNonEmptyCells(sheet?: string): Array<{ address: { sheet: string, row: number, col: number }, cell: { value?: any, formula?: string } }>
  *   },
  *   workbookId: string,
+ *   includeFormulaValues?: boolean,
  *   coordinateBase?: "one" | "zero" | "auto"
  *   signal?: AbortSignal
  * }} params
@@ -33,6 +34,7 @@ export function workbookFromSpreadsheetApi(params) {
   const { spreadsheet, workbookId } = params;
   const signal = params.signal;
   const coordinateBase = params.coordinateBase ?? "one";
+  const includeFormulaValues = (params.includeFormulaValues ?? false) === true;
   if (coordinateBase !== "one" && coordinateBase !== "zero" && coordinateBase !== "auto") {
     throw new Error(`workbookFromSpreadsheetApi: invalid coordinateBase "${coordinateBase}"`);
   }
@@ -75,8 +77,13 @@ export function workbookFromSpreadsheetApi(params) {
       if (!Number.isInteger(row) || row < 0) continue;
       if (!Number.isInteger(col) || col < 0) continue;
       const cell = entry?.cell ?? {};
-      const value = cell.value ?? null;
       const formula = cell.formula ?? null;
+      // DLP-safe default / opt-in behavior:
+      // - Many SpreadsheetApi backends do not evaluate formulas, so `value` is commonly null.
+      // - When backends *do* provide cached formula results, callers should opt in to indexing
+      //   those computed values (they can be an inference channel when dependencies are not traced).
+      const hasFormula = formula != null && String(formula).trim() !== "";
+      const value = hasFormula && !includeFormulaValues ? null : (cell.value ?? null);
       // `SpreadsheetApi.listNonEmptyCells` may include formatting-only cells. These should
       // be dropped from the ai-rag workbook to avoid bloating sparse cell maps.
       if ((value == null || value === "") && (formula == null || String(formula).trim() === "")) continue;

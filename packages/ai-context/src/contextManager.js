@@ -2136,6 +2136,7 @@ export class ContextManager {
     throwIfAborted(signal);
     const skipIndexing = (params.skipIndexing ?? false) === true;
     const skipIndexingWithDlp = (params.skipIndexingWithDlp ?? false) === true;
+    const includeFormulaValues = (params.includeFormulaValues ?? params.include_formula_values ?? false) === true;
 
     // Some SpreadsheetApi hosts (desktop DocumentController adapter) can provide a
     // sheet-name resolver. Thread it through to DLP enforcement so structured
@@ -2157,6 +2158,7 @@ export class ContextManager {
         : workbookFromSpreadsheetApi({
             spreadsheet: params.spreadsheet,
             workbookId: params.workbookId,
+            includeFormulaValues,
             coordinateBase: "one",
             signal,
           });

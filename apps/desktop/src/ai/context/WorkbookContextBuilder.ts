@@ -362,6 +362,7 @@ export interface WorkbookContextBuilderOptions {
       spreadsheet: any;
       workbookId: string;
       query: string;
+      includeFormulaValues?: boolean;
       attachments?: any[];
       topK?: number;
       includePromptContext?: boolean;
@@ -611,6 +612,7 @@ export class WorkbookContextBuilder {
             spreadsheet: this.options.spreadsheet,
             workbookId: this.options.workbookId,
             query: input.focusQuestion!,
+            includeFormulaValues: this.options.includeFormulaValues,
             attachments: input.attachments,
             // WorkbookContextBuilder builds its own promptContext; avoid redundant string formatting
             // + token estimation work inside the underlying RAG service.
