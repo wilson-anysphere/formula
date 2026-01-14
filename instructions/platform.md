@@ -276,6 +276,7 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
   - Optional CI gate in `.github/workflows/ci.yml` via GitHub Actions variables:
     - `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1`
     - `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10`
+    - `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=brotli|gzip` (default: brotli)
   - Additional guardrail: `pnpm -C apps/desktop check:bundle-size` enforces tight JS bundle budgets (uncompressed KiB; reports gzip sizes; see `apps/desktop/scripts/bundle-size-check.mjs`).
   - Related (not the 10MB download metric): CI also publishes optional “desktop size” reports that can be gated via GitHub Actions variables:
     - `node scripts/desktop_dist_asset_report.mjs` → `FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB`, `FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB`
