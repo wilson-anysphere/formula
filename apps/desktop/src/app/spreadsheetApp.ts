@@ -6024,6 +6024,8 @@ export class SpreadsheetApp {
 
     const MAX_CONCURRENT_DECODES = 4;
 
+    const existingObjects = this.listDrawingObjectsForSheet(sheetId);
+
     // Allocate drawing ids ahead-of-time so we guarantee uniqueness within this insertion batch.
     const existingObjects = this.listDrawingObjectsForSheet(sheetId);
     const usedDrawingIds = new Set<number>();
@@ -15199,6 +15201,8 @@ export class SpreadsheetApp {
 
   private onGridDragOver(e: DragEvent): void {
     if (this.isEditing()) return;
+    // Prevent showing a "copy" drop affordance when the workbook cannot be edited.
+    if (this.isReadOnly()) return;
     const dt = e.dataTransfer;
     if (!dt) return;
     const types = Array.from(dt.types ?? []);
@@ -15221,6 +15225,13 @@ export class SpreadsheetApp {
 
   private onGridDrop(e: DragEvent): void {
     if (this.isEditing()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     const dt = e.dataTransfer;
     if (!dt) return;
 
@@ -15230,7 +15241,16 @@ export class SpreadsheetApp {
     e.preventDefault();
 
     const placeAt = this.pickCellAtClientPoint(e.clientX, e.clientY) ?? this.getActiveCell();
-    void this.insertPicturesFromFiles(imageFiles, { placeAt });
+    void Promise.resolve(this.insertPicturesFromFiles(imageFiles, { placeAt })).catch((err) => {
+      // Avoid unhandled promise rejections in event handlers; show an error toast when possible.
+      console.error("Failed to insert picture:", err);
+      try {
+        showToast(`Failed to insert picture: ${String((err as any)?.message ?? err)}`, "error");
+      } catch {
+        // `showToast` requires a #toast-root; some test-only contexts don't include it.
+      }
+      this.focus();
+    });
   }
 
   private trySetPointerCapture(pointerId: number, element: HTMLElement = this.root): void {

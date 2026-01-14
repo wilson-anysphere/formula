@@ -163,5 +163,34 @@ describe("SpreadsheetApp drag/drop image file insertion", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("does not attempt to insert pictures when the workbook is read-only", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    // `isReadOnly()` consults the collab session when present.
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    const insertPicturesFromFiles = vi.fn();
+    (app as any).insertPicturesFromFiles = insertPicturesFromFiles;
+
+    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
+    const dataTransfer = { files: [file], types: ["Files"], dropEffect: "none", items: [] } as any;
+
+    const event = new Event("drop", { bubbles: true, cancelable: true }) as any;
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    Object.defineProperty(event, "clientX", { value: 60 });
+    Object.defineProperty(event, "clientY", { value: 30 });
+    root.dispatchEvent(event);
+
+    expect(insertPicturesFromFiles).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+});
