@@ -1,5 +1,7 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
+use aes::{Aes128, Aes192, Aes256};
 use formula_xlsx::offcrypto::decrypt_aes_cbc_no_padding_in_place;
 use sha1::{Digest as _, Sha1};
 
@@ -8,15 +10,12 @@ const SEGMENT_SIZE: usize = 0x1000;
 
 #[derive(Debug, Clone)]
 pub(crate) enum EncryptionMethod {
-    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption (CBC-segmented compatibility layout).
+    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption.
     ///
-    /// Baseline Standard AES uses AES-ECB (no IV), but some producers encrypt `EncryptedPackage` in
-    /// 4096-byte segments using AES-CBC. For segment `i`, the IV is `SHA1(salt || LE32(i))[0..16]`.
+    /// The `EncryptedPackage` ciphertext is encrypted using **AES-ECB** (no IV).
     StandardCryptoApi {
         /// AES key bytes (16/24/32).
         key: Vec<u8>,
-        /// Verifier salt used to derive per-segment IVs.
-        salt: Vec<u8>,
     },
 
     /// MS-OFFCRYPTO "Agile" encryption.
@@ -155,8 +154,8 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
             (self.plaintext_len - seg_plain_start).min(SEGMENT_SIZE as u64) as usize;
         let seg_cipher_len = round_up_to_multiple(seg_plain_len, AES_BLOCK_SIZE);
 
-        // For Agile (and the CBC-segmented Standard variant handled by this reader), ciphertext
-        // segments are laid out so that segment `i` starts at ciphertext offset `i * 0x1000`.
+        // For both Standard and Agile encryption, ciphertext segments are laid out so that segment
+        // `i` starts at ciphertext offset `i * 0x1000`.
         let seg_cipher_start = seg_plain_start;
 
         // Reuse the old cached plaintext buffer as scratch space to avoid copies.
@@ -167,15 +166,9 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
         self.inner.seek(SeekFrom::Start(seg_cipher_start))?;
         self.inner.read_exact(&mut self.scratch)?;
 
-        let seg_index_u32 = u32::try_from(segment_index).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidInput, "segment index exceeds u32")
-        })?;
-
         match &self.method {
-            EncryptionMethod::StandardCryptoApi { key, salt } => {
-                let iv = derive_standard_segment_iv(salt, seg_index_u32);
-                decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut self.scratch)
-                    .map_err(map_aes_cbc_err)?;
+            EncryptionMethod::StandardCryptoApi { key } => {
+                aes_ecb_decrypt_in_place(key, &mut self.scratch)?;
             }
             EncryptionMethod::Agile {
                 key,
@@ -183,6 +176,9 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
                 hash_alg,
                 block_size,
             } => {
+                let seg_index_u32 = u32::try_from(segment_index).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "segment index exceeds u32")
+                })?;
                 if *block_size != AES_BLOCK_SIZE {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -210,6 +206,47 @@ fn map_aes_cbc_err(err: formula_xlsx::offcrypto::AesCbcDecryptError) -> io::Erro
     io::Error::new(io::ErrorKind::InvalidData, err)
 }
 
+fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> io::Result<()> {
+    if buf.len() % AES_BLOCK_SIZE != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "AES-ECB ciphertext length {} is not a multiple of {AES_BLOCK_SIZE}",
+                buf.len()
+            ),
+        ));
+    }
+
+    fn decrypt_with<C>(key: &[u8], buf: &mut [u8]) -> io::Result<()>
+    where
+        C: BlockDecrypt + KeyInit,
+    {
+        let cipher = C::new_from_slice(key).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unsupported AES key length {} (expected 16/24/32)",
+                    key.len()
+                ),
+            )
+        })?;
+        for block in buf.chunks_mut(AES_BLOCK_SIZE) {
+            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, buf),
+        24 => decrypt_with::<Aes192>(key, buf),
+        32 => decrypt_with::<Aes256>(key, buf),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported AES key length {other} (expected 16/24/32)"),
+        )),
+    }
+}
+
 fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
     if multiple == 0 {
         return value;
@@ -220,17 +257,6 @@ fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
     } else {
         value + (multiple - rem)
     }
-}
-
-fn derive_standard_segment_iv(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_SIZE] {
-    let mut hasher = Sha1::new();
-    hasher.update(salt);
-    hasher.update(segment_index.to_le_bytes());
-    let digest = hasher.finalize();
-
-    let mut iv = [0u8; AES_BLOCK_SIZE];
-    iv.copy_from_slice(&digest[..AES_BLOCK_SIZE]);
-    iv
 }
 
 fn derive_agile_segment_iv(
@@ -251,7 +277,7 @@ fn derive_agile_segment_iv(
 
 fn hash_bytes(alg: formula_xlsx::offcrypto::HashAlgorithm, data: &[u8]) -> Vec<u8> {
     match alg {
-        formula_xlsx::offcrypto::HashAlgorithm::Sha1 => sha1::Sha1::digest(data).to_vec(),
+        formula_xlsx::offcrypto::HashAlgorithm::Sha1 => Sha1::digest(data).to_vec(),
         formula_xlsx::offcrypto::HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
         formula_xlsx::offcrypto::HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
         formula_xlsx::offcrypto::HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
@@ -261,6 +287,7 @@ fn hash_bytes(alg: formula_xlsx::offcrypto::HashAlgorithm, data: &[u8]) -> Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
     use aes::{Aes128, Aes192, Aes256};
     use cbc::cipher::block_padding::NoPadding;
     use cbc::cipher::{BlockEncryptMut, KeyIvInit};
@@ -272,16 +299,24 @@ mod tests {
             .collect()
     }
 
-    fn pkcs7_pad(mut plaintext: Vec<u8>) -> Vec<u8> {
-        if plaintext.is_empty() {
-            return plaintext;
+    fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
+        assert!(buf.len() % AES_BLOCK_SIZE == 0);
+        fn encrypt_with<C>(key: &[u8], buf: &mut [u8])
+        where
+            C: BlockEncrypt + KeyInit,
+        {
+            let cipher = C::new_from_slice(key).expect("valid key length");
+            for block in buf.chunks_mut(AES_BLOCK_SIZE) {
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+            }
         }
-        let mut pad_len = AES_BLOCK_SIZE - (plaintext.len() % AES_BLOCK_SIZE);
-        if pad_len == 0 {
-            pad_len = AES_BLOCK_SIZE;
+
+        match key.len() {
+            16 => encrypt_with::<Aes128>(key, buf),
+            24 => encrypt_with::<Aes192>(key, buf),
+            32 => encrypt_with::<Aes256>(key, buf),
+            other => panic!("unsupported AES key length {other}"),
         }
-        plaintext.extend(std::iter::repeat(pad_len as u8).take(pad_len));
-        plaintext
     }
 
     fn encrypt_segment_aes_cbc_no_padding(
@@ -316,7 +351,7 @@ mod tests {
         buf
     }
 
-    fn encrypt_standard_cryptoapi_stream(key: &[u8], salt: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    fn encrypt_standard_cryptoapi_stream(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
         let orig_size = plaintext.len() as u64;
         let mut out = Vec::new();
         out.extend_from_slice(&orig_size.to_le_bytes());
@@ -325,12 +360,13 @@ mod tests {
             return out;
         }
 
-        let padded = pkcs7_pad(plaintext.to_vec());
-        for (i, chunk) in padded.chunks(SEGMENT_SIZE).enumerate() {
-            let iv = derive_standard_segment_iv(salt, i as u32);
-            let ciphertext = encrypt_segment_aes_cbc_no_padding(key, &iv, chunk);
-            out.extend_from_slice(&ciphertext);
+        let mut buf = plaintext.to_vec();
+        let rem = buf.len() % AES_BLOCK_SIZE;
+        if rem != 0 {
+            buf.extend(std::iter::repeat(0u8).take(AES_BLOCK_SIZE - rem));
         }
+        aes_ecb_encrypt_in_place(key, &mut buf);
+        out.extend_from_slice(&buf);
         out
     }
 
@@ -364,18 +400,14 @@ mod tests {
     fn standard_cryptoapi_read_seek_matches_plaintext() {
         let plaintext = patterned_bytes(10_000);
         let key = [7u8; 16];
-        let salt = [0x11u8; 16];
 
-        let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &salt, &plaintext);
+        let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &plaintext);
         let ciphertext = &encrypted_stream[8..];
 
         let inner = Cursor::new(ciphertext.to_vec());
         let mut reader = DecryptedPackageReader::new(
             inner,
-            EncryptionMethod::StandardCryptoApi {
-                key: key.to_vec(),
-                salt: salt.to_vec(),
-            },
+            EncryptionMethod::StandardCryptoApi { key: key.to_vec() },
             plaintext.len() as u64,
         );
 
@@ -411,7 +443,7 @@ mod tests {
         let decrypted = crate::offcrypto::decrypt_standard_encrypted_package_stream(
             &encrypted_stream,
             &key,
-            &salt,
+            &[],
         )
         .expect("full decrypt");
         assert_eq!(decrypted, plaintext);

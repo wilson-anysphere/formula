@@ -3,11 +3,12 @@
 //! This module currently contains helpers for decrypting the `EncryptedPackage` stream for
 //! MS-OFFCRYPTO "Standard" (CryptoAPI) encryption inside an OLE compound file.
 //!
-//! Important nuance: Standard/CryptoAPI AES `EncryptedPackage` decryption is not entirely uniform in
-//! the wild. The baseline MS-OFFCRYPTO/ECMA-376 scheme uses **AES-ECB** (no IV), but some producers
-//! use CBC-based variants (including a CBC-segmented layout with IV derived from the verifier salt).
-//! This module contains a CBC-segmented compatibility helper; the baseline AES-ECB behavior is
-//! documented in `docs/offcrypto-standard-encryptedpackage.md`.
+//! Standard/CryptoAPI AES `EncryptedPackage` decryption (baseline MS-OFFCRYPTO/ECMA-376) uses
+//! **AES-ECB** (no IV). The framing/truncation rules are documented in
+//! `docs/offcrypto-standard-encryptedpackage.md`.
+//!
+//! Note: some producers may use non-standard CBC-based variants; `formula-io` currently implements
+//! the baseline AES-ECB behavior.
 //!
 //! Note: MS-OFFCRYPTO Standard encryption also has an **RC4** variant ("CryptoAPI RC4") whose
 //! `EncryptedPackage` payload is decrypted in **0x200-byte** blocks with per-block keys derived from

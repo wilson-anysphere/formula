@@ -110,10 +110,7 @@ fn decrypted_package_reader_standard<R: Read + Seek>(
 
     Ok(DecryptedPackageReader::new(
         ciphertext_reader,
-        EncryptionMethod::StandardCryptoApi {
-            key,
-            salt: info.verifier.salt,
-        },
+        EncryptionMethod::StandardCryptoApi { key },
         plaintext_len,
     ))
 }

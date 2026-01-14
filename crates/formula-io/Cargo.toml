@@ -23,6 +23,7 @@ encrypted-workbooks = []
 offcrypto = []
 
 [dependencies]
+aes = "0.8"
 base64 = "0.22"
 cfb = "0.10"
 encoding_rs = "0.8"
@@ -45,7 +46,6 @@ sha1 = "0.10"
 zip = { version = "2.1", default-features = false }
 
 [dev-dependencies]
-aes = "0.8"
 cbc = "0.1"
 proptest = "1"
 xlsx-diff = { path = "../xlsx-diff" }
