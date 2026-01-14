@@ -1111,21 +1111,50 @@ jobs:
             exit 1
           fi
 
+          # Canonicalize + de-dupe roots to avoid double-scanning when `CARGO_TARGET_DIR` overlaps
+          # the default workspace target directories. Avoid Bash 4 associative arrays (macOS runners
+          # still ship Bash 3.2).
+          uniq_roots=()
+          for root in "${roots[@]}"; do
+            abs="$(cd "$root" && pwd -P)"
+            seen=0
+            for existing in "${uniq_roots[@]}"; do
+              if [[ "$existing" == "$abs" ]]; then
+                seen=1
+                break
+              fi
+            done
+            if [[ "$seen" -eq 0 ]]; then
+              uniq_roots+=("$abs")
+            fi
+          done
+          roots=("${uniq_roots[@]}")
+
           shopt -s nullglob
           dsym_dirs=()
           for root in "${roots[@]}"; do
-            # Preferred: Rust/tauri build outputs in the Cargo target dir (outside `bundle/**`).
-            # Keep the symbols out of `**/release/bundle/**` so the bundle-size gate and
-            # dry-run bundle artifacts never include them.
-            dsym_dirs+=("${root}"/release/*.dSYM)
-            dsym_dirs+=("${root}"/*/release/*.dSYM)
-
-            # Fallback: some Tauri versions/tools may place dSYM bundles alongside the .app in
-            # `bundle/macos/`. If that happens, we copy them out (below) and then delete them so
-            # downstream strip/bundle verification doesn't fail.
-            dsym_dirs+=("${root}"/release/bundle/macos/*.dSYM)
-            dsym_dirs+=("${root}"/*/release/bundle/macos/*.dSYM)
+            # Prefer dSYMs produced for the actual build target triple (macOS job is universal).
+            # This avoids uploading multiple copies (e.g. intermediate x86_64/aarch64 builds).
+            dsym_dirs+=("${root}/${CACHE_TARGET}/release/bundle/macos/"*.dSYM)
+            dsym_dirs+=("${root}/release/bundle/macos/"*.dSYM)
           done
+
+          # If no bundle-local dSYMs were produced, fall back to Cargo release outputs
+          # (prefer the configured target triple directory, then the native release dir).
+          if ((${#dsym_dirs[@]} == 0)); then
+            for root in "${roots[@]}"; do
+              dsym_dirs+=("${root}/${CACHE_TARGET}/release/"*.dSYM)
+              dsym_dirs+=("${root}/release/"*.dSYM)
+            done
+          fi
+
+          # Last resort: accept any target triple to avoid failing hard if the output layout changes.
+          if ((${#dsym_dirs[@]} == 0)); then
+            for root in "${roots[@]}"; do
+              dsym_dirs+=("${root}"/*/release/bundle/macos/"*.dSYM)
+              dsym_dirs+=("${root}"/*/release/"*.dSYM)
+            done
+          fi
           shopt -u nullglob
 
           if ((${#dsym_dirs[@]} == 0)); then
@@ -1153,7 +1182,24 @@ jobs:
               target/*|*/target/*) loc="workspace-target" ;;
             esac
 
-            out="debug-symbols/debug-symbols-${ARTIFACT_LABEL}-${CACHE_TARGET}-${loc}-${base}.zip"
+            source="release"
+            if [[ "$dsym" == *"/release/bundle/"* ]]; then
+              source="bundle"
+            fi
+
+            triple="native"
+            if [[ "$dsym" == *"/release/bundle/"* ]]; then
+              prefix="${dsym%%/release/bundle/*}"
+              triple="${prefix##*/}"
+            elif [[ "$dsym" == *"/release/"* ]]; then
+              prefix="${dsym%%/release/*}"
+              triple="${prefix##*/}"
+            fi
+            if [[ "$triple" == "target" ]]; then
+              triple="native"
+            fi
+
+            out="debug-symbols/debug-symbols-${ARTIFACT_LABEL}-${CACHE_TARGET}-${triple}-${loc}-${source}-${base}.zip"
             echo "debug-symbols: zipping $dsym -> $out"
             rm -f "$out"
             # Use `ditto` to preserve bundle structure/metadata for dSYM directories.
