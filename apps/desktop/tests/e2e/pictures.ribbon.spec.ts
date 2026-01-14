@@ -119,26 +119,41 @@ test.describe("Insert → Pictures", () => {
 
       const beforeCount = await getImageDrawingCount(page);
 
-      let fileChooser: import("@playwright/test").FileChooser;
-      try {
-        [fileChooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 10_000 }), thisDevice.click()]);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.includes("filechooser") && message.includes("Timeout")) {
+      const multiFiles = [
+        { name: "tiny-1.png", mimeType: "image/png", buffer: pngBytes },
+        { name: "tiny-2.png", mimeType: "image/png", buffer: pngBytes },
+      ];
+      const singleFile = [{ name: "tiny.png", mimeType: "image/png", buffer: pngBytes }];
+
+      // Preferred: filechooser event.
+      // Fallback: if the implementation uses a persistent/hidden <input type=file>, set files directly.
+      let fileChooserError: unknown = null;
+      const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 2_000 }).catch((err) => {
+        fileChooserError = err;
+        return null;
+      });
+
+      await thisDevice.click();
+      const fileChooser = await fileChooserPromise;
+
+      let selectedFiles = singleFile;
+      if (fileChooser) {
+        selectedFiles = fileChooser.isMultiple() ? multiFiles : singleFile;
+        await fileChooser.setFiles(selectedFiles);
+      } else {
+        const input = page.locator('input[type="file"][accept*="image"]').last();
+        try {
+          await expect(input).toBeAttached({ timeout: 2_000 });
+        } catch {
+          const rawError = fileChooserError instanceof Error ? fileChooserError.message : String(fileChooserError);
           throw new Error(
-            `Expected a file chooser to open after clicking Insert → Pictures → This Device… but none was observed.\n\nOriginal error: ${message}`,
+            `Expected a file picker to open after clicking Insert → Pictures → This Device… but none was observed (no filechooser event and no image <input type=file> found).\n\nfilechooser error: ${rawError}`,
           );
         }
-        throw err;
+        const multiple = await input.evaluate((el) => (el as HTMLInputElement).multiple).catch(() => false);
+        selectedFiles = multiple ? multiFiles : singleFile;
+        await input.setInputFiles(selectedFiles);
       }
-
-      const selectedFiles = fileChooser.isMultiple()
-        ? [
-            { name: "tiny-1.png", mimeType: "image/png", buffer: pngBytes },
-            { name: "tiny-2.png", mimeType: "image/png", buffer: pngBytes },
-          ]
-        : [{ name: "tiny.png", mimeType: "image/png", buffer: pngBytes }];
-      await fileChooser.setFiles(selectedFiles);
 
       await expect
         .poll(
