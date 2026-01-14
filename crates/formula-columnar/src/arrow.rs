@@ -31,6 +31,17 @@
 //! Consumers that do not understand these metadata keys will still see valid
 //! Arrow arrays (e.g. `Int64`), but may not interpret them as specialized
 //! logical types.
+//!
+//! ## Import compatibility
+//!
+//! While exports use a small fixed set of physical Arrow types (to keep the
+//! Parquet representation stable and predictable), imports are intentionally
+//! more permissive to handle real-world Arrow/Parquet schemas:
+//!
+//! - `ColumnType::Number` accepts `Float16/32/64`, `Int*/UInt*` (8/16/32/64),
+//!   and `Decimal128`, upcasting to `f64`.
+//! - `ColumnType::String` accepts `Utf8`, `LargeUtf8`, `Utf8View`, and
+//!   dictionary-encoded strings with a variety of integer key types.
 
 use crate::table::{ColumnSchema, ColumnarTable, ColumnarTableBuilder, TableOptions};
 use crate::types::{ColumnType, Value};
