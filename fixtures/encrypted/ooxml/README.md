@@ -22,8 +22,9 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `password`
 - `standard.xlsx` – Standard encrypted OOXML.
-  - `EncryptionInfo` header version **Major 3 / Minor 2**
-  - Decrypts to `plaintext.xlsx` with password `password`
+   - `EncryptionInfo` header version **Major 3 / Minor 2**
+   - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
+   - Decrypts to `plaintext.xlsx` with password `password`
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `""`
@@ -36,14 +37,22 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext-large.xlsx` with password `password`
 - `standard-large.xlsx` – Standard encrypted OOXML.
-  - `EncryptionInfo` header version **Major 3 / Minor 2**
-  - Decrypts to `plaintext-large.xlsx` with password `password`
+   - `EncryptionInfo` header version **Major 3 / Minor 2**
+   - Decrypts to `plaintext-large.xlsx` with password `password`
+   - Note: this is a *non-standard* “Standard-like” fixture matching the legacy
+     `crates/formula-xlsx::offcrypto` Standard decryptor (reduced iteration count + AES-CBC segmented
+     decryption). See `docs/office-encryption.md` for details.
 
 ### Why the `*-large.xlsx` fixtures exist
 
 Agile encryption processes the plaintext package in **4096-byte segments**. Since `plaintext.xlsx` is
 < 4096 bytes, decrypting it only exercises the single-segment path. The `*-large.xlsx` fixtures make
 sure we cover **multi-segment** decryption.
+
+Note: ECMA-376/MS-OFFCRYPTO Standard encryption uses AES-ECB (no IV), so multi-segment decryption is
+not a meaningful distinction for the Standard algorithm itself. `standard-large.xlsx` exists to
+exercise the multi-segment code path in `crates/formula-xlsx::offcrypto`, which implements a
+Standard-like AES-CBC segmented scheme for compatibility/testing.
 
 - `plaintext-basic.xlsm` – unencrypted ZIP-based macro-enabled workbook (starts with `PK`).
   - Copied from `fixtures/xlsx/macros/basic.xlsm`.
@@ -110,8 +119,10 @@ These fixtures are **synthetic** and **safe-to-ship**. They contain no proprieta
 
 The committed fixture binaries were generated using a mix of tooling:
 
-- The baseline fixtures were generated using Python and
+- `agile.xlsx` and `standard.xlsx` were generated using Python and
   [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2**.
+- `standard-large.xlsx` is a synthetic fixture aligned with `crates/formula-xlsx::offcrypto`’s
+  Standard decrypt behavior (see `docs/office-encryption.md`).
 - `agile-large.xlsx` was generated using the Rust
   [`ms-offcrypto-writer`](https://crates.io/crates/ms-offcrypto-writer) crate (with a deterministic
   RNG seed) so it includes `dataIntegrity` and is compatible with our strict Agile decryptor.

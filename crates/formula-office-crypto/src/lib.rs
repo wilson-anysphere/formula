@@ -177,7 +177,7 @@ fn validate_decrypted_package(bytes: &[u8]) -> Result<(), OfficeCryptoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::{HashAlgorithm, StandardKeyDeriver};
+    use crate::crypto::{HashAlgorithm, StandardKeyDerivation, StandardKeyDeriver};
     use crate::test_alloc::MAX_ALLOC;
     use std::sync::atomic::Ordering;
 
@@ -243,13 +243,19 @@ mod tests {
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
             0x0E, 0x0F,
         ];
-        let deriver = StandardKeyDeriver::new(HashAlgorithm::Sha1, 128, &salt, password);
+        let deriver = StandardKeyDeriver::new(
+            HashAlgorithm::Sha1,
+            128,
+            &salt,
+            password,
+            StandardKeyDerivation::Aes,
+        );
         let key_block0 = deriver.derive_key_for_block(0).expect("derive key");
         assert_eq!(
             key_block0.as_slice(),
             &[
-                0x5A, 0x93, 0xE0, 0xF1, 0xBC, 0x70, 0xC5, 0xBA, 0x59, 0x46, 0x04, 0xA1, 0x5C, 0xD0,
-                0xE8, 0x92,
+                0x1B, 0xA0, 0x05, 0x26, 0x1A, 0xAE, 0xE4, 0x68, 0x6A, 0x99, 0x39, 0x43, 0x70, 0x75,
+                0xE6, 0xC4,
             ]
         );
     }
@@ -271,7 +277,13 @@ mod tests {
             0x0E, 0x0F,
         ];
 
-        let deriver = StandardKeyDeriver::new(HashAlgorithm::Sha1, 128, &salt, password);
+        let deriver = StandardKeyDeriver::new(
+            HashAlgorithm::Sha1,
+            128,
+            &salt,
+            password,
+            StandardKeyDerivation::Rc4,
+        );
         let expected = [
             (
                 0u32,
@@ -309,7 +321,13 @@ mod tests {
         }
 
         // 40-bit key size => 5-byte key truncation.
-        let deriver_40 = StandardKeyDeriver::new(HashAlgorithm::Sha1, 40, &salt, password);
+        let deriver_40 = StandardKeyDeriver::new(
+            HashAlgorithm::Sha1,
+            40,
+            &salt,
+            password,
+            StandardKeyDerivation::Rc4,
+        );
         let key_40 = deriver_40.derive_key_for_block(0).expect("derive 40-bit key");
         assert_eq!(key_40.as_slice(), &[0x6a, 0xd7, 0xde, 0xdf, 0x2d]);
     }

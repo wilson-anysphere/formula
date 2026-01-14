@@ -30,7 +30,7 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 | Format | Scheme | Marker | Implemented crypto | Notes / entry points |
 |---|---|---|---|---|
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` for `.xlsx`/`.xlsm` (via streaming `open_workbook_with_options`); ❌ not yet for `.xlsb` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + standard key derivation + verifier; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` for `.xlsx`/`.xlsm` (via streaming `open_workbook_with_options`); ❌ not yet for `.xlsb` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + standard key derivation + verifier; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (AES-CBC segmented helper; used by `standard-large.xlsx`), `docs/offcrypto-standard-encryptedpackage.md` |
 | Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
 Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors
@@ -289,10 +289,17 @@ Verifier nuances (very common bug source):
 - The verifier hash is `EncryptionHeader.algIdHash` (commonly SHA-1, 20 bytes) and the encrypted
   blob is padded to an AES block boundary (for SHA-1, typically **32 bytes** on disk).
 
-### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB)
+Compatibility note:
 
-Standard `EncryptedPackage` decryption (as implemented in `crates/formula-offcrypto`) uses **AES-ECB**
-over the package ciphertext (no IV):
+- The above verifier description matches the ECMA-376/MS-OFFCRYPTO Standard scheme and decrypts the
+  repo’s `fixtures/encrypted/ooxml/standard.xlsx`.
+- Some non-ECMA producers (and some in-repo code) use different Standard-like verifier encryption
+  (notably AES-CBC with IV derivation). See
+  [Standard variants in this repo](#standard-variants-in-this-repo) for details.
+
+### Standard (CryptoAPI): `EncryptedPackage` decryption (ECMA-376 / AES-ECB)
+
+Standard `EncryptedPackage` decryption uses **AES-ECB** over the package ciphertext (no IV):
 
 ```text
 orig_size = U64LE(stream[0:8])
@@ -302,7 +309,8 @@ plaintext = AES-ECB-Decrypt(key, ciphertext)
 return plaintext[0:orig_size]
 ```
 
-Notes:
+After decryption, **truncate** to the `u64` `orig_size` prefix at the start of the
+`EncryptedPackage` stream.
 
 - The physical `EncryptedPackage` stream can be **larger** than `orig_size` due to block padding and/or
   OLE sector slack. Always decrypt the full ciphertext and then **truncate** to `orig_size`.
@@ -315,6 +323,24 @@ Notes:
     checking the decrypted ZIP magic bytes (`PK`) for broader real-world compatibility.
 - See `docs/offcrypto-standard-encryptedpackage.md` for a compact checklist (framing, alignment,
   truncation).
+### Standard variants in this repo
+This repo currently includes **two** Standard-encrypted OOXML fixtures under
+`fixtures/encrypted/ooxml/` that differ in crypto behavior:
+
+1. `standard.xlsx` — ECMA-376/MS-OFFCRYPTO Standard (Excel 2007-era):
+   - Password KDF: **50,000** iterations
+   - Verifier encryption: **AES-ECB**
+   - `EncryptedPackage` encryption: **AES-ECB**
+   - Decryptors: `crates/formula-offcrypto`, `crates/formula-office-crypto`
+
+2. `standard-large.xlsx` — *non-standard* compatibility fixture (used to exercise multi-segment
+   decryption paths):
+   - Password KDF: **1,000** iterations (intentionally low to keep tests fast)
+   - Verifier encryption: **AES-CBC** with per-block IV derivation
+   - `EncryptedPackage` encryption: **AES-CBC**, segmented into 4096-byte plaintext segments with
+     per-segment IV derivation:
+     `iv_i = SHA1(salt || LE32(i))[0..16]`
+   - Decryptor: `crates/formula-xlsx::offcrypto` (hardcodes the reduced spin count)
 
 ## Interop notes / fixture generation
 
@@ -380,10 +406,10 @@ otherwise:
   - Generate a random 16-byte verifier input (`verifierHashInput`).
   - Emit `dataIntegrity` (HMAC) in the XML descriptor (note: not all decrypt paths validate it yet).
 
-- **Standard writer:** not implemented yet in `formula-office-crypto`. If we add it, the intended
-  defaults are:
-  - AES-128 (`CALG_AES_128`) + SHA-1 (`CALG_SHA1`)
-  - Iteration count is effectively fixed at 50,000 in the key derivation.
+  - **Standard writer:** not implemented yet in `formula-office-crypto`. If we add it, the intended
+    defaults are:
+    - AES-128 (`CALG_AES_128`) + SHA-1 (`CALG_SHA1`)
+    - Iteration count is effectively fixed at 50,000 in the key derivation.
   - `EncryptedPackage` encryption: AES-ECB (no IV); pad plaintext to 16-byte blocks when encrypting
     and rely on the `orig_size` prefix for truncation (see `docs/offcrypto-standard-encryptedpackage.md`).
 

@@ -1,4 +1,7 @@
-use crate::crypto::{aes_cbc_decrypt, derive_iv, rc4_xor_in_place, HashAlgorithm, StandardKeyDeriver};
+use crate::crypto::{
+    aes_cbc_decrypt, aes_ecb_decrypt_in_place, derive_iv, rc4_xor_in_place, HashAlgorithm,
+    StandardKeyDerivation, StandardKeyDeriver,
+};
 use crate::error::OfficeCryptoError;
 use crate::util::{
     checked_vec_len, ct_eq, decode_utf16le_nul_terminated, read_u32_le, read_u64_le,
@@ -198,7 +201,17 @@ pub(crate) fn verify_password_standard(
     password: &str,
 ) -> Result<(), OfficeCryptoError> {
     let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(header.alg_id_hash)?;
-    let deriver = StandardKeyDeriver::new(hash_alg, header.key_bits, &verifier.salt, password);
+    let derivation = match header.alg_id {
+        CALG_RC4 => StandardKeyDerivation::Rc4,
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => StandardKeyDerivation::Aes,
+        other => {
+            return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+                "unsupported cipher AlgID {other:#x}"
+            )))
+        }
+    };
+    let deriver =
+        StandardKeyDeriver::new(hash_alg, header.key_bits, &verifier.salt, password, derivation);
     let key0 = deriver.derive_key_for_block(0)?;
 
     let expected_hash_len = verifier.verifier_hash_size as usize;
@@ -310,7 +323,8 @@ pub(crate) fn decrypt_standard_encrypted_package(
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
             // Try a small set of schemes seen in the wild. We validate via the password verifier and by
             // checking that the decrypted output starts with `PK`.
-            let schemes: [StandardScheme; 3] = [
+            let schemes: [StandardScheme; 4] = [
+                StandardScheme::Ecb,
                 StandardScheme::PerBlockKeyIvZero,
                 StandardScheme::ConstKeyPerBlockIvHash,
                 StandardScheme::ConstKeyIvSaltStream,
@@ -375,7 +389,13 @@ fn decrypt_standard_encrypted_package_rc4(
         )));
     }
 
-    let deriver = StandardKeyDeriver::new(hash_alg, info.header.key_bits, &info.verifier.salt, password);
+    let deriver = StandardKeyDeriver::new(
+        hash_alg,
+        info.header.key_bits,
+        &info.verifier.salt,
+        password,
+        StandardKeyDerivation::Rc4,
+    );
     let key0 = deriver.derive_key_for_block(0)?;
 
     // Verify password using EncryptionVerifier (decrypt verifier + verifier hash in a single RC4
@@ -462,6 +482,11 @@ fn decrypt_standard_encrypted_package_rc4(
 
 #[derive(Debug, Clone, Copy)]
 enum StandardScheme {
+    /// Standard / ECMA-376: AES-ECB using the block-0 file key (no IV).
+    ///
+    /// This matches `msoffcrypto-tool`'s Standard decryptor and decrypts the repo's
+    /// `fixtures/encrypted/ooxml/standard.xlsx`.
+    Ecb,
     /// Segment the data in 4096-byte chunks; for chunk N use a key derived with blockIndex=N and
     /// IV=0.
     PerBlockKeyIvZero,
@@ -486,34 +511,53 @@ fn decrypt_standard_with_scheme(
         info.header.key_bits,
         &info.verifier.salt,
         password,
+        StandardKeyDerivation::Aes,
     );
     let key0 = deriver.derive_key_for_block(0)?;
 
     // Verify password using EncryptionVerifier.
-    let (verifier_key, verifier_iv) = match scheme {
-        StandardScheme::PerBlockKeyIvZero => (key0.clone(), [0u8; 16].to_vec()),
-        StandardScheme::ConstKeyPerBlockIvHash => (
-            key0.clone(),
-            derive_iv(hash_alg, &info.verifier.salt, &0u32.to_le_bytes(), 16),
-        ),
-        StandardScheme::ConstKeyIvSaltStream => {
-            let iv = info.verifier.salt.get(..16).ok_or_else(|| {
-                OfficeCryptoError::InvalidFormat("EncryptionVerifier salt too short".to_string())
-            })?;
-            (key0.clone(), iv.to_vec())
+    let (verifier, verifier_hash_plain) = match scheme {
+        StandardScheme::Ecb => {
+            let mut verifier = info.verifier.encrypted_verifier.clone();
+            aes_ecb_decrypt_in_place(key0.as_slice(), &mut verifier)?;
+            let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
+            aes_ecb_decrypt_in_place(key0.as_slice(), &mut verifier_hash)?;
+            (Zeroizing::new(verifier), Zeroizing::new(verifier_hash))
+        }
+        StandardScheme::PerBlockKeyIvZero
+        | StandardScheme::ConstKeyPerBlockIvHash
+        | StandardScheme::ConstKeyIvSaltStream => {
+            let (verifier_key, verifier_iv) = match scheme {
+                StandardScheme::PerBlockKeyIvZero => (key0.clone(), [0u8; 16].to_vec()),
+                StandardScheme::ConstKeyPerBlockIvHash => (
+                    key0.clone(),
+                    derive_iv(hash_alg, &info.verifier.salt, &0u32.to_le_bytes(), 16),
+                ),
+                StandardScheme::ConstKeyIvSaltStream => {
+                    let iv = info.verifier.salt.get(..16).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(
+                            "EncryptionVerifier salt too short".to_string(),
+                        )
+                    })?;
+                    (key0.clone(), iv.to_vec())
+                }
+                StandardScheme::Ecb => unreachable!("handled above"),
+            };
+
+            let verifier = Zeroizing::new(aes_cbc_decrypt(
+                &verifier_key,
+                &verifier_iv,
+                &info.verifier.encrypted_verifier,
+            )?);
+            let verifier_hash = Zeroizing::new(aes_cbc_decrypt(
+                &verifier_key,
+                &verifier_iv,
+                &info.verifier.encrypted_verifier_hash,
+            )?);
+            (verifier, verifier_hash)
         }
     };
 
-    let verifier: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-        &verifier_key,
-        &verifier_iv,
-        &info.verifier.encrypted_verifier,
-    )?);
-    let verifier_hash_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
-        &verifier_key,
-        &verifier_iv,
-        &info.verifier.encrypted_verifier_hash,
-    )?);
     let verifier_hash_plain = verifier_hash_plain
         .get(..info.verifier.verifier_hash_size as usize)
         .ok_or_else(|| {
@@ -529,6 +573,19 @@ fn decrypt_standard_with_scheme(
 
     // Password is valid; decrypt the package.
     match scheme {
+        StandardScheme::Ecb => {
+            let mut plain = ciphertext.to_vec();
+            aes_ecb_decrypt_in_place(key0.as_slice(), &mut plain)?;
+            if expected_len > plain.len() {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "decrypted package length {} shorter than expected {}",
+                    plain.len(),
+                    expected_len
+                )));
+            }
+            plain.truncate(expected_len);
+            Ok(plain)
+        }
         StandardScheme::PerBlockKeyIvZero => {
             decrypt_segmented(ciphertext, total_size, expected_len, |block| {
                 let key = deriver.derive_key_for_block(block)?;
@@ -602,7 +659,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::crypto::{
         aes_cbc_encrypt, hash_password, password_to_utf16le, rc4_xor_in_place, HashAlgorithm,
-        StandardKeyDeriver,
+        StandardKeyDerivation, StandardKeyDeriver,
     };
     use crate::util::{ct_eq_call_count, parse_encryption_info_header, reset_ct_eq_calls};
 
@@ -647,7 +704,13 @@ pub(crate) mod tests {
         let verifier_plain: [u8; 16] = *b"formula-std-test";
         let verifier_hash = HashAlgorithm::Sha1.digest(&verifier_plain);
 
-        let deriver = StandardKeyDeriver::new(HashAlgorithm::Sha1, key_bits, &salt, password);
+        let deriver = StandardKeyDeriver::new(
+            HashAlgorithm::Sha1,
+            key_bits,
+            &salt,
+            password,
+            StandardKeyDerivation::Aes,
+        );
         let key0 = deriver.derive_key_for_block(0).expect("key0");
         let iv = [0u8; 16];
 
@@ -708,8 +771,9 @@ pub(crate) mod tests {
         salt: &[u8],
         password: &str,
         block_index: u32,
+        derivation: StandardKeyDerivation,
     ) -> Vec<u8> {
-        // Matches `StandardKeyDeriver` (50k spin) + CryptoAPI CryptDeriveKey behavior.
+        // Matches `StandardKeyDeriver` (50k spin) + (for AES) CryptoAPI CryptDeriveKey behavior.
         let pw = password_to_utf16le(password);
         let pw_hash = hash_password(hash_alg, salt, &pw, 50_000);
 
@@ -719,24 +783,25 @@ pub(crate) mod tests {
         let h = hash_alg.digest(&buf);
 
         let key_len = (key_bits as usize) / 8;
-        if key_len <= h.len() {
-            return h[..key_len].to_vec();
+        match derivation {
+            StandardKeyDerivation::Rc4 => h[..key_len].to_vec(),
+            StandardKeyDerivation::Aes => {
+                // CryptoAPI `CryptDeriveKey` expansion used by MS-OFFCRYPTO Standard encryption: pad
+                // `h` to 64 bytes with zeros, XOR with 0x36 and 0x5C, hash each, and concatenate.
+                let mut buf = h.clone();
+                buf.resize(64, 0);
+                let mut ipad = vec![0u8; 64];
+                let mut opad = vec![0u8; 64];
+                for i in 0..64 {
+                    ipad[i] = buf[i] ^ 0x36;
+                    opad[i] = buf[i] ^ 0x5c;
+                }
+                let mut out = hash_alg.digest(&ipad);
+                out.extend_from_slice(&hash_alg.digest(&opad));
+                out.truncate(key_len);
+                out
+            }
         }
-
-        // CryptoAPI `CryptDeriveKey` expansion used by MS-OFFCRYPTO Standard encryption: pad `h` to
-        // 64 bytes with zeros, XOR with 0x36 and 0x5C, hash each, and concatenate.
-        let mut buf = h.clone();
-        buf.resize(64, 0);
-        let mut ipad = vec![0u8; 64];
-        let mut opad = vec![0u8; 64];
-        for i in 0..64 {
-            ipad[i] = buf[i] ^ 0x36;
-            opad[i] = buf[i] ^ 0x5c;
-        }
-        let mut out = hash_alg.digest(&ipad);
-        out.extend_from_slice(&hash_alg.digest(&opad));
-        out.truncate(key_len);
-        out
     }
 
     #[test]
@@ -759,8 +824,15 @@ pub(crate) mod tests {
         ] {
             for key_bits in [40u32, 56u32, 128u32] {
                 // Derive the expected key for block 0 and validate truncation.
-                let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
-                let deriver = StandardKeyDeriver::new(hash_alg, key_bits, &salt, password);
+                let key_ref =
+                    derive_key_ref(hash_alg, key_bits, &salt, password, 0, StandardKeyDerivation::Rc4);
+                let deriver = StandardKeyDeriver::new(
+                    hash_alg,
+                    key_bits,
+                    &salt,
+                    password,
+                    StandardKeyDerivation::Rc4,
+                );
                 let key0 = deriver.derive_key_for_block(0).expect("derive key");
                 assert_eq!(
                     key0.as_slice(),
@@ -830,8 +902,15 @@ pub(crate) mod tests {
 
         let key_bits = 256u32;
         let hash_alg = HashAlgorithm::Sha1;
-        let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
-        let deriver = StandardKeyDeriver::new(hash_alg, key_bits, &salt, password);
+        let key_ref =
+            derive_key_ref(hash_alg, key_bits, &salt, password, 0, StandardKeyDerivation::Aes);
+        let deriver = StandardKeyDeriver::new(
+            hash_alg,
+            key_bits,
+            &salt,
+            password,
+            StandardKeyDerivation::Aes,
+        );
         let key0 = deriver.derive_key_for_block(0).expect("derive key");
         assert_eq!(key0.as_slice(), key_ref.as_slice());
         assert_eq!(key_ref.len(), 32);
@@ -880,8 +959,15 @@ pub(crate) mod tests {
 
         let key_bits = 256u32;
         let hash_alg = HashAlgorithm::Md5;
-        let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
-        let deriver = StandardKeyDeriver::new(hash_alg, key_bits, &salt, password);
+        let key_ref =
+            derive_key_ref(hash_alg, key_bits, &salt, password, 0, StandardKeyDerivation::Aes);
+        let deriver = StandardKeyDeriver::new(
+            hash_alg,
+            key_bits,
+            &salt,
+            password,
+            StandardKeyDerivation::Aes,
+        );
         let key0 = deriver.derive_key_for_block(0).expect("derive key");
         assert_eq!(key0.as_slice(), key_ref.as_slice());
         assert_eq!(key_ref.len(), 32);

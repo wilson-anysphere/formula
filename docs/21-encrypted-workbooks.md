@@ -141,9 +141,10 @@ Implementation notes:
   - Agile (4.4) XML (password key-encryptor subset),
   and implements Standard password→key derivation + verifier checks.
 - `crates/formula-io/src/offcrypto/encrypted_package.rs` contains a Standard/CryptoAPI
-  `EncryptedPackage` decrypt helper for a **CBC-segmented compatibility layout** (IV derived from
-  the verifier salt + segment index). Baseline Standard AES `EncryptedPackage` decryption is ECB
-  (no IV); see `docs/offcrypto-standard-encryptedpackage.md` for details.
+  `EncryptedPackage` decrypt helper for an **AES-CBC segmented compatibility layout** (IV derived
+  from the verifier salt + segment index). Baseline ECMA-376/MS-OFFCRYPTO Standard AES
+  `EncryptedPackage` decryption is AES-ECB (no IV); see `docs/offcrypto-standard-encryptedpackage.md`
+  and `docs/office-encryption.md`.
 - For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
   [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
@@ -176,11 +177,13 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 
 The encryption *mode* differs by scheme:
 
-- **Standard (CryptoAPI; `versionMinor == 2`):** in the baseline MS-OFFCRYPTO scheme,
-  `EncryptedPackage` is decrypted with **AES-ECB** (no IV) and then truncated to
-  `original_package_size`. Some producers use **CBC variants** (including 0x1000-segmented CBC with
-  `IV = SHA1(salt || LE32(i))[0..16]`); see `docs/offcrypto-standard-encryptedpackage.md` for a
-  breakdown and repo-specific behavior.
+- **Standard (CryptoAPI; `versionMinor == 2`):** baseline ECMA-376/MS-OFFCRYPTO uses **AES-ECB**
+  (no IV) for `EncryptedPackage` decryption; decrypt the ciphertext blocks and truncate to
+  `original_package_size` (see `docs/offcrypto-standard-encryptedpackage.md`).
+  - Compatibility note: some producers use Standard-like **AES-CBC** variants (including a
+    0x1000-segmented CBC scheme with `IV = SHA1(salt || LE32(i))[0..16]`). This repo’s
+    `fixtures/encrypted/ooxml/standard-large.xlsx` exercises such a variant; see
+    `docs/office-encryption.md` for details.
 - **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
   `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified by the XML
   descriptor.

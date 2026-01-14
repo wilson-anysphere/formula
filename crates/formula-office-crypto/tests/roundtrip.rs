@@ -704,10 +704,28 @@ fn standard_derive_key_sha1(password: &str, salt: &[u8], key_bits: u32, block: u
     let mut tmp = Vec::with_capacity(h.len() + 4);
     tmp.extend_from_slice(&h);
     tmp.extend_from_slice(&block.to_le_bytes());
-    let h2 = sha1_digest(&tmp);
+    let h_block = sha1_digest(&tmp);
+
+    // Match CryptoAPI `CryptDeriveKey` (MS-OFFCRYPTO Standard AES): always apply ipad/opad expansion,
+    // even when keyLen <= digestLen (e.g. AES-128 + SHA1).
+    let mut d = [0u8; 64];
+    d[..h_block.len()].copy_from_slice(&h_block);
+    let mut ipad = [0u8; 64];
+    let mut opad = [0u8; 64];
+    for i in 0..64 {
+        ipad[i] = d[i] ^ 0x36;
+        opad[i] = d[i] ^ 0x5c;
+    }
+    let inner = sha1_digest(&ipad);
+    let outer = sha1_digest(&opad);
+
+    let mut derived = [0u8; 40];
+    derived[..20].copy_from_slice(&inner);
+    derived[20..].copy_from_slice(&outer);
+
     let key_len = (key_bits as usize) / 8;
     let mut out = [0u8; 16];
-    out.copy_from_slice(&h2[..key_len]);
+    out.copy_from_slice(&derived[..key_len]);
     out
 }
 

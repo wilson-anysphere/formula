@@ -1,4 +1,5 @@
 use crate::error::OfficeCryptoError;
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
 use cbc::Encryptor;
@@ -306,6 +307,52 @@ pub(crate) fn aes_cbc_decrypt(
     Ok(buf)
 }
 
+pub(crate) fn aes_ecb_decrypt_in_place(
+    key: &[u8],
+    buf: &mut [u8],
+) -> Result<(), OfficeCryptoError> {
+    if buf.is_empty() {
+        return Ok(());
+    }
+    if buf.len() % 16 != 0 {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "AES-ECB ciphertext length must be multiple of 16 (got {})",
+            buf.len()
+        )));
+    }
+
+    fn decrypt_with<C>(key: &[u8], buf: &mut [u8]) -> Result<(), OfficeCryptoError>
+    where
+        C: BlockDecrypt + KeyInit,
+    {
+        let cipher = C::new_from_slice(key)
+            .map_err(|_| OfficeCryptoError::InvalidFormat("invalid AES key".to_string()))?;
+        for block in buf.chunks_mut(16) {
+            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, buf),
+        24 => decrypt_with::<Aes192>(key, buf),
+        32 => decrypt_with::<Aes256>(key, buf),
+        other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported AES key length {other}"
+        ))),
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn aes_ecb_decrypt(
+    key: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    let mut buf = ciphertext.to_vec();
+    aes_ecb_decrypt_in_place(key, &mut buf)?;
+    Ok(buf)
+}
+
 pub(crate) fn aes_cbc_encrypt(
     key: &[u8],
     iv: &[u8],
@@ -418,14 +465,29 @@ pub(crate) fn rc4_xor_in_place(key: &[u8], data: &mut [u8]) -> Result<(), Office
 /// CryptoAPI's `CryptDeriveKey`.
 ///
 /// We keep this in a dedicated struct so we can reuse the expensive password hash across blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StandardKeyDerivation {
+    /// AES-based Standard encryption uses CryptoAPI `CryptDeriveKey` semantics (ipad/opad expansion).
+    Aes,
+    /// RC4-based Standard encryption uses key truncation (`key = H_block[..key_len]`).
+    Rc4,
+}
+
 pub(crate) struct StandardKeyDeriver {
     hash_alg: HashAlgorithm,
     key_bytes: usize,
     password_hash: Zeroizing<Vec<u8>>,
+    derivation: StandardKeyDerivation,
 }
 
 impl StandardKeyDeriver {
-    pub(crate) fn new(hash_alg: HashAlgorithm, key_bits: u32, salt: &[u8], password: &str) -> Self {
+    pub(crate) fn new(
+        hash_alg: HashAlgorithm,
+        key_bits: u32,
+        salt: &[u8],
+        password: &str,
+        derivation: StandardKeyDerivation,
+    ) -> Self {
         let pw = password_to_utf16le(password);
         // Office Standard encryption uses a fixed spin count of 50k.
         let password_hash = hash_password(hash_alg, salt, &pw, 50_000);
@@ -434,6 +496,7 @@ impl StandardKeyDeriver {
             hash_alg,
             key_bytes,
             password_hash,
+            derivation,
         }
     }
 
@@ -446,22 +509,41 @@ impl StandardKeyDeriver {
         buf.extend_from_slice(&self.password_hash);
         buf.extend_from_slice(&block_index.to_le_bytes());
         let h: Zeroizing<Vec<u8>> = Zeroizing::new(self.hash_alg.digest(&buf));
-        Ok(crypt_derive_key(self.hash_alg, &h, self.key_bytes))
+        match self.derivation {
+            StandardKeyDerivation::Aes => Ok(crypt_derive_key_aes(self.hash_alg, &h, self.key_bytes)?),
+            StandardKeyDerivation::Rc4 => {
+                if self.key_bytes > h.len() {
+                    return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+                        "requested RC4 key length {} exceeds hash output length {}",
+                        self.key_bytes,
+                        h.len()
+                    )));
+                }
+                Ok(Zeroizing::new(h[..self.key_bytes].to_vec()))
+            }
+        }
     }
 }
 
-fn crypt_derive_key(hash_alg: HashAlgorithm, hash: &[u8], key_len: usize) -> Zeroizing<Vec<u8>> {
-    if key_len <= hash.len() {
-        return Zeroizing::new(hash[..key_len].to_vec());
-    }
-
-    // MS-OFFCRYPTO's CryptoAPI key derivation extension: hash padded with zeros to 64 bytes, XORed
-    // with 0x36/0x5C, then hashed to produce additional material.
+fn crypt_derive_key_aes(
+    hash_alg: HashAlgorithm,
+    hash: &[u8],
+    key_len: usize,
+) -> Result<Zeroizing<Vec<u8>>, OfficeCryptoError> {
+    // CryptoAPI `CryptDeriveKey` semantics (MS-OFFCRYPTO Standard):
     //
-    // This matches the "HMAC-like" `CryptDeriveKey` behavior described in MS-OFFCRYPTO (and matches
-    // reference implementations such as `msoffcrypto-tool`).
+    // - Pad the hash output to 64 bytes with zeros
+    // - XOR with ipad/opad (0x36/0x5C)
+    // - Hash each, concatenate, truncate to key_len
+    //
+    // This is applied even when `key_len <= hash.len()` (e.g. AES-128 + SHA1).
     let mut buf: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
-    debug_assert!(hash.len() <= 64);
+    if hash.len() > buf.len() {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "hash output too long for CryptoAPI key derivation: {} bytes",
+            hash.len()
+        )));
+    }
     buf[..hash.len()].copy_from_slice(hash);
 
     let mut ipad: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
@@ -477,8 +559,15 @@ fn crypt_derive_key(hash_alg: HashAlgorithm, hash: &[u8], key_len: usize) -> Zer
     let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(h1.len() + h2.len()));
     out.extend_from_slice(&h1);
     out.extend_from_slice(&h2);
+    if key_len > out.len() {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "requested key length {} exceeds CryptoAPI derivation output length {}",
+            key_len,
+            out.len()
+        )));
+    }
     out.truncate(key_len);
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -549,7 +638,13 @@ mod tests {
             ),
         ];
 
-        let deriver = StandardKeyDeriver::new(HashAlgorithm::Md5, 128, &salt, password);
+        let deriver = StandardKeyDeriver::new(
+            HashAlgorithm::Md5,
+            128,
+            &salt,
+            password,
+            StandardKeyDerivation::Rc4,
+        );
         for (block, expected_key) in expected {
             let key = deriver
                 .derive_key_for_block(*block)

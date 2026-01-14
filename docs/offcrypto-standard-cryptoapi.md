@@ -231,8 +231,8 @@ Terminology used below:
 * `block` – a 32-bit unsigned “block key” (`u32`), encoded as `LE32(block)`.
   * `block = 0` is used to derive the **file key** (and to validate the password using the verifier).
   * For `EncryptedPackage`:
-    * **AES** uses the same derived file key (`block = 0`) for the entire stream and decrypts the
-      ciphertext with **AES-ECB** (no IV) (see §7.2.1).
+    * **AES** decrypts the full ciphertext with the derived file key (`block = 0`) using **AES-ECB**
+      (no IV) (see §7.2.1).
     * **RC4** varies the **key** by `segmentIndex` (see §7.2.2).
 
 ### 5.1) Per-block hash input (key material)

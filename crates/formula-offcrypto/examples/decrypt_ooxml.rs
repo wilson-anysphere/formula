@@ -35,14 +35,12 @@ use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 
-use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
 use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
 use formula_offcrypto::{
-    decrypt_encrypted_package, inspect_encryption_info, parse_encryption_info,
-    standard_derive_key_zeroizing, standard_verify_key, AgileEncryptionInfo, EncryptionInfo,
-    HashAlgorithm, OffcryptoError, StandardEncryptionInfo,
+    decrypt_encrypted_package, decrypt_standard_only, inspect_encryption_info, parse_encryption_info,
+    AgileEncryptionInfo, EncryptionInfo, HashAlgorithm, OffcryptoError,
 };
 use hmac::{Hmac, Mac as _};
 use sha1::Digest as _;
@@ -102,22 +100,17 @@ fn main() {
     }
 
     let decrypted_zip = match parse_encryption_info(&encryption_info_bytes) {
-        Ok(EncryptionInfo::Standard {
-            header, verifier, ..
-        }) => {
-            let info = StandardEncryptionInfo { header, verifier };
-            match decrypt_standard_encrypted_package(
-                &info,
-                &encrypted_package_bytes,
-                &args.password,
-            ) {
-                Ok(b) => b,
-                Err(err) => {
-                    eprintln!("error: failed to decrypt Standard EncryptedPackage: {err}");
-                    std::process::exit(1);
-                }
+        Ok(EncryptionInfo::Standard { .. }) => match decrypt_standard_only(
+            &encryption_info_bytes,
+            &encrypted_package_bytes,
+            &args.password,
+        ) {
+            Ok(b) => b,
+            Err(err) => {
+                eprintln!("error: failed to decrypt Standard EncryptedPackage: {err}");
+                std::process::exit(1);
             }
-        }
+        },
         Ok(EncryptionInfo::Agile { info, .. }) => {
             match decrypt_agile_encrypted_package(
                 &info,
@@ -331,20 +324,6 @@ fn open_stream_best_effort<R: Read + Seek + std::io::Write>(
 const HMAC_KEY_BLOCK: [u8; 8] = [0x5F, 0xB2, 0xAD, 0x01, 0x0C, 0xB9, 0xE1, 0xF6];
 const HMAC_VALUE_BLOCK: [u8; 8] = [0xA0, 0x67, 0x7F, 0x02, 0xB2, 0x2C, 0x84, 0x33];
 
-fn decrypt_standard_encrypted_package(
-    info: &StandardEncryptionInfo,
-    encrypted_package: &[u8],
-    password: &str,
-) -> Result<Vec<u8>, OffcryptoError> {
-    let key = standard_derive_key_zeroizing(info, password)?;
-    standard_verify_key(info, &key)?;
-
-    decrypt_encrypted_package(encrypted_package, |_segment_index, ciphertext, plaintext| {
-        plaintext.copy_from_slice(ciphertext);
-        aes_ecb_decrypt_in_place(&key, plaintext)
-    })
-}
-
 fn decrypt_agile_encrypted_package(
     info: &AgileEncryptionInfo,
     encrypted_package: &[u8],
@@ -513,31 +492,6 @@ fn aes_cbc_decrypt_in_place(
     }
 
     Ok(())
-}
-
-fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
-    if buf.len() % 16 != 0 {
-        return Err(OffcryptoError::InvalidCiphertextLength { len: buf.len() });
-    }
-
-    fn decrypt_with<C>(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
-    where
-        C: BlockDecrypt + KeyInit,
-    {
-        let cipher =
-            C::new_from_slice(key).map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
-        for block in buf.chunks_mut(16) {
-            cipher.decrypt_block(GenericArray::from_mut_slice(block));
-        }
-        Ok(())
-    }
-
-    match key.len() {
-        16 => decrypt_with::<Aes128>(key, buf),
-        24 => decrypt_with::<Aes192>(key, buf),
-        32 => decrypt_with::<Aes256>(key, buf),
-        _ => Err(OffcryptoError::InvalidKeyLength { len: key.len() }),
-    }
 }
 
 fn compute_hmac(
