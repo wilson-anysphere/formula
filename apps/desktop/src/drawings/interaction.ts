@@ -371,19 +371,19 @@ export class DrawingInteractionController {
           this.trySetPointerCapture(e.pointerId);
           this.callbacks.beginBatch?.({ label: "Rotate Picture" });
           this.attachEscapeListener();
-           this.rotating = {
-             id: selectedObject.id,
-             startAngleRad,
-             centerX,
-             centerY,
-             startRotationDeg,
-             startObjects,
-             pointerId: e.pointerId,
-             transform: selectedObject.transform,
-           };
-           this.element.style.cursor = cursorForRotationHandle(true);
-           return;
-         }
+          this.rotating = {
+            id: selectedObject.id,
+            startAngleRad,
+            centerX,
+            centerY,
+            startRotationDeg,
+            startObjects,
+            pointerId: e.pointerId,
+            transform: selectedObject.transform,
+          };
+          this.element.style.cursor = cursorForRotationHandle(true);
+          return;
+        }
 
         const handle = hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform);
         if (handle) {
@@ -404,17 +404,17 @@ export class DrawingInteractionController {
           this.trySetPointerCapture(e.pointerId);
           this.callbacks.beginBatch?.({ label: "Resize Picture" });
           this.attachEscapeListener();
-            this.resizing = {
-              id: selectedObject.id,
-              handle,
-              startSheetX,
-              startSheetY,
-              startObjects,
-              pointerId: e.pointerId,
-              transform: selectedObject.transform,
-              startWidthPx: selectedBounds.width,
-              startHeightPx: selectedBounds.height,
-             aspectRatio:
+          this.resizing = {
+            id: selectedObject.id,
+            handle,
+            startSheetX,
+            startSheetY,
+            startObjects,
+            pointerId: e.pointerId,
+            transform: selectedObject.transform,
+            startWidthPx: selectedBounds.width,
+            startHeightPx: selectedBounds.height,
+            aspectRatio:
               selectedObject.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
                 ? selectedBounds.width / selectedBounds.height
                 : null,
