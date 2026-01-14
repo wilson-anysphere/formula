@@ -473,7 +473,9 @@ impl Value {
             Value::Number(n) => Ok(*n),
             Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
             Value::Blank => Ok(0.0),
-            Value::Text(s) => coerce_text_to_number(s, ctx.value_locale(), ctx.now_utc(), ctx.date_system()),
+            Value::Text(s) => {
+                coerce_text_to_number(s, ctx.value_locale(), ctx.now_utc(), ctx.date_system())
+            }
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
@@ -633,7 +635,11 @@ impl Value {
                 }
                 Ok(v.display.clone())
             }
-            Value::Number(n) => Ok(format_number_general(*n)),
+            Value::Number(n) => Ok(format_number_general_with_options(
+                *n,
+                ValueLocaleConfig::en_us().separators,
+                ExcelDateSystem::EXCEL_1900,
+            )),
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),
@@ -645,7 +651,10 @@ impl Value {
         }
     }
 
-    pub fn coerce_to_string_with_ctx(&self, ctx: &dyn FunctionContext) -> Result<String, ErrorKind> {
+    pub fn coerce_to_string_with_ctx(
+        &self,
+        ctx: &dyn FunctionContext,
+    ) -> Result<String, ErrorKind> {
         match self {
             Value::Text(s) => Ok(s.clone()),
             Value::Entity(v) => Ok(v.display.clone()),
@@ -697,98 +706,6 @@ fn coerce_text_to_number(
         .map_err(map_excel_error)
 }
 
-fn format_number_general(n: f64) -> String {
-    if !n.is_finite() {
-        return n.to_string();
-    }
-
-    // Excel does not surface a negative sign for zero under "General".
-    if n == 0.0 {
-        return "0".to_string();
-    }
-
-    let abs = n.abs();
-    // Approximate Excel's General switching thresholds:
-    // - Scientific when abs >= 1e11
-    // - Scientific when abs < 1e-9
-    let scientific = abs >= 1e11 || abs < 1e-9;
-    if scientific {
-        format_number_general_scientific(n)
-    } else {
-        format_number_general_decimal(n)
-    }
-}
-
-fn format_number_general_decimal(n: f64) -> String {
-    let abs = n.abs();
-    let digits_before_decimal = if abs >= 1.0 {
-        // `log10` can be slightly off for some values; use it only for determining a reasonable
-        // fixed precision and rely on formatting+trimming for the final representation.
-        abs.log10().floor() as i32 + 1
-    } else {
-        0
-    };
-
-    let precision = (15 - digits_before_decimal).clamp(0, 15) as usize;
-    let mut out = format!("{:.*}", precision, n);
-    trim_trailing_decimal_zeros(&mut out);
-    out
-}
-
-fn format_number_general_scientific(n: f64) -> String {
-    let abs = n.abs();
-    // Compute exponent such that 1 <= mantissa < 10.
-    let mut exp = abs.log10().floor() as i32;
-    let mut mantissa = abs / 10_f64.powi(exp);
-    if mantissa < 1.0 {
-        exp -= 1;
-        mantissa *= 10.0;
-    } else if mantissa >= 10.0 {
-        exp += 1;
-        mantissa /= 10.0;
-    }
-
-    // Excel uses 15 significant digits.
-    let mut mantissa = (mantissa * 1e14).round() / 1e14;
-    if mantissa >= 10.0 {
-        mantissa /= 10.0;
-        exp += 1;
-    }
-
-    let mut mantissa_str = format!("{:.14}", mantissa);
-    trim_trailing_decimal_zeros(&mut mantissa_str);
-    if n.is_sign_negative() {
-        mantissa_str.insert(0, '-');
-    }
-
-    let exp_sign = if exp >= 0 { '+' } else { '-' };
-    let exp_abs = exp.unsigned_abs();
-    let exp_str = if exp_abs < 10 {
-        format!("0{exp_abs}")
-    } else {
-        exp_abs.to_string()
-    };
-
-    format!("{mantissa_str}E{exp_sign}{exp_str}")
-}
-
-fn trim_trailing_decimal_zeros(s: &mut String) {
-    if let Some(dot) = s.find('.') {
-        // Strip trailing zeros after the decimal point.
-        while s.ends_with('0') {
-            s.pop();
-        }
-        // Remove the decimal point if it is now the last character.
-        if s.len() == dot + 1 {
-            s.pop();
-        }
-    }
-
-    if s == "-0" {
-        *s = "0".to_string();
-    }
-}
-
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Value::Number(value)
@@ -823,7 +740,9 @@ impl fmt::Display for Value {
             Value::Record(record) => f.write_str(&record.display),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
-            Value::Reference(_) | Value::ReferenceUnion(_) => f.write_str(ErrorKind::Value.as_code()),
+            Value::Reference(_) | Value::ReferenceUnion(_) => {
+                f.write_str(ErrorKind::Value.as_code())
+            }
             Value::Array(arr) => write!(f, "{}", arr.top_left()),
             Value::Lambda(_) => f.write_str(ErrorKind::Calc.as_code()),
             Value::Spill { .. } => f.write_str(ErrorKind::Spill.as_code()),
