@@ -611,7 +611,8 @@ export function branchStateFromYjsDoc(doc) {
         for (const [id, value] of mapEntriesFromArrayRoot(existingArray)) {
           byId.set(id, yjsValueToJson(value));
         }
-        for (const item of existingArray.toArray()) {
+        for (let i = 0; i < existingArray.length; i++) {
+          const item = existingArray.get(i);
           const id = coerceString(readYMapOrObject(item, "id"));
           if (!id) continue;
           if (byId.has(id)) continue;
@@ -649,7 +650,8 @@ export function branchStateFromYjsDoc(doc) {
           for (const [id, value] of mapEntriesFromArrayRoot(commentsArray)) {
             byId.set(id, yjsValueToJson(value));
           }
-          for (const item of commentsArray.toArray()) {
+          for (let i = 0; i < commentsArray.length; i++) {
+            const item = commentsArray.get(i);
             const id = coerceString(readYMapOrObject(item, "id"));
             if (!id) continue;
             if (byId.has(id)) continue;
