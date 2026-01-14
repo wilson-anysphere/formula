@@ -8,21 +8,38 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
 
 test("Desktop CSS should not use brightness() filters (use tokens instead)", () => {
-  const stylesDir = path.join(desktopRoot, "src", "styles");
-  const styleTargets = fs
-    .readdirSync(stylesDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".css"))
-    .map((entry) => path.join(stylesDir, entry.name));
+  const srcRoot = path.join(desktopRoot, "src");
 
-  const targets = [
-    ...styleTargets,
-    // Accent-driven titlebar hover styling is still token-based but lives outside src/styles.
-    path.join(desktopRoot, "src", "titlebar", "titlebar.css"),
-  ];
+  /**
+   * @param {string} dirPath
+   * @returns {string[]}
+   */
+  function walkCssFiles(dirPath) {
+    /** @type {string[]} */
+    const files = [];
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...walkCssFiles(fullPath));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".css")) continue;
+      files.push(fullPath);
+    }
+    return files;
+  }
 
-  const uniqueTargets = [...new Set(targets)];
+  const targets = walkCssFiles(srcRoot).filter((file) => {
+    const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
+    // Demo/sandbox assets are not part of the shipped UI bundle.
+    if (rel.startsWith("grid/presence-renderer/")) return false;
+    if (rel.includes("/demo/")) return false;
+    if (rel.includes("/__tests__/")) return false;
+    return true;
+  });
 
-  for (const target of uniqueTargets) {
+  for (const target of targets) {
     const css = fs.readFileSync(target, "utf8");
     assert.ok(
       !/\bbrightness\s*\(/i.test(css),
