@@ -98,6 +98,7 @@ jobs:
     needs: conflict-marker-guard
     permissions:
       contents: read
+      actions: read
     runs-on: ubuntu-24.04
     outputs:
       upload: ${{ steps.params.outputs.upload }}
@@ -219,6 +220,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Verify tagged commit has successful CI run
+        if: steps.params.outputs.upload == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-tag-ci-status.mjs --sha "${{ github.sha }}" --workflow "CI"
+
       - name: Check pinned Tauri CLI version matches Tauri crates
         run: node scripts/ci/check-tauri-cli-version.mjs
 
@@ -324,31 +331,9 @@ jobs:
       - name: Check Cargo.lock is up-to-date (no implicit lockfile updates)
         shell: bash
         run: bash scripts/ci/check-cargo-lock-reproducible.sh
-  check-ci-status:
-    name: Verify tagged commit has successful CI run
-    needs: preflight
-    if: needs.preflight.outputs.upload == 'true'
-    permissions:
-      contents: read
-      actions: read
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Verify tagged commit has successful CI run
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/check-tag-ci-status.mjs --sha "${{ github.sha }}" --workflow "CI"
-
   build:
     name: Build (${{ matrix.label }})
-    needs:
-      - preflight
-      - check-ci-status
+    needs: preflight
     permissions:
       contents: write
       id-token: write
