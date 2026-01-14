@@ -11723,9 +11723,10 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
-        self.external_value_provider
-            .as_ref()
-            .and_then(|provider| provider.sheet_order(workbook))
+        let provider = self.external_value_provider.as_ref()?;
+        provider
+            .sheet_order(workbook)
+            .or_else(|| provider.workbook_sheet_names(workbook).map(|names| names.as_ref().to_vec()))
     }
 
     fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
@@ -13091,10 +13092,10 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
-        self.snapshot
-            .external_value_provider
-            .as_ref()
-            .and_then(|provider| provider.sheet_order(workbook))
+        let provider = self.snapshot.external_value_provider.as_ref()?;
+        provider
+            .sheet_order(workbook)
+            .or_else(|| provider.workbook_sheet_names(workbook).map(|names| names.as_ref().to_vec()))
     }
 
     fn get_value_on_sheet(

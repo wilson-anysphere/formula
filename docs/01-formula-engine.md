@@ -562,14 +562,12 @@ workbook’s sheet order*. Because the engine cannot know the sheet ordering for
 host must supply it:
 
 1. `workbook_sheet_names("Book.xlsx")` returns sheet names in workbook order (case-insensitive semantics).
-    - In the Rust `ExternalValueProvider` trait, implement
-      `ExternalValueProvider::workbook_sheet_names(workbook)` (preferred; defaults to
-      `sheet_order(workbook)`) or `ExternalValueProvider::sheet_order(workbook)`.
-    - Conceptually (in other host bindings), this can be thought of as
-      `workbook_sheet_names(workbook)`.
-    - When embedding the evaluator directly via `ValueResolver`, implement
-      `ValueResolver::workbook_sheet_names(workbook)` (preferred; defaults to
-      `external_sheet_order(workbook)`) or `ValueResolver::external_sheet_order(workbook)`.
+    - In the Rust `ExternalValueProvider` trait, prefer
+      `ExternalValueProvider::workbook_sheet_names(workbook) -> Option<Arc<[String]>>`
+      (legacy: `sheet_order(workbook) -> Option<Vec<String>>`).
+    - When embedding the evaluator directly via `ValueResolver`, prefer
+      `ValueResolver::workbook_sheet_names(workbook) -> Option<Arc<[String]>>`
+      (legacy: `external_sheet_order(workbook) -> Option<Vec<String>>`).
 2. The engine finds `start` and `end` within that list and selects the inclusive slice between them (order
    independent, like Excel).
 3. Each sheet name `S` in that slice is queried as `sheet_key = "[Book.xlsx]S"`.
@@ -613,12 +611,10 @@ integrators must implement:
 - `ValueResolver::get_external_value(sheet_key, addr)` — evaluator-facing hook (used when embedding the
   evaluator directly).
 - `ExternalValueProvider::get(sheet_key, addr)` — return a scalar value for an external cell.
-- External workbook sheet order — required for external 3D spans:
-  - `ExternalValueProvider::workbook_sheet_names(workbook)` (preferred) or
-    `ExternalValueProvider::sheet_order(workbook)`
+- `ExternalValueProvider::workbook_sheet_names(workbook)` (legacy: `sheet_order(workbook)`) — return sheet
+  names for `workbook` in workbook order (required for external 3D spans).
   - When embedding the evaluator directly via `ValueResolver`, this is exposed as
-    `ValueResolver::workbook_sheet_names(workbook)` (preferred) or
-    `ValueResolver::external_sheet_order(workbook)`.
+    `ValueResolver::workbook_sheet_names(workbook)` (legacy: `external_sheet_order(workbook)`).
 - `ExternalValueProvider::workbook_table(workbook, table_name)` — return external workbook table metadata
   (required for external structured refs like `[Book.xlsx]Sheet1!Table1[Col]`).
   - When embedding the evaluator directly via `ValueResolver`, this is exposed as
