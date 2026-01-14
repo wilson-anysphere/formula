@@ -77,32 +77,32 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
     },
     // setProperty("filter", "brightness(0.9)") / setProperty("backdrop-filter", "brightness(0.9)")
     {
-      re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*|(?:\?\.|\.)\s*bind\s*\(\s*[^)]*\)\s*\(\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(filter)",
     },
     // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("filter", "brightness(0.9)")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*|(?:\?\.|\.)\s*bind\s*\(\s*[^)]*\)\s*\(\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'](filter)",
     },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("filter", "brightness(0.9)")`)
     {
-      re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*|(?:\?\.|\.)\s*bind\s*\(\s*[^)]*\)\s*\(\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty[filter]",
     },
     // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("filter", "brightness(0.9)")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*|(?:\?\.|\.)\s*bind\s*\(\s*[^)]*\)\s*\(\s*)(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'][filter]",
     },
     // setAttribute("style", "filter: brightness(0.9)")
     {
-      re: /\bsetAttribute\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\bsetAttribute\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*|(?:\?\.|\.)\s*bind\s*\(\s*[^)]*\)\s*\(\s*)(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setAttribute(style)",
     },
     // setAttribute via bracket notation (e.g. `el["setAttribute"]("style", "filter: brightness(0.9)")`)
     {
-      re: /\[\s*(?:["'`])setAttribute(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*)(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])setAttribute(?:["'`])\s*]\s*(?:\(\s*|(?:\?\.|\.)\s*call\s*\(\s*[^,]+,\s*|(?:\?\.|\.)\s*apply\s*\(\s*[^,]+,\s*\[\s*|(?:\?\.|\.)\s*bind\s*\(\s*[^)]*\)\s*\(\s*)(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setAttribute[style]",
     },
     // cssText assignment (e.g. `el.style.cssText = "filter: brightness(0.9)"`)
