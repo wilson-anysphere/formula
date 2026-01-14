@@ -3687,12 +3687,12 @@ impl DaxEngine {
 
                         let mut rows = Vec::new();
                         if key.is_blank() {
-                            if let Some(unmatched) = rel.unmatched_fact_rows.as_deref() {
-                                for &row in unmatched {
+                            if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
+                                unmatched.for_each_row(|row| {
                                     if allowed.get(row).copied().unwrap_or(false) {
                                         rows.push(row);
                                     }
-                                }
+                                });
                             } else if let Some(from_index) = rel.from_index.as_ref() {
                                 for (fk, candidates) in from_index {
                                     if fk.is_blank() || !rel.to_index.contains_key(fk) {
@@ -3859,8 +3859,8 @@ impl DaxEngine {
                             }
 
                             if include_blank {
-                                if let Some(unmatched) = rel_info.unmatched_fact_rows.as_deref() {
-                                    next_rows.extend(unmatched.iter().copied());
+                                if let Some(unmatched) = rel_info.unmatched_fact_rows.as_ref() {
+                                    unmatched.extend_into(&mut next_rows);
                                 } else {
                                     for row in 0..from_table_ref.row_count() {
                                         let v = from_table_ref
@@ -4218,12 +4218,12 @@ fn propagate_filter(
                 }
 
                 if blank_row_allowed {
-                    if let Some(unmatched) = relationship.unmatched_fact_rows.as_deref() {
-                        for &row in unmatched {
+                    if let Some(unmatched) = relationship.unmatched_fact_rows.as_ref() {
+                        unmatched.for_each_row(|row| {
                             if from_set.get(row).copied().unwrap_or(false) {
                                 next[row] = true;
                             }
-                        }
+                        });
                     } else {
                         // Shouldn't happen for columnar relationships, but keep semantics by
                         // scanning if needed.
@@ -4551,7 +4551,7 @@ fn virtual_blank_row_exists(
         // A virtual blank row exists if the relationship has any *currently visible* fact-side
         // row whose foreign key is BLANK or has no match in the dimension.
         if filter.is_empty() {
-            if let Some(unmatched) = rel.unmatched_fact_rows.as_deref() {
+            if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
                 if !unmatched.is_empty() {
                     return Ok(true);
                 }
@@ -4573,12 +4573,8 @@ fn virtual_blank_row_exists(
             .get(rel.rel.from_table.as_str())
             .ok_or_else(|| DaxError::UnknownTable(rel.rel.from_table.clone()))?;
 
-        if let Some(unmatched) = rel.unmatched_fact_rows.as_deref() {
-            if unmatched
-                .iter()
-                .copied()
-                .any(|row| from_set.get(row).copied().unwrap_or(false))
-            {
+        if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
+            if unmatched.any_row_allowed(from_set) {
                 return Ok(true);
             }
         } else if let Some(from_index) = rel.from_index.as_ref() {

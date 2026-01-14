@@ -504,6 +504,146 @@ impl RowSet {
     }
 }
 
+/// A compact representation of fact-side rows that belong to the "virtual blank" dimension member:
+/// rows whose foreign key is BLANK or does not map to any key in the related `to_table`.
+///
+/// For columnar fact tables we avoid materializing a full `FK -> Vec<row>` index; however, the
+/// engine still needs to model Tabular's implicit blank/unknown member semantics. Storing a row
+/// list for the blank member can still be too large when most rows are unmatched, so we switch
+/// from a sparse list to a dense bitset when it becomes more memory-efficient.
+#[derive(Clone, Debug)]
+pub(crate) enum UnmatchedFactRows {
+    Sparse(Vec<usize>),
+    Dense {
+        /// Bitset of length `len` (stored in 64-bit words).
+        bits: Vec<u64>,
+        len: usize,
+        count: usize,
+    },
+}
+
+impl UnmatchedFactRows {
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => rows.is_empty(),
+            UnmatchedFactRows::Dense { count, .. } => *count == 0,
+        }
+    }
+
+    pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => {
+                for &row in rows {
+                    f(row);
+                }
+            }
+            UnmatchedFactRows::Dense { bits, len, .. } => {
+                for (word_idx, &word) in bits.iter().enumerate() {
+                    let mut w = word;
+                    while w != 0 {
+                        let tz = w.trailing_zeros() as usize;
+                        let row = word_idx * 64 + tz;
+                        if row >= *len {
+                            break;
+                        }
+                        f(row);
+                        w &= w - 1;
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn extend_into(&self, out: &mut Vec<usize>) {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => out.extend(rows.iter().copied()),
+            UnmatchedFactRows::Dense { .. } => self.for_each_row(|row| out.push(row)),
+        }
+    }
+
+    pub(crate) fn any_row_allowed(&self, allowed: &[bool]) -> bool {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => rows
+                .iter()
+                .copied()
+                .any(|row| allowed.get(row).copied().unwrap_or(false)),
+            UnmatchedFactRows::Dense { bits, len, .. } => {
+                for (word_idx, &word) in bits.iter().enumerate() {
+                    let mut w = word;
+                    while w != 0 {
+                        let tz = w.trailing_zeros() as usize;
+                        let row = word_idx * 64 + tz;
+                        if row >= *len {
+                            break;
+                        }
+                        if allowed.get(row).copied().unwrap_or(false) {
+                            return true;
+                        }
+                        w &= w - 1;
+                    }
+                }
+                false
+            }
+        }
+    }
+}
+
+struct UnmatchedFactRowsBuilder {
+    row_count: usize,
+    sparse_to_dense_threshold: usize,
+    rows: UnmatchedFactRows,
+}
+
+impl UnmatchedFactRowsBuilder {
+    fn new(row_count: usize) -> Self {
+        // Compare the approximate memory usage of:
+        // - sparse list: `unmatched_count * size_of::<usize>()`
+        // - dense bitset: `row_count / 8` bytes
+        //
+        // We switch to the dense representation once it becomes more memory-efficient:
+        //   unmatched_count > row_count / 64.
+        let sparse_to_dense_threshold = row_count / 64;
+        Self {
+            row_count,
+            sparse_to_dense_threshold,
+            rows: UnmatchedFactRows::Sparse(Vec::new()),
+        }
+    }
+
+    fn push(&mut self, row: usize) {
+        match &mut self.rows {
+            UnmatchedFactRows::Sparse(rows) => {
+                rows.push(row);
+                if rows.len() > self.sparse_to_dense_threshold {
+                    let word_len = (self.row_count + 63) / 64;
+                    let mut bits = vec![0u64; word_len];
+                    for &row in rows.iter() {
+                        let word = row / 64;
+                        let bit = row % 64;
+                        bits[word] |= 1u64 << bit;
+                    }
+                    let count = rows.len();
+                    self.rows = UnmatchedFactRows::Dense {
+                        bits,
+                        len: self.row_count,
+                        count,
+                    };
+                }
+            }
+            UnmatchedFactRows::Dense { bits, count, .. } => {
+                let word = row / 64;
+                let bit = row % 64;
+                bits[word] |= 1u64 << bit;
+                *count += 1;
+            }
+        }
+    }
+
+    fn finish(self) -> UnmatchedFactRows {
+        self.rows
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
@@ -526,7 +666,7 @@ pub(crate) struct RelationshipInfo {
     ///
     /// This is primarily used for columnar fact tables where we do not materialize
     /// [`Self::from_index`].
-    pub(crate) unmatched_fact_rows: Option<Vec<usize>>,
+    pub(crate) unmatched_fact_rows: Option<UnmatchedFactRows>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -918,9 +1058,8 @@ impl DataModel {
             }
             TableStorage::Columnar(_) => {
                 // Avoid materializing `from_index` for columnar fact tables. Instead, precompute
-                // the (usually small) set of fact rows that belong to the virtual blank dimension
-                // member.
-                let mut unmatched = Vec::new();
+                // the set of fact rows that belong to the virtual blank dimension member.
+                let mut unmatched = UnmatchedFactRowsBuilder::new(from_table.row_count());
                 let mut seen = (relationship.cardinality == Cardinality::OneToOne)
                     .then_some(HashSet::<Value>::new());
                 for row in 0..from_table.row_count() {
@@ -956,7 +1095,7 @@ impl DataModel {
                     }
                 }
 
-                (None, Some(unmatched))
+                (None, Some(unmatched.finish()))
             }
         };
 
