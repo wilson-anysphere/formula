@@ -7,8 +7,9 @@ use cipher::{BlockDecryptMut, KeyIvInit};
 use sha1::{Digest as _, Sha1};
 
 use formula_offcrypto::{
-    agile_secret_key, decrypt_encrypted_package, parse_encryption_info, standard_derive_key,
-    standard_verify_key, EncryptionInfo, HashAlgorithm, OffcryptoError, StandardEncryptionInfo,
+    agile_decrypt_package, agile_secret_key, agile_verify_password, decrypt_encrypted_package,
+    parse_encryption_info, standard_derive_key, standard_verify_key, EncryptionInfo, HashAlgorithm,
+    OffcryptoError, StandardEncryptionInfo,
 };
 
 mod support;
@@ -169,6 +170,7 @@ fn roundtrip_agile_encryption() {
         panic!("expected Agile EncryptionInfo");
     };
 
+    agile_verify_password(&info, password).expect("verify password");
     let secret_key = agile_secret_key(&info, password).expect("derive agile secret key");
 
     assert_eq!(
@@ -176,15 +178,8 @@ fn roundtrip_agile_encryption() {
         "expected test helper to use 16-byte block size"
     );
 
-    let key_data_salt = info.key_data_salt.clone();
-    let algo = info.key_data_hash_algorithm;
-    let decrypted = decrypt_encrypted_package(&encrypted_package, |block, ct, pt| {
-        pt.copy_from_slice(ct);
-        let iv = derive_iv(algo, &key_data_salt, block);
-        aes_cbc_decrypt_in_place(&secret_key, &iv, pt)?;
-        Ok(())
-    })
-    .expect("decrypt EncryptedPackage");
+    let decrypted = agile_decrypt_package(&info, &secret_key, &encrypted_package)
+        .expect("decrypt EncryptedPackage");
 
     assert_eq!(decrypted, plaintext);
     assert_zip_contains_workbook_xml(&decrypted);
