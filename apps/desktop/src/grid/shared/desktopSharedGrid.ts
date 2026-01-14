@@ -154,6 +154,14 @@ export class DesktopSharedGrid {
   private readonly a11yStatusEl: HTMLDivElement;
   private readonly a11yActiveCellId: string;
   private readonly a11yActiveCellEl: HTMLDivElement;
+  private readonly containerRestore: {
+    role: string | null;
+    ariaRowcount: string | null;
+    ariaColcount: string | null;
+    ariaMultiselectable: string | null;
+    ariaDescribedBy: string | null;
+    touchAction: string;
+  };
 
   private disposeFns: Array<() => void> = [];
 
@@ -240,13 +248,24 @@ export class DesktopSharedGrid {
     applySrOnlyStyle(this.a11yActiveCellEl);
     this.container.appendChild(this.a11yActiveCellEl);
 
+    this.containerRestore = {
+      role: this.container.getAttribute("role"),
+      ariaRowcount: this.container.getAttribute("aria-rowcount"),
+      ariaColcount: this.container.getAttribute("aria-colcount"),
+      ariaMultiselectable: this.container.getAttribute("aria-multiselectable"),
+      ariaDescribedBy: this.container.getAttribute("aria-describedby"),
+      touchAction: this.container.style.touchAction,
+    };
+
     this.container.setAttribute("role", "grid");
     this.container.setAttribute("aria-rowcount", String(options.rowCount));
     this.container.setAttribute("aria-colcount", String(options.colCount));
     this.container.setAttribute("aria-multiselectable", "true");
     // If the container is re-used (e.g. grid mode switches), ensure we start from a clean state.
     this.container.removeAttribute("aria-activedescendant");
-    this.container.setAttribute("aria-describedby", this.a11yStatusId);
+    const describedBy = new Set((this.containerRestore.ariaDescribedBy ?? "").split(/\s+/).filter(Boolean));
+    describedBy.add(this.a11yStatusId);
+    this.container.setAttribute("aria-describedby", Array.from(describedBy).join(" "));
     this.container.style.touchAction = "none";
 
     this.renderer.attach({
@@ -338,11 +357,16 @@ export class DesktopSharedGrid {
     this.stopAutoScroll();
     this.renderer.destroy();
     this.container.removeAttribute("aria-activedescendant");
-    this.container.removeAttribute("aria-describedby");
-    this.container.removeAttribute("aria-multiselectable");
-    this.container.removeAttribute("aria-rowcount");
-    this.container.removeAttribute("aria-colcount");
-    this.container.removeAttribute("role");
+    const restoreAttribute = (name: string, value: string | null) => {
+      if (value == null) this.container.removeAttribute(name);
+      else this.container.setAttribute(name, value);
+    };
+    restoreAttribute("aria-describedby", this.containerRestore.ariaDescribedBy);
+    restoreAttribute("aria-multiselectable", this.containerRestore.ariaMultiselectable);
+    restoreAttribute("aria-rowcount", this.containerRestore.ariaRowcount);
+    restoreAttribute("aria-colcount", this.containerRestore.ariaColcount);
+    restoreAttribute("role", this.containerRestore.role);
+    this.container.style.touchAction = this.containerRestore.touchAction;
     this.a11yStatusEl.remove();
     this.a11yActiveCellEl.remove();
   }
