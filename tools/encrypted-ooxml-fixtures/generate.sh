@@ -198,3 +198,15 @@ if [[ ! -f "${MAIN_CLASSFILE}" || "${SOURCE}" -nt "${MAIN_CLASSFILE}" ]]; then
 fi
 
 java -classpath "${CLASSES_DIR}:${CP_JARS}" "${MAIN_CLASS}" "${MODE}" "${PASSWORD}" "${IN_PLAINTEXT_XLSX}" "${OUT_ENCRYPTED_XLSX}"
+
+# Minimal sanity check: encrypted OOXML XLSX files are OLE/CFB containers, not ZIP archives.
+if [[ ! -s "${OUT_ENCRYPTED_XLSX}" ]]; then
+  echo "ERROR: generator did not produce a non-empty output file: ${OUT_ENCRYPTED_XLSX}" >&2
+  exit 1
+fi
+OLE_MAGIC_HEX="d0cf11e0a1b11ae1"
+OUT_MAGIC_HEX="$(head -c 8 "${OUT_ENCRYPTED_XLSX}" | od -An -t x1 | tr -d ' \n')"
+if [[ "${OUT_MAGIC_HEX}" != "${OLE_MAGIC_HEX}" ]]; then
+  echo "ERROR: output does not look like an OLE/CFB container (expected magic ${OLE_MAGIC_HEX}, got ${OUT_MAGIC_HEX})" >&2
+  exit 1
+fi
