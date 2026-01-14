@@ -2461,8 +2461,11 @@ export function bindYjsToDocumentController(options) {
     const formatDeltasRaw = readFormatDeltasFromDocumentChange(payload);
     const rangeRunDeltasRaw = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
 
-    // In read-only roles, allow these mutations to update local UI state but do not
-    // persist them into the shared Yjs document.
+    // In read-only roles, do not persist shared-state mutations (sheet view / formatting) into Yjs.
+    //
+    // Note: In addition to skipping persistence, we also revert these mutations back out of the local
+    // DocumentController to avoid "local-only" divergence when a non-edit user triggers an edit
+    // through an unexpected UI path (extensions, scripts, etc).
     const formatDeltas = allowSharedStateWrites ? formatDeltasRaw : [];
     const rangeRunDeltas = allowSharedStateWrites ? rangeRunDeltasRaw : [];
 
@@ -2470,13 +2473,89 @@ export function bindYjsToDocumentController(options) {
       enqueueSheetViewWrite(sheetViewDeltas);
     }
 
-    if (deltas.length === 0 && formatDeltas.length === 0 && rangeRunDeltas.length === 0) return;
+    /** @type {any[]} */
+    const deniedInverseSheetViews = [];
+    /** @type {any[]} */
+    const deniedInverseFormats = [];
+    /** @type {any[]} */
+    const deniedInverseRangeRuns = [];
+    if (!allowSharedStateWrites) {
+      for (const delta of sheetViewDeltas) {
+        const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
+        if (!sheetId) continue;
+        deniedInverseSheetViews.push({
+          sheetId,
+          before: delta.after,
+          after: delta.before,
+        });
+      }
+      for (const delta of formatDeltasRaw) {
+        const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
+        if (!sheetId) continue;
+        const layer = delta?.layer;
+        if (layer !== "sheet" && layer !== "row" && layer !== "col") continue;
+        const inv = {
+          sheetId,
+          layer,
+          beforeStyleId: delta.afterStyleId,
+          afterStyleId: delta.beforeStyleId,
+        };
+        if (delta.index != null) inv.index = delta.index;
+        deniedInverseFormats.push(inv);
+      }
+      for (const delta of rangeRunDeltasRaw) {
+        const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
+        if (!sheetId) continue;
+        const col = Number(delta?.col);
+        const startRow = Number(delta?.startRow);
+        const endRowExclusive = Number(delta?.endRowExclusive);
+        if (!Number.isInteger(col) || col < 0) continue;
+        if (!Number.isInteger(startRow) || startRow < 0) continue;
+        if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+        deniedInverseRangeRuns.push({
+          sheetId,
+          col,
+          startRow,
+          endRowExclusive,
+          beforeRuns: delta.afterRuns,
+          afterRuns: delta.beforeRuns,
+        });
+      }
+    }
+
+    const needsSharedStateRevert =
+      deniedInverseSheetViews.length > 0 || deniedInverseFormats.length > 0 || deniedInverseRangeRuns.length > 0;
+
+    if (deltas.length === 0 && formatDeltas.length === 0 && rangeRunDeltas.length === 0 && !needsSharedStateRevert) return;
 
     const needsEncryptionGuard = Boolean(encryption || hasEncryptedCells);
     if (!editGuard && !needsEncryptionGuard) {
       if (formatDeltas.length > 0) enqueueSheetFormatWrite(formatDeltas);
       if (rangeRunDeltas.length > 0) enqueueSheetRangeRunWrite(rangeRunDeltas);
       if (deltas.length > 0) enqueueWrite(deltas);
+
+      if (needsSharedStateRevert) {
+        applyingRemote = true;
+        try {
+          if (
+            deniedInverseSheetViews.length > 0 &&
+            typeof documentController.applyExternalSheetViewDeltas === "function"
+          ) {
+            documentController.applyExternalSheetViewDeltas(deniedInverseSheetViews, { source: "collab" });
+          }
+          if (deniedInverseFormats.length > 0 && typeof documentController.applyExternalFormatDeltas === "function") {
+            documentController.applyExternalFormatDeltas(deniedInverseFormats, { source: "collab" });
+          }
+          if (
+            deniedInverseRangeRuns.length > 0 &&
+            typeof documentController.applyExternalRangeRunDeltas === "function"
+          ) {
+            documentController.applyExternalRangeRunDeltas(deniedInverseRangeRuns, { source: "collab" });
+          }
+        } finally {
+          applyingRemote = false;
+        }
+      }
       return;
     }
 
@@ -2490,10 +2569,8 @@ export function bindYjsToDocumentController(options) {
     const rejected = [];
     /** @type {any[]} */
     const deniedInverse = [];
-    /** @type {any[]} */
-    const deniedInverseFormats = [];
-    /** @type {any[]} */
-    const deniedInverseRangeRuns = [];
+    // `deniedInverseFormats` and `deniedInverseRangeRuns` are pre-populated for read-only shared-state
+    // reverts. Additional entries may be appended below when per-range permissions deny a write.
 
     for (const delta of deltas) {
       const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };
@@ -2574,7 +2651,12 @@ export function bindYjsToDocumentController(options) {
       }
     }
 
-    if (deniedInverse.length > 0 || deniedInverseFormats.length > 0 || deniedInverseRangeRuns.length > 0) {
+    if (
+      deniedInverse.length > 0 ||
+      deniedInverseSheetViews.length > 0 ||
+      deniedInverseFormats.length > 0 ||
+      deniedInverseRangeRuns.length > 0
+    ) {
       // Keep local UI state aligned with the shared document when a user attempts to
       // edit a restricted cell.
       applyingRemote = true;
@@ -2597,6 +2679,13 @@ export function bindYjsToDocumentController(options) {
               if (prevCanEdit !== undefined) documentController.canEditCell = prevCanEdit;
             }
           }
+        }
+
+        if (
+          deniedInverseSheetViews.length > 0 &&
+          typeof documentController.applyExternalSheetViewDeltas === "function"
+        ) {
+          documentController.applyExternalSheetViewDeltas(deniedInverseSheetViews, { source: "collab" });
         }
 
         if (deniedInverseFormats.length > 0 && typeof documentController.applyExternalFormatDeltas === "function") {
