@@ -4882,7 +4882,21 @@ fn engine_value_to_pivot_value(value: &EngineValue) -> PivotValue {
         EngineValue::Error(e) => PivotValue::Text(e.as_code().to_string()),
         // For rich values, use the user-visible display string so pivots behave like the grid.
         EngineValue::Entity(v) => PivotValue::Text(v.display.clone()),
-        EngineValue::Record(v) => PivotValue::Text(v.display.clone()),
+        EngineValue::Record(v) => {
+            // Records may specify a `display_field` (Excel rich value displayField semantics).
+            // Mirror the grid behavior by degrading to the display-field value when present.
+            let text = v
+                .display_field
+                .as_deref()
+                .and_then(|field| v.get_field_case_insensitive(field))
+                .map(|value| {
+                    value
+                        .coerce_to_string()
+                        .unwrap_or_else(|e| e.as_code().to_string())
+                })
+                .unwrap_or_else(|| v.display.clone());
+            PivotValue::Text(text)
+        }
         // Ranges should not contain these variants as stored cell values; treat them as blank to
         // keep pivot cache building resilient to unexpected evaluator outputs.
         EngineValue::Reference(_)
@@ -9839,6 +9853,127 @@ mod tests {
         assert_eq!(
             state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
             CellScalar::Number(350.0)
+        );
+    }
+
+    #[test]
+    fn pivot_source_records_use_display_field_when_degrading_to_text() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Item".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Sales".to_string()))),
+        );
+        sheet.set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(10.0))));
+        sheet.set_cell(2, 1, Cell::from_literal(Some(CellScalar::Number(20.0))));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let data_sheet_name = state
+            .get_workbook()
+            .unwrap()
+            .sheet(&data_sheet_id)
+            .unwrap()
+            .name
+            .clone();
+
+        // Use the same fallback display string for both records so the pivot will incorrectly
+        // group them together if `display_field` is ignored.
+        let mut record_1 = formula_engine::Record::new("Fallback").field(
+            "Name",
+            EngineValue::Text("Apple".to_string()),
+        );
+        record_1.display_field = Some("Name".to_string());
+        let mut record_2 = formula_engine::Record::new("Fallback").field(
+            "Name",
+            EngineValue::Text("Banana".to_string()),
+        );
+        record_2.display_field = Some("Name".to_string());
+
+        state
+            .engine
+            .set_cell_value(&data_sheet_name, "A2", EngineValue::Record(record_1))
+            .expect("set A2 record");
+        state
+            .engine
+            .set_cell_value(&data_sheet_name, "A3", EngineValue::Record(record_2))
+            .expect("set A3 record");
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Item")],
+            column_fields: Vec::new(),
+            value_fields: vec![ValueField {
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        state
+            .create_pivot_table(
+                "By Item".to_string(),
+                data_sheet_id,
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 2,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                cfg,
+            )
+            .unwrap();
+
+        let label_1 = state.get_cell(&pivot_sheet_id, 1, 0).unwrap().display_value;
+        let label_2 = state.get_cell(&pivot_sheet_id, 2, 0).unwrap().display_value;
+        let mut labels = vec![label_1, label_2];
+        labels.sort();
+        assert_eq!(labels, vec!["Apple".to_string(), "Banana".to_string()]);
+
+        let value_1 = state.get_cell(&pivot_sheet_id, 1, 1).unwrap().value;
+        let value_2 = state.get_cell(&pivot_sheet_id, 2, 1).unwrap().value;
+        let mut values = vec![];
+        for v in [value_1, value_2] {
+            match v {
+                CellScalar::Number(n) => values.push(n),
+                other => panic!("expected numeric pivot value, got {other:?}"),
+            }
+        }
+        values.sort_by(|a, b| a.total_cmp(b));
+        assert_eq!(values, vec![10.0, 20.0]);
+
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
+            CellScalar::Number(30.0)
         );
     }
 
