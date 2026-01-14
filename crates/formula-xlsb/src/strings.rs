@@ -174,6 +174,39 @@ fn decode_utf16le_lossy(raw: &[u8]) -> Option<String> {
     Some(out)
 }
 
+#[cfg(test)]
+mod phonetic_text_tests {
+    use super::parse_phonetic_text_best_effort;
+
+    fn utf16le_bytes(s: &str) -> Vec<u8> {
+        s.encode_utf16()
+            .flat_map(|unit| unit.to_le_bytes())
+            .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn decodes_u16_len_prefixed_utf16le_at_start() {
+        let text = "abc";
+        let mut data = Vec::new();
+        data.extend_from_slice(&(text.encode_utf16().count() as u16).to_le_bytes());
+        data.extend_from_slice(&utf16le_bytes(text));
+
+        assert_eq!(parse_phonetic_text_best_effort(&data), Some(text.to_string()));
+    }
+
+    #[test]
+    fn decodes_u32_len_prefixed_utf16le_with_header_offset() {
+        let text = "かな";
+        let mut data = vec![0xFF, 0x00, 0xAA, 0xBB];
+        data.extend_from_slice(&(text.encode_utf16().count() as u32).to_le_bytes());
+        data.extend_from_slice(&utf16le_bytes(text));
+        // Add some trailing bytes to ensure the decoder ignores extra payload.
+        data.extend_from_slice(&[0x01, 0x02, 0x03]);
+
+        assert_eq!(parse_phonetic_text_best_effort(&data), Some(text.to_string()));
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlagsWidth {
     U8,
