@@ -7,7 +7,7 @@ import {
   type Suggestion
 } from "@formula/ai-completion";
 import type { EngineClient } from "@formula/engine";
-import { extractFormulaReferences, tokenizeFormula } from "@formula/spreadsheet-frontend";
+import { extractFormulaReferences } from "@formula/spreadsheet-frontend";
  
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
@@ -435,10 +435,34 @@ function createPreviewEvaluator(params: {
     };
 
     const defaultSheetName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
-    const maybeRewrittenStructured = text.includes("[")
-      ? rewriteStructuredReferences(text, tables, defaultSheetName)
-      : null;
-    const evalText = maybeRewrittenStructured ?? text;
+    const structuredTables = Array.from(tables.entries()).map(([key, table]) => ({
+      name: key,
+      columns: table.columns,
+      sheetName: table.sheetName ?? undefined,
+      startRow: table.startRow ?? undefined,
+      startCol: table.startCol ?? undefined,
+      endRow: table.endRow ?? undefined,
+      endCol: table.endCol ?? undefined,
+    }));
+    const resolveStructuredRefToReference = (refText: string): string | null => {
+      const trimmed = String(refText ?? "").trim();
+      // Structured refs are never sheet-qualified in formula text.
+      if (!trimmed.includes("[") || trimmed.includes("!")) return null;
+
+      const { references } = extractFormulaReferences(trimmed, undefined, undefined, { tables: structuredTables });
+      const first = references[0];
+      if (!first) return null;
+      if (first.start !== 0 || first.end !== trimmed.length) return null;
+
+      const r = first.range;
+      const sheet = typeof r.sheet === "string" && r.sheet.trim() ? r.sheet.trim() : defaultSheetName;
+      const prefix = sheet ? formatSheetPrefix(sheet) : "";
+
+      const start = toA1(r.startRow, r.startCol);
+      const end = toA1(r.endRow, r.endCol);
+      const a1 = start === end ? start : `${start}:${end}`;
+      return `${prefix}${a1}`;
+    };
 
     const knownSheets =
       typeof document.getSheetIds === "function"
@@ -508,9 +532,10 @@ function createPreviewEvaluator(params: {
     };
 
     try {
-      const value = evaluateFormula(evalText, getCellValue, {
+      const value = evaluateFormula(text, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
+        resolveStructuredRefToReference,
       });
       // Errors from the lightweight evaluator usually mean unsupported syntax.
       if (typeof value === "string" && (value === "#NAME?" || value === "#VALUE!")) return "(preview unavailable)";
@@ -552,60 +577,6 @@ function toA1(row: number, col: number): string {
     n = Math.floor((n - 1) / 26);
   }
   return `${letters}${row + 1}`;
-}
-
-function rewriteStructuredReferences(
-  formulaText: string,
-  tables: Map<string, TablePreviewInfo>,
-  defaultSheetId: string,
-): string | null {
-  if (!formulaText.includes("[")) return null;
-
-  // Tokenize first so we can detect structured refs that fail to resolve (and avoid
-  // partially rewriting a formula, which would still be invalid for the evaluator).
-  const structuredTokens = tokenizeFormula(formulaText).filter(
-    (token) => token.type === "reference" && token.text.includes("[") && !token.text.includes("!")
-  );
-  if (structuredTokens.length === 0) return null;
-
-  const tableInfo = new Map<string, any>();
-  for (const [key, table] of tables.entries()) {
-    tableInfo.set(key, {
-      name: key,
-      columns: table.columns,
-      sheetName: table.sheetName ?? undefined,
-      startRow: table.startRow ?? undefined,
-      startCol: table.startCol ?? undefined,
-      endRow: table.endRow ?? undefined,
-      endCol: table.endCol ?? undefined,
-    });
-  }
-
-  const { references } = extractFormulaReferences(formulaText, undefined, undefined, { tables: tableInfo });
-  const bySpan = new Map(references.map((ref) => [`${ref.start}:${ref.end}`, ref]));
-
-  const replacements: Array<{ start: number; end: number; text: string }> = [];
-  for (const token of structuredTokens) {
-    const ref = bySpan.get(`${token.start}:${token.end}`);
-    if (!ref) return null;
-
-    const r = ref.range;
-    const sheet = typeof r.sheet === "string" && r.sheet.trim() ? r.sheet.trim() : defaultSheetId;
-    const prefix = sheet ? formatSheetPrefix(sheet) : "";
-
-    const start = toA1(r.startRow, r.startCol);
-    const end = toA1(r.endRow, r.endCol);
-    const a1 = start === end ? start : `${start}:${end}`;
-    replacements.push({ start: token.start, end: token.end, text: `${prefix}${a1}` });
-  }
-
-  // Apply replacements right-to-left so offsets remain valid.
-  replacements.sort((a, b) => b.start - a.start);
-  let out = formulaText;
-  for (const rep of replacements) {
-    out = out.slice(0, rep.start) + rep.text + out.slice(rep.end);
-  }
-  return out;
 }
 
 function bestPureInsertionSuggestion({

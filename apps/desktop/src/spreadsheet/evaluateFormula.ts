@@ -50,6 +50,16 @@ export interface EvaluateFormulaOptions {
    */
   resolveNameToReference?: (name: string) => string | null;
   /**
+   * Optional structured-reference resolver used by lightweight evaluation (e.g. formula-bar previews).
+   *
+   * When provided, reference tokens that are not valid A1 refs/ranges (e.g. `Table1[Amount]`)
+   * are passed through this resolver before falling back to `#REF!`.
+   *
+   * The resolver should return an A1 reference/range string, optionally sheet-qualified
+   * (e.g. `Sheet1!A2:A10`).
+   */
+  resolveStructuredRefToReference?: (refText: string) => string | null;
+  /**
    * When directly passing a range reference as an AI function argument, cap the number of
    * cells materialized to avoid unbounded range serialization.
    *
@@ -396,12 +406,26 @@ function readReference(
   context: EvalContext
 ): CellValue {
   const { sheetName, ref } = splitSheetQualifier(refText);
-  const range = parseA1Range(ref);
+
+  let effectiveSheetName = sheetName;
+  let effectiveRef = ref;
+  let range = parseA1Range(effectiveRef);
+
+  if (!range && typeof options.resolveStructuredRefToReference === "function") {
+    const resolved = options.resolveStructuredRefToReference(refText);
+    if (resolved) {
+      const split = splitSheetQualifier(resolved);
+      effectiveSheetName = split.sheetName;
+      effectiveRef = split.ref;
+      range = parseA1Range(effectiveRef);
+    }
+  }
+
   if (!range) return "#REF!";
 
   const defaultSheet = sheetIdFromCellAddress(options.cellAddress);
-  const provenanceSheet = sheetName ?? defaultSheet;
-  const getPrefix = sheetName ? `${sheetName}!` : "";
+  const provenanceSheet = effectiveSheetName ?? defaultSheet;
+  const getPrefix = effectiveSheetName ? `${effectiveSheetName}!` : "";
 
   const readCell = (addr: string) => getCellValue(`${getPrefix}${addr}`);
 

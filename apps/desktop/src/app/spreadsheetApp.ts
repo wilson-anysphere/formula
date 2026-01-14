@@ -104,7 +104,7 @@ import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 import { parseGoTo, splitSheetQualifier } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
-import { extractFormulaReferences, shiftA1References, tokenizeFormula, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
+import { extractFormulaReferences, shiftA1References, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWorkbookSchemaProvider.js";
 import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBuilder.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
@@ -15827,49 +15827,32 @@ export class SpreadsheetApp {
       return null;
     };
 
-    const rewriteStructuredReferencesToA1 = (text: string): string | null => {
-      if (!text.includes("[")) return null;
+    const resolveStructuredRefToReference = (refText: string): string | null => {
+      const trimmed = String(refText ?? "").trim();
+      // Excel structured refs are never sheet-qualified in formula text.
+      if (!trimmed.includes("[") || trimmed.includes("!")) return null;
 
-      // Use the shared formula tokenizer + reference extractor so structured refs stay aligned
-      // with formula-bar highlighting and hover previews.
-      //
-      // We only rewrite when *all* structured references in the expression resolve to concrete
-      // A1 ranges, since partial rewrites still leave the evaluator with unsupported syntax.
-      const structuredTokens = tokenizeFormula(text).filter(
-        (token) => token.type === "reference" && token.text.includes("[") && !token.text.includes("!")
-      );
-      if (structuredTokens.length === 0) return null;
+      const { references } = extractFormulaReferences(trimmed, undefined, undefined, { tables: this.searchWorkbook.tables as any });
+      const first = references[0];
+      if (!first) return null;
+      if (first.start !== 0 || first.end !== trimmed.length) return null;
 
-      const { references } = extractFormulaReferences(text, undefined, undefined, { tables: this.searchWorkbook.tables as any });
-      const bySpan = new Map(references.map((ref) => [`${ref.start}:${ref.end}`, ref]));
+      const r = first.range;
+      const sheet = typeof r.sheet === "string" && r.sheet.trim() ? r.sheet.trim() : sheetId;
+      const resolvedSheetId = sheet ? this.resolveSheetIdByName(sheet) ?? sheet : "";
+      // Avoid creating phantom sheets during preview evaluation.
+      if (resolvedSheetId && !sheetExists(resolvedSheetId)) return null;
 
-      const replacements: Array<{ start: number; end: number; text: string }> = [];
-      for (const token of structuredTokens) {
-        const ref = bySpan.get(`${token.start}:${token.end}`);
-        if (!ref) return null;
-
-        const r = ref.range;
-        const sheet = typeof r.sheet === "string" && r.sheet.trim() ? r.sheet.trim() : sheetId;
-        const sheetToken = formatSheetNameForA1(sheet);
-        const prefix = sheetToken ? `${sheetToken}!` : "";
-
-        let a1 = "";
-        try {
-          a1 = rangeToA1({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol });
-        } catch {
-          return null;
-        }
-
-        replacements.push({ start: token.start, end: token.end, text: `${prefix}${a1}` });
+      let a1 = "";
+      try {
+        a1 = rangeToA1({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol });
+      } catch {
+        return null;
       }
 
-      // Apply replacements from right-to-left so offsets remain valid.
-      replacements.sort((a, b) => b.start - a.start);
-      let out = text;
-      for (const rep of replacements) {
-        out = out.slice(0, rep.start) + rep.text + out.slice(rep.end);
-      }
-      return out;
+      const sheetToken = sheet ? formatSheetNameForA1(sheet) : "";
+      const prefix = sheetToken ? `${sheetToken}!` : "";
+      return `${prefix}${a1}`;
     };
 
     let reads = 0;
@@ -15957,10 +15940,10 @@ export class SpreadsheetApp {
     };
 
     try {
-      const evalExpr = rewriteStructuredReferencesToA1(trimmedExpr) ?? trimmedExpr;
-      const value = evaluateFormula(`=${evalExpr}`, getCellValue, {
+      const value = evaluateFormula(`=${trimmedExpr}`, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
+        resolveStructuredRefToReference,
         maxRangeCells: MAX_CELL_READS,
       });
       // Errors from the lightweight evaluator usually mean unsupported syntax / functions.
@@ -16246,6 +16229,56 @@ export class SpreadsheetApp {
     // and never invoke the reference resolver callback.
     let coordScratch: { row: number; col: number } | null = null;
 
+    const resolveNameToReference = (name: string): string | null => {
+      const entry: any = this.searchWorkbook.getName(name);
+      const range = entry?.range;
+      if (
+        !range ||
+        typeof range.startRow !== "number" ||
+        typeof range.startCol !== "number" ||
+        typeof range.endRow !== "number" ||
+        typeof range.endCol !== "number"
+      ) {
+        return null;
+      }
+
+      let a1 = "";
+      try {
+        a1 = rangeToA1(range);
+      } catch {
+        return null;
+      }
+
+      const sheetName = typeof entry?.sheetName === "string" && entry.sheetName.trim() ? entry.sheetName.trim() : "";
+      const token = sheetName ? formatSheetNameForA1(sheetName) : "";
+      const prefix = token ? `${token}!` : "";
+      return `${prefix}${a1}`;
+    };
+
+    const resolveStructuredRefToReference = (refText: string): string | null => {
+      const trimmed = String(refText ?? "").trim();
+      if (!trimmed.includes("[") || trimmed.includes("!")) return null;
+
+      const { references } = extractFormulaReferences(trimmed, undefined, undefined, { tables: this.searchWorkbook.tables as any });
+      const first = references[0];
+      if (!first) return null;
+      if (first.start !== 0 || first.end !== trimmed.length) return null;
+
+      const r = first.range;
+      const sheet = typeof r.sheet === "string" && r.sheet.trim() ? r.sheet.trim() : sheetId;
+
+      let a1 = "";
+      try {
+        a1 = rangeToA1({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol });
+      } catch {
+        return null;
+      }
+
+      const sheetToken = sheet ? formatSheetNameForA1(sheet) : "";
+      const prefix = sheetToken ? `${sheetToken}!` : "";
+      return `${prefix}${a1}`;
+    };
+
     const value = evaluateFormula(state.formula, (ref) => {
       const normalized = ref.trim();
       let targetSheet = sheetId;
@@ -16268,7 +16301,7 @@ export class SpreadsheetApp {
       coord.col = 0;
       parseA1CellRefIntoCoord(targetAddress, coord);
       return this.computeCellValue(targetSheet, coord, memo, stack, options);
-    }, { ai: this.aiCellFunctions, cellAddress });
+    }, { ai: this.aiCellFunctions, cellAddress, resolveNameToReference, resolveStructuredRefToReference });
 
     sheetStack.delete(key);
     sheetMemo.set(key, value);
