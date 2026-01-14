@@ -643,6 +643,54 @@ struct ColXmlProps {
     style_xf: Option<u32>,
 }
 
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_col_width.is_none()
+        && sheet.default_row_height.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<sheetFormatPr");
+    if let Some(base) = sheet.base_col_width {
+        out.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        out.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        out.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+    out.push_str("/>");
+    out
+}
+
+#[cfg(test)]
+mod sheet_format_pr_tests {
+    use super::sheet_format_pr_xml;
+    use formula_model::Worksheet;
+
+    #[test]
+    fn empty_when_sheet_defaults_are_unset() {
+        let sheet = Worksheet::new(1, "Sheet1");
+        assert_eq!(sheet_format_pr_xml(&sheet), "");
+    }
+
+    #[test]
+    fn renders_expected_attributes_with_trimmed_floats() {
+        let mut sheet = Worksheet::new(1, "Sheet1");
+        sheet.base_col_width = Some(8);
+        sheet.default_col_width = Some(8.5);
+        sheet.default_row_height = Some(15.25);
+
+        assert_eq!(
+            sheet_format_pr_xml(&sheet),
+            r#"<sheetFormatPr baseColWidth="8" defaultColWidth="8.5" defaultRowHeight="15.25"/>"#
+        );
+    }
+}
+
 fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, u32>) -> String {
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
 
