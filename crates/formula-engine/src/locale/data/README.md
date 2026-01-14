@@ -66,6 +66,7 @@ For debugging, you can also pass:
 
 - `-Visible` to watch Excel work
 - `-MaxFunctions N` to run a smaller subset
+- PowerShell's `-Verbose` switch for per-function `Formula` / `FormulaLocal` logging
 
 After updating the source JSON, regenerate and verify the generated TSVs:
 
