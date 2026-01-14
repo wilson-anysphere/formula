@@ -114,7 +114,7 @@ fn decodes_sheet_scoped_ptgname_when_sheet_name_is_unicode() {
     let result = import_fixture(&bytes);
 
     assert!(
-        result.workbook.sheet_by_name("Résumé").is_some(),
+        result.workbook.sheet_by_name("数据").is_some(),
         "expected unicode sheet to be present"
     );
 
@@ -123,6 +123,6 @@ fn decodes_sheet_scoped_ptgname_when_sheet_name_is_unicode() {
         .formula(CellRef::from_a1("A2").unwrap())
         .expect("expected formula in Ref!A2");
 
-    assert_eq!(formula, "'Résumé'!LocalName");
+    assert_eq!(formula, "'数据'!LocalName");
     assert_parseable_formula(formula);
 }

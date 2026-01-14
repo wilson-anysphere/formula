@@ -1033,14 +1033,25 @@ fn import_xls_with_biff_reader(
             None
         };
 
-        let (sheet_id, sheet_name) = match out.add_sheet(source_sheet_name.clone()) {
+        // Prefer BIFF BoundSheet names (workbook order) when available.
+        //
+        // Calamine's `.xls` reader can sometimes mis-decode BIFF8 Unicode sheet names, notably when
+        // the BoundSheet name uses the uncompressed (UTF-16LE) form. We still need to use
+        // calamine’s sheet name to *access* sheet contents via its API, but we can name the output
+        // sheet using the BIFF name for better fidelity.
+        let output_sheet_name = biff_idx
+            .and_then(|biff_idx| biff_sheets.as_ref().and_then(|s| s.get(biff_idx)))
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| source_sheet_name.clone());
+
+        let (sheet_id, sheet_name) = match out.add_sheet(output_sheet_name.clone()) {
             Ok(sheet_id) => {
-                used_sheet_names.push(source_sheet_name.clone());
-                (sheet_id, source_sheet_name.clone())
+                used_sheet_names.push(output_sheet_name.clone());
+                (sheet_id, output_sheet_name.clone())
             }
             Err(err) => {
                 let mut candidate =
-                    sanitize_sheet_name(&source_sheet_name, sheet_idx + 1, &used_sheet_names);
+                    sanitize_sheet_name(&output_sheet_name, sheet_idx + 1, &used_sheet_names);
                 let sheet_id = loop {
                     match out.add_sheet(candidate.clone()) {
                         Ok(sheet_id) => break sheet_id,
@@ -1051,14 +1062,14 @@ fn import_xls_with_biff_reader(
                             let mut augmented = used_sheet_names.clone();
                             augmented.push(candidate);
                             candidate =
-                                sanitize_sheet_name(&source_sheet_name, sheet_idx + 1, &augmented);
+                                sanitize_sheet_name(&output_sheet_name, sheet_idx + 1, &augmented);
                         }
                     }
                 };
 
                 push_import_warning(
                     &mut warnings,
-                    format!("sanitized sheet name `{source_sheet_name}` -> `{candidate}` ({err})"),
+                    format!("sanitized sheet name `{output_sheet_name}` -> `{candidate}` ({err})"),
                     &mut warnings_suppressed,
                 );
                 used_sheet_names.push(candidate.clone());

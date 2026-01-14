@@ -13748,10 +13748,9 @@ fn build_shared_formula_sheet_scoped_name_a1_sheet_workbook_stream() -> Vec<u8> 
 }
 
 fn build_shared_formula_sheet_scoped_name_unicode_sheet_workbook_stream() -> Vec<u8> {
-    // Use a name that exercises non-ASCII handling while still being representable in BIFF8's
-    // "compressed" string form (all UTF-16 code units <= 0x00FF) so it is robust across BIFF8
-    // decoders.
-    build_shared_formula_sheet_scoped_name_simple_workbook_stream("Résumé")
+    // Use a name that requires BIFF8's uncompressed UTF-16LE string storage (code units > 0x00FF).
+    // This exercises our ability to import full Unicode sheet names from BIFF8 BoundSheet records.
+    build_shared_formula_sheet_scoped_name_simple_workbook_stream("数据")
 }
 
 fn build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream() -> Vec<u8> {
