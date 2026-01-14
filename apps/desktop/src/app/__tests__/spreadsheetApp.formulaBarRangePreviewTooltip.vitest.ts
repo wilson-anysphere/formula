@@ -144,6 +144,57 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("renders a 3x3 sample + '(range too large: N cells)' summary for large ranges", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    // Seed a 3x3 sample in the top-left corner of a large range.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, 2);
+    doc.setCellValue("Sheet1", { row: 0, col: 2 }, 3);
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 4);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 5);
+    doc.setCellValue("Sheet1", { row: 1, col: 2 }, 6);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 7);
+    doc.setCellValue("Sheet1", { row: 2, col: 1 }, 8);
+    doc.setCellValue("Sheet1", { row: 2, col: 2 }, 9);
+
+    // 11 rows x 10 cols = 110 cells (> 100 cap).
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=SUM(A1:J11)", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpan = highlight?.querySelector<HTMLElement>('span[data-kind="reference"]');
+    expect(refSpan?.textContent).toBe("A1:J11");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    const summary = tooltip!.querySelector<HTMLElement>(".formula-range-preview-tooltip__summary");
+    expect(summary?.textContent).toContain("range too large");
+    expect(summary?.textContent).toContain("cells");
+    expect(summary?.textContent).toMatch(/110/);
+
+    const cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("clears the tooltip when the active cell changes while hovering a reference in view mode", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");
