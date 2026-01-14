@@ -14963,6 +14963,8 @@ export class SpreadsheetApp {
       }
 
       // Comment indicators.
+      const commentIndicatorBounds = { x: 0, y: 0, width: this.cellWidth, height: this.cellHeight };
+      const commentIndicatorStyle = { color: commentIndicatorColor };
       for (let visualRow = 0; visualRow < rows.length; visualRow++) {
         const row = rows[visualRow]!;
         for (let visualCol = 0; visualCol < cols.length; visualCol++) {
@@ -14970,14 +14972,10 @@ export class SpreadsheetApp {
           const meta = this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col);
           if (!meta) continue;
           const resolved = meta.resolved ?? false;
-          drawCommentIndicator(ctx, {
-            x: startX + visualCol * this.cellWidth,
-            y: startY + visualRow * this.cellHeight,
-            width: this.cellWidth,
-            height: this.cellHeight,
-          }, {
-            color: resolved ? commentIndicatorResolvedColor : commentIndicatorColor,
-          });
+          commentIndicatorBounds.x = startX + visualCol * this.cellWidth;
+          commentIndicatorBounds.y = startY + visualRow * this.cellHeight;
+          commentIndicatorStyle.color = resolved ? commentIndicatorResolvedColor : commentIndicatorColor;
+          drawCommentIndicator(ctx, commentIndicatorBounds, commentIndicatorStyle, false);
         }
       }
 

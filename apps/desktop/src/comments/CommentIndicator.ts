@@ -16,11 +16,12 @@ export function drawCommentIndicator(
   ctx: CanvasRenderingContext2D,
   bounds: CellBounds,
   style: CommentIndicatorStyle = {},
+  preserveState = true,
 ): void {
   const size = style.size ?? Math.max(6, Math.min(bounds.width, bounds.height) * 0.25);
   const color = style.color ?? resolveCssVar("--warning", { fallback: "CanvasText" });
 
-  ctx.save();
+  if (preserveState) ctx.save();
   ctx.beginPath();
   ctx.moveTo(bounds.x + bounds.width, bounds.y);
   ctx.lineTo(bounds.x + bounds.width - size, bounds.y);
@@ -28,5 +29,5 @@ export function drawCommentIndicator(
   ctx.closePath();
   ctx.fillStyle = color;
   ctx.fill();
-  ctx.restore();
+  if (preserveState) ctx.restore();
 }
