@@ -241,47 +241,90 @@ fn open_stream_case_tolerant<R: Read + std::io::Seek>(
     name: &str,
 ) -> Result<cfb::Stream<R>, OfficeCryptoError> {
     // Some OLE writers expose root streams with a leading `/` (e.g. `/EncryptionInfo`) even though
-    // most Office-produced containers use `EncryptionInfo`. Be tolerant and try both.
-    match ole.open_stream(name) {
-        Ok(s) => Ok(s),
-        Err(err1) => {
-            if let Some(stripped) = name.strip_prefix('/') {
-                return match ole.open_stream(stripped) {
-                    Ok(s) => Ok(s),
-                    Err(err2) if err1.kind() == std::io::ErrorKind::NotFound => {
-                        Err(OfficeCryptoError::InvalidFormat(format!(
-                            "missing OLE stream {name}: {err2}"
-                        )))
-                    }
-                    Err(err2) => Err(OfficeCryptoError::InvalidFormat(format!(
-                        "failed to open OLE stream {name}: {err1}; {err2}"
-                    ))),
-                };
-            }
+    // most Office-produced containers use `EncryptionInfo`. Additionally, some producers vary
+    // casing for these stream names. Be tolerant and try:
+    // - `name` and `/{name}`
+    // - case-insensitive match via `walk()` for implementations that treat `open_stream` as
+    //   case-sensitive.
+    let want = name.trim_start_matches('/');
+    let mut all_not_found = true;
+    let mut first_err: Option<std::io::Error> = None;
 
-            let with_leading_slash = format!("/{name}");
-            match ole.open_stream(&with_leading_slash) {
-                Ok(s) => Ok(s),
-                Err(err2) if err1.kind() == std::io::ErrorKind::NotFound => Err(
-                    OfficeCryptoError::InvalidFormat(format!("missing OLE stream {name}: {err2}")),
-                ),
-                Err(err2) => Err(OfficeCryptoError::InvalidFormat(format!(
-                    "failed to open OLE stream {name}: {err1}; {err2}"
-                ))),
+    fn record_err(all_not_found: &mut bool, first_err: &mut Option<std::io::Error>, err: std::io::Error) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            *all_not_found = false;
+        }
+        if first_err.is_none() {
+            *first_err = Some(err);
+        }
+    }
+
+    match ole.open_stream(want) {
+        Ok(s) => return Ok(s),
+        Err(err) => record_err(&mut all_not_found, &mut first_err, err),
+    }
+
+    let with_leading_slash = format!("/{want}");
+    match ole.open_stream(&with_leading_slash) {
+        Ok(s) => return Ok(s),
+        Err(err) => record_err(&mut all_not_found, &mut first_err, err),
+    }
+
+    // Case-insensitive fallback: walk the directory tree and match stream paths.
+    let mut found_path: Option<String> = None;
+    for entry in ole.walk() {
+        if !entry.is_stream() {
+            continue;
+        }
+        let path = entry.path().to_string_lossy();
+        let normalized = path.as_ref().strip_prefix('/').unwrap_or(path.as_ref());
+        if normalized.eq_ignore_ascii_case(want) {
+            found_path = Some(path.into_owned());
+            break;
+        }
+    }
+
+    if let Some(found_path) = found_path {
+        match ole.open_stream(&found_path) {
+            Ok(s) => return Ok(s),
+            Err(err) => record_err(&mut all_not_found, &mut first_err, err),
+        }
+
+        // Some implementations accept the walk()-returned path but reject a leading slash
+        // (or vice versa); try again stripped.
+        let stripped = found_path.strip_prefix('/').unwrap_or(found_path.as_str());
+        if stripped != found_path {
+            match ole.open_stream(stripped) {
+                Ok(s) => return Ok(s),
+                Err(err) => record_err(&mut all_not_found, &mut first_err, err),
+            }
+            let with_slash = format!("/{stripped}");
+            match ole.open_stream(&with_slash) {
+                Ok(s) => return Ok(s),
+                Err(err) => record_err(&mut all_not_found, &mut first_err, err),
             }
         }
     }
+
+    if all_not_found {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "missing OLE stream {want}"
+        )));
+    }
+
+    let suffix = first_err
+        .map(|e| format!(": {e}"))
+        .unwrap_or_default();
+    Err(OfficeCryptoError::InvalidFormat(format!(
+        "failed to open OLE stream {want}{suffix}"
+    )))
 }
 
 fn stream_exists_case_tolerant<R: Read + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> bool {
-    if ole.open_stream(name).is_ok() {
-        return true;
-    }
-    let with_leading_slash = format!("/{name}");
-    ole.open_stream(&with_leading_slash).is_ok()
+    open_stream_case_tolerant(ole, name).is_ok()
 }
 
 fn validate_decrypted_package(bytes: &[u8]) -> Result<(), OfficeCryptoError> {
