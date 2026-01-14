@@ -361,16 +361,20 @@ describe("WasmWorkbookBackend", () => {
         {
           id: "Sheet1",
           name: "Sheet1",
+          visibility: "hidden",
+          tabColor: { rgb: "FF0000" },
           usedRange: { start_row: 0, start_col: 0, end_row: 2, end_col: 2 },
         },
         {
           id: "Sheet2",
           name: "Sheet2",
+          visibility: "veryHidden",
           usedRange: null,
         },
         {
           id: "Empty",
           name: "Empty",
+          tabColor: { theme: 1, tint: 0.5 },
         },
       ],
     } as const;
@@ -433,9 +437,9 @@ describe("WasmWorkbookBackend", () => {
       path: null,
       origin_path: null,
       sheets: [
-        { id: "Sheet1", name: "Sheet1" },
-        { id: "Sheet2", name: "Sheet2" },
-        { id: "Empty", name: "Empty" },
+        { id: "Sheet1", name: "Sheet1", visibility: "hidden", tabColor: { rgb: "FF0000" } },
+        { id: "Sheet2", name: "Sheet2", visibility: "veryHidden" },
+        { id: "Empty", name: "Empty", tabColor: { theme: 1, tint: 0.5 } },
       ],
     });
 
