@@ -295,10 +295,19 @@ pub enum LegacyXlsFilePassScheme {
 }
 
 /// Options controlling workbook open behavior.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct OpenOptions {
     /// Optional password for encrypted workbooks.
     pub password: Option<String>,
+}
+
+impl std::fmt::Debug for OpenOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let password = self.password.as_ref().map(|_| "<redacted>");
+        f.debug_struct("OpenOptions")
+            .field("password", &password)
+            .finish()
+    }
 }
 
 /// Default maximum plaintext size allowed when decrypting an OOXML `EncryptedPackage`.
@@ -1873,8 +1882,11 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     // Some synthetic fixtures (and some pipelines) may already contain a plaintext ZIP payload in
     // `EncryptedPackage`. Let callers handle that via the plaintext open path so this helper only
     // yields bytes when we actually decrypted an encrypted payload.
-    if maybe_extract_ooxml_package_bytes(&encrypted_package).is_some() {
-        return Ok(None);
+    if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
+        // Validate ZIP structure to avoid false positives on ciphertext that happens to start with `PK`.
+        if zip::ZipArchive::new(std::io::Cursor::new(package_bytes)).is_ok() {
+            return Ok(None);
+        }
     }
 
     if encryption_info.len() < 4 {
