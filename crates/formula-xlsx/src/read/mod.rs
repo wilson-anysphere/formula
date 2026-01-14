@@ -2635,12 +2635,12 @@ fn parse_worksheet_into_model(
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
-                        b"defaultColWidth" => {
-                            worksheet.default_col_width =
-                                attr.unescape_value()?.into_owned().parse::<f32>().ok();
-                        }
                         b"defaultRowHeight" => {
                             worksheet.default_row_height =
+                                attr.unescape_value()?.into_owned().parse::<f32>().ok();
+                        }
+                        b"defaultColWidth" => {
+                            worksheet.default_col_width =
                                 attr.unescape_value()?.into_owned().parse::<f32>().ok();
                         }
                         b"baseColWidth" => {

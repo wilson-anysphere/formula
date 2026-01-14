@@ -895,7 +895,7 @@ fn build_parts(
         let views_changed = desired_views != orig_views;
 
         let desired_sheet_format = SheetFormatSettings::from_sheet(sheet);
-        let sheet_format_changed = desired_sheet_format != orig_sheet_format;
+        let sheet_format_changed = sheet_format_needs_patch(desired_sheet_format, orig_sheet_format);
 
         let cols_changed = &sheet.col_properties != &orig_cols;
 
@@ -1944,6 +1944,39 @@ fn parse_sheet_format_settings(xml: &str) -> Result<SheetFormatSettings, WriteEr
     Ok(settings)
 }
 
+fn f32_eq(a: f32, b: f32) -> bool {
+    (a - b).abs() <= 0.0001
+}
+
+fn sheet_format_needs_patch(desired: SheetFormatSettings, original: SheetFormatSettings) -> bool {
+    // When callers don't set any sheet format defaults in the model, preserve any existing
+    // `<sheetFormatPr>` element byte-for-byte for round-trip fidelity.
+    if desired.is_default() {
+        return false;
+    }
+
+    if let Some(want) = desired.default_col_width {
+        match original.default_col_width {
+            Some(orig) if f32_eq(orig, want) => {}
+            _ => return true,
+        }
+    }
+    if let Some(want) = desired.default_row_height {
+        match original.default_row_height {
+            Some(orig) if f32_eq(orig, want) => {}
+            _ => return true,
+        }
+    }
+    if let Some(want) = desired.base_col_width {
+        match original.base_col_width {
+            Some(orig) if orig == want => {}
+            _ => return true,
+        }
+    }
+
+    false
+}
+
 fn render_sheet_views_section(views: SheetViewSettings, prefix: Option<&str>) -> String {
     if views.is_default() {
         return String::new();
@@ -2177,12 +2210,14 @@ fn render_sheet_format_pr(settings: SheetFormatSettings, prefix: Option<&str>) -
     out
 }
 
-fn update_sheet_format_pr_xml(
-    sheet_xml: &str,
-    settings: SheetFormatSettings,
-) -> Result<String, WriteError> {
+fn update_sheet_format_pr_xml(sheet_xml: &str, settings: SheetFormatSettings) -> Result<String, WriteError> {
+    // If the model doesn't explicitly set any defaults, preserve any existing `<sheetFormatPr>`
+    // element as-is for round-trip fidelity.
     let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
-    let new_section = render_sheet_format_pr(settings, worksheet_prefix.as_deref());
+    let insert_section = render_sheet_format_pr(settings, worksheet_prefix.as_deref());
+    if insert_section.is_empty() {
+        return Ok(sheet_xml.to_string());
+    }
 
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
@@ -2190,7 +2225,6 @@ fn update_sheet_format_pr_xml(
     let mut writer = Writer::new(Vec::new());
     let mut buf = Vec::new();
 
-    let mut skip_depth: usize = 0;
     let mut replaced = false;
     let mut inserted = false;
 
@@ -2198,48 +2232,34 @@ fn update_sheet_format_pr_xml(
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            _ if skip_depth > 0 => match event {
-                Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
-                Event::Empty(_) => {}
-                _ => {}
-            },
             Event::Start(ref e) if e.local_name().as_ref() == b"sheetFormatPr" => {
                 replaced = true;
-                if !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
-                }
-                skip_depth = 1;
+                write_sheet_format_pr_element(&mut writer, e, settings, false)?;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheetFormatPr" => {
                 replaced = true;
-                if !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
-                }
+                write_sheet_format_pr_element(&mut writer, e, settings, true)?;
             }
-            Event::Start(ref e)
+            Event::Start(ref e) | Event::Empty(ref e)
                 if e.local_name().as_ref() == b"cols"
-                    || e.local_name().as_ref() == b"sheetData" =>
+                    || e.local_name().as_ref() == b"sheetData"
+                    || e.local_name().as_ref() == b"sheetProtection"
+                    || e.local_name().as_ref() == b"autoFilter"
+                    || e.local_name().as_ref() == b"mergeCells"
+                    || e.local_name().as_ref() == b"hyperlinks"
+                    || e.local_name().as_ref() == b"tableParts"
+                    || e.local_name().as_ref() == b"drawing"
+                    || e.local_name().as_ref() == b"extLst" =>
             {
-                if !replaced && !inserted && !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                if !replaced && !inserted {
+                    writer.get_mut().extend_from_slice(insert_section.as_bytes());
                     inserted = true;
                 }
-                writer.write_event(Event::Start(e.to_owned()))?;
-            }
-            Event::Empty(ref e)
-                if e.local_name().as_ref() == b"cols"
-                    || e.local_name().as_ref() == b"sheetData" =>
-            {
-                if !replaced && !inserted && !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
-                    inserted = true;
-                }
-                writer.write_event(Event::Empty(e.to_owned()))?;
+                writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
-                if !replaced && !inserted && !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                if !replaced && !inserted {
+                    writer.get_mut().extend_from_slice(insert_section.as_bytes());
                     inserted = true;
                 }
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -2255,6 +2275,96 @@ fn update_sheet_format_pr_xml(
         .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
 }
 
+fn write_sheet_format_pr_element(
+    writer: &mut Writer<Vec<u8>>,
+    e: &quick_xml::events::BytesStart<'_>,
+    settings: SheetFormatSettings,
+    is_empty: bool,
+) -> Result<(), WriteError> {
+    writer.get_mut().push(b'<');
+    writer.get_mut().extend_from_slice(e.name().as_ref());
+
+    let mut wrote_default_row_height = false;
+    let mut wrote_default_col_width = false;
+    let mut wrote_base_col_width = false;
+
+    for attr in e.attributes() {
+        let attr = attr?;
+        writer.get_mut().push(b' ');
+        writer.get_mut().extend_from_slice(attr.key.as_ref());
+        writer.get_mut().extend_from_slice(b"=\"");
+
+        match attr.key.as_ref() {
+            b"defaultRowHeight" if settings.default_row_height.is_some() => {
+                wrote_default_row_height = true;
+                writer.get_mut().extend_from_slice(
+                    settings
+                        .default_row_height
+                        .expect("checked is_some")
+                        .to_string()
+                        .as_bytes(),
+                );
+            }
+            b"defaultColWidth" if settings.default_col_width.is_some() => {
+                wrote_default_col_width = true;
+                writer.get_mut().extend_from_slice(
+                    settings
+                        .default_col_width
+                        .expect("checked is_some")
+                        .to_string()
+                        .as_bytes(),
+                );
+            }
+            b"baseColWidth" if settings.base_col_width.is_some() => {
+                wrote_base_col_width = true;
+                writer.get_mut().extend_from_slice(
+                    settings
+                        .base_col_width
+                        .expect("checked is_some")
+                        .to_string()
+                        .as_bytes(),
+                );
+            }
+            _ => {
+                writer.get_mut().extend_from_slice(
+                    escape_attr(&attr.unescape_value()?.into_owned()).as_bytes(),
+                );
+            }
+        }
+
+        writer.get_mut().push(b'"');
+    }
+
+    if let Some(base) = settings.base_col_width {
+        if !wrote_base_col_width {
+            writer.get_mut().extend_from_slice(br#" baseColWidth=""#);
+            writer.get_mut().extend_from_slice(base.to_string().as_bytes());
+            writer.get_mut().push(b'"');
+        }
+    }
+    if let Some(width) = settings.default_col_width {
+        if !wrote_default_col_width {
+            writer.get_mut().extend_from_slice(br#" defaultColWidth=""#);
+            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+            writer.get_mut().push(b'"');
+        }
+    }
+    if let Some(height) = settings.default_row_height {
+        if !wrote_default_row_height {
+            writer.get_mut().extend_from_slice(br#" defaultRowHeight=""#);
+            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+            writer.get_mut().push(b'"');
+        }
+    }
+
+    if is_empty {
+        writer.get_mut().extend_from_slice(b"/>");
+    } else {
+        writer.get_mut().push(b'>');
+    }
+
+    Ok(())
+}
 fn parse_xml_bool(val: &str) -> bool {
     val == "1" || val.eq_ignore_ascii_case("true")
 }
@@ -5191,6 +5301,7 @@ fn write_worksheet_xml(
     }
 
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
+    let sheet_format_pr_xml = render_sheet_format_pr(SheetFormatSettings::from_sheet(sheet), None);
     let cols_xml = render_cols(sheet, None, style_to_xf);
     let sheet_protection_xml = render_sheet_protection(&sheet.sheet_protection, None);
     let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
@@ -5231,6 +5342,9 @@ fn write_worksheet_xml(
         xml.push_str("/></sheetPr>");
     }
     xml.push_str(&format!(r#"<dimension ref="{dimension}"/>"#));
+    if !sheet_format_pr_xml.is_empty() {
+        xml.push_str(&sheet_format_pr_xml);
+    }
     if !cols_xml.is_empty() {
         xml.push_str(&cols_xml);
     }

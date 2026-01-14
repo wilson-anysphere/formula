@@ -199,17 +199,17 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub col_properties: BTreeMap<u32, ColProperties>,
 
-    /// Sheet default column width in Excel "character" units.
-    ///
-    /// This corresponds to OOXML `<sheetFormatPr defaultColWidth="...">`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_col_width: Option<f32>,
-
     /// Sheet default row height in points.
     ///
     /// This corresponds to OOXML `<sheetFormatPr defaultRowHeight="...">`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_row_height: Option<f32>,
+
+    /// Sheet default column width in Excel "character" units.
+    ///
+    /// This corresponds to OOXML `<sheetFormatPr defaultColWidth="...">`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_col_width: Option<f32>,
 
     /// Base column width in characters.
     ///
@@ -317,8 +317,8 @@ impl Worksheet {
             col_count: default_col_count(),
             row_properties: BTreeMap::new(),
             col_properties: BTreeMap::new(),
-            default_col_width: None,
             default_row_height: None,
+            default_col_width: None,
             base_col_width: None,
             outline: Outline::default(),
             frozen_rows,
@@ -1916,9 +1916,9 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default)]
             col_properties: BTreeMap<u32, ColProperties>,
             #[serde(default)]
-            default_col_width: Option<f32>,
-            #[serde(default)]
             default_row_height: Option<f32>,
+            #[serde(default)]
+            default_col_width: Option<f32>,
             #[serde(default)]
             base_col_width: Option<u16>,
             #[serde(default)]
@@ -2047,8 +2047,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             col_count,
             row_properties: helper.row_properties,
             col_properties: helper.col_properties,
-            default_col_width: helper.default_col_width,
             default_row_height: helper.default_row_height,
+            default_col_width: helper.default_col_width,
             base_col_width: helper.base_col_width,
             outline,
             frozen_rows,

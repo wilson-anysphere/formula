@@ -1156,6 +1156,7 @@ fn sheet_xml(
     let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
 
     let sheet_protection_xml = sheet_protection_xml(sheet);
+    let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
     let data_validations_xml = sheet_data_validations_xml(sheet);
 
     let mut page_margins_xml = String::new();
@@ -1543,6 +1544,28 @@ fn sheet_data_validations_xml(sheet: &Worksheet) -> String {
 
     out.push_str("</dataValidations>");
     out
+}
+
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_row_height.is_none()
+        && sheet.default_col_width.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut attrs = String::new();
+    if let Some(base) = sheet.base_col_width {
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(w) = sheet.default_col_width {
+        attrs.push_str(&format!(r#" defaultColWidth="{w}""#));
+    }
+    if let Some(ht) = sheet.default_row_height {
+        attrs.push_str(&format!(r#" defaultRowHeight="{ht}""#));
+    }
+
+    format!(r#"<sheetFormatPr{attrs}/>"#)
 }
 
 fn sheet_protection_xml(sheet: &Worksheet) -> String {
