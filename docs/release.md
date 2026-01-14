@@ -1355,6 +1355,12 @@ If you want a faster check that **does not** download/hash all release bundles (
 GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run
 ```
 
+To additionally verify the **updater payload signatures** (slow; downloads the updater bundles referenced in `latest.json`), add `--verify-assets`:
+
+```bash
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run --verify-assets
+```
+
 To additionally enforce that the release contains **all expected OS/arch targets** (recommended for multi-arch releases), pass the expectations config:
 
 ```bash
