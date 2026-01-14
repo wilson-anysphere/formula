@@ -232,7 +232,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument() as any;
 
@@ -253,23 +253,44 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       const startClientY = colHeaderHeight + 10;
 
       selectionCanvas.dispatchEvent(
-        new (globalThis as any).PointerEvent("pointerdown", { clientX: startClientX, clientY: startClientY, pointerId: 1, buttons: 1 }),
+        new (globalThis as any).PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          clientX: startClientX,
+          clientY: startClientY,
+          pointerId: 1,
+          button: 0,
+          buttons: 1,
+        }),
       );
       selectionCanvas.dispatchEvent(
-        new (globalThis as any).PointerEvent("pointermove", { clientX: startClientX + 20, clientY: startClientY, pointerId: 1, buttons: 1 }),
+        new (globalThis as any).PointerEvent("pointermove", {
+          bubbles: true,
+          cancelable: true,
+          clientX: startClientX + 20,
+          clientY: startClientY,
+          pointerId: 1,
+          buttons: 1,
+        }),
       );
 
       // Drag should have moved the in-memory drawing state.
-      expect(((app as any).sheetDrawings as any[])[0]?.anchor?.pos?.xEmu).not.toBe(0);
+      expect(((app as any).drawingObjectsCache as any)?.objects?.[0]?.anchor?.pos?.xEmu).not.toBe(0);
 
-      // Escape should be able to bubble to the controller's window-level handler and cancel the drag.
+      // Escape should reach the controller's window-level handler and cancel the drag.
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 
-      expect(((app as any).sheetDrawings as any[])[0]?.anchor?.pos?.xEmu).toBe(0);
+      expect(((app as any).drawingObjectsCache as any)?.objects?.[0]?.anchor?.pos?.xEmu).toBe(0);
 
       // Releasing the pointer after cancel should not re-commit the drag.
       selectionCanvas.dispatchEvent(
-        new (globalThis as any).PointerEvent("pointerup", { clientX: startClientX + 20, clientY: startClientY, pointerId: 1 }),
+        new (globalThis as any).PointerEvent("pointerup", {
+          bubbles: true,
+          cancelable: true,
+          clientX: startClientX + 20,
+          clientY: startClientY,
+          pointerId: 1,
+        }),
       );
 
       expect(doc.getSheetDrawings(sheetId)[0].anchor.pos.xEmu).toBe(0);

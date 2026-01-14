@@ -254,20 +254,26 @@ export class DrawingInteractionController {
     if (e.key !== "Escape") return;
     if (!this.dragging && !this.resizing && !this.rotating) return;
     e.preventDefault();
+    // Ensure the spreadsheet/grid key handlers do not interpret Escape as "deselect"
+    // while we're actively dragging/resizing/rotating a drawing.
+    e.stopPropagation();
+    (e as any).stopImmediatePropagation?.();
     this.cancelActiveGesture();
   };
 
   private attachEscapeListener(): void {
     if (this.escapeListenerAttached) return;
     if (typeof window === "undefined") return;
-    window.addEventListener("keydown", this.onKeyDown);
+    // Capture phase so Escape cancels the gesture before SpreadsheetApp's root keydown
+    // handler can consume it (and stop propagation).
+    window.addEventListener("keydown", this.onKeyDown, { capture: true });
     this.escapeListenerAttached = true;
   }
 
   private detachEscapeListener(): void {
     if (!this.escapeListenerAttached) return;
     if (typeof window === "undefined") return;
-    window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("keydown", this.onKeyDown, { capture: true });
     this.escapeListenerAttached = false;
   }
 

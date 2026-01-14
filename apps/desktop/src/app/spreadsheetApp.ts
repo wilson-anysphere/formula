@@ -6368,10 +6368,8 @@ export class SpreadsheetApp {
     }
 
     // Include locally-cached drawings (e.g. drag/resize interactions) that may not yet be
-    // reflected in the DocumentController snapshot.
-    for (const obj of this.sheetDrawings) {
-      if (obj.kind.type === "image") keep.add(obj.kind.imageId);
-    }
+    // reflected in the DocumentController snapshot. `DrawingInteractionController` updates
+    // `drawingObjectsCache` during pointermove, and we scan it below.
     const cachedObjects = this.drawingObjectsCache;
     if (cachedObjects && cachedObjects.sheetId === this.sheetId) {
       for (const obj of cachedObjects.objects) {

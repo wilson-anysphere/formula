@@ -130,17 +130,7 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
       },
     ]);
 
-    // 2) In-memory interaction cache (`sheetDrawings`).
-    (app as any).sheetDrawings = [
-      {
-        id: 1,
-        kind: { type: "image", imageId: "image_local" },
-        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(10), cy: pxToEmu(10) } },
-        zOrder: 0,
-      },
-    ];
-
-    // 3) In-memory drawings cache (used by tests/insert flows).
+    // 2) In-memory drawings cache (used by tests/insert flows and pointer-move previews).
     (app as any).drawingObjectsCache = {
       sheetId,
       objects: [
@@ -161,10 +151,9 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
 
     expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
     const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
-    expect(new Set(Array.from(keep))).toEqual(new Set(["image_doc", "image_local", "image_cache"]));
+    expect(new Set(Array.from(keep))).toEqual(new Set(["image_doc", "image_cache"]));
 
     app.destroy();
     root.remove();
   });
 });
-
