@@ -3505,8 +3505,21 @@ export class FormulaBarView {
   #inferSelectedReferenceIndex(start: number, end: number): number | null {
     if (!this.model.isEditing || !this.model.draft.trimStart().startsWith("=")) return null;
     if (start === end) return null;
-    for (const ref of this.model.coloredReferences()) {
-      if (ref.start === start && ref.end === end) return ref.index;
+    const refs = this.model.coloredReferences();
+    let lo = 0;
+    let hi = refs.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const ref = refs[mid]!;
+      if (ref.start < start) {
+        lo = mid + 1;
+        continue;
+      }
+      if (ref.start > start) {
+        hi = mid - 1;
+        continue;
+      }
+      return ref.end === end ? ref.index : null;
     }
     return null;
   }
