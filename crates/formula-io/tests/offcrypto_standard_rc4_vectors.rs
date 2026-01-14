@@ -412,7 +412,8 @@ fn standard_cryptoapi_rc4_md5_40bit_padding_vector() {
     );
     assert_ne!(ciphertext_raw, ciphertext_padded);
 
-    // Ensure the production decrypt reader uses the padded 16-byte key form for 40-bit MD5.
+    // Ensure the production decrypt reader uses MD5 for per-block key derivation and applies the
+    // CryptoAPI 40-bit padding rule (5-byte key material treated as a 16-byte RC4 key).
     let mut stream = Vec::new();
     stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     stream.extend_from_slice(&ciphertext_padded);
