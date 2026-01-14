@@ -1206,17 +1206,9 @@ function spliceReferenceSpans(
 ): HighlightSpan[] {
   if (referenceTokens.length === 0) return spans;
 
-  let refs: ReadonlyArray<{ start: number; end: number }> = referenceTokens;
-  let sorted = true;
-  let lastStart = -Infinity;
-  for (const ref of referenceTokens) {
-    if (ref.start < lastStart) {
-      sorted = false;
-      break;
-    }
-    lastStart = ref.start;
-  }
-  if (!sorted) refs = [...referenceTokens].sort((a, b) => a.start - b.start);
+  // In FormulaBarModel, `referenceTokens` comes from `extractFormulaReferencesFromTokens`, which
+  // produces spans in appearance order. Avoid a redundant sortedness scan/copy on the hot path.
+  const refs: ReadonlyArray<{ start: number; end: number }> = referenceTokens;
   const out: HighlightSpan[] = [];
   let pos = 0;
   let spanIndex = 0;
