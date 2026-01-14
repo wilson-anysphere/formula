@@ -432,6 +432,16 @@ pub(crate) fn verify_password_standard(
     }
 }
 
+#[allow(dead_code)]
+fn verify_password_standard_with_key(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    hash_alg: HashAlgorithm,
+    key0: &[u8],
+) -> Result<(), OfficeCryptoError> {
+    verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0).map(|_| ())
+}
+
 fn verify_password_standard_rc4_key_style(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
@@ -854,6 +864,7 @@ fn decrypt_standard_encrypted_package_rc4(
     Ok(out)
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 enum StandardScheme {
     /// Standard / ECMA-376: AES-ECB using the block-0 file key (no IV).
@@ -871,6 +882,7 @@ enum StandardScheme {
     ConstKeyIvSaltStream,
 }
 
+#[allow(dead_code)]
 fn decrypt_standard_with_scheme(
     info: &StandardEncryptionInfo,
     ciphertext: &[u8],
@@ -1028,6 +1040,7 @@ fn decrypt_standard_with_scheme(
     }
 }
 
+#[allow(dead_code)]
 fn decrypt_segmented<F>(
     ciphertext: &[u8],
     total_size: u64,
