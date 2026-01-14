@@ -3142,6 +3142,131 @@ fn values_and_distinctcount_include_virtual_blank_row_for_unmatched_relationship
 }
 
 #[test]
+fn count_functions_include_virtual_blank_row_for_unmatched_relationship_keys() {
+    let mut model = DataModel::new();
+
+    let mut customers = Table::new("Customers", vec!["CustomerId", "Region"]);
+    customers.push_row(vec![1.into(), "East".into()]).unwrap();
+    customers.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(customers).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "CustomerId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 999.into(), 7.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders_Customers".into(),
+            from_table: "Orders".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let empty = FilterContext::empty();
+
+    // COUNTBLANK should include the relationship-generated blank member (unknown customer) when it
+    // exists, consistent with VALUES/DISTINCTCOUNT behavior.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTA(Customers[Region])",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNT(Customers[Region])",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let blank_region =
+        FilterContext::empty().with_column_equals("Customers", "Region", Value::Blank);
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &blank_region,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTA(Customers[Region])",
+                &blank_region,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let non_blank_regions = FilterContext::empty().with_column_in(
+        "Customers",
+        "Region",
+        vec!["East".into(), "West".into()],
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &non_blank_regions,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTA(Customers[Region])",
+                &non_blank_regions,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
+}
+
+#[test]
 fn allnoblankrow_excludes_relationship_blank_member() {
     let mut model = DataModel::new();
 
