@@ -8050,10 +8050,10 @@ impl Engine {
 
     /// Direct precedents (cells and ranges referenced by the formula in `cell`).
     ///
-    /// Note: external-workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are expanded using
-    /// [`ExternalValueProvider::sheet_order`] when a provider is configured. When the sheet order
-    /// is unavailable, this API reports the raw span key (e.g. `"[Book.xlsx]Sheet1:Sheet3"`) as a
-    /// single external precedent.
+    /// Note: external-workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are expanded into
+    /// per-sheet precedents when the engine has an [`ExternalValueProvider`] that supplies
+    /// [`ExternalValueProvider::sheet_order`]. If sheet order is unavailable, 3D spans are omitted
+    /// from this auditing API (matching evaluation, which returns `#REF!`).
     pub fn precedents(&self, sheet: &str, addr: &str) -> Result<Vec<PrecedentNode>, EngineError> {
         self.precedents_impl(sheet, addr, false)
     }
@@ -15097,8 +15097,7 @@ fn walk_external_expr(
                     let Some(addr) = r.addr.resolve(current_cell.addr) else {
                         return;
                     };
-                    if let Some(expanded) =
-                        expand_external_sheet_span_key(key, external_value_provider)
+                    if let Some(expanded) = expand_external_sheet_span_key(key, external_value_provider)
                     {
                         for sheet_key in expanded {
                             precedents.insert(PrecedentNode::ExternalCell {
@@ -15106,11 +15105,6 @@ fn walk_external_expr(
                                 addr,
                             });
                         }
-                    } else {
-                        precedents.insert(PrecedentNode::ExternalCell {
-                            sheet: key.clone(),
-                            addr,
-                        });
                     }
                 }
             }
@@ -15138,8 +15132,7 @@ fn walk_external_expr(
                     };
                     let start = clamp_addr_to_excel_dimensions(start);
                     let end = clamp_addr_to_excel_dimensions(end);
-                    if let Some(expanded) =
-                        expand_external_sheet_span_key(key, external_value_provider)
+                    if let Some(expanded) = expand_external_sheet_span_key(key, external_value_provider)
                     {
                         for sheet_key in expanded {
                             precedents.insert(PrecedentNode::ExternalRange {
@@ -15148,12 +15141,6 @@ fn walk_external_expr(
                                 end,
                             });
                         }
-                    } else {
-                        precedents.insert(PrecedentNode::ExternalRange {
-                            sheet: key.clone(),
-                            start,
-                            end,
-                        });
                     }
                 }
             }

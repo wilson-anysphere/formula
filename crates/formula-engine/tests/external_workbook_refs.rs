@@ -425,7 +425,7 @@ fn precedents_include_dynamic_external_precedents_from_offset() {
 }
 
 #[test]
-fn precedents_expand_external_3d_sheet_span_when_sheet_order_available() {
+fn precedents_expand_external_3d_sheet_spans_when_sheet_order_is_available() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_sheet_order(
         "Book.xlsx",
@@ -435,11 +435,18 @@ fn precedents_expand_external_3d_sheet_span_when_sheet_order_available() {
             "Sheet3".to_string(),
         ],
     );
+    for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        provider.set(
+            &format!("[Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
     engine
-        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]sheet1:sheet3!A1)")
         .unwrap();
 
     assert_eq!(
@@ -500,19 +507,13 @@ fn precedents_expand_external_3d_sheet_span_matches_endpoints_nfkc_case_insensit
 }
 
 #[test]
-fn precedents_include_external_3d_sheet_span_when_sheet_order_unavailable() {
+fn precedents_omit_external_3d_sheet_spans_when_sheet_order_unavailable() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
         .unwrap();
 
-    assert_eq!(
-        engine.precedents("Sheet1", "A1").unwrap(),
-        vec![PrecedentNode::ExternalCell {
-            sheet: "[Book.xlsx]Sheet1:Sheet3".to_string(),
-            addr: CellAddr { row: 0, col: 0 },
-        }]
-    );
+    assert_eq!(engine.precedents("Sheet1", "A1").unwrap(), Vec::new());
 }
 
 #[test]
