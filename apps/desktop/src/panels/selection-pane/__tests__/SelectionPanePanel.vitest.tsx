@@ -155,16 +155,19 @@ describe("Selection Pane panel", () => {
     const ribbonRoot = document.createElement("div");
     document.body.appendChild(ribbonRoot);
 
-    const unmountRibbon = mountRibbon(
-      ribbonRoot,
-      {
-        onCommand: (commandId: string) => {
-          if (commandId !== "pageLayout.arrange.selectionPane") return;
-          panelBodyRenderer.renderPanelBody(PanelIds.SELECTION_PANE, panelBody);
+    let unmountRibbon: (() => void) | null = null;
+    await act(async () => {
+      unmountRibbon = mountRibbon(
+        ribbonRoot,
+        {
+          onCommand: (commandId: string) => {
+            if (commandId !== "pageLayout.arrange.selectionPane") return;
+            panelBodyRenderer.renderPanelBody(PanelIds.SELECTION_PANE, panelBody);
+          },
         },
-      },
-      { initialTabId: "pageLayout" },
-    );
+        { initialTabId: "pageLayout" },
+      );
+    });
 
     const commandButton = ribbonRoot.querySelector<HTMLButtonElement>('button[data-command-id="pageLayout.arrange.selectionPane"]');
     expect(commandButton).toBeInstanceOf(HTMLButtonElement);
@@ -216,8 +219,10 @@ describe("Selection Pane panel", () => {
     expect(updatedItemEls.length).toBe(3);
     expect(updatedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
 
-    unmountRibbon();
-    panelBodyRenderer.cleanup([]);
+    await act(async () => {
+      unmountRibbon?.();
+      panelBodyRenderer.cleanup([]);
+    });
     app.destroy();
     sheetRoot.remove();
   });
