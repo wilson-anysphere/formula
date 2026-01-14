@@ -62,6 +62,18 @@ test('agent-init warns when executed instead of sourced', { skip: !hasBash }, ()
   );
 });
 
+test('agent-init does not leak setup_display helper function (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'type setup_display >/dev/null 2>&1 && echo leak || echo ok',
+    ].join(' && '),
+  );
+  assert.equal(out, 'ok');
+});
+
 test('agent-init defaults CARGO_HOME to a repo-local directory', { skip: !hasBash }, () => {
   const cargoHome = runBash(
     [
