@@ -99,10 +99,10 @@ describe("Selection Pane panel", () => {
 
     priorCanvasChartsEnv = process.env.CANVAS_CHARTS;
     priorUseCanvasChartsEnv = process.env.USE_CANVAS_CHARTS;
-    // Most Selection Pane behavior is authored/expected in legacy chart mode. In canvas charts mode,
-    // ChartStore charts are rendered as drawing objects and show up in the list alongside workbook
-    // drawings. These tests force legacy chart mode; suites that need canvas charts should opt in
-    // explicitly (e.g. `process.env.CANVAS_CHARTS = "1"`).
+    // Most Selection Pane behavior is authored/expected in legacy chart mode. In canvas charts mode
+    // (default), ChartStore charts are rendered as drawing objects and show up in the list alongside
+    // workbook drawings. These tests force legacy chart mode; suites that need canvas charts should
+    // opt in explicitly (e.g. `process.env.CANVAS_CHARTS = "1"` or `?canvasCharts=1`).
     process.env.CANVAS_CHARTS = "0";
     delete process.env.USE_CANVAS_CHARTS;
     document.body.innerHTML = "";
@@ -592,7 +592,7 @@ describe("Selection Pane panel", () => {
     sheetRoot.remove();
   });
 
-  it("lists ChartStore charts in ?canvasCharts=1 mode; clicking selects and delete removes them", async () => {
+  it("lists ChartStore charts when canvas charts are enabled; clicking selects and delete removes them", async () => {
     const [{ createPanelBodyRenderer }, { PanelIds }, { mountRibbon }] = await Promise.all([
       import("../../panelBodyRenderer.js"),
       import("../../panelRegistry.js"),
@@ -686,7 +686,7 @@ describe("Selection Pane panel", () => {
     }
   });
 
-  it("reorders ChartStore charts via bring forward / send backward in ?canvasCharts=1 mode", async () => {
+  it("reorders ChartStore charts via bring forward / send backward when canvas charts are enabled", async () => {
     const url = new URL(window.location.href);
     url.searchParams.set("canvasCharts", "1");
     window.history.replaceState(null, "", url.toString());
@@ -721,7 +721,7 @@ describe("Selection Pane panel", () => {
     sheetRoot.remove();
   });
 
-  it("deletes selected ChartStore charts via Delete key in ?canvasCharts=1 mode", async () => {
+  it("deletes selected ChartStore charts via Delete key when canvas charts are enabled", async () => {
     const url = new URL(window.location.href);
     url.searchParams.set("canvasCharts", "1");
     window.history.replaceState(null, "", url.toString());
