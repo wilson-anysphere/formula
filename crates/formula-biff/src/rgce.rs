@@ -1079,12 +1079,8 @@ fn decode_rgce_impl(
                     0x2F => "#CONNECT!",
                     0x30 => "#BLOCKED!",
                     0x31 => "#UNKNOWN!",
-                    _ => {
-                        return Err(DecodeRgceError::UnsupportedToken {
-                            offset: ptg_offset,
-                            ptg,
-                        })
-                    }
+                    // Best-effort forward-compatibility with newer Excel error codes.
+                    _ => "#UNKNOWN!",
                 };
                 stack.push(ExprFragment::new(text.to_string()));
             }
