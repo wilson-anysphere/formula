@@ -1313,10 +1313,11 @@ export class CanvasGridRenderer {
     const url = URL.createObjectURL(blob);
     try {
       const img = new Image();
-      img.src = url;
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = () => reject(new Error("Image decode fallback failed to load <img>"));
+        // Assign the src after wiring handlers so we don't miss synchronous load events in tests/polyfills.
+        img.src = url;
       });
 
       const canvas = document.createElement("canvas");

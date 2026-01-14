@@ -322,9 +322,7 @@ describe("CanvasGridRenderer image cells", () => {
         naturalWidth = 16;
         naturalHeight = 8;
         set src(_value: string) {
-          queueMicrotask(() => {
-            this.onload?.();
-          });
+          this.onload?.();
         }
       }
       vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
@@ -438,9 +436,7 @@ describe("CanvasGridRenderer image cells", () => {
         naturalWidth = 16;
         naturalHeight = 8;
         set src(_value: string) {
-          queueMicrotask(() => {
-            this.onload?.();
-          });
+          this.onload?.();
         }
       }
       vi.stubGlobal("Image", FakeImage as unknown as typeof Image);

@@ -37,8 +37,9 @@ describe("ImageBitmapCache decode fallback", () => {
     URLCtor.revokeObjectURL = revokeObjectURL;
 
     try {
-      // Provide a deterministic Image stub that fires `onload` asynchronously *after* the handler is
-      // assigned (the production code sets `src` before wiring `onload`).
+      // Provide a deterministic Image stub that fires `onload` synchronously when `src` is assigned.
+      // This ensures our fallback decode path wires handlers before setting `src` (robust to
+      // synchronous load events in tests/polyfills).
       class FakeImage {
         onload: (() => void) | null = null;
         onerror: (() => void) | null = null;
@@ -47,9 +48,7 @@ describe("ImageBitmapCache decode fallback", () => {
         naturalWidth = 16;
         naturalHeight = 8;
         set src(_value: string) {
-          queueMicrotask(() => {
-            this.onload?.();
-          });
+          this.onload?.();
         }
       }
       vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
