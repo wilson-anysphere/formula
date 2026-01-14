@@ -11,6 +11,7 @@ import {
   setSeedPanelsForExtension,
 } from "../../extensions/contributedPanelsSeedStore.js";
 import { showQuickPick, showToast } from "../../extensions/ui.js";
+import { getTauriDialogConfirmOrNull } from "../../tauri/api.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
 function tryShowToast(message, type = "info") {
@@ -281,12 +282,8 @@ async function renderSearchResults({
                     const message = `${warning.message}\n\nProceed with install?`;
 
                     // Prefer native dialogs in desktop builds when available.
-                    try {
-                      if (typeof globalThis?.__TAURI__?.dialog?.confirm === "function") {
-                        return await nativeDialogs.confirm(message, { title: "Install extension" });
-                      }
-                    } catch {
-                      // ignore
+                    if (getTauriDialogConfirmOrNull()) {
+                      return await nativeDialogs.confirm(message, { title: "Install extension" });
                     }
 
                     // Web builds: use the non-blocking <dialog>-based picker.

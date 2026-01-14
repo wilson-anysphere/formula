@@ -1,5 +1,7 @@
 export type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
 export type TauriDialogSave = (options?: Record<string, unknown>) => Promise<string | null>;
+export type TauriDialogConfirm = (message: string, options?: Record<string, unknown>) => Promise<boolean>;
+export type TauriDialogMessage = (message: string, options?: Record<string, unknown>) => Promise<void>;
 
 export type TauriDialogApi = {
   open: TauriDialogOpen;
@@ -43,6 +45,18 @@ export function getTauriDialogSaveOrNull(): TauriDialogSave | null {
   const dialog = getTauriDialogNamespaceOrNull();
   const save = dialog?.save as TauriDialogSave | undefined;
   return typeof save === "function" ? save : null;
+}
+
+export function getTauriDialogConfirmOrNull(): TauriDialogConfirm | null {
+  const dialog = getTauriDialogNamespaceOrNull();
+  const confirm = dialog?.confirm as TauriDialogConfirm | undefined;
+  return typeof confirm === "function" ? confirm : null;
+}
+
+export function getTauriDialogMessageOrNull(): TauriDialogMessage | null {
+  const dialog = getTauriDialogNamespaceOrNull();
+  const message = (dialog?.message ?? dialog?.alert) as TauriDialogMessage | undefined;
+  return typeof message === "function" ? message : null;
 }
 
 /**

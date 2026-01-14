@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   getTauriDialogOrNull,
   getTauriDialogOrThrow,
+  getTauriDialogConfirmOrNull,
   getTauriDialogOpenOrNull,
   getTauriDialogSaveOrNull,
   getTauriEventApiOrNull,
@@ -112,6 +113,12 @@ describe("tauri/api dynamic accessors", () => {
 
       expect(getTauriDialogOpenOrNull()).toBe(open);
       expect(getTauriDialogSaveOrNull()).toBeNull();
+    });
+
+    it("detects confirm() when available", () => {
+      const confirm = vi.fn();
+      (globalThis as any).__TAURI__ = { dialog: { confirm } };
+      expect(getTauriDialogConfirmOrNull()).toBe(confirm);
     });
   });
 
