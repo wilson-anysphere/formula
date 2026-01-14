@@ -9,6 +9,7 @@ import {
   createLocaleAwareStarterFunctions,
 } from "../ai/completion/parsePartialFormula.js";
 import { getLocale } from "../i18n/index.js";
+import { normalizeFormulaLocaleId } from "./formulaLocale.js";
 
 export type Cell = { input: string; value: SpreadsheetValue };
 
@@ -178,7 +179,10 @@ export class SpreadsheetModel {
         return cell.value;
       },
       // Include locale because parsing is locale-aware (argument separators, localized function names).
-      getCacheKey: () => `${this.#cellsVersion}:${this.#cells.size}:locale:${currentFormulaLocaleId()}`,
+      getCacheKey: () => {
+        const locale = normalizeFormulaLocaleId(currentFormulaLocaleId()) ?? "en-US";
+        return `${this.#cellsVersion}:${this.#cells.size}:locale:${locale}`;
+      },
     };
 
     this.#pendingCompletion = this.#completion
