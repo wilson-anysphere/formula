@@ -2938,7 +2938,8 @@ fn decrypt_encrypted_ooxml_package(
         return Ok(None);
     }
 
-    // Read full `EncryptionInfo` and `EncryptedPackage` streams (best-effort + case-insensitive).
+    // Read full `EncryptionInfo` and `EncryptedPackage` streams (best-effort for leading slash and
+    // casing variations).
     let encryption_info = read_ole_stream_best_effort(&mut ole, "EncryptionInfo")
         .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
