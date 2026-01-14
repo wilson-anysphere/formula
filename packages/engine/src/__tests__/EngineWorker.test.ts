@@ -712,6 +712,43 @@ describe("EngineWorker RPC", () => {
     expect(methods).toEqual(["setCells", "setColWidth"]);
   });
 
+  it("flushes pending setCell batches before setColWidthChars", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Fire-and-forget setCell leaves a pending microtask flush.
+    void engine.setCell("A1", 1);
+
+    await engine.setColWidthChars("Sheet1", 3, 8.43);
+
+    const methods = worker.received
+      .filter((msg): msg is RpcRequest => msg.type === "request")
+      .map((msg) => msg.method);
+
+    expect(methods).toEqual(["setCells", "setColWidthChars"]);
+  });
+
+  it("sends setColWidthChars RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.setColWidthChars("Sheet1", 3, 8.43);
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "setColWidthChars"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ sheet: "Sheet1", col: 3, widthChars: 8.43 });
+  });
+
   it("sends setCellStyleId RPC requests with the expected params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
