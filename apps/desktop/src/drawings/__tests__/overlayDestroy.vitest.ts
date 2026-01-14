@@ -162,6 +162,8 @@ describe("DrawingOverlay destroy()", () => {
     const images: ImageStore = {
       get: (id: string) => entries.get(id),
       set: (entry: ImageEntry) => entries.set(entry.id, entry),
+      delete: (id: string) => entries.delete(id),
+      clear: () => entries.clear(),
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -195,6 +197,8 @@ describe("DrawingOverlay destroy()", () => {
     const images: ImageStore = {
       get: (id: string) => entries.get(id),
       set: (entry: ImageEntry) => entries.set(entry.id, entry),
+      delete: (id: string) => entries.delete(id),
+      clear: () => entries.clear(),
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -223,6 +227,8 @@ describe("DrawingOverlay destroy()", () => {
     const images: ImageStore = {
       get: () => imageEntry,
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -255,6 +261,8 @@ describe("DrawingOverlay destroy()", () => {
     const images: ImageStore = {
       get: (id: string) => entries.get(id),
       set: (entry: ImageEntry) => entries.set(entry.id, entry),
+      delete: (id: string) => entries.delete(id),
+      clear: () => entries.clear(),
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -290,6 +298,8 @@ describe("DrawingOverlay destroy()", () => {
       get: () => undefined,
       set,
       getAsync,
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -316,6 +326,8 @@ describe("DrawingOverlay destroy()", () => {
       get: () => undefined,
       set: () => {},
       getAsync,
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -338,6 +350,8 @@ describe("DrawingOverlay destroy()", () => {
       get: () => undefined,
       set: () => {},
       getAsync,
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -388,6 +402,8 @@ describe("DrawingOverlay destroy()", () => {
     const images: ImageStore = {
       get: () => undefined,
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -439,6 +455,8 @@ describe("DrawingOverlay destroy()", () => {
     const images: ImageStore = {
       get: () => undefined,
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);
@@ -457,6 +475,8 @@ describe("DrawingOverlay destroy()", () => {
     const images: ImageStore = {
       get: () => undefined,
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);

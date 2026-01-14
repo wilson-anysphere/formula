@@ -79,6 +79,8 @@ describe("DrawingOverlay images", () => {
     const images: ImageStore = {
       get: (id) => (id === entry.id ? entry : undefined),
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     let resolveBitmap!: (bitmap: ImageBitmap) => void;
@@ -122,6 +124,8 @@ describe("DrawingOverlay images", () => {
     const images: ImageStore = {
       get: (id) => (id === entry.id ? entry : undefined),
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     const createImageBitmapSpy = vi.fn(async () => {
@@ -145,4 +149,3 @@ describe("DrawingOverlay images", () => {
     expect(calls.some((call) => call.method === "drawImage")).toBe(false);
   });
 });
-
