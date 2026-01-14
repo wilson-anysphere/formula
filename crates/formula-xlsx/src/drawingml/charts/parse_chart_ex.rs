@@ -207,39 +207,6 @@ fn parse_legend(
     })
 }
 
-fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
-    let mut hints = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        if let Some(layout_id) = attribute_case_insensitive(node, "layoutId") {
-            let hint = format!("layoutId={layout_id}");
-            if seen.insert(hint.clone()) {
-                hints.push(hint);
-            }
-        }
-        if let Some(chart_type) = attribute_case_insensitive(node, "chartType") {
-            let hint = format!("chartType={chart_type}");
-            if seen.insert(hint.clone()) {
-                hints.push(hint);
-            }
-        }
-
-        let tag = node.tag_name().name();
-        if tag.len() > 5
-            && tag.to_ascii_lowercase().ends_with("chart")
-            && !tag.eq_ignore_ascii_case("chart")
-        {
-            let hint = format!("element={tag}");
-            if seen.insert(hint.clone()) {
-                hints.push(hint);
-            }
-        }
-    }
-
-    hints
-}
-
 fn detect_chart_kind(
     doc: &Document<'_>,
     root_ns: &str,
@@ -294,47 +261,6 @@ fn detect_chart_kind(
     });
 
     "unknown".to_string()
-}
-
-fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
-    // Best-effort: gather any attribute/type hints that might help us extend chart-kind inference
-    // in the future. This is only used in diagnostics when no known detection path matched, so
-    // keep it simple and robust.
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        // Attribute hints.
-        for attr in ["layoutId", "chartType"] {
-            if let Some(hint) =
-                attribute_case_insensitive(node, attr).and_then(normalize_chart_ex_kind_hint)
-            {
-                if seen.insert(hint.clone()) {
-                    out.push(hint);
-                }
-            }
-        }
-
-        // Tag-name hints (fallback): any `*Chart` element other than the generic container.
-        let name = node.tag_name().name();
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
-            let base = lower.strip_suffix("chart").unwrap_or(&lower);
-            if !base.is_empty() {
-                let hint = lowercase_first(base);
-                if seen.insert(hint.clone()) {
-                    out.push(hint);
-                }
-            }
-        }
-
-        // Bound diagnostics to avoid pathological allocations on malicious inputs.
-        if out.len() >= 16 {
-            break;
-        }
-    }
-
-    out
 }
 
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
