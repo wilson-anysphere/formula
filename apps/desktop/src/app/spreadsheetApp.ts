@@ -4877,8 +4877,19 @@ export class SpreadsheetApp {
       return null;
     }
 
-    const bounds = drawingObjectToViewportRect(obj, viewport, this.drawingGeom);
-    const centers = getResizeHandleCenters(bounds, obj.transform);
+    let bounds: { x: number; y: number; width: number; height: number };
+    try {
+      bounds = drawingObjectToViewportRect(obj, viewport, this.drawingGeom);
+    } catch {
+      return null;
+    }
+
+    let centers: ReturnType<typeof getResizeHandleCenters>;
+    try {
+      centers = getResizeHandleCenters(bounds, obj.transform);
+    } catch {
+      return null;
+    }
 
     const pick = (handle: "nw" | "ne" | "se" | "sw"): { x: number; y: number } | null => {
       const found = centers.find((c) => c.handle === handle);
