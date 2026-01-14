@@ -250,9 +250,11 @@ pub fn timeline_selection_to_engine_filter_field_with_cache(
         };
     };
 
+    let date_system = infer_date_system_from_timeline_shared_items(shared_items, start, end);
+
     let mut allowed = HashSet::new();
     for item in shared_items {
-        let Some(date) = pivot_cache_shared_item_to_naive_date(item) else {
+        let Some(date) = pivot_cache_shared_item_to_naive_date(item, date_system) else {
             continue;
         };
         if let Some(start) = start {
@@ -274,27 +276,80 @@ pub fn timeline_selection_to_engine_filter_field_with_cache(
     }
 }
 
-fn pivot_cache_shared_item_to_naive_date(item: &PivotCacheValue) -> Option<NaiveDate> {
+fn pivot_cache_shared_item_to_naive_date(
+    item: &PivotCacheValue,
+    date_system: ExcelDateSystem,
+) -> Option<NaiveDate> {
     match item {
         PivotCacheValue::DateTime(v) | PivotCacheValue::String(v) => {
             // Timeline caches normalize dates using the workbook's date system, but this helper is
-            // purely cache-definition based and does not have access to the workbook metadata. In
-            // practice shared items for date fields are typically stored as ISO strings, so the
-            // date-system parameter only matters when the shared item is a numeric serial encoded
-            // as a string.
-            normalize_timeline_date(v, ExcelDateSystem::EXCEL_1900)
-                .as_deref()
-                .and_then(parse_iso_ymd)
+            // purely cache-definition based and does not have access to the workbook metadata.
+            // We still accept a `date_system` parameter to support best-effort inference from the
+            // selection range when shared items are numeric serials.
+            normalize_timeline_date(v, date_system).as_deref().and_then(parse_iso_ymd)
         }
         PivotCacheValue::Number(n) => {
             // Excel stores dates as serial numbers; shared items for date fields should generally
             // use `<d>`, but accept numbers as a best-effort fallback.
             let serial = n.floor() as i32;
-            serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900)
+            serial_to_ymd(serial, date_system)
                 .ok()
                 .and_then(|ymd| NaiveDate::from_ymd_opt(ymd.year, ymd.month as u32, ymd.day as u32))
         }
         _ => None,
+    }
+}
+
+fn date_in_range(date: NaiveDate, start: Option<NaiveDate>, end: Option<NaiveDate>) -> bool {
+    if let Some(start) = start {
+        if date < start {
+            return false;
+        }
+    }
+    if let Some(end) = end {
+        if date > end {
+            return false;
+        }
+    }
+    true
+}
+
+fn infer_date_system_from_timeline_shared_items(
+    shared_items: &[PivotCacheValue],
+    start: Option<NaiveDate>,
+    end: Option<NaiveDate>,
+) -> ExcelDateSystem {
+    // Without at least one parseable bound we cannot infer which date system the cached serials
+    // use (and callers explicitly treat that scenario as "allow all").
+    if start.is_none() && end.is_none() {
+        return ExcelDateSystem::EXCEL_1900;
+    }
+
+    let mut matches_1900 = 0usize;
+    let mut matches_1904 = 0usize;
+    let mut saw_disambiguating_value = false;
+
+    for item in shared_items {
+        let d1900 = pivot_cache_shared_item_to_naive_date(item, ExcelDateSystem::EXCEL_1900);
+        let d1904 = pivot_cache_shared_item_to_naive_date(item, ExcelDateSystem::Excel1904);
+
+        if d1900 == d1904 {
+            continue;
+        }
+        saw_disambiguating_value = true;
+
+        if d1900.is_some_and(|d| date_in_range(d, start, end)) {
+            matches_1900 += 1;
+        }
+        if d1904.is_some_and(|d| date_in_range(d, start, end)) {
+            matches_1904 += 1;
+        }
+    }
+
+    if saw_disambiguating_value && matches_1904 > matches_1900 {
+        ExcelDateSystem::Excel1904
+    } else {
+        ExcelDateSystem::EXCEL_1900
     }
 }
 
@@ -3090,6 +3145,39 @@ mod engine_filter_field_tests {
         let mut expected = HashSet::new();
         expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(2024, 1, 2).unwrap()));
         expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(2024, 1, 3).unwrap()));
+
+        assert_eq!(filter.allowed, Some(expected));
+    }
+
+    #[test]
+    fn timeline_selection_to_engine_filter_handles_numeric_serials_with_best_effort_date_system() {
+        // Shared items can store date values as numeric serials. Without workbook metadata we can't
+        // know whether they are 1900- or 1904-based; infer the date system from the selection range
+        // so we don't end up producing an empty filter due to a 4-year offset.
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "OrderDate".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::Number(1.0),
+                    PivotCacheValue::Number(2.0),
+                    PivotCacheValue::Number(3.0),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // In the 1904 date system, serial 1 = 1904-01-02 and serial 2 = 1904-01-03.
+        let selection = TimelineSelectionState {
+            start: Some("1904-01-02".to_string()),
+            end: Some("1904-01-03".to_string()),
+        };
+
+        let filter = timeline_selection_to_engine_filter_field_with_cache(&cache_def, 0, &selection);
+
+        let mut expected = HashSet::new();
+        expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(1904, 1, 2).unwrap()));
+        expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(1904, 1, 3).unwrap()));
 
         assert_eq!(filter.allowed, Some(expected));
     }
