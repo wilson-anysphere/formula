@@ -105,5 +105,28 @@ describe("ribbon/axisSizing", () => {
     expect(setRowHeightSpy).not.toHaveBeenCalled();
     expect(focus).not.toHaveBeenCalled();
   });
-});
 
+  it("no-ops in read-only mode before prompting", async () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const setRowHeightSpy = vi.spyOn(doc, "setRowHeight");
+    vi.mocked(showInputBox).mockResolvedValue("42");
+
+    const focus = vi.fn();
+    const app = {
+      getSelectionRanges: () => [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+      getCurrentSheetId: () => sheetId,
+      getDocument: () => doc,
+      focus,
+      isEditing: () => false,
+      isReadOnly: () => true,
+    };
+
+    await promptAndApplyAxisSizing(app, "rowHeight");
+
+    expect(showInputBox).not.toHaveBeenCalled();
+    expect(setRowHeightSpy).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+  });
+});

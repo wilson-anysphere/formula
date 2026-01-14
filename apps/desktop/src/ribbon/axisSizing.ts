@@ -12,6 +12,13 @@ export type AxisSizingApp = {
   getDocument(): DocumentController;
   focus(): void;
   isEditing(): boolean;
+  /**
+   * Optional read-only indicator (used in collab viewer/commenter sessions).
+   *
+   * When true, axis sizing should be treated as a disallowed sheet mutation (it would only apply
+   * locally and never sync to the shared document).
+   */
+  isReadOnly?: () => boolean;
 };
 
 type NormalizedRange = { startRow: number; endRow: number; startCol: number; endCol: number };
@@ -70,6 +77,8 @@ export async function promptAndApplyAxisSizing(
   const isEditing = options.isEditing ?? (() => app.isEditing());
   if (isEditing()) return;
 
+  if (app.isReadOnly?.() === true) return;
+
   // `selectedRowIndices()` / `selectedColIndices()` enumerate every row/col in every selection range into a Set.
   // On Excel-scale sheets, this can freeze/crash the UI (e.g. select-all => 1M rows).
   // Guard here so we reject huge selections *before* prompting for input.
@@ -112,4 +121,3 @@ export async function promptAndApplyAxisSizing(
 
   app.focus();
 }
-

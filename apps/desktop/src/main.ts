@@ -2226,7 +2226,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const outlineDisabled = app.getGridMode() === "shared";
     const canComment = app.getCollabSession()?.canComment() ?? true;
     const dynamicDisabledById = {
-      ...(isEditing
+      ...(isEditing || isReadOnly
         ? {
             // Excel disables sheet formatting commands (row/col sizing) while editing. Keep the
             // ribbon UI aligned with the context menu + the runtime guard in `axisSizing.ts`.
