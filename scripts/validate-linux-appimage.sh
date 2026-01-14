@@ -617,6 +617,20 @@ validate_appimage() {
     info "warn: No .desktop file explicitly listed xlsx MIME '${required_xlsx_mime}'. Spreadsheet MIME types were present, but .xlsx double-click integration may be incomplete."
   fi
 
+  # Prefer strict validation against tauri.conf.json so we catch missing MIME types,
+  # scheme handlers, compliance artifacts, and Parquet shared-mime-info wiring in the
+  # extracted AppImage payload (not just in config).
+  #
+  # This mirrors the `.deb` / `.rpm` validations in the release workflow.
+  if command -v python3 >/dev/null 2>&1; then
+    info "Running strict Linux desktop integration verifier against extracted AppImage payload"
+    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" --package-root "$appdir" --tauri-config "$TAURI_CONF_PATH"; then
+      die "Linux desktop integration verification failed for AppImage: $appimage_path"
+    fi
+  else
+    info "Note: python3 not found; skipping strict desktop integration verification (scripts/ci/verify_linux_desktop_integration.py)"
+  fi
+
   # 5) Validate version metadata matches tauri.conf.json. Prefer the AppImage-specific
   # X-AppImage-Version desktop entry key; otherwise accept a semver-looking Version=
   # field. If no application version marker is present, fall back to validating the

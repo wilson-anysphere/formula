@@ -12,6 +12,19 @@ const tauriConfig = JSON.parse(
 );
 const expectedVersion = String(tauriConfig?.version ?? "").trim();
 const expectedMainBinaryName = String(tauriConfig?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedFileAssociationMimeTypes = Array.from(
+  new Set(
+    (tauriConfig?.bundle?.fileAssociations ?? [])
+      .flatMap((assoc) => {
+        const raw = assoc?.mimeType;
+        if (Array.isArray(raw)) return raw;
+        if (raw) return [raw];
+        return [];
+      })
+      .map((mt) => String(mt).trim())
+      .filter(Boolean),
+  ),
+);
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -39,6 +52,7 @@ function writeFakeAppImage(
     withXlsxMime = true,
     withMimeTypeEntry = true,
     withSchemeMime = true,
+    withParquetMimeDefinition = true,
     execLine = `${expectedMainBinaryName} %U`,
     withLicense = true,
     withNotice = true,
@@ -46,9 +60,12 @@ function writeFakeAppImage(
     desktopEntryVersion = "",
   } = {},
 ) {
-  const desktopMimeBase = withXlsxMime
-    ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;"
-    : "text/plain;";
+  const mimeTypes = withXlsxMime
+    ? expectedFileAssociationMimeTypes
+    : expectedFileAssociationMimeTypes.filter(
+        (mt) => mt !== "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+  const desktopMimeBase = `${mimeTypes.join(";")};`;
   const desktopMime = withSchemeMime
     ? `${desktopMimeBase}x-scheme-handler/formula;`
     : desktopMimeBase;
@@ -73,6 +90,7 @@ set -euo pipefail
 if [[ "\${1:-}" == "--appimage-extract" ]]; then
   mkdir -p squashfs-root/usr/bin
   mkdir -p squashfs-root/usr/share/doc/${expectedMainBinaryName}
+  mkdir -p squashfs-root/usr/share/mime/packages
 
   cat > squashfs-root/AppRun <<'APPRUN'
 #!/usr/bin/env bash
@@ -88,6 +106,19 @@ BIN
 
   ${withLicense ? 'echo "LICENSE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/LICENSE' : ":"}
   ${withNotice ? 'echo "NOTICE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/NOTICE' : ":"}
+  ${
+    withParquetMimeDefinition
+      ? "cat > squashfs-root/usr/share/mime/packages/app.formula.desktop.xml <<'MIME'\n" +
+        '<?xml version="1.0" encoding="UTF-8"?>\n' +
+        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n' +
+        '  <mime-type type="application/vnd.apache.parquet">\n' +
+        "    <comment>Parquet File</comment>\n" +
+        '    <glob pattern="*.parquet"/>\n' +
+        "  </mime-type>\n" +
+        "</mime-info>\n" +
+        "MIME"
+      : ":"
+  }
 
   ${desktopBlock}
   exit 0
