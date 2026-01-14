@@ -451,7 +451,9 @@ fn precedents_include_dynamic_external_precedents_from_indirect_ref_text_cell() 
     engine
         .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet1!A1")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)")
+        .unwrap();
     assert!(
         engine.bytecode_compile_report(10).is_empty(),
         "{:?}",
@@ -782,7 +784,9 @@ fn external_sheet_invalidation_dirties_dynamic_external_indirect_dependents_from
     engine
         .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet1!A1")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)")
+        .unwrap();
     assert!(
         engine.bytecode_compile_report(10).is_empty(),
         "{:?}",

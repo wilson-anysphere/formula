@@ -235,9 +235,9 @@ fn locale_es_es_suspicious_identity_mappings_are_rare() {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let (canon, loc) = line
-                .split_once('\t')
-                .unwrap_or_else(|| panic!("invalid TSV entry (expected Canonical<TAB>Localized): {line}"));
+            let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+                panic!("invalid TSV entry (expected Canonical<TAB>Localized): {line}")
+            });
             out.insert(canon.to_string(), loc.to_string());
         }
         out
@@ -250,8 +250,12 @@ fn locale_es_es_suspicious_identity_mappings_are_rare() {
     let mut base = 0usize;
     let mut suspicious: Vec<String> = Vec::new();
     for (canon, es_loc) in es {
-        let Some(de_loc) = de.get(&canon) else { continue };
-        let Some(fr_loc) = fr.get(&canon) else { continue };
+        let Some(de_loc) = de.get(&canon) else {
+            continue;
+        };
+        let Some(fr_loc) = fr.get(&canon) else {
+            continue;
+        };
         if de_loc != &canon && fr_loc != &canon {
             base += 1;
             if es_loc == canon {
@@ -260,7 +264,10 @@ fn locale_es_es_suspicious_identity_mappings_are_rare() {
         }
     }
 
-    assert!(base > 0, "test invariant: expected some de-DE/fr-FR translated functions");
+    assert!(
+        base > 0,
+        "test invariant: expected some de-DE/fr-FR translated functions"
+    );
 
     let suspicious_count = suspicious.len();
     let ratio = suspicious_count as f64 / base as f64;
@@ -271,7 +278,12 @@ fn locale_es_es_suspicious_identity_mappings_are_rare() {
 
     if ratio > MAX_SUSPICIOUS_RATIO {
         suspicious.sort();
-        let sample = suspicious.iter().take(25).cloned().collect::<Vec<_>>().join(", ");
+        let sample = suspicious
+            .iter()
+            .take(25)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
         panic!(
             "es-ES has too many suspicious identity mappings vs de-DE+fr-FR ({suspicious_count}/{base} = {ratio:.3}). Examples: {sample}"
         );
