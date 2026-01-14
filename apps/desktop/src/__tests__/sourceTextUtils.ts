@@ -1,6 +1,8 @@
 export function skipStringLiteral(source: string, start: number): number {
   const quote = source[start];
   if (quote !== "'" && quote !== '"' && quote !== "`") return start + 1;
+  if (quote === "`") return skipTemplateLiteral(source, start);
+
   let i = start + 1;
   while (i < source.length) {
     const ch = source[i];
@@ -9,6 +11,73 @@ export function skipStringLiteral(source: string, start: number): number {
       continue;
     }
     if (ch === quote) return i + 1;
+    i += 1;
+  }
+  return source.length;
+}
+
+function skipTemplateLiteral(source: string, start: number): number {
+  // Template literals can contain nested `${ ... }` expressions (including other template literals).
+  // This is a lightweight best-effort skipper so our source-scanning guardrails don't get confused
+  // by backticks appearing inside `${}`.
+  let i = start + 1;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "\\") {
+      // Escape sequence inside the template quasi.
+      i += 2;
+      continue;
+    }
+
+    if (ch === "`") return i + 1;
+
+    if (ch === "$" && source[i + 1] === "{") {
+      i += 2; // consume `${`
+      let depth = 1;
+      for (; i < source.length; i += 1) {
+        const c = source[i]!;
+
+        if (c === "'" || c === '"' || c === "`") {
+          i = skipStringLiteral(source, i) - 1;
+          continue;
+        }
+
+        // Skip comments inside the expression so braces inside comments don't affect depth.
+        if (c === "/" && source[i + 1] === "/") {
+          i += 2;
+          while (i < source.length && source[i] !== "\n") i += 1;
+          i -= 1;
+          continue;
+        }
+
+        if (c === "/" && source[i + 1] === "*") {
+          i += 2;
+          while (i < source.length) {
+            if (source[i] === "*" && source[i + 1] === "/") {
+              i += 1;
+              break;
+            }
+            i += 1;
+          }
+          continue;
+        }
+
+        if (c === "/" && isRegexLiteralStart(source, i)) {
+          i = skipRegexLiteral(source, i) - 1;
+          continue;
+        }
+
+        if (c === "{") depth += 1;
+        else if (c === "}") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+
+      if (i >= source.length) return source.length;
+      // `i` is at the closing `}`; continue scanning the template quasi.
+    }
+
     i += 1;
   }
   return source.length;
@@ -30,7 +99,7 @@ function isRegexLiteralStart(source: string, start: number): boolean {
   const prev = source[i]!;
 
   // Characters that can precede an expression, where a regex literal is valid.
-  if ("([{:;,=!?&|+-*%^~<>".includes(prev)) return true;
+  if ("([{:;,=!?&|+-*%^~<>/".includes(prev)) return true;
 
   // Keywords like `return /.../` are also valid.
   if (/[A-Za-z_$]/.test(prev)) {

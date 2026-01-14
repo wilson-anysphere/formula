@@ -31,5 +31,21 @@ describe("sourceTextUtils.stripComments", () => {
     expect(out).toContain(`/[/*]/`);
     expect(out).toContain(`/[//]/`);
   });
-});
 
+  it("handles nested template literals and template expressions without getting confused by backticks/braces", () => {
+    const input = [
+      // Nested template literal inside an expression.
+      "const a = `outer ${`inner`} end`; // trailing",
+      // Block comment inside the expression (including a `}` that should not close the expression).
+      "const b = `x ${foo /* } */} y`;",
+      // Nested object literal braces inside the expression.
+      "const c = `x ${ { a: 1, b: 2 } } y`;",
+    ].join("\n");
+
+    const out = stripComments(input);
+    expect(out).toContain("const a = `outer ${`inner`} end`;");
+    expect(out).not.toContain("trailing");
+    expect(out).toContain("const b = `x ${foo /* } */} y`;");
+    expect(out).toContain("const c = `x ${ { a: 1, b: 2 } } y`;");
+  });
+});
