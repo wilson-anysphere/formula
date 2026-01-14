@@ -1054,13 +1054,15 @@ export interface SummaryReport {
 }
 
 // Suggested binding shape:
-//   const mgr = workbook.createScenarioManager();
-//   mgr.createScenario(params: CreateScenarioParams) -> ScenarioId
-//   mgr.listScenarios() -> Scenario[]
-//   mgr.getScenario(id: ScenarioId) -> Scenario | null
-//   mgr.deleteScenario(id: ScenarioId) -> boolean
-//   mgr.applyScenario(id) / mgr.restoreBase()
-//   mgr.generateSummaryReport({ resultCells, scenarioIds }) -> SummaryReport
+//   // Likely implemented as `WasmWorkbook` methods (consistent with existing formula-wasm APIs),
+//   // but could also be exposed as a separate manager object. Either approach is viable as long
+//   // as scenario state persists across calls.
+//   workbook.createScenario(params: CreateScenarioParams) -> ScenarioId
+//   workbook.listScenarios() -> Scenario[]
+//   workbook.getScenario(id: ScenarioId) -> Scenario | null
+//   workbook.deleteScenario(id: ScenarioId) -> boolean
+//   workbook.applyScenario(id: ScenarioId) / workbook.restoreScenarioBase()
+//   workbook.generateScenarioSummaryReport({ resultCells, scenarioIds }) -> SummaryReport
 ```
 
 Validation + edge cases (Rust behavior):
@@ -1092,15 +1094,20 @@ Rust API ([`what_if/monte_carlo.rs`](../crates/formula-engine/src/what_if/monte_
 Proposed JS/WASM DTOs (field names match Rust’s serde output):
 
 ```ts
+/**
+ * Rust serde DTO shape (if you expose `formula_engine::what_if::monte_carlo::SimulationConfig`
+ * directly through wasm and deserialize it via serde).
+ */
 export interface SimulationConfig {
   iterations: number;
   inputDistributions: InputDistribution[];
   outputCells: CellRef[];
 
-  // Optional in JS; Rust defaults: seed=0, histogramBins=50
-  seed?: number; // u64; require a safe integer to preserve determinism
+  // Required by the Rust struct (u64; require a safe integer for JS determinism).
+  seed: number;
   correlations?: CorrelationMatrix | null;
-  histogramBins?: number;
+  // Required by the Rust struct.
+  histogramBins: number;
 }
 
 export interface InputDistribution {
@@ -1157,17 +1164,31 @@ export interface SimulationResult {
   outputSamples: Record<CellRef, number[]>;
 }
 
-export interface MonteCarloOptions {
-  /**
-   * Default sheet name used to resolve CellRefs without an explicit `Sheet!A1` prefix.
-   * (Ignored when config uses explicit sheet prefixes.)
-   */
+/**
+ * Proposed `formula-wasm` request shape (mirrors the existing `goalSeek` style).
+ *
+ * Note: cells are expressed as A1 addresses WITHOUT sheet prefixes; the sheet is
+ * provided separately and used as the default sheet for the engine adapter.
+ */
+export interface MonteCarloRequest {
+  // Defaults to "Sheet1" when omitted/empty.
   sheet?: string;
-  onProgress?: (p: SimulationProgress) => void;
+
+  iterations: number;
+  inputDistributions: { cell: string; distribution: Distribution }[];
+  outputCells: string[];
+
+  // Optional; Rust defaults: seed=0, histogramBins=50
+  seed?: number;
+  correlations?: CorrelationMatrix | null;
+  histogramBins?: number;
+
+  // Optional; on wasm builds "multiThreaded" falls back to single-threaded recalc.
+  recalcMode?: RecalcMode;
 }
 
-// Proposed JS/WASM entrypoint:
-//   workbook.runMonteCarloSimulation(config: SimulationConfig, options?: MonteCarloOptions): SimulationResult
+// Proposed future entrypoint:
+//   workbook.runMonteCarloSimulation(request: MonteCarloRequest): SimulationResult
 ```
 
 Validation + edge cases (Rust behavior):
@@ -1198,6 +1219,7 @@ Validation + edge cases (Rust behavior):
 - Side effects: Monte Carlo also mutates spreadsheet state:
   - Each `inputDistributions[*].cell` is overwritten every iteration and is left set to the *last iteration’s* sampled value.
   - The model is recalculated after each sample batch; outputs reflect the last iteration at the end of the run.
+  - If exposed via `formula-wasm`, the binding must keep the JS-facing workbook input state consistent with these mutations (similar to how `goalSeek` updates the `changingCell` input). Otherwise `getCell`/`toJson` may drift from engine state.
 
 ---
 
@@ -1324,10 +1346,13 @@ export interface SolveOutcome {
 // Suggested binding shape (Engine-backed):
 //   workbook.solve(
 //     {
-//       defaultSheet?: string,
-//       objectiveCell: CellRef,
-//       variableCells: CellRef[],
-//       constraintCells: CellRef[],
+//       // Defaults to "Sheet1" when omitted/empty.
+//       sheet?: string,
+//
+//       // A1 addresses without `Sheet!` prefixes (mirrors `goalSeek`).
+//       objectiveCell: string,
+//       variableCells: string[],
+//       constraintCells: string[],
 //       problem: SolverProblem,
 //       options?: SolveOptions,
 //       onProgress?: (p: SolveProgress) => boolean, // return false to cancel
@@ -1370,6 +1395,7 @@ Validation + edge cases (Rust behavior):
   - Cell-ref parsing:
     - Accepted forms include `A1` (default sheet), `Sheet1!A1`, and `'My Sheet'!A1` (quoted with Excel escaping `''`).
     - Invalid refs fail fast during `EngineSolverModel::new` (e.g. empty refs, missing sheet name when `!` is present).
+    - A future `formula-wasm` binding will likely mirror `goalSeek` and accept A1 addresses without `Sheet!` prefixes, using a separate `sheet` field as the default sheet.
   - Numeric coercion:
     - Decision variables are read **strictly** at construction time:
       - accepted: numbers, booleans (`TRUE`→1, `FALSE`→0), blanks (`0`), and numeric text (parsed using the engine’s `ValueLocaleConfig`, so thousands/decimal separators and common adornments are accepted)
