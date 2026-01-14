@@ -1874,7 +1874,7 @@ impl MetadataPart {
                         let attr = attr?;
                         let key = crate::openxml::local_name(attr.key.as_ref());
                         if key == b"i" || key == b"idx" || key == b"index" || key == b"v" {
-                            rich_idx = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            rich_idx = attr.unescape_value()?.trim().parse::<u32>().ok();
                             if rich_idx.is_some() {
                                 break;
                             }
@@ -1956,7 +1956,7 @@ impl MetadataPart {
                         let key = crate::openxml::local_name(attr.key.as_ref());
                         if key == b"i" || key == b"idx" || key == b"index" || key == b"v" {
                             current_future_rich_idx =
-                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                                attr.unescape_value()?.trim().parse::<u32>().ok();
                             if current_future_rich_idx.is_some() {
                                 break;
                             }
@@ -2030,10 +2030,10 @@ impl MetadataPart {
                         let attr = attr?;
                         match crate::openxml::local_name(attr.key.as_ref()) {
                             b"t" => {
-                                t = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                                t = attr.unescape_value()?.trim().parse::<u32>().ok();
                             }
                             b"v" => {
-                                v = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                                v = attr.unescape_value()?.trim().parse::<u32>().ok();
                             }
                             _ => {}
                         }
@@ -2391,8 +2391,8 @@ fn parse_workbook_metadata(
                 for attr in e.attributes() {
                     let attr = attr?;
                     if attr.key.as_ref() == b"date1904" {
-                        let val = attr.unescape_value()?.into_owned();
-                        if val == "1" || val.eq_ignore_ascii_case("true") {
+                        let val = attr.unescape_value()?;
+                        if parse_xml_bool(&val) {
                             date_system = DateSystem::V1904;
                         }
                     }
@@ -2407,9 +2407,8 @@ fn parse_workbook_metadata(
                             calc_pr.calc_mode = Some(attr.unescape_value()?.into_owned())
                         }
                         b"fullCalcOnLoad" => {
-                            let v = attr.unescape_value()?.into_owned();
-                            calc_pr.full_calc_on_load =
-                                Some(v == "1" || v.eq_ignore_ascii_case("true"))
+                            let v = attr.unescape_value()?;
+                            calc_pr.full_calc_on_load = Some(parse_xml_bool(&v))
                         }
                         _ => {}
                     }
@@ -2443,28 +2442,28 @@ fn parse_workbook_metadata(
                         b"activeTab" => {
                             if workbook_view.active_tab.is_none() {
                                 workbook_view.active_tab =
-                                    attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                                    attr.unescape_value()?.trim().parse::<usize>().ok();
                             }
                         }
                         b"xWindow" => {
-                            window.x = attr.unescape_value()?.into_owned().parse::<i32>().ok();
+                            window.x = attr.unescape_value()?.trim().parse::<i32>().ok();
                             saw_window_attr = true;
                         }
                         b"yWindow" => {
-                            window.y = attr.unescape_value()?.into_owned().parse::<i32>().ok();
+                            window.y = attr.unescape_value()?.trim().parse::<i32>().ok();
                             saw_window_attr = true;
                         }
                         b"windowWidth" => {
-                            window.width = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            window.width = attr.unescape_value()?.trim().parse::<u32>().ok();
                             saw_window_attr = true;
                         }
                         b"windowHeight" => {
-                            window.height = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            window.height = attr.unescape_value()?.trim().parse::<u32>().ok();
                             saw_window_attr = true;
                         }
                         b"windowState" => {
-                            let state = attr.unescape_value()?.into_owned();
-                            window.state = match state.to_ascii_lowercase().as_str() {
+                            let state = attr.unescape_value()?.trim().to_ascii_lowercase();
+                            window.state = match state.as_str() {
                                 "minimized" => Some(WorkbookWindowState::Minimized),
                                 "maximized" => Some(WorkbookWindowState::Maximized),
                                 "normal" => Some(WorkbookWindowState::Normal),
@@ -2501,7 +2500,7 @@ fn parse_workbook_metadata(
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"sheetId" => {
                             sheet_id =
-                                Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                                Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
                         }
                         b"state" => state = Some(attr.unescape_value()?.into_owned()),
                         _ if crate::openxml::local_name(key) == b"id" => {
@@ -2537,12 +2536,12 @@ fn parse_workbook_metadata(
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
                             local_sheet_id =
-                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                                attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
                         b"hidden" => {
-                            let v = attr.unescape_value()?.into_owned();
-                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                            let v = attr.unescape_value()?;
+                            hidden = parse_xml_bool(&v);
                         }
                         _ => {}
                     }
@@ -2570,12 +2569,12 @@ fn parse_workbook_metadata(
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
                             local_sheet_id =
-                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                                attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
                         b"hidden" => {
-                            let v = attr.unescape_value()?.into_owned();
-                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                            let v = attr.unescape_value()?;
+                            hidden = parse_xml_bool(&v);
                         }
                         _ => {}
                     }
@@ -3055,13 +3054,14 @@ fn parse_worksheet_into_model(
                         b"r" => {
                             let a1 = attr.unescape_value()?.into_owned();
                             current_ref = Some(
-                                CellRef::from_a1(&a1).map_err(|_| ReadError::InvalidCellRef(a1))?,
+                                CellRef::from_a1(a1.trim())
+                                    .map_err(|_| ReadError::InvalidCellRef(a1))?,
                             );
                         }
                         b"t" => current_t = Some(attr.unescape_value()?.into_owned()),
                         b"s" => {
                             if let Ok(xf_index) =
-                                attr.unescape_value()?.into_owned().parse::<u32>()
+                                attr.unescape_value()?.trim().parse::<u32>()
                             {
                                 current_style = styles_part.style_id_for_xf(xf_index);
                             }
@@ -3083,12 +3083,13 @@ fn parse_worksheet_into_model(
                         b"r" => {
                             let a1 = attr.unescape_value()?.into_owned();
                             cell_ref = Some(
-                                CellRef::from_a1(&a1).map_err(|_| ReadError::InvalidCellRef(a1))?,
+                                CellRef::from_a1(a1.trim())
+                                    .map_err(|_| ReadError::InvalidCellRef(a1))?,
                             );
                         }
                         b"s" => {
                             if let Ok(xf_index) =
-                                attr.unescape_value()?.into_owned().parse::<u32>()
+                                attr.unescape_value()?.trim().parse::<u32>()
                             {
                                 style_id = styles_part.style_id_for_xf(xf_index);
                             }
@@ -3105,7 +3106,7 @@ fn parse_worksheet_into_model(
                         if let (Some(vm), Some(_metadata_part), Some(_rich_value_cells)) =
                             (vm.as_deref(), metadata_part, rich_value_cells.as_mut())
                         {
-                            if let Ok(vm_idx) = vm.parse::<u32>() {
+                            if let Ok(vm_idx) = vm.trim().parse::<u32>() {
                                 pending_vm_cells.push((cell_ref, vm_idx));
                             }
                         }
@@ -3278,11 +3279,11 @@ fn parse_worksheet_into_model(
                         b"ref" => formula.reference = Some(attr.unescape_value()?.into_owned()),
                         b"si" => {
                             formula.shared_index =
-                                Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                                Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
                         }
                         b"aca" => {
-                            let v = attr.unescape_value()?.into_owned();
-                            formula.always_calc = Some(v == "1" || v.eq_ignore_ascii_case("true"))
+                            let v = attr.unescape_value()?;
+                            formula.always_calc = Some(parse_xml_bool(&v))
                         }
                         _ => {}
                     }
@@ -3300,11 +3301,11 @@ fn parse_worksheet_into_model(
                         b"ref" => formula.reference = Some(attr.unescape_value()?.into_owned()),
                         b"si" => {
                             formula.shared_index =
-                                Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                                Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
                         }
                         b"aca" => {
-                            let v = attr.unescape_value()?.into_owned();
-                            formula.always_calc = Some(v == "1" || v.eq_ignore_ascii_case("true"))
+                            let v = attr.unescape_value()?;
+                            formula.always_calc = Some(parse_xml_bool(&v))
                         }
                         _ => {}
                     }
