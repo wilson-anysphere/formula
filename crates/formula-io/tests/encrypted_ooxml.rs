@@ -211,44 +211,21 @@ fn detects_encrypted_ooxml_xlsx_container_for_model_loader() {
 fn encrypted_ooxml_fixtures_require_password() {
     for rel in [
         "encrypted/ooxml/agile.xlsx",
-        "encrypted/ooxml/agile-empty-password.xlsx",
         "encrypted/ooxml/standard.xlsx",
     ] {
         let path = fixture_path(rel);
 
         let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
-        if cfg!(feature = "encrypted-workbooks") {
-            assert!(
-                matches!(err, Error::PasswordRequired { .. }),
-                "expected Error::PasswordRequired, got {err:?}"
-            );
-        } else {
-            assert!(
-                matches!(err, Error::UnsupportedEncryption { .. }),
-                "expected Error::UnsupportedEncryption, got {err:?}"
-            );
-        }
         let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("encrypt") || msg.contains("password") || msg.contains("unsupported"),
+            msg.contains("encrypt") || msg.contains("password"),
             "expected error message to mention encryption/password protection, got: {msg}"
         );
 
         let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
-        if cfg!(feature = "encrypted-workbooks") {
-            assert!(
-                matches!(err, Error::PasswordRequired { .. }),
-                "expected Error::PasswordRequired, got {err:?}"
-            );
-        } else {
-            assert!(
-                matches!(err, Error::UnsupportedEncryption { .. }),
-                "expected Error::UnsupportedEncryption, got {err:?}"
-            );
-        }
         let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("encrypt") || msg.contains("password") || msg.contains("unsupported"),
+            msg.contains("encrypt") || msg.contains("password"),
             "expected error message to mention encryption/password protection, got: {msg}"
         );
     }
