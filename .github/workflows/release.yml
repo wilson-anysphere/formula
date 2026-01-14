@@ -705,14 +705,6 @@ jobs:
           # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
 
-      - name: Cache Pyodide assets
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: apps/desktop/public/pyodide/
-          key: pyodide-v${{ env.PYODIDE_VERSION }}-${{ runner.os }}
-          restore-keys: |
-            pyodide-v${{ env.PYODIDE_VERSION }}-
-
       - name: Install JS dependencies
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
         env:
@@ -802,31 +794,15 @@ jobs:
             echo "Expected wasm-pack ${expected}, but found ${actual}." >&2
             exit 1
           fi
-      - name: Detect Pyodide version (for caching)
-        id: pyodide
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\\s+PYODIDE_VERSION\\s*=\\s*[\"\\x27]([^\"\\x27]+)[\"\\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Restore Pyodide asset cache
-        id: pyodide-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
-          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
-
-      - name: Ensure Pyodide assets are present (populate cache on miss)
-        shell: bash
-        run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
-
-      - name: Save Pyodide asset cache
-        if: steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
-          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+      - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        # COOP/COEP + Worker support can regress per-platform; run on all release targets by default.
+        #
+        # Optional: set `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) as a GitHub Actions variable to
+        # only run this step on Linux (useful if a hosted-runner regression makes the check flaky on
+        # macOS/Windows while keeping at least one COI signal before publishing).
+        if: needs.validate-version.outputs.upload == 'true' && (runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false'))
+        run: pnpm -C apps/desktop check:coi
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
