@@ -556,9 +556,9 @@ jobs:
       - name: Check desktop builds with full desktop feature set
         run: |
           if (cargo metadata --no-deps --format-version=1 | Select-String -Pattern '"name":"formula-desktop-tauri"' -Quiet) {
-            cargo check -p formula-desktop-tauri --features desktop
+            cargo check -p formula-desktop-tauri --features desktop --locked
           } else {
-            cargo check -p desktop --features desktop
+            cargo check -p desktop --features desktop --locked
           }
 
   desktop-tauri-check-macos:
@@ -586,9 +586,9 @@ jobs:
       - name: Check desktop builds with full desktop feature set
         run: |
           if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
-            cargo check -p formula-desktop-tauri --features desktop
+            cargo check -p formula-desktop-tauri --features desktop --locked
           else
-            cargo check -p desktop --features desktop
+            cargo check -p desktop --features desktop --locked
           fi
 
   node-tests:
