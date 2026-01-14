@@ -97,12 +97,7 @@ export function inverseTransformVector(
   dy: number,
   transform: DrawingTransform,
 ): { x: number; y: number } {
-  // Inverse of: scale(flip) then rotate(theta).
-  // Apply rotate(-theta) then scale(flip). (flip is its own inverse)
-  const trig = getTransformTrig(transform);
-  const rx = dx * trig.cos + dy * trig.sin;
-  const ry = -dx * trig.sin + dy * trig.cos;
-  return { x: transform.flipH ? -rx : rx, y: transform.flipV ? -ry : ry };
+  return inverseTransformVectorInto(dx, dy, transform, { x: 0, y: 0 });
 }
 
 export function applyTransformVector(
@@ -110,9 +105,46 @@ export function applyTransformVector(
   dy: number,
   transform: DrawingTransform,
 ): { x: number; y: number } {
+  return applyTransformVectorInto(dx, dy, transform, { x: 0, y: 0 });
+}
+
+/**
+ * Allocation-free inverse transform helper.
+ *
+ * Writes into `out` and returns it.
+ */
+export function inverseTransformVectorInto(
+  dx: number,
+  dy: number,
+  transform: DrawingTransform,
+  out: { x: number; y: number },
+): { x: number; y: number } {
+  // Inverse of: scale(flip) then rotate(theta).
+  // Apply rotate(-theta) then scale(flip). (flip is its own inverse)
+  const trig = getTransformTrig(transform);
+  const rx = dx * trig.cos + dy * trig.sin;
+  const ry = -dx * trig.sin + dy * trig.cos;
+  out.x = transform.flipH ? -rx : rx;
+  out.y = transform.flipV ? -ry : ry;
+  return out;
+}
+
+/**
+ * Allocation-free forward transform helper.
+ *
+ * Writes into `out` and returns it.
+ */
+export function applyTransformVectorInto(
+  dx: number,
+  dy: number,
+  transform: DrawingTransform,
+  out: { x: number; y: number },
+): { x: number; y: number } {
   // Forward transform: scale(flip) then rotate(theta).
   const trig = getTransformTrig(transform);
   const x = transform.flipH ? -dx : dx;
   const y = transform.flipV ? -dy : dy;
-  return { x: x * trig.cos - y * trig.sin, y: x * trig.sin + y * trig.cos };
+  out.x = x * trig.cos - y * trig.sin;
+  out.y = x * trig.sin + y * trig.cos;
+  return out;
 }

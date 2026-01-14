@@ -18,7 +18,11 @@ import {
   patchXfrmOff,
   patchXfrmRot,
 } from "./drawingml/patch";
-import { applyTransformVector, inverseTransformVector, normalizeRotationDeg } from "./transform";
+import { applyTransformVectorInto, inverseTransformVectorInto, normalizeRotationDeg } from "./transform";
+
+const A1_CELL = { row: 0, col: 0 };
+const CELL_SCRATCH = { row: 0, col: 0 };
+const TRANSFORM_VEC_SCRATCH = { x: 0, y: 0 };
 
 export type DrawingInteractionCommitKind = "move" | "resize" | "rotate";
 
@@ -173,7 +177,12 @@ export class DrawingInteractionController {
   })();
   private escapeListenerAttached = false;
   private autoScrollRaf: number | null = null;
+  private readonly lastPointerScratch: { x: number; y: number; shiftKey: boolean } = { x: 0, y: 0, shiftKey: false };
   private lastPointer: { x: number; y: number; shiftKey: boolean } | null = null;
+  private readonly sheetPointScratch: { x: number; y: number } = { x: 0, y: 0 };
+  private readonly autoScrollDeltaScratch: { dx: number; dy: number } = { dx: 0, dy: 0 };
+  private readonly transformVecScratch: { x: number; y: number } = { x: 0, y: 0 };
+  private readonly aspectRatioDeltaScratch: { dx: number; dy: number } = { dx: 0, dy: 0 };
 
   /**
    * Mark a pointer event as a context-click that hit a drawing object.
@@ -368,7 +377,7 @@ export class DrawingInteractionController {
     const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
     const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
     const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
-    const startSheetPoint = this.sheetPointFromLocal({ x: clampedX, y: clampedY }, viewport, paneLayout);
+    const startSheetPoint = this.sheetPointFromLocal(clampedX, clampedY, viewport, paneLayout);
     const startSheetX = startSheetPoint.x;
     const startSheetY = startSheetPoint.y;
 
@@ -583,8 +592,12 @@ export class DrawingInteractionController {
       this.stopPointerEvent(e);
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
-      this.lastPointer = { x, y, shiftKey: Boolean(e.shiftKey) };
-      this.applyInteractionAtPointer(this.lastPointer);
+      const pointer = this.lastPointerScratch;
+      pointer.x = x;
+      pointer.y = y;
+      pointer.shiftKey = Boolean(e.shiftKey);
+      this.lastPointer = pointer;
+      this.applyInteractionAtPointer(pointer);
       this.maybeStartAutoScroll();
       return;
     }
@@ -690,25 +703,25 @@ export class DrawingInteractionController {
     }
   };
 
-  private sheetPointFromLocal(pointer: { x: number; y: number }, viewport: Viewport, paneLayout: PaneLayout): { x: number; y: number } {
+  private sheetPointFromLocal(x: number, y: number, viewport: Viewport, paneLayout: PaneLayout): { x: number; y: number } {
     // Sheet-space coordinates are relative to the A1 origin. Screen-space points
     // include `headerOffsetX/Y` and are shifted by scroll offsets except when the
     // pointer is inside a frozen pane.
-    const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(pointer.x, paneLayout.headerOffsetX) : pointer.x;
-    const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(pointer.y, paneLayout.headerOffsetY) : pointer.y;
+    const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(x, paneLayout.headerOffsetX) : x;
+    const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
     const effectiveScrollX = clampedX < paneLayout.frozenBoundaryX ? 0 : viewport.scrollX;
     const effectiveScrollY = clampedY < paneLayout.frozenBoundaryY ? 0 : viewport.scrollY;
-    return {
-      x: effectiveScrollX + (clampedX - paneLayout.headerOffsetX),
-      y: effectiveScrollY + (clampedY - paneLayout.headerOffsetY),
-    };
+    const out = this.sheetPointScratch;
+    out.x = effectiveScrollX + (clampedX - paneLayout.headerOffsetX);
+    out.y = effectiveScrollY + (clampedY - paneLayout.headerOffsetY);
+    return out;
   }
 
   private applyInteractionAtPointer(pointer: { x: number; y: number; shiftKey: boolean }): void {
     const viewport = this.callbacks.getViewport();
     const zoom = sanitizeZoom(viewport.zoom);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-    const sheetPoint = this.sheetPointFromLocal(pointer, viewport, paneLayout);
+    const sheetPoint = this.sheetPointFromLocal(pointer.x, pointer.y, viewport, paneLayout);
 
     if (this.resizing) {
       let dx = sheetPoint.x - this.resizing.startSheetX;
@@ -718,30 +731,37 @@ export class DrawingInteractionController {
       const isCornerHandle = handle === "nw" || handle === "ne" || handle === "se" || handle === "sw";
       if (isCornerHandle && pointer.shiftKey && this.resizing.aspectRatio != null) {
         const transform = this.resizing.transform;
+        const startWidthPx = this.resizing.startWidthPx;
+        const startHeightPx = this.resizing.startHeightPx;
+        const aspectRatio = this.resizing.aspectRatio;
+        const minSizePx = 8;
+
         if (hasNonIdentityTransform(transform)) {
-          const local = inverseTransformVector(dx, dy, transform!);
-          const lockedLocal = lockAspectRatioResize({
+          const local = inverseTransformVectorInto(dx, dy, transform, this.transformVecScratch);
+          const lockedLocal = lockAspectRatioResizeInto(
             handle,
-            dx: local.x,
-            dy: local.y,
-            startWidthPx: this.resizing.startWidthPx,
-            startHeightPx: this.resizing.startHeightPx,
-            aspectRatio: this.resizing.aspectRatio,
-            minSizePx: 8,
-          });
-          const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+            local.x,
+            local.y,
+            startWidthPx,
+            startHeightPx,
+            aspectRatio,
+            minSizePx,
+            this.aspectRatioDeltaScratch,
+          );
+          const world = applyTransformVectorInto(lockedLocal.dx, lockedLocal.dy, transform, this.transformVecScratch);
           dx = world.x;
           dy = world.y;
         } else {
-          const locked = lockAspectRatioResize({
+          const locked = lockAspectRatioResizeInto(
             handle,
             dx,
             dy,
-            startWidthPx: this.resizing.startWidthPx,
-            startHeightPx: this.resizing.startHeightPx,
-            aspectRatio: this.resizing.aspectRatio,
-            minSizePx: 8,
-          });
+            startWidthPx,
+            startHeightPx,
+            aspectRatio,
+            minSizePx,
+            this.aspectRatioDeltaScratch,
+          );
           dx = locked.dx;
           dy = locked.dy;
         }
@@ -802,12 +822,16 @@ export class DrawingInteractionController {
   }
 
   private computeAutoScrollDelta(pointer: { x: number; y: number }, viewport: Viewport, paneLayout: PaneLayout): { dx: number; dy: number } {
+    const out = this.autoScrollDeltaScratch;
     const inHeader = pointer.x < paneLayout.headerOffsetX || pointer.y < paneLayout.headerOffsetY;
-    if (inHeader) return { dx: 0, dy: 0 };
+    if (inHeader) {
+      out.dx = 0;
+      out.dy = 0;
+      return out;
+    }
 
     const threshold = 24;
     const maxSpeed = 20;
-    const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
     const pointInFrozenCols = pointer.x < paneLayout.frozenBoundaryX;
     const pointInFrozenRows = pointer.y < paneLayout.frozenBoundaryY;
@@ -820,10 +844,14 @@ export class DrawingInteractionController {
     let dx = 0;
     if (!pointInFrozenCols) {
       if (pointer.x >= leftEdge && pointer.x < leftEdge + threshold) {
-        const t = clamp01((leftEdge + threshold - pointer.x) / threshold);
+        let t = (leftEdge + threshold - pointer.x) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dx = -Math.round(t * maxSpeed);
       } else if (pointer.x > rightEdge - threshold) {
-        const t = clamp01((pointer.x - (rightEdge - threshold)) / threshold);
+        let t = (pointer.x - (rightEdge - threshold)) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dx = Math.round(t * maxSpeed);
       }
     }
@@ -831,15 +859,21 @@ export class DrawingInteractionController {
     let dy = 0;
     if (!pointInFrozenRows) {
       if (pointer.y >= topEdge && pointer.y < topEdge + threshold) {
-        const t = clamp01((topEdge + threshold - pointer.y) / threshold);
+        let t = (topEdge + threshold - pointer.y) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dy = -Math.round(t * maxSpeed);
       } else if (pointer.y > bottomEdge - threshold) {
-        const t = clamp01((pointer.y - (bottomEdge - threshold)) / threshold);
+        let t = (pointer.y - (bottomEdge - threshold)) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dy = Math.round(t * maxSpeed);
       }
     }
 
-    return { dx, dy };
+    out.dx = dx;
+    out.dy = dy;
+    return out;
   }
 
   private maybeStartAutoScroll(): void {
@@ -1222,38 +1256,42 @@ export function resizeAnchor(
   zoom: number = 1,
 ): DrawingObject["anchor"] {
   const z = sanitizeZoom(zoom);
-  const originA1 = (() => {
+  let originA1x = 0;
+  let originA1y = 0;
+  if (anchor.type === "absolute") {
     try {
-      return geom.cellOriginPx({ row: 0, col: 0 });
+      const origin = geom.cellOriginPx(A1_CELL);
+      originA1x = origin.x;
+      originA1y = origin.y;
     } catch {
-      return { x: 0, y: 0 };
+      originA1x = 0;
+      originA1y = 0;
     }
-  })();
-  const rect =
-    anchor.type === "absolute"
-      ? {
-          left: originA1.x + emuToPx(anchor.pos.xEmu) * z,
-          top: originA1.y + emuToPx(anchor.pos.yEmu) * z,
-          right: originA1.x + emuToPx(anchor.pos.xEmu + anchor.size.cx) * z,
-          bottom: originA1.y + emuToPx(anchor.pos.yEmu + anchor.size.cy) * z,
-        }
-      : anchor.type === "oneCell"
-        ? (() => {
-            const p = anchorPointToSheetPx(anchor.from, geom, z);
-            return {
-              left: p.x,
-              top: p.y,
-              right: p.x + emuToPx(anchor.size.cx) * z,
-              bottom: p.y + emuToPx(anchor.size.cy) * z,
-            };
-          })()
-        : (() => {
-            const from = anchorPointToSheetPx(anchor.from, geom, z);
-            const to = anchorPointToSheetPx(anchor.to, geom, z);
-            return { left: from.x, top: from.y, right: to.x, bottom: to.y };
-          })();
+  }
 
-  let { left, top, right, bottom } = rect;
+  let left = 0;
+  let top = 0;
+  let right = 0;
+  let bottom = 0;
+  if (anchor.type === "absolute") {
+    left = originA1x + emuToPx(anchor.pos.xEmu) * z;
+    top = originA1y + emuToPx(anchor.pos.yEmu) * z;
+    right = originA1x + emuToPx(anchor.pos.xEmu + anchor.size.cx) * z;
+    bottom = originA1y + emuToPx(anchor.pos.yEmu + anchor.size.cy) * z;
+  } else if (anchor.type === "oneCell") {
+    const p = anchorPointToSheetPx(anchor.from, geom, z);
+    left = p.x;
+    top = p.y;
+    right = p.x + emuToPx(anchor.size.cx) * z;
+    bottom = p.y + emuToPx(anchor.size.cy) * z;
+  } else {
+    const from = anchorPointToSheetPx(anchor.from, geom, z);
+    const to = anchorPointToSheetPx(anchor.to, geom, z);
+    left = from.x;
+    top = from.y;
+    right = to.x;
+    bottom = to.y;
+  }
 
   const movesLeftEdge = handle === "nw" || handle === "w" || handle === "sw";
   const movesTopEdge = handle === "nw" || handle === "n" || handle === "ne";
@@ -1262,13 +1300,15 @@ export function resizeAnchor(
 
   if (hasNonIdentityTransform(transform)) {
     // Convert pointer movement into the shape's local coordinate system (pre-rotation).
-    let localDelta = inverseTransformVector(dxPx, dyPx, transform!);
+    const localDelta = inverseTransformVectorInto(dxPx, dyPx, transform, TRANSFORM_VEC_SCRATCH);
+    let localDx = localDelta.x;
+    let localDy = localDelta.y;
 
     // Edge handles resize along a single local axis: ignore perpendicular movement.
     if (handle === "e" || handle === "w") {
-      localDelta = { x: localDelta.x, y: 0 };
+      localDy = 0;
     } else if (handle === "n" || handle === "s") {
-      localDelta = { x: 0, y: localDelta.y };
+      localDx = 0;
     }
 
     const width = right - left;
@@ -1283,10 +1323,10 @@ export function resizeAnchor(
     let localTop = -hh;
     let localBottom = hh;
 
-    if (movesLeftEdge) localLeft += localDelta.x;
-    if (movesRightEdge) localRight += localDelta.x;
-    if (movesTopEdge) localTop += localDelta.y;
-    if (movesBottomEdge) localBottom += localDelta.y;
+    if (movesLeftEdge) localLeft += localDx;
+    if (movesRightEdge) localRight += localDx;
+    if (movesTopEdge) localTop += localDy;
+    if (movesBottomEdge) localBottom += localDy;
 
     // Clamp against negative widths/heights while keeping the opposite edge stationary.
     if (localRight < localLeft) {
@@ -1306,8 +1346,9 @@ export function resizeAnchor(
 
     const nextWidth = Math.max(0, localRight - localLeft);
     const nextHeight = Math.max(0, localBottom - localTop);
-    const localCenterShift = { x: (localLeft + localRight) / 2, y: (localTop + localBottom) / 2 };
-    const worldCenterShift = applyTransformVector(localCenterShift.x, localCenterShift.y, transform!);
+    const localCenterShiftX = (localLeft + localRight) / 2;
+    const localCenterShiftY = (localTop + localBottom) / 2;
+    const worldCenterShift = applyTransformVectorInto(localCenterShiftX, localCenterShiftY, transform, TRANSFORM_VEC_SCRATCH);
 
     const nextCx = cx + worldCenterShift.x;
     const nextCy = cy + worldCenterShift.y;
@@ -1382,7 +1423,7 @@ export function resizeAnchor(
     case "absolute": {
       return {
         ...anchor,
-        pos: { xEmu: pxToEmu((left - originA1.x) / z), yEmu: pxToEmu((top - originA1.y) / z) },
+        pos: { xEmu: pxToEmu((left - originA1x) / z), yEmu: pxToEmu((top - originA1y) / z) },
         size: { cx: pxToEmu(widthPx / z), cy: pxToEmu(heightPx / z) },
       };
     }
@@ -1402,7 +1443,7 @@ function anchorPointToSheetPx(point: AnchorPoint, geom: GridGeometry, zoom: numb
   return { x: origin.x + emuToPx(point.offset.xEmu) * z, y: origin.y + emuToPx(point.offset.yEmu) * z };
 }
 
-function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
+function hasNonIdentityTransform(transform: DrawingTransform | undefined): transform is DrawingTransform {
   if (!transform) return false;
   return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
 }
@@ -1430,7 +1471,9 @@ export function shiftAnchorPoint(
       break;
     }
     col -= 1;
-    const w = geom.cellSizePx({ row, col }).width / z;
+    CELL_SCRATCH.row = row;
+    CELL_SCRATCH.col = col;
+    const w = geom.cellSizePx(CELL_SCRATCH).width / z;
     if (w <= 0) {
       xPx = 0;
       break;
@@ -1438,7 +1481,9 @@ export function shiftAnchorPoint(
     xPx += w;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const w = geom.cellSizePx({ row, col }).width / z;
+    CELL_SCRATCH.row = row;
+    CELL_SCRATCH.col = col;
+    const w = geom.cellSizePx(CELL_SCRATCH).width / z;
     if (w <= 0) {
       xPx = 0;
       break;
@@ -1456,7 +1501,9 @@ export function shiftAnchorPoint(
       break;
     }
     row -= 1;
-    const h = geom.cellSizePx({ row, col }).height / z;
+    CELL_SCRATCH.row = row;
+    CELL_SCRATCH.col = col;
+    const h = geom.cellSizePx(CELL_SCRATCH).height / z;
     if (h <= 0) {
       yPx = 0;
       break;
@@ -1464,7 +1511,9 @@ export function shiftAnchorPoint(
     yPx += h;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const h = geom.cellSizePx({ row, col }).height / z;
+    CELL_SCRATCH.row = row;
+    CELL_SCRATCH.col = col;
+    const h = geom.cellSizePx(CELL_SCRATCH).height / z;
     if (h <= 0) {
       yPx = 0;
       break;
@@ -1476,7 +1525,9 @@ export function shiftAnchorPoint(
 
   // Best-effort clamp to avoid tiny float drift.
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const w = geom.cellSizePx({ row, col }).width / z;
+    CELL_SCRATCH.row = row;
+    CELL_SCRATCH.col = col;
+    const w = geom.cellSizePx(CELL_SCRATCH).width / z;
     if (w <= 0) {
       xPx = 0;
       break;
@@ -1487,7 +1538,9 @@ export function shiftAnchorPoint(
     col += 1;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const h = geom.cellSizePx({ row, col }).height / z;
+    CELL_SCRATCH.row = row;
+    CELL_SCRATCH.col = col;
+    const h = geom.cellSizePx(CELL_SCRATCH).height / z;
     if (h <= 0) {
       yPx = 0;
       break;
@@ -1608,23 +1661,24 @@ function resolveViewportPaneLayout(viewport: Viewport, geom: GridGeometry, out: 
 }
 
 // NOTE: Call sites avoid allocating pane objects by computing frozen-row/col membership inline.
-function lockAspectRatioResize(args: {
-  handle: ResizeHandle;
-  dx: number;
-  dy: number;
-  startWidthPx: number;
-  startHeightPx: number;
-  aspectRatio: number;
-  minSizePx: number;
-}): { dx: number; dy: number } {
-  const { handle, startWidthPx, startHeightPx } = args;
-  let { dx, dy, aspectRatio } = args;
+function lockAspectRatioResizeInto(
+  handle: ResizeHandle,
+  dx: number,
+  dy: number,
+  startWidthPx: number,
+  startHeightPx: number,
+  aspectRatio: number,
+  minSizePx: number,
+  out: { dx: number; dy: number },
+): { dx: number; dy: number } {
+  out.dx = dx;
+  out.dy = dy;
 
   // Only lock corner-handle resizes (edge handles remain unconstrained).
-  if (handle === "n" || handle === "e" || handle === "s" || handle === "w") return { dx, dy };
-  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return { dx, dy };
-  if (!Number.isFinite(startWidthPx) || !Number.isFinite(startHeightPx)) return { dx, dy };
-  if (startWidthPx <= 0 || startHeightPx <= 0) return { dx, dy };
+  if (handle === "n" || handle === "e" || handle === "s" || handle === "w") return out;
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return out;
+  if (!Number.isFinite(startWidthPx) || !Number.isFinite(startHeightPx)) return out;
+  if (startWidthPx <= 0 || startHeightPx <= 0) return out;
 
   const sx = handle === "ne" || handle === "se" ? 1 : -1;
   const sy = handle === "sw" || handle === "se" ? 1 : -1;
@@ -1643,31 +1697,29 @@ function lockAspectRatioResize(args: {
   const widthDriven = Math.abs(scaleW - 1) >= Math.abs(scaleH - 1);
 
   const minScale = Math.max(
-    startWidthPx > args.minSizePx ? args.minSizePx / startWidthPx : 0,
-    startHeightPx > args.minSizePx ? args.minSizePx / startHeightPx : 0,
+    startWidthPx > minSizePx ? minSizePx / startWidthPx : 0,
+    startHeightPx > minSizePx ? minSizePx / startHeightPx : 0,
+    0,
   );
 
-  const clampScale = (s: number): number => {
-    if (!Number.isFinite(s)) return 1;
-    // Prevent flipping, and enforce a minimum visual size for stable ratio math.
-    return Math.max(s, minScale, 0);
-  };
-
   if (widthDriven) {
-    const scale = clampScale(scaleW);
+    let scale = scaleW;
+    if (!Number.isFinite(scale)) scale = 1;
+    // Prevent flipping, and enforce a minimum visual size for stable ratio math.
+    scale = Math.max(scale, minScale);
     const nextWidth = startWidthPx * scale;
     const nextHeight = nextWidth / aspectRatio;
-    return {
-      dx: (nextWidth - startWidthPx) * sx,
-      dy: (nextHeight - startHeightPx) * sy,
-    };
+    out.dx = (nextWidth - startWidthPx) * sx;
+    out.dy = (nextHeight - startHeightPx) * sy;
+    return out;
   }
 
-  const scale = clampScale(scaleH);
+  let scale = scaleH;
+  if (!Number.isFinite(scale)) scale = 1;
+  scale = Math.max(scale, minScale);
   const nextHeight = startHeightPx * scale;
   const nextWidth = nextHeight * aspectRatio;
-  return {
-    dx: (nextWidth - startWidthPx) * sx,
-    dy: (nextHeight - startHeightPx) * sy,
-  };
+  out.dx = (nextWidth - startWidthPx) * sx;
+  out.dy = (nextHeight - startHeightPx) * sy;
+  return out;
 }

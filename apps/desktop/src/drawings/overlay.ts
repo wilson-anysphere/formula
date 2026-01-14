@@ -52,6 +52,9 @@ const DEFAULT_OVERLAY_COLOR_TOKENS: OverlayColorTokens = {
   selectionHandleFill: "white",
 };
 
+const LINE_DASH_NONE: number[] = [];
+const LINE_DASH_PLACEHOLDER: number[] = [4, 2];
+
 function getRootCssStyle(root: unknown): CssVarStyle | null {
   if (!root || typeof getComputedStyle !== "function") return null;
   try {
@@ -372,6 +375,7 @@ export class DrawingOverlay {
   private readonly selectedAabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly resizeHandleCentersScratch: ResizeHandleCenter[] = [];
   private readonly rotationHandleCenterScratch: RotationHandleCenter = { x: 0, y: 0 };
+  private readonly dashPatternScratch: number[] = [];
   private readonly paneLayoutScratch: PaneLayout = {
     frozenRows: 0,
     frozenCols: 0,
@@ -845,13 +849,13 @@ export class DrawingOverlay {
             try {
               ctx.strokeStyle = colors.placeholderOtherStroke;
               ctx.lineWidth = 1;
-              ctx.setLineDash([4, 2]);
+              ctx.setLineDash(LINE_DASH_PLACEHOLDER);
               if (hasNonIdentityTransform(obj.transform)) {
                 drawTransformedRect(ctx, screenRectScratch, obj.transform);
               } else {
                 ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
               }
-              ctx.setLineDash([]);
+              ctx.setLineDash(LINE_DASH_NONE);
               ctx.fillStyle = colors.placeholderLabel;
               ctx.globalAlpha = 0.6;
               ctx.font = "12px sans-serif";
@@ -969,7 +973,7 @@ export class DrawingOverlay {
                 if (hasNonIdentityTransform(obj.transform)) {
                   pushObjectTransform(ctx, screenRectScratch, obj.transform, localRectScratch);
                   try {
-                    drawShape(ctx, localRectScratch, spec, colors, cssVarStyle, zoom, canRenderText ? null : undefined);
+                    drawShape(ctx, localRectScratch, spec, colors, cssVarStyle, zoom, this.dashPatternScratch, canRenderText ? null : undefined);
                     if (canRenderText) {
                       renderShapeText(ctx, localRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
                     }
@@ -977,7 +981,7 @@ export class DrawingOverlay {
                     ctx.restore();
                   }
                 } else {
-                  drawShape(ctx, screenRectScratch, spec, colors, cssVarStyle, zoom, canRenderText ? null : undefined);
+                  drawShape(ctx, screenRectScratch, spec, colors, cssVarStyle, zoom, this.dashPatternScratch, canRenderText ? null : undefined);
                   if (canRenderText) {
                     renderShapeText(ctx, screenRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
                   }
@@ -1025,7 +1029,7 @@ export class DrawingOverlay {
             try {
               ctx.strokeStyle = colors.placeholderOtherStroke;
               ctx.lineWidth = 1;
-              ctx.setLineDash([4, 2]);
+              ctx.setLineDash(LINE_DASH_PLACEHOLDER);
               if (hasNonIdentityTransform(obj.transform)) {
                 drawTransformedRect(ctx, screenRectScratch, obj.transform);
               } else {
@@ -1054,13 +1058,13 @@ export class DrawingOverlay {
                 ? colors.placeholderGraphicFrameStroke
                 : colors.placeholderOtherStroke;
           ctx.lineWidth = 1;
-          ctx.setLineDash([4, 2]);
+          ctx.setLineDash(LINE_DASH_PLACEHOLDER);
           if (hasNonIdentityTransform(obj.transform)) {
             drawTransformedRect(ctx, screenRectScratch, obj.transform);
           } else {
             ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
           }
-          ctx.setLineDash([]);
+          ctx.setLineDash(LINE_DASH_NONE);
           ctx.fillStyle = colors.placeholderLabel;
           ctx.globalAlpha = 0.6;
           ctx.font = "12px sans-serif";
@@ -1496,7 +1500,7 @@ function drawSelection(
   ctx.save();
   ctx.strokeStyle = colors.selectionStroke;
   ctx.lineWidth = 2;
-  ctx.setLineDash([]);
+  ctx.setLineDash(LINE_DASH_NONE);
   if (hasNonIdentityTransform(transform)) {
     drawTransformedRect(ctx, rect, transform);
   } else {
@@ -1537,6 +1541,7 @@ function drawShape(
   colors: OverlayColorTokens,
   cssVarStyle: CssVarStyle | null,
   zoom: number,
+  dashScratch: number[],
   labelOverride?: string | null,
 ): void {
   // Clip to the anchored bounds; this matches the chart rendering behaviour and
@@ -1585,7 +1590,7 @@ function drawShape(
   if (spec.stroke && strokeWidthPx > 0) {
     ctx.strokeStyle = resolveCanvasColor(cssVarStyle, spec.stroke.color, colors.placeholderLabel);
     ctx.lineWidth = strokeWidthPx;
-    ctx.setLineDash(dashPatternForPreset(spec.stroke.dashPreset, strokeWidthPx));
+    ctx.setLineDash(dashPatternForPreset(spec.stroke.dashPreset, strokeWidthPx, dashScratch));
     ctx.stroke();
   }
 
@@ -1628,29 +1633,61 @@ function roundRectPath(
   ctx.closePath();
 }
 
-function dashPatternForPreset(preset: string | undefined, strokeWidthPx: number): number[] {
-  if (!preset) return [];
+function dashPatternForPreset(preset: string | undefined, strokeWidthPx: number, out: number[]): number[] {
+  out.length = 0;
+  if (!preset || preset === "solid") return out;
   const unit = Math.max(1, strokeWidthPx);
   switch (preset) {
     case "dash":
-    case "sysDash":
-      return [4 * unit, 2 * unit];
+    case "sysDash": {
+      out[0] = 4 * unit;
+      out[1] = 2 * unit;
+      out.length = 2;
+      return out;
+    }
     case "dot":
-    case "sysDot":
-      return [unit, 2 * unit];
+    case "sysDot": {
+      out[0] = unit;
+      out[1] = 2 * unit;
+      out.length = 2;
+      return out;
+    }
     case "dashDot":
-    case "sysDashDot":
-      return [4 * unit, 2 * unit, unit, 2 * unit];
-    case "lgDash":
-      return [8 * unit, 3 * unit];
-    case "lgDashDot":
-      return [8 * unit, 3 * unit, unit, 3 * unit];
+    case "sysDashDot": {
+      out[0] = 4 * unit;
+      out[1] = 2 * unit;
+      out[2] = unit;
+      out[3] = 2 * unit;
+      out.length = 4;
+      return out;
+    }
+    case "lgDash": {
+      out[0] = 8 * unit;
+      out[1] = 3 * unit;
+      out.length = 2;
+      return out;
+    }
+    case "lgDashDot": {
+      out[0] = 8 * unit;
+      out[1] = 3 * unit;
+      out[2] = unit;
+      out[3] = 3 * unit;
+      out.length = 4;
+      return out;
+    }
     case "lgDashDotDot":
-    case "sysDashDotDot":
-      return [8 * unit, 3 * unit, unit, 3 * unit, unit, 3 * unit];
-    case "solid":
+    case "sysDashDotDot": {
+      out[0] = 8 * unit;
+      out[1] = 3 * unit;
+      out[2] = unit;
+      out[3] = 3 * unit;
+      out[4] = unit;
+      out[5] = 3 * unit;
+      out.length = 6;
+      return out;
+    }
     default:
-      return [];
+      return out;
   }
 }
 
@@ -1931,7 +1968,7 @@ function renderShapeText(
   ctx.globalAlpha = 1;
   // Shapes may have dashed outlines; ensure underline strokes do not inherit the
   // dash pattern from the shape geometry rendering.
-  ctx.setLineDash([]);
+  ctx.setLineDash(LINE_DASH_NONE);
 
   const alignment = layout.alignment ?? "left";
   for (const line of lines) {
