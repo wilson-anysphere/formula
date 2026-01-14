@@ -2422,7 +2422,7 @@ fn materialize_rgce(
                     return None;
                 }
                 let nested = base.get(i..i + cce)?;
-                let nested_out = materialize_rgce(nested, base_row, base_col, row, col)?;
+                let nested_out = materialize_rgce(nested, base_row, base_col, row, col, ctx)?;
                 // Materialization should preserve encoded size; bail out defensively otherwise.
                 if nested_out.len() != cce {
                     return None;
