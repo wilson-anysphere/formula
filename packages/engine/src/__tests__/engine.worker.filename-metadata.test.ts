@@ -121,6 +121,58 @@ describe("engine.worker workbook file metadata integration", () => {
     (globalThis as any).self = previousSelf;
   });
 
+  it('formats CELL("filename") without a directory when only filename is known', async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [
+            { address: "A1", value: '=CELL("filename")', sheet: "Sheet1" },
+            { address: "A2", value: '=INFO("directory")', sheet: "Sheet1" },
+            { address: "A1", value: '=CELL("filename")', sheet: "Sheet2" },
+            { address: "A3", value: '=CELL("filename",Sheet2!A1)', sheet: "Sheet1" },
+          ],
+        },
+      });
+
+      // Simulate a web-style save where only the workbook name is known.
+      await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setWorkbookFileMetadata",
+        params: { directory: null, filename: "book.xlsx" },
+      });
+      await sendRequest(port, { type: "request", id: 3, method: "recalculate", params: {} });
+
+      let resp = await sendRequest(port, { type: "request", id: 4, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("[book.xlsx]Sheet1");
+
+      resp = await sendRequest(port, { type: "request", id: 5, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      // INFO("directory") requires a non-empty directory string.
+      expect(resp.result.value).toBe("#N/A");
+
+      resp = await sendRequest(port, { type: "request", id: 6, method: "getCell", params: { address: "A1", sheet: "Sheet2" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("[book.xlsx]Sheet2");
+
+      // `CELL("filename", reference)` should use the reference's sheet name component.
+      resp = await sendRequest(port, { type: "request", id: 7, method: "getCell", params: { address: "A3", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("[book.xlsx]Sheet2");
+    } finally {
+      dispose();
+    }
+  });
+
   it('updates CELL("filename") results after setWorkbookFileMetadata', async () => {
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalFilename.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });
