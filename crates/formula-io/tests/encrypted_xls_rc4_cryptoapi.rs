@@ -7,6 +7,7 @@ use formula_io::{
 use formula_model::CellValue;
 
 const PASSWORD: &str = "correct horse battery staple";
+const EMPTY_PASSWORD: &str = "";
 const UNICODE_PASSWORD: &str = "pässwörd";
 const UNICODE_EMOJI_PASSWORD: &str = "pässwörd🔒";
 
@@ -14,6 +15,18 @@ fn encrypted_xls_fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../formula-xls/tests/fixtures/encrypted")
         .join("biff8_rc4_cryptoapi_pw_open.xls")
+}
+
+fn encrypted_xls_empty_password_fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-xls/tests/fixtures/encrypted")
+        .join("biff8_rc4_cryptoapi_pw_open_empty_password.xls")
+}
+
+fn encrypted_xls_legacy_empty_password_fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-xls/tests/fixtures/encrypted")
+        .join("biff8_rc4_cryptoapi_legacy_pw_open_empty_password.xls")
 }
 
 fn encrypted_xls_unicode_fixture_path() -> PathBuf {
@@ -92,6 +105,68 @@ fn encrypted_xls_requires_password_on_password_api() {
     assert!(
         matches!(err, Error::PasswordRequired { .. }),
         "expected Error::PasswordRequired, got {err:?}"
+    );
+}
+
+#[test]
+fn opens_encrypted_xls_with_empty_password() {
+    let path = encrypted_xls_empty_password_fixture_path();
+
+    let err = open_workbook_with_password(&path, None).expect_err("expected password required");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+
+    // Model loader path.
+    let model = open_workbook_model_with_password(&path, Some(EMPTY_PASSWORD))
+        .expect("open encrypted xls model");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    // Full workbook loader path.
+    let wb = open_workbook_with_password(&path, Some(EMPTY_PASSWORD)).expect("open encrypted xls");
+    let Workbook::Xls(result) = wb else {
+        panic!("expected Workbook::Xls, got {wb:?}");
+    };
+    let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    let err = open_workbook_with_password(&path, Some("not-empty"))
+        .expect_err("expected invalid password");
+    assert!(
+        matches!(err, Error::InvalidPassword { .. }),
+        "expected Error::InvalidPassword, got {err:?}"
+    );
+}
+
+#[test]
+fn opens_encrypted_xls_cryptoapi_legacy_with_empty_password() {
+    let path = encrypted_xls_legacy_empty_password_fixture_path();
+
+    let err = open_workbook_with_password(&path, None).expect_err("expected password required");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+
+    let model = open_workbook_model_with_password(&path, Some(EMPTY_PASSWORD))
+        .expect("open encrypted xls model");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    let wb = open_workbook_with_password(&path, Some(EMPTY_PASSWORD)).expect("open encrypted xls");
+    let Workbook::Xls(result) = wb else {
+        panic!("expected Workbook::Xls, got {wb:?}");
+    };
+    let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    let err = open_workbook_with_password(&path, Some("not-empty"))
+        .expect_err("expected invalid password");
+    assert!(
+        matches!(err, Error::InvalidPassword { .. }),
+        "expected Error::InvalidPassword, got {err:?}"
     );
 }
 
