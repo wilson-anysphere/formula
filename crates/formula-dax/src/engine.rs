@@ -4400,9 +4400,15 @@ impl DaxEngine {
                         let to_table_ref = model
                             .table(current_table)
                             .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
-                        let key = to_table_ref
-                            .value_by_idx(current_row, rel.to_idx)
-                            .unwrap_or(Value::Blank);
+                        let to_row_count = to_table_ref.row_count();
+                        let is_virtual_blank_row = current_row >= to_row_count;
+                        let key = if is_virtual_blank_row {
+                            Value::Blank
+                        } else {
+                            to_table_ref
+                                .value_by_idx(current_row, rel.to_idx)
+                                .unwrap_or(Value::Blank)
+                        };
 
                         let sets = resolve_row_sets(model, filter)?;
                         let allowed = sets
@@ -4411,12 +4417,17 @@ impl DaxEngine {
 
                         let mut rows = Vec::new();
                         if key.is_blank() {
-                            if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
-                                unmatched.for_each_row(|row| {
-                                    if row < allowed.len() && allowed.get(row) {
-                                        rows.push(row);
-                                    }
-                                });
+                            // The relationship-generated blank/unknown member is distinct from a
+                            // *physical* BLANK key on the dimension side. Only the virtual blank
+                            // member should expose unmatched fact rows.
+                            if is_virtual_blank_row {
+                                if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
+                                    unmatched.for_each_row(|row| {
+                                        if row < allowed.len() && allowed.get(row) {
+                                            rows.push(row);
+                                        }
+                                    });
+                                }
                             }
                         } else if let Some(from_index) = rel.from_index.as_ref() {
                             if let Some(candidates) = from_index.get(&key) {
@@ -4476,12 +4487,20 @@ impl DaxEngine {
                         let mut key_set: HashSet<Value> = HashSet::new();
                         let mut keys: Vec<Value> = Vec::new();
                         let mut include_blank = false;
+                        let blank_row = to_table_ref.row_count();
                         for &to_row in &current_rows {
+                            if to_row >= blank_row {
+                                include_blank = true;
+                                continue;
+                            }
                             let key = to_table_ref
                                 .value_by_idx(to_row, rel_info.to_idx)
                                 .unwrap_or(Value::Blank);
                             if key.is_blank() {
-                                include_blank = true;
+                                // Physical BLANK keys do not participate in relationship joins.
+                                // They are distinct from the relationship-generated virtual blank
+                                // member (`row == row_count()`), which is handled via
+                                // `include_blank`.
                                 continue;
                             }
                             if key_set.insert(key.clone()) {

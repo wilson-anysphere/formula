@@ -412,6 +412,137 @@ fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m
 }
 
 #[test]
+fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_facts_m2m() {
+    // Regression: the relationship-generated blank member is distinct from a *physical* BLANK key
+    // on the dimension side. RELATEDTABLE from a physical blank-key row should not return unmatched
+    // facts.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), 999.into(), 7.0.into()]).unwrap();
+    fact.push_row(vec![3.into(), Value::Blank, 5.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let physical_blank_row = 1;
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", physical_blank_row);
+
+    assert_eq!(
+        DaxEngine::new()
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
+fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_facts_m2m_for_columnar_fact(
+) {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Null,
+        formula_columnar::Value::Number(5.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let physical_blank_row = 1;
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", physical_blank_row);
+
+    assert_eq!(
+        DaxEngine::new()
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
 fn relatedtable_respects_userelationship_overrides_with_m2m() {
     let mut model = DataModel::new();
 
