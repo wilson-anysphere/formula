@@ -359,6 +359,7 @@ Desktop encryption commands (Command Palette):
 - `collab.exportEncryptionKey` — export the key for the active cell’s encrypted range.
   - Prefers the `keyId` embedded in an existing encrypted cell payload (if present), otherwise falls back to policy metadata.
   - If the key bytes are missing locally, it prompts to import the key first.
+  - If the encrypted range policy metadata is unreadable (unsupported `metadata.encryptedRanges` schema) and the active cell does not already contain an `enc` payload, the UI cannot determine the key id and surfaces an error.
 - `collab.importEncryptionKey` — import a shared key string into the local key store.
   - If the key id already exists with different bytes, the UI prompts before overwriting.
   - If the UI cannot verify whether the key id already exists (key store unavailable), it prompts before importing.
