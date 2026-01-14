@@ -443,10 +443,18 @@ function reportSize({ env }) {
   // `pnpm perf:desktop-size` still works in minimal local environments.
   // eslint-disable-next-line no-console
   console.log("\n[desktop-size] Rust binary breakdown (cargo-bloat / llvm-size):\n");
-  const binReport = tryRunPython(["scripts/desktop_binary_size_report.py", "--no-build"], { env });
+  const binJsonOut = path.join(artifactDir, "desktop-binary-size.json");
+  rmSync(binJsonOut, { force: true });
+  const binReport = tryRunPython(
+    ["scripts/desktop_binary_size_report.py", "--no-build", "--json-out", binJsonOut],
+    { env },
+  );
   if (!binReport.ran) {
     // eslint-disable-next-line no-console
     console.log("[desktop-size] python not found; skipping scripts/desktop_binary_size_report.py");
+  } else if (binReport.status !== 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[desktop-size] WARN desktop_binary_size_report exited with status ${binReport.status}`);
   }
 
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
