@@ -12,7 +12,7 @@ use std::io::{Read, Seek};
 use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD};
 use base64::Engine as _;
 use roxmltree::Document;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::encrypted_package_reader::{DecryptedPackageReader, EncryptionMethod};
 
@@ -1288,8 +1288,13 @@ fn agile_decrypt_package_key(
 
         fn truncate_and_zeroize_spare(buf: &mut Zeroizing<Vec<u8>>, new_len: usize) {
             buf.truncate(new_len);
-            for slot in buf.spare_capacity_mut() {
-                slot.write(0);
+            // SAFETY: We only write zeros to uninitialized memory; it is valid to treat the spare
+            // capacity as a raw byte slice for the purpose of clearing it.
+            unsafe {
+                let spare = buf.spare_capacity_mut();
+                let ptr = spare.as_mut_ptr() as *mut u8;
+                let len = spare.len();
+                std::slice::from_raw_parts_mut(ptr, len).zeroize();
             }
         }
 

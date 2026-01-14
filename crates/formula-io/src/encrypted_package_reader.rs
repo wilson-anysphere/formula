@@ -271,8 +271,16 @@ fn map_aes_cbc_err(err: formula_xlsx::offcrypto::AesCbcDecryptError) -> io::Erro
 
 fn zeroize_vec_u8_full(buf: &mut Vec<u8>) {
     buf.zeroize();
-    for slot in buf.spare_capacity_mut() {
-        slot.write(0);
+    // Also wipe the Vec's spare capacity (uninitialized bytes). This prevents plaintext bytes from
+    // lingering in the allocation when buffers are resized/shrunk.
+    //
+    // SAFETY: We only write zeros to uninitialized memory; it is valid to treat the spare capacity
+    // as a raw byte slice for the purpose of clearing it.
+    unsafe {
+        let spare = buf.spare_capacity_mut();
+        let ptr = spare.as_mut_ptr() as *mut u8;
+        let len = spare.len();
+        std::slice::from_raw_parts_mut(ptr, len).zeroize();
     }
 }
 
