@@ -20863,6 +20863,23 @@ export class SpreadsheetApp {
       return resolveThisRowCell(tableName, columnName);
     }
 
+    // Fallback: handle implicit selector-qualified structured refs that select multiple columns,
+    // e.g. `[[#All],[Col1],[Col2]]` or `[[Col1]:[Col3]]`. These are valid inside a table context,
+    // but the table name is omitted. Infer the containing table and delegate to the shared
+    // structured-ref resolver (which can handle multi-column forms).
+    if (trimmed.startsWith("[[")) {
+      const tableName = findContainingTableName();
+      if (!tableName) return null;
+
+      const rewritten = `${tableName}${trimmed}`;
+      const { references } = extractFormulaReferences(rewritten, undefined, undefined, { tables: this.searchWorkbook.tables as any });
+      const first = references[0];
+      if (!first) return null;
+      if (first.start !== 0 || first.end !== rewritten.length) return null;
+      const r = first.range;
+      return { sheet: r.sheet, startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol };
+    }
+
     return null;
   }
 
