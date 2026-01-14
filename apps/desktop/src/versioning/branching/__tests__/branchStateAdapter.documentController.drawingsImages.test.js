@@ -8,6 +8,7 @@ test("branchStateAdapter round-trips images + drawings via DocumentState.metadat
   const doc = new DocumentController();
 
   doc.setImage("img1", { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" });
+  doc.setSheetBackgroundImageId("Sheet1", "img1");
   doc.setSheetDrawings("Sheet1", [
     {
       id: "d1",
@@ -22,14 +23,15 @@ test("branchStateAdapter round-trips images + drawings via DocumentState.metadat
   assert.deepEqual(state.metadata.images, [{ id: "img1", mimeType: "image/png", bytesBase64: "AQID" }]);
   assert.ok(state.metadata.drawingsBySheet);
   assert.equal(state.metadata.drawingsBySheet.Sheet1?.[0]?.id, "d1");
+  assert.equal(state.sheets.metaById.Sheet1?.view?.backgroundImageId, "img1");
 
   const restored = new DocumentController();
   applyBranchStateToDocumentController(restored, state);
 
+  assert.equal(restored.getSheetBackgroundImageId("Sheet1"), "img1");
   assert.deepEqual(restored.getSheetDrawings("Sheet1"), doc.getSheetDrawings("Sheet1"));
   const image = restored.getImage("img1");
   assert.ok(image);
   assert.equal(image?.mimeType, "image/png");
   assert.deepEqual(Array.from(image?.bytes ?? []), [1, 2, 3]);
 });
-

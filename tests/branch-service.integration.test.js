@@ -325,6 +325,85 @@ test("schemaVersion=1 commits missing sheet view preserve existing frozen panes"
   assert.deepEqual(state.sheets.metaById.Sheet1.view, { frozenRows: 2, frozenCols: 1 });
 });
 
+test("schemaVersion=1 commits omitting backgroundImageId preserve existing sheet background image", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-no-backgroundImageId", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: {
+        Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0, backgroundImageId: "bg.png" } },
+      },
+    },
+    cells: { Sheet1: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  // Simulate a schemaVersion=1 client that knows about per-sheet view state but not backgroundImageId.
+  await service.commit(actor, {
+    nextState: {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: { Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0 } } },
+      },
+      cells: { Sheet1: { A1: { value: 1 } } },
+      metadata: {},
+      namedRanges: {},
+      comments: {},
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 1);
+  assert.equal(state.sheets.metaById.Sheet1.view.backgroundImageId, "bg.png");
+});
+
+test("schemaVersion=1 commits can clear backgroundImageId when explicitly set to null", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-clear-backgroundImageId", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: {
+        Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0, backgroundImageId: "bg.png" } },
+      },
+    },
+    cells: { Sheet1: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  await service.commit(actor, {
+    nextState: {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: {
+          Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0, backgroundImageId: null } },
+        },
+      },
+      cells: { Sheet1: { A1: { value: 1 } } },
+      metadata: {},
+      namedRanges: {},
+      comments: {},
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 1);
+  assert.equal(state.sheets.metaById.Sheet1.view.backgroundImageId, null);
+});
+
 test("schemaVersion=1 commits missing sheets preserve existing sheet metadata", async () => {
   const actor = { userId: "u1", role: "owner" };
   const store = new InMemoryBranchStore();

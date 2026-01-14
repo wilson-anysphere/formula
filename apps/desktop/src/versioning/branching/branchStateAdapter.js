@@ -319,6 +319,36 @@ export function documentControllerToBranchState(doc) {
     /** @type {Record<string, any>} */
     const view = cloneJsonish(rawView);
 
+    // --- Worksheet background images ---
+    //
+    // Background images are tracked via a sheet-level `backgroundImageId` that references
+    // a workbook-scoped image entry (stored in `doc.images` and persisted via BranchService
+    // metadata). When the controller supports this field, treat "missing" as an explicit
+    // clear (`null`) so branching commits can distinguish omission (older clients) from
+    // "clear background".
+    const supportsBackgroundImageId =
+      typeof doc.getSheetBackgroundImageId === "function" ||
+      typeof doc.setSheetBackgroundImageId === "function" ||
+      (rawView &&
+        typeof rawView === "object" &&
+        (Object.prototype.hasOwnProperty.call(rawView, "backgroundImageId") ||
+          Object.prototype.hasOwnProperty.call(rawView, "background_image_id")));
+    if (supportsBackgroundImageId) {
+      let bg = null;
+      if (typeof doc.getSheetBackgroundImageId === "function") {
+        try {
+          bg = doc.getSheetBackgroundImageId(sheetId);
+        } catch {
+          bg = null;
+        }
+      } else if (rawView && typeof rawView === "object") {
+        bg = rawView.backgroundImageId ?? rawView.background_image_id ?? null;
+      }
+      const normalized = typeof bg === "string" ? bg.trim() : null;
+      view.backgroundImageId = normalized || null;
+      delete view.background_image_id;
+    }
+
     // --- Layered formats (sheet/row/col defaults) ---
     //
     // DocumentController's internal representation uses style ids, while BranchService stores
@@ -540,6 +570,11 @@ export function applyBranchStateToDocumentController(doc, state) {
       view: cloneJsonish(view),
       frozenRows: view.frozenRows ?? 0,
       frozenCols: view.frozenCols ?? 0,
+      ...(Object.prototype.hasOwnProperty.call(view, "backgroundImageId")
+        ? { backgroundImageId: view.backgroundImageId }
+        : Object.prototype.hasOwnProperty.call(view, "background_image_id")
+          ? { backgroundImageId: view.background_image_id }
+          : {}),
       colWidths: view.colWidths,
       rowHeights: view.rowHeights,
       cells

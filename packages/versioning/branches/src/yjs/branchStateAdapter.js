@@ -318,10 +318,28 @@ export function branchStateFromYjsDoc(doc) {
         view = {
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
-          ...(backgroundImageId !== undefined ? { backgroundImageId: yjsValueToJson(backgroundImageId) } : {}),
+          // Always include the key (even when null) so BranchService can distinguish
+          // explicit clears from omissions during semantic merges.
+          backgroundImageId: yjsValueToJson(backgroundImageId) ?? null,
           ...(colWidths !== undefined ? { colWidths: yjsValueToJson(colWidths) } : {}),
           ...(rowHeights !== undefined ? { rowHeights: yjsValueToJson(rowHeights) } : {}),
         };
+      }
+    }
+
+    // Ensure BranchService snapshots can represent explicit clears for `backgroundImageId`.
+    //
+    // Collaboration schema typically deletes the key on clear, but BranchService treats missing
+    // keys as "no change" to support older clients. Include `backgroundImageId: null` so clears
+    // survive commits + semantic merges.
+    if (view == null) {
+      view = { frozenRows: 0, frozenCols: 0, backgroundImageId: null };
+    } else if (isRecord(view)) {
+      const hasKey =
+        Object.prototype.hasOwnProperty.call(view, "backgroundImageId") ||
+        Object.prototype.hasOwnProperty.call(view, "background_image_id");
+      if (!hasKey) {
+        view.backgroundImageId = null;
       }
     }
 
