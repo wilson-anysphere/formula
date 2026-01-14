@@ -428,7 +428,9 @@ function isKnownFunctionNameUpper(nameUpper: string, localeId: string): boolean 
 const ARG_SEPARATOR_CACHE = new Map<string, string>();
 
 function inferArgSeparator(localeId: string): string {
-  const locale = normalizeLocaleId(localeId) || "en-US";
+  // Prefer the formula engine's normalized locale IDs so UI separators match parsing semantics
+  // for language/region variants (e.g. `de-CH` is treated as `de-DE` by the engine today).
+  const locale = normalizeFormulaLocaleId(localeId) ?? normalizeLocaleId(localeId) ?? "en-US";
   const cached = ARG_SEPARATOR_CACHE.get(locale);
   if (cached) return cached;
 

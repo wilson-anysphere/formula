@@ -131,6 +131,37 @@ describe("FormulaBarView function hint UI", () => {
     }
   });
 
+  it("normalizes BCP-47 variants when inferring argument separators (de-CH-1996)", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-CH-1996";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=ROUND(1,2; 0)";
+
+      const inFirstArg = view.textarea.value.indexOf("1,2") + 1;
+      view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+      view.textarea.dispatchEvent(new Event("input"));
+      await nextFrame();
+
+      expect(getSignatureName(host)).toBe("ROUND(");
+      // Even though `de-CH` uses different numeric formatting, the formula engine currently treats
+      // it as `de-DE` for formula parsing (decimal comma + `;` list separator). Ensure the hint
+      // logic stays consistent with that behavior.
+      expect(getActiveParamText(host)).toBe("number");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("normalizes language-only locale IDs when resolving localized function names (de SUMME)", async () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "de";
