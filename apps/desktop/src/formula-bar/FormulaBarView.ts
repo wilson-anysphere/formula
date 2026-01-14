@@ -3086,7 +3086,7 @@ export class FormulaBarView {
       this.#selectedReferenceIndex = null;
     }
 
-    if (document.activeElement !== this.#addressEl) {
+    if (document.activeElement !== this.#addressEl && this.#addressEl.value !== this.#nameBoxValue) {
       this.#addressEl.value = this.#nameBoxValue;
     }
 

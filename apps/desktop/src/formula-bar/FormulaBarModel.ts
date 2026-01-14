@@ -696,15 +696,15 @@ export class FormulaBarModel {
 
   #updateHoverFromCursor(): void {
     if (!this.#isEditing || !isFormulaText(this.#draft)) {
-      this.#hoveredReference = null;
-      this.#hoveredReferenceText = null;
+      if (this.#hoveredReference != null) this.#hoveredReference = null;
+      if (this.#hoveredReferenceText != null) this.#hoveredReferenceText = null;
       return;
     }
 
     const activeIndex = this.#activeReferenceIndex;
     if (activeIndex == null) {
-      this.#hoveredReference = null;
-      this.#hoveredReferenceText = null;
+      if (this.#hoveredReference != null) this.#hoveredReference = null;
+      if (this.#hoveredReferenceText != null) this.#hoveredReferenceText = null;
       return;
     }
 
@@ -712,8 +712,8 @@ export class FormulaBarModel {
     // formula string on every cursor move.
     const active = this.#coloredReferences[activeIndex] ?? null;
     if (!active) {
-      this.#hoveredReference = null;
-      this.#hoveredReferenceText = null;
+      if (this.#hoveredReference != null) this.#hoveredReference = null;
+      if (this.#hoveredReferenceText != null) this.#hoveredReferenceText = null;
       return;
     }
 
