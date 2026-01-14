@@ -136,24 +136,6 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
       channelFactory: createMockChannel,
     });
 
-    // `engineHydrateFromDocument` / `engineApplyDocumentChange` operate on the narrower
-    // `EngineSyncTarget` surface (sheet-first signatures for some metadata APIs). The public
-    // EngineWorker client is an EngineClient-style API (sheet-last helpers like
-    // `setCellStyleId(address, styleId, sheet)` and `setColWidth(col, width, sheet)`).
-    //
-    // Wrap it so `tsc` typechecking stays strict while still exercising the real worker RPC.
-    const syncTarget: EngineSyncTarget = {
-      loadWorkbookFromJson: (json) => engine.loadWorkbookFromJson(json),
-      setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
-      setCells: (updates) => engine.setCells(updates),
-      recalculate: (sheet) => engine.recalculate(sheet),
-      setSheetDisplayName: (sheetId, name) => engine.setSheetDisplayName(sheetId, name),
-      internStyle: (styleObj) => engine.internStyle(styleObj as any),
-      setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
-      setFormatRunsByCol: (sheet, col, runs) => engine.setFormatRunsByCol(sheet, col, runs),
-      setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
-    };
-
     try {
       const doc = new DocumentController();
       const syncTarget = engineWorkerAsSyncTarget(engine);
