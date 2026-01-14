@@ -1014,7 +1014,7 @@ impl DataModel {
                 UnmatchedFactRows::Dense {
                     bits,
                     len,
-                    ref mut count,
+                    count,
                 } => {
                     let key = &key_for_updates;
                     let len = *len;
