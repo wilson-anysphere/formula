@@ -92,6 +92,24 @@ impl XlsxDocument {
             },
         )
     }
+
+    /// Locate pivot chart parts and also resolve where each chart is placed (drawings + sheets).
+    pub fn pivot_chart_parts_with_placement(
+        &self,
+    ) -> Result<Vec<PivotChartWithPlacement>, XlsxError> {
+        // `pivot_chart_parts()` now resolves placement metadata directly on `PivotChartPart`, so this
+        // API is just a convenience wrapper that avoids duplicating relationship traversal.
+        let charts = self.pivot_chart_parts()?;
+        let mut out = Vec::with_capacity(charts.len());
+        for chart in charts {
+            out.push(PivotChartWithPlacement {
+                placed_on_drawings: chart.placed_on_drawings.clone(),
+                placed_on_sheets: chart.placed_on_sheets.clone(),
+                chart,
+            });
+        }
+        Ok(out)
+    }
 }
 
 fn parse_pivot_chart_parts_with<'a, PN, Part, Resolve>(
