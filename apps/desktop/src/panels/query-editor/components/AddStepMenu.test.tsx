@@ -262,13 +262,17 @@ describe("AddStepMenu", () => {
     expect(suggestButton.textContent).toContain("Suggesting");
 
     await act(async () => {
-      deferred.resolve([{ type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "isNotNull" } }]);
+      deferred.resolve([
+        { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "isNotNull" } },
+        { type: "addColumn", name: "Flag", formula: "1" },
+      ]);
       await flushMicrotasks(10);
     });
 
     const suggestionButtons = host!.querySelectorAll("button.query-editor-add-step__suggestion");
-    expect(suggestionButtons.length).toBe(1);
+    expect(suggestionButtons.length).toBe(2);
     expect(suggestionButtons[0]?.textContent).toBe("Filter Rows (Region)");
+    expect(suggestionButtons[1]?.textContent).toBe("Add Column (Flag)");
   });
 
   it("clears existing AI suggestions when the intent changes or after applying one", async () => {

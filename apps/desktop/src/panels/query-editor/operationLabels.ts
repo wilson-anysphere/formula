@@ -27,6 +27,10 @@ function joinNames(names: string[] | null | undefined): string | null {
  */
 export function formatQueryOperationLabel(op: QueryOperation): string {
   switch (op.type) {
+    case "addColumn": {
+      const name = typeof op.name === "string" ? op.name : null;
+      return `${humanizeOperationType(op.type)}${formatDetails(name)}`;
+    }
     case "take": {
       const count = typeof op.count === "number" && Number.isFinite(op.count) ? String(op.count) : null;
       return `${t("queryEditor.addStep.op.keepTopRows")}${formatDetails(count)}`;
@@ -63,6 +67,14 @@ export function formatQueryOperationLabel(op: QueryOperation): string {
     case "splitColumn": {
       const col = typeof op.column === "string" ? op.column : null;
       return `${t("queryEditor.addStep.op.splitColumn")}${formatDetails(col)}`;
+    }
+    case "fillDown": {
+      const cols = joinNames(op.columns);
+      return `${humanizeOperationType(op.type)}${formatDetails(cols)}`;
+    }
+    case "replaceValues": {
+      const col = typeof op.column === "string" ? op.column : null;
+      return `${humanizeOperationType(op.type)}${formatDetails(col)}`;
     }
     case "distinctRows": {
       const cols = joinNames(op.columns ?? null);
