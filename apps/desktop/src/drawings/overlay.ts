@@ -310,7 +310,7 @@ export function effectiveScrollForAnchor(
 export class DrawingOverlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly bitmapCache = new ImageBitmapCache({ negativeCacheMs: 250 });
-  private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null }>();
+  private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null; hasText: boolean }>();
   private shapeTextCachePruneSource: DrawingObject[] | null = null;
   private shapeTextCachePruneLength = 0;
   private readonly spatialIndex = new DrawingSpatialIndex();
@@ -815,12 +815,19 @@ export class DrawingOverlay {
           // Parse `<xdr:txBody>` once and cache; avoid reparsing XML on every frame.
           let cachedText = this.shapeTextCache.get(obj.id);
           if (!cachedText || cachedText.rawXml !== rawXmlText) {
-            cachedText = { rawXml: rawXmlText, parsed: parseDrawingMLShapeText(rawXmlText) };
+            const parsed = parseDrawingMLShapeText(rawXmlText);
+            const hasText =
+              parsed != null &&
+              parsed.textRuns.some((run) => {
+                const text = run.text;
+                return typeof text === "string" && /\S/.test(text);
+              });
+            cachedText = { rawXml: rawXmlText, parsed, hasText };
             this.shapeTextCache.set(obj.id, cachedText);
           }
           const textLayout = cachedText.parsed;
           const textParsed = textLayout !== null;
-          const hasText = textLayout ? textLayout.textRuns.map((r) => r.text).join("").trim().length > 0 : false;
+          const hasText = cachedText.hasText;
           const canRenderText = hasText && typeof (ctx as any).measureText === "function";
 
           let rendered = false;
@@ -831,15 +838,14 @@ export class DrawingOverlay {
             spec = null;
           }
 
-            if (spec) {
-              const specToDraw = canRenderText ? { ...spec, label: undefined } : spec;
-              withClipRect(clipRect, () => {
-                try {
-                  withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
-                    drawShape(ctx, localRect, specToDraw, colors, cssVarStyle, zoom);
-                    if (canRenderText) {
-                      renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
-                    }
+          if (spec) {
+            withClipRect(clipRect, () => {
+              try {
+                withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
+                  drawShape(ctx, localRect, spec, colors, cssVarStyle, zoom, canRenderText ? null : undefined);
+                  if (canRenderText) {
+                    renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                  }
                 });
                 rendered = true;
               } catch {
@@ -851,11 +857,11 @@ export class DrawingOverlay {
 
           // If we couldn't render the shape geometry but we did successfully parse text,
           // still render the text within the anchored bounds (and skip placeholders).
-            if (canRenderText) {
-              withClipRect(clipRect, () => {
-                withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
-                  ctx.save();
-                  try {
+          if (canRenderText) {
+            withClipRect(clipRect, () => {
+              withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
+                ctx.save();
+                try {
                   ctx.beginPath();
                   ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
                   ctx.clip();
@@ -1316,6 +1322,7 @@ function drawShape(
   colors: OverlayColorTokens,
   cssVarStyle: CssVarStyle | null,
   zoom: number,
+  labelOverride?: string | null,
 ): void {
   // Clip to the anchored bounds; this matches the chart rendering behaviour and
   // avoids accidental overdraw if we misinterpret a shape transform.
@@ -1367,7 +1374,8 @@ function drawShape(
     ctx.stroke();
   }
 
-  if (spec.label) {
+  const label = labelOverride !== undefined ? labelOverride : spec.label;
+  if (label) {
     ctx.fillStyle = spec.labelColor ?? colors.placeholderLabel;
     ctx.globalAlpha = 0.8;
     const size =
@@ -1384,7 +1392,7 @@ function drawShape(
       align === "center" ? rect.x + rect.width / 2 : align === "right" ? rect.x + rect.width - padding : rect.x + padding;
     const yText =
       vAlign === "middle" ? rect.y + rect.height / 2 : vAlign === "bottom" ? rect.y + rect.height - padding : rect.y + padding;
-    ctx.fillText(spec.label, xText, yText);
+    ctx.fillText(label, xText, yText);
   }
 }
 
