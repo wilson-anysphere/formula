@@ -1087,12 +1087,17 @@ Validation + edge cases (Rust behavior):
 - Side effects:
   - `applyScenario` mutates the workbook state (writes scenario values and recalculates) and leaves that scenario active until `restoreBase()` is called.
   - `generateSummaryReport(...)` restores the base state before returning (it calls `restore_base` internally at the start and end).
+  - Engine-backed note: Scenario Manager writes changing cells via `WhatIfModel::set_cell_value(...)`.
+    - When using `EngineWhatIfModel` / a future wasm binding, this clears any existing formulas in those changing cells.
+    - Base snapshots store **values**, not formulas; `restoreBase()` restores the captured values and does not reinstate original formulas.
+    - Hosts should restrict scenario “changing cells” to literal input/value cells (Excel-like behavior).
 - Additional in-tree behavior (useful for bindings / UX):
   - `ScenarioManager::current_scenario()` returns the currently-applied scenario id (or `None` if the base state is active).
   - Deleting the current scenario (`delete_scenario`) clears `current_scenario`.
   - `ScenarioManager` itself is in-memory and does not implement `Serialize`.
     - If a host wants persistence, it should persist enough data to recreate scenarios via `create_scenario`.
     - Note: `create_scenario` allocates new ids and timestamps (`createdMs`), so ids/timestamps will not be stable across reload unless the Rust API is extended.
+    - If exposed via `formula-wasm`, the binding should also keep the JS-facing workbook input state consistent with scenario apply/restore mutations (similar to how `goalSeek` updates the `changingCell` input). Otherwise `getCell`/`toJson` may drift from engine state.
 
 ### Monte Carlo Simulation
 
