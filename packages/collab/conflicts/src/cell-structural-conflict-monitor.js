@@ -345,7 +345,7 @@ export class CellStructuralConflictMonitor {
       addedIds.add(String(opId));
       const record = this._ops.get(opId);
       if (!record) continue;
-      this._ingestOpRecord(record);
+      this._ingestOpRecord(record, opId);
     }
 
     if (localDeletes.length > 0 && this._localOpQueue.length > 0) {
@@ -364,13 +364,14 @@ export class CellStructuralConflictMonitor {
  
   /**
    * @param {any} record
+   * @param {string} [opId]
    */
-  _ingestOpRecord(record) {
+  _ingestOpRecord(record, opId) {
     if (!record || typeof record !== "object") return;
-    const id = String(record.id ?? "");
+    const id = String(opId ?? record.id ?? "");
     if (!id) return;
     if (this._opRecords.has(id)) return;
- 
+  
     this._opRecords.set(id, record);
  
     const ours = record.userId === this.localUserId;
@@ -464,9 +465,9 @@ export class CellStructuralConflictMonitor {
     const ours = [];
     this._ops.forEach((record, id) => {
       if (!record || typeof record !== "object") return;
-      this._ingestOpRecord(record);
+      this._ingestOpRecord(record, String(id));
       if (record.userId !== this.localUserId) return;
-      ours.push({ id: String(record.id ?? id), createdAt: Number(record.createdAt ?? 0) });
+      ours.push({ id: String(id), createdAt: Number(record.createdAt ?? 0) });
     });
     ours.sort((a, b) => a.createdAt - b.createdAt);
 
