@@ -11,13 +11,18 @@
  *   then uploads a single combined `latest.json` and matching `latest.json.sig`.
  *
  * Usage:
- *   node scripts/ci/publish-updater-manifest.mjs <tag> <manifests-dir>
+ *   node scripts/ci/publish-updater-manifest.mjs <tag> <manifests-dir> [--dry-run]
  *
  * Required env:
- *   - GITHUB_REPOSITORY
- *   - GITHUB_TOKEN (or GH_TOKEN)
  *   - TAURI_PRIVATE_KEY
  *   - TAURI_KEY_PASSWORD (only used for encrypted PKCS#8 keys; encrypted minisign keys are not supported)
+ *
+ * Required env (when not using --dry-run):
+ *   - GITHUB_REPOSITORY
+ *   - GITHUB_TOKEN (or GH_TOKEN)
+ *
+ * Optional env:
+ *   - FORMULA_TAURI_CONF_PATH (override apps/desktop/src-tauri/tauri.conf.json when verifying signature)
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -337,12 +342,15 @@ async function uploadReleaseAsset({ uploadUrl, name, bytes, contentType, token }
 
 async function main() {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-  const refName = process.argv[2] ?? process.env.GITHUB_REF_NAME;
-  const manifestsDir = process.argv[3];
+  const argv = process.argv.slice(2);
+  const dryRun = argv.includes("--dry-run");
+  const positional = argv.filter((arg) => arg && !arg.startsWith("--"));
+  const refName = positional[0] ?? process.env.GITHUB_REF_NAME;
+  const manifestsDir = positional[1];
 
   if (!refName || !manifestsDir) {
     fatal(
-      "Usage: node scripts/ci/publish-updater-manifest.mjs <tag> <manifests-dir> (example: v0.2.3 updater-manifests)",
+      "Usage: node scripts/ci/publish-updater-manifest.mjs <tag> <manifests-dir> [--dry-run] (example: v0.2.3 updater-manifests)",
     );
   }
 
@@ -351,12 +359,6 @@ async function main() {
     : refName;
   const tag = normalizedRefName;
   const expectedVersion = normalizeVersion(tag);
-
-  const repo = process.env.GITHUB_REPOSITORY;
-  if (!repo) fatal("Missing GITHUB_REPOSITORY (expected to run inside GitHub Actions).");
-
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  if (!token) fatal("Missing GITHUB_TOKEN / GH_TOKEN (required to update the GitHub Release).");
 
   const tauriPrivateKey = process.env.TAURI_PRIVATE_KEY ?? "";
   const tauriKeyPassword = process.env.TAURI_KEY_PASSWORD ?? "";
@@ -499,7 +501,14 @@ async function main() {
   // Defense-in-depth: verify that the combined manifest signature we are about to upload validates
   // under the updater public key embedded in the app config. If this fails, clients will reject
   // updates even though CI was able to sign artifacts.
-  const tauriConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+  const defaultTauriConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+  const tauriConfigPath = process.env.FORMULA_TAURI_CONF_PATH
+    ? path.resolve(
+        path.isAbsolute(process.env.FORMULA_TAURI_CONF_PATH)
+          ? process.env.FORMULA_TAURI_CONF_PATH
+          : path.join(repoRoot, process.env.FORMULA_TAURI_CONF_PATH),
+      )
+    : defaultTauriConfigPath;
   /** @type {string} */
   let pubkeyValue = "";
   try {
@@ -538,6 +547,17 @@ async function main() {
 
   fs.writeFileSync("latest.json", latestJsonText);
   fs.writeFileSync("latest.json.sig", latestSigText);
+
+  if (dryRun) {
+    console.log(`publish-updater-manifest: dry run enabled; skipping GitHub Release upload.`);
+    return;
+  }
+
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!repo) fatal("Missing GITHUB_REPOSITORY (expected to run inside GitHub Actions).");
+
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  if (!token) fatal("Missing GITHUB_TOKEN / GH_TOKEN (required to update the GitHub Release).");
 
   const release = await fetchRelease(repo, tag, token);
   const releaseId = /** @type {number} */ (release?.id);
