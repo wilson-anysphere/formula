@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runDesktopStartupBenchmarks } from './desktopStartupBench.ts';
 import { repoRoot } from './desktopStartupUtil.ts';
@@ -27,6 +27,13 @@ function findResult(results: Awaited<ReturnType<typeof runDesktopStartupBenchmar
 }
 
 describe('desktopStartupBench cold vs warm', () => {
+  beforeEach(() => {
+    // These benchmarks spawn a child process and rely on real timers for timeouts.
+    // Some test suites use fake timers and can leak them across files when a test aborts early.
+    // Force real timers here to keep the benchmark harness stable in full-suite runs.
+    vi.useRealTimers();
+  });
+
   it('emits cold metrics and does not reuse the profile between runs', async () => {
     const modulePath = resolve(repoRoot, 'apps/desktop/tests/performance/fixtures/fakeDesktopStartupModule.cjs');
     await withTempEnv(
@@ -40,9 +47,9 @@ describe('desktopStartupBench cold vs warm', () => {
         // Keep the benchmark fast for unit tests.
         FORMULA_DESKTOP_STARTUP_RUNS: '3',
         // Under full vitest runs (many tests + child process churn), spawning the fake desktop
-        // process can occasionally take >2s on CI. Keep the overall benchmark fast while
-        // allowing some headroom to avoid flakes.
-        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '5000',
+        // process can occasionally take several seconds on CI. Keep the overall benchmark fast
+        // while allowing some headroom to avoid flakes.
+        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '15000',
         FORMULA_DESKTOP_RSS_IDLE_DELAY_MS: '0',
         FORMULA_DESKTOP_STARTUP_MODE: 'cold',
         FORMULA_DESKTOP_STARTUP_BENCH_KIND: 'full',
@@ -90,7 +97,7 @@ describe('desktopStartupBench cold vs warm', () => {
         NODE_OPTIONS: `--require ${modulePath}`,
 
         FORMULA_DESKTOP_STARTUP_RUNS: '3',
-        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '5000',
+        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '15000',
         FORMULA_DESKTOP_RSS_IDLE_DELAY_MS: '0',
         FORMULA_DESKTOP_STARTUP_MODE: 'warm',
         FORMULA_DESKTOP_STARTUP_BENCH_KIND: 'full',
