@@ -1714,6 +1714,25 @@ test("Argument value suggestions use catalog arg_types (RANDBETWEEN suggests num
   );
 });
 
+test('DATEDIF unit suggests "d", "m", "y", "ym", "yd"', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=DATEDIF(A1, B1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const unit of ['"d"', '"m"', '"y"', '"ym"', '"yd"']) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=DATEDIF(A1, B1, ${unit}`),
+      `Expected DATEDIF to suggest unit=${unit}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("MATCH match_type suggests 0, 1, -1", async () => {
   const engine = new TabCompletionEngine();
 

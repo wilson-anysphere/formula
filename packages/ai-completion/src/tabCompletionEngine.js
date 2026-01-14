@@ -846,6 +846,15 @@ export class TabCompletionEngine {
       return dedupeSuggestions(suggestions);
     }
 
+    if (argType === "string") {
+      const enumEntries = getEnumEntries();
+      if (enumEntries?.length) {
+        for (const entry of enumEntries) addReplacement(entry);
+        return dedupeSuggestions(suggestions);
+      }
+      return [];
+    }
+
     if (argType === "value") {
       // Common heuristic: reference the cell to the left.
       if (cellRef.col > 0) {
@@ -1277,6 +1286,17 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "1", displayText: "1 (week starts Sunday)", confidence: 0.66 },
       { replacement: "2", displayText: "2 (week starts Monday)", confidence: 0.65 },
       { replacement: "21", displayText: "21 (ISO week numbering)", confidence: 0.63 },
+    ],
+  },
+  DATEDIF: {
+    // unit (in quotes)
+    2: [
+      { replacement: '"d"', displayText: '"d" (days)', confidence: 0.67 },
+      { replacement: '"m"', displayText: '"m" (months)', confidence: 0.66 },
+      { replacement: '"y"', displayText: '"y" (years)', confidence: 0.65 },
+      { replacement: '"ym"', displayText: '"ym" (months, ignoring years)', confidence: 0.64 },
+      { replacement: '"yd"', displayText: '"yd" (days, ignoring years)', confidence: 0.63 },
+      { replacement: '"md"', displayText: '"md" (days, ignoring months + years)', confidence: 0.62 },
     ],
   },
   "WORKDAY.INTL": {
