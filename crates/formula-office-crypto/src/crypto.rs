@@ -847,6 +847,48 @@ mod tests {
     }
 
     #[test]
+    fn standard_cryptoapi_rc4_md5_derivation_vector() {
+        // Deterministic test vector from `docs/offcrypto-standard-cryptoapi-rc4.md`.
+        let password = "password";
+        let salt: Vec<u8> = (0u8..=0x0F).collect();
+        let spin_count = 50_000u32;
+        let key_bits = 128u32;
+
+        let pw = password_to_utf16le(password);
+        let h = hash_password(HashAlgorithm::Md5, &salt, &pw, spin_count);
+        assert_eq!(h.to_vec(), hex_decode("2079476089fda784c3a3cfeb98102c7e"));
+
+        let deriver = StandardKeyDeriver::new(
+            HashAlgorithm::Md5,
+            key_bits,
+            &salt,
+            password,
+            StandardKeyDerivation::Rc4,
+        );
+        let key0 = deriver.derive_key_for_block(0).expect("key0");
+        let key1 = deriver.derive_key_for_block(1).expect("key1");
+        assert_eq!(
+            key0.as_slice(),
+            hex_decode("69badcae244868e209d4e053ccd2a3bc")
+        );
+        assert_eq!(
+            key1.as_slice(),
+            hex_decode("6f4d502ab37700ffdab5704160455b47")
+        );
+        assert_ne!(key0.as_slice(), key1.as_slice());
+
+        let plaintext = b"Hello, RC4 CryptoAPI!";
+        let mut ciphertext = plaintext.to_vec();
+        rc4_xor_in_place(&key0, &mut ciphertext).expect("rc4 encrypt");
+        assert_eq!(
+            ciphertext,
+            hex_decode("425dd9c8165e1216065e53eb586e897b5e85a07a6d")
+        );
+        rc4_xor_in_place(&key0, &mut ciphertext).expect("rc4 decrypt");
+        assert_eq!(ciphertext, plaintext);
+    }
+
+    #[test]
     fn normalize_key_material_pads_with_0x36() {
         assert_eq!(
             normalize_key_material(&[0xAA, 0xBB], 5),

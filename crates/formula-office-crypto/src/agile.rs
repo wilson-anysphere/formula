@@ -406,22 +406,33 @@ pub(crate) fn decrypt_agile_encrypted_package(
         // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream bytes**
         // (length prefix + ciphertext). This matches Excel and the `ms-offcrypto-writer` crate.
         //
-        // However, some producers compute the HMAC over the **decrypted package bytes** (plaintext ZIP)
-        // instead. For compatibility, accept either HMAC target (but prefer the ciphertext stream).
-        let computed_hmac_ciphertext_full =
+        // However, in the wild there are at least two compatibility variants:
+        // - HMAC over the ciphertext bytes only (excluding the 8-byte size prefix)
+        // - HMAC over the decrypted package bytes (plaintext ZIP)
+        //
+        // For robustness, accept any of these targets, preferring the spec'd EncryptedPackage stream.
+        let computed_hmac_stream_full =
             compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
-        let computed_hmac_ciphertext = computed_hmac_ciphertext_full.get(..hash_size).ok_or_else(|| {
+        let computed_hmac_stream = computed_hmac_stream_full.get(..hash_size).ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
         })?;
-        if !ct_eq(expected_hmac, computed_hmac_ciphertext) {
-            let computed_hmac_plaintext_full =
-                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out);
-            let computed_hmac_plaintext = computed_hmac_plaintext_full.get(..hash_size).ok_or_else(|| {
+        if !ct_eq(expected_hmac, computed_hmac_stream) {
+            let computed_hmac_ciphertext_full =
+                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext);
+            let computed_hmac_ciphertext = computed_hmac_ciphertext_full.get(..hash_size).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
             })?;
-            if !ct_eq(expected_hmac, computed_hmac_plaintext) {
-                last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
-                continue;
+            if !ct_eq(expected_hmac, computed_hmac_ciphertext) {
+                let computed_hmac_plaintext_full =
+                    compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out);
+                let computed_hmac_plaintext =
+                    computed_hmac_plaintext_full.get(..hash_size).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
+                    })?;
+                if !ct_eq(expected_hmac, computed_hmac_plaintext) {
+                    last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
+                    continue;
+                }
             }
         }
 
