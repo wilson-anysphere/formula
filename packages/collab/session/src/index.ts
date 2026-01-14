@@ -625,6 +625,7 @@ export class CollabSession {
   private readonly statusListeners = new Set<(state: CollabSessionSyncState) => void>();
   private providerStatusListener: ((event: any) => void) | null = null;
   private providerSyncListener: ((isSynced: boolean) => void) | null = null;
+  private commentsMigrationPermissionsUnsubscribe: (() => void) | null = null;
 
   private readonly recentOutgoingUpdateBytes: number[] = [];
   private docUpdateListener: ((update: Uint8Array, origin: any) => void) | null = null;
@@ -1103,8 +1104,23 @@ export class CollabSession {
   private scheduleCommentsMigration(opts: CollabSessionOptions["comments"] | undefined): void {
     if (!opts?.migrateLegacyArrayToMap) return;
 
+    // Migration mutates the shared Y.Doc. In collab mode, viewers should never
+    // generate Yjs updates (they would be rejected by server-side access control
+    // anyway). Gate migration on comment permissions and re-attempt after a role
+    // upgrade (e.g. viewer → commenter).
+    let hydrationReady = false;
+
     const tryMigrate = () => {
       if (this.isDestroyed) return;
+      if (!hydrationReady) return;
+
+      let canComment = false;
+      try {
+        canComment = this.canComment();
+      } catch {
+        canComment = false;
+      }
+      if (!canComment) return;
 
       let didMigrate = false;
       try {
@@ -1148,6 +1164,22 @@ export class CollabSession {
       }
     };
 
+    // If permissions are applied after session construction, retry migration once
+    // hydration is complete and the role allows comment writes.
+    if (this.commentsMigrationPermissionsUnsubscribe) {
+      try {
+        this.commentsMigrationPermissionsUnsubscribe();
+      } catch {
+        // ignore
+      }
+      this.commentsMigrationPermissionsUnsubscribe = null;
+    }
+    this.commentsMigrationPermissionsUnsubscribe = this.onPermissionsChanged(() => {
+      // Defer to a microtask so we don't do heavy Yjs work directly inside the
+      // caller's `setPermissions()` stack.
+      queueMicrotask(tryMigrate);
+    });
+
     // Run after local persistence hydration (if enabled).
     if (this.hasLocalPersistence) {
       void this.localPersistenceLoaded
@@ -1156,6 +1188,7 @@ export class CollabSession {
           // remote/provider hydration.
         })
         .finally(() => {
+          hydrationReady = true;
           queueMicrotask(tryMigrate);
         });
     }
@@ -1165,6 +1198,7 @@ export class CollabSession {
       const handler = (isSynced: boolean) => {
         if (!isSynced) return;
         if (typeof provider.off === "function") provider.off("sync", handler);
+        hydrationReady = true;
         queueMicrotask(tryMigrate);
       };
       provider.on("sync", handler);
@@ -1172,6 +1206,7 @@ export class CollabSession {
     } else if (!this.hasLocalPersistence) {
       // No persistence + no sync provider: the caller-provided doc is already in
       // memory, so migrate in a microtask.
+      hydrationReady = true;
       queueMicrotask(tryMigrate);
     }
   }
@@ -1478,6 +1513,14 @@ export class CollabSession {
   destroy(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
+    if (this.commentsMigrationPermissionsUnsubscribe) {
+      try {
+        this.commentsMigrationPermissionsUnsubscribe();
+      } catch {
+        // ignore
+      }
+      this.commentsMigrationPermissionsUnsubscribe = null;
+    }
     if (this.sheetsSchemaObserver) {
       this.sheets.unobserve(this.sheetsSchemaObserver);
       this.sheetsSchemaObserver = null;

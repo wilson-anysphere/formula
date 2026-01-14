@@ -251,6 +251,49 @@ test("CollabSession can optionally migrate legacy Array-backed comments root to 
   doc.destroy();
 });
 
+test("CollabSession comment migration is gated by comment permissions (viewer does not migrate)", async () => {
+  const doc = new Y.Doc();
+
+  const legacyRoot = doc.getArray("comments");
+  legacyRoot.push([
+    createYComment({
+      id: "c_legacy",
+      cellRef: "Sheet1:0:0",
+      kind: "threaded",
+      content: "legacy",
+      author: { id: "u_legacy", name: "Legacy User" },
+      now: 1,
+    }),
+  ]);
+
+  assert.ok(doc.share.get("comments") instanceof Y.Array);
+
+  const session = createCollabSession({
+    doc,
+    undo: {},
+    comments: { migrateLegacyArrayToMap: true },
+  });
+
+  session.setPermissions({ role: "viewer", rangeRestrictions: [], userId: "u_viewer" });
+
+  // Migration is scheduled after hydration in a microtask, but should be skipped for viewers.
+  await new Promise((resolve) => queueMicrotask(resolve));
+  assert.ok(doc.share.get("comments") instanceof Y.Array);
+
+  // If permissions change to a role that can comment, migration should run.
+  session.setPermissions({ role: "commenter", rangeRestrictions: [], userId: "u_viewer" });
+  await new Promise((resolve) => queueMicrotask(resolve));
+
+  assert.ok(doc.share.get("comments") instanceof Y.Map);
+
+  const comments = createCommentManagerForSession(session);
+  const getContent = () => comments.listAll().find((c) => c.id === "c_legacy")?.content ?? null;
+  assert.equal(getContent(), "legacy");
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession undo captures comment edits when comments root was created by a different Yjs instance (CJS applyUpdate)", () => {
   const Ycjs = requireYjsCjs();
 
