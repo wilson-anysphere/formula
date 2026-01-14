@@ -44,6 +44,12 @@ const RECORD_SORT: u16 = 0x0090;
 /// These records begin with an `FrtHeader`. We detect record types via `FrtHeader.rt`, but
 /// Excel typically uses `record_id == rt`.
 const RECORD_AUTOFILTER12: u16 = 0x087E;
+/// ContinueFrt12 [MS-XLS] (Future Record Type continuation; BIFF8 only)
+///
+/// Large FRT records (including AutoFilter12/Sort12/SortData12) may be continued across one or more
+/// `ContinueFrt12` records. These records also begin with an `FrtHeader`; the bytes after the
+/// header should be appended to the previous FRT record payload.
+const RECORD_CONTINUEFRT12: u16 = 0x087F;
 /// Sort12 (Future Record Type; BIFF8 only)
 const RECORD_SORT12: u16 = 0x0890;
 // Alternate Sort12 rt value observed in some non-Excel producers.
@@ -1147,6 +1153,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     // We store columns in a map while parsing to de-duplicate any repeated records.
     let mut autofilter12_columns: BTreeMap<u32, FilterColumn> = BTreeMap::new();
     let mut saw_autofilter12 = false;
+    let mut pending_autofilter12: Option<PendingFrtPayload> = None;
 
     let mut saw_eof = false;
     let mut warned_colinfo_first_oob = false;
@@ -1166,7 +1173,25 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
         // BOF indicates the start of a new substream; stop before yielding the next BOF in case the
         // worksheet is missing its EOF.
         if record.offset != start && records::is_bof_record(record.record_id) {
+            flush_pending_autofilter12_record(
+                pending_autofilter12.take(),
+                codepage,
+                &mut autofilter12_columns,
+                &mut props,
+            );
             break;
+        }
+
+        // Flush any pending AutoFilter12 record as soon as we encounter a non-continuation record.
+        // This keeps record association deterministic and ensures we don't accidentally attach
+        // continuation bytes to the wrong record type.
+        if record.record_id != RECORD_CONTINUEFRT12 {
+            flush_pending_autofilter12_record(
+                pending_autofilter12.take(),
+                codepage,
+                &mut autofilter12_columns,
+                &mut props,
+            );
         }
 
         match record.record_id {
@@ -1214,6 +1239,42 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             // These records start with an `FrtHeader` structure. The record id in the BIFF
             // stream is often the same as `FrtHeader.rt`, but we still key off `rt` for
             // robustness.
+            RECORD_CONTINUEFRT12 => {
+                // Best-effort continuation for AutoFilter12 payloads.
+                let Some(pending) = pending_autofilter12.as_mut() else {
+                    continue;
+                };
+                let payload = parse_frt_header(record.data)
+                    .map(|(_, p)| p)
+                    .unwrap_or(record.data);
+                if payload.is_empty() {
+                    continue;
+                }
+                if pending.fragments >= records::MAX_LOGICAL_RECORD_FRAGMENTS {
+                    push_warning_bounded_force(
+                        &mut props.warnings,
+                        format!(
+                            "too many ContinueFrt12 fragments (cap={}); dropping continued AutoFilter12",
+                            records::MAX_LOGICAL_RECORD_FRAGMENTS
+                        ),
+                    );
+                    pending_autofilter12 = None;
+                    continue;
+                }
+                if pending.payload.len().saturating_add(payload.len()) > records::MAX_LOGICAL_RECORD_BYTES {
+                    push_warning_bounded_force(
+                        &mut props.warnings,
+                        format!(
+                            "AutoFilter12 continued payload too large (cap={} bytes); dropping continued AutoFilter12",
+                            records::MAX_LOGICAL_RECORD_BYTES
+                        ),
+                    );
+                    pending_autofilter12 = None;
+                    continue;
+                }
+                pending.payload.extend_from_slice(payload);
+                pending.fragments = pending.fragments.saturating_add(1);
+            }
             id if id >= 0x0850 && id <= 0x08FF => {
                 let Some((rt, frt_payload)) = parse_frt_header(record.data) else {
                     // Not a valid FRT header; ignore silently.
@@ -1223,39 +1284,12 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 match rt {
                     RECORD_AUTOFILTER12 => {
                         saw_autofilter12 = true;
-                        match decode_autofilter12_record(frt_payload, codepage) {
-                            Ok(Some(column)) => {
-                                autofilter12_columns
-                                    .entry(column.col_id)
-                                    .or_insert(column);
-                            }
-                            Ok(None) => {
-                                // Record parsed but contained no recoverable values.
-                                if !props
-                                    .warnings
-                                    .iter()
-                                    .any(|w| w == "unsupported AutoFilter12")
-                                {
-                                    push_warning_bounded(
-                                        &mut props.warnings,
-                                        "unsupported AutoFilter12".to_string(),
-                                    );
-                                }
-                            }
-                            Err(_) => {
-                                // Best-effort: preserve nothing but surface a deterministic warning.
-                                if !props
-                                    .warnings
-                                    .iter()
-                                    .any(|w| w == "unsupported AutoFilter12")
-                                {
-                                    push_warning_bounded(
-                                        &mut props.warnings,
-                                        "unsupported AutoFilter12".to_string(),
-                                    );
-                                }
-                            }
-                        }
+                        // AutoFilter12 records may be continued via one or more ContinueFrt12
+                        // records. Stash the payload and decode once any continuations are seen.
+                        pending_autofilter12 = Some(PendingFrtPayload {
+                            payload: frt_payload.to_vec(),
+                            fragments: 1,
+                        });
                     }
                     // Sort12/SortData12 future records are imported separately during AutoFilter
                     // post-processing (see `biff::sort`).
@@ -1433,6 +1467,15 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
         }
     }
 
+    // Flush any trailing AutoFilter12 payload if the sheet stream ended without another record
+    // boundary (e.g. truncated sheet missing EOF).
+    flush_pending_autofilter12_record(
+        pending_autofilter12.take(),
+        codepage,
+        &mut autofilter12_columns,
+        &mut props,
+    );
+
     if !autofilter12_columns.is_empty() {
         props.auto_filter_columns = autofilter12_columns.into_values().collect();
     } else if saw_autofilter12 && props.auto_filter_columns.is_empty() {
@@ -1500,6 +1543,34 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     }
 
     Ok(props)
+}
+
+#[derive(Debug)]
+struct PendingFrtPayload {
+    payload: Vec<u8>,
+    fragments: usize,
+}
+
+fn flush_pending_autofilter12_record(
+    pending: Option<PendingFrtPayload>,
+    codepage: u16,
+    columns: &mut BTreeMap<u32, FilterColumn>,
+    props: &mut SheetRowColProperties,
+) {
+    let Some(pending) = pending else {
+        return;
+    };
+
+    match decode_autofilter12_record(&pending.payload, codepage) {
+        Ok(Some(column)) => {
+            columns.entry(column.col_id).or_insert(column);
+        }
+        Ok(None) | Err(_) => {
+            if !props.warnings.iter().any(|w| w == "unsupported AutoFilter12") {
+                push_warning_bounded(&mut props.warnings, "unsupported AutoFilter12".to_string());
+            }
+        }
+    }
 }
 
 // SORT.grbit flags.
