@@ -531,9 +531,11 @@ validate_appimage() {
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
   local has_xlsx_integration=0
+  local has_parquet_mime=0
   local has_scheme_mime=0
   local bad_exec_count=0
   local required_scheme_mime="x-scheme-handler/formula"
+  local required_parquet_mime="application/vnd.apache.parquet"
 
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
@@ -546,6 +548,10 @@ validate_appimage() {
 
     local mime_value
     mime_value="$(printf '%s' "$mime_line" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"
+
+    if printf '%s' "$mime_value" | grep -Fqi "$required_parquet_mime"; then
+      has_parquet_mime=1
+    fi
 
     if printf '%s' "$mime_value" | grep -Fqi "$required_xlsx_mime"; then
       has_xlsx_mime=1
@@ -616,6 +622,26 @@ validate_appimage() {
       fi
     done
     die "No .desktop file advertised .xlsx support for AppImage: $appimage_path"
+  fi
+
+  if [ "$has_parquet_mime" -ne 1 ]; then
+    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised Parquet support for AppImage: $appimage_path" >&2
+    echo "${SCRIPT_NAME}: error: Expected MimeType= to include '${required_parquet_mime}'." >&2
+    echo "${SCRIPT_NAME}: error: MimeType entries found:" >&2
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#$appdir/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
+    done
+    die "No .desktop file advertised Parquet support for AppImage: $appimage_path"
   fi
 
   if [ "$has_spreadsheet_mime" -ne 1 ]; then

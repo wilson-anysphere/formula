@@ -368,6 +368,7 @@ validate_desktop_integration_extracted() {
   desktop_files=("${matched_desktop_files[@]}")
 
   local required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  local required_parquet_mime="application/vnd.apache.parquet"
   local required_scheme_mime="x-scheme-handler/formula"
   local spreadsheet_mime_regex
   spreadsheet_mime_regex='xlsx|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
@@ -375,6 +376,7 @@ validate_desktop_integration_extracted() {
   local has_any_mimetype=0
   local has_spreadsheet_mime=0
   local has_xlsx_integration=0
+  local has_parquet_mime=0
   local has_scheme_mime=0
   local bad_exec_count=0
 
@@ -387,6 +389,10 @@ validate_desktop_integration_extracted() {
     has_any_mimetype=1
     local mime_value
     mime_value="$(printf '%s' "$mime_line" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"
+
+    if printf '%s' "$mime_value" | grep -Fqi "$required_parquet_mime"; then
+      has_parquet_mime=1
+    fi
 
     if printf '%s' "$mime_value" | grep -Fqi "$required_scheme_mime"; then
       has_scheme_mime=1
@@ -427,6 +433,10 @@ validate_desktop_integration_extracted() {
   fi
   if [[ "$has_xlsx_integration" -ne 1 ]]; then
     err "No extracted .desktop MimeType= entry advertised xlsx support (expected substring 'xlsx' or MIME '${required_xlsx_mime}')."
+    return 1
+  fi
+  if [[ "$has_parquet_mime" -ne 1 ]]; then
+    err "No extracted .desktop MimeType= entry advertised Parquet support (expected MIME '${required_parquet_mime}')."
     return 1
   fi
   if [[ "$has_spreadsheet_mime" -ne 1 ]]; then
