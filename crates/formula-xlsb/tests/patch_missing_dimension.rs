@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
+use formula_biff::encode_rgce_with_rgcb;
 use formula_xlsb::{
     biff12_varint, patch_sheet_bin, patch_sheet_bin_streaming, CellEdit, CellValue, XlsbWorkbook,
 };
@@ -154,6 +155,103 @@ fn patch_sheet_bin_streaming_inserts_missing_dimension_before_sheetdata() {
     let dim = sheet.dimension.expect("expected synthesized DIMENSION");
     assert_eq!(dim.start_row, 4);
     assert_eq!(dim.start_col, 2);
+    assert_eq!(dim.height, 1);
+    assert_eq!(dim.width, 1);
+}
+
+#[test]
+fn patch_sheet_bin_inserts_missing_dimension_when_converting_value_cell_to_formula() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let xlsb_bytes = builder.build_bytes();
+    let sheet_bin = read_sheet_bin(xlsb_bytes.clone());
+    let sheet_no_dim = remove_dimension_record(&sheet_bin);
+    assert_eq!(read_dimension_bounds(&sheet_no_dim), None);
+
+    let encoded = encode_rgce_with_rgcb("=1+1").expect("encode formula");
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(encoded.rgce),
+        new_rgcb: Some(encoded.rgcb),
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+    let patched_sheet_bin = patch_sheet_bin(&sheet_no_dim, &edits).expect("patch_sheet_bin");
+    assert_eq!(
+        read_dimension_bounds(&patched_sheet_bin),
+        Some((0, 0, 0, 0))
+    );
+
+    let tmpdir = tempdir().expect("tempdir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, xlsb_bytes).expect("write input");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    wb.save_with_part_overrides(
+        &output_path,
+        &HashMap::from([(sheet_part, patched_sheet_bin)]),
+    )
+    .expect("write patched workbook");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched");
+    let sheet = wb2.read_sheet(0).expect("read patched sheet");
+    let dim = sheet.dimension.expect("expected synthesized DIMENSION");
+    assert_eq!(dim.start_row, 0);
+    assert_eq!(dim.start_col, 0);
+    assert_eq!(dim.height, 1);
+    assert_eq!(dim.width, 1);
+}
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_missing_dimension_when_converting_value_cell_to_formula() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let xlsb_bytes = builder.build_bytes();
+    let sheet_bin = read_sheet_bin(xlsb_bytes.clone());
+    let sheet_no_dim = remove_dimension_record(&sheet_bin);
+    assert_eq!(read_dimension_bounds(&sheet_no_dim), None);
+
+    let encoded = encode_rgce_with_rgcb("=1+1").expect("encode formula");
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(encoded.rgce),
+        new_rgcb: Some(encoded.rgcb),
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let mut patched_stream = Vec::new();
+    let changed =
+        patch_sheet_bin_streaming(Cursor::new(&sheet_no_dim), &mut patched_stream, &edits)
+            .expect("patch_sheet_bin_streaming");
+    assert!(changed, "expected streaming patcher to report changes");
+    assert_eq!(read_dimension_bounds(&patched_stream), Some((0, 0, 0, 0)));
+
+    let tmpdir = tempdir().expect("tempdir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, xlsb_bytes).expect("write input");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    wb.save_with_part_overrides(&output_path, &HashMap::from([(sheet_part, patched_stream)]))
+        .expect("write patched workbook");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched");
+    let sheet = wb2.read_sheet(0).expect("read patched sheet");
+    let dim = sheet.dimension.expect("expected synthesized DIMENSION");
+    assert_eq!(dim.start_row, 0);
+    assert_eq!(dim.start_col, 0);
     assert_eq!(dim.height, 1);
     assert_eq!(dim.width, 1);
 }

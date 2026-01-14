@@ -628,6 +628,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_float(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
@@ -652,6 +653,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_rk(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
@@ -677,6 +679,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_inline_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
@@ -701,6 +704,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_shared_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
@@ -753,6 +757,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_bool(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
@@ -777,6 +782,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_error(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
+                            changed = true;
                             convert_value_record_to_formula(
                                 &mut writer,
                                 id,
