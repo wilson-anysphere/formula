@@ -281,7 +281,6 @@ export class DrawingInteractionController {
     // Ensure the spreadsheet/grid key handlers do not interpret Escape as "deselect"
     // while we're actively dragging/resizing/rotating a drawing.
     e.stopPropagation();
-    (e as any).stopImmediatePropagation?.();
     this.cancelActiveGesture();
   };
 
