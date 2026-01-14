@@ -167,9 +167,9 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
       activeValue: document.createElement("div"),
     };
 
-    // Drawing interactions are enabled by default in shared-grid mode; keep the default
-    // so this test matches the desktop runtime.
-    const app = new SpreadsheetApp(root, status);
+    // Enable drawing interactions so the split-view secondary pane can use its dedicated
+    // DrawingInteractionController for drag/resize/rotate gestures.
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
     expect(app.getGridMode()).toBe("shared");
 
     // Wire a minimal "secondary selection → primary selection" sync (like `main.ts`).
@@ -233,7 +233,7 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
     };
     app.setDrawingObjects([drawing]);
 
-    return { app, root, secondaryView, secondaryContainer, selectionCanvas, beforeActive };
+    return { app, root, secondaryView, secondaryContainer, selectionCanvas, beforeActive, drawing };
   }
 
   it("selects the drawing and tags context-clicks on right click without moving the active cell", () => {
@@ -353,6 +353,68 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
 
     expect(selectionCanvas.style.cursor).toBe("default");
     expect(secondaryContainer.style.cursor).toBe("");
+
+    secondaryView.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
+
+  it("moves drawings via drag gestures in the secondary pane", () => {
+    const { app, root, secondaryView, secondaryContainer, selectionCanvas, drawing } = setup();
+
+    // Persist the drawing into the DocumentController so interaction commits update the
+    // underlying model (SpreadsheetApp clears its in-memory cache at commit time).
+    const sheetId = app.getCurrentSheetId();
+    (app.getDocument() as any).setSheetDrawings(sheetId, [drawing], { label: "Set Drawings" });
+
+    const headerOffsetX = secondaryView.grid.renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = secondaryView.grid.renderer.scroll.rows.totalSize(1);
+
+    const rect = secondaryContainer.getBoundingClientRect();
+
+    const startX = headerOffsetX + 40;
+    const startY = headerOffsetY + 40;
+    const dx = 30;
+    const dy = 20;
+    const endX = startX + dx;
+    const endY = startY + dy;
+
+    const down = createPointerLikeMouseEvent("pointerdown", {
+      clientX: rect.left + startX,
+      clientY: rect.top + startY,
+      button: 0,
+      pointerId: 1,
+    });
+    selectionCanvas.dispatchEvent(down);
+
+    const move = createPointerLikeMouseEvent("pointermove", {
+      clientX: rect.left + endX,
+      clientY: rect.top + endY,
+      button: 0,
+      pointerId: 1,
+    });
+    selectionCanvas.dispatchEvent(move);
+
+    const up = createPointerLikeMouseEvent("pointerup", {
+      clientX: rect.left + endX,
+      clientY: rect.top + endY,
+      button: 0,
+      pointerId: 1,
+    });
+    selectionCanvas.dispatchEvent(up);
+
+    const persisted = (app.getDocument() as any).getSheetDrawings(sheetId) as any[];
+    const next = persisted.find((d) => d?.id === 1) ?? null;
+    expect(next).not.toBeNull();
+
+    const zoom = secondaryView.grid.renderer.getZoom();
+    const expectedDxEmu = pxToEmu(dx, zoom);
+    const expectedDyEmu = pxToEmu(dy, zoom);
+
+    expect(next.anchor?.type).toBe("absolute");
+    expect(next.anchor?.pos?.xEmu).toBeCloseTo(expectedDxEmu, 4);
+    expect(next.anchor?.pos?.yEmu).toBeCloseTo(expectedDyEmu, 4);
 
     secondaryView.destroy();
     app.destroy();

@@ -1260,6 +1260,7 @@ export class SpreadsheetApp {
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
   private splitViewSecondaryGridPointerAbort: AbortController | null = null;
   private splitViewSecondarySelectionCanvas: HTMLCanvasElement | null = null;
+  private splitViewSecondaryDrawingInteractionController: DrawingInteractionController | null = null;
   private readonly drawingsListeners = new Set<() => void>();
   private readonly drawingSelectionListeners = new Set<(id: DrawingObjectId | null) => void>();
   private readonly formulaChartModelStore = new FormulaChartModelStore();
@@ -1287,6 +1288,20 @@ export class SpreadsheetApp {
     frozenCols: 0,
   };
   private readonly drawingInteractionViewportScratch: DrawingViewport = {
+    scrollX: 0,
+    scrollY: 0,
+    width: 0,
+    height: 0,
+    dpr: 1,
+    zoom: 1,
+    headerOffsetX: 0,
+    headerOffsetY: 0,
+    frozenRows: 0,
+    frozenCols: 0,
+    frozenWidthPx: 0,
+    frozenHeightPx: 0,
+  };
+  private readonly splitViewSecondaryDrawingInteractionViewportScratch: DrawingViewport = {
     scrollX: 0,
     scrollY: 0,
     width: 0,
@@ -2933,6 +2948,9 @@ export class SpreadsheetApp {
             }
             this.selectedDrawingIndex = idx >= 0 ? idx : null;
           }
+          // Keep split-view interaction state in sync when selection changes in the primary pane.
+          // (The secondary pane uses a dedicated DrawingInteractionController instance.)
+          this.splitViewSecondaryDrawingInteractionController?.setSelectedId(selectedId);
           if (prev !== selectedId) {
             this.dispatchDrawingSelectionChanged();
           }
@@ -3184,6 +3202,7 @@ export class SpreadsheetApp {
                 this.selectedDrawingId = null;
                 this.selectedDrawingIndex = null;
                 this.drawingInteractionController?.setSelectedId(null);
+                this.splitViewSecondaryDrawingInteractionController?.setSelectedId(null);
                 this.dispatchDrawingSelectionChanged();
                 // In legacy grid mode, drawing selection chrome is rendered on the selection canvas.
                 // Ensure it clears immediately when switching the active selection to a chart.
@@ -4588,6 +4607,8 @@ export class SpreadsheetApp {
     this.splitViewSecondaryGridPointerAbort?.abort();
     this.splitViewSecondaryGridPointerAbort = null;
     this.splitViewSecondarySelectionCanvas = null;
+    this.splitViewSecondaryDrawingInteractionController?.dispose({ revert: false });
+    this.splitViewSecondaryDrawingInteractionController = null;
     this.splitViewSecondaryGrid = null;
     this.splitViewDrawingHitTestIndex = null;
     this.splitViewDrawingHitTestIndexObjects = null;
@@ -6825,6 +6846,7 @@ export class SpreadsheetApp {
       }
       this.drawingOverlay.setSelectedId(lastInsertedId);
       this.drawingInteractionController?.setSelectedId(lastInsertedId);
+      this.splitViewSecondaryDrawingInteractionController?.setSelectedId(lastInsertedId);
       if (prevSelected !== lastInsertedId) {
         this.dispatchDrawingSelectionChanged();
       }
@@ -7035,11 +7057,12 @@ export class SpreadsheetApp {
       // and the selected drawing. Cancel interactions up front so we don't attempt to commit/cancel
       // against a document that is about to be replaced.
       //
-      // Note: `drawingsInteraction` is a backwards-compat alias of `drawingInteractionController`,
-      // but keep the null-safe calls for resilience in older/partially-stubbed test harnesses.
-      this.chartDrawingInteraction?.reset({ clearSelection: true });
-      this.drawingsInteraction?.reset({ clearSelection: true });
-      this.drawingInteractionController?.reset({ clearSelection: true });
+       // Note: `drawingsInteraction` is a backwards-compat alias of `drawingInteractionController`,
+       // but keep the null-safe calls for resilience in older/partially-stubbed test harnesses.
+       this.chartDrawingInteraction?.reset({ clearSelection: true });
+       this.drawingsInteraction?.reset({ clearSelection: true });
+       this.drawingInteractionController?.reset({ clearSelection: true });
+       this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
 
       const prevSelectedDrawingId = this.selectedDrawingId;
       const prevSelectedChartId = this.selectedChartId;
@@ -7077,12 +7100,13 @@ export class SpreadsheetApp {
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
         // Switching sheets as part of a restore should behave like a normal sheet change:
-        // drawings are sheet-scoped, so clear any prior selection and invalidate caches before
-        // swapping `sheetId`.
-        this.drawingInteractionController?.reset({ clearSelection: true });
-        this.selectedDrawingId = null;
-        this.selectedDrawingIndex = null;
-        this.drawingOverlay.setSelectedId(null);
+         // drawings are sheet-scoped, so clear any prior selection and invalidate caches before
+         // swapping `sheetId`.
+         this.drawingInteractionController?.reset({ clearSelection: true });
+         this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
+         this.selectedDrawingId = null;
+         this.selectedDrawingIndex = null;
+         this.drawingOverlay.setSelectedId(null);
         this.drawingObjectsCache = null;
         this.canvasChartCombinedDrawingObjectsCache = null;
         this.invalidateDrawingHitTestIndexCaches();
@@ -7439,6 +7463,7 @@ export class SpreadsheetApp {
     // controller could apply its cleanup (`setObjects`) to the new sheet.
     this.chartDrawingInteraction?.reset({ clearSelection: true });
     this.drawingInteractionController?.reset({ clearSelection: true });
+    this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
     this.canvasChartCombinedDrawingObjectsCache = null;
@@ -7512,6 +7537,7 @@ export class SpreadsheetApp {
       this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
+      this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
       this.canvasChartCombinedDrawingObjectsCache = null;
@@ -7586,6 +7612,7 @@ export class SpreadsheetApp {
       this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
+      this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
       this.canvasChartCombinedDrawingObjectsCache = null;
@@ -8069,6 +8096,7 @@ export class SpreadsheetApp {
       this.selectedDrawingIndex = null;
       this.drawingOverlay.setSelectedId(null);
       this.drawingInteractionController?.setSelectedId(null);
+      this.splitViewSecondaryDrawingInteractionController?.setSelectedId(null);
     }
 
     this.drawingObjectsCache = null;
@@ -8184,6 +8212,7 @@ export class SpreadsheetApp {
     // Keep any active interaction controller in sync without implicitly enabling interactions.
     this.drawingsInteraction?.setSelectedId(id);
     this.drawingInteractionController?.setSelectedId(id);
+    this.splitViewSecondaryDrawingInteractionController?.setSelectedId(id);
 
     const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
     this.renderDrawings(sharedViewport);
@@ -8203,6 +8232,8 @@ export class SpreadsheetApp {
     this.splitViewSecondaryGridPointerAbort?.abort();
     this.splitViewSecondaryGridPointerAbort = null;
     this.splitViewSecondarySelectionCanvas = null;
+    this.splitViewSecondaryDrawingInteractionController?.dispose({ revert: false });
+    this.splitViewSecondaryDrawingInteractionController = null;
 
     this.splitViewSecondaryGrid = view;
     // Drop any cached hit-test index tied to the previous secondary grid instance.
@@ -8228,11 +8259,21 @@ export class SpreadsheetApp {
       } catch {
         this.splitViewSecondarySelectionCanvas = null;
       }
-      view.container.addEventListener("pointerdown", (e) => this.onSplitViewSecondaryDrawingPointerDownCapture(e), {
-        capture: true,
-        passive: false,
-        signal: abort.signal,
-      });
+      const enableDrawingGestures = this.drawingInteractionController != null;
+      if (enableDrawingGestures) {
+        // When drawing interactions are enabled, attach a dedicated controller to the secondary pane
+        // so users can move/resize/rotate drawings from either split pane.
+        const controller = this.ensureSplitViewSecondaryDrawingInteractionController(view);
+        controller.setSelectedId(this.selectedDrawingId);
+      } else {
+        // In shared-grid mode without drawing interactions, we still support click-to-select and
+        // Excel-like context-click behavior via a lightweight capture handler.
+        view.container.addEventListener("pointerdown", (e) => this.onSplitViewSecondaryDrawingPointerDownCapture(e), {
+          capture: true,
+          passive: false,
+          signal: abort.signal,
+        });
+      }
       view.container.addEventListener("pointermove", (e) => this.onSplitViewSecondaryPointerMove(e), {
         passive: true,
         signal: abort.signal,
@@ -8245,6 +8286,174 @@ export class SpreadsheetApp {
         { signal: abort.signal },
       );
     }
+  }
+
+  private getSplitViewSecondaryDrawingInteractionViewportScratch(
+    secondary: { container: HTMLElement; grid: DesktopSharedGrid },
+  ): DrawingViewport {
+    const out = this.splitViewSecondaryDrawingInteractionViewportScratch;
+    const scroll = secondary.grid.getScroll();
+    const viewportState = secondary.grid.renderer.scroll.getViewportState();
+    const width = secondary.container.clientWidth;
+    const height = secondary.container.clientHeight;
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const headerWidth = headerCols > 0 ? secondary.grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+    const headerHeight = headerRows > 0 ? secondary.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+    const headerOffsetX = Math.min(headerWidth, width);
+    const headerOffsetY = Math.min(headerHeight, height);
+
+    const zoomRaw = secondary.grid.renderer.getZoom();
+    const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
+
+    const { frozenRows, frozenCols } = this.getFrozen();
+
+    out.scrollX = scroll.x;
+    out.scrollY = scroll.y;
+    out.width = width;
+    out.height = height;
+    out.dpr = 1;
+    out.zoom = zoom;
+    out.frozenRows = frozenRows;
+    out.frozenCols = frozenCols;
+    out.headerOffsetX = headerOffsetX;
+    out.headerOffsetY = headerOffsetY;
+    out.frozenWidthPx = viewportState.frozenWidth;
+    out.frozenHeightPx = viewportState.frozenHeight;
+    return out;
+  }
+
+  private ensureSplitViewSecondaryDrawingInteractionController(view: {
+    container: HTMLElement;
+    grid: DesktopSharedGrid;
+  }): DrawingInteractionController {
+    const existing = this.splitViewSecondaryDrawingInteractionController;
+    if (existing) return existing;
+
+    const headerRows = 1;
+    const headerCols = 1;
+
+    const geom: DrawingGridGeometry = {
+      cellOriginPx: (cell) => {
+        const headerWidth = headerCols > 0 ? view.grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+        const headerHeight = headerRows > 0 ? view.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: view.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: view.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          width: view.grid.renderer.getColWidth(gridCol),
+          height: view.grid.renderer.getRowHeight(gridRow),
+        };
+      },
+    };
+
+    const focusSecondary = (): void => {
+      try {
+        (view.container as any).focus?.({ preventScroll: true });
+      } catch {
+        view.container.focus?.();
+      }
+    };
+
+    const controller = new DrawingInteractionController(
+      view.container,
+      geom,
+      {
+        getViewport: () => this.getSplitViewSecondaryDrawingInteractionViewportScratch(view),
+        getObjects: () => this.listDrawingObjectsForSheet(),
+        setObjects: (next) => {
+          this.setDrawingObjectsForSheet(next);
+          this.scheduleDrawingsRender("split:drawings-gesture");
+          const selectedId = this.selectedDrawingId;
+          if (selectedId != null) {
+            // `setObjects` is on the pointer-move hot path during drag/resize/rotate interactions.
+            // Avoid an O(n) `find` scan by reusing the index computed on selection.
+            let idx = this.selectedDrawingIndex;
+            const hasCachedIndex =
+              typeof idx === "number" && idx >= 0 && idx < next.length && next[idx]?.id === selectedId;
+            if (!hasCachedIndex) {
+              idx = -1;
+              for (let i = 0; i < next.length; i += 1) {
+                if (next[i]!.id === selectedId) {
+                  idx = i;
+                  break;
+                }
+              }
+              this.selectedDrawingIndex = idx >= 0 ? idx : null;
+            }
+            if (idx >= 0 && next[idx]?.kind.type === "chart") {
+              // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
+              this.renderCharts(false);
+            }
+          }
+          this.emitDrawingsChanged();
+          // Split view: ensure the secondary pane redraws its drawings overlay when in-memory
+          // drawing objects are updated during an interaction gesture.
+          this.scheduleDrawingsChangedWindowEvent();
+        },
+        commitObjects: (next) => {
+          this.document.setSheetDrawings(this.sheetId, next, { source: "drawings" });
+        },
+        beginBatch: ({ label }) => {
+          const mapped =
+            label === "Move Picture"
+              ? "Move Drawing"
+              : label === "Resize Picture"
+                ? "Resize Drawing"
+                : label === "Rotate Picture"
+                  ? "Rotate Drawing"
+                  : label;
+          this.document.beginBatch({ label: mapped });
+        },
+        endBatch: () => this.document.endBatch(),
+        cancelBatch: () => this.document.cancelBatch(),
+        shouldHandlePointerDown: (e) => {
+          // When the formula bar is in range-selection mode, drawing hits should not steal the
+          // pointerdown; let normal grid range selection continue.
+          if (this.formulaBar?.isFormulaEditing()) return false;
+          const target = e.target as HTMLElement | null;
+          if (!target) return true;
+          // Only treat pointerdown events originating from the grid surface (canvases/root) as
+          // drawing selection/interaction. This avoids interfering with interactive DOM overlays
+          // (scrollbars, editor, etc) even when drawings extend underneath them.
+          return target === view.container || target.tagName === "CANVAS";
+        },
+        onPointerDownHit: () => {
+          if (this.editor.isOpen()) {
+            this.editor.commit("command");
+          }
+          // Ensure any secondary in-cell editor commits before we stop propagation (Excel-like behavior).
+          focusSecondary();
+        },
+        onInteractionCommit: (commit) => {
+          this.commitDrawingInteraction(commit);
+        },
+        onSelectionChange: (selectedId) => {
+          // Keep selection global (both panes share a single drawing selection model).
+          this.selectDrawingById(selectedId);
+          focusSecondary();
+        },
+        requestFocus: focusSecondary,
+        scrollBy: (dx, dy) => {
+          const before = view.grid.getScroll();
+          view.grid.scrollBy(dx, dy);
+          const after = view.grid.getScroll();
+          return before.x !== after.x || before.y !== after.y;
+        },
+      },
+      { capture: true },
+    );
+
+    this.splitViewSecondaryDrawingInteractionController = controller;
+    return controller;
   }
 
   private onSplitViewSecondaryDrawingPointerDownCapture(e: PointerEvent): void {
@@ -9348,6 +9557,7 @@ export class SpreadsheetApp {
     // selected (which could enable invisible resize/rotate handles).
     this.drawingsInteraction?.setSelectedId(id);
     this.drawingInteractionController?.setSelectedId(id);
+    this.splitViewSecondaryDrawingInteractionController?.setSelectedId(id);
     const drawSelectionInOverlay = this.gridMode === "shared" || this.drawingInteractionController != null;
     this.drawingOverlay.setSelectedId(drawSelectionInOverlay ? id : null);
     if (prev !== id) {
@@ -9732,6 +9942,7 @@ export class SpreadsheetApp {
     this.dispatchDrawingSelectionChanged();
     this.drawingOverlay.setSelectedId(null);
     this.drawingInteractionController?.setSelectedId(null);
+    this.splitViewSecondaryDrawingInteractionController?.setSelectedId(null);
     this.drawingObjectsCache = null;
     this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
@@ -10762,6 +10973,7 @@ export class SpreadsheetApp {
         if (this.gridMode === "shared") {
           this.ensureDrawingInteractionController().setSelectedId(inserted.id);
         }
+        this.splitViewSecondaryDrawingInteractionController?.setSelectedId(inserted.id);
         if (prevSelected !== inserted.id) {
           this.dispatchDrawingSelectionChanged();
         }
@@ -10922,6 +11134,9 @@ export class SpreadsheetApp {
           }
           this.selectedDrawingIndex = idx >= 0 ? idx : null;
         }
+        // Keep split-view interaction state in sync when selection changes in the primary pane.
+        // (The secondary pane uses a dedicated DrawingInteractionController instance.)
+        this.splitViewSecondaryDrawingInteractionController?.setSelectedId(selectedId);
         this.drawingOverlay.setSelectedId(selectedId);
         if (prev !== selectedId) {
           this.dispatchDrawingSelectionChanged();
@@ -11703,6 +11918,7 @@ export class SpreadsheetApp {
     // `drawingsInteraction` is a back-compat alias; avoid double invalidation when they are the same instance.
     this.chartDrawingInteraction?.invalidateHitTestIndex();
     this.drawingsInteraction?.invalidateHitTestIndex();
+    this.splitViewSecondaryDrawingInteractionController?.invalidateHitTestIndex();
     if (controller && controller !== this.drawingsInteraction) {
       controller.invalidateHitTestIndex();
     }
@@ -13753,6 +13969,7 @@ export class SpreadsheetApp {
       this.selectedDrawingIndex = null;
       this.drawingsInteraction?.setSelectedId(null);
       this.drawingInteractionController?.setSelectedId(null);
+      this.splitViewSecondaryDrawingInteractionController?.setSelectedId(null);
       this.drawingOverlay.setSelectedId(null);
       // In non-canvas chart mode, chart selection is rendered on a separate overlay and
       // won't repaint the drawings overlay. Ensure we clear any drawing selection chrome
@@ -21054,6 +21271,7 @@ export class SpreadsheetApp {
       if (this.selectedDrawingId == null) {
         this.drawingOverlay.setSelectedId(null);
         this.drawingInteractionController?.setSelectedId(null);
+        this.splitViewSecondaryDrawingInteractionController?.setSelectedId(null);
       }
       this.drawingObjectsCache = null;
       this.drawingHitTestIndex = null;
@@ -21366,6 +21584,7 @@ export class SpreadsheetApp {
       }
       this.drawingOverlay.setSelectedId(drawingId);
       this.drawingInteractionController?.setSelectedId(drawingId);
+      this.splitViewSecondaryDrawingInteractionController?.setSelectedId(drawingId);
       if (prevDrawingSelected !== drawingId) {
         this.dispatchDrawingSelectionChanged();
       }
