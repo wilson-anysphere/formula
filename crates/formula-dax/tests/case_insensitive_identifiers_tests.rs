@@ -335,6 +335,90 @@ fn userelationship_resolves_unicode_relationship_case_insensitively() {
 }
 
 #[test]
+fn crossfilter_resolves_unicode_relationship_case_insensitively() {
+    let mut model = DataModel::new();
+
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders->Straße".into(),
+            from_table: "orders".into(),
+            from_column: "straßenid".into(),
+            to_table: "STRASSE".into(),
+            to_column: "STRASSENID".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Orders Total", "SUM(orders[amount])").unwrap();
+    model
+        .add_measure(
+            "Orders East (default)",
+            "CALCULATE([Orders Total], STRASSE[REGION] = \"East\")",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Orders East (crossfilter none)",
+            "CALCULATE([Orders Total], CROSSFILTER(orders[straßenid], STRASSE[STRASSENID], NONE), STRASSE[REGION] = \"East\")",
+        )
+        .unwrap();
+
+    let with_default = model
+        .evaluate_measure("orders east (default)", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(with_default, Value::from(30.0));
+
+    let disabled = model
+        .evaluate_measure("orders east (crossfilter none)", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(
+        disabled,
+        Value::from(35.0),
+        "CROSSFILTER(..., NONE) should disable the relationship even when identifiers differ only by Unicode case folding"
+    );
+}
+
+#[test]
+fn lookupvalue_resolves_unicode_identifiers_case_insensitively() {
+    let mut model = DataModel::new();
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    model
+        .add_measure(
+            "Region 1",
+            "LOOKUPVALUE(STRASSE[REGION], STRASSE[STRASSENID], 1)",
+        )
+        .unwrap();
+    let value = model
+        .evaluate_measure("REGION 1", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, Value::from("East"));
+}
+
+#[test]
 fn related_resolves_unicode_identifiers_case_insensitively() {
     let mut model = DataModel::new();
     let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
