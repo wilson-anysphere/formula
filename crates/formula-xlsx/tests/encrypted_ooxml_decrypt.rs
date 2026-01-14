@@ -15,7 +15,8 @@ fn decrypt_fixture(encrypted_name: &str) -> Vec<u8> {
 
     let cursor = Cursor::new(bytes);
     let mut ole = cfb::CompoundFile::open(cursor).expect("open OLE container");
-    decrypt_ooxml_from_cfb(&mut ole, PASSWORD).expect("decrypt encrypted package")
+    decrypt_ooxml_from_cfb(&mut ole, PASSWORD)
+        .unwrap_or_else(|err| panic!("decrypt {encrypted_name} encrypted package: {err}"))
 }
 
 #[test]
@@ -42,6 +43,34 @@ fn decrypts_agile_and_standard_large_fixtures() {
         assert!(
             pkg.part_names()
                 .any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
+            "decrypted package missing xl/workbook.xml"
+        );
+    }
+}
+
+#[test]
+fn decrypts_agile_and_standard_small_fixtures() {
+    let plaintext_path = fixture_path_buf("plaintext.xlsx");
+    let plaintext = std::fs::read(plaintext_path).expect("read plaintext.xlsx fixture bytes");
+
+    // Sanity: ensure we actually exercise the <=4096-byte edge case (padding/truncation).
+    assert!(
+        plaintext.len() < 4096,
+        "expected plaintext.xlsx to be < 4096 bytes, got {}",
+        plaintext.len()
+    );
+
+    for encrypted in ["agile.xlsx", "standard.xlsx"] {
+        let decrypted = decrypt_fixture(encrypted);
+        assert_eq!(
+            decrypted, plaintext,
+            "decrypted bytes must match plaintext.xlsx for {encrypted}"
+        );
+
+        // Additional sanity: the decrypted bytes should be a valid OPC/ZIP workbook package.
+        let pkg = XlsxPackage::from_bytes(&decrypted).expect("open decrypted package as XLSX");
+        assert!(
+            pkg.part_names().any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
             "decrypted package missing xl/workbook.xml"
         );
     }
@@ -103,4 +132,3 @@ fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
         );
     }
 }
-
