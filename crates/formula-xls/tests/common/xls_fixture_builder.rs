@@ -1118,6 +1118,25 @@ pub fn build_shared_formula_out_of_bounds_relative_refs_fixture_xls() -> Vec<u8>
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula where the follower cell uses a wide
+/// `PtgExp` payload (row u32 + col u16) **and** the shared `SHRFMLA.rgce` uses `PtgRef` with
+/// row/col-relative flags (rather than `PtgRefN` offsets).
+///
+/// Expected decoded formula in B3: `A3+1`.
+pub fn build_shared_formula_ptgexp_wide_payload_ptgref_relative_flags_fixture_xls() -> Vec<u8> {
+    let workbook_stream =
+        build_shared_formula_ptgexp_wide_payload_ptgref_relative_flags_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -8287,6 +8306,79 @@ fn build_shared_formula_shrfmla_ref8_no_cuse_sheet_stream(xf_cell: u16) -> Vec<u
     shrfmla.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
     shrfmla.extend_from_slice(&rgce);
     push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_ptgexp_wide_payload_ptgref_relative_flags_workbook_stream() -> Vec<u8> {
+    // Similar to `build_shared_formula_ptgexp_u32_row_u16_col_workbook_stream`, but the shared
+    // SHRFMLA rgce uses `PtgRef` with row/col-relative flags. Without BIFF8 shared-formula
+    // materialization, follower cells would decode unshifted references.
+    let xf_cell = 16u16;
+    let sheet_stream =
+        build_shared_formula_ptgexp_wide_payload_ptgref_relative_flags_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedWideRefFlags", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_ptgexp_wide_payload_ptgref_relative_flags_sheet_stream(
+    xf_cell: u16,
+) -> Vec<u8> {
+    // Worksheet containing:
+    // - Numeric inputs in A2/A3
+    // - Shared formula range B2:B3 where SHRFMLA.rgce is `A2+1` encoded as
+    //   PtgRef(row=1,col=0xC000)
+    // - Follower cell B3 stores `PtgExp` coordinates as row u32 + col u16 (6 bytes)
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [1, 3) cols [0, 2) => A2:B3.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&1u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&3u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Input values.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 10.0)); // A2
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(2, 0, xf_cell, 20.0)); // A3
+
+    // Anchor cell B2 (row=1,col=1): store canonical PtgExp(B2) followed by SHRFMLA containing the
+    // shared rgce.
+    let anchor_ptgexp = ptg_exp(1, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &anchor_ptgexp),
+    );
+
+    // Shared formula rgce: `A2+1`, encoded using PtgRef with relative flags.
+    let shared_rgce: Vec<u8> = vec![
+        0x24, // PtgRef
+        0x01, 0x00, // rw = 1 (row 2)
+        0x00, 0xC0, // col = 0 | row_rel | col_rel
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(1, 2, 1, 1, &shared_rgce),
+    );
+
+    // Follower cell B3 (row=2,col=1): PtgExp with a 6-byte payload (row u32 + col u16).
+    let follower_ptgexp = ptg_exp_row_u32_col_u16(1, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(2, 1, xf_cell, 0.0, &follower_ptgexp),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet

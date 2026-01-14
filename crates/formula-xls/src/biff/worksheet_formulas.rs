@@ -1377,6 +1377,10 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
         records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
     let mut shrfmla: HashMap<CellRef, Biff8ShrFmlaRecord> = HashMap::new();
+    let mut shrfmla_analysis_by_base: HashMap<
+        CellRef,
+        Option<rgce::Biff8SharedFormulaRgceAnalysis>,
+    > = HashMap::new();
     let mut array: HashMap<CellRef, Biff8ArrayRecord> = HashMap::new();
     let mut table: HashMap<CellRef, Biff8TableRecord> = HashMap::new();
     let mut pending: Vec<PendingExp> = Vec::new();
@@ -1573,18 +1577,49 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    if def.rgcb.is_empty() {
-                        rgce::decode_biff8_rgce_with_base(
+                    let base_coord = rgce::CellCoord::new(base_row, base_col);
+                    let target_coord = rgce::CellCoord::new(exp.cell.row, exp.cell.col);
+
+                    let analysis = shrfmla_analysis_by_base
+                        .entry(base_cell)
+                        .or_insert_with(|| rgce::analyze_biff8_shared_formula_rgce(&def.rgce).ok());
+
+                    let delta_is_zero = exp.cell == base_cell;
+                    let needs_materialization = analysis
+                        .as_ref()
+                        .is_some_and(|analysis| !delta_is_zero && analysis.has_abs_refs_with_relative_flags)
+                        // Best-effort fallback: if analysis failed, attempt materialization for
+                        // follower cells and fall back on failure.
+                        || (analysis.is_none() && !delta_is_zero);
+
+                    let rgce_to_decode: std::borrow::Cow<'_, [u8]> = if needs_materialization {
+                        match rgce::materialize_biff8_shared_formula_rgce(
                             &def.rgce,
-                            ctx,
-                            Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
-                        )
+                            base_coord,
+                            target_coord,
+                        ) {
+                            Ok(v) => std::borrow::Cow::Owned(v),
+                            Err(err) => {
+                                out.warnings.push(format!(
+                                    "cell {}: failed to materialize shared formula base {}: {err}",
+                                    exp.cell.to_a1(),
+                                    base_cell.to_a1()
+                                ));
+                                std::borrow::Cow::Borrowed(&def.rgce)
+                            }
+                        }
+                    } else {
+                        std::borrow::Cow::Borrowed(&def.rgce)
+                    };
+
+                    if def.rgcb.is_empty() {
+                        rgce::decode_biff8_rgce_with_base(&rgce_to_decode, ctx, Some(target_coord))
                     } else {
                         rgce::decode_biff8_rgce_with_base_and_rgcb(
-                            &def.rgce,
+                            &rgce_to_decode,
                             &def.rgcb,
                             ctx,
-                            Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
+                            Some(target_coord),
                         )
                     }
                 } else if let Some(def) = array
