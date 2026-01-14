@@ -186,15 +186,7 @@
 
 dialog.custom-sort-dialog {
   width: min(520px, calc(100vw - (var(--space-6) * 2)));
-  border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
   padding: 0;
-  background: var(--dialog-bg);
-  color: var(--text-primary);
-}
-
-dialog.custom-sort-dialog::backdrop {
-  background: var(--dialog-backdrop);
 }
 
 /* --- Organize Sheets dialog ------------------------------------------------ */

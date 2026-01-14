@@ -37,11 +37,6 @@ dialog.extensions-ui {
   font-family: var(--font-mono);
 }
 
-.extensions-ui,
-.extensions-ui * {
-  box-sizing: border-box;
-}
-
 .extensions-ui .quick-pick__list {
   display: flex;
   flex-direction: column;
