@@ -837,9 +837,30 @@ fn parse_filepass_rc4(payload: &[u8]) -> Result<FilePassRc4, DecryptError> {
         )));
     }
 
-    let salt = payload[6..22].try_into().expect("slice len");
-    let encrypted_verifier = payload[22..38].try_into().expect("slice len");
-    let encrypted_verifier_hash = payload[38..54].try_into().expect("slice len");
+    let salt: [u8; 16] = payload
+        .get(6..22)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| {
+            DecryptError::InvalidFilePass(
+                "truncated FILEPASS RC4 salt (expected 16 bytes)".to_string(),
+            )
+        })?;
+    let encrypted_verifier: [u8; 16] = payload
+        .get(22..38)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| {
+            DecryptError::InvalidFilePass(
+                "truncated FILEPASS RC4 encrypted verifier (expected 16 bytes)".to_string(),
+            )
+        })?;
+    let encrypted_verifier_hash: [u8; 16] = payload
+        .get(38..54)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| {
+            DecryptError::InvalidFilePass(
+                "truncated FILEPASS RC4 encrypted verifier hash (expected 16 bytes)".to_string(),
+            )
+        })?;
 
     Ok(FilePassRc4 {
         key_len,
