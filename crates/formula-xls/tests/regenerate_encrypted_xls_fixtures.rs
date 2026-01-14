@@ -1077,6 +1077,13 @@ fn regenerate_encrypted_xls_fixtures() {
         panic!("write encrypted fixture {rc4_standard_path:?} failed: {err}");
     });
 
+    // Unicode-password variant (non-ASCII).
+    let rc4_standard_unicode_path = fixtures_dir.join("biff8_rc4_standard_unicode_pw_open.xls");
+    let rc4_standard_unicode_bytes = build_rc4_standard_encrypted_xls_bytes("pässwörd");
+    std::fs::write(&rc4_standard_unicode_path, rc4_standard_unicode_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {rc4_standard_unicode_path:?} failed: {err}");
+    });
+
     // RC4 Standard edge-case fixtures derived from `basic.xls`.
     let rc4_standard_long_path = fixtures_dir.join("biff8_rc4_standard_pw_open_long_password.xls");
     let rc4_standard_long_bytes =
