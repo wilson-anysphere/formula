@@ -99,10 +99,24 @@ const geom: GridGeometry = {
 
 const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 1_000, height: 1_000, dpr: 1, zoom: 1 };
 
-function createImageObject(): DrawingObject {
+function createImageObject(opts?: { transform?: DrawingObject["transform"] }): DrawingObject {
   return {
     id: 1,
     kind: { type: "image", imageId: "img_1" },
+    anchor: {
+      type: "absolute",
+      pos: { xEmu: 0, yEmu: 0 },
+      size: { cx: pxToEmu(200), cy: pxToEmu(100) },
+    },
+    zOrder: 0,
+    transform: opts?.transform,
+  };
+}
+
+function createShapeObject(): DrawingObject {
+  return {
+    id: 1,
+    kind: { type: "shape" },
     anchor: {
       type: "absolute",
       pos: { xEmu: 0, yEmu: 0 },
@@ -130,6 +144,56 @@ describe("DrawingInteractionController image resize aspect ratio", () => {
 
     // Drag horizontally while holding Shift; height should be adjusted to keep 2:1.
     el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 250, clientY: 100, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+    });
+  });
+
+  it("does not lock aspect ratio for non-image objects", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    let objects: DrawingObject[] = [createShapeObject()];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    // Start resizing from the south-east corner.
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 200, clientY: 100, pointerId: 1 }));
+
+    // Holding Shift should not change behavior for non-images.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 250, clientY: 100, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(100) },
+    });
+  });
+
+  it("keeps the original aspect ratio for rotated images (lock is applied in local coords)", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    let objects: DrawingObject[] = [
+      createImageObject({ transform: { rotationDeg: 90, flipH: false, flipV: false } }),
+    ];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    // For a 200x100 rect rotated 90deg, the "se" local handle center is at (50, 150).
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 50, clientY: 150, pointerId: 1 }));
+
+    // Move down by 50px while holding Shift. This corresponds to +50px local width delta.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 50, clientY: 200, pointerId: 1, shiftKey: true }));
 
     expect(objects[0]?.anchor).toMatchObject({
       type: "absolute",
