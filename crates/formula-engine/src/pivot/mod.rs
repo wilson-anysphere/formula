@@ -556,8 +556,8 @@ impl CreatePivotTableRequest {
                 .value_fields
                 .into_iter()
                 .map(|vf| {
-                    let raw_field = vf.field;
-                    let source_field = pivot_field_ref_from_legacy_string(raw_field.clone());
+                    let field = vf.field;
+                    let source_field = pivot_field_ref_from_legacy_string(field);
                     let name = vf
                         .name
                         .unwrap_or_else(|| {
