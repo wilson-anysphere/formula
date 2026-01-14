@@ -8,6 +8,7 @@ import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/
 import { DEFAULT_GRID_FONT_FAMILY } from "./defaultFontFamilies.ts";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager.ts";
 import { VirtualScrollManager } from "../virtualization/VirtualScrollManager.ts";
+import { alignScrollToDevicePixels as alignScrollToDevicePixelsUtil } from "../virtualization/alignScrollToDevicePixels.ts";
 import {
   MergedCellIndex,
   isInteriorHorizontalGridline,
@@ -2290,16 +2291,7 @@ export class CanvasGridRenderer {
   }
 
   private alignScrollToDevicePixels(pos: { x: number; y: number }): { x: number; y: number } {
-    const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
-    const step = 1 / dpr;
-    const { maxScrollX, maxScrollY } = this.scroll.getMaxScroll();
-
-    const maxAlignedX = Math.floor(maxScrollX / step) * step;
-    const maxAlignedY = Math.floor(maxScrollY / step) * step;
-
-    const x = Math.min(maxAlignedX, Math.max(0, Math.round(pos.x / step) * step));
-    const y = Math.min(maxAlignedY, Math.max(0, Math.round(pos.y / step) * step));
-    return { x, y };
+    return alignScrollToDevicePixelsUtil(pos, this.scroll.getMaxScroll(), this.devicePixelRatio);
   }
 
   private markFullViewportDirty(viewport: GridViewportState): void {

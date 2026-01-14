@@ -12,6 +12,7 @@ import type {
 } from "@formula/grid";
 import {
   applySrOnlyStyle,
+  alignScrollToDevicePixels,
   CanvasGridRenderer,
   computeScrollbarThumb,
   DEFAULT_GRID_FONT_FAMILY,
@@ -385,18 +386,7 @@ export class DesktopSharedGrid {
   }
 
   private alignScroll(pos: { x: number; y: number }): { x: number; y: number } {
-    // Keep aligned with `CanvasGridRenderer.alignScrollToDevicePixels` (private), which ensures
-    // scroll offsets land on device-pixel boundaries for crisp rendering and stable blits.
-    const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
-    const step = 1 / dpr;
-    const { maxScrollX, maxScrollY } = this.renderer.scroll.getMaxScroll();
-
-    const maxAlignedX = Math.floor(maxScrollX / step) * step;
-    const maxAlignedY = Math.floor(maxScrollY / step) * step;
-
-    const x = Math.min(maxAlignedX, Math.max(0, Math.round(pos.x / step) * step));
-    const y = Math.min(maxAlignedY, Math.max(0, Math.round(pos.y / step) * step));
-    return { x, y };
+    return alignScrollToDevicePixels(pos, this.renderer.scroll.getMaxScroll(), this.devicePixelRatio);
   }
 
   scrollTo(x: number, y: number): void {

@@ -44,6 +44,7 @@ export { VariableSizeAxis } from "./virtualization/VariableSizeAxis";
 export type { AxisVisibleRange } from "./virtualization/VariableSizeAxis";
 export type { ScrollbarThumb } from "./virtualization/scrollbarMath";
 export { computeScrollbarThumb } from "./virtualization/scrollbarMath";
+export { alignScrollToDevicePixels } from "./virtualization/alignScrollToDevicePixels";
 export { VirtualScrollManager } from "./virtualization/VirtualScrollManager";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager";
 export { GridPlaceholder } from "./GridPlaceholder";
