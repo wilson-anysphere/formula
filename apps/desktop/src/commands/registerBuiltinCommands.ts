@@ -84,6 +84,13 @@ export function registerBuiltinCommands(params: {
       return;
     }
 
+    // Dock zones can be collapsed. Treat a collapsed docked panel as "closed" for toggle purposes
+    // so toggle commands restore the dock (instead of removing the panel).
+    if (placement.kind === "docked" && (layoutController.layout as any)?.docks?.[placement.side]?.collapsed) {
+      layoutController.openPanel(panelId);
+      return;
+    }
+
     // Floating panels can be minimized. Treat a minimized floating panel as "closed" for toggle
     // purposes so toggle commands restore the panel instead of closing it.
     if (placement.kind === "floating" && (layoutController.layout as any)?.floating?.[panelId]?.minimized) {
@@ -97,6 +104,13 @@ export function registerBuiltinCommands(params: {
   const openDockPanel = (panelId: string) => {
     const placement = getPanelPlacement(layoutController.layout, panelId);
     if (placement.kind === "closed") {
+      layoutController.openPanel(panelId);
+      return;
+    }
+
+    // Dock zones can be collapsed. Treat a collapsed docked panel as "closed" for open purposes
+    // so open commands restore the dock (instead of leaving it hidden).
+    if (placement.kind === "docked" && (layoutController.layout as any)?.docks?.[placement.side]?.collapsed) {
       layoutController.openPanel(panelId);
       return;
     }

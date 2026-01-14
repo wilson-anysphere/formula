@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
-import { createDefaultLayout, getPanelPlacement, openPanel, closePanel, floatPanel, setFloatingPanelMinimized } from "../layout/layoutState.js";
+import {
+  createDefaultLayout,
+  getPanelPlacement,
+  openPanel,
+  closePanel,
+  floatPanel,
+  setDockCollapsed,
+  setFloatingPanelMinimized,
+} from "../layout/layoutState.js";
 import { PanelIds, panelRegistry } from "../panels/panelRegistry.js";
 
 import { DATA_QUERIES_RIBBON_COMMANDS, registerDataQueriesCommands } from "./registerDataQueriesCommands.js";
@@ -89,6 +97,31 @@ describe("registerDataQueriesCommands", () => {
     expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(true);
     await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections);
     expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(false);
+  });
+
+  it("restores collapsed docks when toggling the Data Queries panel via command palette", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = createLayoutHarness();
+
+    registerDataQueriesCommands({
+      commandRegistry,
+      layoutController,
+      getPowerQueryService: () => null,
+      showToast: () => {},
+      notify: () => {},
+    });
+
+    await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections, true);
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES)).toEqual({ kind: "docked", side: "right" });
+
+    layoutController.layout = setDockCollapsed(layoutController.layout, "right", true);
+    expect(layoutController.layout.docks.right.collapsed).toBe(true);
+
+    // No explicit pressed state (command palette toggle) should treat collapsed docks as "closed"
+    // and restore them.
+    await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections);
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES)).toEqual({ kind: "docked", side: "right" });
+    expect(layoutController.layout.docks.right.collapsed).toBe(false);
   });
 
   it("syncs ribbon state + restores focus when the toggle command cannot run (missing layout controller)", async () => {

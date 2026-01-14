@@ -7,6 +7,7 @@ import {
   openPanel,
   closePanel,
   floatPanel,
+  setDockCollapsed,
   setFloatingPanelMinimized,
   setSplitDirection as setSplitDirectionState,
 } from "../layout/layoutState.js";
@@ -78,6 +79,35 @@ describe("registerBuiltinCommands: panel toggles", () => {
     await commandRegistry.executeCommand("view.togglePanel.dataQueries");
     expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).toBe("floating");
     expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(false);
+  });
+
+  it("restores collapsed docks when toggling a panel open", async () => {
+    const { commandRegistry, layoutController } = createHarness();
+
+    await commandRegistry.executeCommand("view.togglePanel.dataQueries");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES)).toEqual({ kind: "docked", side: "right" });
+
+    layoutController.layout = setDockCollapsed(layoutController.layout, "right", true);
+    expect(layoutController.layout.docks.right.collapsed).toBe(true);
+
+    // Toggling should restore (uncollapse) instead of closing.
+    await commandRegistry.executeCommand("view.togglePanel.dataQueries");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES)).toEqual({ kind: "docked", side: "right" });
+    expect(layoutController.layout.docks.right.collapsed).toBe(false);
+  });
+
+  it("restores collapsed docks when executing open-panel commands", async () => {
+    const { commandRegistry, layoutController } = createHarness();
+
+    await commandRegistry.executeCommand("data.forecast.whatIfAnalysis.scenarioManager");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SCENARIO_MANAGER)).toEqual({ kind: "docked", side: "left" });
+
+    layoutController.layout = setDockCollapsed(layoutController.layout, "left", true);
+    expect(layoutController.layout.docks.left.collapsed).toBe(true);
+
+    await commandRegistry.executeCommand("data.forecast.whatIfAnalysis.scenarioManager");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SCENARIO_MANAGER)).toEqual({ kind: "docked", side: "left" });
+    expect(layoutController.layout.docks.left.collapsed).toBe(false);
   });
 
   it("toggles Version History panel open/closed", async () => {

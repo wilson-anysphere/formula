@@ -2199,8 +2199,15 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const perfStats = app.getGridPerfStats() as any;
     const perfStatsSupported = perfStats != null;
     const perfStatsEnabled = Boolean(perfStats?.enabled);
-    const isPanelOpen = (panelId: string): boolean =>
-      ribbonLayoutController != null && getPanelPlacement(ribbonLayoutController.layout, panelId).kind !== "closed";
+    const isPanelOpen = (panelId: string): boolean => {
+      if (!ribbonLayoutController) return false;
+      const layout = ribbonLayoutController.layout as any;
+      const placement = getPanelPlacement(layout, panelId) as any;
+      if (placement.kind === "closed") return false;
+      if (placement.kind === "floating") return !Boolean(layout?.floating?.[panelId]?.minimized);
+      if (placement.kind === "docked") return !Boolean(layout?.docks?.[placement.side]?.collapsed);
+      return false;
+    };
 
     const pressedById = {
       "format.toggleBold": formatState.bold,

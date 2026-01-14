@@ -100,7 +100,15 @@ export function registerDataQueriesCommands(params: {
           return false;
         }
       })();
-      if (placement.kind === "closed" || isMinimizedFloating) open();
+      const isCollapsedDock = (() => {
+        if (placement.kind !== "docked") return false;
+        try {
+          return Boolean((layoutController.layout as any)?.docks?.[placement.side]?.collapsed);
+        } catch {
+          return false;
+        }
+      })();
+      if (placement.kind === "closed" || isMinimizedFloating || isCollapsedDock) open();
       else close();
 
       focusAfterExecute?.();
