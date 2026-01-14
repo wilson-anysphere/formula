@@ -474,6 +474,7 @@ function reportSize({ env }) {
   } else if (binReport.status !== 0) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-size] WARN desktop_binary_size_report exited with status ${binReport.status}`);
+    failed = true;
   }
 
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
