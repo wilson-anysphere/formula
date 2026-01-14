@@ -59,7 +59,9 @@ fn decrypts_standard_fixture_via_streaming_reader() {
             formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes))
                 .expect("parse decrypted bytes to model workbook")
         }
-        other => panic!("expected Workbook::Model or Workbook::Xlsx, got {other:?}"),
+        other => panic!(
+            "expected Workbook::Model or Workbook::Xlsx for decrypted Standard workbook, got {other:?}"
+        ),
     };
     assert_expected_contents(&decrypted_model);
 
