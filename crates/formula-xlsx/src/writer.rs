@@ -431,7 +431,7 @@ fn trim_float(value: f64) -> String {
             return as_f32.to_string();
         }
     }
- 
+
     let s = format!("{value:.15}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
     if s.is_empty() {
@@ -1756,10 +1756,7 @@ fn cell_xml(
     let mut value_xml = String::new();
 
     if cell.style_id != 0 {
-        if let Some(xf_index) = style_to_xf
-            .get(&cell.style_id)
-            .copied()
-        {
+        if let Some(xf_index) = style_to_xf.get(&cell.style_id).copied() {
             attrs.push_str(&format!(r#" s="{}""#, xf_index));
         }
     }
