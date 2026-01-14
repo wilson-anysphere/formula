@@ -132,10 +132,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // Good/Bad/Neutral submenu is implemented today.
   "home.styles.cellStyles.goodBadNeutral",
 
-  // --- Comments ---------------------------------------------------------------
-  "review.comments.newComment",
-  "review.comments.showComments",
-
   // --- Formula auditing -------------------------------------------------------
   "formulas.formulaAuditing.tracePrecedents",
   "formulas.formulaAuditing.traceDependents",
@@ -161,11 +157,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "view.macros.recordMacro",
   "view.macros.recordMacro.stop",
   "view.macros.useRelativeReferences",
-  "view.show.performanceStats",
-  "view.window.split",
-  "view.zoom.zoom",
-  "view.zoom.zoom100",
-  "view.zoom.zoomToSelection",
   "view.appearance.theme.system",
   "view.appearance.theme.light",
   "view.appearance.theme.dark",
