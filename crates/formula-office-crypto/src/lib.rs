@@ -26,6 +26,9 @@ const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 ///
 /// `spinCount` is attacker-controlled in Agile-encrypted files; bounding it avoids CPU DoS from
 /// maliciously large values (Excel commonly uses 100,000).
+///
+/// Note: Decryption cost is linear in `spinCount`. Keep this conservative by default; callers that
+/// need to support unusually large `spinCount` values can override it via [`DecryptOptions`].
 pub const DEFAULT_MAX_SPIN_COUNT: u32 = 1_000_000;
 
 /// Maximum allowed size for the Agile (XML) `EncryptionInfo` payload.

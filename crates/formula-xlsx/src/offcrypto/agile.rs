@@ -30,6 +30,9 @@ pub enum AgileEncryptionInfoWarning {
 ///
 /// Excel commonly uses `spinCount=100000`. This default provides headroom while preventing
 /// malicious documents from requesting billions of hash iterations (CPU DoS).
+///
+/// Note: Decryption cost is linear in `spinCount`. Keep this conservative by default; callers that
+/// need to support unusually large `spinCount` values can override it via [`DecryptOptions`].
 pub const DEFAULT_MAX_SPIN_COUNT: u32 = 1_000_000;
 
 /// Options controlling Agile decryption behavior.

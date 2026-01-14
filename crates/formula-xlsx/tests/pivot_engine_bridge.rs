@@ -41,9 +41,15 @@ fn converts_pivot_cache_and_table_to_engine_types() {
 
     let cfg = pivot_table_to_engine_config(&table, &cache_def);
     assert_eq!(cfg.row_fields.len(), 1);
-    assert_eq!(cfg.row_fields[0].source_field, "Region");
+    assert_eq!(
+        cfg.row_fields[0].source_field,
+        formula_engine::pivot::PivotFieldRef::CacheFieldName("Region".to_string())
+    );
     assert_eq!(cfg.value_fields.len(), 1);
-    assert_eq!(cfg.value_fields[0].source_field, "Sales");
+    assert_eq!(
+        cfg.value_fields[0].source_field,
+        formula_engine::pivot::PivotFieldRef::CacheFieldName("Sales".to_string())
+    );
     assert_eq!(cfg.value_fields[0].aggregation, AggregationType::Sum);
 
     let pivot = PivotTable::new("PivotTable1", &source, cfg).expect("create pivot");
