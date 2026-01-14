@@ -281,7 +281,7 @@ fn catch_calamine_panic_with_context<T>(
 /// malformed or unsupported records may produce warnings rather than failing
 /// the import.
 pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, ImportError> {
-    import_xls_path_with_biff_reader(path.as_ref(), None, biff::read_workbook_stream_from_xls)
+    import_xls_with_biff_reader(path.as_ref(), None, None, biff::read_workbook_stream_from_xls)
 }
 
 /// Import a legacy `.xls` workbook from disk with an optional password for BIFF `FILEPASS`
@@ -301,11 +301,29 @@ pub fn import_xls_path_with_password(
     path: impl AsRef<Path>,
     password: Option<&str>,
 ) -> Result<XlsImportResult, ImportError> {
-    import_xls_path_with_biff_reader(
+    import_xls_with_biff_reader(
         path.as_ref(),
         password,
+        None,
         biff::read_workbook_stream_from_xls,
     )
+}
+
+/// Import a legacy `.xls` workbook from in-memory bytes.
+///
+/// This is intended for non-filesystem contexts (e.g. when a workbook is already loaded into
+/// memory). The returned [`XlsImportResult::source`] path is set to `"<memory>"`.
+pub fn import_xls_bytes(bytes: &[u8]) -> Result<XlsImportResult, ImportError> {
+    import_xls_with_biff_reader(Path::new("<memory>"), None, Some(bytes), |_| {
+        let cursor = Cursor::new(bytes);
+        let mut comp = cfb::CompoundFile::open(cursor).map_err(|err| err.to_string())?;
+        let mut stream = biff::open_xls_workbook_stream(&mut comp)?;
+        let mut workbook_stream = Vec::new();
+        stream
+            .read_to_end(&mut workbook_stream)
+            .map_err(|err| err.to_string())?;
+        Ok(workbook_stream)
+    })
 }
 
 /// Import a password-protected legacy `.xls` workbook from in-memory bytes.
@@ -316,7 +334,7 @@ pub fn import_xls_bytes_with_password(
     bytes: &[u8],
     password: &str,
 ) -> Result<XlsImportResult, ImportError> {
-    import_xls_path_with_biff_reader(Path::new("<memory>"), Some(password), |_| {
+    import_xls_with_biff_reader(Path::new("<memory>"), Some(password), Some(bytes), |_| {
         let cursor = Cursor::new(bytes);
         let mut comp = cfb::CompoundFile::open(cursor).map_err(|err| err.to_string())?;
         let mut stream = biff::open_xls_workbook_stream(&mut comp)?;
@@ -336,14 +354,15 @@ pub fn import_xls_bytes_with_password(
 pub fn import_xls_path_without_biff(
     path: impl AsRef<Path>,
 ) -> Result<XlsImportResult, ImportError> {
-    import_xls_path_with_biff_reader(path.as_ref(), None, |_| {
+    import_xls_with_biff_reader(path.as_ref(), None, None, |_| {
         Err("BIFF parsing disabled".to_string())
     })
 }
 
-fn import_xls_path_with_biff_reader(
+fn import_xls_with_biff_reader(
     path: &Path,
     password: Option<&str>,
+    fallback_xls_bytes: Option<&[u8]>,
     read_biff_workbook_stream: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
 ) -> Result<XlsImportResult, ImportError> {
     let path = path.as_ref();
@@ -471,8 +490,11 @@ fn import_xls_path_with_biff_reader(
             .map_err(ImportError::Xls)?
         }
         None => {
-            let bytes =
-                std::fs::read(path).map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?;
+            let bytes = match fallback_xls_bytes {
+                Some(bytes) => bytes.to_vec(),
+                None => std::fs::read(path)
+                    .map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?,
+            };
             catch_calamine_panic_with_context("opening `.xls` via calamine", || {
                 Xls::new(Cursor::new(bytes))
             })?
@@ -5164,7 +5186,7 @@ mod tests {
         let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
         tmp.write_all(bytes).expect("write xls bytes");
 
-        let result = import_xls_path_with_biff_reader(tmp.path(), None, |_| {
+        let result = import_xls_with_biff_reader(tmp.path(), None, None, |_| {
             panic!("boom from biff reader");
         })
         .expect("expected import to succeed after BIFF reader panic");
