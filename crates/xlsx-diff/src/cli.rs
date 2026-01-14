@@ -32,6 +32,8 @@ pub struct Args {
     password: Option<String>,
 
     /// Read the password from a file (trailing newlines are trimmed).
+    ///
+    /// Use `-` to read the password from stdin.
     #[arg(long, value_name = "PATH", conflicts_with = "password")]
     password_file: Option<PathBuf>,
 
@@ -40,6 +42,8 @@ pub struct Args {
     original_password: Option<String>,
 
     /// Read the password for the original workbook from a file. Overrides `--password-file`.
+    ///
+    /// Use `-` to read the password from stdin.
     #[arg(
         long = "original-password-file",
         value_name = "PATH",
@@ -52,6 +56,8 @@ pub struct Args {
     modified_password: Option<String>,
 
     /// Read the password for the modified workbook from a file. Overrides `--password-file`.
+    ///
+    /// Use `-` to read the password from stdin.
     #[arg(
         long = "modified-password-file",
         value_name = "PATH",

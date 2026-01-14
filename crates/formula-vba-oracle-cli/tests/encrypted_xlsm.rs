@@ -4,7 +4,7 @@ use std::process::Command;
 #[test]
 fn extract_supports_encrypted_xlsm_with_password() {
     let fixture_path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/xlsx/macros/basic-encrypted.xlsm");
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/encrypted/ooxml/basic-encrypted.xlsm");
 
     let assert = Command::new(assert_cmd::cargo::cargo_bin!("formula-vba-oracle-cli"))
         .args([
@@ -42,7 +42,7 @@ fn extract_supports_encrypted_xlsm_with_password() {
 #[test]
 fn extract_reports_wrong_password_for_encrypted_xlsm() {
     let fixture_path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/xlsx/macros/basic-encrypted.xlsm");
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/encrypted/ooxml/basic-encrypted.xlsm");
 
     let assert = Command::new(assert_cmd::cargo::cargo_bin!("formula-vba-oracle-cli"))
         .args([
@@ -66,4 +66,3 @@ fn extract_reports_wrong_password_for_encrypted_xlsm() {
         "expected password-related error, got: {msg}\nstdout:\n{stdout}"
     );
 }
-
