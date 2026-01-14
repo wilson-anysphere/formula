@@ -5263,9 +5263,9 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 (start_id == end_id).then_some(SheetId::Local(start_id))
             }
             crate::eval::SheetReference::External(_) => {
-                // Excel's INDIRECT does not resolve references into external workbooks, so reject
-                // any externally-qualified sheet keys here (regardless of whether an
-                // `ExternalValueProvider` is configured).
+                // Excel's INDIRECT does not resolve references into external workbooks. Reject any
+                // externally-qualified sheet keys here so the bytecode backend matches the AST
+                // backend and returns `#REF!` without consulting the external provider.
                 None
             }
         }

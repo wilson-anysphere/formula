@@ -122,7 +122,10 @@ fn indirect_external_workbook_refs_are_ref_error_without_bytecode() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
     assert_eq!(
         provider.calls(),
         0,

@@ -596,14 +596,16 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
             match ctx.eval_arg(&compiled) {
                 ArgValue::Reference(r) => {
-                    // Excel semantics: INDIRECT does not resolve references into external workbooks
-                    // (even if an external value provider is configured).
-                    // This also avoids introducing dynamic external dependencies that are not yet
-                    // represented in the dependency graph / precedents API.
+                    // Excel semantics: INDIRECT does not resolve references into external
+                    // workbooks (even if an external value provider is configured). This keeps
+                    // diagnostics consistent across backends and avoids introducing dynamic
+                    // external dependencies that are not represented in the dependency graph /
+                    // precedents API.
                     if matches!(&r.sheet_id, crate::functions::SheetId::External(_)) {
-                        return Value::Error(ErrorKind::Ref);
+                        Value::Error(ErrorKind::Ref)
+                    } else {
+                        Value::Reference(r)
                     }
-                    Value::Reference(r)
                 }
                 ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Ref),
                 ArgValue::Scalar(Value::Error(e)) => Value::Error(e),

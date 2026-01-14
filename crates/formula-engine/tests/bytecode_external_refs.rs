@@ -119,7 +119,7 @@ fn bytecode_indirect_external_cell_ref_is_ref_error() {
     engine.set_external_value_provider(Some(provider.clone()));
     engine.set_bytecode_enabled(true);
     engine
-        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")+1"#)
+        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
 
     // External workbook references are not supported by INDIRECT, so this formula should fall
