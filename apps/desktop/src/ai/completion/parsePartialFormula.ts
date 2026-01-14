@@ -168,7 +168,11 @@ class LocaleAwareFunctionRegistry extends FunctionRegistry {
     const rawLimit = options?.limit ?? 10;
     // Fetch a larger candidate set, then filter down by locale. This ensures we still return
     // enough localized results even when the prefix matches many canonical names.
-    const candidateLimit = Math.max(rawLimit * 10, 100);
+    //
+    // Note: because we register aliases for multiple locales, `super.search()` can return many
+    // "wrong-locale" aliases before reaching the canonical functions. Keep this large enough to
+    // avoid accidentally filtering everything out for some prefixes in other locales.
+    const candidateLimit = Math.max(rawLimit * 50, 500);
 
     const localeId = (() => {
       try {
