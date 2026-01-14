@@ -163,13 +163,19 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     const objects = (app as any).listDrawingObjectsForSheet();
     await overlay.render(objects, viewport);
 
-    const hydrated = images.get(entry.id);
-    expect(hydrated).toBeTruthy();
-    expect(Array.from(hydrated.bytes)).toEqual(Array.from(entry.bytes));
-
     const drawingCanvas = root.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
     const ctx = contexts.get(drawingCanvas) as any;
     expect(ctx).toBeTruthy();
+    // Hydration is async (IndexedDB + a follow-up render pass). Poll briefly for the in-memory
+    // cache to be populated and for drawImage to run.
+    let hydrated: any = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      hydrated = images.get(entry.id);
+      if (hydrated && ctx.drawImage.mock.calls.length > 0) break;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(hydrated).toBeTruthy();
+    expect(Array.from(hydrated.bytes)).toEqual(Array.from(entry.bytes));
     expect(ctx.drawImage).toHaveBeenCalled();
 
     app.destroy();
@@ -184,6 +190,7 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     const file = {
       name: "test.png",
       type: "image/png",
+      size: bytes.byteLength,
       arrayBuffer: async () => bytes.buffer.slice(0),
     } as unknown as File;
 
@@ -231,6 +238,7 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     const file = {
       name: "reloaded.png",
       type: "image/png",
+      size: bytes.byteLength,
       arrayBuffer: async () => bytes.buffer.slice(0),
     } as unknown as File;
 
@@ -286,12 +294,17 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     const objects = (app2 as any).listDrawingObjectsForSheet();
     await overlay.render(objects, viewport);
 
-    const hydrated = images2.get(imageId);
-    expect(hydrated).toBeTruthy();
-    expect(Array.from(hydrated.bytes)).toEqual(Array.from(bytes));
-
     const drawingCanvas = root2.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
     const ctx = contexts.get(drawingCanvas) as any;
+    // Hydration is async (IndexedDB + follow-up render). Poll briefly for bytes to land in memory.
+    let hydrated: any = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      hydrated = images2.get(imageId);
+      if (hydrated && ctx.drawImage.mock.calls.length > 0) break;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(hydrated).toBeTruthy();
+    expect(Array.from(hydrated.bytes)).toEqual(Array.from(bytes));
     expect(ctx.drawImage).toHaveBeenCalled();
 
     app2.destroy();
