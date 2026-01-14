@@ -2851,10 +2851,10 @@ export class SpreadsheetApp {
         },
         shouldHandlePointerDown: (e) => {
           if (this.formulaBar?.isFormulaEditing()) return false;
-          const target = e.target as HTMLElement | null;
-          // Some unit tests invoke the capture handler directly with a synthetic PointerEvent
-          // which may not have a meaningful `.target`. Treat those as grid-surface events so
-          // click-to-select behaviors remain testable.
+          const target = e.target as HTMLElement | null | undefined;
+          // Unit tests sometimes call pointer handlers directly using synthetic events (or plain
+          // objects) that omit `target`. Treat those as grid-surface events so drawing
+          // interactions remain testable without DOM dispatch.
           if (!target) return true;
           // Only treat pointerdown events originating from the grid surface (canvases/root) as
           // drawing selection/interaction. This avoids interfering with interactive DOM overlays
@@ -3094,7 +3094,9 @@ export class SpreadsheetApp {
               // When the formula bar is in range-selection mode, chart hits should not steal the
               // pointerdown; let normal grid range selection continue.
               if (this.formulaBar?.isFormulaEditing()) return false;
-              const target = e.target as HTMLElement | null;
+              const target = e.target as HTMLElement | null | undefined;
+              // Tests may call pointer handlers directly with synthetic events that omit `target`.
+              // Treat them as grid-surface events so chart interaction logic stays testable.
               if (!target) return true;
               // Only treat pointerdown events originating from the grid surface (canvases/root) as
               // chart selection/drags. This avoids interfering with interactive DOM overlays
@@ -6493,6 +6495,17 @@ export class SpreadsheetApp {
       throw new Error("Picture insertion is not supported in this build.");
     }
 
+    // Snapshot the current drawing objects so we can avoid allocating ids that collide with
+    // existing pictures. We still re-read the raw sheet drawings at commit time to avoid
+    // overwriting concurrent remote updates.
+    const existingObjects = (() => {
+      try {
+        return this.listDrawingObjectsForSheet(sheetId);
+      } catch {
+        return [];
+      }
+    })();
+
     const readFileBytes = async (file: File): Promise<Uint8Array> => {
       // Preferred path: the standard File/Blob `arrayBuffer()` API.
       if (typeof (file as any)?.arrayBuffer === "function") {
@@ -6562,15 +6575,6 @@ export class SpreadsheetApp {
     };
 
     const MAX_CONCURRENT_DECODES = 4;
-
-    const existingObjects = (() => {
-      try {
-        return this.listDrawingObjectsForSheet(sheetId);
-      } catch {
-        return [];
-      }
-    })();
-
     // Allocate drawing ids ahead-of-time so we guarantee uniqueness within this insertion batch.
     const usedDrawingIds = new Set<number>();
     let maxDrawingId = 0;
@@ -6905,21 +6909,17 @@ export class SpreadsheetApp {
 
     let nextOrder = ordered;
     if (direction === "forward") {
-      // Excel-style semantics: move the drawing forward one step in the render stack.
-      // `ordered` is back-to-front (ascending); swapping with the next item moves it forward.
       if (index >= ordered.length - 1) return;
-      const swapIndex = index + 1;
       nextOrder = ordered.slice();
       const tmp = nextOrder[index]!;
-      nextOrder[index] = nextOrder[swapIndex]!;
-      nextOrder[swapIndex] = tmp;
+      nextOrder[index] = nextOrder[index + 1]!;
+      nextOrder[index + 1] = tmp;
     } else if (direction === "backward") {
       if (index <= 0) return;
-      const swapIndex = index - 1;
       nextOrder = ordered.slice();
       const tmp = nextOrder[index]!;
-      nextOrder[index] = nextOrder[swapIndex]!;
-      nextOrder[swapIndex] = tmp;
+      nextOrder[index] = nextOrder[index - 1]!;
+      nextOrder[index - 1] = tmp;
     } else if (direction === "front") {
       if (index >= ordered.length - 1) return;
       nextOrder = ordered.slice();
@@ -10814,7 +10814,11 @@ export class SpreadsheetApp {
       },
       shouldHandlePointerDown: (e) => {
         if (this.formulaBar?.isFormulaEditing()) return false;
-        const target = e.target as HTMLElement | null;
+        const target = e.target as HTMLElement | null | undefined;
+        // In unit tests we sometimes call SpreadsheetApp's pointer handlers directly using
+        // plain objects that do not include `target`. Treat those as coming from the grid
+        // surface so drawing hit testing remains enabled.
+        if (!target) return true;
         const isGridSurface =
           target === this.root ||
           target === this.selectionCanvas ||
@@ -14290,16 +14294,22 @@ export class SpreadsheetApp {
     // tag the event so the shared-grid selection canvas can ignore it (Excel-like behavior).
     if (!this.sharedGrid && !isPrimaryClick) return;
     if (this.sharedGrid && !(isPrimaryClick || isContextClick)) return;
-
-    // Unit tests sometimes call this handler directly with a synthetic `PointerEvent` that has no
-    // `target` (because it was never dispatched). In that case, allow this capture handler to run
-    // even when the DrawingInteractionController is enabled so tests can exercise header-hit behavior
-    // without routing through real DOM event dispatch.
-    const target = e.target as HTMLElement | null;
+    const target = e.target as HTMLElement | null | undefined;
     // When the dedicated DrawingInteractionController is enabled, it owns selection/dragging.
-    // Avoid competing with its pointer listeners (especially in legacy mode where it uses
-    // bubbling listeners and relies on pointer events not being cancelled in capture phase).
-    if (this.drawingInteractionController && target) return;
+    //
+    // In unit tests, this handler may be invoked directly with a synthetic PointerEvent (not
+    // dispatched through the DOM), bypassing the controller. Forward those synthetic events so
+    // shared-grid selection remains testable and behavior matches real pointer dispatch.
+    if (this.drawingInteractionController) {
+      if (!target) {
+        try {
+          (this.drawingInteractionController as any).onPointerDown?.(e);
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
     // If another capture listener already claimed the event (e.g. chart interactions),
     // do not compete.
     if (e.cancelBubble) return;
@@ -17962,6 +17972,24 @@ export class SpreadsheetApp {
     //
     // We still want SpreadsheetApp to handle non-drawing pointerdowns (cell selection, fill handle,
     // etc), so only bail out when the event was already claimed by the controller.
+    const anyEvent = e as any;
+    // When SpreadsheetApp pointer handlers are invoked directly (unit tests), the normal DOM
+    // listener ordering (controller first, then SpreadsheetApp) is bypassed. In that case the
+    // controller never sees the event, so selection/drags won't work. Forward synthetic events
+    // (which often omit `target`) to the controller so behavior matches real pointer dispatch.
+    if (this.drawingInteractionController && anyEvent.target == null) {
+      const wasPrevented = Boolean(anyEvent.defaultPrevented);
+      const wasCancelBubble = Boolean(anyEvent.cancelBubble);
+      try {
+        (this.drawingInteractionController as any).onPointerDown?.(e);
+      } catch {
+        // Best-effort: drawing interaction forwarding should not break grid selection logic.
+      }
+      if ((!wasPrevented && anyEvent.defaultPrevented) || (!wasCancelBubble && anyEvent.cancelBubble)) {
+        return;
+      }
+    }
+
     if (this.drawingInteractionController && e.defaultPrevented && e.cancelBubble) {
       return;
     }
@@ -18503,6 +18531,20 @@ export class SpreadsheetApp {
       return;
     }
 
+    const anyEvent = e as any;
+    if (this.drawingInteractionController && anyEvent.target == null) {
+      const wasPrevented = Boolean(anyEvent.defaultPrevented);
+      const wasCancelBubble = Boolean(anyEvent.cancelBubble);
+      try {
+        (this.drawingInteractionController as any).onPointerMove?.(e);
+      } catch {
+        // ignore
+      }
+      if ((!wasPrevented && anyEvent.defaultPrevented) || (!wasCancelBubble && anyEvent.cancelBubble)) {
+        return;
+      }
+    }
+
     const target = e.target as HTMLElement | null;
     const useOffsetCoords =
       target === this.root ||
@@ -18898,6 +18940,22 @@ export class SpreadsheetApp {
       this.renderDrawings();
       this.renderSelection();
       return;
+    }
+
+    const anyEvent = e as any;
+    if (this.drawingInteractionController && anyEvent.target == null) {
+      const wasPrevented = Boolean(anyEvent.defaultPrevented);
+      const wasCancelBubble = Boolean(anyEvent.cancelBubble);
+      try {
+        const controllerAny = this.drawingInteractionController as any;
+        if (e.type === "pointercancel") controllerAny.onPointerCancel?.(e);
+        else controllerAny.onPointerUp?.(e);
+      } catch {
+        // ignore
+      }
+      if ((!wasPrevented && anyEvent.defaultPrevented) || (!wasCancelBubble && anyEvent.cancelBubble)) {
+        return;
+      }
     }
 
     if (!this.dragState) return;
