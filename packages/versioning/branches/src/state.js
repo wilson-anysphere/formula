@@ -146,19 +146,54 @@ function normalizeSheetView(value) {
     const overlaps = (a, b) =>
       a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
 
+    const readEntryField = (entry, keys) => {
+      if (!entry || typeof entry !== "object") return undefined;
+      const get = typeof entry.get === "function" ? entry.get.bind(entry) : null;
+      if (get) {
+        for (const key of keys) {
+          try {
+            const value = get(key);
+            if (value !== undefined) return value;
+          } catch {
+            // ignore
+          }
+        }
+      }
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(entry, key)) return entry[key];
+      }
+      return undefined;
+    };
+ 
     /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
     const out = [];
 
     for (let idx = 0; idx < len; idx += 1) {
       const entry = Array.isArray(arr) ? arr[idx] : arr.get(idx);
-      const sr = Number(entry?.startRow ?? entry?.start_row ?? entry?.sr);
-      const er = Number(entry?.endRow ?? entry?.end_row ?? entry?.er);
-      const sc = Number(entry?.startCol ?? entry?.start_col ?? entry?.sc);
-      const ec = Number(entry?.endCol ?? entry?.end_col ?? entry?.ec);
-      if (!Number.isInteger(sr) || sr < 0) continue;
-      if (!Number.isInteger(er) || er < 0) continue;
-      if (!Number.isInteger(sc) || sc < 0) continue;
-      if (!Number.isInteger(ec) || ec < 0) continue;
+      const range = readEntryField(entry, ["range"]) ?? entry;
+
+      const readNonNegInt = (obj, keys) => {
+        const rawValue = readEntryField(obj, keys);
+        const num = Number(rawValue);
+        if (!Number.isInteger(num) || num < 0) return null;
+        return num;
+      };
+
+      let sr = readNonNegInt(range, ["startRow", "start_row", "sr"]);
+      let er = readNonNegInt(range, ["endRow", "end_row", "er"]);
+      let sc = readNonNegInt(range, ["startCol", "start_col", "sc"]);
+      let ec = readNonNegInt(range, ["endCol", "end_col", "ec"]);
+
+      if (sr == null || er == null || sc == null || ec == null) {
+        const start = readEntryField(range, ["start"]);
+        const end = readEntryField(range, ["end"]);
+        if (sr == null) sr = readNonNegInt(start, ["row", "r"]);
+        if (sc == null) sc = readNonNegInt(start, ["col", "c"]);
+        if (er == null) er = readNonNegInt(end, ["row", "r"]);
+        if (ec == null) ec = readNonNegInt(end, ["col", "c"]);
+      }
+
+      if (sr == null || er == null || sc == null || ec == null) continue;
 
       const startRow = Math.min(sr, er);
       const endRow = Math.max(sr, er);
