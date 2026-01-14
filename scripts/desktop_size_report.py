@@ -229,6 +229,51 @@ def _default_desktop_binary_path() -> Path:
     return Path("target/release/formula-desktop")
 
 
+def _candidate_default_binary_paths(repo_root: Path) -> list[Path]:
+    """
+    Best-effort discovery for the built desktop binary in common locations.
+
+    In this repo, workspace builds typically land in `<repo>/target`, but historical
+    or non-workspace builds may place artifacts under `apps/desktop/src-tauri/target`.
+    """
+    exe = "formula-desktop.exe" if os.name == "nt" else "formula-desktop"
+    candidates: list[Path] = [
+        repo_root / "target" / "release" / exe,
+        repo_root / "apps" / "desktop" / "src-tauri" / "target" / "release" / exe,
+    ]
+
+    # Cross-compile / target-triple build outputs.
+    for base in (
+        repo_root / "target",
+        repo_root / "apps" / "desktop" / "src-tauri" / "target",
+    ):
+        if not base.is_dir():
+            continue
+        try:
+            entries = sorted(base.iterdir())
+        except OSError:
+            continue
+        for ent in entries:
+            if not ent.is_dir():
+                continue
+            candidates.append(ent / "release" / exe)
+
+    # De-dupe while preserving order.
+    seen: set[Path] = set()
+    uniq: list[Path] = []
+    for p in candidates:
+        key = p
+        try:
+            key = p.resolve()
+        except OSError:
+            key = p
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(p)
+    return uniq
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Report lightweight desktop sizes (Rust desktop binary + Vite dist dir) without running `tauri build`.",
@@ -280,11 +325,17 @@ def main() -> int:
         return 2
 
     binary_path = args.binary
+    searched_binary_paths: list[Path] = []
     if not binary_path.is_absolute():
-        if (cwd / binary_path).is_file():
-            binary_path = cwd / binary_path
-        elif (repo_root / binary_path).is_file():
-            binary_path = repo_root / binary_path
+        cwd_candidate = cwd / binary_path
+        repo_candidate = repo_root / binary_path
+        searched_binary_paths.extend([cwd_candidate, repo_candidate])
+        if cwd_candidate.is_file():
+            binary_path = cwd_candidate
+        elif repo_candidate.is_file():
+            binary_path = repo_candidate
+    else:
+        searched_binary_paths.append(binary_path)
 
     dist_path = args.dist
     if not dist_path.is_absolute():
@@ -294,13 +345,37 @@ def main() -> int:
             dist_path = repo_root / dist_path
 
     if not binary_path.is_file():
+        # If the caller used the default binary path, try a few more common locations
+        # (workspace target dir vs per-crate target dir vs target-triple paths).
+        if args.binary == _default_desktop_binary_path():
+            for candidate in _candidate_default_binary_paths(repo_root):
+                searched_binary_paths.append(candidate)
+                if candidate.is_file():
+                    binary_path = candidate
+                    break
+
+    if not binary_path.is_file():
         msg = f"binary not found: {binary_path}"
         print(f"desktop-size: ERROR {msg}", file=sys.stderr)
+        uniq_searched: list[str] = []
+        seen: set[str] = set()
+        for p in searched_binary_paths:
+            rel = _relpath(p, repo_root)
+            if rel in seen:
+                continue
+            seen.add(rel)
+            uniq_searched.append(rel)
+        searched = ", ".join(f"`{p}`" for p in uniq_searched[:6])
+        if len(uniq_searched) > 6:
+            searched += ", …"
+        if searched:
+            print(f"desktop-size: searched: {searched}", file=sys.stderr)
         _append_error_summary(
             msg,
             hints=[
                 "Build the desktop binary: `cargo build -p formula-desktop-tauri --features desktop --release --locked`",
                 "Or pass `--binary <path>` (default: `target/release/formula-desktop[.exe]`)",
+                f"Searched: {searched}" if searched else "Searched: _(none)_",
             ],
         )
         return 2
