@@ -3205,6 +3205,12 @@ export class FormulaBarView {
         // the formula includes a single `&` operator or comparison like "<".
         const content = needsEscapeDraft && ESCAPE_HTML_TEST_RE.test(text) ? escapeHtml(text) : text;
 
+        // Identifier spans are only needed in view mode when we have a name resolver (so hover
+        // previews can resolve named ranges). Otherwise they are unstyled and never used for hover.
+        if (!isFormulaEditing && kind === "identifier" && !extraClass && !canIdentifierBeReference) {
+          return content;
+        }
+
         if (!isFormulaEditing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
           return `<span data-kind="${kind}"${classAttr}>${content}</span>`;
