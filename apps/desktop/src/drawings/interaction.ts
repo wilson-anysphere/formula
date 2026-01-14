@@ -410,6 +410,7 @@ export class DrawingInteractionController {
             // Keep the current selection but allow the event to bubble so the app
             // can show a context menu.
             this.markDrawingContextClick(e);
+            this.callbacks.requestFocus?.();
             return;
           }
           const centerX = selectedBounds.x + selectedBounds.width / 2;
@@ -450,6 +451,7 @@ export class DrawingInteractionController {
             // Keep the current selection but allow the event to bubble so the app
             // can show a context menu.
             this.markDrawingContextClick(e);
+            this.callbacks.requestFocus?.();
             return;
           }
           this.stopPointerEvent(e);
