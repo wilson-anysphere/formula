@@ -195,10 +195,13 @@ export function hasTauriWindowHandleApi(): boolean {
       return false;
     }
   })();
+  const getCurrentWebviewWindow = safeGetProp(winApi, "getCurrentWebviewWindow");
+  const getCurrentWindow = safeGetProp(winApi, "getCurrentWindow");
+  const getCurrent = safeGetProp(winApi, "getCurrent");
   return (
-    typeof winApi.getCurrentWebviewWindow === "function" ||
-    typeof winApi.getCurrentWindow === "function" ||
-    typeof winApi.getCurrent === "function" ||
+    typeof getCurrentWebviewWindow === "function" ||
+    typeof getCurrentWindow === "function" ||
+    typeof getCurrent === "function" ||
     hasAppWindow
   );
 }
@@ -219,9 +222,9 @@ export function getTauriWindowHandleOrNull(): any | null {
   };
 
   const handle =
-    tryCall(winApi.getCurrentWebviewWindow) ??
-    tryCall(winApi.getCurrentWindow) ??
-    tryCall(winApi.getCurrent) ??
+    tryCall(safeGetProp(winApi, "getCurrentWebviewWindow")) ??
+    tryCall(safeGetProp(winApi, "getCurrentWindow")) ??
+    tryCall(safeGetProp(winApi, "getCurrent")) ??
     (() => {
       try {
         return winApi.appWindow ?? null;

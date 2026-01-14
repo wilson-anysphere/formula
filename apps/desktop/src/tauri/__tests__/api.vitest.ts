@@ -391,6 +391,22 @@ describe("tauri/api dynamic accessors", () => {
       expect(getTauriWindowHandleOrThrow()).toBe(handle);
     });
 
+    it("treats throwing getCurrent* property getters as unavailable and continues probing", () => {
+      const handle = { label: "fallback" };
+      const winApi: any = { getCurrentWindow: vi.fn(() => handle) };
+      Object.defineProperty(winApi, "getCurrentWebviewWindow", {
+        configurable: true,
+        get() {
+          throw new Error("blocked getter");
+        },
+      });
+      (globalThis as any).__TAURI__ = { window: winApi };
+
+      expect(hasTauriWindowHandleApi()).toBe(true);
+      expect(getTauriWindowHandleOrNull()).toBe(handle);
+      expect(getTauriWindowHandleOrThrow()).toBe(handle);
+    });
+
     it("throws a distinct error when the window API exists but no handle can be resolved", () => {
       (globalThis as any).__TAURI__ = {
         window: {
