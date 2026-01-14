@@ -1641,7 +1641,12 @@ pub(crate) fn split_external_sheet_key(key: &str) -> Option<(&str, &str)> {
     if !key.starts_with('[') {
         return None;
     }
-    let end = key.find(']')?;
+    // External workbook ids can include a path prefix (e.g. from a quoted reference like
+    // `'C:\[foo]\[Book.xlsx]Sheet1'!A1`), and that prefix may itself contain `[` / `]`.
+    //
+    // Our canonical external sheet key format is `"[{workbook}]{sheet}"`, so locate the *last*
+    // closing bracket to recover the workbook id.
+    let end = key.rfind(']')?;
     let workbook = &key[1..end];
     let sheet = &key[end + 1..];
     if workbook.is_empty() || sheet.is_empty() {

@@ -116,6 +116,28 @@ fn sheet_reports_external_sheet_number_using_nfkc_case_insensitive_matching() {
 }
 
 #[test]
+fn sheet_reports_external_sheet_number_for_path_qualified_workbook_with_brackets() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        r"C:\[foo]\Book.xlsx",
+        vec!["Sheet1".to_string(), "Sheet2".to_string()],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r"=SHEET('C:\[foo]\[Book.xlsx]Sheet2'!A1)",
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
 fn sheet_returns_na_for_external_sheet_when_order_unavailable() {
     let provider = Arc::new(TestExternalProvider::default());
 
