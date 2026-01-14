@@ -1182,7 +1182,7 @@ Note: the in-app updater downloads whatever URLs `latest.json` points at (per-pl
 auto-update artifact is not always the same file you’d choose for manual install (see
 `docs/desktop-updater-target-mapping.md`):
 
-- macOS: updater uses `*.app.tar.gz` (not the `.dmg`)
+- macOS: updater uses a tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (not the `.dmg`)
 - Linux: updater uses `*.AppImage` (not `.deb`/`.rpm`)
 - Windows: updater uses the **`.msi`** installer referenced in `latest.json` (the NSIS `.exe` is shipped for manual install/downgrade)
 
@@ -1190,8 +1190,8 @@ Quick reference (auto-update vs manual install):
 
 | Target key (`latest.json.platforms`) | Auto-update asset (`platforms[key].url`) | Manual install |
 | --- | --- | --- |
-| `darwin-x86_64` | `*.app.tar.gz` (universal updater archive) | `.dmg` |
-| `darwin-aarch64` | `*.app.tar.gz` (universal updater archive) | `.dmg` |
+| `darwin-x86_64` | updater payload archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) | `.dmg` |
+| `darwin-aarch64` | updater payload archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) | `.dmg` |
 | `windows-x86_64` | `*.msi` (Windows Installer; updater runs this) | `.msi` / `.exe` (NSIS) |
 | `windows-aarch64` | `*.msi` (Windows Installer; updater runs this) | `.msi` / `.exe` (NSIS) |
 | `linux-x86_64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
@@ -1218,11 +1218,11 @@ wired to the correct **updater-consumed** artifacts:
       - `jq '.platforms | keys' latest.json`
       - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
-   - macOS: `*.app.tar.gz` (**not** `.dmg`)
+   - macOS: updater payload archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (**not** `.dmg`)
    - Windows: `*.msi` (CI expects the manifest to reference the MSI; the `.exe` is for manual install)
    - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
    - Multi-arch correctness:
-     - macOS: it is normal for `darwin-x86_64` and `darwin-aarch64` to point at the **same** universal `*.app.tar.gz`.
+     - macOS: it is normal for `darwin-x86_64` and `darwin-aarch64` to point at the **same** universal updater tarball.
      - Windows: `windows-x86_64` and `windows-aarch64` should point at **different** `.msi` files whose filenames include an arch token (e.g. `x64`/`x86_64`/`amd64` vs `arm64`/`aarch64`).
      - Linux: `linux-x86_64` and `linux-aarch64` should point at **different** `.AppImage` files whose filenames include an arch token (e.g. `x86_64`/`amd64` vs `arm64`/`aarch64`).
 4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
