@@ -350,7 +350,8 @@ MS-OFFCRYPTO Standard encryption can also use `CALG_RC4` (instead of AES). We do
 plumb this through the primary `formula-io` open APIs, but the codebase contains RC4 CryptoAPI
 helpers and tests.
 
-Critical nuance: for **40-bit** RC4 (`KeySize == 40`), CryptoAPI represents the key as a **16-byte**
+Critical nuance: for **40-bit** RC4 (`KeySize == 0` or `KeySize == 40`), CryptoAPI represents the
+key as a **16-byte**
 RC4 key where the low 40 bits come from the derived key material and the remaining 88 bits are zero.
 
 High-level shape (SHA-1; per MS-OFFCRYPTO Standard RC4):
@@ -363,8 +364,11 @@ for i in 0..50000:
 
 for blockIndex = 0, 1, 2, ...:              // 0x200-byte blocks
   Hb = SHA1(H || LE32(blockIndex))
-  key_material = Hb[0..KeySize/8]
-  if KeySize == 40:
+  keySizeBits = KeySize
+  if keySizeBits == 0:
+    keySizeBits = 40                        // MS-OFFCRYPTO: RC4 KeySize=0 means 40-bit
+  key_material = Hb[0..keySizeBits/8]
+  if keySizeBits == 40:
     rc4_key = key_material || 0x00 * 11     // 16 bytes total (CryptoAPI quirk)
   else:
     rc4_key = key_material                  // 7 bytes (56-bit) or 16 bytes (128-bit)

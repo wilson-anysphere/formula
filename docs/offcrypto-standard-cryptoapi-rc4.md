@@ -99,8 +99,11 @@ Inputs (from `EncryptionInfo`):
 - `password`: user-supplied password string
 - `salt`: `EncryptionVerifier.salt` bytes (`EncryptionVerifier.saltSize` is typically 16)
 - `spin_count`: **50000** for Standard CryptoAPI RC4 (`0x0000C350`)
-- `key_size_bytes`: `EncryptionHeader.keySize / 8`
-  - `keySize` is stored in *bits* (e.g. 0x80 for 128-bit RC4 keys).
+- `key_size_bits`: `EncryptionHeader.keySize` (stored in *bits*)
+  - Example: 0x80 for 128-bit RC4 keys.
+  - **KeySize=0 note (RC4 only):** MS-OFFCRYPTO specifies `keySize == 0` MUST be interpreted as
+    **40** (legacy 40-bit RC4).
+- `key_size_bytes`: `key_size_bits / 8` (after applying the `keySize == 0 → 40` rule above)
 
 ### Step 1: encode the password
 
@@ -128,13 +131,13 @@ For each ciphertext block index `block` (0-based):
 
 ```text
 h_block = Hash(h || LE32(block))
-key_material = h_block[0..key_size_bytes]   // key_size_bytes = KeySize/8
+key_material = h_block[0..key_size_bytes]   // key_size_bytes = key_size_bits/8
 
 // CryptoAPI RC4 quirk: 40-bit keys are padded to 16 bytes for the RC4 KSA.
 //
 // If you use the raw 5-byte key_material directly, you will generate a different RC4 keystream
 // than CryptoAPI/Office and the plaintext will be garbage.
-if key_size_bytes == 5:                     // KeySize == 40 bits
+if key_size_bytes == 5:                     // KeySize == 0 (→40) or 40 bits
   rc4_key = key_material || 0x00 * 11       // 16 bytes total
 else:
   rc4_key = key_material                    // 7 bytes (56-bit) or 16 bytes (128-bit)
@@ -143,8 +146,8 @@ else:
 Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 state per block).
 
 **40-bit note:** CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit RC4 key with the low
-40 bits set and the remaining 88 bits zero. Concretely, when `keySize == 40` (`key_size_bytes == 5`),
-the RC4 key bytes passed into the RC4 KSA are:
+40 bits set and the remaining 88 bits zero. Concretely, when `keySize == 0` (interpreted as 40) or
+`keySize == 40` (`key_size_bytes == 5`), the RC4 key bytes passed into the RC4 KSA are:
 
 ```text
 rc4_key = h_block[0..5] || 0x00 * 11   // 16 bytes total
@@ -203,7 +206,8 @@ RC4(key=block0, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
 
 ### 40-bit RC4 key padding example (raw 5-byte key vs CryptoAPI padded key)
 
-Using the same parameters as above but with `KeySize = 40` bits (`key_size_bytes = 5`):
+Using the same parameters as above but with `KeySize = 0` (interpreted as 40) or `KeySize = 40`
+bits (`key_size_bytes = 5`):
 
 ```text
 block 0 H_block (SHA1(H || LE32(0))) =
