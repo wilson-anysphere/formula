@@ -144,8 +144,11 @@ Current state in this repo (important nuance):
   - `open_workbook_model_with_options` intentionally does not decrypt encrypted OOXML wrappers; use
     `open_workbook_model_with_password` for encrypted OOXML → `formula_model::Workbook`.
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
-    `crates/formula-io/src/encrypted_package_reader.rs`, but the high-level `open_workbook*` APIs
-    currently decrypt to in-memory buffers.
+    `crates/formula-io/src/encrypted_package_reader.rs`.
+    - This is used by `open_workbook_with_options` to open Standard/CryptoAPI AES workbooks into a
+      model without materializing the decrypted ZIP bytes.
+    - Other encrypted-open paths (Agile, Standard RC4, and the `_with_password` helpers) still
+      decrypt `EncryptedPackage` into an in-memory buffer first.
 
 When triaging user reports, the most important thing is to capture the `EncryptionInfo` version
 because it determines which scheme you’re dealing with:

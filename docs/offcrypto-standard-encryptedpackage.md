@@ -21,8 +21,10 @@ High-level behavior in `formula-io`:
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
     is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
-    `crates/formula-io/src/encrypted_package_reader.rs`, but the high-level `open_workbook*` APIs
-    currently decrypt to in-memory buffers.
+    `crates/formula-io/src/encrypted_package_reader.rs`.
+    - This is used by `open_workbook_with_options` for Standard/CryptoAPI AES to avoid materializing
+      decrypted ZIP bytes.
+    - Other encrypted-open paths still decrypt into an in-memory buffer first.
 
 Standard/CryptoAPI decryption primitives also exist in lower-level crates (notably
 `crates/formula-offcrypto` and `crates/formula-office-crypto`). The high-level open path in

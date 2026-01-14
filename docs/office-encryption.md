@@ -279,7 +279,10 @@ Implementation status:
     `dataIntegrity` when it is present (when `<dataIntegrity>` is missing, decryption proceeds but no
     integrity verification is performed).
   - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not validate
-    `dataIntegrity`; the high-level `open_workbook*` APIs currently decrypt to in-memory buffers.
+    `dataIntegrity`.
+    - It is used for some compatibility fallbacks (for example Agile files that omit
+      `<dataIntegrity>`) and for Standard AES streaming opens in `open_workbook_with_options`.
+    - Other encrypted-open paths still decrypt `EncryptedPackage` into an in-memory buffer first.
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting Agile packages via
   `decrypt_encrypted_package` with `DecryptOptions.verify_integrity = true` (default: `false`).
   - It verifies only the spec/Excel target (the full `EncryptedPackage` stream bytes) and returns
