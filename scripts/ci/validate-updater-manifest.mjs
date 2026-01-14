@@ -194,7 +194,7 @@ const EXPECTED_PLATFORMS = [
   },
 ];
 
-const EXPECTED_PLATFORM_KEYS = EXPECTED_PLATFORMS.map((p) => p.key);
+export const EXPECTED_PLATFORM_KEYS = EXPECTED_PLATFORMS.map((p) => p.key);
 
 /**
  * Validate the `platforms` section of a Tauri updater manifest (`latest.json`).

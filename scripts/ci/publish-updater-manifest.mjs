@@ -37,7 +37,7 @@ import {
   parseTauriUpdaterPubkey,
 } from "./tauri-minisign.mjs";
 import { validateTauriUpdaterManifest } from "../tauri-updater-manifest.mjs";
-import { validatePlatformEntries } from "./validate-updater-manifest.mjs";
+import { EXPECTED_PLATFORM_KEYS, validatePlatformEntries } from "./validate-updater-manifest.mjs";
 
 // GitHub Actions sets GITHUB_API_URL for both github.com and GHES. Prefer it over a hard-coded
 // api.github.com base so this script works in enterprise installs.
@@ -499,16 +499,7 @@ async function main() {
   // contains our required runtime `{os}-{arch}` target keys (see docs/desktop-updater-target-mapping.md).
   // In `--dry-run` mode we skip the required-key check so maintainers can merge/inspect partial
   // manifests for debugging without needing to fabricate every platform.
-  const requiredPlatforms = dryRun
-    ? undefined
-    : [
-        "darwin-x86_64",
-        "darwin-aarch64",
-        "windows-x86_64",
-        "windows-aarch64",
-        "linux-x86_64",
-        "linux-aarch64",
-      ];
+  const requiredPlatforms = dryRun ? undefined : EXPECTED_PLATFORM_KEYS;
   validateTauriUpdaterManifest(combined, { expectedVersion, requiredPlatforms });
 
   // In non-dry-run mode, reuse the strict CI updater-manifest validator's collision + arch-token

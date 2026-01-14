@@ -34,6 +34,7 @@ import {
   parseTauriUpdaterPubkey,
   parseTauriUpdaterSignature,
 } from "./ci/tauri-minisign.mjs";
+import { EXPECTED_PLATFORM_KEYS as REQUIRED_RUNTIME_PLATFORM_KEYS } from "./ci/validate-updater-manifest.mjs";
 
 class ActionableError extends Error {
   /**
@@ -953,17 +954,13 @@ function validateLatestJson(manifest, expectedVersion, assetsByName, opts = {}) 
   } else {
     const { platforms } = foundPlatforms;
     const keys = Object.keys(platforms);
-    const requiredPlatformKeys = [
-      // Keep this list in sync with docs/desktop-updater-target-mapping.md and
-      // scripts/ci/validate-updater-manifest.mjs (which is the stricter CI validator).
-      // macOS universal bundles are written under both arch keys (same updater archive URL).
-      "darwin-x86_64",
-      "darwin-aarch64",
-      "windows-x86_64",
-      "windows-aarch64",
-      "linux-x86_64",
-      "linux-aarch64",
-    ];
+    // Keep this list in sync with docs/desktop-updater-target-mapping.md.
+    //
+    // Source of truth lives in the CI validator (`scripts/ci/validate-updater-manifest.mjs`), which
+    // is intentionally strict about the required runtime `{os}-{arch}` platform key set.
+    //
+    // Note: macOS universal bundles are written under both arch keys (same updater archive URL).
+    const requiredPlatformKeys = REQUIRED_RUNTIME_PLATFORM_KEYS;
     const requiredPlatformKeySet = new Set(requiredPlatformKeys);
     for (const requiredKey of requiredPlatformKeys) {
       if (!Object.prototype.hasOwnProperty.call(platforms, requiredKey)) {
