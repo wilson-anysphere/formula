@@ -1006,6 +1006,8 @@ Progress events:
 
 Rust API ([`what_if/scenario_manager.rs`](../crates/formula-engine/src/what_if/scenario_manager.rs)):
 
+- WASM status: Scenario Manager is **not currently exposed** via `formula-wasm` (unlike `goalSeek`). The DTOs below describe the intended binding surface if/when it is added.
+
 - `ScenarioManager` — in-memory store of named scenarios + a “base” snapshot used for restore.
 - `ScenarioId(u64)` (`#[serde(transparent)]`) — scenario identifier.
 - `Scenario` (`#[serde(rename_all = "camelCase")]`) — scenario metadata + `{ CellRef -> CellValue }` map.
@@ -1078,6 +1080,8 @@ Validation + edge cases (Rust behavior):
 ### Monte Carlo Simulation
 
 Rust API ([`what_if/monte_carlo.rs`](../crates/formula-engine/src/what_if/monte_carlo.rs)):
+
+- WASM status: Monte Carlo is **not currently exposed** via `formula-wasm`. The DTOs below describe the intended binding surface if/when it is added.
 
 - `SimulationConfig` (`#[serde(rename_all = "camelCase")]`), `InputDistribution`, `Distribution`, `CorrelationMatrix`
 - `MonteCarloEngine::{run_simulation, run_simulation_with_progress}`
@@ -1200,6 +1204,8 @@ Validation + edge cases (Rust behavior):
 ## Solver (Optimization)
 
 The Rust implementation lives in [`solver/mod.rs`](../crates/formula-engine/src/solver/mod.rs) (and supporting files under `crates/formula-engine/src/solver/*`) and is exposed as `formula_engine::solver`.
+
+WASM status: Solver is **not currently exposed** via `formula-wasm`. The DTOs below describe the intended binding surface if/when it is added.
 
 This is a small-but-functional Excel-like Solver with three methods:
 
