@@ -296,6 +296,25 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     // detection later.
     const MAX_HINTS: usize = 12;
 
+    fn hint_priority(hint: &str) -> u8 {
+        // Put the most specific / actionable hints first.
+        if hint.starts_with("typeNode=") || hint.starts_with("typeHint=") {
+            0
+        } else if hint.starts_with("chartType=") {
+            1
+        } else if hint.starts_with("layoutId=") {
+            2
+        } else {
+            3
+        }
+    }
+
+    fn finalize(mut hints: Vec<String>) -> Vec<String> {
+        // `sort_by_key` is stable, so within each priority bucket we preserve document order.
+        hints.sort_by_key(|h| hint_priority(h));
+        hints
+    }
+
     // Best-effort: capture any attribute-based hints that might identify the ChartEx chart kind.
     //
     // This is diagnostic-only; keep output stable by:
@@ -304,24 +323,24 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
+    let maybe_push = |hint: String, out: &mut Vec<String>, seen: &mut HashSet<String>| -> bool {
+        if seen.insert(hint.clone()) {
+            out.push(hint);
+            return out.len() >= MAX_HINTS;
+        }
+        false
+    };
+
     if let Some(node) = find_chart_type_node(doc) {
         let name = node.tag_name().name();
         let hint = format!("typeNode={name}");
-        if seen.insert(hint.clone()) {
-            out.push(hint);
-            if out.len() >= MAX_HINTS {
-                out.sort();
-                return out;
-            }
+        if maybe_push(hint, &mut out, &mut seen) {
+            return finalize(out);
         }
         if let Some(kind) = normalize_chart_ex_kind_hint(name) {
             let hint = format!("typeHint={kind}");
-            if seen.insert(hint.clone()) {
-                out.push(hint);
-                if out.len() >= MAX_HINTS {
-                    out.sort();
-                    return out;
-                }
+            if maybe_push(hint, &mut out, &mut seen) {
+                return finalize(out);
             }
         }
     }
@@ -337,12 +356,8 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             }
             let value = normalize_chart_ex_kind_hint(raw).unwrap_or_else(|| raw.to_string());
             let hint = format!("{attr}={value}");
-            if seen.insert(hint.clone()) {
-                out.push(hint);
-                if out.len() >= MAX_HINTS {
-                    out.sort();
-                    return out;
-                }
+            if maybe_push(hint, &mut out, &mut seen) {
+                return finalize(out);
             }
         }
 
@@ -352,17 +367,12 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
         let lower = name.to_ascii_lowercase();
         if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
             let hint = format!("node={name}");
-            if seen.insert(hint.clone()) {
-                out.push(hint);
-                if out.len() >= MAX_HINTS {
-                    out.sort();
-                    return out;
-                }
+            if maybe_push(hint, &mut out, &mut seen) {
+                return finalize(out);
             }
         }
     }
-    out.sort();
-    out
+    finalize(out)
 }
 
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
