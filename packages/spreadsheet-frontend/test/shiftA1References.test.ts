@@ -56,7 +56,7 @@ describe("shiftA1References", () => {
     // Workbook name containing an escaped `]` (`]]`) should also be treated as opaque.
     expect(shiftA1References("=[A1]]Book.xlsx]Sheet1!A1+1", 1, 0)).toBe("=[A1]]Book.xlsx]Sheet1!A2+1");
     // Workbook names may contain `[` without nesting semantics; still keep them intact.
-    expect(shiftA1References("=[A1[Name].xlsx]Sheet1!A1+1", 1, 0)).toBe("=[A1[Name].xlsx]Sheet1!A2+1");
+    expect(shiftA1References("=[A1[Name.xlsx]Sheet1!A1+1", 1, 0)).toBe("=[A1[Name.xlsx]Sheet1!A2+1");
 
     // Structured reference column names can look like A1 refs. Leave them unchanged.
     expect(shiftA1References("=SUM(Table1[A1],A1)", 1, 0)).toBe("=SUM(Table1[A1],A2)");
