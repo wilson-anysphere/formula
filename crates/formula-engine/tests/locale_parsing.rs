@@ -1163,6 +1163,24 @@ fn canonicalize_and_localize_error_literals_for_all_locales() {
 }
 
 #[test]
+fn canonicalize_and_localize_inverted_punctuation_error_literals_for_es_es() {
+    for (localized_variants, canonical) in [
+        (&["=#¡VALOR!", "=#¡valor!"][..], "=#VALUE!"),
+        (&["=#¿NOMBRE?", "=#¿nombre?"][..], "=#NAME?"),
+    ] {
+        for &localized in localized_variants {
+            let canon = locale::canonicalize_formula(localized, &locale::ES_ES).unwrap();
+            assert_eq!(canon, canonical);
+            // Ensure canonical -> localized prefers the inverted punctuation spelling.
+            assert_eq!(
+                locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+                localized_variants[0]
+            );
+        }
+    }
+}
+
+#[test]
 fn canonicalize_normalizes_canonical_error_variants() {
     assert_eq!(
         locale::canonicalize_formula("=#n/a!", &locale::EN_US).unwrap(),
