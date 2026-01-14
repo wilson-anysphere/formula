@@ -15506,38 +15506,63 @@ export class SpreadsheetApp {
   }
 
   private onGridDragOver(e: DragEvent): void {
-    if (this.isEditing()) return;
     const dt = e.dataTransfer;
     if (!dt) return;
     const types = Array.from(dt.types ?? []);
     if (!types.includes("Files")) return;
 
-    // Only allow drop if at least one file is an image. Prefer `items` metadata during
-    // dragover; `files` may not be populated until drop in some browsers.
+    const hasAnyFiles =
+      Array.from(dt.items ?? []).some((item) => item.kind === "file") || Array.from(dt.files ?? []).length > 0;
+    if (!hasAnyFiles) return;
+
+    // Prevent the browser/webview from treating the drop as an "open file" navigation.
+    // Still only advertise a "copy" affordance for supported image files.
+    e.preventDefault();
+
+    // Prefer `items` metadata during dragover; `files` may not be populated until drop in some browsers.
+    const isImageFile = (file: File): boolean => {
+      const type = typeof file?.type === "string" ? file.type : "";
+      if (type.startsWith("image/")) return true;
+      const name = typeof file?.name === "string" ? file.name.toLowerCase() : "";
+      return /\.(png|jpe?g|gif|bmp|webp|svg)$/.test(name);
+    };
+
     const hasImage =
       Array.from(dt.items ?? []).some((item) => item.kind === "file" && item.type.startsWith("image/")) ||
-      Array.from(dt.files ?? []).some((file) => file.type.startsWith("image/"));
-    if (!hasImage) return;
-
-    e.preventDefault();
+      Array.from(dt.files ?? []).some((file) => isImageFile(file));
     try {
-      // Keep drop events flowing even in read-only mode (so we can show a permission toast on drop),
-      // but don't show a misleading "copy" affordance.
-      dt.dropEffect = this.isReadOnly() ? "none" : "copy";
+      // Keep drop events flowing even in read-only/editing mode so we can suppress default
+      // navigation and (when relevant) show a permission toast on drop, but don't show a misleading
+      // "copy" affordance.
+      const canInsert = hasImage && !this.isReadOnly() && !this.isEditing();
+      dt.dropEffect = canInsert ? "copy" : "none";
     } catch {
       // ignore
     }
   }
 
   private onGridDrop(e: DragEvent): void {
-    if (this.isEditing()) return;
     const dt = e.dataTransfer;
     if (!dt) return;
 
-    const imageFiles = Array.from(dt.files ?? []).filter((file) => file.type.startsWith("image/"));
+    const types = Array.from(dt.types ?? []);
+    if (!types.includes("Files")) return;
+
+    // Prevent the browser/webview from navigating to the dropped file. Even if we don't support
+    // the dropped file type (non-image), "open file" navigation is never the desired UX here.
+    e.preventDefault();
+
+    const isImageFile = (file: File): boolean => {
+      const type = typeof file?.type === "string" ? file.type : "";
+      if (type.startsWith("image/")) return true;
+      const name = typeof file?.name === "string" ? file.name.toLowerCase() : "";
+      return /\.(png|jpe?g|gif|bmp|webp|svg)$/.test(name);
+    };
+
+    const imageFiles = Array.from(dt.files ?? []).filter((file) => isImageFile(file));
     if (imageFiles.length === 0) return;
 
-    e.preventDefault();
+    if (this.isEditing()) return;
 
     if (this.isReadOnly()) {
       const cell = this.selection.active;

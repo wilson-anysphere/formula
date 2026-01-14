@@ -194,4 +194,35 @@ describe("SpreadsheetApp drag/drop image file insertion", () => {
     app.destroy();
     root.remove();
   });
+
+  it("does not attempt to insert pictures while editing, but still prevents default file handling", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    // Force SpreadsheetApp into "editing" mode so it should not insert.
+    (app as any).isEditing = () => true;
+
+    const insertPicturesFromFiles = vi.fn();
+    (app as any).insertPicturesFromFiles = insertPicturesFromFiles;
+
+    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
+    const dataTransfer = { files: [file], types: ["Files"], dropEffect: "none", items: [] } as any;
+
+    const event = new Event("drop", { bubbles: true, cancelable: true }) as any;
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    Object.defineProperty(event, "clientX", { value: 60 });
+    Object.defineProperty(event, "clientY", { value: 30 });
+    root.dispatchEvent(event);
+
+    expect(insertPicturesFromFiles).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
 });
