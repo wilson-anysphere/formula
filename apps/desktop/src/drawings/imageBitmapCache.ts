@@ -596,8 +596,35 @@ export class ImageBitmapCache {
     try {
       const img = new Image();
       await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("Image decode fallback failed to load <img>"));
+        const timeoutMs = 5_000;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        const clear = () => {
+          if (timeoutId === null) return;
+          try {
+            clearTimeout(timeoutId);
+          } catch {
+            // Ignore clear failures (best-effort).
+          }
+          timeoutId = null;
+        };
+
+        img.onload = () => {
+          clear();
+          resolve();
+        };
+        img.onerror = () => {
+          clear();
+          reject(new Error("Image decode fallback failed to load <img>"));
+        };
+
+        if (typeof setTimeout === "function") {
+          timeoutId = setTimeout(() => {
+            timeoutId = null;
+            reject(new Error("Image decode fallback timed out"));
+          }, timeoutMs);
+        }
+
         // Assign the src after wiring handlers so we don't miss synchronous load events in tests/polyfills.
         img.src = url;
       });

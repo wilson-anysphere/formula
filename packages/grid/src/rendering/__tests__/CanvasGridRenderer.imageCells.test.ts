@@ -981,6 +981,111 @@ describe("CanvasGridRenderer image cells", () => {
     }
   });
 
+  it("revokes object URLs when the <img> fallback times out", async () => {
+    vi.useFakeTimers();
+    try {
+      // Avoid synchronous RAF side effects; this test controls when renders occur.
+      vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+      const provider: CellProvider = {
+        getCell: (row, col) =>
+          row === 0 && col === 0
+            ? {
+                row,
+                col,
+                value: null,
+                image: { imageId: "img_timeout", altText: "Timeout", width: 100, height: 50 }
+              }
+            : null
+      };
+
+      const invalidState = new Error("decode failed");
+      (invalidState as any).name = "InvalidStateError";
+      const createImageBitmapSpy = vi.fn(() => Promise.reject(invalidState));
+      vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+      // Use a tiny blob (<24 bytes) so the PNG header guard is skipped and we go directly to the InvalidStateError path.
+      const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+
+      const gridCanvas = document.createElement("canvas");
+      const contentCanvas = document.createElement("canvas");
+      const selectionCanvas = document.createElement("canvas");
+
+      const grid = createRecordingContext(gridCanvas);
+      const content = createRecordingContext(contentCanvas);
+      const selection = createRecordingContext(selectionCanvas);
+
+      const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+        [gridCanvas, grid.ctx],
+        [contentCanvas, content.ctx],
+        [selectionCanvas, selection.ctx]
+      ]);
+
+      installContexts(contexts);
+
+      const URLCtor = globalThis.URL as any;
+      const originalCreateObjectURL = URLCtor?.createObjectURL;
+      const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+      const createObjectURL = vi.fn(() => "blob:fake");
+      const revokeObjectURL = vi.fn();
+      URLCtor.createObjectURL = createObjectURL;
+      URLCtor.revokeObjectURL = revokeObjectURL;
+
+      try {
+        class FakeImage {
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_value: string) {
+            // Intentionally never call onload/onerror.
+          }
+        }
+        vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+        const renderer = new CanvasGridRenderer({
+          provider,
+          rowCount: 1,
+          colCount: 1,
+          defaultColWidth: 100,
+          defaultRowHeight: 50,
+          imageResolver
+        });
+        renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+        renderer.resize(100, 50, 1);
+
+        renderer.renderImmediately();
+
+        const pending = (renderer as any).imageBitmapCache.get("img_timeout") as
+          | { state: "pending"; promise: Promise<void> }
+          | { state: string };
+        expect(pending?.state).toBe("pending");
+
+        // Allow createImageBitmap rejection -> fallback decode to schedule its timeout.
+        await flushMicrotasks();
+
+        vi.advanceTimersByTime(5_000);
+        await flushMicrotasks();
+
+        expect(imageResolver).toHaveBeenCalledTimes(1);
+        expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
+        expect(createObjectURL).toHaveBeenCalledTimes(1);
+        expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+
+        // Final state should be an error (the InvalidStateError is rethrown when the fallback fails).
+        expect((renderer as any).imageBitmapCache.get("img_timeout")?.state).toBe("error");
+
+        renderer.renderImmediately();
+        expect(content.rec.fillTexts.some((args) => args[0] === "Timeout")).toBe(true);
+      } finally {
+        if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+        else URLCtor.createObjectURL = originalCreateObjectURL;
+        if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+        else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("evicts least-recently-used decoded images when the image cache exceeds its max size", async () => {
     const provider: CellProvider = {
       getCell: (row, col) =>

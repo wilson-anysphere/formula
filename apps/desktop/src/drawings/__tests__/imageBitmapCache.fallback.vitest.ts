@@ -177,4 +177,57 @@ describe("ImageBitmapCache decode fallback", () => {
       else URLCtor.revokeObjectURL = originalRevokeObjectURL;
     }
   });
+
+  it("times out if the <img> fallback never resolves, and still revokes the object URL", async () => {
+    vi.useFakeTimers();
+    try {
+      const entry: ImageEntry = { id: "img_fallback_timeout", bytes: new Uint8Array([1, 2, 3, 4]), mimeType: "image/png" };
+
+      const invalidState = new Error("decode failed");
+      (invalidState as any).name = "InvalidStateError";
+      const createImageBitmapMock = vi.fn(() => Promise.reject(invalidState));
+      vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+      const URLCtor = globalThis.URL as any;
+      const originalCreateObjectURL = URLCtor?.createObjectURL;
+      const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+      const createObjectURL = vi.fn(() => "blob:fake");
+      const revokeObjectURL = vi.fn();
+      URLCtor.createObjectURL = createObjectURL;
+      URLCtor.revokeObjectURL = revokeObjectURL;
+
+      try {
+        class FakeImage {
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_value: string) {
+            // Intentionally never call onload/onerror.
+          }
+        }
+        vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+        const cache = new ImageBitmapCache({ maxEntries: 16, negativeCacheMs: 0 });
+        const promise = cache.get(entry);
+
+        // Allow the initial createImageBitmap rejection -> fallback path to schedule its timeout.
+        await Promise.resolve();
+        await Promise.resolve();
+
+        // The fallback times out after 5s; the cache should rethrow the original InvalidStateError.
+        vi.advanceTimersByTime(5_000);
+        await expect(promise).rejects.toMatchObject({ name: "InvalidStateError" });
+
+        expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+        expect(createObjectURL).toHaveBeenCalledTimes(1);
+        expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+      } finally {
+        if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+        else URLCtor.createObjectURL = originalCreateObjectURL;
+        if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+        else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
