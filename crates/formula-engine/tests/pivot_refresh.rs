@@ -163,3 +163,27 @@ fn engine_pivot_infers_dates_from_cell_number_formats() {
         ]
     );
 }
+
+#[test]
+fn engine_pivot_coerces_non_finite_numbers_to_num_error_text() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "Category").unwrap();
+    engine.set_cell_value("Sheet1", "B1", "Amount").unwrap();
+
+    engine.set_cell_value("Sheet1", "A2", "A").unwrap();
+    engine.set_cell_value("Sheet1", "B2", f64::NAN).unwrap();
+
+    engine.recalculate();
+
+    let range = formula_model::Range::from_a1("A1:B2").unwrap();
+    let cache = engine.pivot_cache_from_range("Sheet1", range).unwrap();
+
+    assert_eq!(cache.records.len(), 1);
+    assert_eq!(cache.records[0][0], PivotValue::Text("A".to_string()));
+    assert_eq!(cache.records[0][1], PivotValue::Text("#NUM!".to_string()));
+
+    // Ensure schema sampling remains JSON-friendly (no NaNs).
+    let schema = cache.schema(10);
+    assert_eq!(schema.fields[1].sample_values, vec![PivotValue::Text("#NUM!".to_string())]);
+}

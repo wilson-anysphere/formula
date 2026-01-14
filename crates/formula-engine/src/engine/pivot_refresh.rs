@@ -131,7 +131,15 @@ fn get_cell_value_at(engine: &Engine, sheet_id: SheetId, addr: CellAddr) -> Valu
 fn engine_value_to_pivot_value(value: &Value) -> PivotValue {
     match value {
         Value::Blank => PivotValue::Blank,
-        Value::Number(n) => PivotValue::Number(*n),
+        Value::Number(n) => {
+            // Pivot values are serialized across WASM/JSON boundaries (schema/field items). JSON
+            // cannot represent non-finite numbers, and Excel surfaces these as `#NUM!`.
+            if n.is_finite() {
+                PivotValue::Number(*n)
+            } else {
+                PivotValue::Text(ErrorKind::Num.as_code().to_string())
+            }
+        }
         Value::Bool(b) => PivotValue::Bool(*b),
         Value::Text(s) => match parse_text_as_date(s) {
             Some(d) => PivotValue::Date(d),
