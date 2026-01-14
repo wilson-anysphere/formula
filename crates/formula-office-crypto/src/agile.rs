@@ -116,16 +116,16 @@ pub(crate) fn parse_agile_encryption_info(
     bytes: &[u8],
     header: &EncryptionInfoHeader,
 ) -> Result<AgileEncryptionInfo, OfficeCryptoError> {
-    let start = header.header_offset;
-    let xml_len = header.header_size as usize;
-    let xml_bytes = bytes.get(start..start + xml_len).ok_or_else(|| {
-        OfficeCryptoError::InvalidFormat("EncryptionInfo XML size out of range".to_string())
-    })?;
-    let xml_str = std::str::from_utf8(xml_bytes).map_err(|_| {
-        OfficeCryptoError::InvalidFormat("EncryptionInfo XML is not valid UTF-8".to_string())
-    })?;
-
-    let descriptor = parse_agile_descriptor(xml_str)?;
+    // Real-world Agile `EncryptionInfo` streams vary in how they wrap/encode the XML descriptor:
+    // - Some include a 4-byte XML length prefix after the 8-byte version header.
+    // - Others start the XML directly after the version header (no length prefix).
+    // - The XML may be UTF-8 (optionally with BOM) or UTF-16LE, and can be padded with trailing
+    //   NUL bytes.
+    //
+    // We mirror the robustness of `formula_io::extract_agile_encryption_info_xml` by extracting
+    // candidates from the post-version payload and attempting to parse the descriptor across those
+    // variants.
+    let descriptor = parse_agile_descriptor_from_stream(bytes)?;
 
     Ok(AgileEncryptionInfo {
         version_major: header.version_major,
@@ -135,6 +135,189 @@ pub(crate) fn parse_agile_encryption_info(
         data_integrity: descriptor.data_integrity,
         password_key_encryptor: descriptor.password_key_encryptor,
     })
+}
+
+fn parse_agile_descriptor_from_stream(bytes: &[u8]) -> Result<AgileDescriptor, OfficeCryptoError> {
+    if bytes.len() < 8 {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptionInfo stream too short".to_string(),
+        ));
+    }
+
+    let payload = &bytes[8..];
+    let mut errors: Vec<String> = Vec::new();
+
+    // --- Primary: UTF-8 payload (trim UTF-8 BOM, trim trailing NULs). ---
+    match parse_agile_descriptor_utf8(payload) {
+        Ok(d) => return Ok(d),
+        Err(err) => errors.push(format!("utf-8: {err}")),
+    }
+
+    // --- Fallback: UTF-16LE when there are many NUL bytes (ASCII UTF-16 pattern). ---
+    if is_nul_heavy(payload) {
+        match parse_agile_descriptor_utf16le(payload) {
+            Ok(d) => return Ok(d),
+            Err(err) => errors.push(format!("utf-16le: {err}")),
+        }
+    }
+
+    // --- Fallback: length-prefix heuristic (u32 LE) ---
+    if let Some(len_slice) = length_prefixed_slice(payload) {
+        match parse_agile_descriptor_utf8(len_slice) {
+            Ok(d) => return Ok(d),
+            Err(err) => errors.push(format!("len+utf-8: {err}")),
+        }
+        if is_nul_heavy(len_slice) {
+            match parse_agile_descriptor_utf16le(len_slice) {
+                Ok(d) => return Ok(d),
+                Err(err) => errors.push(format!("len+utf-16le: {err}")),
+            }
+        }
+    }
+
+    // --- Fallback: scan forward to the first `<` when the payload contains `<encryption` later. ---
+    if let Some(scanned) = scan_to_first_xml_tag(payload) {
+        match parse_agile_descriptor_utf8(scanned) {
+            Ok(d) => return Ok(d),
+            Err(err) => errors.push(format!("scan+utf-8: {err}")),
+        }
+        if is_nul_heavy(scanned) {
+            match parse_agile_descriptor_utf16le(scanned) {
+                Ok(d) => return Ok(d),
+                Err(err) => errors.push(format!("scan+utf-16le: {err}")),
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        errors.push("no candidates".to_string());
+    }
+    Err(OfficeCryptoError::InvalidFormat(format!(
+        "failed to extract Agile EncryptionInfo XML: {}",
+        errors.join("; ")
+    )))
+}
+
+fn trim_trailing_nul_bytes(mut bytes: &[u8]) -> &[u8] {
+    while let Some((&last, rest)) = bytes.split_last() {
+        if last == 0 {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+fn trim_trailing_utf16le_nul_units(mut bytes: &[u8]) -> &[u8] {
+    while bytes.len() >= 2 {
+        let n = bytes.len();
+        if bytes[n - 2] == 0 && bytes[n - 1] == 0 {
+            bytes = &bytes[..n - 2];
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+fn trim_utf8_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes)
+}
+
+fn trim_start_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if matches!(bytes[idx], b' ' | b'\t' | b'\r' | b'\n') {
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    &bytes[idx..]
+}
+
+fn is_nul_heavy(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    let zeros = bytes.iter().filter(|&&b| b == 0).count();
+    zeros > bytes.len() / 8
+}
+
+fn parse_agile_descriptor_utf8(bytes: &[u8]) -> Result<AgileDescriptor, String> {
+    let bytes = trim_trailing_nul_bytes(bytes);
+    let bytes = trim_utf8_bom(bytes);
+    let xml = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
+    // In case the stream was decoded through a path that preserved U+FEFF.
+    let xml = xml.strip_prefix('\u{FEFF}').unwrap_or(xml);
+    parse_agile_descriptor(xml).map_err(|e| e.to_string())
+}
+
+fn parse_agile_descriptor_utf16le(bytes: &[u8]) -> Result<AgileDescriptor, String> {
+    let mut bytes = trim_trailing_utf16le_nul_units(bytes);
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        bytes = &bytes[2..];
+    }
+
+    // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
+    bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
+
+    let mut code_units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        code_units.push(u16::from_le_bytes([pair[0], pair[1]]));
+    }
+    let mut xml = String::from_utf16(&code_units).map_err(|_| "invalid UTF-16LE".to_string())?;
+    if let Some(stripped) = xml.strip_prefix('\u{FEFF}') {
+        xml = stripped.to_string();
+    }
+    while xml.ends_with('\0') {
+        xml.pop();
+    }
+    parse_agile_descriptor(&xml).map_err(|e| e.to_string())
+}
+
+fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
+    let len_bytes: [u8; 4] = payload.get(0..4)?.try_into().ok()?;
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    if len == 0 || len > payload.len().saturating_sub(4) {
+        return None;
+    }
+    let candidate = payload.get(4..4 + len)?;
+
+    // Ensure the candidate *looks* like XML to avoid false positives on arbitrary data.
+    let candidate_trimmed = trim_start_ascii_whitespace(candidate);
+    let candidate_trimmed = trim_utf8_bom(candidate_trimmed);
+
+    if candidate_trimmed.first() == Some(&b'<') {
+        return Some(candidate);
+    }
+    // UTF-16LE BOM.
+    if candidate_trimmed.starts_with(&[0xFF, 0xFE]) {
+        return Some(candidate);
+    }
+
+    None
+}
+
+fn scan_to_first_xml_tag(payload: &[u8]) -> Option<&[u8]> {
+    // Be conservative: only scan if we see the expected root tag bytes somewhere later.
+    const NEEDLE: &[u8] = b"<encryption";
+    if !payload
+        .windows(NEEDLE.len())
+        .any(|w| w.eq_ignore_ascii_case(NEEDLE))
+    {
+        return None;
+    }
+
+    let payload = trim_utf8_bom(payload);
+    let trimmed = trim_start_ascii_whitespace(payload);
+    if trimmed.first() == Some(&b'<') {
+        return None;
+    }
+
+    let idx = payload.iter().position(|&b| b == b'<')?;
+    Some(&payload[idx..])
 }
 
 pub(crate) fn decrypt_agile_encrypted_package(
