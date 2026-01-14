@@ -4129,6 +4129,24 @@ test("QUARTILE.INC quart suggests 1, 2, 3, 0, 4", async () => {
   }
 });
 
+test("HYPGEOM.DIST scalar args suggest a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=HYPGEOM.DIST(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=HYPGEOM.DIST(A1"),
+    `Expected HYPGEOM.DIST to suggest a left-cell reference, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("NORM.DIST cumulative suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 

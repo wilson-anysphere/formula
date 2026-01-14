@@ -243,6 +243,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("FTEST", 0), "Expected FTEST array1 to be a range");
   assert.ok(registry.isRangeArg("Z.TEST", 0), "Expected Z.TEST array to be a range");
   assert.ok(registry.isRangeArg("ZTEST", 0), "Expected ZTEST array to be a range");
+  assert.equal(registry.getArgType("Z.TEST", 1), "value", "Expected Z.TEST x to be value-like");
+  assert.equal(registry.getArgType("Z.TEST", 2), "value", "Expected Z.TEST sigma to be value-like");
+  assert.ok(registry.getFunction("Z.TEST")?.args?.[2]?.optional, "Expected Z.TEST sigma to be optional");
+  assert.equal(registry.getArgType("ZTEST", 1), "value", "Expected ZTEST x to be value-like");
+  assert.equal(registry.getArgType("ZTEST", 2), "value", "Expected ZTEST sigma to be value-like");
+  assert.ok(registry.getFunction("ZTEST")?.args?.[2]?.optional, "Expected ZTEST sigma to be optional");
 
   // Additional common stats functions
   assert.ok(registry.isRangeArg("PERCENTILE.EXC", 0), "Expected PERCENTILE.EXC array to be a range");
@@ -354,6 +360,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("BINOM.DIST", 3), "boolean", "Expected BINOM.DIST cumulative to be boolean");
   assert.equal(registry.getArgType("BINOMDIST", 0), "value", "Expected BINOMDIST number_s to be value-like");
   assert.equal(registry.getArgType("BINOMDIST", 3), "boolean", "Expected BINOMDIST cumulative to be boolean");
+  assert.equal(registry.getArgType("HYPGEOM.DIST", 0), "value", "Expected HYPGEOM.DIST sample_s to be value-like");
+  assert.equal(registry.getArgType("HYPGEOM.DIST", 4), "boolean", "Expected HYPGEOM.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("HYPGEOMDIST", 0), "value", "Expected HYPGEOMDIST sample_s to be value-like");
+  assert.equal(registry.getArgType("NEGBINOM.DIST", 0), "value", "Expected NEGBINOM.DIST number_f to be value-like");
+  assert.equal(registry.getArgType("NEGBINOM.DIST", 3), "boolean", "Expected NEGBINOM.DIST cumulative to be boolean");
+  assert.equal(registry.getArgType("NEGBINOMDIST", 0), "value", "Expected NEGBINOMDIST number_f to be value-like");
   assert.equal(registry.getArgType("BINOM.INV", 0), "value", "Expected BINOM.INV trials to be value-like");
   assert.equal(registry.getArgType("NORMDIST", 0), "value", "Expected NORMDIST x to be value-like");
   assert.equal(registry.getArgType("NORMDIST", 3), "boolean", "Expected NORMDIST cumulative to be boolean");
@@ -381,6 +393,9 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("POISSON", 2), "boolean", "Expected POISSON cumulative to be boolean");
   assert.equal(registry.getArgType("WEIBULL", 0), "value", "Expected WEIBULL x to be value-like");
   assert.equal(registry.getArgType("WEIBULL", 3), "boolean", "Expected WEIBULL cumulative to be boolean");
+  assert.equal(registry.getArgType("FISHER", 0), "value", "Expected FISHER x to be value-like");
+  assert.equal(registry.getArgType("FISHERINV", 0), "value", "Expected FISHERINV y to be value-like");
+  assert.equal(registry.getArgType("PHI", 0), "value", "Expected PHI x to be value-like");
 
   // Time-series forecasting functions
   assert.ok(registry.isRangeArg("FORECAST.ETS", 1), "Expected FORECAST.ETS values to be a range");

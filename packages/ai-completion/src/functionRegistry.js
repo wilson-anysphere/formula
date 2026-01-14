@@ -1534,8 +1534,8 @@ const CURATED_FUNCTIONS = [
     description: "Returns the one-tailed probability-value of a z-test.",
     args: [
       { name: "array", type: "range" },
-      { name: "x", type: "number" },
-      { name: "sigma", type: "number", optional: true },
+      { name: "x", type: "value" },
+      { name: "sigma", type: "value", optional: true },
     ],
   },
   {
@@ -1543,8 +1543,8 @@ const CURATED_FUNCTIONS = [
     description: "Returns the one-tailed probability-value of a z-test (legacy).",
     args: [
       { name: "array", type: "range" },
-      { name: "x", type: "number" },
-      { name: "sigma", type: "number", optional: true },
+      { name: "x", type: "value" },
+      { name: "sigma", type: "value", optional: true },
     ],
   },
   {
@@ -1553,6 +1553,27 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "data_array", type: "range" },
       { name: "bins_array", type: "range" },
+    ],
+  },
+  {
+    name: "FISHER",
+    description: "Returns the Fisher transformation.",
+    args: [
+      { name: "x", type: "value" },
+    ],
+  },
+  {
+    name: "FISHERINV",
+    description: "Returns the inverse of the Fisher transformation.",
+    args: [
+      { name: "y", type: "value" },
+    ],
+  },
+  {
+    name: "PHI",
+    description: "Returns the value of the standard normal density function.",
+    args: [
+      { name: "x", type: "value" },
     ],
   },
   {
@@ -1626,6 +1647,46 @@ const CURATED_FUNCTIONS = [
       { name: "trials", type: "value" },
       { name: "probability_s", type: "value" },
       { name: "alpha", type: "value" },
+    ],
+  },
+  {
+    name: "HYPGEOM.DIST",
+    description: "Returns the hypergeometric distribution.",
+    args: [
+      { name: "sample_s", type: "value" },
+      { name: "number_sample", type: "value" },
+      { name: "population_s", type: "value" },
+      { name: "number_pop", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "HYPGEOMDIST",
+    description: "Returns the hypergeometric distribution (legacy).",
+    args: [
+      { name: "sample_s", type: "value" },
+      { name: "number_sample", type: "value" },
+      { name: "population_s", type: "value" },
+      { name: "number_pop", type: "value" },
+    ],
+  },
+  {
+    name: "NEGBINOM.DIST",
+    description: "Returns the negative binomial distribution.",
+    args: [
+      { name: "number_f", type: "value" },
+      { name: "number_s", type: "value" },
+      { name: "probability_s", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "NEGBINOMDIST",
+    description: "Returns the negative binomial distribution (legacy).",
+    args: [
+      { name: "number_f", type: "value" },
+      { name: "number_s", type: "value" },
+      { name: "probability_s", type: "value" },
     ],
   },
   {
