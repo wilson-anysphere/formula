@@ -975,6 +975,35 @@ fn hash_join_string_works_with_different_dictionaries() {
 }
 
 #[test]
+fn hash_join_string_works_with_shared_dictionary() {
+    let schema = vec![ColumnSchema {
+        name: "k".to_owned(),
+        column_type: ColumnType::String,
+    }];
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::String(Arc::<str>::from("A"))],
+            vec![Value::String(Arc::<str>::from("B"))],
+            vec![Value::String(Arc::<str>::from("A"))],
+        ],
+    );
+    // Clone the table so both sides share the same dictionary `Arc`.
+    let right = left.clone();
+
+    let join = left.hash_join(&right, 0, 0).unwrap();
+    assert_eq!(join.len(), 5);
+
+    let mut pairs: Vec<(usize, usize)> = join
+        .left_indices
+        .into_iter()
+        .zip(join.right_indices.into_iter())
+        .collect();
+    pairs.sort();
+    assert_eq!(pairs, vec![(0, 0), (0, 2), (1, 1), (2, 0), (2, 2)]);
+}
+
+#[test]
 fn hash_join_number_canonicalizes_negative_zero_and_nans() {
     let schema = vec![ColumnSchema {
         name: "k".to_owned(),
@@ -1178,6 +1207,49 @@ fn hash_join_multi_ignores_right_string_values_not_in_left_dictionary() {
         .unwrap();
     assert_eq!(full.left_indices, vec![Some(0), None]);
     assert_eq!(full.right_indices, vec![Some(1), Some(0)]);
+}
+
+#[test]
+fn hash_join_multi_two_string_keys_works_with_shared_dictionaries() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![
+                Value::String(Arc::<str>::from("A")),
+                Value::String(Arc::<str>::from("X")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("A")),
+                Value::String(Arc::<str>::from("Y")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("B")),
+                Value::String(Arc::<str>::from("X")),
+            ],
+        ],
+    );
+    // Clone the table so both string dictionaries are shared for both key columns.
+    let right = left.clone();
+
+    let join = left.hash_join_multi(&right, &[0, 1], &[0, 1]).unwrap();
+    let mut pairs: Vec<(usize, usize)> = join
+        .left_indices
+        .into_iter()
+        .zip(join.right_indices.into_iter())
+        .collect();
+    pairs.sort();
+    assert_eq!(pairs, vec![(0, 0), (1, 1), (2, 2)]);
 }
 
 #[test]
