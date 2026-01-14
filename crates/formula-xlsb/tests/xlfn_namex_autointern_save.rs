@@ -28,9 +28,9 @@ fn read_xl_wide_string(payload: &[u8], offset: &mut usize) -> Option<String> {
 }
 
 fn first_ptg_namex_token(rgce: &[u8]) -> Option<[u8; 5]> {
-    // PtgNameX token layout (value class): [0x39][ixti:u16][name_index:u16]
+    // PtgNameX token layout: [ptgNameX{R,V,A}][ixti:u16][name_index:u16]
     rgce.windows(5)
-        .find(|w| w[0] == 0x39)
+        .find(|w| matches!(w[0], 0x39 | 0x59 | 0x79))
         .map(|w| [w[0], w[1], w[2], w[3], w[4]])
 }
 
