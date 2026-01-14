@@ -90,6 +90,10 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found in PATH: $1"
 }
 
+require_docker() {
+  command -v docker >/dev/null 2>&1 || die "docker is required for container validation (install docker or rerun with --no-container)"
+}
+
 require_cmd rpm
 
 rel_path() {
@@ -246,7 +250,7 @@ validate_static() {
 validate_container() {
   local rpm_path="$1"
 
-  require_cmd docker
+  require_docker
 
   rpm_path="$(abs_path "${rpm_path}")"
   local rpm_basename
