@@ -219,6 +219,7 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
     setCells: (updates) => engine.setCells(updates),
     recalculate: (sheet) => engine.recalculate(sheet),
+    setWorkbookFileMetadata: (directory, filename) => engine.setWorkbookFileMetadata(directory, filename),
     internStyle: (styleObj) => engine.internStyle(styleObj as any),
     setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
     setColWidth: (sheet, col, widthChars) => engine.setColWidth(col, widthChars, sheet),
@@ -1116,6 +1117,7 @@ export class SpreadsheetApp {
   private readonly workbookImageManager: WorkbookImageManager;
 
   private wasmEngine: EngineClient | null = null;
+  private workbookFileMetadata: { directory: string | null; filename: string | null } = { directory: null, filename: null };
   private wasmSyncSuspended = false;
   private wasmUnsubscribe: (() => void) | null = null;
   private wasmSyncPromise: Promise<void> = Promise.resolve();
@@ -4532,6 +4534,35 @@ export class SpreadsheetApp {
     return this.document;
   }
 
+  /**
+   * Update workbook-level file metadata used by Excel-compatible worksheet information functions
+   * like `CELL("filename")` and `INFO("directory")`.
+   *
+   * Callers can set `syncEngine=false` when updating metadata ahead of a full engine rehydrate
+   * (e.g. workbook open/restore), where `engineHydrateFromDocument` will apply the metadata before
+   * the first recalculation.
+   */
+  async setWorkbookFileMetadata(
+    directory: string | null,
+    filename: string | null,
+    options: { syncEngine?: boolean; recalculate?: boolean } = {},
+  ): Promise<void> {
+    this.workbookFileMetadata = { directory: directory ?? null, filename: filename ?? null };
+
+    const shouldSyncEngine = options.syncEngine !== false;
+    if (!shouldSyncEngine) return;
+
+    if (!this.wasmEngine) return;
+
+    await this.enqueueWasmSync(async (engine) => {
+      await engine.setWorkbookFileMetadata(this.workbookFileMetadata.directory, this.workbookFileMetadata.filename);
+      if (options.recalculate !== false) {
+        const changes = await engine.recalculate();
+        this.applyComputedChanges(changes);
+      }
+    });
+  }
+
   undo(): boolean {
     if (this.isReadOnly()) return false;
     if (this.editor.isOpen()) return false;
@@ -6024,7 +6055,9 @@ export class SpreadsheetApp {
       this.syncFrozenPanes();
       if (this.wasmEngine) {
         await this.enqueueWasmSync(async (engine) => {
-          const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document);
+          const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
+            workbookFileMetadata: this.workbookFileMetadata,
+          });
           this.applyComputedChanges(changes);
         });
       }
@@ -6105,7 +6138,9 @@ export class SpreadsheetApp {
             for (let attempt = 0; attempt < 2; attempt += 1) {
               changedDuringInit = false;
               this.clearComputedValuesByCoord();
-              const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document);
+              const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
+                workbookFileMetadata: this.workbookFileMetadata,
+              });
               this.applyComputedChanges(changes);
               if (!changedDuringInit) break;
             }
@@ -6122,7 +6157,9 @@ export class SpreadsheetApp {
             if (source === "applyState") {
               this.clearComputedValuesByCoord();
               void this.enqueueWasmSync(async (worker) => {
-                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document);
+                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                  workbookFileMetadata: this.workbookFileMetadata,
+                });
                 this.applyComputedChanges(changes);
               });
               return;
@@ -6170,7 +6207,9 @@ export class SpreadsheetApp {
           // Note: do not `await` inside this init chain (it would deadlock by waiting on the
           // promise chain we're currently building).
           postInitHydrate = this.enqueueWasmSync(async (worker) => {
-            const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document);
+            const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+              workbookFileMetadata: this.workbookFileMetadata,
+            });
             this.applyComputedChanges(changes);
           });
           } catch {
@@ -8021,7 +8060,9 @@ export class SpreadsheetApp {
       let hydrateError: unknown = null;
       await this.enqueueWasmSync(async (worker) => {
         try {
-          const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document);
+          const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+            workbookFileMetadata: this.workbookFileMetadata,
+          });
           this.applyComputedChanges(changes);
         } catch (err) {
           hydrateError = err;

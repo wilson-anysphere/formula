@@ -49,6 +49,13 @@ export interface EngineSyncTarget {
   ) => Promise<void> | void;
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
   /**
+   * Update workbook-level file metadata used by Excel-compatible functions like `CELL("filename")`
+   * and `INFO("directory")`.
+   *
+   * This is optional because older WASM builds may not expose the API.
+   */
+  setWorkbookFileMetadata?: (directory: string | null, filename: string | null) => Promise<void> | void;
+  /**
    * Update a worksheet's column width metadata (OOXML `col/@width` units).
    *
    * The engine treats this as sheet-scoped metadata that can affect worksheet information
@@ -227,7 +234,23 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
   return { sheets };
 }
 
-export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: any): Promise<CellChange[]> {
+export type EngineHydrateFromDocumentOptions = {
+  /**
+   * Workbook-level file metadata used by Excel-compatible functions like `CELL("filename")`
+   * and `INFO("directory")`.
+   *
+   * When provided, we apply it after `loadWorkbookFromJson` (which replaces the workbook state)
+   * but before the initial `recalculate()` so any dependent formulas compute with the latest
+   * metadata.
+   */
+  workbookFileMetadata?: { directory: string | null; filename: string | null } | null;
+};
+
+export async function engineHydrateFromDocument(
+  engine: EngineSyncTarget,
+  doc: any,
+  options: EngineHydrateFromDocumentOptions = {},
+): Promise<CellChange[]> {
   const workbookJson = exportDocumentToEngineWorkbookJson(doc);
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
 
@@ -327,6 +350,11 @@ export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: a
         if (styleUpdates.length > 0) await Promise.all(styleUpdates);
       }
     }
+  }
+
+  const metadata = options.workbookFileMetadata ?? null;
+  if (metadata && typeof engine.setWorkbookFileMetadata === "function") {
+    await engine.setWorkbookFileMetadata(metadata.directory ?? null, metadata.filename ?? null);
   }
 
   return await engine.recalculate();

@@ -230,6 +230,7 @@ import {
   type SheetFormattingSnapshot,
   type SnapshotCell,
 } from "./workbook/mergeFormattingIntoSnapshot.js";
+import { getWorkbookFileMetadataFromWorkbookInfo } from "./workbook/workbookFileMetadata.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
@@ -9497,6 +9498,15 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // previously-opened workbook.
   refreshTableSignaturesFromBackend(doc, [], { workbookSignature });
   refreshDefinedNameSignaturesFromBackend(doc, [], { workbookSignature });
+
+  // Keep the WASM formula engine's workbook file metadata (directory/filename) in sync with the
+  // desktop workbook identity so `CELL("filename")` / `INFO("directory")` update immediately.
+  //
+  // Set the metadata *before* `restoreDocumentState` hydrates the worker so the initial recalc
+  // observes the correct path without needing an extra recalculation pass.
+  const workbookFileMetadata = getWorkbookFileMetadataFromWorkbookInfo(info);
+  await app.setWorkbookFileMetadata(workbookFileMetadata.directory, workbookFileMetadata.filename, { syncEngine: false });
+
   await app.restoreDocumentState(snapshot);
 
   // Hydrate worksheet background images (`<picture r:id="...">`) from the opened XLSX package.
@@ -9806,6 +9816,11 @@ async function handleSaveAsPath(
   activeWorkbook = { ...activeWorkbook, path };
   app.getDocument().markSaved();
   syncTitlebar();
+
+  // Save As establishes a new file identity; keep the WASM engine workbook metadata in sync so
+  // `CELL("filename")` / `INFO("directory")` update immediately (Excel semantics).
+  const fileMetadata = getWorkbookFileMetadataFromWorkbookInfo({ path, origin_path: null });
+  void app.setWorkbookFileMetadata(fileMetadata.directory, fileMetadata.filename);
 
   await copyPowerQueryPersistence(previousPanelWorkbookId, path);
   activePanelWorkbookId = path;

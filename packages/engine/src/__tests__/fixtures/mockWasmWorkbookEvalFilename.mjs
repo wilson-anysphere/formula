@@ -1,0 +1,143 @@
+// Minimal ESM module that emulates a wasm-bindgen build of `crates/formula-wasm`,
+// but implements just enough evaluation to exercise workbook file metadata plumbing.
+//
+// This is loaded by `packages/engine/src/engine.worker.ts` via dynamic import (runtime string),
+// so it must be plain JS (not TS) to avoid relying on Vite/Vitest transforms.
+
+export default async function init() {}
+
+function normalizeSheet(sheet) {
+  return typeof sheet === "string" && sheet.trim() !== "" ? sheet : "Sheet1";
+}
+
+function normalizeInput(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  return null;
+}
+
+function isFormula(value) {
+  return typeof value === "string" && value.trimStart().startsWith("=");
+}
+
+function matchesCellFilename(formula) {
+  const body = formula.trim().replace(/^=/, "").trim();
+  return /^CELL\s*\(\s*\"filename\"\s*\)\s*$/i.test(body);
+}
+
+function matchesInfoDirectory(formula) {
+  const body = formula.trim().replace(/^=/, "").trim();
+  return /^INFO\s*\(\s*\"directory\"\s*\)\s*$/i.test(body);
+}
+
+export class WasmWorkbook {
+  constructor() {
+    this.directory = null;
+    this.filename = null;
+    this.inputsBySheet = new Map();
+    this.valuesBySheet = new Map();
+  }
+
+  _sheetMap(map, sheet) {
+    const key = normalizeSheet(sheet);
+    let m = map.get(key);
+    if (!m) {
+      m = new Map();
+      map.set(key, m);
+    }
+    return m;
+  }
+
+  toJson() {
+    return "{}";
+  }
+
+  setWorkbookFileMetadata(directory, filename) {
+    this.directory = directory ?? null;
+    this.filename = filename ?? null;
+  }
+
+  setCell(address, value, sheet) {
+    const sheetName = normalizeSheet(sheet);
+    const input = normalizeInput(value);
+    const inputs = this._sheetMap(this.inputsBySheet, sheetName);
+    const values = this._sheetMap(this.valuesBySheet, sheetName);
+
+    if (input == null) {
+      inputs.delete(address);
+      values.delete(address);
+      return;
+    }
+
+    inputs.set(address, input);
+    // Recalculate updates values; for now clear any stale value.
+    values.delete(address);
+  }
+
+  getCell(address, sheet) {
+    const sheetName = normalizeSheet(sheet);
+    const inputs = this._sheetMap(this.inputsBySheet, sheetName);
+    const values = this._sheetMap(this.valuesBySheet, sheetName);
+    return {
+      sheet: sheetName,
+      address,
+      input: inputs.get(address) ?? null,
+      value: values.get(address) ?? null,
+    };
+  }
+
+  getRange(_range, _sheet) {
+    return [];
+  }
+
+  setRange(_range, _values, _sheet) {}
+
+  recalculate(sheet) {
+    const targetSheet = sheet ? normalizeSheet(sheet) : null;
+    const changes = [];
+
+    const sheetEntries = targetSheet
+      ? [[targetSheet, this._sheetMap(this.inputsBySheet, targetSheet)]]
+      : Array.from(this.inputsBySheet.entries());
+
+    for (const [sheetName, inputs] of sheetEntries) {
+      const values = this._sheetMap(this.valuesBySheet, sheetName);
+      for (const [address, input] of inputs.entries()) {
+        let computed = null;
+        if (isFormula(input)) {
+          if (matchesCellFilename(input)) {
+            if (!this.filename) {
+              computed = "";
+            } else {
+              computed = `${this.directory ?? ""}[${this.filename}]${sheetName}`;
+            }
+          } else if (matchesInfoDirectory(input)) {
+            computed = this.filename ? this.directory ?? "" : "";
+          }
+        } else {
+          computed = input;
+        }
+
+        if (values.get(address) !== computed) {
+          values.set(address, computed);
+          changes.push({ sheet: sheetName, address, value: computed });
+        }
+      }
+    }
+
+    return changes;
+  }
+
+  static fromJson(_json) {
+    return new WasmWorkbook();
+  }
+}
+
+// Editor-tooling exports (unused by these tests, but included to satisfy worker expectations).
+export function lexFormula() {
+  return [];
+}
+export function parseFormulaPartial() {
+  return { ast: null, error: null, context: { function: null } };
+}
+
