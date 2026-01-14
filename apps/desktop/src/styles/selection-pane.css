@@ -7,14 +7,14 @@
 }
 
 .selection-pane__empty {
-  padding: 12px;
+  padding: var(--space-5);
   color: var(--text-secondary);
   font-size: 12px;
 }
 
 .selection-pane__list {
   list-style: none;
-  padding: 6px;
+  padding: var(--space-3);
   margin: 0;
   overflow: auto;
 }
@@ -22,8 +22,8 @@
 .selection-pane__row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-radius: 6px;
   cursor: pointer;
   user-select: none;
@@ -63,8 +63,8 @@
   justify-content: center;
   border: 0;
   background: transparent;
-  padding: 4px;
-  border-radius: 4px;
+  padding: var(--space-2);
+  border-radius: var(--radius);
   color: var(--text-secondary);
 }
 
