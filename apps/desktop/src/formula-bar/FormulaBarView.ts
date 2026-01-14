@@ -2735,6 +2735,10 @@ export class FormulaBarView {
       let ghostInserted = false;
       let previewInserted = false;
       const highlightParts: string[] = [];
+      // Escaping every token individually incurs a lot of overhead on long formulas. If the
+      // underlying draft contains no HTML-significant characters, we can safely emit token
+      // text as-is.
+      const needsEscapeDraft = ESCAPE_HTML_TEST_RE.test(draft);
 
       const refs = coloredReferences;
       let refCursor = 0;
@@ -2762,24 +2766,26 @@ export class FormulaBarView {
 
         if (!isFormulaEditing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${escapeHtml(text)}</span>`;
+          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
         }
 
         if (span.kind === "error") {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${escapeHtml(text)}</span>`;
+          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
         }
 
         const containing = findContainingRef(span.start, span.end);
         if (!containing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${escapeHtml(text)}</span>`;
+          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
         }
 
         const isActive = activeReferenceIndex === containing.index;
         const baseClass = isActive ? "formula-bar-reference formula-bar-reference--active" : "formula-bar-reference";
         const classAttr = extraClass ? ` class="${baseClass} ${extraClass}"` : ` class="${baseClass}"`;
-        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr} style="color: ${containing.color};">${escapeHtml(text)}</span>`;
+        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr} style="color: ${containing.color};">${
+          needsEscapeDraft ? escapeHtml(text) : text
+        }</span>`;
       };
 
       for (const span of highlightedSpans) {
@@ -3843,6 +3849,7 @@ export class FormulaBarView {
 }
 
 const ESCAPE_HTML_RE = /[&<>]/g;
+const ESCAPE_HTML_TEST_RE = /[&<>]/;
 const ESCAPE_HTML_MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
 
 function escapeHtml(text: string): string {
