@@ -187,72 +187,6 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
     }
 }
 
-fn style_layer_ids(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> [u32; 5] {
-    let col_style_id = ctx
-        .col_properties(sheet_id, addr.col)
-        .and_then(|props| props.style_id)
-        .unwrap_or(0);
-
-    // Style precedence matches the DocumentController layering:
-    //   sheet < col < row < range-run < cell
-    [
-        ctx.cell_style_id(sheet_id, addr),
-        ctx.format_run_style_id(sheet_id, addr),
-        ctx.row_style_id(sheet_id, addr.row).unwrap_or(0),
-        col_style_id,
-        ctx.sheet_default_style_id(sheet_id).unwrap_or(0),
-    ]
-}
-
-fn resolve_locked(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellAddr) -> bool {
-    let Some(styles) = ctx.style_table() else {
-        // Excel defaults to locked cells.
-        return true;
-    };
-
-    for style_id in style_layer_ids(ctx, sheet_id, addr) {
-        if let Some(style) = styles.get(style_id) {
-            if let Some(protection) = &style.protection {
-                return protection.locked;
-            }
-        }
-    }
-
-    // Excel defaults to locked cells.
-    true
-}
-
-fn resolve_horizontal_alignment(
-    ctx: &dyn FunctionContext,
-    sheet_id: &SheetId,
-    addr: CellAddr,
-) -> HorizontalAlignment {
-    ctx.cell_horizontal_alignment(sheet_id, addr)
-        .unwrap_or(HorizontalAlignment::General)
-}
-fn resolve_number_format<'a>(
-    ctx: &'a dyn FunctionContext,
-    sheet_id: &SheetId,
-    addr: CellAddr,
-) -> Option<&'a str> {
-    let styles = ctx.style_table()?;
-
-    // Style precedence matches the DocumentController layering:
-    //   sheet < col < row < range-run < cell
-    //
-    // When a style does not specify a number format (`number_format=None`), treat it as "inherit"
-    // so lower-precedence layers can contribute the number format.
-    for style_id in style_layer_ids(ctx, sheet_id, addr) {
-        if let Some(style) = styles.get(style_id) {
-            if let Some(fmt) = style.number_format.as_deref() {
-                return Some(fmt);
-            }
-        }
-    }
-
-    None
-}
-
 fn is_ident_cont_char(c: char) -> bool {
     matches!(c, '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
 }
@@ -290,13 +224,12 @@ fn abs_a1(addr: CellAddr) -> String {
     format!("${col}${row}")
 }
 
-fn cell_number_format<'a>(
-    ctx: &'a dyn FunctionContext,
+fn cell_number_format(
+    ctx: &dyn FunctionContext,
     sheet_id: &SheetId,
     addr: CellAddr,
-) -> Option<&'a str> {
-    ctx.get_cell_number_format(sheet_id, addr)
-        .or_else(|| resolve_number_format(ctx, sheet_id, addr))
+) -> Option<String> {
+    ctx.effective_cell_style(sheet_id, addr).number_format
 }
 
 fn format_options_for_cell(ctx: &dyn FunctionContext) -> formula_format::FormatOptions {
@@ -438,7 +371,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 return Value::Error(ErrorKind::Ref);
             }
             let fmt = cell_number_format(ctx, &cell_ref.sheet_id, addr);
-            Value::Text(cell_format_code(fmt))
+            Value::Text(cell_format_code(fmt.as_deref()))
         }
         CellInfoType::Color => {
             let cell_ref = record_explicit_cell(ctx);
@@ -448,7 +381,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             }
             let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
             let options = format_options_for_cell(ctx);
-            let info = formula_format::cell_format_info(format_code, &options);
+            let info = formula_format::cell_format_info(format_code.as_deref(), &options);
             Value::Number(info.color as f64)
         }
         CellInfoType::Parentheses => {
@@ -459,7 +392,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             }
             let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
             let options = format_options_for_cell(ctx);
-            let info = formula_format::cell_format_info(format_code, &options);
+            let info = formula_format::cell_format_info(format_code.as_deref(), &options);
             Value::Number(info.parentheses as f64)
         }
         CellInfoType::Width => {
@@ -513,7 +446,6 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // `CELL("protect")` consults cell protection metadata but should avoid recording an
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
-
             // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
             // `#REF!` rather than defaulting to "locked".
             let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
@@ -525,16 +457,13 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // - All cells default to locked (`1`).
             // - Formatting can explicitly set locked=FALSE (`0`).
             // - The result does *not* depend on whether sheet protection is enabled.
-            let locked = resolve_locked(ctx, &cell_ref.sheet_id, addr);
-            Value::Number(if locked { 1.0 } else { 0.0 })
+            let style = ctx.effective_cell_style(&cell_ref.sheet_id, addr);
+            Value::Number(if style.locked { 1.0 } else { 0.0 })
         }
         CellInfoType::Prefix => {
-            use formula_model::HorizontalAlignment;
-
             // `CELL("prefix")` consults alignment/prefix metadata but should avoid recording an
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
-
             // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
             // `#REF!` rather than defaulting to an empty prefix.
             let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
@@ -542,13 +471,14 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 return Value::Error(ErrorKind::Ref);
             }
 
-            let horizontal = resolve_horizontal_alignment(ctx, &cell_ref.sheet_id, addr);
-            let prefix = match horizontal {
-                HorizontalAlignment::Left => "'",
-                HorizontalAlignment::Center => "^",
-                HorizontalAlignment::Right => "\"",
-                HorizontalAlignment::Fill => "\\",
-                HorizontalAlignment::General | HorizontalAlignment::Justify => "",
+            let style = ctx.effective_cell_style(&cell_ref.sheet_id, addr);
+            let prefix = match style.alignment_horizontal {
+                Some(HorizontalAlignment::Left) => "'",
+                Some(HorizontalAlignment::Center) => "^",
+                Some(HorizontalAlignment::Right) => "\"",
+                Some(HorizontalAlignment::Fill) => "\\",
+                // `General`, `Justify`, or unset alignment.
+                _ => "",
             };
 
             Value::Text(prefix.to_string())

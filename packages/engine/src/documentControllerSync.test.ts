@@ -34,6 +34,16 @@ describe("DocumentController → engine workbook JSON exporter", () => {
             A2: "=A1*2",
             B1: "Hello",
           },
+          cellStyleIds: {
+            C1: 1,
+          },
+        },
+      },
+      styleTable: {
+        "1": {
+          font: {
+            italic: true,
+          },
         },
       },
     });

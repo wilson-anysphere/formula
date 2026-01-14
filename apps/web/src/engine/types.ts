@@ -10,8 +10,16 @@ export type EngineSheetJson = {
    */
   rowCount?: number;
   colCount?: number;
+
+  // Formatting metadata (optional; used by CELL()/INFO()).
+  defaultStyleId?: number;
+  rowStyleIds?: Record<string, number>;
+  colStyleIds?: Record<string, number>;
+  formatRunsByCol?: Record<string, Array<{ startRow: number; endRowExclusive: number; styleId: number }>>;
+  cellStyleIds?: Record<string, number>;
 };
 
 export type EngineWorkbookJson = {
   sheets: Record<string, EngineSheetJson>;
+  styleTable?: Record<string, any>;
 };

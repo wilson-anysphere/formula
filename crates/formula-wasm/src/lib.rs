@@ -2576,8 +2576,11 @@ impl WorkbookState {
                 let Some(formula) = input.as_str() else {
                     continue;
                 };
-                let rewritten =
-                    formula_model::rewrite_sheet_names_in_formula(formula, &old_display, &new_display);
+                let rewritten = formula_model::rewrite_sheet_names_in_formula(
+                    formula,
+                    &old_display,
+                    &new_display,
+                );
                 if rewritten != formula {
                     *input = JsonValue::String(rewritten);
                 }
@@ -4458,11 +4461,7 @@ impl WasmWorkbook {
 
         let mut next: EngineInfo = self.inner.engine.engine_info().clone();
 
-        fn update_string(
-            obj: &Object,
-            key: &str,
-            out: &mut Option<String>,
-        ) -> Result<(), JsValue> {
+        fn update_string(obj: &Object, key: &str, out: &mut Option<String>) -> Result<(), JsValue> {
             let has = Reflect::has(obj, &JsValue::from_str(key)).unwrap_or(false);
             if !has {
                 return Ok(());
@@ -4651,6 +4650,7 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "fromJson")]
     pub fn from_json(json: &str) -> Result<WasmWorkbook, JsValue> {
         #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct WorkbookJson {
             #[serde(default, rename = "localeId")]
             locale_id: Option<String>,
@@ -4665,6 +4665,8 @@ impl WasmWorkbook {
             #[serde(default, rename = "textCodepage", alias = "codepage", alias = "text_codepage")]
             text_codepage: Option<u16>,
             sheets: BTreeMap<String, SheetJson>,
+            #[serde(default)]
+            style_table: BTreeMap<u32, formula_engine::style_patch::StylePatch>,
         }
 
         #[derive(Debug, Deserialize)]
@@ -4683,27 +4685,38 @@ impl WasmWorkbook {
         }
 
         #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct SheetJson {
-            #[serde(default, rename = "rowCount")]
+            #[serde(default)]
             row_count: Option<u32>,
-            #[serde(default, rename = "colCount")]
+            #[serde(default)]
             col_count: Option<u32>,
             #[serde(default)]
             visibility: Option<SheetVisibilityJson>,
             #[serde(default, rename = "tabColor")]
             tab_color: Option<TabColorJson>,
             cells: BTreeMap<String, JsonValue>,
+            #[serde(default)]
+            default_style_id: Option<u32>,
+            #[serde(default)]
+            row_style_ids: BTreeMap<u32, u32>,
+            #[serde(default)]
+            col_style_ids: BTreeMap<u32, u32>,
+            #[serde(default)]
+            format_runs_by_col: BTreeMap<u32, Vec<formula_engine::style_patch::FormatRun>>,
+            #[serde(default)]
+            cell_style_ids: BTreeMap<String, u32>,
         }
 
         let parsed: WorkbookJson = serde_json::from_str(json)
             .map_err(|err| js_err(format!("invalid workbook json: {err}")))?;
-
         let WorkbookJson {
             locale_id,
             formula_language,
             sheet_order,
             text_codepage,
             sheets,
+            style_table,
         } = parsed;
         let formula_language = formula_language.unwrap_or(WorkbookFormulaLanguageDto::Localized);
 
@@ -4727,6 +4740,11 @@ impl WasmWorkbook {
 
         if let Some(codepage) = text_codepage {
             wb.engine.set_text_codepage(codepage);
+        }
+
+        // Import the style table up-front so per-layer style ids can be resolved by the engine.
+        for (style_id, patch) in style_table {
+            wb.engine.set_style_patch(style_id, patch);
         }
 
         // Create all sheets up-front so cross-sheet formula references resolve correctly.
@@ -4762,6 +4780,11 @@ impl WasmWorkbook {
                 visibility,
                 tab_color,
                 cells,
+                default_style_id,
+                row_style_ids,
+                col_style_ids,
+                format_runs_by_col,
+                cell_style_ids,
             } = sheet;
             let display_name = wb.ensure_sheet(&sheet_name);
 
@@ -4833,6 +4856,35 @@ impl WasmWorkbook {
                 let cols = col_count.unwrap_or(EXCEL_MAX_COLS);
                 if rows != EXCEL_MAX_ROWS || cols != EXCEL_MAX_COLS {
                     wb.set_sheet_dimensions_internal(&display_name, rows, cols)?;
+                }
+            }
+
+            // Apply layered formatting metadata.
+            if let Some(style_id) = default_style_id.filter(|id| *id != 0) {
+                wb.engine
+                    .set_sheet_default_patch_style_id(&display_name, style_id);
+            }
+            for (row, style_id) in row_style_ids {
+                if style_id != 0 {
+                    wb.engine.set_row_patch_style_id(&display_name, row, style_id);
+                }
+            }
+            for (col, style_id) in col_style_ids {
+                if style_id != 0 {
+                    wb.engine.set_col_patch_style_id(&display_name, col, style_id);
+                }
+            }
+            for (col, runs) in format_runs_by_col {
+                if !runs.is_empty() {
+                    wb.engine
+                        .set_patch_format_runs_by_col(&display_name, col, runs);
+                }
+            }
+            for (addr, style_id) in cell_style_ids {
+                if style_id != 0 {
+                    wb.engine
+                        .set_cell_patch_style_id(&display_name, &addr, style_id)
+                        .map_err(|err| js_err(err.to_string()))?;
                 }
             }
 
@@ -5157,7 +5209,10 @@ impl WasmWorkbook {
     }
 
     #[wasm_bindgen(js_name = "fromEncryptedXlsxBytes")]
-    pub fn from_encrypted_xlsx_bytes(bytes: &[u8], password: String) -> Result<WasmWorkbook, JsValue> {
+    pub fn from_encrypted_xlsx_bytes(
+        bytes: &[u8],
+        password: String,
+    ) -> Result<WasmWorkbook, JsValue> {
         // Ensure the function registry is populated before importing any workbook formulas.
         ensure_rust_constructors_run();
 
@@ -5191,8 +5246,11 @@ impl WasmWorkbook {
         }
 
         let cursor = std::io::Cursor::new(decrypted.as_slice());
-        let archive = zip::ZipArchive::new(cursor)
-            .map_err(|err| js_err(format!("decrypted payload is not a valid ZIP archive: {err}")))?;
+        let archive = zip::ZipArchive::new(cursor).map_err(|err| {
+            js_err(format!(
+                "decrypted payload is not a valid ZIP archive: {err}"
+            ))
+        })?;
 
         let mut has_workbook_xml = false;
         let mut has_workbook_bin = false;
@@ -5934,7 +5992,11 @@ impl WasmWorkbook {
     }
 
     #[wasm_bindgen(js_name = "getRangeCompact")]
-    pub fn get_range_compact(&self, range: String, sheet: Option<String>) -> Result<JsValue, JsValue> {
+    pub fn get_range_compact(
+        &self,
+        range: String,
+        sheet: Option<String>,
+    ) -> Result<JsValue, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let sheet = self.inner.require_sheet(sheet)?;
         let range = WorkbookState::parse_range(&range)?;
@@ -8272,7 +8334,10 @@ mod tests {
             .iter()
             .find(|f| f.name == "Amount")
             .expect("expected Amount field in schema");
-        assert_eq!(amount_field.field_type, pivot_engine::PivotFieldType::Number);
+        assert_eq!(
+            amount_field.field_type,
+            pivot_engine::PivotFieldType::Number
+        );
     }
 
     #[test]
@@ -9587,7 +9652,10 @@ mod tests {
         assert_eq!(schema.fields.len(), 2);
 
         assert_eq!(schema.fields[0].name, "Category");
-        assert_eq!(schema.fields[0].field_type, pivot_engine::PivotFieldType::Text);
+        assert_eq!(
+            schema.fields[0].field_type,
+            pivot_engine::PivotFieldType::Text
+        );
         assert_eq!(
             schema.fields[0].sample_values,
             vec![
@@ -9597,7 +9665,10 @@ mod tests {
         );
 
         assert_eq!(schema.fields[1].name, "Amount");
-        assert_eq!(schema.fields[1].field_type, pivot_engine::PivotFieldType::Number);
+        assert_eq!(
+            schema.fields[1].field_type,
+            pivot_engine::PivotFieldType::Number
+        );
         assert_eq!(
             schema.fields[1].sample_values,
             vec![

@@ -441,6 +441,20 @@ pub trait ValueResolver {
     fn origin(&self) -> Option<&str> {
         None
     }
+
+    /// Resolve effective formatting/protection metadata for a single cell.
+    ///
+    /// This is used by worksheet information functions like `CELL("prefix")` and
+    /// `CELL("protect")`.
+    ///
+    /// Implementations that do not track formatting can return the default style values.
+    fn effective_cell_style(
+        &self,
+        _sheet_id: usize,
+        _addr: CellAddr,
+    ) -> crate::style_patch::EffectiveStyle {
+        crate::style_patch::EffectiveStyle::default()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2265,6 +2279,17 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
     fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
         self.resolver.pivot_registry()
+    }
+
+    fn effective_cell_style(
+        &self,
+        sheet_id: &FnSheetId,
+        addr: CellAddr,
+    ) -> crate::style_patch::EffectiveStyle {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.effective_cell_style(*id, addr),
+            FnSheetId::External(_) => crate::style_patch::EffectiveStyle::default(),
+        }
     }
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
         self.resolver.sheet_id(name)

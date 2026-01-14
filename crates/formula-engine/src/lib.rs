@@ -55,6 +55,7 @@ pub mod simd;
 pub mod solver;
 pub mod sort_filter;
 pub mod style_bridge;
+pub mod style_patch;
 pub mod value;
 pub mod what_if;
 

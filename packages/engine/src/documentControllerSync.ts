@@ -5,6 +5,21 @@ import { docColWidthPxToExcelChars } from "./excelColumnWidth.ts";
 
 export type EngineCellScalar = number | string | boolean | null;
 
+/**
+ * Engine style patch objects (DocumentController `styleTable` entries).
+ *
+ * These are intentionally typed as `any` for now: the engine only needs a small subset
+ * (alignment/numberFormat/protection) for `CELL()`/`INFO()`, and we want to avoid over-coupling
+ * the TS protocol to the Rust style model while formatting evolves.
+ */
+export type EngineStylePatch = any;
+
+export type EngineFormatRun = {
+  startRow: number;
+  endRowExclusive: number;
+  styleId: number;
+};
+
 export type EngineSheetJson = {
   /**
    * Sparse cell map keyed by A1 address.
@@ -29,6 +44,31 @@ export type EngineSheetJson = {
    * Optional logical worksheet dimensions (column count).
    */
   colCount?: number;
+
+  // --- Formatting (DocumentController semantics) ---
+  /**
+   * Default sheet-level style id.
+   */
+  defaultStyleId?: number;
+  /**
+   * Row-level style ids (0-indexed row -> style id).
+   */
+  rowStyleIds?: Record<string, number>;
+  /**
+   * Column-level style ids (0-indexed col -> style id).
+   */
+  colStyleIds?: Record<string, number>;
+  /**
+   * Range-run formatting, keyed by column.
+   */
+  formatRunsByCol?: Record<string, EngineFormatRun[]>;
+  /**
+   * Cell-level style ids keyed by A1 address.
+   *
+   * Note: this is stored separately from `cells` so we can represent format-only cells without
+   * emitting `"A1": null` entries in the scalar cell map.
+   */
+  cellStyleIds?: Record<string, number>;
 };
 
 export type EngineWorkbookJson = {
@@ -80,6 +120,10 @@ export type EngineWorkbookJson = {
    * without rebuilding the entire engine workbook.
    */
   sheets: Record<string, EngineSheetJson>;
+  /**
+   * DocumentController style table (patch objects keyed by style id).
+   */
+  styleTable?: Record<string, EngineStylePatch>;
 };
 
 export type DocumentCellState = {
@@ -413,8 +457,18 @@ function exportDocumentToEngineWorkbookJsonWithOptions(
   const sheets: Record<string, EngineSheetJson> = {};
   const sheetOrder: string[] = [];
   const seenSheetsInOrder = new Set<string>();
+  const styleTable: Record<string, EngineStylePatch> = {};
 
   const ids = getDocumentSheetIds(doc);
+
+  // Export the style table up-front so per-layer style ids can be resolved by the engine.
+  const docStyleTable = doc?.styleTable;
+  if (docStyleTable && typeof docStyleTable.get === "function") {
+    const size = typeof docStyleTable.size === "number" ? docStyleTable.size : 0;
+    for (let styleId = 1; styleId < size; styleId++) {
+      styleTable[String(styleId)] = docStyleTable.get(styleId);
+    }
+  }
 
   for (const sheetId of ids) {
     const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
@@ -423,6 +477,7 @@ function exportDocumentToEngineWorkbookJsonWithOptions(
       sheetOrder.push(engineSheetId);
     }
     const cells: Record<string, EngineCellScalar> = {};
+    const cellStyleIds: Record<string, number> = {};
     const sheet = doc?.model?.sheets?.get?.(sheetId);
 
     if (sheet?.cells?.entries) {
@@ -430,11 +485,17 @@ function exportDocumentToEngineWorkbookJsonWithOptions(
         const coord = parseRowColKey(key);
         if (!coord) continue;
 
-        const input = cellStateToEngineInput(cell);
-        if (input == null) continue;
-
         const address = toA1(coord.row, coord.col);
-        cells[address] = input;
+
+        const input = cellStateToEngineInput(cell);
+        if (input != null) {
+          cells[address] = input;
+        }
+
+        const styleId = typeof cell.styleId === "number" ? cell.styleId : 0;
+        if (styleId !== 0) {
+          cellStyleIds[address] = styleId;
+        }
       }
     }
 
@@ -456,17 +517,68 @@ function exportDocumentToEngineWorkbookJsonWithOptions(
     const colWidths = sanitizeAxisMap(view?.colWidths);
     const rowHeights = sanitizeAxisMap(view?.rowHeights);
 
-    sheets[engineSheetId] = {
-      cells,
-      ...(colWidths ? { colWidths } : {}),
-      ...(rowHeights ? { rowHeights } : {}),
-    };
+    const out: EngineSheetJson = { cells };
+    if (colWidths) out.colWidths = colWidths;
+    if (rowHeights) out.rowHeights = rowHeights;
+
+    // Sheet-level style id.
+    const defaultStyleId = typeof sheet?.defaultStyleId === "number" ? sheet.defaultStyleId : 0;
+    if (defaultStyleId !== 0) out.defaultStyleId = defaultStyleId;
+
+    // Row/col style ids.
+    if (sheet?.rowStyleIds?.entries) {
+      const rowStyleIds: Record<string, number> = {};
+      for (const [row, styleId] of sheet.rowStyleIds.entries() as Iterable<[number, number]>) {
+        if (typeof row !== "number" || typeof styleId !== "number" || styleId === 0) continue;
+        rowStyleIds[String(row)] = styleId;
+      }
+      if (Object.keys(rowStyleIds).length > 0) out.rowStyleIds = rowStyleIds;
+    }
+    if (sheet?.colStyleIds?.entries) {
+      const colStyleIds: Record<string, number> = {};
+      for (const [col, styleId] of sheet.colStyleIds.entries() as Iterable<[number, number]>) {
+        if (typeof col !== "number" || typeof styleId !== "number" || styleId === 0) continue;
+        colStyleIds[String(col)] = styleId;
+      }
+      if (Object.keys(colStyleIds).length > 0) out.colStyleIds = colStyleIds;
+    }
+
+    // Range-run formatting.
+    if (sheet?.formatRunsByCol?.entries) {
+      const formatRunsByCol: Record<string, EngineFormatRun[]> = {};
+      for (const [col, runs] of sheet.formatRunsByCol.entries() as Iterable<[number, EngineFormatRun[]]>) {
+        if (typeof col !== "number" || !Array.isArray(runs) || runs.length === 0) continue;
+        const normalized = runs
+          .filter(
+            (r) =>
+              r &&
+              typeof r.startRow === "number" &&
+              typeof r.endRowExclusive === "number" &&
+              typeof r.styleId === "number",
+          )
+          .map((r) => ({ startRow: r.startRow, endRowExclusive: r.endRowExclusive, styleId: r.styleId }));
+        if (normalized.length > 0) {
+          formatRunsByCol[String(col)] = normalized;
+        }
+      }
+      if (Object.keys(formatRunsByCol).length > 0) out.formatRunsByCol = formatRunsByCol;
+    }
+
+    if (Object.keys(cellStyleIds).length > 0) {
+      out.cellStyleIds = cellStyleIds;
+    }
+
+    sheets[engineSheetId] = out;
   }
 
   const localeIdRaw = options.localeId;
-  const localeId = typeof localeIdRaw === "string" && localeIdRaw.trim() !== "" ? localeIdRaw.trim() : undefined;
+  const localeId =
+    typeof localeIdRaw === "string" && localeIdRaw.trim() !== "" ? localeIdRaw.trim() : undefined;
 
-  return { ...(localeId ? { localeId } : {}), sheetOrder, sheets };
+  const out: EngineWorkbookJson = { sheets, sheetOrder };
+  if (localeId) out.localeId = localeId;
+  if (Object.keys(styleTable).length > 0) out.styleTable = styleTable;
+  return out;
 }
 
 export type EngineHydrateFromDocumentOptions = {

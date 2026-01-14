@@ -393,7 +393,6 @@ pub struct ValueField {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
 }
-
 impl From<&str> for ScalarValue {
     fn from(value: &str) -> Self {
         ScalarValue::Text(value.to_string())

@@ -324,6 +324,18 @@ struct Sheet {
     ///
     /// Runs are expected to be sorted by `start_row` and non-overlapping.
     format_runs_by_col: BTreeMap<u32, Vec<FormatRun>>,
+    /// Default sheet style id (DocumentController "sheet formatting" layer).
+    dc_default_style_id: u32,
+    /// Row-level style ids (DocumentController "row formatting" layer).
+    dc_row_style_ids: HashMap<u32, u32>,
+    /// Column-level style ids (DocumentController "column formatting" layer).
+    dc_col_style_ids: HashMap<u32, u32>,
+    /// Range-run formatting, keyed by column.
+    ///
+    /// Mirrors DocumentController's `formatRunsByCol` representation.
+    dc_format_runs_by_col: HashMap<u32, Vec<crate::style_patch::FormatRun>>,
+    /// Cell-level style ids (DocumentController "cell formatting" layer).
+    dc_cell_style_ids: HashMap<CellAddr, u32>,
 }
 
 impl Default for Sheet {
@@ -343,6 +355,11 @@ impl Default for Sheet {
             row_properties: BTreeMap::new(),
             col_properties: BTreeMap::new(),
             format_runs_by_col: BTreeMap::new(),
+            dc_default_style_id: 0,
+            dc_row_style_ids: HashMap::new(),
+            dc_col_style_ids: HashMap::new(),
+            dc_format_runs_by_col: HashMap::new(),
+            dc_cell_style_ids: HashMap::new(),
         }
     }
 }
@@ -889,6 +906,7 @@ pub struct Engine {
     text_codepage: u16,
     circular_references: HashSet<CellKey>,
     spills: SpillState,
+    style_table: Arc<crate::style_patch::StylePatchTable>,
     next_recalc_id: u64,
     info: EngineInfo,
 }
@@ -999,6 +1017,7 @@ impl Engine {
             text_codepage: 1252,
             circular_references: HashSet::new(),
             spills: SpillState::default(),
+            style_table: Arc::new(crate::style_patch::StylePatchTable::new()),
             next_recalc_id: 0,
             info: EngineInfo::default(),
         }
@@ -2170,6 +2189,11 @@ impl Engine {
             sheet_state.row_properties.clear();
             sheet_state.col_properties.clear();
             sheet_state.format_runs_by_col.clear();
+            sheet_state.dc_default_style_id = 0;
+            sheet_state.dc_row_style_ids.clear();
+            sheet_state.dc_col_style_ids.clear();
+            sheet_state.dc_format_runs_by_col.clear();
+            sheet_state.dc_cell_style_ids.clear();
         }
 
         // Rewrite formulas stored in remaining sheets.
@@ -2663,6 +2687,34 @@ impl Engine {
         }
     }
 
+    // --- Formatting / Style patches (DocumentController semantics) ---
+
+    /// Insert or replace a style patch in the engine's style table.
+    ///
+    /// Style ids follow DocumentController semantics:
+    /// - `0` is always the implicit default style (no overrides)
+    /// - non-zero ids reference patch objects whose semantics are based on *property presence*
+    ///   (including explicit `null` clears).
+    pub fn set_style_patch(&mut self, style_id: u32, patch: crate::style_patch::StylePatch) {
+        Arc::make_mut(&mut self.style_table).insert(style_id, patch);
+        // Formatting changes can affect worksheet information functions like CELL().
+        // We do not currently track dependencies on formatting metadata, so conservatively
+        // mark formulas dirty.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Remove a style patch from the style table.
+    pub fn remove_style_patch(&mut self, style_id: u32) {
+        Arc::make_mut(&mut self.style_table).remove(style_id);
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
     /// Set the worksheet default style id (layered formatting base) for `sheet`.
     ///
     /// `None` (or `Some(0)`) resets the default style to `0`.
@@ -2809,6 +2861,167 @@ impl Engine {
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
+    }
+
+    /// Set the default style id for a sheet (DocumentController sheet formatting layer).
+    pub fn set_sheet_default_patch_style_id(&mut self, sheet: &str, style_id: u32) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+            sheet_state.dc_default_style_id = style_id;
+        }
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set the style id for a row (DocumentController row formatting layer).
+    pub fn set_row_patch_style_id(&mut self, sheet: &str, row: u32, style_id: u32) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        // Ensure the row is in-bounds (growing dimensions if needed).
+        let _ = self
+            .workbook
+            .grow_sheet_dimensions(sheet_id, CellAddr { row, col: 0 });
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+            if style_id == 0 {
+                sheet_state.dc_row_style_ids.remove(&row);
+            } else {
+                sheet_state.dc_row_style_ids.insert(row, style_id);
+            }
+        }
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set the style id for a column (DocumentController column formatting layer).
+    pub fn set_col_patch_style_id(&mut self, sheet: &str, col: u32, style_id: u32) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        // Ensure the column is in-bounds (growing dimensions if needed).
+        let _ = self
+            .workbook
+            .grow_sheet_dimensions(sheet_id, CellAddr { row: 0, col });
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+            if style_id == 0 {
+                sheet_state.dc_col_style_ids.remove(&col);
+            } else {
+                sheet_state.dc_col_style_ids.insert(col, style_id);
+            }
+        }
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Replace the run-length encoded formatting runs for a given column.
+    pub fn set_patch_format_runs_by_col(
+        &mut self,
+        sheet: &str,
+        col: u32,
+        runs: Vec<crate::style_patch::FormatRun>,
+    ) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let _ = self
+            .workbook
+            .grow_sheet_dimensions(sheet_id, CellAddr { row: 0, col });
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+            if runs.is_empty() {
+                sheet_state.dc_format_runs_by_col.remove(&col);
+            } else {
+                sheet_state.dc_format_runs_by_col.insert(col, runs);
+            }
+        }
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Set the cell-level style id (DocumentController cell formatting layer).
+    pub fn set_cell_patch_style_id(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        style_id: u32,
+    ) -> Result<(), EngineError> {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let addr = parse_a1(addr)?;
+        if addr.row >= i32::MAX as u32 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
+        }
+        if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+            if style_id == 0 {
+                sheet_state.dc_cell_style_ids.remove(&addr);
+            } else {
+                sheet_state.dc_cell_style_ids.insert(addr, style_id);
+            }
+        }
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+        Ok(())
+    }
+
+    /// Convenience: compute the effective style values for a cell using the engine's current
+    /// style table + formatting layers.
+    pub fn effective_cell_style(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Option<crate::style_patch::EffectiveStyle> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let sheet_state = self.workbook.sheets.get(sheet_id)?;
+        if addr.row >= sheet_state.row_count || addr.col >= sheet_state.col_count {
+            return None;
+        }
+
+        let col_style = sheet_state
+            .dc_col_style_ids
+            .get(&addr.col)
+            .copied()
+            .unwrap_or(0);
+        let row_style = sheet_state
+            .dc_row_style_ids
+            .get(&addr.row)
+            .copied()
+            .unwrap_or(0);
+        let cell_style = sheet_state
+            .dc_cell_style_ids
+            .get(&addr)
+            .copied()
+            .unwrap_or(0);
+        let range_run_style = sheet_state
+            .dc_format_runs_by_col
+            .get(&addr.col)
+            .and_then(|runs| {
+                runs.iter()
+                    .find(|run| addr.row >= run.start_row && addr.row < run.end_row_exclusive)
+                    .map(|run| run.style_id)
+            })
+            .unwrap_or(0);
+
+        let layers = crate::style_patch::CellStyleLayers {
+            sheet: sheet_state.dc_default_style_id,
+            col: col_style,
+            row: row_style,
+            range_run: range_run_style,
+            cell: cell_style,
+        };
+
+        Some(crate::style_patch::resolve_effective_style(
+            &self.style_table,
+            layers,
+        ))
     }
 
     pub fn set_calc_settings(&mut self, settings: CalcSettings) {
@@ -6014,6 +6227,7 @@ impl Engine {
 
         let mut snapshot = Snapshot::from_workbook(
             &self.workbook,
+            self.style_table.clone(),
             &self.spills,
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
@@ -6133,6 +6347,7 @@ impl Engine {
 
         let mut snapshot = Snapshot::from_workbook(
             &self.workbook,
+            self.style_table.clone(),
             &self.spills,
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
@@ -6652,6 +6867,7 @@ impl Engine {
 
         let mut snapshot = Snapshot::from_workbook(
             &self.workbook,
+            self.style_table.clone(),
             &self.spills,
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
@@ -8831,6 +9047,7 @@ impl Engine {
 
         let snapshot = Snapshot::from_workbook(
             &self.workbook,
+            self.style_table.clone(),
             &self.spills,
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
@@ -11260,6 +11477,12 @@ struct Snapshot {
     format_runs_by_col: Vec<BTreeMap<u32, Vec<FormatRun>>>,
     text_codepage: u16,
     sheet_origin_cells: Vec<Option<CellAddr>>,
+    style_patch_table: Arc<crate::style_patch::StylePatchTable>,
+    dc_sheet_default_style_ids: Vec<u32>,
+    dc_row_style_ids: Vec<HashMap<u32, u32>>,
+    dc_col_style_ids: Vec<HashMap<u32, u32>>,
+    dc_format_runs_by_col: Vec<HashMap<u32, Vec<crate::style_patch::FormatRun>>>,
+    dc_cell_style_ids: Vec<HashMap<CellAddr, u32>>,
     values: HashMap<CellKey, Value>,
     style_ids: HashMap<CellKey, u32>,
     phonetics: HashMap<CellKey, String>,
@@ -11291,6 +11514,7 @@ struct Snapshot {
 impl Snapshot {
     fn from_workbook(
         workbook: &Workbook,
+        style_patch_table: Arc<crate::style_patch::StylePatchTable>,
         spills: &SpillState,
         external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
         external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
@@ -11366,6 +11590,33 @@ impl Snapshot {
                 }
             })
             .collect();
+
+        let dc_sheet_default_style_ids = workbook
+            .sheets
+            .iter()
+            .map(|s| s.dc_default_style_id)
+            .collect();
+        let dc_row_style_ids = workbook
+            .sheets
+            .iter()
+            .map(|s| s.dc_row_style_ids.clone())
+            .collect();
+        let dc_col_style_ids = workbook
+            .sheets
+            .iter()
+            .map(|s| s.dc_col_style_ids.clone())
+            .collect();
+        let dc_format_runs_by_col = workbook
+            .sheets
+            .iter()
+            .map(|s| s.dc_format_runs_by_col.clone())
+            .collect();
+        let dc_cell_style_ids = workbook
+            .sheets
+            .iter()
+            .map(|s| s.dc_cell_style_ids.clone())
+            .collect();
+
         let mut cell_count = 0usize;
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             if !workbook.sheet_exists(sheet_id) {
@@ -11524,6 +11775,12 @@ impl Snapshot {
             format_runs_by_col,
             text_codepage: workbook.text_codepage,
             sheet_origin_cells,
+            style_patch_table,
+            dc_sheet_default_style_ids,
+            dc_row_style_ids,
+            dc_col_style_ids,
+            dc_format_runs_by_col,
+            dc_cell_style_ids,
             values,
             style_ids,
             phonetics,
@@ -12110,6 +12367,140 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn origin(&self) -> Option<&str> {
         self.info.origin.as_deref()
+    }
+
+    fn effective_cell_style(
+        &self,
+        sheet_id: usize,
+        addr: CellAddr,
+    ) -> crate::style_patch::EffectiveStyle {
+        let sheet_default_style_id = self
+            .dc_sheet_default_style_ids
+            .get(sheet_id)
+            .copied()
+            .unwrap_or(0);
+
+        let col_style = self
+            .dc_col_style_ids
+            .get(sheet_id)
+            .and_then(|m| m.get(&addr.col))
+            .copied()
+            .unwrap_or(0);
+        let row_style = self
+            .dc_row_style_ids
+            .get(sheet_id)
+            .and_then(|m| m.get(&addr.row))
+            .copied()
+            .unwrap_or(0);
+        let cell_style = self
+            .dc_cell_style_ids
+            .get(sheet_id)
+            .and_then(|m| m.get(&addr))
+            .copied()
+            .unwrap_or(0);
+        let range_run_style = self
+            .dc_format_runs_by_col
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .and_then(|runs| {
+                runs.iter()
+                    .find(|run| addr.row >= run.start_row && addr.row < run.end_row_exclusive)
+                    .map(|run| run.style_id)
+            })
+            .unwrap_or(0);
+
+        let layers = crate::style_patch::CellStyleLayers {
+            sheet: sheet_default_style_id,
+            col: col_style,
+            row: row_style,
+            range_run: range_run_style,
+            cell: cell_style,
+        };
+
+        // If any DocumentController patch layer is present, resolve using patch semantics.
+        if layers.in_precedence_order().into_iter().any(|id| id != 0) {
+            return crate::style_patch::resolve_effective_style(&self.style_patch_table, layers);
+        }
+
+        // Fall back to the workbook style table semantics when no patch formatting is applied.
+        let (rows, cols) = self.sheet_dimensions(sheet_id);
+        if addr.row >= rows || addr.col >= cols {
+            return crate::style_patch::EffectiveStyle::default();
+        }
+
+        let mut number_format: Option<String> = None;
+        let mut alignment_horizontal: Option<HorizontalAlignment> = None;
+        let mut locked: Option<bool> = None;
+
+        // Resolve style layers using document precedence:
+        // sheet < col < row < range-run < cell.
+        let sheet_style_id = self.sheet_default_style_id(sheet_id).unwrap_or(0);
+        let col_style_id = self
+            .col_properties
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let row_style_id = self
+            .row_properties
+            .get(sheet_id)
+            .and_then(|rows| rows.get(&addr.row))
+            .and_then(|props| props.style_id)
+            .unwrap_or(0);
+        let run_style_id = self
+            .format_runs_by_col
+            .get(sheet_id)
+            .and_then(|cols| cols.get(&addr.col))
+            .map(|runs| {
+                let mut style_id = 0;
+                for run in runs {
+                    if addr.row < run.start_row {
+                        break;
+                    }
+                    if addr.row >= run.end_row_exclusive {
+                        continue;
+                    }
+                    style_id = run.style_id;
+                }
+                style_id
+            })
+            .unwrap_or(0);
+        let cell_style_id = self.cell_style_id(sheet_id, addr);
+
+        for style_id in [
+            sheet_style_id,
+            col_style_id,
+            row_style_id,
+            run_style_id,
+            cell_style_id,
+        ] {
+            if style_id == 0 {
+                continue;
+            }
+            let Some(style) = self.styles.get(style_id) else {
+                continue;
+            };
+
+            if let Some(fmt) = style.number_format.as_deref() {
+                number_format = Some(fmt.to_string());
+            }
+            if let Some(horizontal) = style
+                .alignment
+                .as_ref()
+                .and_then(|alignment| alignment.horizontal)
+            {
+                alignment_horizontal = Some(horizontal);
+            }
+            if let Some(protection) = style.protection.as_ref() {
+                locked = Some(protection.locked);
+            }
+        }
+
+        crate::style_patch::EffectiveStyle {
+            number_format,
+            alignment_horizontal,
+            locked: locked.unwrap_or(true),
+        }
     }
 }
 
@@ -19938,6 +20329,7 @@ mod tests {
         // references used by the formulas above).
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
+            bytecode_engine.style_table.clone(),
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
@@ -20068,6 +20460,7 @@ mod tests {
         // Column caches should *not* allocate a full-column buffer for `A:A`.
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
+            bytecode_engine.style_table.clone(),
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
@@ -20143,6 +20536,7 @@ mod tests {
         // Full-column ranges should skip building column slices.
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
+            bytecode_engine.style_table.clone(),
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
@@ -20225,6 +20619,7 @@ mod tests {
         // Column caches should *not* allocate full-column buffers for 3D spans over `A:A`.
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
+            bytecode_engine.style_table.clone(),
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
@@ -20359,6 +20754,7 @@ mod tests {
         // Column caches should *not* allocate full-column buffers for 3D spans over `A:A` / `E:E`.
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
+            bytecode_engine.style_table.clone(),
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
@@ -20525,6 +20921,7 @@ mod tests {
         // Column caches should *not* allocate full-column buffers for `A:A` / `B:B`.
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
+            bytecode_engine.style_table.clone(),
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
@@ -21474,6 +21871,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
@@ -21512,6 +21910,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
@@ -21552,6 +21951,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
@@ -21598,6 +21998,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
@@ -21668,6 +22069,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
@@ -21729,6 +22131,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
@@ -22551,6 +22954,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),

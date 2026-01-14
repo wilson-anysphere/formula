@@ -366,7 +366,6 @@ pub trait FunctionContext {
     fn get_cell_number_format(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
         None
     }
-
     /// Returns the workbook's style table, if available.
     fn style_table(&self) -> Option<&formula_model::StyleTable> {
         None
@@ -439,6 +438,20 @@ pub trait FunctionContext {
     fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
         None
     }
+
+    /// Resolve effective formatting/protection metadata for a cell.
+    ///
+    /// This is used by worksheet information functions like `CELL("prefix")` and `CELL("protect")`.
+    ///
+    /// Implementations that do not track formatting can return the default style values.
+    fn effective_cell_style(
+        &self,
+        _sheet_id: &SheetId,
+        _addr: CellAddr,
+    ) -> crate::style_patch::EffectiveStyle {
+        crate::style_patch::EffectiveStyle::default()
+    }
+
     /// Resolve a worksheet name to an internal sheet id for runtime-parsed sheet references.
     ///
     /// Implementations should match Excel's Unicode-aware, NFKC + case-insensitive comparison
