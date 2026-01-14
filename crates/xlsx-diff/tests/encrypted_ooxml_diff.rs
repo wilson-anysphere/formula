@@ -101,7 +101,7 @@ fn diff_unicode_password_fixtures_against_plain_no_differences() -> Result<()> {
 #[test]
 fn diff_xlsm_fixtures_against_plain_no_differences() -> Result<()> {
     let plain = fixture_path("plaintext-basic.xlsm");
-    for encrypted in ["agile-basic.xlsm", "standard-basic.xlsm"] {
+    for encrypted in ["agile-basic.xlsm", "standard-basic.xlsm", "basic-password.xlsm"] {
         let encrypted = fixture_path(encrypted);
         assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
     }
