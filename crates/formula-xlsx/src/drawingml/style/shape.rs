@@ -87,11 +87,8 @@ fn parse_grad_fill(node: Node<'_, '_>) -> Option<GradientFill> {
 
 fn parse_color_container(node: Node<'_, '_>) -> Option<formula_model::charts::ColorRef> {
     node.children()
-        .find(|n| {
-            n.is_element()
-                && (n.tag_name().name() == "srgbClr" || n.tag_name().name() == "schemeClr")
-        })
-        .and_then(parse_color)
+        .filter(|n| n.is_element())
+        .find_map(parse_color)
 }
 
 fn outer_xml(node: Node<'_, '_>) -> Option<String> {

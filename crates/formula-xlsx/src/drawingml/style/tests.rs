@@ -298,3 +298,22 @@ fn sppr_pattern_fill_with_fg_bg() {
     assert_eq!(fill.fg_color, Some(Color::Argb(0xFFFF0000)));
     assert_eq!(fill.bg_color, Some(Color::Argb(0xFF00FF00)));
 }
+
+#[test]
+fn sppr_pattern_fill_supports_prst_clr_and_sys_clr() {
+    let xml = r#"<c:spPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:pattFill prst="pct20">
+            <a:fgClr><a:prstClr val="LtGray"/></a:fgClr>
+            <a:bgClr><a:sysClr val="windowText" lastClr="112233"/></a:bgClr>
+        </a:pattFill>
+    </c:spPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let sppr = parse_sppr(doc.root_element()).unwrap();
+    let FillStyle::Pattern(fill) = sppr.fill.unwrap() else {
+        panic!("expected pattFill");
+    };
+    assert_eq!(fill.pattern, "pct20");
+    assert_eq!(fill.fg_color, Some(Color::Argb(0xFFC0C0C0)));
+    assert_eq!(fill.bg_color, Some(Color::Argb(0xFF112233)));
+}
