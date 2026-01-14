@@ -1510,35 +1510,35 @@ try {
         }
       }
  
-      foreach ($scheme in $expectedSchemes) {
-        try {
+      try {
+        foreach ($scheme in $expectedSchemes) {
           Assert-MsiRegistersUrlProtocol -Msi $msi -Scheme $scheme
-        } catch {
-          $msg = $_.Exception.Message
-          if ($msg -match 'Failed to open MSI for inspection') {
-            Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
-            # Best-effort mode: validate only the primary scheme, since string scanning can be brittle.
+        }
+      } catch {
+        $msg = $_.Exception.Message
+        if ($msg -match 'Failed to open MSI for inspection') {
+          Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
+          foreach ($scheme in $expectedSchemes) {
             $schemeNeedles = @(
               # Prefer scheme-specific paths that include a separator after the scheme name to
-              # avoid prefix false-positives (e.g. don't treat "formula-extra" as satisfying "formula").
-              "\$primaryScheme\shell\open\command",
-              "$primaryScheme\shell\open\command",
-              "Software\\Classes\\$primaryScheme\\shell\\open\\command",
-              "Software\Classes\$primaryScheme\shell\open\command",
-              "HKEY_CLASSES_ROOT\\$primaryScheme\\shell\\open\\command",
-              "HKEY_CLASSES_ROOT\$primaryScheme\shell\open\command",
-              "HKCR\\$primaryScheme\\shell\\open\\command",
-              "HKCR\$primaryScheme\shell\open\command"
+              # avoid prefix false-positives (e.g. don't treat 'formula-extra' as satisfying 'formula').
+              "\$scheme\shell\open\command",
+              "$scheme\shell\open\command",
+              "Software\\Classes\\$scheme\\shell\\open\\command",
+              "Software\Classes\$scheme\shell\open\command",
+              "HKEY_CLASSES_ROOT\\$scheme\\shell\\open\\command",
+              "HKEY_CLASSES_ROOT\$scheme\shell\open\command",
+              "HKCR\\$scheme\\shell\\open\\command",
+              "HKCR\$scheme\shell\open\command"
             )
             $schemeMarker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $schemeNeedles
             if ([string]::IsNullOrWhiteSpace($schemeMarker)) {
-              throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$primaryScheme://' in the MSI binary: $($msi.FullName)"
+              throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$scheme://' in the MSI binary: $($msi.FullName)"
             }
-            Write-Warning "MSI table inspection failed, but the MSI contained marker '$schemeMarker' related to '$primaryScheme://'. Assuming URL protocol metadata is present (best-effort)."
-            break
-          } else {
-            throw
+            Write-Warning "MSI table inspection failed, but the MSI contained marker '$schemeMarker' related to '$scheme://'. Assuming URL protocol metadata is present (best-effort)."
           }
+        } else {
+          throw
         }
       }
       Assert-MsiContainsComplianceArtifacts -Msi $msi
@@ -1565,16 +1565,25 @@ try {
         }
       }
  
-      $protocolMarker = Find-ExeUrlProtocolMarker -Exe $exe -UrlScheme $primaryScheme
-      if ([string]::IsNullOrWhiteSpace($protocolMarker)) {
-        $msg = "EXE installer did not contain obvious markers for '$primaryScheme://' URL protocol registration (e.g. '$primaryScheme\\shell\\open\\command'). This validation is heuristic for NSIS installers."
-        if ($msiInstallers.Count -gt 0) {
-          Write-Warning "$msg MSI validation passed, so this is non-fatal. If users rely on the EXE installer, investigate NSIS URL protocol wiring."
-        } else {
-          throw "$msg Without an MSI, we cannot reliably confirm Windows URL protocol registration is present."
-        }
+      $protocolSchemes = @()
+      if ($msiInstallers.Count -gt 0) {
+        # MSI validation is authoritative; only scan the primary scheme for best-effort EXE validation.
+        $protocolSchemes = @($primaryScheme)
       } else {
-        Write-Host ("EXE protocol marker scan: found {0}" -f $protocolMarker)
+        $protocolSchemes = @($expectedSchemes)
+      }
+      foreach ($scheme in $protocolSchemes) {
+        $protocolMarker = Find-ExeUrlProtocolMarker -Exe $exe -UrlScheme $scheme
+        if ([string]::IsNullOrWhiteSpace($protocolMarker)) {
+          $msg = "EXE installer did not contain obvious markers for '$scheme://' URL protocol registration (e.g. '$scheme\\shell\\open\\command'). This validation is heuristic for NSIS installers."
+          if ($msiInstallers.Count -gt 0) {
+            Write-Warning "$msg MSI validation passed, so this is non-fatal. If users rely on the EXE installer, investigate NSIS URL protocol wiring."
+          } else {
+            throw "$msg Without an MSI, we cannot reliably confirm Windows URL protocol registration is present."
+          }
+        } else {
+          Write-Host ("EXE protocol marker scan ($scheme): found {0}" -f $protocolMarker)
+        }
       }
 
       # NSIS is a distributed installer (alongside MSI). Ensure the same compliance artifacts
