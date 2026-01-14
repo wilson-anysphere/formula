@@ -333,11 +333,17 @@ Current implementation details:
 - They are evaluated with:
   - `FilterContext::default()` (effectively “no filter context”)
   - a row context pointing at each row of the table
-- They are only supported for **in-memory tables** (`Table::new(...)`).
-  - Columnar tables are immutable; use `add_calculated_column_definition(...)` if values are already stored.
+- They are supported for both **in-memory** (`Table::new(...)`) and **columnar-backed** (`Table::from_columnar(...)`)
+  tables.
+  - For columnar tables, the computed values are encoded and appended as a new column to the underlying
+    `formula_columnar::ColumnarTable` (copy-on-write; may clone when shared).
+  - Columnar calculated columns currently require a single logical type across all **non-blank** rows:
+    number, string, or boolean.
+  - When loading persisted models where calculated column values are already stored, use
+    `add_calculated_column_definition(...)` to register the metadata without re-evaluating the expression.
 
 On `DataModel::insert_row(...)`, calculated columns for that table are evaluated for the new row and stored
-into the in-memory table.
+into the in-memory table (note: `insert_row` is not supported for columnar tables).
 
 ---
 
