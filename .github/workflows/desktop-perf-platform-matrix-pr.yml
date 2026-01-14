@@ -32,6 +32,9 @@ env:
 jobs:
   guard:
     name: Guard (label + same-repo PR)
+    # Avoid creating work for unrelated label events. This still leaves a workflow run entry,
+    # but all jobs will be skipped immediately when the label isn't a trigger label.
+    if: github.event.label.name == 'desktop-perf-matrix' || github.event.label.name == 'run-desktop-perf'
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.guard.outputs.should_run }}
@@ -96,8 +99,8 @@ jobs:
     env:
       # The runners gate on these env vars; map the platform-matrix toggle to the existing
       # enforcement knobs (defaults off).
-      FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH: ${{ vars.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX == '1' && '1' || '0' }}
-      FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH: ${{ vars.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX == '1' && '1' || '0' }}
+      FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH: ${{ env.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX == '1' && '1' || '0' }}
+      FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH: ${{ env.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX == '1' && '1' || '0' }}
 
     steps:
       - name: Checkout PR head (not merge commit)
@@ -466,25 +469,137 @@ jobs:
             perf-artifacts/*.json
             perf-artifacts/*.log
 
-      - name: Fail job if perf runners failed
+      - name: Enforce perf gate (optional) + report failures
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          failed=0
-          if [ "${{ steps.startup-cold.outcome }}" != "success" ]; then
-            echo "::error::desktop startup cold runner failed (outcome=${{ steps.startup-cold.outcome }})"
-            failed=1
-          fi
-          if [ "${{ steps.startup-warm.outcome }}" != "success" ]; then
-            echo "::error::desktop startup warm runner failed (outcome=${{ steps.startup-warm.outcome }})"
-            failed=1
-          fi
-          if [ "${{ steps.memory.outcome }}" != "success" ]; then
-            echo "::error::desktop memory runner failed (outcome=${{ steps.memory.outcome }})"
-            failed=1
-          fi
-          exit "$failed"
+          node - <<'NODE'
+          const fs = require("node:fs");
+          
+          const enforce = (process.env.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX ?? "").trim() === "1";
+          
+          function readJsonMaybe(p) {
+            try {
+              return JSON.parse(fs.readFileSync(p, "utf8"));
+            } catch {
+              return null;
+            }
+          }
+          
+          function fmt(n, digits = 0) {
+            if (typeof n !== "number" || !Number.isFinite(n)) return "n/a";
+            return n.toFixed(digits);
+          }
+          
+          function emitError(msg) {
+            // GitHub Actions annotation.
+            // eslint-disable-next-line no-console
+            console.log(`::error::${msg}`);
+          }
+          
+          function checkOutcome(name, outcome) {
+            if (outcome === "success") return false;
+            // Treat skipped separately so a prior build failure is less confusing.
+            if (outcome === "skipped") {
+              emitError(`${name} did not run (outcome=skipped). This usually means an earlier build step failed.`);
+            } else {
+              emitError(`${name} failed (outcome=${outcome}). See logs/artifacts for details.`);
+            }
+            return true;
+          }
+          
+          function checkMetric(label, p95, target, unit, digits = 0) {
+            if (!enforce) return false;
+            if (typeof p95 !== "number" || !Number.isFinite(p95)) return false;
+            if (typeof target !== "number" || !Number.isFinite(target)) return false;
+            if (p95 <= target) return false;
+            emitError(`${label} regression: p95=${fmt(p95, digits)}${unit} > target=${fmt(target, digits)}${unit}`);
+            return true;
+          }
+          
+          const startupColdOutcome = process.env.STARTUP_COLD_OUTCOME || "unknown";
+          const startupWarmOutcome = process.env.STARTUP_WARM_OUTCOME || "unknown";
+          const memoryOutcome = process.env.MEMORY_OUTCOME || "unknown";
+          
+          let failed = false;
+          failed = checkOutcome("desktop startup cold runner", startupColdOutcome) || failed;
+          failed = checkOutcome("desktop startup warm runner", startupWarmOutcome) || failed;
+          failed = checkOutcome("desktop memory runner", memoryOutcome) || failed;
+          
+          const cold = readJsonMaybe("perf-artifacts/desktop-startup-metrics-cold.json");
+          const warm = readJsonMaybe("perf-artifacts/desktop-startup-metrics-warm.json");
+          const mem = readJsonMaybe("perf-artifacts/desktop-memory-metrics.json");
+          
+          const coldSummary = cold?.summary ?? null;
+          const warmSummary = warm?.summary ?? null;
+          const memSummary = mem?.summary ?? null;
+          
+          if (enforce) {
+            failed =
+              checkMetric(
+                "startup.cold.windowVisible",
+                coldSummary?.windowVisible?.p95,
+                coldSummary?.windowVisible?.targetMs,
+                "ms",
+                0,
+              ) || failed;
+            failed =
+              checkMetric("startup.cold.tti", coldSummary?.tti?.p95, coldSummary?.tti?.targetMs, "ms", 0) || failed;
+            failed =
+              checkMetric(
+                "startup.cold.webviewLoaded",
+                coldSummary?.webviewLoaded?.p95,
+                coldSummary?.webviewLoaded?.targetMs,
+                "ms",
+                0,
+              ) || failed;
+            failed =
+              checkMetric(
+                "startup.cold.firstRender",
+                coldSummary?.firstRender?.p95,
+                coldSummary?.firstRender?.targetMs,
+                "ms",
+                0,
+              ) || failed;
+            
+            failed =
+              checkMetric(
+                "startup.warm.windowVisible",
+                warmSummary?.windowVisible?.p95,
+                warmSummary?.windowVisible?.targetMs,
+                "ms",
+                0,
+              ) || failed;
+            failed =
+              checkMetric("startup.warm.tti", warmSummary?.tti?.p95, warmSummary?.tti?.targetMs, "ms", 0) || failed;
+            failed =
+              checkMetric(
+                "startup.warm.webviewLoaded",
+                warmSummary?.webviewLoaded?.p95,
+                warmSummary?.webviewLoaded?.targetMs,
+                "ms",
+                0,
+              ) || failed;
+            failed =
+              checkMetric(
+                "startup.warm.firstRender",
+                warmSummary?.firstRender?.p95,
+                warmSummary?.firstRender?.targetMs,
+                "ms",
+                0,
+              ) || failed;
+            
+            failed =
+              checkMetric("idleMemory.rss", memSummary?.rssMb?.p95, memSummary?.rssMb?.targetMb, "MB", 1) || failed;
+          }
+          
+          if (failed) process.exitCode = 1;
+          NODE
+        env:
+          STARTUP_COLD_OUTCOME: ${{ steps.startup-cold.outcome }}
+          STARTUP_WARM_OUTCOME: ${{ steps.startup-warm.outcome }}
+          MEMORY_OUTCOME: ${{ steps.memory.outcome }}
 
   pr-comment:
     name: PR comment (desktop perf summary)
@@ -632,4 +747,3 @@ jobs:
               });
               core.info("Created new desktop perf matrix comment.");
             }
-
