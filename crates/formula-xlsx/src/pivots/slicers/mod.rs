@@ -1041,7 +1041,13 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
                         resolved.connected_pivot_tables,
                         resolved.connected_tables,
                     ),
-                    Err(_) => (None, None, Vec::new(), Vec::new()),
+                    Err(_) => {
+                        // Best-effort: if the slicer cache XML is malformed, still surface the
+                        // cache part and any connected Excel Tables referenced via relationships.
+                        let (_, connected_tables) =
+                            parse_slicer_cache_rels_best_effort(package, cache_part);
+                        (None, None, Vec::new(), connected_tables)
+                    }
                 }
             } else {
                 (None, None, Vec::new(), Vec::new())
