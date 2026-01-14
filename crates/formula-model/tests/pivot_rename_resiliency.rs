@@ -206,3 +206,126 @@ fn rename_operations_are_noops_when_no_pivots_exist() {
 
     assert!(wb.pivot_tables.is_empty());
 }
+
+#[test]
+fn duplicate_sheet_duplicates_pivots_and_updates_destinations_and_sources() {
+    let mut wb = Workbook::new();
+    let sheet_id = wb.add_sheet("Sheet1").unwrap();
+    wb.add_table(sheet_id, sample_table("Table1")).unwrap();
+    let range = Range::from_a1("A1:B3").unwrap();
+
+    wb.pivot_tables.push(PivotTableModel {
+        id: Uuid::from_u128(1),
+        name: "Pivot1".to_string(),
+        source: PivotSource::Table {
+            table: TableIdentifier::Id(1),
+        },
+        destination: PivotDestination::Cell {
+            sheet_id,
+            cell: CellRef::new(0, 0),
+        },
+        config: Default::default(),
+        cache_id: Some(Uuid::from_u128(1234)),
+    });
+    wb.pivot_tables.push(PivotTableModel {
+        id: Uuid::from_u128(2),
+        name: "Pivot2".to_string(),
+        source: PivotSource::RangeName {
+            sheet_name: "Sheet1".to_string(),
+            range: range.clone(),
+        },
+        destination: PivotDestination::CellName {
+            sheet_name: "SHEET1".to_string(),
+            cell: CellRef::new(10, 0),
+        },
+        config: Default::default(),
+        cache_id: None,
+    });
+
+    let duplicated_sheet_id = wb.duplicate_sheet(sheet_id, Some("Copy")).unwrap();
+
+    // We should now have 2 original pivots + 2 duplicates.
+    assert_eq!(wb.pivot_tables.len(), 4);
+
+    // Original pivot still points at original sheet/table.
+    assert!(wb.pivot_tables.iter().any(|p| {
+        p.id == Uuid::from_u128(1)
+            && p.destination
+                == PivotDestination::Cell {
+                    sheet_id,
+                    cell: CellRef::new(0, 0),
+                }
+            && p.source
+                == PivotSource::Table {
+                    table: TableIdentifier::Id(1),
+                }
+    }));
+
+    // Original string-based pivot remains unchanged.
+    assert!(wb.pivot_tables.iter().any(|p| {
+        p.id == Uuid::from_u128(2)
+            && p.destination
+                == PivotDestination::CellName {
+                    sheet_name: "SHEET1".to_string(),
+                    cell: CellRef::new(10, 0),
+                }
+            && p.source
+                == PivotSource::RangeName {
+                    sheet_name: "Sheet1".to_string(),
+                    range: range.clone(),
+                }
+    }));
+
+    // The duplicated pivots should target the copied sheet and split their caches so they can be
+    // refreshed independently.
+    let duplicated_table_pivot = wb
+        .pivot_tables
+        .iter()
+        .find(|p| {
+            p.destination
+                == PivotDestination::Cell {
+                    sheet_id: duplicated_sheet_id,
+                    cell: CellRef::new(0, 0),
+                }
+                && p.source
+                    == PivotSource::Table {
+                        table: TableIdentifier::Id(2),
+                    }
+        })
+        .expect("expected duplicated table-based pivot");
+    let duplicated_table_cache_id = duplicated_table_pivot
+        .cache_id
+        .expect("duplicated pivot should have its own cache id");
+    assert!(wb.pivot_caches.iter().any(|cache| {
+        cache.id == duplicated_table_cache_id
+            && cache.needs_refresh
+            && cache.source == duplicated_table_pivot.source
+    }));
+
+    let duplicated_range_pivot = wb
+        .pivot_tables
+        .iter()
+        .find(|p| {
+            p.destination
+                == PivotDestination::CellName {
+                    sheet_name: "Copy".to_string(),
+                    cell: CellRef::new(10, 0),
+                }
+                && p.source
+                    == PivotSource::RangeName {
+                        sheet_name: "Copy".to_string(),
+                        range: range.clone(),
+                    }
+        })
+        .expect("expected duplicated range-based pivot");
+    let duplicated_range_cache_id = duplicated_range_pivot
+        .cache_id
+        .expect("duplicated pivot should have its own cache id");
+    assert!(wb.pivot_caches.iter().any(|cache| {
+        cache.id == duplicated_range_cache_id
+            && cache.needs_refresh
+            && cache.source == duplicated_range_pivot.source
+    }));
+
+    assert_eq!(wb.pivot_caches.len(), 2);
+}
