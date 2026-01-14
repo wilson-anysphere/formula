@@ -5665,8 +5665,8 @@ fn patch_worksheet_xml(
     // x14 extension payload under `<ext uri="{78C0D931-...}">`).
     //
     // Note: conditional formatting parsing is best-effort. Only strip conditional formatting when
-    // we can successfully parse it from the original worksheet XML; otherwise preserve it for
-    // high-fidelity round-trip.
+    // we can successfully parse *rules* from the original worksheet XML; otherwise preserve it for
+    // high-fidelity round-trip (including unknown/unmodeled conditional formatting shapes).
     if sheet.conditional_formatting_rules.is_empty() {
         let original_xml = std::str::from_utf8(original).map_err(|e| {
             WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
@@ -5674,7 +5674,7 @@ fn patch_worksheet_xml(
         if original_xml.contains("conditionalFormatting") {
             if let Ok(parsed) = crate::parse_worksheet_conditional_formatting_streaming(original_xml)
             {
-                if !parsed.raw_blocks.is_empty() {
+                if !parsed.rules.is_empty() {
                     out = strip_worksheet_conditional_formatting_blocks(&out)?;
                 }
             }

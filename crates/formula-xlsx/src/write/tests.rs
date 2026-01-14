@@ -294,6 +294,30 @@ fn clearing_conditional_formatting_strips_cf_blocks_but_preserves_other_extlst_e
 }
 
 #[test]
+fn roundtrip_preserves_unmodeled_empty_conditional_formatting_blocks() {
+    // An empty `<conditionalFormatting>` block (no `<cfRule>` children) does not round-trip through
+    // the workbook model today (no `CfRule` can be constructed). Ensure we don't delete it on save
+    // just because the model's `conditional_formatting_rules` vector is empty.
+    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+  <conditionalFormatting sqref="A1"/>
+</worksheet>"#;
+    let input = build_minimal_xlsx_with_sheet1(sheet1_xml);
+
+    let doc = crate::load_from_bytes(&input).expect("load minimal xlsx");
+
+    let out = write_to_vec(&doc).expect("write patched xlsx");
+    let xml = zip_part_to_string(&out, "xl/worksheets/sheet1.xml");
+    assert!(
+        xml.contains("conditionalFormatting"),
+        "expected empty conditionalFormatting block to be preserved:\n{xml}"
+    );
+}
+
+#[test]
 fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
