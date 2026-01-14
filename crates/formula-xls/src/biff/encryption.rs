@@ -23,10 +23,7 @@ use crate::ct::ct_eq;
 
 use super::{records, BiffVersion};
 
-// CryptoAPI RC4 key derivation helpers are currently used only for deterministic, in-repo
-// fixture/encryption generation in tests. Production `.xls` CryptoAPI decryption lives in
-// `crates/formula-xls/src/decrypt.rs`.
-#[cfg(test)]
+// CryptoAPI RC4 parsing + key derivation helpers.
 pub(crate) mod cryptoapi;
 pub(crate) mod rc4;
 pub(crate) mod xor;
@@ -88,6 +85,11 @@ pub(crate) enum BiffEncryption {
     ///
     /// The full FILEPASS payload is preserved so decryptors can parse algorithm details.
     Biff8Rc4CryptoApi { filepass_payload: Vec<u8> },
+    /// BIFF8 RC4 encryption using CryptoAPI with a legacy FILEPASS layout (`wEncryptionInfo=0x0004`).
+    ///
+    /// This variant uses different RC4 stream-position semantics than the standard CryptoAPI
+    /// encoding.
+    Biff8Rc4CryptoApiLegacy { filepass_payload: Vec<u8> },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -197,8 +199,11 @@ pub(crate) fn parse_filepass_record(
                         BIFF8_RC4_SUBTYPE_RC4 => Ok(BiffEncryption::Biff8Rc4 {
                             filepass_payload: data.to_vec(),
                         }),
-                        BIFF8_RC4_SUBTYPE_CRYPTOAPI | BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
-                            Ok(BiffEncryption::Biff8Rc4CryptoApi {
+                        BIFF8_RC4_SUBTYPE_CRYPTOAPI => Ok(BiffEncryption::Biff8Rc4CryptoApi {
+                            filepass_payload: data.to_vec(),
+                        }),
+                        BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
+                            Ok(BiffEncryption::Biff8Rc4CryptoApiLegacy {
                                 filepass_payload: data.to_vec(),
                             })
                         }
@@ -435,9 +440,13 @@ fn decrypt_after_filepass(
         BiffEncryption::Biff8Rc4 { filepass_payload } => {
             decrypt_biff8_rc4_standard(workbook_stream, encrypted_start, password, filepass_payload)
         }
-        BiffEncryption::Biff8Rc4CryptoApi { .. } => Err(DecryptError::UnsupportedEncryption(
-            "BIFF8 RC4 CryptoAPI decryption not implemented".to_string(),
-        )),
+        BiffEncryption::Biff8Rc4CryptoApi { filepass_payload }
+        | BiffEncryption::Biff8Rc4CryptoApiLegacy { filepass_payload } => cryptoapi::decrypt_workbook_stream_rc4_cryptoapi(
+            workbook_stream,
+            encrypted_start,
+            password,
+            filepass_payload,
+        ),
     }
 }
 
@@ -1272,8 +1281,8 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 // structures (salt/verifier), then encrypt record payload bytes after FILEPASS
                 // using the CryptoAPI per-block RC4 keystream.
                 //
-                // Note: This is test-only; production `.xls` decryption is implemented in
-                // `crates/formula-xls/src/decrypt.rs`.
+                // Note: This is test-only; production `.xls` decryption is implemented by
+                // `crate::biff::encryption` (see `cryptoapi` submodule).
                 const CALG_RC4: u32 = 0x0000_6801;
                 const SPIN_COUNT: u32 = 50_000;
 
@@ -1399,6 +1408,12 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 }
 
                 return Ok(());
+            }
+            BiffEncryption::Biff8Rc4CryptoApiLegacy { .. } => {
+                return Err(DecryptError::UnsupportedEncryption(
+                    "BIFF8 RC4 CryptoAPI legacy encryption is not supported by the test encryptor"
+                        .to_string(),
+                ));
             }
         }
     }
@@ -1599,7 +1614,7 @@ mod tests {
         let parsed = parse_filepass_record(BiffVersion::Biff8, &payload).expect("parse");
         assert_eq!(
             parsed,
-            BiffEncryption::Biff8Rc4CryptoApi {
+            BiffEncryption::Biff8Rc4CryptoApiLegacy {
                 filepass_payload: payload.to_vec()
             }
         );
@@ -2344,11 +2359,7 @@ mod tests {
 
         let range = filepass_payload_range(&plain);
         plain[range.clone()].copy_from_slice(&encrypted[range.clone()]);
-        let filepass_offset = range.start - 4;
-        plain[filepass_offset..filepass_offset + 2].copy_from_slice(&0xFFFFu16.to_le_bytes());
-
-        crate::decrypt::decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted, password)
-            .expect("decrypt");
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
         assert_eq!(encrypted, plain);
     }
 

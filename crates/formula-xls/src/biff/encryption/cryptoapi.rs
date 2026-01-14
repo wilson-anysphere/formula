@@ -1,15 +1,55 @@
-use md5::Md5;
-use sha1::{Digest as _, Sha1};
+use md5::{Digest as _, Md5};
+use sha1::Sha1;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::ct::ct_eq;
 
-use super::rc4::Rc4;
-use super::DecryptError;
+use super::{records, rc4::Rc4, DecryptError};
 
 // CryptoAPI ALG_ID values for hash functions.
 pub(crate) const CALG_MD5: u32 = 0x0000_8003;
 pub(crate) const CALG_SHA1: u32 = 0x0000_8004;
+// CryptoAPI ALG_ID for RC4.
+pub(crate) const CALG_RC4: u32 = 0x0000_6801;
+
+// BIFF8 RC4 CryptoAPI password hardening spin count.
+pub(crate) const BIFF8_CRYPTOAPI_SPIN_COUNT: u32 = 50_000;
+
+// CryptoAPI EncryptionHeader is 32 bytes of fixed fields plus an optional CSP name.
+// Cap this defensively so malformed files cannot request unbounded allocations.
+const MAX_ENCRYPTION_HEADER_SIZE: usize = 4096;
+
+/// Normalize CryptoAPI RC4 `EncryptionHeader.keySize` (bits).
+///
+/// In MS-OFFCRYPTO Standard/CryptoAPI encryption, `keySize == 0` is defined to mean **40-bit RC4**
+/// (legacy export restrictions). Some BIFF8 `FILEPASS` CryptoAPI workbooks follow the same
+/// convention, so we treat `0` as `40` for compatibility.
+fn normalize_cryptoapi_rc4_key_size_bits(key_size_bits: u32) -> u32 {
+    if key_size_bits == 0 { 40 } else { key_size_bits }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CryptoApiHashAlg {
+    Sha1,
+    Md5,
+}
+
+impl CryptoApiHashAlg {
+    fn from_alg_id_hash(alg_id_hash: u32) -> Option<Self> {
+        match alg_id_hash {
+            CALG_SHA1 => Some(Self::Sha1),
+            CALG_MD5 => Some(Self::Md5),
+            _ => None,
+        }
+    }
+
+    fn digest_len(self) -> usize {
+        match self {
+            Self::Sha1 => 20,
+            Self::Md5 => 16,
+        }
+    }
+}
 
 fn cryptoapi_hash2(
     alg_id_hash: u32,
@@ -38,6 +78,193 @@ fn cryptoapi_hash2(
         other => Err(DecryptError::UnsupportedEncryption(format!(
             "unsupported CryptoAPI hash alg_id_hash=0x{other:08X}"
         ))),
+    }
+}
+
+fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, DecryptError> {
+    let b = bytes.get(offset..offset + 2).ok_or_else(|| {
+        DecryptError::InvalidFilePass(format!(
+            "truncated FILEPASS payload (need u16 at offset {offset}, len={})",
+            bytes.len()
+        ))
+    })?;
+    Ok(u16::from_le_bytes([b[0], b[1]]))
+}
+
+fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, DecryptError> {
+    let b = bytes.get(offset..offset + 4).ok_or_else(|| {
+        DecryptError::InvalidFilePass(format!(
+            "truncated FILEPASS payload (need u32 at offset {offset}, len={})",
+            bytes.len()
+        ))
+    })?;
+    Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+fn utf16le_bytes(password: &str) -> Zeroizing<Vec<u8>> {
+    let mut out = Zeroizing::new(Vec::with_capacity(password.len().saturating_mul(2)));
+    for unit in password.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
+    let mut hasher = Sha1::new();
+    for chunk in chunks {
+        hasher.update(chunk);
+    }
+    let mut digest = hasher.finalize();
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+    out
+}
+
+fn md5_bytes(chunks: &[&[u8]]) -> [u8; 16] {
+    let mut hasher = Md5::new();
+    for chunk in chunks {
+        hasher.update(chunk);
+    }
+    let mut digest = hasher.finalize();
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+    out
+}
+
+fn derive_key_material(
+    hash_alg: CryptoApiHashAlg,
+    password: &str,
+    salt: &[u8],
+    spin_count: u32,
+) -> Zeroizing<Vec<u8>> {
+    // CryptoAPI password hashing [MS-OFFCRYPTO]:
+    //   H0 = Hash(salt + UTF16LE(password))
+    //   for i in 0..spin_count-1: H0 = Hash(i_le32 + H0)
+    let pw_bytes = utf16le_bytes(password);
+    match hash_alg {
+        CryptoApiHashAlg::Sha1 => {
+            let mut hash = Zeroizing::new(sha1_bytes(&[salt, &pw_bytes]));
+            drop(pw_bytes);
+
+            for i in 0..spin_count {
+                let iter = i.to_le_bytes();
+                let mut next = sha1_bytes(&[&iter, &hash[..]]);
+                hash[..].copy_from_slice(&next);
+                next.zeroize();
+            }
+
+            Zeroizing::new(hash.to_vec())
+        }
+        CryptoApiHashAlg::Md5 => {
+            let mut hash = Zeroizing::new(md5_bytes(&[salt, &pw_bytes]));
+            drop(pw_bytes);
+
+            for i in 0..spin_count {
+                let iter = i.to_le_bytes();
+                let mut next = md5_bytes(&[&iter, &hash[..]]);
+                hash[..].copy_from_slice(&next);
+                next.zeroize();
+            }
+
+            Zeroizing::new(hash.to_vec())
+        }
+    }
+}
+
+fn derive_key_material_legacy(
+    hash_alg: CryptoApiHashAlg,
+    password: &str,
+    salt: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
+    if salt.len() != 16 {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "CryptoAPI legacy salt length {} (expected 16)",
+            salt.len()
+        )));
+    }
+    Ok(derive_key_material(hash_alg, password, salt, 0))
+}
+
+fn derive_block_key(
+    hash_alg: CryptoApiHashAlg,
+    key_material: &[u8],
+    block: u32,
+    key_len: usize,
+) -> Zeroizing<Vec<u8>> {
+    let block_bytes = block.to_le_bytes();
+
+    // Office/WinCrypt quirk: 40-bit RC4 keys are expressed as a 128-bit (16-byte) key where the
+    // low 40 bits are set and the remaining 88 bits are zero.
+    let key = match hash_alg {
+        CryptoApiHashAlg::Sha1 => {
+            let mut digest = sha1_bytes(&[key_material, &block_bytes]);
+            let key = if key_len == 5 {
+                let mut key = Vec::with_capacity(16);
+                key.extend_from_slice(&digest[..5]);
+                key.resize(16, 0);
+                key
+            } else {
+                digest[..key_len].to_vec()
+            };
+            digest.zeroize();
+            key
+        }
+        CryptoApiHashAlg::Md5 => {
+            let mut digest = md5_bytes(&[key_material, &block_bytes]);
+            let key = if key_len == 5 {
+                let mut key = Vec::with_capacity(16);
+                key.extend_from_slice(&digest[..5]);
+                key.resize(16, 0);
+                key
+            } else {
+                digest[..key_len].to_vec()
+            };
+            digest.zeroize();
+            key
+        }
+    };
+
+    Zeroizing::new(key)
+}
+
+fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
+    // Advance the internal RC4 state without caring about the output bytes.
+    let mut scratch = [0u8; 64];
+    while n > 0 {
+        let take = n.min(scratch.len());
+        rc4.apply_keystream(&mut scratch[..take]);
+        n = n.saturating_sub(take);
+    }
+}
+
+fn decrypt_range_by_offset(
+    bytes: &mut [u8],
+    start_offset: usize,
+    hash_alg: CryptoApiHashAlg,
+    key_material: &[u8],
+    key_len: usize,
+) {
+    // Decrypt `bytes` assuming the CryptoAPI RC4 keystream position corresponds to
+    // `start_offset` in the workbook stream.
+    let mut stream_pos = start_offset;
+    let mut remaining = bytes.len();
+    let mut pos = 0usize;
+    while remaining > 0 {
+        let block = (stream_pos / super::RC4_BLOCK_SIZE) as u32;
+        let in_block = stream_pos % super::RC4_BLOCK_SIZE;
+        let take = remaining.min(super::RC4_BLOCK_SIZE - in_block);
+
+        let key = derive_block_key(hash_alg, key_material, block, key_len);
+        let mut rc4 = Rc4::new(&key[..]);
+        drop(key);
+        rc4_discard(&mut rc4, in_block);
+        rc4.apply_keystream(&mut bytes[pos..pos + take]);
+
+        stream_pos = stream_pos.saturating_add(take);
+        pos = pos.saturating_add(take);
+        remaining = remaining.saturating_sub(take);
     }
 }
 
@@ -145,6 +372,612 @@ pub(crate) fn validate_biff8_cryptoapi_password(
     let ok = ct_eq(expected.as_slice(), &verifier_hash[..]);
     expected.as_mut_slice().zeroize();
     Ok(ok)
+}
+
+#[derive(Debug, Clone)]
+struct EncryptionHeader {
+    alg_id: u32,
+    alg_id_hash: u32,
+    key_size_bits: u32,
+}
+
+#[derive(Debug, Clone)]
+struct EncryptionVerifier {
+    salt: Vec<u8>,
+    encrypted_verifier: [u8; 16],
+    verifier_hash_size: u32,
+    encrypted_verifier_hash: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct CryptoApiEncryptionInfo {
+    header: EncryptionHeader,
+    verifier: EncryptionVerifier,
+}
+
+fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, DecryptError> {
+    // Fixed-length header fields are 8 DWORDs (32 bytes).
+    if bytes.len() < 32 {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionHeader truncated (len={})",
+            bytes.len()
+        )));
+    }
+
+    // EncryptionHeader layout [MS-OFFCRYPTO] 2.3.1:
+    //   DWORD Flags;
+    //   DWORD SizeExtra;
+    //   DWORD AlgID;
+    //   DWORD AlgIDHash;
+    //   DWORD KeySize;
+    //   DWORD ProviderType;
+    //   DWORD Reserved1;
+    //   DWORD Reserved2;
+    //   WCHAR CSPName[];
+    let alg_id = u32::from_le_bytes(bytes[8..12].try_into().expect("slice len"));
+    let alg_id_hash = u32::from_le_bytes(bytes[12..16].try_into().expect("slice len"));
+    let key_size_bits = u32::from_le_bytes(bytes[16..20].try_into().expect("slice len"));
+    Ok(EncryptionHeader {
+        alg_id,
+        alg_id_hash,
+        key_size_bits,
+    })
+}
+
+fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, DecryptError> {
+    // EncryptionVerifier layout [MS-OFFCRYPTO] 2.3.2:
+    //   DWORD SaltSize;
+    //   BYTE  Salt[SaltSize];
+    //   BYTE  EncryptedVerifier[16];
+    //   DWORD VerifierHashSize;
+    //   BYTE  EncryptedVerifierHash[VerifierHashSize];
+
+    if bytes.len() < 4 {
+        return Err(DecryptError::InvalidFilePass(
+            "EncryptionVerifier truncated".to_string(),
+        ));
+    }
+
+    let salt_size = read_u32_le(bytes, 0)? as usize;
+    const MAX_SALT_SIZE: usize = 64;
+    if salt_size > MAX_SALT_SIZE {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionVerifier SaltSize {salt_size} exceeds max {MAX_SALT_SIZE}",
+        )));
+    }
+
+    let salt_start = 4usize;
+    let salt_end = salt_start
+        .checked_add(salt_size)
+        .ok_or_else(|| DecryptError::InvalidFilePass("SaltSize overflow".to_string()))?;
+    let verifier_start = salt_end;
+    let verifier_end = verifier_start.checked_add(16).ok_or_else(|| {
+        DecryptError::InvalidFilePass("EncryptedVerifier offset overflow".to_string())
+    })?;
+    let hash_size_start = verifier_end;
+    let hash_size_end = hash_size_start.checked_add(4).ok_or_else(|| {
+        DecryptError::InvalidFilePass("VerifierHashSize offset overflow".to_string())
+    })?;
+
+    if hash_size_end > bytes.len() {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionVerifier truncated (len={}, need={hash_size_end})",
+            bytes.len()
+        )));
+    }
+
+    let salt = bytes[salt_start..salt_end].to_vec();
+    let mut encrypted_verifier = [0u8; 16];
+    encrypted_verifier.copy_from_slice(&bytes[verifier_start..verifier_end]);
+    let verifier_hash_size = read_u32_le(bytes, hash_size_start)?;
+    let verifier_hash_size_usize = verifier_hash_size as usize;
+    const MAX_VERIFIER_HASH_SIZE: usize = 64;
+    if verifier_hash_size_usize > MAX_VERIFIER_HASH_SIZE {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionVerifierHash VerifierHashSize {verifier_hash_size_usize} exceeds max {MAX_VERIFIER_HASH_SIZE}",
+        )));
+    }
+    let encrypted_hash_start = hash_size_end;
+    let encrypted_hash_end = encrypted_hash_start
+        .checked_add(verifier_hash_size_usize)
+        .ok_or_else(|| DecryptError::InvalidFilePass("VerifierHashSize overflow".to_string()))?;
+    if encrypted_hash_end > bytes.len() {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionVerifierHash truncated (len={}, need={encrypted_hash_end})",
+            bytes.len()
+        )));
+    }
+
+    let encrypted_verifier_hash = bytes[encrypted_hash_start..encrypted_hash_end].to_vec();
+
+    Ok(EncryptionVerifier {
+        salt,
+        encrypted_verifier,
+        verifier_hash_size,
+        encrypted_verifier_hash,
+    })
+}
+
+fn parse_cryptoapi_encryption_info(bytes: &[u8]) -> Result<CryptoApiEncryptionInfo, DecryptError> {
+    // EncryptionInfo [MS-OFFCRYPTO] 2.3.1:
+    //   EncryptionVersionInfo (Major, Minor) 4 bytes
+    //   DWORD Flags;
+    //   DWORD HeaderSize;
+    //   EncryptionHeader (HeaderSize bytes)
+    //   EncryptionVerifier (remaining bytes)
+    if bytes.len() < 12 {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionInfo truncated (len={})",
+            bytes.len()
+        )));
+    }
+
+    let header_size = read_u32_le(bytes, 8)? as usize;
+    if header_size > MAX_ENCRYPTION_HEADER_SIZE {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionInfo HeaderSize {header_size} exceeds max {MAX_ENCRYPTION_HEADER_SIZE}",
+        )));
+    }
+    let header_start = 12usize;
+    let header_end = header_start
+        .checked_add(header_size)
+        .ok_or_else(|| DecryptError::InvalidFilePass("HeaderSize overflow".to_string()))?;
+    if header_end > bytes.len() {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptionInfo header out of bounds (len={}, header_end={header_end})",
+            bytes.len()
+        )));
+    }
+
+    let header = parse_encryption_header(&bytes[header_start..header_end])?;
+    let verifier = parse_encryption_verifier(&bytes[header_end..])?;
+    Ok(CryptoApiEncryptionInfo { header, verifier })
+}
+
+fn parse_cryptoapi_encryption_info_legacy_filepass(
+    payload: &[u8],
+) -> Result<CryptoApiEncryptionInfo, DecryptError> {
+    // Legacy BIFF8 FILEPASS layout for RC4 CryptoAPI:
+    // - u16 wEncryptionType (0x0001)
+    // - u16 wEncryptionInfo (0x0004)
+    // - u16 vMajor
+    // - u16 vMinor
+    // - u16 reserved (0)
+    // - u32 headerSize
+    // - EncryptionHeader (headerSize bytes)
+    // - EncryptionVerifier (remaining bytes)
+    if payload.len() < 14 {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "FILEPASS payload truncated (len={})",
+            payload.len()
+        )));
+    }
+
+    let encryption_type = read_u16_le(payload, 0)?;
+    if encryption_type != super::BIFF8_ENCRYPTION_TYPE_RC4 {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "FILEPASS wEncryptionType=0x{encryption_type:04X} (expected 0x0001 for RC4)"
+        )));
+    }
+
+    let encryption_info = read_u16_le(payload, 2)?;
+    if encryption_info != super::BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "FILEPASS RC4 wEncryptionInfo=0x{encryption_info:04X} (expected 0x0004)"
+        )));
+    }
+
+    let header_size = read_u32_le(payload, 10)? as usize;
+    if header_size > MAX_ENCRYPTION_HEADER_SIZE {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "FILEPASS headerSize {header_size} exceeds max {MAX_ENCRYPTION_HEADER_SIZE}",
+        )));
+    }
+    let header_start = 14usize;
+    let header_end = header_start
+        .checked_add(header_size)
+        .ok_or_else(|| DecryptError::InvalidFilePass("headerSize overflow".to_string()))?;
+    if header_end > payload.len() {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "FILEPASS header out of bounds (payload_len={}, header_end={header_end})",
+            payload.len()
+        )));
+    }
+
+    let header = parse_encryption_header(&payload[header_start..header_end])?;
+    let verifier = parse_encryption_verifier(&payload[header_end..])?;
+    Ok(CryptoApiEncryptionInfo { header, verifier })
+}
+
+fn verify_password(
+    info: &CryptoApiEncryptionInfo,
+    password: &str,
+) -> Result<(CryptoApiHashAlg, Zeroizing<Vec<u8>>, usize), DecryptError> {
+    let hash_alg = CryptoApiHashAlg::from_alg_id_hash(info.header.alg_id_hash).ok_or_else(|| {
+        DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
+            info.header.alg_id, info.header.alg_id_hash
+        ))
+    })?;
+    if info.header.alg_id != CALG_RC4 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
+            info.header.alg_id, info.header.alg_id_hash
+        )));
+    }
+
+    // RC4 CryptoAPI uses a fixed 16-byte salt.
+    if info.verifier.salt.len() != 16 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI verifier salt length {} (expected 16)",
+            info.verifier.salt.len()
+        )));
+    }
+
+    let key_size_bits = normalize_cryptoapi_rc4_key_size_bits(info.header.key_size_bits);
+    if key_size_bits % 8 != 0 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits} (not byte-aligned)"
+        )));
+    }
+    let key_len = (key_size_bits / 8) as usize;
+    if !matches!(key_len, 5 | 7 | 16) {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits}"
+        )));
+    }
+
+    let verifier_hash_size = info.verifier.verifier_hash_size as usize;
+    let expected_verifier_hash_size = hash_alg.digest_len();
+    if verifier_hash_size != expected_verifier_hash_size {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI verifierHashSize={verifier_hash_size}"
+        )));
+    }
+
+    // Derive base key material and decrypt verifier using block 0.
+    let key_material = derive_key_material(
+        hash_alg,
+        password,
+        info.verifier.salt.as_slice(),
+        BIFF8_CRYPTOAPI_SPIN_COUNT,
+    );
+    let key0 = derive_block_key(hash_alg, key_material.as_slice(), 0, key_len);
+    let mut rc4 = Rc4::new(&key0[..]);
+    drop(key0);
+
+    let mut verifier = Zeroizing::new(info.verifier.encrypted_verifier);
+    rc4.apply_keystream(&mut verifier[..]);
+
+    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    rc4.apply_keystream(&mut verifier_hash[..]);
+
+    let expected = Zeroizing::new(match hash_alg {
+        CryptoApiHashAlg::Sha1 => sha1_bytes(&[&verifier[..]]).to_vec(),
+        CryptoApiHashAlg::Md5 => md5_bytes(&[&verifier[..]]).to_vec(),
+    });
+    if verifier_hash.len() < verifier_hash_size {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptedVerifierHash length {} shorter than VerifierHashSize {verifier_hash_size}",
+            verifier_hash.len()
+        )));
+    }
+    if !ct_eq(&verifier_hash[..verifier_hash_size], &expected[..verifier_hash_size]) {
+        return Err(DecryptError::WrongPassword);
+    }
+
+    Ok((hash_alg, key_material, key_len))
+}
+
+fn verify_password_legacy(
+    info: &CryptoApiEncryptionInfo,
+    password: &str,
+) -> Result<(CryptoApiHashAlg, Zeroizing<Vec<u8>>, usize), DecryptError> {
+    // Some legacy CryptoAPI FILEPASS headers omit/zero AlgIDHash; Excel still behaves like SHA1.
+    // Default to SHA1 for AlgIDHash=0 to preserve historical behaviour, but honor MD5 when set.
+    let hash_alg = match CryptoApiHashAlg::from_alg_id_hash(info.header.alg_id_hash) {
+        Some(hash_alg) => hash_alg,
+        None if info.header.alg_id_hash == 0 => CryptoApiHashAlg::Sha1,
+        None => {
+            return Err(DecryptError::UnsupportedEncryption(format!(
+                "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
+                info.header.alg_id, info.header.alg_id_hash
+            )))
+        }
+    };
+    if info.header.alg_id != CALG_RC4 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
+            info.header.alg_id, info.header.alg_id_hash
+        )));
+    }
+
+    let key_size_bits = normalize_cryptoapi_rc4_key_size_bits(info.header.key_size_bits);
+    if key_size_bits % 8 != 0 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits} (not byte-aligned)"
+        )));
+    }
+    let key_len = (key_size_bits / 8) as usize;
+    if !matches!(key_len, 5 | 7 | 16) {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits}"
+        )));
+    }
+
+    let verifier_hash_size = info.verifier.verifier_hash_size as usize;
+    let expected_verifier_hash_size = hash_alg.digest_len();
+    if verifier_hash_size != expected_verifier_hash_size {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI verifierHashSize={verifier_hash_size}"
+        )));
+    }
+
+    let key_material = derive_key_material_legacy(hash_alg, password, info.verifier.salt.as_slice())?;
+    let key0 = derive_block_key(hash_alg, key_material.as_slice(), 0, key_len);
+    let mut rc4 = Rc4::new(&key0[..]);
+    drop(key0);
+
+    let mut verifier = Zeroizing::new(info.verifier.encrypted_verifier);
+    rc4.apply_keystream(&mut verifier[..]);
+
+    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    rc4.apply_keystream(&mut verifier_hash[..]);
+
+    let expected = Zeroizing::new(match hash_alg {
+        CryptoApiHashAlg::Sha1 => sha1_bytes(&[&verifier[..]]).to_vec(),
+        CryptoApiHashAlg::Md5 => md5_bytes(&[&verifier[..]]).to_vec(),
+    });
+    if verifier_hash.len() < verifier_hash_size {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "EncryptedVerifierHash length {} shorter than VerifierHashSize {verifier_hash_size}",
+            verifier_hash.len()
+        )));
+    }
+    if !ct_eq(&verifier_hash[..verifier_hash_size], &expected[..verifier_hash_size]) {
+        return Err(DecryptError::WrongPassword);
+    }
+
+    Ok((hash_alg, key_material, key_len))
+}
+
+struct PayloadRc4 {
+    hash_alg: CryptoApiHashAlg,
+    key_material: Zeroizing<Vec<u8>>,
+    key_len: usize,
+    block: u32,
+    pos_in_block: usize,
+    rc4: Rc4,
+}
+
+impl PayloadRc4 {
+    fn new(hash_alg: CryptoApiHashAlg, key_material: Zeroizing<Vec<u8>>, key_len: usize) -> Self {
+        let key0 = derive_block_key(hash_alg, key_material.as_slice(), 0, key_len);
+        let rc4 = Rc4::new(&key0);
+        drop(key0);
+        Self {
+            hash_alg,
+            key_material,
+            key_len,
+            block: 0,
+            pos_in_block: 0,
+            rc4,
+        }
+    }
+
+    fn rekey(&mut self) {
+        self.block = self.block.wrapping_add(1);
+        let key = derive_block_key(
+            self.hash_alg,
+            self.key_material.as_slice(),
+            self.block,
+            self.key_len,
+        );
+        self.rc4 = Rc4::new(&key);
+        self.pos_in_block = 0;
+    }
+
+    fn apply_keystream(&mut self, mut data: &mut [u8]) {
+        while !data.is_empty() {
+            if self.pos_in_block == super::RC4_BLOCK_SIZE {
+                self.rekey();
+            }
+
+            let remaining_in_block = super::RC4_BLOCK_SIZE.saturating_sub(self.pos_in_block);
+            let chunk_len = data.len().min(remaining_in_block);
+            let (chunk, rest) = data.split_at_mut(chunk_len);
+            self.rc4.apply_keystream(chunk);
+            self.pos_in_block = self.pos_in_block.saturating_add(chunk_len);
+            data = rest;
+        }
+    }
+}
+
+fn is_never_encrypted_record(record_id: u16) -> bool {
+    // Mirror Apache POI's BIFF8 RC4 CryptoAPI legacy behaviour:
+    // - BOF
+    // - FILEPASS
+    // - INTERFACEHDR (0x00E1)
+    records::is_bof_record(record_id)
+        || record_id == records::RECORD_FILEPASS
+        || record_id == super::RECORD_INTERFACEHDR
+}
+
+fn decrypt_cryptoapi_standard(
+    workbook_stream: &mut [u8],
+    encrypted_start: usize,
+    password: &str,
+    filepass_payload: &[u8],
+) -> Result<(), DecryptError> {
+    // FILEPASS payload:
+    //   u16 wEncryptionType
+    //   u16 wEncryptionSubType (=0x0002)
+    //   u32 dwEncryptionInfoLen
+    //   EncryptionInfo bytes...
+    if filepass_payload.len() < 8 {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "FILEPASS payload truncated (len={})",
+            filepass_payload.len()
+        )));
+    }
+
+    let enc_info_len = read_u32_le(filepass_payload, 4)? as usize;
+    let enc_info_start = 8usize;
+    let enc_info_end = enc_info_start
+        .checked_add(enc_info_len)
+        .ok_or_else(|| DecryptError::InvalidFilePass("dwEncryptionInfoLen overflow".to_string()))?;
+    if enc_info_end > filepass_payload.len() {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "FILEPASS dwEncryptionInfoLen out of bounds (len={}, need={enc_info_end})",
+            filepass_payload.len()
+        )));
+    }
+
+    let info = parse_cryptoapi_encryption_info(&filepass_payload[enc_info_start..enc_info_end])?;
+    let (hash_alg, key_material, key_len) = verify_password(&info, password)?;
+
+    let mut cipher = PayloadRc4::new(hash_alg, key_material, key_len);
+
+    // Decrypt record payload bytes after FILEPASS using the record-payload-only stream model.
+    let mut offset = encrypted_start;
+    while offset < workbook_stream.len() {
+        let remaining = workbook_stream.len().saturating_sub(offset);
+        if remaining < 4 {
+            // Some writers may include trailing padding bytes after the final EOF record.
+            break;
+        }
+
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len =
+            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let data_start = offset.checked_add(4).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
+        })?;
+        let data_end = data_start.checked_add(len).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record length overflow".to_string())
+        })?;
+        if data_end > workbook_stream.len() {
+            return Err(DecryptError::InvalidFilePass(format!(
+                "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream (len={}, end={data_end})",
+                workbook_stream.len()
+            )));
+        }
+
+        cipher.apply_keystream(&mut workbook_stream[data_start..data_end]);
+        offset = data_end;
+    }
+
+    Ok(())
+}
+
+fn decrypt_cryptoapi_legacy(
+    workbook_stream: &mut [u8],
+    encrypted_start: usize,
+    password: &str,
+    filepass_payload: &[u8],
+) -> Result<(), DecryptError> {
+    let info = parse_cryptoapi_encryption_info_legacy_filepass(filepass_payload)?;
+    let (hash_alg, key_material, key_len) = verify_password_legacy(&info, password)?;
+
+    let mut offset = encrypted_start;
+    // "Encryption stream position" is keyed by the absolute offset within the workbook stream.
+    let mut stream_pos: usize = encrypted_start;
+
+    while offset < workbook_stream.len() {
+        let remaining = workbook_stream.len().saturating_sub(offset);
+        if remaining < 4 {
+            break;
+        }
+
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len =
+            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let data_start = offset.checked_add(4).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
+        })?;
+        let data_end = data_start.checked_add(len).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record length overflow".to_string())
+        })?;
+        if data_end > workbook_stream.len() {
+            return Err(DecryptError::InvalidFilePass(format!(
+                "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream (len={}, end={data_end})",
+                workbook_stream.len()
+            )));
+        }
+
+        // Record headers are not encrypted but still advance the CryptoAPI RC4 stream position.
+        stream_pos = stream_pos.checked_add(4).ok_or_else(|| {
+            DecryptError::InvalidFilePass("stream position overflow".to_string())
+        })?;
+
+        if !is_never_encrypted_record(record_id) {
+            match record_id {
+                // BoundSheet8.lbPlyPos (first 4 bytes) must remain plaintext so sheet offsets remain
+                // valid after masking FILEPASS. The remaining fields are encrypted.
+                super::RECORD_BOUNDSHEET => {
+                    if len > 4 {
+                        let decrypt_start = stream_pos.checked_add(4).ok_or_else(|| {
+                            DecryptError::InvalidFilePass("stream position overflow".to_string())
+                        })?;
+                        decrypt_range_by_offset(
+                            &mut workbook_stream[data_start + 4..data_end],
+                            decrypt_start,
+                            hash_alg,
+                            key_material.as_slice(),
+                            key_len,
+                        );
+                    }
+                }
+                _ => decrypt_range_by_offset(
+                    &mut workbook_stream[data_start..data_end],
+                    stream_pos,
+                    hash_alg,
+                    key_material.as_slice(),
+                    key_len,
+                ),
+            }
+        }
+
+        // Advance past the record payload, regardless of whether we decrypted it.
+        stream_pos = stream_pos.checked_add(len).ok_or_else(|| {
+            DecryptError::InvalidFilePass("stream position overflow".to_string())
+        })?;
+        offset = data_end;
+    }
+
+    Ok(())
+}
+
+/// Decrypt a BIFF8 workbook stream protected with RC4 CryptoAPI.
+///
+/// This supports both:
+/// - Standard FILEPASS CryptoAPI layout (`wEncryptionSubType == 0x0002`)
+/// - Legacy FILEPASS CryptoAPI layout (`wEncryptionInfo == 0x0004`)
+pub(crate) fn decrypt_workbook_stream_rc4_cryptoapi(
+    workbook_stream: &mut [u8],
+    encrypted_start: usize,
+    password: &str,
+    filepass_payload: &[u8],
+) -> Result<(), DecryptError> {
+    let encryption_type = read_u16_le(filepass_payload, 0)?;
+    if encryption_type != super::BIFF8_ENCRYPTION_TYPE_RC4 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS wEncryptionType=0x{encryption_type:04X} (expected RC4)"
+        )));
+    }
+
+    let second = read_u16_le(filepass_payload, 2)?;
+    match second {
+        super::BIFF8_RC4_SUBTYPE_CRYPTOAPI => {
+            decrypt_cryptoapi_standard(workbook_stream, encrypted_start, password, filepass_payload)
+        }
+        super::BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
+            decrypt_cryptoapi_legacy(workbook_stream, encrypted_start, password, filepass_payload)
+        }
+        other => Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS RC4 wEncryptionSubType/wEncryptionInfo=0x{other:04X}"
+        ))),
+    }
 }
 
 #[cfg(test)]
