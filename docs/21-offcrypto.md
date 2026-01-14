@@ -166,6 +166,7 @@ When handling user reports, these error variants map cleanly to “what happened
 | `InvalidPassword` | Password was provided but the workbook could not be opened/decrypted. (This can mean “wrong password”; until decryption is wired end-to-end, it can also mean “not implemented yet”.) | Ask the user to re-enter the password; confirm it opens in Excel with the same password. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
 | `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard/CryptoAPI `minor == 2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
 | `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Ask the user to remove encryption in Excel, or convert the workbook to an unencrypted format. |
+| `UnsupportedEncryption` | (Lower-level decryptors) The encrypted OOXML wrapper was recognized, but the cipher/KDF parameters are unsupported by the decryptor. | Capture the `EncryptionInfo` version and decryptor error string; ask the user to remove encryption in Excel and re-save as a fallback. |
 
 If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo`
 `major.minor` pair in the bug report (or at least whether `minor == 2` vs `4.4`).
@@ -181,6 +182,30 @@ If you are debugging decryption directly (outside the `formula-io` open path), t
 This is where you will most commonly see the **`UnsupportedEncryption`** error: it indicates we
 recognized the encrypted OOXML wrapper, but the specific cipher/hash/KDF settings are not implemented
 by the decryptor.
+
+### Manual decryption (debug-only)
+
+If you want to debug a user report *outside* the `formula-io` open path, you can decrypt the OOXML
+package bytes directly and then inspect the decrypted ZIP contents:
+
+```rust
+use std::io::Cursor;
+
+let encrypted = std::fs::read("encrypted.xlsx")?;
+let decrypted_zip = formula_office_crypto::decrypt_encrypted_package_ole(&encrypted, "password")?;
+assert!(decrypted_zip.starts_with(b"PK"));
+
+let zip = zip::ZipArchive::new(Cursor::new(&decrypted_zip))?;
+for name in zip.file_names() {
+    println!("{name}");
+}
+```
+
+If the decrypted bytes do **not** start with `PK`, treat that as either:
+
+- wrong password, or
+- unsupported/corrupt encryption wrapper (the decryptor should ideally surface `InvalidPassword` /
+  `UnsupportedEncryption` / `InvalidFormat` in these cases).
 
 ## Test fixtures and attribution
 
