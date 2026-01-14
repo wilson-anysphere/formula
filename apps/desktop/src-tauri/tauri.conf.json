@@ -11,6 +11,7 @@
     "features": ["desktop"]
   },
   "app": {
+    "withGlobalTauri": true,
     "security": {
       "headers": {
         "Cross-Origin-Opener-Policy": "same-origin",

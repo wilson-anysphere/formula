@@ -33,6 +33,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::http::header::{HeaderName, HeaderValue};
 use tauri::http::{Response, StatusCode};
+use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Listener, Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
@@ -1623,10 +1624,7 @@ fn main() {
             }
 
             // Only record once, and only when the page load finished.
-            let finished = matches!(
-                payload.event(),
-                tauri::webview::PageLoadEvent::Finished
-            );
+            let finished = matches!(payload.event(), PageLoadEvent::Finished);
             if !finished {
                 return;
             }

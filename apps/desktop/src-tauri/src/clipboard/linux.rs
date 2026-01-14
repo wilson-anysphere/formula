@@ -357,10 +357,10 @@ mod gtk_backend {
             let read_from_clipboard = |clipboard: &gtk::Clipboard, selection: &'static str| {
                 let targets = clipboard_target_names(clipboard);
 
-                let mut text_target: Option<&str> = None;
-                let mut html_target: Option<&str> = None;
-                let mut rtf_target: Option<&str> = None;
-                let mut image_target: Option<&str> = None;
+                let mut text_target: Option<String> = None;
+                let mut html_target: Option<String> = None;
+                let mut rtf_target: Option<String> = None;
+                let mut image_target: Option<String> = None;
                 let mut image_bytes: Option<usize> = None;
                 let mut image_pixbuf_fallback = false;
 
@@ -388,7 +388,7 @@ mod gtk_backend {
                         } else {
                             wait_for_utf8_targets_with_source(clipboard, &candidates, MAX_TEXT_BYTES)
                                 .map(|(target, value)| {
-                                    text_target = Some(target);
+                                    text_target = Some(target.to_string());
                                     value
                                 })
                         }
@@ -406,7 +406,7 @@ mod gtk_backend {
                         MAX_TEXT_BYTES,
                     )
                     .map(|(target, value)| {
-                        text_target = Some(target);
+                        text_target = Some(target.to_string());
                         value
                     }),
                 }
@@ -420,7 +420,7 @@ mod gtk_backend {
                         } else {
                             wait_for_utf8_targets_with_source(clipboard, &candidates, MAX_TEXT_BYTES)
                                 .map(|(target, value)| {
-                                    html_target = Some(target);
+                                    html_target = Some(target.to_string());
                                     value
                                 })
                         }
@@ -436,7 +436,7 @@ mod gtk_backend {
                         MAX_TEXT_BYTES,
                     )
                     .map(|(target, value)| {
-                        html_target = Some(target);
+                        html_target = Some(target.to_string());
                         value
                     }),
                 }
@@ -452,7 +452,7 @@ mod gtk_backend {
                         } else {
                             wait_for_utf8_targets_with_source(clipboard, &candidates, MAX_TEXT_BYTES)
                                 .map(|(target, value)| {
-                                    rtf_target = Some(target);
+                                    rtf_target = Some(target.to_string());
                                     value
                                 })
                         }
@@ -469,7 +469,7 @@ mod gtk_backend {
                         MAX_TEXT_BYTES,
                     )
                     .map(|(target, value)| {
-                        rtf_target = Some(target);
+                        rtf_target = Some(target.to_string());
                         value
                     }),
                 }
@@ -477,13 +477,13 @@ mod gtk_backend {
                 let image_png_base64 = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["image/png"]).and_then(|t| {
                         wait_for_bytes_base64(clipboard, t, MAX_PNG_BYTES).map(|(b64, len)| {
-                            image_target = Some(t);
+                            image_target = Some(t.to_string());
                             image_bytes = Some(len);
                             b64
                         })
                     }),
                     None => wait_for_bytes_base64(clipboard, "image/png", MAX_PNG_BYTES).map(|(b64, len)| {
-                        image_target = Some("image/png");
+                        image_target = Some("image/png".to_string());
                         image_bytes = Some(len);
                         b64
                     }),
@@ -502,7 +502,7 @@ mod gtk_backend {
                     if bytes.len() > MAX_PNG_BYTES {
                         return None;
                     }
-                    image_target = Some("pixbuf->image/png");
+                    image_target = Some("pixbuf->image/png".to_string());
                     image_bytes = Some(bytes.len());
                     image_pixbuf_fallback = true;
                     Some(STANDARD.encode(bytes))
