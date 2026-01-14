@@ -2,8 +2,8 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 
 use crate::crypto::{
-    aes_ecb_decrypt, aes_ecb_encrypt, rc4_xor_in_place, HashAlgorithm, StandardKeyDerivation,
-    StandardKeyDeriver,
+    aes_cbc_decrypt, aes_ecb_decrypt, aes_ecb_encrypt, rc4_xor_in_place, HashAlgorithm,
+    StandardKeyDerivation, StandardKeyDeriver,
 };
 use crate::error::OfficeCryptoError;
 use crate::util::{
@@ -66,6 +66,12 @@ const MAX_VERIFIER_HASH_SIZE: u32 = 64;
 
 /// Standard/CryptoAPI RC4 `EncryptedPackage` block size.
 const RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE: usize = 0x200;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StandardAesCipherMode {
+    Ecb,
+    Cbc { iv: [u8; 16] },
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct StandardEncryptionInfo {
@@ -219,7 +225,9 @@ fn parse_encryption_verifier(
     // - AES uses 16-byte blocks and pads `encryptedVerifierHash` to a multiple of 16.
     let encrypted_hash_len = match header.alg_id {
         CALG_RC4 => verifier_hash_size as usize,
-        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => ((verifier_hash_size as usize + 15) / 16) * 16,
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            ((verifier_hash_size as usize + 15) / 16) * 16
+        }
         other => {
             return Err(OfficeCryptoError::UnsupportedEncryption(format!(
                 "unsupported cipher AlgID {other:#x}"
@@ -276,7 +284,33 @@ pub(crate) fn verify_password_standard(
                 StandardKeyDerivation::Aes,
             );
             let key0_aes = deriver_aes.derive_key_for_block(0)?;
-            verify_password_standard_with_key(header, verifier, hash_alg, key0_aes.as_slice())
+            match verify_password_standard_with_key_and_mode(
+                header,
+                verifier,
+                hash_alg,
+                key0_aes.as_slice(),
+            ) {
+                Ok(_) => Ok(()),
+                Err(OfficeCryptoError::InvalidPassword) => {
+                    // Compatibility fallback: some producers appear to use the RC4-style key
+                    // truncation derivation even when AlgID indicates AES.
+                    let deriver_rc4 = StandardKeyDeriver::new(
+                        hash_alg,
+                        header.key_bits,
+                        &verifier.salt,
+                        password,
+                        StandardKeyDerivation::Rc4,
+                    );
+                    let key0_rc4 = deriver_rc4.derive_key_for_block(0)?;
+                    verify_password_standard_with_key(
+                        header,
+                        verifier,
+                        hash_alg,
+                        key0_rc4.as_slice(),
+                    )
+                }
+                Err(other) => Err(other),
+            }
         }
         other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
             "unsupported cipher AlgID {other:#x}"
@@ -290,6 +324,16 @@ fn verify_password_standard_with_key(
     hash_alg: HashAlgorithm,
     key0: &[u8],
 ) -> Result<(), OfficeCryptoError> {
+    let _mode = verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0)?;
+    Ok(())
+}
+
+fn verify_password_standard_with_key_and_mode(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    hash_alg: HashAlgorithm,
+    key0: &[u8],
+) -> Result<StandardAesCipherMode, OfficeCryptoError> {
     let expected_hash_len = verifier.verifier_hash_size as usize;
 
     match header.alg_id {
@@ -333,8 +377,9 @@ fn verify_password_standard_with_key(
             let verifier_hash_plain_full = buf.get(16..).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat("RC4 verifier hash out of range".to_string())
             })?;
-            let verifier_hash_plain =
-                verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+            let verifier_hash_plain = verifier_hash_plain_full
+                .get(..expected_hash_len)
+                .ok_or_else(|| {
                     OfficeCryptoError::InvalidFormat(format!(
                         "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
                         verifier_hash_plain_full.len(),
@@ -352,7 +397,7 @@ fn verify_password_standard_with_key(
             })?;
 
             if ct_eq(verifier_hash_plain, verifier_hash) {
-                Ok(())
+                Ok(StandardAesCipherMode::Ecb)
             } else {
                 Err(OfficeCryptoError::InvalidPassword)
             }
@@ -360,10 +405,12 @@ fn verify_password_standard_with_key(
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
             // MS-OFFCRYPTO Standard AES verifier fields are decrypted with AES-ECB (no IV).
             let verifier_plain = aes_ecb_decrypt(key0, &verifier.encrypted_verifier)?;
-            let verifier_hash_plain_full = aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash)?;
+            let verifier_hash_plain_full =
+                aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash)?;
 
-            let verifier_hash_plain =
-                verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+            let verifier_hash_plain = verifier_hash_plain_full
+                .get(..expected_hash_len)
+                .ok_or_else(|| {
                     OfficeCryptoError::InvalidFormat(format!(
                         "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
                         verifier_hash_plain_full.len(),
@@ -381,10 +428,86 @@ fn verify_password_standard_with_key(
             })?;
 
             if ct_eq(verifier_hash_plain, verifier_hash) {
-                Ok(())
-            } else {
-                Err(OfficeCryptoError::InvalidPassword)
+                return Ok(StandardAesCipherMode::Ecb);
             }
+
+            // Compatibility fallback: some producers appear to use AES-CBC for the verifier fields
+            // even though the canonical Standard/CryptoAPI fixture in this repo uses AES-ECB.
+            //
+            // Try a small set of plausible IVs (all-zero, or derived from the verifier salt) and
+            // accept whichever yields a matching verifier hash.
+            let salt_iv = {
+                let mut iv = [0u8; 16];
+                let n = verifier.salt.len().min(16);
+                iv[..n].copy_from_slice(&verifier.salt[..n]);
+                iv
+            };
+            let mut iv_candidates: Vec<[u8; 16]> = Vec::new();
+            iv_candidates.push([0u8; 16]);
+            if salt_iv != [0u8; 16] {
+                iv_candidates.push(salt_iv);
+            }
+            for iv in iv_candidates.iter() {
+                // 1) Attempt decrypting each field independently with the same IV.
+                let verifier_plain = aes_cbc_decrypt(key0, iv, &verifier.encrypted_verifier)?;
+                let verifier_hash_plain_full =
+                    aes_cbc_decrypt(key0, iv, &verifier.encrypted_verifier_hash)?;
+                let verifier_hash_plain =
+                    verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(format!(
+                            "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
+                            verifier_hash_plain_full.len(),
+                            expected_hash_len
+                        ))
+                    })?;
+                let verifier_hash = hash_alg.digest(&verifier_plain);
+                let verifier_hash = verifier_hash.get(..expected_hash_len).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(format!(
+                        "hash output shorter than verifierHashSize (got {}, need {})",
+                        verifier_hash.len(),
+                        expected_hash_len
+                    ))
+                })?;
+                if ct_eq(verifier_hash_plain, verifier_hash) {
+                    return Ok(StandardAesCipherMode::Cbc { iv: *iv });
+                }
+
+                // 2) Some producers may encrypt the verifier + verifier hash as one CBC stream.
+                // Attempt that as well (decrypt concatenation, then split).
+                let mut concat = Vec::with_capacity(
+                    verifier.encrypted_verifier.len() + verifier.encrypted_verifier_hash.len(),
+                );
+                concat.extend_from_slice(&verifier.encrypted_verifier);
+                concat.extend_from_slice(&verifier.encrypted_verifier_hash);
+                let concat_plain = aes_cbc_decrypt(key0, iv, &concat)?;
+                let verifier_plain = concat_plain.get(..16).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat("CBC verifier out of range".to_string())
+                })?;
+                let verifier_hash_plain_full = concat_plain.get(16..).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat("CBC verifier hash out of range".to_string())
+                })?;
+                let verifier_hash_plain =
+                    verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(format!(
+                            "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
+                            verifier_hash_plain_full.len(),
+                            expected_hash_len
+                        ))
+                    })?;
+                let verifier_hash = hash_alg.digest(verifier_plain);
+                let verifier_hash = verifier_hash.get(..expected_hash_len).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(format!(
+                        "hash output shorter than verifierHashSize (got {}, need {})",
+                        verifier_hash.len(),
+                        expected_hash_len
+                    ))
+                })?;
+                if ct_eq(verifier_hash_plain, verifier_hash) {
+                    return Ok(StandardAesCipherMode::Cbc { iv: *iv });
+                }
+            }
+
+            Err(OfficeCryptoError::InvalidPassword)
         }
         other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
             "unsupported cipher AlgID {other:#x}"
@@ -426,20 +549,43 @@ pub(crate) fn decrypt_standard_encrypted_package(
                     info.header.key_bits
                 )));
             }
-            let deriver = StandardKeyDeriver::new(
-                hash_alg,
-                info.header.key_bits,
-                &info.verifier.salt,
-                password,
-                StandardKeyDerivation::Aes,
-            );
-            let key0 = deriver.derive_key_for_block(0)?;
-            verify_password_standard_with_key(
-                &info.header,
-                &info.verifier,
-                hash_alg,
-                key0.as_slice(),
-            )?;
+            let (key0, mode) = {
+                let deriver_aes = StandardKeyDeriver::new(
+                    hash_alg,
+                    info.header.key_bits,
+                    &info.verifier.salt,
+                    password,
+                    StandardKeyDerivation::Aes,
+                );
+                let key0_aes = deriver_aes.derive_key_for_block(0)?;
+                match verify_password_standard_with_key_and_mode(
+                    &info.header,
+                    &info.verifier,
+                    hash_alg,
+                    key0_aes.as_slice(),
+                ) {
+                    Ok(mode) => (key0_aes, mode),
+                    Err(OfficeCryptoError::InvalidPassword) => {
+                        // Compatibility fallback: try the RC4-style key truncation derivation.
+                        let deriver_rc4 = StandardKeyDeriver::new(
+                            hash_alg,
+                            info.header.key_bits,
+                            &info.verifier.salt,
+                            password,
+                            StandardKeyDerivation::Rc4,
+                        );
+                        let key0_rc4 = deriver_rc4.derive_key_for_block(0)?;
+                        let mode = verify_password_standard_with_key_and_mode(
+                            &info.header,
+                            &info.verifier,
+                            hash_alg,
+                            key0_rc4.as_slice(),
+                        )?;
+                        (key0_rc4, mode)
+                    }
+                    Err(other) => return Err(other),
+                }
+            };
 
             // The encrypted payload is padded to the AES block size (16 bytes). Some producers may
             // include trailing bytes in the OLE stream beyond the padded plaintext length; ignore
@@ -447,14 +593,11 @@ pub(crate) fn decrypt_standard_encrypted_package(
             let padded_len = if expected_len == 0 {
                 0usize
             } else {
-                expected_len
-                    .checked_add(15)
-                    .ok_or_else(|| {
-                        OfficeCryptoError::InvalidFormat(
-                            "EncryptedPackage expected length overflow".to_string(),
-                        )
-                    })?
-                    / 16
+                expected_len.checked_add(15).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(
+                        "EncryptedPackage expected length overflow".to_string(),
+                    )
+                })? / 16
                     * 16
             };
             if ciphertext.len() < padded_len {
@@ -465,7 +608,12 @@ pub(crate) fn decrypt_standard_encrypted_package(
                 )));
             }
             let to_decrypt = &ciphertext[..padded_len];
-            let mut plain = aes_ecb_decrypt(key0.as_slice(), to_decrypt)?;
+            let mut plain = match mode {
+                StandardAesCipherMode::Ecb => aes_ecb_decrypt(key0.as_slice(), to_decrypt)?,
+                StandardAesCipherMode::Cbc { iv } => {
+                    aes_cbc_decrypt(key0.as_slice(), &iv, to_decrypt)?
+                }
+            };
             if expected_len > plain.len() {
                 return Err(OfficeCryptoError::InvalidFormat(format!(
                     "decrypted package length {} shorter than expected {}",
@@ -476,11 +624,9 @@ pub(crate) fn decrypt_standard_encrypted_package(
             plain.truncate(expected_len);
             Ok(plain)
         }
-        other => {
-            Err(OfficeCryptoError::UnsupportedEncryption(format!(
-                "unsupported cipher AlgID {other:#x} for EncryptedPackage"
-            )))
-        }
+        other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported cipher AlgID {other:#x} for EncryptedPackage"
+        ))),
     }
 }
 
@@ -517,12 +663,8 @@ fn decrypt_standard_encrypted_package_rc4(
         StandardKeyDerivation::Rc4,
     );
     let key0 = deriver.derive_key_for_block(0)?;
-    match verify_password_standard_with_key(
-        &info.header,
-        &info.verifier,
-        hash_alg,
-        key0.as_slice(),
-    ) {
+    match verify_password_standard_with_key(&info.header, &info.verifier, hash_alg, key0.as_slice())
+    {
         Ok(()) => {}
         Err(OfficeCryptoError::InvalidPassword) => return Err(OfficeCryptoError::InvalidPassword),
         Err(e) => return Err(e),
@@ -857,13 +999,14 @@ pub(crate) mod tests {
 
         let encryption_info = standard_encryption_info_fixture();
         let header = parse_encryption_info_header(&encryption_info).expect("parse header");
-        let info = parse_standard_encryption_info(&encryption_info, &header).expect("parse standard");
+        let info =
+            parse_standard_encryption_info(&encryption_info, &header).expect("parse standard");
 
         // Only the 8-byte length prefix is required for this test because the wrong password fails
         // during verifier validation (before package decryption is attempted).
         let encrypted_package = [0u8; 8];
-        let err =
-            decrypt_standard_encrypted_package(&info, &encrypted_package, "wrong-password").expect_err("wrong pw");
+        let err = decrypt_standard_encrypted_package(&info, &encrypted_package, "wrong-password")
+            .expect_err("wrong pw");
         assert!(matches!(err, OfficeCryptoError::InvalidPassword));
         assert!(
             ct_eq_call_count() > 0,
@@ -966,7 +1109,8 @@ pub(crate) mod tests {
                 // Encrypt verifier + verifierHash with RC4 using a single continuous stream (the
                 // CryptoAPI/Office behavior).
                 let verifier_hash = hash_alg.digest(&verifier_plain);
-                let mut verifier_buf = Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
+                let mut verifier_buf =
+                    Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
                 verifier_buf.extend_from_slice(&verifier_plain);
                 verifier_buf.extend_from_slice(&verifier_hash);
                 if key_bits == 40 {
@@ -975,7 +1119,8 @@ pub(crate) mod tests {
                     padded[..5].copy_from_slice(&key_ref[..5]);
                     rc4_xor_in_place(&padded, &mut verifier_buf).expect("rc4 encrypt verifier buf");
                 } else {
-                    rc4_xor_in_place(&key_ref, &mut verifier_buf).expect("rc4 encrypt verifier buf");
+                    rc4_xor_in_place(&key_ref, &mut verifier_buf)
+                        .expect("rc4 encrypt verifier buf");
                 }
                 let encrypted_verifier = verifier_buf[..16].to_vec();
                 let encrypted_verifier_hash = verifier_buf[16..].to_vec();
@@ -1059,9 +1204,10 @@ pub(crate) mod tests {
             encrypted_verifier_hash,
         };
 
-        verify_password_standard(&header, &verifier, password).expect("correct password should verify");
-        let err =
-            verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong password");
+        verify_password_standard(&header, &verifier, password)
+            .expect("correct password should verify");
+        let err = verify_password_standard(&header, &verifier, wrong_password)
+            .expect_err("wrong password");
         assert!(matches!(err, OfficeCryptoError::InvalidPassword));
     }
 

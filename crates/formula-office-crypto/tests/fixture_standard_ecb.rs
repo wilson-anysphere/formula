@@ -14,3 +14,14 @@ fn decrypts_repo_standard_fixture() {
     assert_eq!(decrypted.as_slice(), expected.as_slice());
 }
 
+#[test]
+fn decrypts_repo_standard_basic_xlsm_fixture() {
+    // Standard-encrypted macro-enabled workbook fixture.
+    //
+    // This exercises Standard/CryptoAPI compatibility beyond the minimal `.xlsx` case.
+    let encrypted = include_bytes!("../../../fixtures/encrypted/ooxml/standard-basic.xlsm");
+    let expected = include_bytes!("../../../fixtures/encrypted/ooxml/plaintext-basic.xlsm");
+
+    let decrypted = decrypt_encrypted_package_ole(encrypted, "password").expect("decrypt fixture");
+    assert_eq!(decrypted.as_slice(), expected.as_slice());
+}
