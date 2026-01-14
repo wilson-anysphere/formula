@@ -10420,7 +10420,6 @@ export class SpreadsheetApp {
 
     const outline = this.getOutlineForSheet(this.sheetId);
     let changed = false;
-    const changedCols: number[] = [];
     for (const raw of cols) {
       if (!Number.isFinite(raw)) continue;
       const col = Math.trunc(raw);
@@ -10429,47 +10428,10 @@ export class SpreadsheetApp {
       if (entry.hidden.user !== hidden) {
         entry.hidden.user = hidden;
         changed = true;
-        changedCols.push(col);
       }
     }
 
     if (!changed) return;
-
-    // Keep the DocumentController-level hidden column metadata (`__sheetHiddenCols`) in sync with
-    // UI hide/unhide actions so:
-    // - engine hydration (`engineHydrateFromDocument`) can observe the latest hidden state
-    // - hiding/unhiding before the WASM worker initializes still applies once it hydrates
-    //
-    // This metadata is best-effort and is not currently persisted in the DocumentController
-    // snapshot schema.
-    try {
-      const docAny = this.document as any;
-      const existing = docAny.__sheetHiddenCols;
-      const map: Record<string, number[]> =
-        existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
-      const rawCurrent = map[this.sheetId];
-      const next = new Set<number>();
-      if (Array.isArray(rawCurrent)) {
-        for (const entry of rawCurrent) {
-          const n = Number(entry);
-          if (!Number.isInteger(n) || n < 0) continue;
-          next.add(n);
-        }
-      }
-      for (const col of changedCols) {
-        if (hidden) next.add(col);
-        else next.delete(col);
-      }
-      const nextList = [...next].sort((a, b) => a - b);
-      if (nextList.length > 0) {
-        map[this.sheetId] = nextList;
-      } else {
-        delete map[this.sheetId];
-      }
-      docAny.__sheetHiddenCols = map;
-    } catch {
-      // ignore
-    }
 
     this.onOutlineUpdated();
   }
@@ -12319,13 +12281,18 @@ export class SpreadsheetApp {
     if (!Number.isInteger(col0) || col0 < 0) return;
     if (!Number.isInteger(count0) || count0 <= 0) return;
 
+    let hiddenColsAfter: number[] | null = null;
     if (!this.wasmEngine) {
       try {
         this.document.insertCols(sheetId, col0, count0, { label: "Insert Columns", source: "ribbon" });
+        hiddenColsAfter = this.applyColInsertToOutlineAndMetadata(sheetId, col0, count0);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         showToast(`Failed to insert columns: ${message}`, "error");
         return;
+      }
+      if (this.gridMode === "legacy") {
+        this.rebuildAxisVisibilityCache();
       }
       this.refresh();
       if (this.sheetId === sheetId) {
@@ -12341,8 +12308,15 @@ export class SpreadsheetApp {
         source: "ribbon",
         formulaRewrites: result.formulaRewrites,
       });
+      hiddenColsAfter = this.applyColInsertToOutlineAndMetadata(sheetId, col0, count0);
     }, { label: "Insert Columns" });
 
+    if (hiddenColsAfter != null) {
+      if (this.gridMode === "legacy") {
+        this.rebuildAxisVisibilityCache();
+      }
+      this.seedHiddenColsSyncCache(sheetId, hiddenColsAfter);
+    }
     this.refresh();
     if (this.sheetId === sheetId) {
       this.focus();
@@ -12364,13 +12338,18 @@ export class SpreadsheetApp {
     if (!Number.isInteger(col0) || col0 < 0) return;
     if (!Number.isInteger(count0) || count0 <= 0) return;
 
+    let hiddenColsAfter: number[] | null = null;
     if (!this.wasmEngine) {
       try {
         this.document.deleteCols(sheetId, col0, count0, { label: "Delete Columns", source: "ribbon" });
+        hiddenColsAfter = this.applyColDeleteToOutlineAndMetadata(sheetId, col0, count0);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         showToast(`Failed to delete columns: ${message}`, "error");
         return;
+      }
+      if (this.gridMode === "legacy") {
+        this.rebuildAxisVisibilityCache();
       }
       this.refresh();
       if (this.sheetId === sheetId) {
@@ -12386,12 +12365,157 @@ export class SpreadsheetApp {
         source: "ribbon",
         formulaRewrites: result.formulaRewrites,
       });
+      hiddenColsAfter = this.applyColDeleteToOutlineAndMetadata(sheetId, col0, count0);
     }, { label: "Delete Columns" });
 
+    if (hiddenColsAfter != null) {
+      if (this.gridMode === "legacy") {
+        this.rebuildAxisVisibilityCache();
+      }
+      this.seedHiddenColsSyncCache(sheetId, hiddenColsAfter);
+    }
     this.refresh();
     if (this.sheetId === sheetId) {
       this.focus();
     }
+  }
+
+  private shiftDocumentHiddenColsForColInsert(sheetId: string, col0: number, count0: number): void {
+    if (!Number.isInteger(col0) || col0 < 0) return;
+    if (!Number.isInteger(count0) || count0 <= 0) return;
+
+    try {
+      const docAny = this.document as any;
+      const existing = docAny.__sheetHiddenCols;
+      const map: Record<string, number[]> =
+        existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+
+      const raw = (map as any)[sheetId];
+      if (!Array.isArray(raw) || raw.length === 0) {
+        docAny.__sheetHiddenCols = map;
+        return;
+      }
+
+      const next = new Set<number>();
+      for (const entry of raw) {
+        const col = Number(entry);
+        if (!Number.isInteger(col) || col < 0) continue;
+        next.add(col >= col0 ? col + count0 : col);
+      }
+
+      const nextList = [...next].sort((a, b) => a - b);
+      if (nextList.length > 0) {
+        (map as any)[sheetId] = nextList;
+      } else {
+        delete (map as any)[sheetId];
+      }
+      docAny.__sheetHiddenCols = map;
+    } catch {
+      // ignore
+    }
+  }
+
+  private shiftDocumentHiddenColsForColDelete(sheetId: string, col0: number, count0: number): void {
+    if (!Number.isInteger(col0) || col0 < 0) return;
+    if (!Number.isInteger(count0) || count0 <= 0) return;
+
+    const start = col0;
+    const end = col0 + count0 - 1;
+
+    try {
+      const docAny = this.document as any;
+      const existing = docAny.__sheetHiddenCols;
+      const map: Record<string, number[]> =
+        existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+
+      const raw = (map as any)[sheetId];
+      if (!Array.isArray(raw) || raw.length === 0) {
+        docAny.__sheetHiddenCols = map;
+        return;
+      }
+
+      const next = new Set<number>();
+      for (const entry of raw) {
+        const col = Number(entry);
+        if (!Number.isInteger(col) || col < 0) continue;
+        if (col >= start && col <= end) continue;
+        next.add(col > end ? col - count0 : col);
+      }
+
+      const nextList = [...next].sort((a, b) => a - b);
+      if (nextList.length > 0) {
+        (map as any)[sheetId] = nextList;
+      } else {
+        delete (map as any)[sheetId];
+      }
+      docAny.__sheetHiddenCols = map;
+    } catch {
+      // ignore
+    }
+  }
+
+  private applyColInsertToOutlineAndMetadata(sheetId: string, col: number, count: number): number[] {
+    const count0 = Math.trunc(count);
+    if (!Number.isInteger(count0) || count0 <= 0) {
+      return this.syncHiddenColsMetadataToDocument(sheetId);
+    }
+    const col0 = Math.trunc(col);
+    if (!Number.isInteger(col0) || col0 < 0) {
+      return this.syncHiddenColsMetadataToDocument(sheetId);
+    }
+
+    const outline = this.getOutlineForSheet(sheetId);
+    const startIndex1 = col0 + 1;
+    const nextEntries = new Map<number, any>();
+    for (const [index1, entry] of outline.cols.entries) {
+      nextEntries.set(index1 >= startIndex1 ? index1 + count0 : index1, entry);
+    }
+    outline.cols.entries = nextEntries;
+    outline.recomputeOutlineHiddenCols();
+
+    this.shiftDocumentHiddenColsForColInsert(sheetId, col0, count0);
+    return this.syncHiddenColsMetadataToDocument(sheetId);
+  }
+
+  private applyColDeleteToOutlineAndMetadata(sheetId: string, col: number, count: number): number[] {
+    const count0 = Math.trunc(count);
+    if (!Number.isInteger(count0) || count0 <= 0) {
+      return this.syncHiddenColsMetadataToDocument(sheetId);
+    }
+    const col0 = Math.trunc(col);
+    if (!Number.isInteger(col0) || col0 < 0) {
+      return this.syncHiddenColsMetadataToDocument(sheetId);
+    }
+
+    const outline = this.getOutlineForSheet(sheetId);
+    const startIndex1 = col0 + 1;
+    const endIndex1 = startIndex1 + count0 - 1;
+    const nextEntries = new Map<number, any>();
+    for (const [index1, entry] of outline.cols.entries) {
+      if (index1 >= startIndex1 && index1 <= endIndex1) continue;
+      nextEntries.set(index1 > endIndex1 ? index1 - count0 : index1, entry);
+    }
+    outline.cols.entries = nextEntries;
+    outline.recomputeOutlineHiddenCols();
+
+    this.shiftDocumentHiddenColsForColDelete(sheetId, col0, count0);
+    return this.syncHiddenColsMetadataToDocument(sheetId);
+  }
+
+  private seedHiddenColsSyncCache(sheetId: string, hiddenCols: number[]): void {
+    if (!this.wasmEngine) return;
+
+    // If the engine instance was replaced (e.g. re-init), resync even if the outline state
+    // appears unchanged.
+    if (this.lastSyncedHiddenColsEngine !== this.wasmEngine) {
+      this.lastSyncedHiddenColsEngine = this.wasmEngine;
+      this.lastSyncedHiddenColsKeyBySheetId.clear();
+      this.lastSyncedHiddenColsBySheetId.clear();
+    }
+
+    const key = hiddenCols.join(",");
+    this.lastSyncedHiddenColsKeyBySheetId.set(sheetId, key);
+    this.lastSyncedHiddenColsBySheetId.set(sheetId, hiddenCols.slice());
   }
 
   async insertCells(range: Range, direction: "right" | "down"): Promise<void> {
@@ -20236,6 +20360,15 @@ export class SpreadsheetApp {
   }
 
   private onOutlineUpdated(): void {
+    // Keep the DocumentController-level hidden column metadata (`__sheetHiddenCols`) in sync with
+    // legacy outline changes so:
+    // - engine hydration (`engineHydrateFromDocument`) can observe the latest hidden state
+    // - hiding/unhiding before the WASM worker initializes still applies once it hydrates
+    //
+    // This metadata is best-effort and is not currently persisted in the DocumentController
+    // snapshot schema.
+    this.syncHiddenColsMetadataToDocument(this.sheetId);
+
     if (this.gridMode === "legacy") {
       this.rebuildAxisVisibilityCache();
     }
@@ -20249,6 +20382,54 @@ export class SpreadsheetApp {
     // Keep the WASM formula engine in sync with legacy outline-based hidden columns so worksheet
     // information functions like `CELL("width")` can reflect hidden state.
     this.syncHiddenColsToWasmEngine();
+  }
+
+  private syncHiddenColsMetadataToDocument(sheetId: string): number[] {
+    const outline = this.getOutlineForSheet(sheetId);
+    const hiddenCols: number[] = [];
+
+    for (const [index1, entry] of outline.cols.entries) {
+      const hidden = this.gridMode === "legacy" ? isHidden(entry.hidden) : entry.hidden.user;
+      if (!hidden) continue;
+      // Outline indices are 1-based; DocumentController metadata uses 0-based column indices.
+      const col = index1 - 1;
+      if (col < 0 || col >= this.limits.maxCols) continue;
+      hiddenCols.push(col);
+    }
+    hiddenCols.sort((a, b) => a - b);
+
+    try {
+      const docAny = this.document as any;
+      const existing = docAny.__sheetHiddenCols;
+      const map: Record<string, number[]> =
+        existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+
+      // Preserve any hidden column metadata for columns outside the UI renderer's current limits
+      // (legacy mode caps maxCols/maxRows for performance). Formulas can still reference those
+      // columns, so `CELL("width")` hydration should not drop that metadata just because the UI
+      // can't render the column.
+      const preserved: number[] = [];
+      const rawExisting = (map as any)[sheetId];
+      if (Array.isArray(rawExisting)) {
+        for (const entry of rawExisting) {
+          const col = Number(entry);
+          if (!Number.isInteger(col) || col < 0) continue;
+          if (col >= this.limits.maxCols) preserved.push(col);
+        }
+      }
+
+      const merged = [...new Set<number>([...hiddenCols, ...preserved])].sort((a, b) => a - b);
+      if (merged.length > 0) {
+        map[sheetId] = merged;
+      } else {
+        delete map[sheetId];
+      }
+      docAny.__sheetHiddenCols = map;
+    } catch {
+      // ignore
+    }
+
+    return hiddenCols;
   }
 
   private syncHiddenColsToWasmEngine(): void {
