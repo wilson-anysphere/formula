@@ -5673,6 +5673,105 @@ export class DocumentController {
   }
 
   /**
+   * Excel "Merge Across": merge each row segment independently.
+   *
+   * Example: A1:C3 => merges A1:C1, A2:C2, A3:C3.
+   *
+   * Semantics:
+   * - Only rectangular regions are supported.
+   * - Each row segment is anchored at its left-most cell (`startCol`).
+   * - All non-anchor cells in the selection rectangle have their *contents* cleared (value/formula),
+   *   while preserving formatting.
+   * - Overlaps with existing merges are resolved automatically by removing any merges that
+   *   intersect the selection rectangle (new merges win).
+   *
+   * Ranges use inclusive end coordinates (`endRow`/`endCol` are inclusive).
+   *
+   * @param {string} sheetId
+   * @param {{ startRow: number, endRow: number, startCol: number, endCol: number }} range
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  mergeAcross(sheetId, range, options = {}) {
+    const sr = Number(range?.startRow);
+    const er = Number(range?.endRow);
+    const sc = Number(range?.startCol);
+    const ec = Number(range?.endCol);
+    if (!Number.isInteger(sr) || sr < 0) return;
+    if (!Number.isInteger(er) || er < 0) return;
+    if (!Number.isInteger(sc) || sc < 0) return;
+    if (!Number.isInteger(ec) || ec < 0) return;
+
+    const startRow = Math.min(sr, er);
+    const endRow = Math.max(sr, er);
+    const startCol = Math.min(sc, ec);
+    const endCol = Math.max(sc, ec);
+
+    // Merge Across is only meaningful for multi-column selections.
+    if (startCol === endCol) return;
+
+    if (this.canEditCell) {
+      // Each row segment is anchored at its left-most cell.
+      for (let row = startRow; row <= endRow; row += 1) {
+        if (!this.canEditCell({ sheetId, row, col: startCol })) return;
+      }
+    }
+
+    const overlaps = (a, b) =>
+      a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
+
+    const selectionRect = { startRow, endRow, startCol, endCol };
+
+    const beforeView = this.model.getSheetView(sheetId);
+    const existing = Array.isArray(beforeView?.mergedRanges) ? beforeView.mergedRanges : [];
+    const nextMergedRanges = existing
+      .filter((r) => r && !overlaps(r, selectionRect))
+      .map((r) => ({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol }));
+    for (let row = startRow; row <= endRow; row += 1) {
+      nextMergedRanges.push({ startRow: row, endRow: row, startCol, endCol });
+    }
+
+    const afterView = cloneSheetViewState(beforeView);
+    afterView.mergedRanges = nextMergedRanges;
+    const normalizedAfterView = normalizeSheetViewState(afterView);
+
+    /** @type {CellDelta[]} */
+    const cellDeltas = [];
+    let blockedByPermissions = false;
+
+    // Clear contents of non-anchor cells in each merged row segment, preserving formatting.
+    this.forEachCellInSheet(sheetId, ({ row, col, cell }) => {
+      if (blockedByPermissions) return;
+      if (row < startRow || row > endRow) return;
+      if (col < startCol || col > endCol) return;
+      if (col === startCol) return;
+      if (cell.value == null && cell.formula == null) return;
+
+      if (this.canEditCell && !this.canEditCell({ sheetId, row, col })) {
+        // If we can't clear an interior cell that has content, abort the merge to avoid
+        // leaving non-anchor content hidden inside a merged region.
+        blockedByPermissions = true;
+        return;
+      }
+
+      const before = cloneCellState(cell);
+      const after = { value: null, formula: null, styleId: before.styleId };
+      if (cellStateEquals(before, after)) return;
+      cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+    });
+
+    if (blockedByPermissions) return;
+
+    /** @type {SheetViewDelta[]} */
+    const sheetViewDeltas = sheetViewStateEquals(beforeView, normalizedAfterView)
+      ? []
+      : [{ sheetId, before: beforeView, after: normalizedAfterView }];
+
+    if (cellDeltas.length === 0 && sheetViewDeltas.length === 0) return;
+
+    this.#applyUserWorkbookEdits({ cellDeltas, sheetViewDeltas }, options);
+  }
+
+  /**
    * Remove merged-cell regions intersecting a target cell or range.
    *
    * @param {string} sheetId

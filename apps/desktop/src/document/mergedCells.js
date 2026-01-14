@@ -157,6 +157,13 @@ export function mergeAcross(doc, sheetId, range, options = {}) {
     if (blockedByPermissions) return false;
   }
 
+  // Prefer a native DocumentController implementation when available so mergedRanges + content
+  // clearing are applied as a single workbook edit (one change event / one undo step).
+  if (typeof doc.mergeAcross === "function") {
+    doc.mergeAcross(sheetId, r, options);
+    return true;
+  }
+
   const existing = typeof doc.getMergedRanges === "function" ? doc.getMergedRanges(sheetId) : [];
   // Any merges that intersect the selection are removed first (Excel-like).
   const remaining = existing.filter((m) => !rangesIntersect(m, r));
