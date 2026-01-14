@@ -260,3 +260,59 @@ test("formula rewrites can target other sheets", () => {
   assert.equal(doc.getCell("Sheet1", "A2").value, 42);
   assert.equal(doc.getCell("Sheet2", "A1").formula, "=Sheet1!A2");
 });
+
+test("insertCellsShiftRight shifts merged ranges within the affected row band", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 0, startCol: 2, endCol: 3 }]); // C1:D1
+  doc.insertCellsShiftRight("Sheet1", { startRow: 0, endRow: 0, startCol: 1, endCol: 1 }); // insert at B1
+
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 0, startCol: 3, endCol: 4 }]); // D1:E1
+});
+
+test("insertCellsShiftDown shifts merged ranges within the affected column band", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 2, endRow: 3, startCol: 0, endCol: 1 }]); // A3:B4
+  doc.insertCellsShiftDown("Sheet1", { startRow: 1, endRow: 1, startCol: 0, endCol: 1 }); // insert at A2:B2
+
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 3, endRow: 4, startCol: 0, endCol: 1 }]); // A4:B5
+});
+
+test("deleteCellsShiftLeft removes merged ranges that are fully deleted", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 0, startCol: 1, endCol: 2 }]); // B1:C1
+  doc.deleteCellsShiftLeft("Sheet1", { startRow: 0, endRow: 0, startCol: 1, endCol: 2 }); // delete B1:C1
+
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), []);
+});
+
+test("deleteCellsShiftUp removes merged ranges that are fully deleted", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 1, endRow: 2, startCol: 0, endCol: 1 }]); // A2:B3
+  doc.deleteCellsShiftUp("Sheet1", { startRow: 1, endRow: 2, startCol: 0, endCol: 1 }); // delete A2:B3
+
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), []);
+});
+
+test("insertCellsShiftRight throws when it would split a merged range", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }]); // A1:B1
+  assert.throws(
+    () => doc.insertCellsShiftRight("Sheet1", { startRow: 0, endRow: 0, startCol: 1, endCol: 1 }),
+    /merged/i,
+  );
+});
+
+test("insertCellsShiftRight throws when a merged range overlaps the shift band", () => {
+  const doc = new DocumentController();
+
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 1, startCol: 0, endCol: 0 }]); // A1:A2
+  assert.throws(
+    () => doc.insertCellsShiftRight("Sheet1", { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }),
+    /merged/i,
+  );
+});

@@ -835,6 +835,162 @@ function shiftMergedRangesForAxisEdit(mergedRanges, axis, index0, count, maxRow,
 }
 
 /**
+ * Shift merged-cell ranges (SheetViewState.mergedRanges) for an insert/delete-cells shift operation.
+ *
+ * This is used by Excel-style:
+ * - Insert Cells... (shift right / shift down)
+ * - Delete Cells... (shift left / shift up)
+ *
+ * These edits shift a rectangular band of cells within a row band (horizontal) or column band (vertical),
+ * which means a merged region can be affected *partially* in ways that cannot be represented by a single
+ * rectangular merge range.
+ *
+ * To stay safe and avoid silently corrupting merge metadata, we reject operations that would split a
+ * merged region (by throwing).
+ *
+ * @param {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }> | null | undefined} mergedRanges
+ * @param {{ startRow: number, endRow: number, startCol: number, endCol: number }} rect
+ * @param {"insertShiftRight" | "insertShiftDown" | "deleteShiftLeft" | "deleteShiftUp"} kind
+ * @param {number} maxRow
+ * @param {number} maxCol
+ * @returns {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }> | undefined}
+ */
+function shiftMergedRangesForCellsShift(mergedRanges, rect, kind, maxRow, maxCol) {
+  if (!Array.isArray(mergedRanges) || mergedRanges.length === 0) return undefined;
+
+  const startRow = Number(rect?.startRow);
+  const endRow = Number(rect?.endRow);
+  const startCol = Number(rect?.startCol);
+  const endCol = Number(rect?.endCol);
+  if (!Number.isInteger(startRow) || startRow < 0) return mergedRanges.map((r) => ({ ...r }));
+  if (!Number.isInteger(endRow) || endRow < 0) return mergedRanges.map((r) => ({ ...r }));
+  if (!Number.isInteger(startCol) || startCol < 0) return mergedRanges.map((r) => ({ ...r }));
+  if (!Number.isInteger(endCol) || endCol < 0) return mergedRanges.map((r) => ({ ...r }));
+
+  const rectStartRow = Math.min(startRow, endRow);
+  const rectEndRow = Math.max(startRow, endRow);
+  const rectStartCol = Math.min(startCol, endCol);
+  const rectEndCol = Math.max(startCol, endCol);
+  const width = rectEndCol - rectStartCol + 1;
+  const height = rectEndRow - rectStartRow + 1;
+
+  const err = () =>
+    new Error(
+      "Cannot shift cells because the operation would split a merged region. Unmerge the cells, then try again.",
+    );
+
+  /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
+  const out = [];
+
+  for (const r of mergedRanges) {
+    if (!r) continue;
+    const sr = Number(r.startRow);
+    const er = Number(r.endRow);
+    const sc = Number(r.startCol);
+    const ec = Number(r.endCol);
+    if (!Number.isInteger(sr) || sr < 0) continue;
+    if (!Number.isInteger(er) || er < 0) continue;
+    if (!Number.isInteger(sc) || sc < 0) continue;
+    if (!Number.isInteger(ec) || ec < 0) continue;
+
+    let mergeStartRow = Math.min(sr, er);
+    let mergeEndRow = Math.max(sr, er);
+    let mergeStartCol = Math.min(sc, ec);
+    let mergeEndCol = Math.max(sc, ec);
+
+    if (kind === "insertShiftRight" || kind === "deleteShiftLeft") {
+      const overlapsRowBand = mergeStartRow <= rectEndRow && mergeEndRow >= rectStartRow;
+      if (overlapsRowBand && (mergeStartRow < rectStartRow || mergeEndRow > rectEndRow)) {
+        throw err();
+      }
+
+      if (overlapsRowBand) {
+        if (kind === "insertShiftRight") {
+          if (mergeEndCol < rectStartCol) {
+            // left of insertion point: unchanged
+          } else if (mergeStartCol >= rectStartCol) {
+            mergeStartCol += width;
+            mergeEndCol += width;
+            if (mergeEndCol > maxCol) {
+              throw new Error("Shift would move merged cells out of bounds.");
+            }
+          } else {
+            throw err();
+          }
+        } else {
+          // deleteShiftLeft
+          if (mergeEndCol < rectStartCol) {
+            // left of delete region: unchanged
+          } else if (mergeStartCol > rectEndCol) {
+            mergeStartCol -= width;
+            mergeEndCol -= width;
+            if (mergeStartCol < 0) {
+              throw new Error("Shift would move merged cells out of bounds.");
+            }
+          } else if (mergeStartCol >= rectStartCol && mergeEndCol <= rectEndCol) {
+            // fully deleted: drop merge
+            continue;
+          } else {
+            throw err();
+          }
+        }
+      }
+    } else {
+      // Vertical shifts: insertShiftDown / deleteShiftUp
+      const overlapsColBand = mergeStartCol <= rectEndCol && mergeEndCol >= rectStartCol;
+      if (overlapsColBand && (mergeStartCol < rectStartCol || mergeEndCol > rectEndCol)) {
+        throw err();
+      }
+
+      if (overlapsColBand) {
+        if (kind === "insertShiftDown") {
+          if (mergeEndRow < rectStartRow) {
+            // above insertion point: unchanged
+          } else if (mergeStartRow >= rectStartRow) {
+            mergeStartRow += height;
+            mergeEndRow += height;
+            if (mergeEndRow > maxRow) {
+              throw new Error("Shift would move merged cells out of bounds.");
+            }
+          } else {
+            throw err();
+          }
+        } else {
+          // deleteShiftUp
+          if (mergeEndRow < rectStartRow) {
+            // above delete region: unchanged
+          } else if (mergeStartRow > rectEndRow) {
+            mergeStartRow -= height;
+            mergeEndRow -= height;
+            if (mergeStartRow < 0) {
+              throw new Error("Shift would move merged cells out of bounds.");
+            }
+          } else if (mergeStartRow >= rectStartRow && mergeEndRow <= rectEndRow) {
+            continue;
+          } else {
+            throw err();
+          }
+        }
+      }
+    }
+
+    // Ignore single-cell merges (no-op).
+    if (mergeStartRow === mergeEndRow && mergeStartCol === mergeEndCol) continue;
+    if (mergeStartRow > maxRow || mergeStartCol > maxCol) continue;
+    if (mergeEndRow < 0 || mergeEndCol < 0) continue;
+
+    out.push({
+      startRow: mergeStartRow,
+      endRow: mergeEndRow,
+      startCol: mergeStartCol,
+      endCol: mergeEndCol,
+    });
+  }
+
+  return out.length > 0 ? out : undefined;
+}
+
+/**
  * Shift a Map<number, number> (rowStyleIds/colStyleIds) for axis insert/delete.
  *
  * @param {Map<number, number>} map
@@ -4953,9 +5109,23 @@ export class DocumentController {
       }
     }
 
+    /** @type {SheetViewDelta[]} */
+    const sheetViewDeltas = [];
+    const beforeView = this.model.getSheetView(id);
+    if (Array.isArray(beforeView.mergedRanges) && beforeView.mergedRanges.length > 0) {
+      const afterView = cloneSheetViewState(beforeView);
+      const next = shiftMergedRangesForCellsShift(afterView.mergedRanges, rect, kind, EXCEL_MAX_ROW, EXCEL_MAX_COL);
+      if (next) afterView.mergedRanges = next;
+      else delete afterView.mergedRanges;
+      const normalizedView = normalizeSheetViewState(afterView);
+      if (!sheetViewStateEquals(beforeView, normalizedView)) {
+        sheetViewDeltas.push({ sheetId: id, before: beforeView, after: normalizedView });
+      }
+    }
+
     const defaultLabel = kind === "insertShiftRight" || kind === "insertShiftDown" ? "Insert Cells" : "Delete Cells";
     this.#applyUserWorkbookEdits(
-      { cellDeltas: deltas, rangeRunDeltas },
+      { cellDeltas: deltas, rangeRunDeltas, sheetViewDeltas },
       { label: options.label ?? defaultLabel },
     );
   }
