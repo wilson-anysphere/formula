@@ -32,6 +32,35 @@ type Summary = {
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
+function usage(): string {
+  return [
+    "Desktop startup benchmark runner (real Tauri binary).",
+    "",
+    "Usage:",
+    "  node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts [options]",
+    "",
+    "Options:",
+    "  --mode <cold|warm>               Startup mode (env: FORMULA_DESKTOP_STARTUP_MODE, default: cold)",
+    "  --runs <n>                       Iterations (env: FORMULA_DESKTOP_STARTUP_RUNS, default: 20)",
+    "  --timeout-ms <ms>                Timeout per run (env: FORMULA_DESKTOP_STARTUP_TIMEOUT_MS, default: 15000)",
+    "  --bin, --bin-path <path>         Desktop binary path (env: FORMULA_DESKTOP_BIN)",
+    "  --startup-bench, --shell         Shell-only startup (default in CI)",
+    "  --full                           Full app startup (default locally)",
+    "  --window-target-ms <ms>          p95 target (overrides env targets)",
+    "  --webview-loaded-target-ms <ms>  p95 target (env: FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS / FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS)",
+    "  --tti-target-ms <ms>             p95 target (overrides env targets)",
+    "  --json, --json-path <path>       Write JSON output (samples + summary) to this path",
+    "  --enforce                        Exit non-zero if p95 exceeds targets (env: FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1)",
+    "  --allow-ci                       Allow running under CI without FORMULA_RUN_DESKTOP_STARTUP_BENCH=1",
+    "  -h, --help                       Show this help and exit",
+    "",
+    "Notes:",
+    "  - Uses an isolated HOME under target/perf-home by default (override via FORMULA_PERF_HOME).",
+    "  - Sets FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1 for stability.",
+    "",
+  ].join("\n");
+}
+
 function parseBenchKindFromEnv(): StartupBenchKind | null {
   const raw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? "").trim().toLowerCase();
   if (!raw) return null;
@@ -219,6 +248,13 @@ function printSummary(summary: Summary, benchKind: StartupBenchKind): void {
 }
 
 async function main(): Promise<void> {
+  const cliArgs = process.argv.slice(2);
+  if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
+    // eslint-disable-next-line no-console
+    console.log(usage());
+    return;
+  }
+
   const {
     runs,
     timeoutMs,
@@ -231,7 +267,7 @@ async function main(): Promise<void> {
     enforce,
     jsonPath,
     benchKind,
-  } = parseArgs(process.argv.slice(2));
+  } = parseArgs(cliArgs);
 
   if (process.env.CI && !allowInCi && process.env.FORMULA_RUN_DESKTOP_STARTUP_BENCH !== "1") {
     // eslint-disable-next-line no-console

@@ -40,6 +40,31 @@ const perfXdgData = resolve(perfHome, "xdg-data");
 const perfAppData = resolve(perfHome, "AppData", "Roaming");
 const perfLocalAppData = resolve(perfHome, "AppData", "Local");
 
+function usage(): string {
+  return [
+    "Desktop idle memory benchmark runner (real Tauri binary).",
+    "",
+    "Usage:",
+    "  node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts [options]",
+    "",
+    "Options:",
+    "  --runs <n>                 Iterations (env: FORMULA_DESKTOP_MEMORY_RUNS, default: 10)",
+    "  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: 30000)",
+    "  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: 5000)",
+    "  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN)",
+    "  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB, default: 100)",
+    "  --json, --json-path <path> Write JSON output (samples + summary) to this path",
+    "  --enforce                  Exit non-zero if p95 exceeds target (env: FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1)",
+    "  --allow-ci                 Allow running under CI without FORMULA_RUN_DESKTOP_MEMORY_BENCH=1",
+    "  -h, --help                 Show this help and exit",
+    "",
+    "Notes:",
+    "  - Uses an isolated HOME under target/perf-home by default (override via FORMULA_PERF_HOME).",
+    "  - Windows reports process-tree Working Set (closest analogue to RSS).",
+    "",
+  ].join("\n");
+}
+
 function parseArgs(argv: string[]): {
   runs: number;
   timeoutMs: number;
@@ -488,9 +513,14 @@ function printSummary(summary: Summary): void {
 }
 
 async function main(): Promise<void> {
-  const { runs, timeoutMs, settleMs, binPath: argBin, targetMb, allowInCi, enforce, jsonPath } = parseArgs(
-    process.argv.slice(2),
-  );
+  const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h")) {
+    // eslint-disable-next-line no-console
+    console.log(usage());
+    return;
+  }
+
+  const { runs, timeoutMs, settleMs, binPath: argBin, targetMb, allowInCi, enforce, jsonPath } = parseArgs(argv);
 
   if (process.env.CI && !allowInCi && process.env.FORMULA_RUN_DESKTOP_MEMORY_BENCH !== "1") {
     // eslint-disable-next-line no-console
@@ -507,9 +537,10 @@ async function main(): Promise<void> {
     );
   }
 
+  const memoryKind = process.platform === "win32" ? "Working Set" : "RSS";
   // eslint-disable-next-line no-console
   console.log(
-    "[desktop-memory] measuring idle memory for the desktop app (RSS after TTI).\n" +
+    `[desktop-memory] measuring idle memory for the desktop app (${memoryKind} after TTI).\n` +
       `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_MEMORY_RUNS)\n` +
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_MEMORY_TIMEOUT_MS)\n` +
       `- settle: ${settleMs}ms (override via --settle-ms or FORMULA_DESKTOP_MEMORY_SETTLE_MS)\n` +
