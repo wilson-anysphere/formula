@@ -132,17 +132,13 @@ fn standard_encryption_info_parameters_are_pinned() {
     };
 
     // Standard fixtures.
-    for rel in ["standard.xlsx", "standard-large.xlsx"] {
+    for rel in [
+        "standard.xlsx",
+        "standard-large.xlsx",
+        "standard-4.2.xlsx",
+        "standard-unicode.xlsx",
+    ] {
         let path = fixture_path(rel);
         assert_standard_fixture_encryption_params(&path, expected);
     }
-
-    // POI-generated Standard encryption uses the same schema but commonly emits version 4.2
-    // instead of 3.2. Keep a placeholder so that fixture can be added without needing to update
-    // the test logic.
-    let standard_4_2 = fixture_path("standard-4.2.xlsx");
-    if standard_4_2.exists() {
-        assert_standard_fixture_encryption_params(&standard_4_2, expected);
-    }
 }
-
