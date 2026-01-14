@@ -8564,7 +8564,7 @@ async fn marketplace_fetch_json_with_limit(
     serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 async fn marketplace_fetch_optional_json_with_limit(
     url: reqwest::Url,
     limit_bytes: usize,
@@ -9111,6 +9111,41 @@ mod tests {
         .await
         .expect("expected JSON body to be within limit");
         assert_eq!(parsed, serde_json::json!({ "ok": true }));
+
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn marketplace_optional_json_returns_none_on_404() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+
+            let headers = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(headers.as_bytes())
+                .await
+                .expect("write headers");
+            let _ = stream.shutdown().await;
+        });
+
+        let url =
+            reqwest::Url::parse(&format!("http://{addr}/extensions/missing")).expect("parse url");
+        let parsed = marketplace_fetch_optional_json_with_limit(
+            url,
+            1024,
+            "marketplace_optional_json_test",
+            "Marketplace optional json test failed",
+        )
+        .await
+        .expect("expected request to succeed");
+        assert!(parsed.is_none(), "expected 404 to map to None");
 
         server.await.expect("server task");
     }
