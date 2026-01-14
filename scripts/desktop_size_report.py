@@ -220,6 +220,21 @@ def _render_markdown(
         )
 
     lines.append("")
+
+    # Explicitly call out offenders so failures are obvious in CI summaries.
+    offenders: list[str] = []
+    if binary_limit_mb is not None and binary.size_bytes > int(round(binary_limit_mb * MB_BYTES)):
+        offenders.append(
+            f"- Binary `{_relpath(binary.path, repo_root)}`: {_human_bytes(binary.size_bytes)} > {binary_limit_mb} MB"
+        )
+    if dist_limit_mb is not None and dist.size_bytes > int(round(dist_limit_mb * MB_BYTES)):
+        offenders.append(f"- Dist `{_relpath(dist.path, repo_root)}`: {_human_bytes(dist.size_bytes)} > {dist_limit_mb} MB")
+    if offenders:
+        lines.append("**Size limits exceeded:**")
+        lines.append("")
+        lines.extend(offenders)
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -422,11 +437,13 @@ def main() -> int:
             "path": _relpath(binary.path, repo_root),
             "size_bytes": binary.size_bytes,
             "size_mb": round(binary.size_mb, 3),
+            "over_limit": binary_limit_mb is not None and binary.size_bytes > int(round(binary_limit_mb * MB_BYTES)),
         },
         "dist": {
             "path": _relpath(dist.path, repo_root),
             "size_bytes": dist.size_bytes,
             "size_mb": round(dist.size_mb, 3),
+            "over_limit": dist_limit_mb is not None and dist.size_bytes > int(round(dist_limit_mb * MB_BYTES)),
         },
         "dist_tar_gz": None,
         "limits_mb": {"binary": binary_limit_mb, "dist": dist_limit_mb},

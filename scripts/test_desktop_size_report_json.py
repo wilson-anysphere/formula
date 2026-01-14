@@ -60,6 +60,8 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
             self.assertIsInstance(entry["size_bytes"], int)
             self.assertIn("size_mb", entry)
             self.assertIsInstance(entry["size_mb"], float)
+            self.assertIn("over_limit", entry)
+            self.assertIsInstance(entry["over_limit"], bool)
 
     def test_json_schema_without_gzip(self) -> None:
         repo_root = self._repo_root()
@@ -102,6 +104,7 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
             )
             self.assertEqual(report["binary"]["size_bytes"], 1_500_000)
             self.assertAlmostEqual(report["binary"]["size_mb"], 1.5, places=3)
+            self.assertFalse(report["binary"]["over_limit"])
 
     def test_json_schema_includes_gzip_size(self) -> None:
         repo_root = self._repo_root()
@@ -139,6 +142,7 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
             self.assertIsInstance(dist_gz, dict)
             self.assertGreater(dist_gz["size_bytes"], 0)
             self.assertIsInstance(dist_gz["size_mb"], float)
+            self.assertFalse(report["dist"]["over_limit"])
 
     def test_oversize_failure_still_writes_json(self) -> None:
         repo_root = self._repo_root()
@@ -175,4 +179,4 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
             self._assert_basic_schema(report)
             self.assertEqual(report["limits_mb"]["binary"], 1.0)
             self.assertEqual(report["binary"]["size_bytes"], 1_500_000)
-
+            self.assertTrue(report["binary"]["over_limit"])
