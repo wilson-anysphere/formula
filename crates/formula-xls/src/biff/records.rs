@@ -35,6 +35,8 @@ pub(crate) const MAX_LOGICAL_RECORD_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(test)]
 pub(crate) const MAX_LOGICAL_RECORD_BYTES: usize = 1024;
 
+// Hard cap for the number of physical fragments that may be coalesced into a single logical BIFF
+// record. This includes the initial record fragment and all subsequent `CONTINUE` fragments.
 #[cfg(not(test))]
 pub(crate) const MAX_LOGICAL_RECORD_FRAGMENTS: usize = 4096;
 // Keep unit tests fast by using a smaller cap.
@@ -441,23 +443,23 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
                 }
             };
 
-            let cap = MAX_LOGICAL_RECORD_BYTES;
+            let cap_bytes = MAX_LOGICAL_RECORD_BYTES;
             let new_len = combined
                 .len()
                 .checked_add(next.data.len())
                 .unwrap_or(usize::MAX);
-            if new_len > cap {
+            if new_len > cap_bytes {
                 self.finished = true;
                 return Some(Err(format!(
-                    "logical BIFF record 0x{record_id:04X} at offset {start_offset} exceeds max continued size ({cap} bytes)"
+                    "logical BIFF record 0x{record_id:04X} at offset {start_offset} exceeds max continued size ({cap_bytes} bytes)"
                 )));
             }
 
-            let cap = MAX_LOGICAL_RECORD_FRAGMENTS;
-            if fragment_sizes.len().saturating_add(1) > cap {
+            let cap_fragments = MAX_LOGICAL_RECORD_FRAGMENTS;
+            if fragment_sizes.len() >= cap_fragments {
                 self.finished = true;
                 return Some(Err(format!(
-                    "logical BIFF record 0x{record_id:04X} at offset {start_offset} exceeds max fragment count ({cap})"
+                    "logical BIFF record 0x{record_id:04X} at offset {start_offset} exceeds max continued fragments ({cap_fragments} fragments)"
                 )));
             }
 
@@ -727,25 +729,29 @@ mod tests {
 
     #[test]
     fn logical_iter_errors_on_excessive_continue_fragments() {
-        let allows = |id: u16| id == 0x00AA;
-
         let mut stream_parts: Vec<Vec<u8>> = Vec::new();
-        stream_parts.push(record(0x00AA, &[1]));
-        for _ in 0..(MAX_LOGICAL_RECORD_FRAGMENTS + 1) {
+        // Initial record fragment with empty payload.
+        stream_parts.push(record(0x00AA, &[]));
+
+        // Followed by more empty CONTINUE records than the fragment cap allows. Payloads remain
+        // empty so this triggers the fragment limit (not the byte limit).
+        for _ in 0..=MAX_LOGICAL_RECORD_FRAGMENTS {
             stream_parts.push(record(RECORD_CONTINUE, &[]));
         }
+
         let stream = stream_parts.concat();
 
-        let mut iter = LogicalBiffRecordIter::new(&stream, allows);
+        let mut iter = LogicalBiffRecordIter::new(&stream, |_| true);
         let err = iter.next().unwrap().unwrap_err();
+        assert!(err.contains("max continued fragments"), "err={err}");
         assert!(
-            err.contains("exceeds max fragment count"),
-            "expected fragment count error, got: {err}"
+            err.contains(&MAX_LOGICAL_RECORD_FRAGMENTS.to_string()),
+            "err={err}"
         );
-        assert!(
-            err.contains(&format!("({MAX_LOGICAL_RECORD_FRAGMENTS})")),
-            "expected cap value, got: {err}"
-        );
+        assert!(!err.contains("max continued size"), "err={err}");
+
+        // Oversized continuation errors must terminate the iterator so callers don't loop on the
+        // same error.
         assert!(iter.next().is_none());
     }
 }
