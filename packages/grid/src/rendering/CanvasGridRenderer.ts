@@ -253,14 +253,31 @@ function guardPngBytes(bytes: Uint8Array): void {
 
 async function guardPngBlob(blob: Blob): Promise<void> {
   // Fast path: only read enough bytes to parse IHDR width/height.
+  if (blob.size < 24) return;
   const slice = blob.slice(0, 24) as any;
-  if (typeof slice?.arrayBuffer !== "function") return;
-  let header: ArrayBuffer;
-  try {
-    header = await slice.arrayBuffer();
-  } catch {
-    return;
+  let header: ArrayBuffer | null = null;
+
+  if (typeof slice?.arrayBuffer === "function") {
+    try {
+      header = await slice.arrayBuffer();
+    } catch {
+      header = null;
+    }
+  } else if (typeof (globalThis as any).FileReader === "function") {
+    // Fallback for older browsers / jsdom where Blob#arrayBuffer is not implemented.
+    try {
+      const reader = new (globalThis as any).FileReader() as FileReader;
+      header = await new Promise<ArrayBuffer>((resolve, reject) => {
+        reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.readAsArrayBuffer(slice as Blob);
+      });
+    } catch {
+      header = null;
+    }
   }
+
+  if (!header) return;
   const dims = readPngDimensions(new Uint8Array(header));
   if (!dims) return;
   assertPngNotTooLarge(dims);
