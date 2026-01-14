@@ -306,12 +306,21 @@ export async function runOnce({
     let startupTimeout: NodeJS.Timeout | null = null;
     let forceKillTimer: NodeJS.Timeout | null = null;
     let exitDeadline: NodeJS.Timeout | null = null;
+    let afterCaptureTimer: NodeJS.Timeout | null = null;
+    let afterCaptureTimeoutResolve: (() => void) | null = null;
+    let afterCaptureController: AbortController | null = null;
     let timedOutWaitingForMetrics = false;
 
     const cleanup = () => {
       if (startupTimeout) clearTimeout(startupTimeout);
       if (forceKillTimer) clearTimeout(forceKillTimer);
       if (exitDeadline) clearTimeout(exitDeadline);
+      if (afterCaptureTimer) clearTimeout(afterCaptureTimer);
+      if (afterCaptureTimeoutResolve) afterCaptureTimeoutResolve();
+      afterCaptureTimeoutResolve = null;
+      afterCaptureTimer = null;
+      if (afterCaptureController) afterCaptureController.abort();
+      afterCaptureController = null;
       closeReadline(rlOut);
       closeReadline(rlErr);
     };
@@ -387,12 +396,13 @@ export async function runOnce({
       const hookTimeoutMs = afterCaptureTimeoutMs ?? 5000;
       void (async () => {
         const controller = new AbortController();
-        let timer: NodeJS.Timeout | null = null;
+        afterCaptureController = controller;
         try {
           await Promise.race([
             Promise.resolve().then(() => hook(child, parsed, controller.signal)),
             new Promise<void>((resolve) => {
-              timer = setTimeout(() => {
+              afterCaptureTimeoutResolve = resolve;
+              afterCaptureTimer = setTimeout(() => {
                 controller.abort();
                 resolve();
               }, Math.max(0, hookTimeoutMs));
@@ -401,7 +411,10 @@ export async function runOnce({
         } catch {
           // Best-effort hook: ignore errors and proceed to shutdown.
         } finally {
-          if (timer) clearTimeout(timer);
+          if (afterCaptureTimer) clearTimeout(afterCaptureTimer);
+          afterCaptureTimer = null;
+          if (afterCaptureController === controller) afterCaptureController = null;
+          afterCaptureTimeoutResolve = null;
         }
         beginShutdown('captured');
       })();
