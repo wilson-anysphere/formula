@@ -374,7 +374,10 @@ def _stable_case_path_string(*, repo_root: Path, cases_path: Path) -> str:
         rel = cases_path.resolve().relative_to(repo_root.resolve())
         return rel.as_posix()
     except Exception:
-        return cases_path.as_posix()
+        stable = _stable_path_string_from_payload(repo_root=repo_root, raw=cases_path.as_posix())
+        if stable:
+            return stable
+        return cases_path.name
 
 
 def _iter_result_entries(payload: Any) -> Iterable[dict[str, Any]]:

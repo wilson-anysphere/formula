@@ -81,6 +81,8 @@ class UpdatePinnedDatasetTests(unittest.TestCase):
             pinned_updated = json.loads(pinned_path.read_text(encoding="utf-8"))
             self.assertEqual(pinned_updated["caseSet"]["sha256"], cases_sha)
             self.assertEqual(pinned_updated["caseSet"]["count"], 2)
+            # Ensure we don't record an absolute temp directory path in the pinned dataset.
+            self.assertEqual(pinned_updated["caseSet"]["path"], cases_path.name)
             result_ids = {r.get("caseId") for r in pinned_updated.get("results", []) if isinstance(r, dict)}
             self.assertEqual(result_ids, {"case1", "case2"})
 
