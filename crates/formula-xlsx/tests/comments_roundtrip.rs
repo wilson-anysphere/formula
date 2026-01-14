@@ -171,3 +171,102 @@ fn comment_parts_tolerate_non_canonical_part_name_casing() {
     assert!(parts.preserved.contains_key("XL/PERSONS/PERSONS1.XML"));
     assert!(parts.preserved.contains_key("XL/COMMENTSEXT1.XML"));
 }
+
+fn make_package_with_percent_encoded_comment_part_names() -> Vec<u8> {
+    const LEGACY_COMMENTS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <authors>
+    <author>Alex</author>
+  </authors>
+  <commentList>
+    <comment ref="A1" authorId="0">
+      <text><r><t xml:space="preserve">Legacy note</t></r></text>
+    </comment>
+  </commentList>
+</comments>
+"#;
+
+    const THREADED_COMMENTS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<threadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">
+  <threadedComment id="t1" ref="B2" personId="p1" done="1">
+    <text><r><t xml:space="preserve">Thread root</t></r></text>
+  </threadedComment>
+  <threadedComment id="t2" parentId="t1" ref="B2" personId="p2">
+    <text><r><t xml:space="preserve">First reply</t></r></text>
+  </threadedComment>
+</threadedComments>
+"#;
+
+    const PERSONS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<persons xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">
+  <person id="p1" displayName="Alex"/>
+  <person id="p2" displayName="Sam"/>
+</persons>
+"#;
+
+    let cursor = Cursor::new(Vec::<u8>::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options: FileOptions<'_, ()> =
+        FileOptions::default().compression_method(CompressionMethod::Stored);
+
+    // Percent-encoded names: `comments1.xml` -> `comments%31.xml`, etc.
+    zip.start_file("xl/comments%31.xml", options)
+        .expect("zip entry creation should succeed");
+    zip.write_all(LEGACY_COMMENTS_XML.as_bytes())
+        .expect("legacy comments xml write should succeed");
+
+    zip.start_file("xl/threadedComments/threadedComments%31.xml", options)
+        .expect("zip entry creation should succeed");
+    zip.write_all(THREADED_COMMENTS_XML.as_bytes())
+        .expect("threaded comments xml write should succeed");
+
+    zip.start_file("xl/persons/persons%31.xml", options)
+        .expect("zip entry creation should succeed");
+    zip.write_all(PERSONS_XML.as_bytes())
+        .expect("persons xml write should succeed");
+
+    zip.finish()
+        .expect("zip finalization should succeed")
+        .into_inner()
+}
+
+#[test]
+fn comment_parts_tolerate_percent_encoded_part_names() {
+    let bytes = make_package_with_percent_encoded_comment_part_names();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("should parse as xlsx package");
+
+    let parts = extract_comment_parts(&pkg);
+    assert!(
+        parts
+            .comments
+            .iter()
+            .any(|comment| comment.kind == CommentKind::Note),
+        "expected legacy note comment to be parsed"
+    );
+    assert!(
+        parts
+            .comments
+            .iter()
+            .any(|comment| comment.kind == CommentKind::Threaded),
+        "expected threaded comment to be parsed"
+    );
+
+    let threaded = parts
+        .comments
+        .iter()
+        .find(|comment| comment.kind == CommentKind::Threaded)
+        .expect("threaded comment should exist");
+    assert_eq!(threaded.author.name, "Alex");
+    assert_eq!(
+        threaded
+            .replies
+            .first()
+            .map(|reply| reply.author.name.as_str()),
+        Some("Sam")
+    );
+    assert!(parts.preserved.contains_key("xl/comments%31.xml"));
+    assert!(parts
+        .preserved
+        .contains_key("xl/threadedComments/threadedComments%31.xml"));
+    assert!(parts.preserved.contains_key("xl/persons/persons%31.xml"));
+}

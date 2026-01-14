@@ -150,11 +150,22 @@ fn is_legacy_comments_xml(path: &str) -> bool {
     }
     // Exclude other comment-related parts like `xl/commentsExt*.xml`.
     let suffix = &path["xl/comments".len()..];
-    suffix.starts_with('.')
-        || suffix
-            .as_bytes()
-            .first()
-            .is_some_and(|b| b.is_ascii_digit())
+    if suffix.starts_with('.') {
+        return true;
+    }
+    if suffix
+        .as_bytes()
+        .first()
+        .is_some_and(|b| b.is_ascii_digit())
+    {
+        return true;
+    }
+    if suffix.as_bytes().first() == Some(&b'%') {
+        if let Some(decoded) = decode_percent_byte(suffix) {
+            return decoded == b'.' || decoded.is_ascii_digit();
+        }
+    }
+    false
 }
 
 fn is_threaded_comments_xml(path: &str) -> bool {
@@ -165,4 +176,26 @@ fn is_threaded_comments_xml(path: &str) -> bool {
 fn is_persons_xml(path: &str) -> bool {
     let path = normalize_part_path_for_match(path);
     path.starts_with("xl/persons/") && path.ends_with(".xml")
+}
+
+fn decode_percent_byte(s: &str) -> Option<u8> {
+    // Percent-encoded URIs are common in relationships, but some producers may also percent-encode
+    // the underlying ZIP entry names. We only need the first decoded byte for comment part
+    // classification.
+    let bytes = s.as_bytes();
+    if bytes.len() < 3 || bytes[0] != b'%' {
+        return None;
+    }
+    let hi = hex_value(bytes[1])?;
+    let lo = hex_value(bytes[2])?;
+    Some((hi << 4) | lo)
+}
+
+fn hex_value(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
