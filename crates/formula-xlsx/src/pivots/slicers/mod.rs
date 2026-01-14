@@ -2328,12 +2328,65 @@ fn parse_timeline_selection(
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
+    let mut inner_buf = Vec::new();
 
     let mut selection = TimelineSelectionState::default();
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(start) | Event::Empty(start) => {
+            Event::Start(start) => {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                let is_start_el =
+                    tag.eq_ignore_ascii_case(b"start") || tag.eq_ignore_ascii_case(b"startDate");
+                let is_end_el =
+                    tag.eq_ignore_ascii_case(b"end") || tag.eq_ignore_ascii_case(b"endDate");
+
+                for attr in start.attributes().with_checks(false) {
+                    let attr = attr?;
+                    let key = local_name(attr.key.as_ref());
+                    let value = attr.unescape_value()?.into_owned();
+
+                    if selection.start.is_none()
+                        && (key.eq_ignore_ascii_case(b"start")
+                            || key.eq_ignore_ascii_case(b"startDate")
+                            || key.eq_ignore_ascii_case(b"selectionStart")
+                            || key.eq_ignore_ascii_case(b"selectionStartDate")
+                            || (is_start_el
+                                && (key.eq_ignore_ascii_case(b"val")
+                                    || key.eq_ignore_ascii_case(b"value"))))
+                    {
+                        selection.start = normalize_timeline_date(&value, date_system);
+                    }
+
+                    if selection.end.is_none()
+                        && (key.eq_ignore_ascii_case(b"end")
+                            || key.eq_ignore_ascii_case(b"endDate")
+                            || key.eq_ignore_ascii_case(b"selectionEnd")
+                            || key.eq_ignore_ascii_case(b"selectionEndDate")
+                            || (is_end_el
+                                && (key.eq_ignore_ascii_case(b"val")
+                                    || key.eq_ignore_ascii_case(b"value"))))
+                    {
+                        selection.end = normalize_timeline_date(&value, date_system);
+                    }
+                }
+
+                if is_start_el && selection.start.is_none() {
+                    if let Some(value) =
+                        read_timeline_selection_text(&mut reader, &mut inner_buf, tag)?
+                    {
+                        selection.start = normalize_timeline_date(&value, date_system);
+                    }
+                } else if is_end_el && selection.end.is_none() {
+                    if let Some(value) =
+                        read_timeline_selection_text(&mut reader, &mut inner_buf, tag)?
+                    {
+                        selection.end = normalize_timeline_date(&value, date_system);
+                    }
+                }
+            }
+            Event::Empty(start) => {
                 let element_name = start.name();
                 let tag = local_name(element_name.as_ref());
                 let is_start_el =
@@ -2378,6 +2431,58 @@ fn parse_timeline_selection(
     }
 
     Ok(selection)
+}
+
+fn read_timeline_selection_text<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    buf: &mut Vec<u8>,
+    element_tag: &[u8],
+) -> Result<Option<String>, XlsxError> {
+    let mut depth = 0u32;
+    let mut text = None;
+
+    loop {
+        match reader.read_event_into(buf)? {
+            Event::Start(_) => {
+                depth = depth.saturating_add(1);
+            }
+            Event::End(end) => {
+                let name = end.name();
+                let tag = local_name(name.as_ref());
+                if depth == 0 && tag.eq_ignore_ascii_case(element_tag) {
+                    buf.clear();
+                    break;
+                }
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            Event::Text(value) => {
+                if text.is_none() {
+                    let value = value.unescape()?.into_owned();
+                    if !value.is_empty() {
+                        text = Some(value);
+                    }
+                }
+            }
+            Event::CData(value) => {
+                if text.is_none() {
+                    let value = String::from_utf8_lossy(value.as_ref()).into_owned();
+                    if !value.is_empty() {
+                        text = Some(value);
+                    }
+                }
+            }
+            Event::Eof => {
+                buf.clear();
+                break;
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -3854,6 +3959,48 @@ mod slicer_selection_write_tests {
         let parts = pkg.pivot_slicer_parts().expect("parse slicer parts");
         assert_eq!(parts.slicers.len(), 1);
         assert_eq!(parts.slicers[0].selection.selected_items, None);
+    }
+}
+
+#[cfg(test)]
+mod timeline_selection_parse_tests {
+    use super::*;
+
+    #[test]
+    fn timeline_selection_parses_iso_dates_from_text_nodes() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <selection>
+    <startDate>2024-01-01</startDate>
+    <endDate><v>2024-01-31</v></endDate>
+  </selection>
+</timelineCacheDefinition>"#;
+
+        let selection =
+            parse_timeline_selection(xml, DateSystem::V1900.to_engine_date_system()).unwrap();
+        assert_eq!(selection.start.as_deref(), Some("2024-01-01"));
+        assert_eq!(selection.end.as_deref(), Some("2024-01-31"));
+    }
+
+    #[test]
+    fn timeline_selection_parses_serial_dates_from_text_nodes_with_date_system() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <selection>
+    <startDate>1</startDate>
+    <endDate><v>2</v></endDate>
+  </selection>
+</timelineCacheDefinition>"#;
+
+        let selection_1900 =
+            parse_timeline_selection(xml, DateSystem::V1900.to_engine_date_system()).unwrap();
+        assert_eq!(selection_1900.start.as_deref(), Some("1900-01-01"));
+        assert_eq!(selection_1900.end.as_deref(), Some("1900-01-02"));
+
+        let selection_1904 =
+            parse_timeline_selection(xml, DateSystem::V1904.to_engine_date_system()).unwrap();
+        assert_eq!(selection_1904.start.as_deref(), Some("1904-01-02"));
+        assert_eq!(selection_1904.end.as_deref(), Some("1904-01-03"));
     }
 }
 
