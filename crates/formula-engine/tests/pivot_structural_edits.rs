@@ -307,6 +307,9 @@ fn rename_sheet_updates_pivot_definition_and_refresh_does_not_recreate_old_sheet
 fn delete_sheet_drops_pivot_definitions_that_referenced_it() {
     let mut engine = Engine::new();
     seed_sales_data(&mut engine);
+    // The engine matches Excel semantics and disallows deleting the last remaining sheet.
+    // Ensure an extra sheet exists so the deletion succeeds.
+    engine.set_cell_value("Sheet2", "A1", "ok").unwrap();
 
     let pivot_id = engine.add_pivot_table(PivotTableDefinition {
         id: 0,
