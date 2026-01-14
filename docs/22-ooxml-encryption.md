@@ -31,10 +31,10 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - `Error::InvalidPassword`
   - `Error::UnsupportedOoxmlEncryption`
   - Note: with the `formula-io` crate feature **`encrypted-workbooks`** enabled, the password-aware
-    open APIs (`open_workbook_with_password`, `open_workbook_model_with_password`) can also decrypt
-    and open Agile (4.4) encrypted `.xlsx`/`.xlsm` in memory (via the `formula-xlsx` decryptor).
-    Encrypted `.xlsb` payloads are decrypted but currently reported as
-    `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }` by these helpers.
+    open APIs (`open_workbook_with_password`, `open_workbook_model_with_password`) can decrypt and
+    open Agile (4.4) encrypted `.xlsx`/`.xlsm`/`.xlsb` in memory (via the `formula-xlsx` decryptor).
+    (Standard/CryptoAPI `minor=2` encrypted workbooks are a different scheme; see
+    `docs/offcrypto-standard-cryptoapi.md`.)
 - **Streaming decrypt reader (does not validate `dataIntegrity` HMAC):**
   - `crates/formula-io/src/encrypted_ooxml.rs`
   - `crates/formula-io/src/encrypted_package_reader.rs`
@@ -52,10 +52,13 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - Agile `EncryptedPackage` segment decryption + IV derivation
     (`crates/formula-offcrypto/src/encrypted_package.rs`, `agile_decrypt_package`)
 
-## Supported vs unsupported (current scope)
+## Supported vs unsupported (Agile 4.4 scope)
 
-Formula’s OOXML decryption support is intentionally scoped to the dominant real-world scheme Excel
-uses today: **Agile Encryption (version 4.4) with password-based key encryption**.
+This document describes Formula’s support for the dominant modern scheme Excel uses today:
+**Agile Encryption (version 4.4)** with password-based key encryption.
+
+Standard/CryptoAPI (minor=2) encryption is a different scheme; see
+`docs/offcrypto-standard-cryptoapi.md` and `docs/offcrypto-standard-encryptedpackage.md`.
 
 ### Supported
 

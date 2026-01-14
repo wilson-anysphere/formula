@@ -271,8 +271,9 @@ Implementation status:
 - `formula-io` (behind the `encrypted-workbooks` feature):
   - The legacy `_with_password` APIs use the `formula-xlsx` Agile decryptor and validate
     `dataIntegrity` when it is present.
-  - `open_workbook_with_options` also validates `dataIntegrity` in the primary decrypt path; when
-    `<dataIntegrity>` is missing it falls back to a more permissive decrypt path (no integrity check).
+  - `open_workbook_with_options` also uses the `formula-xlsx` Agile decryptor and validates
+    `dataIntegrity` when it is present (when `<dataIntegrity>` is missing, decryption proceeds but no
+    integrity verification is performed).
   - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not validate
     `dataIntegrity`; the high-level `open_workbook*` APIs currently decrypt to in-memory buffers.
 - `crates/formula-offcrypto` parses `encryptedHmacKey`/`encryptedHmacValue` for completeness but does
