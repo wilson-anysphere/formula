@@ -3036,10 +3036,19 @@ fn plan_package_repair_overrides<R: Read + Seek>(
         let canonical = canonicalize_zip_entry_name(name);
         match op {
             PartOverride::Remove => {
-                part_names.remove(canonical.as_ref());
+                if let Some(existing) =
+                    find_part_name(&part_names, canonical.as_ref()).map(ToString::to_string)
+                {
+                    part_names.remove(&existing);
+                }
             }
             PartOverride::Replace(_) | PartOverride::Add(_) => {
-                part_names.insert(canonical.into_owned());
+                // If the part already exists (even under a non-canonical name like
+                // percent-encoding/case differences), keep the existing ZIP entry name so repairs
+                // prefer rewriting in-place rather than appending a duplicate canonical part.
+                if find_part_name(&part_names, canonical.as_ref()).is_none() {
+                    part_names.insert(canonical.into_owned());
+                }
             }
         }
     }

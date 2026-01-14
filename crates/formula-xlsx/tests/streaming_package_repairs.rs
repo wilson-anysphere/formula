@@ -330,3 +330,61 @@ fn streaming_part_override_matches_backslash_entry_name_without_appending_duplic
 
     Ok(())
 }
+
+#[test]
+fn streaming_repair_does_not_add_image_defaults_for_removed_percent_encoded_media(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Ensure streaming repair logic considers the *effective* part set when deciding whether to
+    // insert image `<Default>` entries into `[Content_Types].xml`.
+    //
+    // In particular, if the source package contains a percent-encoded image part name and the
+    // caller removes it via an unescaped override key, we should not insert a png default.
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+    let bytes = build_zip(&[
+        ("[Content_Types].xml", content_types),
+        ("xl/media/image%201.png", b"not-a-real-png"),
+    ]);
+
+    let mut overrides = HashMap::new();
+    // Remove using an unescaped (space-containing) part name; the ZIP entry is percent-encoded.
+    overrides.insert("xl/media/image 1.png".to_string(), PartOverride::Remove);
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut out,
+        &WorkbookCellPatches::default(),
+        &overrides,
+    )?;
+    let out_bytes = out.into_inner();
+
+    // Verify the image part was removed.
+    let mut zip = ZipArchive::new(Cursor::new(&out_bytes))?;
+    let mut names = Vec::new();
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        names.push(file.name().to_string());
+    }
+    assert!(
+        !names.iter().any(|n| n.contains("image%201.png")),
+        "expected removed image part to be absent, got: {names:?}"
+    );
+
+    // And streaming repair should not inject a png `<Default>` when no pngs remain.
+    let pkg = XlsxPackage::from_bytes(&out_bytes)?;
+    let ct = std::str::from_utf8(pkg.part("[Content_Types].xml").unwrap())?;
+    assert!(
+        !ct.contains(r#"Extension="png""#),
+        "expected no png Default entry after removing all png parts, got:\n{ct}"
+    );
+
+    Ok(())
+}
