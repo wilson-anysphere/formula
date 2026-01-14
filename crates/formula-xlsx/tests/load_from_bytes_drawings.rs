@@ -59,3 +59,27 @@ fn load_from_bytes_populates_worksheet_drawings_with_chart_placeholders() {
         ws.drawings
     );
 }
+
+#[test]
+fn load_from_bytes_populates_chartsheet_drawings_with_chart_placeholders() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/charts/chart-sheet.xlsx");
+    let bytes = std::fs::read(&path).expect("read chartsheet fixture");
+    let doc = formula_xlsx::load_from_bytes(&bytes).expect("load_from_bytes should succeed");
+
+    assert_eq!(doc.workbook.sheets.len(), 2, "expected workbook to contain worksheet + chartsheet");
+    let chart_sheet = doc
+        .workbook
+        .sheets
+        .iter()
+        .find(|s| s.name == "Chart1")
+        .expect("expected workbook to contain a sheet named Chart1");
+
+    assert!(
+        chart_sheet.drawings.iter().any(|o| matches!(
+            &o.kind,
+            DrawingObjectKind::ChartPlaceholder { rel_id, .. } if rel_id == "rId1"
+        )),
+        "expected chartsheet to contain a ChartPlaceholder with rel_id=rId1, got {:#?}",
+        chart_sheet.drawings
+    );
+}
