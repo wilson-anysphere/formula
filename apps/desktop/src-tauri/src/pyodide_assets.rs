@@ -191,9 +191,32 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 }
 
 fn file_has_expected_hash(path: &Path, expected_sha256: &str) -> Result<bool, String> {
-    if !path.is_file() {
+    // Use `symlink_metadata` so we can treat symlinks as invalid cache entries without ever
+    // following them (defense-in-depth: avoid symlink-based scope escapes and avoid hashing
+    // attacker-controlled targets outside the cache directory).
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err.to_string()),
+    };
+
+    if meta.file_type().is_symlink() {
         return Ok(false);
     }
+
+    if !meta.is_file() || meta.len() == 0 {
+        return Ok(false);
+    }
+
+    if meta.len() > MAX_SINGLE_PYODIDE_ASSET_BYTES as u64 {
+        return Err(format!(
+            "cached Pyodide asset is too large to hash safely (limit {} bytes, size {} bytes): {}",
+            MAX_SINGLE_PYODIDE_ASSET_BYTES,
+            meta.len(),
+            path.display()
+        ));
+    }
+
     let actual = sha256_file(path)?;
     Ok(actual == expected_sha256)
 }
@@ -549,6 +572,46 @@ mod tests {
         });
 
         format!("http://{addr}/")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlinked_cached_assets_are_treated_as_missing_and_replaced() {
+        use std::os::unix::fs::symlink;
+
+        let files = vec![("a.txt".to_string(), b"hello".to_vec())];
+        let base_url = serve_files_once(files.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // Create an out-of-cache target with the *same* content and hash. If we follow the symlink
+        // when checking cached assets, we'd treat this as valid and never replace it.
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("a.txt");
+        std::fs::write(&outside_file, b"hello").unwrap();
+
+        let link = cache_dir.join("a.txt");
+        symlink(&outside_file, &link).unwrap();
+
+        let expected_sha = sha256_bytes(b"hello");
+        let specs = vec![PyodideAssetSpec {
+            file_name: "a.txt",
+            sha256: expected_sha.as_str(),
+        }];
+
+        let ok = ensure_pyodide_assets_in_dir(&cache_dir, &base_url, &specs, true, |_| {})
+            .await
+            .unwrap();
+        assert!(ok);
+
+        let meta = std::fs::symlink_metadata(&link).unwrap();
+        assert!(
+            !meta.file_type().is_symlink(),
+            "expected cached asset symlink to be replaced with a real file"
+        );
     }
 
     #[tokio::test]
