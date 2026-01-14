@@ -78,3 +78,41 @@ fn containsrow_with_table_literal_and_column_ref() {
         .unwrap();
     assert_eq!(value, Value::from(2));
 }
+
+#[test]
+fn containsrow_with_multi_column_table_expression() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // Virtual two-column table (SUMMARIZE).
+    let value = engine
+        .evaluate(
+            &model,
+            "CONTAINSROW(SUMMARIZE(Orders, Orders[OrderId], Orders[CustomerId]), 100, 1)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+
+    let value = engine
+        .evaluate(
+            &model,
+            "CONTAINSROW(SUMMARIZE(Orders, Orders[OrderId], Orders[CustomerId]), 100, 2)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(false));
+
+    // Physical table: match all columns in order.
+    let value = engine
+        .evaluate(
+            &model,
+            "CONTAINSROW(Orders, 100, 1, 10)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+}

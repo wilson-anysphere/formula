@@ -794,8 +794,9 @@ If a function is not listed here, it is currently unsupported and will evaluate 
   (current MVP restriction: all search columns must be in the same table as the result column)
 - `CALCULATE(expr, filter1, filter2, ...)`
 - `RELATED(Table[Column])` (requires row context)
-- `CONTAINSROW(tableExpr, value)`  
-  (limited: currently only supports one-column tables, e.g. `CONTAINSROW({1,2,3}, 2)` or `CONTAINSROW(VALUES(Table[Col]), v)`)
+- `CONTAINSROW(tableExpr, value1, ..., valueN)`  
+  (supports multi-column matching when `tableExpr` yields multiple columns; one-column table constructors like
+  `{1,2,3}` expose a single implicit column named `Value`, so `CONTAINSROW({1,2,3}, 2)` works as expected)
 - `EARLIER(Table[Column], [level])` (requires nested row context)
 - `EARLIEST(Table[Column])` (requires row context)
 
