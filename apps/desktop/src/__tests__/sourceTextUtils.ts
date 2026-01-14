@@ -21,6 +21,7 @@ export function stripComments(source: string): string {
   let out = "";
   for (let i = 0; i < source.length; i += 1) {
     const ch = source[i];
+    const prev = i > 0 ? source[i - 1] : "";
 
     if (ch === "'" || ch === '"' || ch === "`") {
       const end = skipStringLiteral(source, i);
@@ -29,7 +30,10 @@ export function stripComments(source: string): string {
       continue;
     }
 
-    if (ch === "/" && source[i + 1] === "/") {
+    // Treat `//` and `/*` as comments unless they are preceded by a backslash. This avoids
+    // accidentally stripping the `\/` at the end of a regex literal like `/foo\//`, which would
+    // otherwise look like the start of a line comment to this lightweight scanner.
+    if (ch === "/" && source[i + 1] === "/" && prev !== "\\") {
       // Line comment.
       i += 2;
       while (i < source.length && source[i] !== "\n") i += 1;
@@ -37,7 +41,7 @@ export function stripComments(source: string): string {
       continue;
     }
 
-    if (ch === "/" && source[i + 1] === "*") {
+    if (ch === "/" && source[i + 1] === "*" && prev !== "\\") {
       // Block comment (preserve newlines so we don't accidentally join tokens across lines).
       i += 2;
       while (i < source.length) {
@@ -56,4 +60,3 @@ export function stripComments(source: string): string {
   }
   return out;
 }
-
