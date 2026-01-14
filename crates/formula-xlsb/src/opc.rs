@@ -225,7 +225,9 @@ impl XlsbWorkbook {
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
         let path = path.as_ref().to_path_buf();
-        let file = File::open(&path)?;
+        let mut file = File::open(&path)?;
+        preflight_zip_entry_count(&mut file)?;
+        file.seek(SeekFrom::Start(0))?;
         let mut zip = ZipArchive::new(file)?;
         let parsed = parse_xlsb_from_zip(&mut zip, options)?;
         Ok(Self::from_parsed(WorkbookSource::Path(path), parsed))
@@ -308,7 +310,10 @@ impl XlsbWorkbook {
     }
 
     fn open_from_owned_bytes(bytes: Arc<[u8]>, options: OpenOptions) -> Result<Self, ParseError> {
-        let mut zip = ZipArchive::new(Cursor::new(bytes.clone()))?;
+        let mut cursor = Cursor::new(bytes.clone());
+        preflight_zip_entry_count(&mut cursor)?;
+        cursor.seek(SeekFrom::Start(0))?;
+        let mut zip = ZipArchive::new(cursor)?;
         let parsed = parse_xlsb_from_zip(&mut zip, options)?;
         Ok(Self::from_parsed(WorkbookSource::Bytes(bytes), parsed))
     }
@@ -1945,6 +1950,118 @@ impl XlsbWorkbook {
             |_part_name, input, output| stream_override(input, output),
         )
     }
+}
+
+/// Best-effort preflight to reject ZIP archives with an excessive number of entries *before*
+/// constructing a `zip::ZipArchive`.
+///
+/// `zip::ZipArchive::new` eagerly reads the central directory and allocates metadata for every
+/// entry. For pathological archives with millions of entries, this can consume substantial memory
+/// even if we later bail out. We therefore parse the end-of-central-directory records ourselves to
+/// obtain the entry count and enforce [`MAX_XLSB_ZIP_ENTRIES`] early.
+fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), ParseError> {
+    let max_entries = max_xlsb_zip_entries();
+
+    // Seek to end so we can read the EOCD record from the tail.
+    let end = reader.seek(SeekFrom::End(0))?;
+
+    // Minimum EOCD record size is 22 bytes.
+    if end < 22 {
+        return Ok(());
+    }
+
+    // The EOCD record is located within the last 22 + 65535 bytes (max comment length).
+    // Add 20 bytes to also include the Zip64 EOCD locator which immediately precedes the EOCD.
+    const EOCD_MIN: u64 = 22;
+    const EOCD_MAX_COMMENT: u64 = 65_535;
+    const ZIP64_LOCATOR_LEN: u64 = 20;
+    let tail_len = end.min(EOCD_MIN + EOCD_MAX_COMMENT + ZIP64_LOCATOR_LEN) as usize;
+
+    // Read tail bytes into memory for signature search.
+    reader.seek(SeekFrom::End(-(tail_len as i64)))?;
+    let mut tail = vec![0u8; tail_len];
+    reader.read_exact(&mut tail)?;
+
+    // Search backwards for the EOCD signature, validating the comment length so we don't match a
+    // signature embedded inside the ZIP comment itself.
+    const EOCD_SIG: [u8; 4] = [0x50, 0x4B, 0x05, 0x06]; // PK\05\06
+    let mut eocd_pos: Option<usize> = None;
+    let max_start = tail.len().saturating_sub(22);
+    for i in (0..=max_start).rev() {
+        if tail.get(i..i + 4) != Some(&EOCD_SIG) {
+            continue;
+        }
+        let comment_len = u16::from_le_bytes(tail[i + 20..i + 22].try_into().unwrap()) as usize;
+        if i + 22 + comment_len == tail.len() {
+            eocd_pos = Some(i);
+            break;
+        }
+    }
+
+    let Some(eocd_pos) = eocd_pos else {
+        // Could not find EOCD; fall back to `zip::ZipArchive` which will return an error.
+        return Ok(());
+    };
+
+    // EOCD total entry count is a u16 at offset 10.
+    let total_entries_u16 =
+        u16::from_le_bytes(tail[eocd_pos + 10..eocd_pos + 12].try_into().unwrap());
+
+    let total_entries_u64 = if total_entries_u16 != 0xFFFF {
+        total_entries_u16 as u64
+    } else {
+        // Zip64: read the Zip64 EOCD locator (20 bytes) immediately before the EOCD record.
+        if eocd_pos < ZIP64_LOCATOR_LEN as usize {
+            // EOCD indicates zip64 but we don't have the locator bytes. Treat this as a hard
+            // failure to avoid constructing a potentially huge `ZipArchive`.
+            return Err(ParseError::TooManyZipEntries {
+                count: usize::MAX,
+                max: max_entries,
+            });
+        }
+        let locator_pos = eocd_pos - (ZIP64_LOCATOR_LEN as usize);
+        const ZIP64_LOCATOR_SIG: [u8; 4] = [0x50, 0x4B, 0x06, 0x07]; // PK\06\07
+        if tail.get(locator_pos..locator_pos + 4) != Some(&ZIP64_LOCATOR_SIG) {
+            // Some ZIPs may legitimately have exactly 65535 entries without zip64. In that case,
+            // treat 0xFFFF as the literal count.
+            0xFFFFu64
+        } else {
+            let zip64_eocd_offset = u64::from_le_bytes(
+                tail[locator_pos + 8..locator_pos + 16]
+                    .try_into()
+                    .unwrap(),
+            );
+
+            // Save current position so we can restore after reading the zip64 EOCD record.
+            let cur = reader.seek(SeekFrom::Current(0))?;
+            reader.seek(SeekFrom::Start(zip64_eocd_offset))?;
+
+            // Zip64 EOCD record has a fixed header of at least 56 bytes; total entries is at
+            // offset 32..40 in that header.
+            let mut hdr = [0u8; 56];
+            reader.read_exact(&mut hdr)?;
+            reader.seek(SeekFrom::Start(cur))?;
+
+            const ZIP64_EOCD_SIG: [u8; 4] = [0x50, 0x4B, 0x06, 0x06]; // PK\06\06
+            if hdr[..4] != ZIP64_EOCD_SIG {
+                return Err(ParseError::Zip(zip::result::ZipError::InvalidArchive(
+                    "invalid ZIP64 EOCD signature",
+                )));
+            }
+
+            u64::from_le_bytes(hdr[32..40].try_into().unwrap())
+        }
+    };
+
+    let total_entries = usize::try_from(total_entries_u64).unwrap_or(usize::MAX);
+    if total_entries > max_entries {
+        return Err(ParseError::TooManyZipEntries {
+            count: total_entries,
+            max: max_entries,
+        });
+    }
+
+    Ok(())
 }
 
 fn parse_xlsb_from_zip<R: Read + Seek>(
