@@ -497,7 +497,6 @@ fn section_has_unescaped_parentheses(pattern: &str) -> bool {
     let mut has_open = false;
     let mut has_close = false;
     let mut chars = pattern.chars();
-
     while let Some(ch) = chars.next() {
         if escape {
             escape = false;

@@ -52,6 +52,16 @@ fn cell_color_and_parentheses_match_excel_semantics() {
         cell_format_info(Some(r#"0;[$(USD)-409]0"#), &options).parentheses,
         0
     );
+
+    // --- 7) Underscore / fill layout token operands should NOT count ---
+    assert_eq!(
+        cell_format_info(Some("0;0_(0_)"), &options).parentheses,
+        0
+    );
+    assert_eq!(
+        cell_format_info(Some("0;0*(0*)"), &options).parentheses,
+        0
+    );
 }
 
 #[test]
