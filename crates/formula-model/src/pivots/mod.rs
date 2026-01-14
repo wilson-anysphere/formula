@@ -74,6 +74,21 @@ impl PivotKeyPart {
             }
         }
     }
+
+    /// Converts this key part into the [`PivotValue`] that should be emitted when rendering pivot
+    /// item labels into a worksheet grid.
+    ///
+    /// Notably, Excel renders blank pivot items as the literal "(blank)" text label rather than an
+    /// empty cell.
+    pub fn to_pivot_value(&self) -> PivotValue {
+        match self {
+            PivotKeyPart::Blank => PivotValue::Text("(blank)".to_string()),
+            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)),
+            PivotKeyPart::Date(d) => PivotValue::Date(*d),
+            PivotKeyPart::Text(s) => PivotValue::Text(s.clone()),
+            PivotKeyPart::Bool(b) => PivotValue::Bool(*b),
+        }
+    }
 }
 
 impl PartialOrd for PivotKeyPart {
@@ -120,6 +135,12 @@ impl Ord for PivotKeyPart {
 pub enum PivotValue {
     Blank,
     Number(f64),
+    /// A calendar date coming from source data / pivot items.
+    ///
+    /// When rendering into worksheet cell values, this should typically be converted to Excel's
+    /// *date serial number* (a number) and paired with a date number format in the styling layer.
+    /// Keeping it typed in the pivot model allows downstream formulas and pivot-specific functions
+    /// (e.g. GETPIVOTDATA) to match Excel semantics.
     Date(NaiveDate),
     Text(String),
     Bool(bool),

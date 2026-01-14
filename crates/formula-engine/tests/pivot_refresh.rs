@@ -82,6 +82,7 @@ fn engine_can_calculate_pivot_from_live_range_values() {
 
 #[test]
 fn engine_pivot_infers_dates_from_cell_number_formats() {
+    use chrono::NaiveDate;
     use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 
     let mut engine = Engine::new();
@@ -142,13 +143,19 @@ fn engine_pivot_infers_dates_from_cell_number_formats() {
         .calculate_pivot_from_range("Sheet1", range, &cfg)
         .unwrap();
 
-    // Row labels should be dates (ISO strings from PivotValue::Date display), not raw serial numbers.
+    // Row labels should be typed dates, not raw serial numbers or pre-formatted strings.
     assert_eq!(
         result.data,
         vec![
             vec!["Date".into(), "Sum of Amount".into()],
-            vec!["2024-01-15".into(), 10.into()],
-            vec!["2024-02-01".into(), 20.into()],
+            vec![
+                NaiveDate::from_ymd_opt(2024, 1, 15).unwrap().into(),
+                10.into()
+            ],
+            vec![
+                NaiveDate::from_ymd_opt(2024, 2, 1).unwrap().into(),
+                20.into()
+            ],
             vec!["Grand Total".into(), 30.into()],
         ]
     );

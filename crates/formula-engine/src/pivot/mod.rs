@@ -1519,6 +1519,12 @@ impl PivotEngine {
         }
 
         // Flatten column keys × value fields.
+        //
+        // Note: Excel renders pivot item labels (including column items) as typed cell values
+        // (numbers/dates/bools). The current pivot output flattens column-field labels and value
+        // field captions into a single header row of text (e.g. "A - Sum of Sales"). Emitting
+        // typed column key values would require multi-row headers to avoid losing the value field
+        // captions; that is handled in higher-level rendering layers.
         for col_key in col_keys {
             let col_label = if cfg.column_fields.is_empty() {
                 String::new()
@@ -1587,7 +1593,7 @@ impl PivotEngine {
                             continue;
                         }
                     }
-                    row.push(PivotValue::Text(part.display_string()));
+                    row.push(part.to_pivot_value());
                 }
 
                 // If row key shorter than row_fields (shouldn't happen), pad.
@@ -1643,11 +1649,11 @@ impl PivotEngine {
                 } else {
                     for idx in 0..cfg.row_fields.len() {
                         if idx < label_column {
-                            let prefix = prefix_parts
-                                .get(idx)
-                                .map(|p| p.display_string())
-                                .unwrap_or_default();
-                            row.push(PivotValue::Text(prefix));
+                            if let Some(prefix) = prefix_parts.get(idx) {
+                                row.push(prefix.to_pivot_value());
+                            } else {
+                                row.push(PivotValue::Blank);
+                            }
                         } else if idx == label_column {
                             row.push(label.clone());
                         } else {
@@ -3538,9 +3544,54 @@ mod tests {
             result.data,
             vec![
                 vec!["Num".into(), "Sum of Value".into()],
-                vec!["10".into(), 30.into()],
-                vec!["2".into(), 20.into()],
-                vec!["1".into(), 10.into()],
+                vec![10.into(), 30.into()],
+                vec![2.into(), 20.into()],
+                vec![1.into(), 10.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn renders_numeric_row_labels_as_numbers_in_tabular_layout() {
+        let data = vec![
+            pv_row(&["Num".into(), "Sales".into()]),
+            pv_row(&[1.into(), 10.into()]),
+            pv_row(&[1.5.into(), 20.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Num")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Num".into(), "Sum of Sales".into()],
+                vec![1.into(), 10.into()],
+                vec![1.5.into(), 20.into()],
             ]
         );
     }
@@ -3699,8 +3750,8 @@ mod tests {
             result.data,
             vec![
                 vec!["Flag".into(), "Sum of Sales".into()],
-                vec!["TRUE".into(), 2.into()],
-                vec!["FALSE".into(), 1.into()],
+                vec![true.into(), 2.into()],
+                vec![false.into(), 1.into()],
                 vec!["(blank)".into(), 3.into()],
             ]
         );
@@ -3753,8 +3804,8 @@ mod tests {
             result.data,
             vec![
                 vec!["Date".into(), "Sum of Sales".into()],
-                vec!["2024-01-02".into(), 20.into()],
-                vec!["2024-01-01".into(), 10.into()],
+                vec![jan_02.into(), 20.into()],
+                vec![jan_01.into(), 10.into()],
                 vec!["(blank)".into(), 5.into()],
             ]
         );
@@ -4096,8 +4147,51 @@ mod tests {
             result.data,
             vec![
                 vec!["Num".into(), "Sum of Sales".into()],
-                vec!["2".into(), 1.into()],
-                vec!["10".into(), 1.into()],
+                vec![2.into(), 1.into()],
+                vec![10.into(), 1.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn renders_blank_row_items_as_excel_blank_text() {
+        let data = vec![
+            pv_row(&["Key".into(), "Sales".into()]),
+            pv_row(&[PivotValue::Blank, 10.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Key")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Key".into(), "Sum of Sales".into()],
+                vec!["(blank)".into(), 10.into()],
             ]
         );
     }
@@ -4902,7 +4996,7 @@ mod tests {
 
         let expected = vec![
             vec!["Key".into(), "Sum of Amount".into()],
-            vec!["1".into(), 10.into()],
+            vec![1.into(), 10.into()],
             vec!["1".into(), 20.into()],
         ];
 

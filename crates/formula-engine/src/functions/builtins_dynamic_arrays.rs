@@ -2244,11 +2244,9 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
 mod tests {
     use super::*;
     use crate::date::ExcelDateSystem;
-    use crate::value::{EntityValue, RecordValue};
     use crate::functions::{Reference, SheetId};
-    use chrono::Utc;
-    use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
-
+    use crate::value::{EntityValue, RecordValue};
+    use chrono::TimeZone;
     struct DummyContext;
 
     impl FunctionContext for DummyContext {
@@ -2267,17 +2265,17 @@ mod tests {
         fn eval_formula_with_bindings(
             &self,
             _expr: &CompiledExpr,
-            _bindings: &HashMap<String, Value>,
+            _bindings: &std::collections::HashMap<String, Value>,
         ) -> Value {
             unreachable!("not needed for sort_key tests")
         }
 
-        fn capture_lexical_env(&self) -> HashMap<String, Value> {
-            HashMap::new()
+        fn capture_lexical_env(&self) -> std::collections::HashMap<String, Value> {
+            std::collections::HashMap::new()
         }
 
         fn apply_implicit_intersection(&self, _reference: &Reference) -> Value {
-            unreachable!("not needed for sort_key tests")
+            Value::Blank
         }
 
         fn get_cell_value(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Value {
@@ -2292,7 +2290,7 @@ mod tests {
         }
 
         fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
-            Utc::now()
+            chrono::Utc.timestamp_opt(0, 0).single().unwrap()
         }
 
         fn date_system(&self) -> ExcelDateSystem {
@@ -2305,10 +2303,6 @@ mod tests {
 
         fn current_cell_addr(&self) -> CellAddr {
             CellAddr { row: 0, col: 0 }
-        }
-
-        fn sheet_dimensions(&self, _sheet_id: &SheetId) -> (u32, u32) {
-            (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
         }
 
         fn push_local_scope(&self) {}
