@@ -369,6 +369,19 @@ function normalizeWorkbookChunkKind(kind) {
 }
 
 /**
+ * Detect whether a workbook chunk kind is unknown/untrusted.
+ *
+ * @param {unknown} kind
+ */
+function isWorkbookChunkKindUnknown(kind) {
+  if (kind === null || kind === undefined) return false;
+  if (typeof kind !== "string") return true;
+  const raw = kind.trim().toLowerCase();
+  if (!raw) return false;
+  return raw !== "chunk" && raw !== "table" && raw !== "namedrange" && raw !== "dataregion" && raw !== "formularegion";
+}
+
+/**
  * Filter vector-store chunk metadata before returning it to callers under structured DLP redaction.
  *
  * Vector stores (especially third-party ones) may persist additional metadata fields. Those fields can
@@ -399,8 +412,37 @@ function filterWorkbookChunkMetadataForOutput(metadata) {
     if (!Object.prototype.hasOwnProperty.call(metadata, key)) continue;
     if (key === "kind") {
       out.kind = normalizeWorkbookChunkKind(metadata.kind);
-    } else {
-      out[key] = metadata[key];
+      continue;
+    }
+
+    // Metadata tokens can be arbitrarily shaped in third-party stores. Under structured DLP redaction,
+    // ensure we never return nested objects that could contain non-heuristic secrets.
+    const value = metadata[key];
+    if (key === "rect") {
+      out.rect = value;
+      continue;
+    }
+    if (key === "tokenCount") {
+      const n = Number(value);
+      if (Number.isFinite(n) && n >= 0) out.tokenCount = Math.floor(n);
+      continue;
+    }
+    if (
+      key === "workbookId" ||
+      key === "sheetName" ||
+      key === "title" ||
+      key === "embedder" ||
+      key === "contentHash" ||
+      key === "metadataHash"
+    ) {
+      if (typeof value === "string") out[key] = value;
+      else if (value !== null && value !== undefined) out[key] = "[REDACTED]";
+      continue;
+    }
+
+    // Any other allowlisted keys are treated as safe primitives; drop otherwise.
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
     }
   }
   return out;
@@ -2013,9 +2055,11 @@ export class ContextManager {
                 // table/namedRange titles) as disallowed for embedding/persistence so a no-op
                 // redactor cannot leak non-heuristic secrets like "TopSecret" to a cloud embedder.
                 const sheetNameTokenDisallowed = sheetNameDisallowed(sheetName);
-                const kind = String(record.metadata?.kind ?? "");
+                const rawKind = record.metadata?.kind;
+                const kind = normalizeWorkbookChunkKind(rawKind ?? "");
+                const kindUnknown = isWorkbookChunkKindUnknown(rawKind);
                 const titleTokenDisallowed =
-                  sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange");
+                  sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange" || kindUnknown);
                 if (sheetNameTokenDisallowed && recordDecision.decision === DLP_DECISION.ALLOW) {
                   const safeFirstLine = safeChunkFirstLineFromMetadata(record.metadata, {
                     sheetNameForOutput: "[REDACTED]",
@@ -2360,15 +2404,18 @@ export class ContextManager {
     throwIfAborted(signal);
     const retrievedChunks = hits.map((hit, idx) => {
       const meta = hit.metadata ?? {};
-      const kind = dlp ? normalizeWorkbookChunkKind(meta.kind ?? "chunk") : (meta.kind ?? "chunk");
+      const rawKind = meta.kind;
+      const kind = dlp ? normalizeWorkbookChunkKind(rawKind ?? "chunk") : (meta.kind ?? "chunk");
+      const kindUnknown = Boolean(dlp) && isWorkbookChunkKindUnknown(rawKind);
       const audit = chunkAudits[idx];
       const decision = audit?.decision ?? null;
       const recordDecision = audit?.recordDecision ?? null;
       const rangeDisallowed = Boolean(dlp) && recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW;
       const rawSheetName = String(meta.sheetName ?? "");
-    const sheetNameTokenDisallowed = Boolean(dlp) && sheetNameDisallowed(rawSheetName);
+      const sheetNameTokenDisallowed = Boolean(dlp) && sheetNameDisallowed(rawSheetName);
       const titleTokenDisallowed =
-        sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange");
+        (sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange")) ||
+        (workbookIdTokenDisallowed && kindUnknown);
       const shouldRedactSheetNameToken = Boolean(dlp) && (rangeDisallowed || sheetNameTokenDisallowed);
       const shouldRedactTitleToken = Boolean(dlp) && (rangeDisallowed || titleTokenDisallowed);
       const shouldRedactChunkId = shouldRedactSheetNameToken || shouldRedactTitleToken || workbookIdTokenDisallowed;

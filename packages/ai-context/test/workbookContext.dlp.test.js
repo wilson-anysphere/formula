@@ -671,6 +671,134 @@ test("buildWorkbookContext: structured DLP REDACT does not leak non-heuristic ch
   assert.doesNotMatch(JSON.stringify(out.retrieved), new RegExp(kindSecret));
 });
 
+test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic titles for unknown chunk kinds (no-op redactor)", async () => {
+  const titleSecret = "TopSecretTitle";
+  const workbook = {
+    id: "wb-dlp-unknown-kind-title",
+    sheets: [
+      {
+        name: "PublicSheet",
+        cells: [[{ v: "Hello" }, { v: "public" }]],
+      },
+      {
+        name: "SecretSheet",
+        cells: [[{ v: "Ignore" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  // Persist a legacy/third-party chunk metadata shape where `kind` is an unknown string.
+  // Under structured DLP redaction, treat `title` as disallowed metadata too so non-heuristic
+  // secrets cannot leak even if the configured redactor is a no-op.
+  await indexWorkbook({
+    workbook,
+    vectorStore,
+    embedder,
+    transform: (record) => ({
+      metadata: { ...(record.metadata ?? {}), kind: "custom", title: titleSecret },
+    }),
+  });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "public",
+    topK: 1,
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "SecretSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.doesNotMatch(out.promptContext, new RegExp(titleSecret));
+  assert.doesNotMatch(JSON.stringify(out.retrieved), new RegExp(titleSecret));
+  assert.equal(out.retrieved[0]?.metadata?.title, "[REDACTED]");
+});
+
+test("buildWorkbookContext: structured DLP REDACT does not return non-string title objects that can contain non-heuristic secrets (no-op redactor)", async () => {
+  const titleSecret = "TopSecretTitleObject";
+  const workbook = {
+    id: "wb-dlp-title-object",
+    sheets: [
+      {
+        name: "PublicSheet",
+        cells: [[{ v: "Hello" }, { v: "public" }]],
+      },
+      {
+        name: "SecretSheet",
+        cells: [[{ v: "Ignore" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  await indexWorkbook({
+    workbook,
+    vectorStore,
+    embedder,
+    transform: (record) => ({
+      metadata: { ...(record.metadata ?? {}), title: { token: titleSecret } },
+    }),
+  });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "public",
+    topK: 1,
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "SecretSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), new RegExp(titleSecret));
+  assert.equal(out.retrieved[0]?.metadata?.title, "[REDACTED]");
+});
+
 test("buildWorkbookContext: workbook_schema redacts sensitive header strings even with a no-op redactor (DLP REDACT + empty retrieval)", async () => {
   const workbook = {
     id: "wb-dlp-schema-header-noop-redactor",
