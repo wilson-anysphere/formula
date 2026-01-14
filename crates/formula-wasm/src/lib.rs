@@ -3897,6 +3897,12 @@ impl WasmWorkbook {
             locale_id: Option<String>,
             #[serde(default, rename = "sheetOrder")]
             sheet_order: Option<Vec<String>>,
+            /// Optional workbook text codepage (Windows codepage number).
+            ///
+            /// This powers Excel's legacy DBCS (`*B`) text functions (e.g. `LENB`) which behave
+            /// differently under Japanese codepages (e.g. 932 / Shift-JIS).
+            #[serde(default, rename = "textCodepage", alias = "codepage", alias = "text_codepage")]
+            text_codepage: Option<u16>,
             sheets: BTreeMap<String, SheetJson>,
         }
 
@@ -3921,6 +3927,10 @@ impl WasmWorkbook {
         // Unknown locale ids are ignored for backwards compatibility (treat as en-US).
         if let Some(locale_id) = parsed.locale_id.as_deref() {
             wb.set_locale_id(locale_id);
+        }
+
+        if let Some(codepage) = parsed.text_codepage {
+            wb.engine.set_text_codepage(codepage);
         }
 
         // Create all sheets up-front so cross-sheet formula references resolve correctly.
@@ -4503,6 +4513,8 @@ impl WasmWorkbook {
         struct WorkbookJson<'a> {
             #[serde(default, skip_serializing_if = "Option::is_none", rename = "localeId")]
             locale_id: Option<&'a str>,
+            #[serde(default, skip_serializing_if = "Option::is_none", rename = "textCodepage")]
+            text_codepage: Option<u16>,
             #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "sheetOrder")]
             sheet_order: Vec<String>,
             sheets: BTreeMap<String, SheetJson>,
@@ -4553,12 +4565,18 @@ impl WasmWorkbook {
             Some(self.inner.formula_locale.id)
         };
 
+        let text_codepage = {
+            let codepage = self.inner.engine.text_codepage();
+            (codepage != 1252).then_some(codepage)
+        };
+
         // Preserve sheet tab order so clients can round-trip through `toJson`/`fromJson` without
         // changing 3D reference semantics (`Sheet1:Sheet3!A1`) or worksheet functions like `SHEET()`.
         let sheet_order = self.inner.engine.sheet_names_in_order();
 
         serde_json::to_string(&WorkbookJson {
             locale_id,
+            text_codepage,
             sheet_order,
             sheets,
         })
@@ -6232,6 +6250,39 @@ mod tests {
         );
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "C1"),
+            EngineValue::Number(2.0)
+        );
+    }
+
+    #[test]
+    fn from_json_imports_text_codepage_and_to_json_roundtrips_it() {
+        let json = serde_json::json!({
+            "textCodepage": 932,
+            "sheets": {
+                "Sheet1": {
+                    "cells": {
+                        "A1": "=LENB(\"あ\")"
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let mut wb = WasmWorkbook::from_json(&json).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(2.0)
+        );
+
+        let roundtrip = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&roundtrip).unwrap();
+        assert_eq!(parsed["textCodepage"], serde_json::json!(932));
+
+        let mut wb2 = WasmWorkbook::from_json(&roundtrip).unwrap();
+        wb2.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb2.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
             EngineValue::Number(2.0)
         );
     }
