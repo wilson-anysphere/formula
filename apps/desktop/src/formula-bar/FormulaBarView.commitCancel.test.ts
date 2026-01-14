@@ -150,6 +150,71 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not begin editing when read-only (focus/click-to-edit keep commit/cancel hidden)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "hello", value: null });
+
+    view.setReadOnly(true);
+    expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
+
+    view.textarea.focus();
+
+    expect(view.model.isEditing).toBe(false);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
+    expect(onBeginEdit).not.toHaveBeenCalled();
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    // Click-to-edit via the highlight pre should also be blocked in read-only mode.
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]')!;
+    highlight.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+
+    expect(view.model.isEditing).toBe(false);
+    expect(onBeginEdit).not.toHaveBeenCalled();
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("setReadOnly(true) exits edit mode without calling onCancel/onCommit", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "changed";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    expect(view.model.isEditing).toBe(true);
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
+
+    view.setReadOnly(true);
+
+    expect(view.model.isEditing).toBe(false);
+    expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+    expect(view.textarea.value).toBe("orig");
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+
+    host.remove();
+  });
+
   it("commitEdit()/cancelEdit() are no-ops when not editing", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
