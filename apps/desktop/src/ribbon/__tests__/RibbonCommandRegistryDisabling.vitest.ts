@@ -79,4 +79,72 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(baselineDisabledById["home.editing.fill.up"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
   });
+
+  it("keeps exempt menu items enabled even when the CommandRegistry does not register them", () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const schema: RibbonSchema = {
+      tabs: [
+        {
+          id: "home",
+          label: "Home",
+          groups: [
+            {
+              id: "cells",
+              label: "Cells",
+              buttons: [
+                {
+                  id: "home.cells.format",
+                  label: "Format",
+                  ariaLabel: "Format Cells",
+                  kind: "dropdown",
+                  menuItems: [
+                    { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
+                    { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const commandRegistry = new CommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema });
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: baselineDisabledById,
+        shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
+      });
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<Ribbon actions={{}} schema={schema} />);
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format"]');
+    expect(trigger).toBeInstanceOf(HTMLButtonElement);
+    expect(trigger?.disabled).toBe(false);
+
+    act(() => {
+      trigger?.click();
+    });
+
+    const rowHeight = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.rowHeight"]');
+    const colWidth = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.columnWidth"]');
+    expect(rowHeight).toBeInstanceOf(HTMLButtonElement);
+    expect(colWidth).toBeInstanceOf(HTMLButtonElement);
+    expect(rowHeight?.disabled).toBe(false);
+    expect(colWidth?.disabled).toBe(false);
+
+    act(() => root.unmount());
+  });
 });

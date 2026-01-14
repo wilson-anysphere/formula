@@ -97,6 +97,8 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.number.moreFormats.formatCells",
   "home.number.moreFormats.custom",
   "home.cells.format.formatCells",
+  "home.cells.format.rowHeight",
+  "home.cells.format.columnWidth",
 
   // --- Home editing -----------------------------------------------------------
   "home.editing.autoSum",
