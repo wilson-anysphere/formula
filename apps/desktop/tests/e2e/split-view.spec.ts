@@ -876,7 +876,8 @@ test.describe("split view", () => {
     // Shared-grid mouse drag keeps the *anchor* cell active (D4 here) even though the range normalizes to B2:D4.
     await expect(page.getByTestId("selection-range")).toHaveText("B2:D4");
     await expect(page.getByTestId("active-cell")).toHaveText("D4");
-    await expect(page.getByTestId("formula-address")).toHaveValue("D4");
+    // Name box reflects the selection (Excel semantics), not the active/anchor cell.
+    await expect(page.getByTestId("formula-address")).toHaveValue("B2:D4");
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell D4");
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-status")).toContainText("Selection B2:D4");
     await expect(secondary.getByTestId("canvas-grid-a11y-status")).toContainText("Selection B2:D4");
@@ -917,7 +918,7 @@ test.describe("split view", () => {
 
     await expect(page.getByTestId("selection-range")).toHaveText("2 ranges");
     await expect(page.getByTestId("active-cell")).toHaveText("C3");
-    await expect(page.getByTestId("formula-address")).toHaveValue("C3");
+    await expect(page.getByTestId("formula-address")).toHaveValue("2 ranges");
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell C3");
 
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
@@ -965,7 +966,7 @@ test.describe("split view", () => {
 
     await expect(page.getByTestId("selection-range")).toHaveText("2 ranges");
     await expect(page.getByTestId("active-cell")).toHaveText("C3");
-    await expect(page.getByTestId("formula-address")).toHaveValue("C3");
+    await expect(page.getByTestId("formula-address")).toHaveValue("2 ranges");
     await expect(secondary.getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell C3");
 
     const secondaryScrollAfter = {
