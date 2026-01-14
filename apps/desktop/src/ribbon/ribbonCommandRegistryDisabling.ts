@@ -68,11 +68,7 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   // (Removed: Home → Styles items are either registered via CommandRegistry or intentionally disabled;
   // What-If Analysis + Solver are registered commands and do not require exemptions.)
 
-  // Insert → Pictures.
-  "insert.illustrations.pictures.thisDevice",
-  "insert.illustrations.pictures.stockImages",
-  "insert.illustrations.pictures.onlinePictures",
-  "insert.illustrations.onlinePictures",
+  // (Removed: Insert → Pictures ids are registered commands and do not require exemptions.)
 ]);
 
 function isExemptViaPattern(_commandId: string): boolean {

@@ -13,6 +13,7 @@ import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript
 import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "../formatting/selectionSizeGuard.js";
 import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.js";
+import { handleInsertPicturesRibbonCommand } from "../main.insertPicturesRibbonCommand.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerAxisSizingCommands } from "./registerAxisSizingCommands.js";
@@ -321,6 +322,25 @@ export function registerDesktopCommands(params: {
     },
     { category: commandCategoryFormat },
   );
+
+  // Ribbon schema uses `insert.illustrations.pictures.*` ids for Insert → Pictures.
+  // Register them so the ribbon does not need to exempt them from CommandRegistry disabling.
+  const commandCategoryInsert = "Insert";
+  const registerInsertPicturesCommand = (commandId: string, title: string): void => {
+    commandRegistry.registerBuiltinCommand(
+      commandId,
+      title,
+      async () => {
+        await handleInsertPicturesRibbonCommand(commandId, app);
+      },
+      { category: commandCategoryInsert },
+    );
+  };
+  registerInsertPicturesCommand("insert.illustrations.pictures", "Pictures…");
+  registerInsertPicturesCommand("insert.illustrations.pictures.thisDevice", "Pictures: This Device…");
+  registerInsertPicturesCommand("insert.illustrations.pictures.stockImages", "Pictures: Stock Images…");
+  registerInsertPicturesCommand("insert.illustrations.pictures.onlinePictures", "Pictures: Online Pictures…");
+  registerInsertPicturesCommand("insert.illustrations.onlinePictures", "Online Pictures…");
 
   commandRegistry.registerBuiltinCommand(
     "format.toggleStrikethrough",
