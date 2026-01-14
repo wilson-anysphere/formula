@@ -24,6 +24,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+_PRIVACY_PUBLIC = "public"
+_PRIVACY_PRIVATE = "private"
+
+
 def _load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -35,6 +39,47 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
+    """Redact potentially sensitive free-form strings in privacy mode.
+
+    This is used to scrub local filesystem paths embedded in reports (for example, Windows paths that
+    include usernames like `C:\\Users\\Alice\\...`).
+    """
+
+    if not value or privacy_mode != _PRIVACY_PRIVATE:
+        return value
+    if value.startswith("sha256="):
+        return value
+    return f"sha256={_sha256_text(value)}"
+
+
+def _redact_paths_in_obj(obj: Any, *, privacy_mode: str) -> Any:
+    """Recursively redact values under keys named `path` or `*Path`."""
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return obj
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            if (
+                isinstance(k, str)
+                and isinstance(v, str)
+                and v
+                and (k == "path" or k.endswith("Path"))
+            ):
+                out[k] = _redact_text(v, privacy_mode=privacy_mode)
+            else:
+                out[k] = _redact_paths_in_obj(v, privacy_mode=privacy_mode)
+        return out
+    if isinstance(obj, list):
+        return [_redact_paths_in_obj(v, privacy_mode=privacy_mode) for v in obj]
+    return obj
 
 
 def _index_results(
@@ -235,6 +280,15 @@ def main() -> int:
     parser.add_argument("--actual", required=True, help="Path to engine results JSON")
     parser.add_argument("--report", required=True, help="Path to write mismatch report JSON")
     parser.add_argument(
+        "--privacy-mode",
+        choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
+        default=_PRIVACY_PUBLIC,
+        help=(
+            "Control redaction of outputs. `private` hashes filesystem path metadata in the report "
+            "(for example, paths that include local usernames/mount points)."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print how many cases would be compared (after tag filtering / max-cases) and exit without writing a report.",
@@ -418,11 +472,15 @@ def main() -> int:
         included_cases = included_cases[: args.max_cases]
 
     if args.dry_run:
+        def _fmt_path(path: Path) -> str:
+            raw = str(path)
+            return _redact_text(raw, privacy_mode=args.privacy_mode) or ""
+
         print("Dry run: compare.py")
-        print(f"cases: {cases_path}")
-        print(f"expected: {expected_path}")
-        print(f"actual: {actual_path}")
-        print(f"report: {report_path}")
+        print(f"cases: {_fmt_path(cases_path)}")
+        print(f"expected: {_fmt_path(expected_path)}")
+        print(f"actual: {_fmt_path(actual_path)}")
+        print(f"report: {_fmt_path(report_path)}")
         print(f"cases after tag filtering: {matched_cases}")
         print(f"cases selected: {len(included_cases)}")
         return 0
@@ -616,37 +674,40 @@ def main() -> int:
         for k, v in sorted(actual_error_kinds.items(), key=lambda kv: (-kv[1], kv[0]))
     ][:20]
 
+    summary: dict[str, Any] = {
+        "totalCases": total,
+        "includeTags": sorted(include_tags),
+        "excludeTags": sorted(exclude_tags),
+        "maxCases": args.max_cases,
+        "absTol": args.abs_tol,
+        "relTol": args.rel_tol,
+        "tagAbsTol": tag_abs_tol,
+        "tagRelTol": tag_rel_tol,
+        "mismatches": mismatch_count,
+        "mismatchRate": mismatch_rate,
+        "maxMismatchRate": args.max_mismatch_rate,
+        "reasonCounts": dict(sorted(reason_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "tagSummary": tag_summary,
+        "topMissingFunctions": top_missing_functions,
+        "topActualErrorKinds": top_actual_error_kinds,
+        "casesSha256": cases_sha,
+        # Make reports self-contained: consumers (CI artifacts, local debugging) should be able
+        # to see exactly which datasets were compared without having to reconstruct CLI args.
+        "casesPath": str(cases_path),
+        "expectedPath": str(expected_path),
+        "actualPath": str(actual_path),
+        # Expected dataset provenance.
+        "expectedDatasetKind": expected_dataset_kind,
+        "expectedDatasetHasPatches": expected_dataset_has_patches,
+        "expectedDatasetPatchEntryCount": expected_dataset_patch_entry_count,
+    }
+    summary = _redact_paths_in_obj(summary, privacy_mode=args.privacy_mode)
+
     report = {
         "schemaVersion": 1,
-        "summary": {
-            "totalCases": total,
-            "includeTags": sorted(include_tags),
-            "excludeTags": sorted(exclude_tags),
-            "maxCases": args.max_cases,
-            "absTol": args.abs_tol,
-            "relTol": args.rel_tol,
-            "tagAbsTol": tag_abs_tol,
-            "tagRelTol": tag_rel_tol,
-            "mismatches": mismatch_count,
-            "mismatchRate": mismatch_rate,
-            "maxMismatchRate": args.max_mismatch_rate,
-            "reasonCounts": dict(sorted(reason_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
-            "tagSummary": tag_summary,
-            "topMissingFunctions": top_missing_functions,
-            "topActualErrorKinds": top_actual_error_kinds,
-            "casesSha256": cases_sha,
-            # Make reports self-contained: consumers (CI artifacts, local debugging) should be able
-            # to see exactly which datasets were compared without having to reconstruct CLI args.
-            "casesPath": str(cases_path),
-            "expectedPath": str(expected_path),
-            "actualPath": str(actual_path),
-            # Expected dataset provenance.
-            "expectedDatasetKind": expected_dataset_kind,
-            "expectedDatasetHasPatches": expected_dataset_has_patches,
-            "expectedDatasetPatchEntryCount": expected_dataset_patch_entry_count,
-        },
-        "expectedSource": expected.get("source"),
-        "actualSource": actual_source,
+        "summary": summary,
+        "expectedSource": _redact_paths_in_obj(expected.get("source"), privacy_mode=args.privacy_mode),
+        "actualSource": _redact_paths_in_obj(actual_source, privacy_mode=args.privacy_mode),
         "mismatches": mismatches,
     }
 
