@@ -261,8 +261,9 @@ Agile includes a `dataIntegrity` block that authenticates the package bytes:
   decrypted `hmacValue` (constant-time compare).
   - Note: MS-OFFCRYPTO/Excel authenticates the **entire `EncryptedPackage` stream bytes** (8-byte
     length prefix + ciphertext). For compatibility with some non-Excel producers, our decryptors may
-    also accept alternative HMAC targets (e.g. plaintext ZIP bytes, ciphertext-only). For the exact
-    per-crate acceptance behavior, see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
+    also accept alternative HMAC targets (e.g. plaintext ZIP bytes, ciphertext-only, or header +
+    plaintext). For the exact per-crate acceptance behavior, see
+    [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 Implementation status:
 

@@ -114,7 +114,8 @@ Current state in this repo (important nuance):
       `<dataIntegrity>`; in that case decryption can still succeed, but no integrity verification is
       performed (decrypted bytes are unauthenticated).
       - When `<dataIntegrity>` *is* present, `formula-office-crypto` is permissive about which bytes
-        are authenticated by the HMAC for compatibility; see
+        are authenticated by the HMAC for compatibility (e.g. ciphertext-only, plaintext-only, or
+        header + plaintext); see
         [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
   - MS-OFFCRYPTO parsing + decrypt helpers (Standard + Agile):
     `crates/formula-offcrypto`
@@ -308,7 +309,8 @@ Note: `formula-office-crypto` validates Agile `<dataIntegrity>` when it is prese
 require it. Some real-world producers omit `<dataIntegrity>`; in that case, decryption can still
 succeed, but integrity cannot be verified (the decrypted bytes are unauthenticated).
 When `<dataIntegrity>` is present, `formula-office-crypto` is permissive about HMAC target bytes for
-compatibility; see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
+compatibility (e.g. ciphertext-only, plaintext-only, or header + plaintext); see
+[`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 ### Inspecting Agile `EncryptionInfo` XML (debug-only)
 
