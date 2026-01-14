@@ -630,10 +630,21 @@ impl Workbook {
         if new_index >= self.sheet_order.len() {
             return false;
         }
-        let Some(current) = self.sheet_order_index(sheet) else {
+        // Prefer searching `sheet_order` directly rather than relying on the cached tab index.
+        //
+        // `sheet_tab_index_by_id` is derived state; if invariants are broken (e.g. tests mutate
+        // `sheet_order` directly), the cache may be stale. In that scenario we must reject the
+        // reorder request without mutating the remaining order.
+        let Some(current) = self.sheet_order.iter().position(|&id| id == sheet) else {
+            // Keep the cache aligned with the current order so subsequent lookups behave
+            // consistently even if the workbook is already in an inconsistent state.
+            self.rebuild_sheet_tab_index_by_id();
             return false;
         };
         if current == new_index {
+            // Even in a no-op reorder, keep the cache aligned with `sheet_order` in case it became
+            // stale.
+            self.rebuild_sheet_tab_index_by_id();
             return true;
         }
         let id = self.sheet_order.remove(current);
@@ -15952,6 +15963,37 @@ fn walk_calc_expr(
                     );
                 }
             }
+            Expr::FunctionCall { name, args, .. } if name == "INDEX" => {
+                if args.is_empty() {
+                    return;
+                }
+
+                // When INDEX is used in reference context (e.g. ROW(INDEX(...))), the input range
+                // is used only for its bounds/shape; the row/col/area arguments determine the
+                // returned reference and should participate in dependency analysis.
+                walk_calc_expr_reference_context(
+                    &args[0],
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
+                for a in args.iter().skip(1) {
+                    walk_calc_expr(
+                        a,
+                        current_cell,
+                        tables_by_sheet,
+                        workbook,
+                        spills,
+                        precedents,
+                        visiting_names,
+                        lexical_scopes,
+                    );
+                }
+            }
             // Spilled ranges are dynamic; consumers like ROW/COLUMN depend on the spill bounds.
             Expr::SpillRange(_) => walk_calc_expr(
                 expr,
@@ -16833,6 +16875,24 @@ fn walk_calc_expr(
                         let Some(arg0) = args.first() else {
                             return;
                         };
+                        walk_calc_expr_reference_context(
+                            arg0,
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        return;
+                    }
+                    "ISREF" => {
+                        let Some(arg0) = args.first() else {
+                            return;
+                        };
+                        // ISREF is based on whether the argument is a reference, not the
+                        // referenced cell's value.
                         walk_calc_expr_reference_context(
                             arg0,
                             current_cell,
@@ -17809,6 +17869,45 @@ mod tests {
             engine.get_cell_value("Sheet1", "A2"),
             Value::Error(ErrorKind::Value)
         );
+    }
+
+    #[test]
+    fn isref_self_reference_is_not_circular() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=ISREF(A1)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(true));
+    }
+
+    #[test]
+    fn isref_multi_cell_range_including_formula_cell_is_not_circular() {
+        let mut engine = Engine::new();
+        // Range includes the formula cell (A2), but ISREF does not dereference values.
+        engine
+            .set_cell_formula("Sheet1", "A2", "=ISREF(A1:A3)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(true));
+    }
+
+    #[test]
+    fn isref_index_reference_does_not_create_range_node_cycles() {
+        let mut engine = Engine::new();
+        // The INDEX range includes the formula cell (A2), but INDEX is only used to compute a
+        // reference here; ISREF should not introduce a range-node cycle.
+        engine
+            .set_cell_formula("Sheet1", "A2", "=ISREF(INDEX(A1:A3,1))")
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(true));
     }
 
     #[test]
