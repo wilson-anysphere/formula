@@ -33,7 +33,11 @@ import {
   type CellEncryptionKey,
   type CellPlaintext,
 } from "@formula/collab-encryption";
-import type { CollabPersistence, CollabPersistenceBinding, CollabPersistenceFlushOptions } from "@formula/collab-persistence";
+import type {
+  CollabPersistence,
+  CollabPersistenceBinding,
+  CollabPersistenceFlushOptions,
+} from "@formula/collab-persistence";
 
 import {
   assertValidRole,

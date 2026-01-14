@@ -21,6 +21,7 @@ describe("flushCollabLocalPersistenceBestEffort", () => {
       idleTimeoutMs: 100,
     });
     expect(flushLocalPersistence).toHaveBeenCalledTimes(1);
+    expect(flushLocalPersistence).toHaveBeenCalledWith({ compact: false });
   });
 
   it("awaits the idle hook before flushing", async () => {
@@ -40,6 +41,7 @@ describe("flushCollabLocalPersistenceBestEffort", () => {
     });
 
     expect(calls).toEqual(["idle", "flush"]);
+    expect(flushLocalPersistence).toHaveBeenCalledWith({ compact: false });
   });
 
   it("continues quitting even if flushLocalPersistence throws", async () => {
@@ -58,6 +60,7 @@ describe("flushCollabLocalPersistenceBestEffort", () => {
     ).resolves.toBeUndefined();
 
     expect(flushLocalPersistence).toHaveBeenCalledTimes(1);
+    expect(flushLocalPersistence).toHaveBeenCalledWith({ compact: false });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toMatch(/Failed to flush collab local persistence/i);
   });
@@ -84,6 +87,7 @@ describe("flushCollabLocalPersistenceBestEffort", () => {
     await expect(promise).resolves.toBeUndefined();
 
     expect(flushLocalPersistence).toHaveBeenCalledTimes(1);
+    expect(flushLocalPersistence).toHaveBeenCalledWith({ compact: false });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toMatch(/Timed out flushing collab persistence/i);
   });
@@ -122,6 +126,7 @@ describe("flushCollabLocalPersistenceBestEffort", () => {
       await Promise.resolve();
 
       expect(unhandled).toHaveLength(0);
+      expect(flushLocalPersistence).toHaveBeenCalledWith({ compact: false });
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }

@@ -117,7 +117,10 @@ export async function flushCollabLocalPersistenceBestEffort(options: {
 
   try {
     await withTimeout(
-      Promise.resolve().then(() => session.flushLocalPersistence()),
+      // Prefer a lightweight snapshot flush on quit. IndexedDB persistence defaults
+      // to compaction, which can be slower and increases the chance that we time out
+      // before the process hard-exits.
+      Promise.resolve().then(() => session.flushLocalPersistence({ compact: false })),
       flushTimeoutMs,
       "Timed out flushing collab persistence",
     );
