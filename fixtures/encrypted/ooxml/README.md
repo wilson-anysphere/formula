@@ -14,7 +14,7 @@ Note: this directory currently vendors encrypted `.xlsx`/`.xlsm` samples only. F
 ## Passwords
 
 - `agile.xlsx` / `standard.xlsx` / `standard-4.2.xlsx` / `standard-rc4.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
-- `agile-basic.xlsm` / `standard-basic.xlsm` / `basic-password.xlsm`: `password`
+- `agile-basic.xlsm` / `standard-basic.xlsm` / `basic-password.xlsm` / `basic-encrypted.xlsm`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 - `agile-unicode-excel.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
@@ -91,6 +91,10 @@ therefore more realistic ciphertext sizes + truncation behavior).
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts with password `password`
   - Source workbook (unencrypted): `fixtures/xlsx/macros/basic.xlsm`
+- `basic-encrypted.xlsm` – Agile encrypted macro-enabled workbook.
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts with password `password`
+  - Used by `crates/formula-vba-oracle-cli` tests
 
 ### Why the `*.xlsm` fixtures exist
 
@@ -175,6 +179,7 @@ bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fix
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-basic.xlsm
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-basic.xlsm
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/basic-password.xlsm
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/basic-encrypted.xlsm
 ```
 
 See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
