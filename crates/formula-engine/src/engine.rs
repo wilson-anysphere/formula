@@ -305,6 +305,31 @@ impl Workbook {
         id
     }
 
+    fn reorder_sheet(&mut self, sheet_id: SheetId, new_index: usize) -> bool {
+        let Some(current) = self.sheet_order.iter().position(|id| *id == sheet_id) else {
+            return false;
+        };
+        if new_index >= self.sheet_order.len() {
+            return false;
+        }
+        if current == new_index {
+            return true;
+        }
+        let sheet = self.sheet_order.remove(current);
+        self.sheet_order.insert(new_index, sheet);
+        true
+    }
+
+    fn tab_index_by_sheet_id(&self) -> Vec<usize> {
+        let mut tab_index = vec![usize::MAX; self.sheet_names.len()];
+        for (idx, sheet_id) in self.sheet_order.iter().copied().enumerate() {
+            if let Some(slot) = tab_index.get_mut(sheet_id) {
+                *slot = idx;
+            }
+        }
+        tab_index
+    }
+
     fn sheet_id(&self, name: &str) -> Option<SheetId> {
         let key = Self::sheet_key(name);
         self.sheet_name_to_id.get(&key).copied()
@@ -495,7 +520,7 @@ pub struct Engine {
 #[derive(Default)]
 struct RecalcValueChangeCollector {
     before: HashMap<CellKey, Value>,
-    after: BTreeMap<CellKey, Value>,
+    after: HashMap<CellKey, Value>,
 }
 
 impl RecalcValueChangeCollector {
@@ -509,7 +534,16 @@ impl RecalcValueChangeCollector {
 
     fn into_sorted_changes(self, workbook: &Workbook) -> Vec<RecalcValueChange> {
         let mut out = Vec::new();
-        for (key, after) in self.after {
+        let tab_index_by_sheet = workbook.tab_index_by_sheet_id();
+        let mut after: Vec<(CellKey, Value)> = self.after.into_iter().collect();
+        after.sort_by(|(a_key, _), (b_key, _)| {
+            sheet_tab_key(a_key.sheet, &tab_index_by_sheet)
+                .cmp(&sheet_tab_key(b_key.sheet, &tab_index_by_sheet))
+                .then_with(|| a_key.addr.row.cmp(&b_key.addr.row))
+                .then_with(|| a_key.addr.col.cmp(&b_key.addr.col))
+        });
+
+        for (key, after) in after {
             let before = self
                 .before
                 .get(&key)
@@ -965,6 +999,16 @@ impl Engine {
             self.recalculate();
         }
         Ok(())
+    }
+
+    /// Reorder a sheet in the workbook tab list.
+    ///
+    /// Note: sheet ids are stable; reordering only affects the user-facing workbook tab order.
+    pub fn reorder_sheet(&mut self, sheet: &str, new_index: usize) -> bool {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return false;
+        };
+        self.workbook.reorder_sheet(sheet_id, new_index)
     }
 
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
@@ -3037,6 +3081,7 @@ impl Engine {
 
             // Dynamic-reference formulas (e.g. INDIRECT/OFFSET) must be evaluated serially so we
             // can trace their runtime precedents and update the dependency graph deterministically.
+            let tab_index_by_sheet_id = self.workbook.tab_index_by_sheet_id();
             for (k, compiled) in &dynamic_tasks {
                 let ctx = crate::eval::EvalContext {
                     current_sheet: k.sheet,
@@ -3115,9 +3160,19 @@ impl Engine {
                         Ok(g) => g,
                         Err(poisoned) => poisoned.into_inner(),
                     };
-                    guard.precedents()
+                    guard.precedents(|sheet_id| {
+                        tab_index_by_sheet_id
+                            .get(sheet_id)
+                            .copied()
+                            .unwrap_or(usize::MAX)
+                    })
                 } else {
-                    trace.borrow().precedents()
+                    trace.borrow().precedents(|sheet_id| {
+                        tab_index_by_sheet_id
+                            .get(sheet_id)
+                            .copied()
+                            .unwrap_or(usize::MAX)
+                    })
                 };
                 let expr = compiled.ast();
 
@@ -5346,7 +5401,7 @@ impl Engine {
     /// produced.
     ///
     /// This is intended for UI tracing/highlighting. The returned list is deterministically ordered
-    /// by `(sheet, row, col)`.
+    /// by workbook tab order, then `(row, col)`.
     pub fn precedents_expanded(
         &self,
         sheet: &str,
@@ -5354,7 +5409,7 @@ impl Engine {
         limit: usize,
     ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
         let nodes = self.precedents(sheet, addr)?;
-        Ok(expand_nodes_to_cells(&nodes, limit))
+        Ok(expand_nodes_to_cells(&nodes, limit, &self.workbook))
     }
 
     /// Direct dependents (cells whose formulas reference `cell`).
@@ -5381,7 +5436,7 @@ impl Engine {
         limit: usize,
     ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
         let nodes = self.dependents(sheet, addr)?;
-        Ok(expand_nodes_to_cells(&nodes, limit))
+        Ok(expand_nodes_to_cells(&nodes, limit, &self.workbook))
     }
 
     /// Returns a dependency path explaining why `cell` is currently dirty.
@@ -5546,7 +5601,7 @@ impl Engine {
                 ));
             }
         }
-        sort_and_dedup_nodes(&mut out);
+        sort_and_dedup_nodes(&mut out, &self.workbook);
         Ok(out)
     }
 
@@ -5579,7 +5634,7 @@ impl Engine {
                 addr: key.addr,
             })
             .collect();
-        sort_and_dedup_nodes(&mut out);
+        sort_and_dedup_nodes(&mut out, &self.workbook);
         Ok(out)
     }
 
@@ -5645,13 +5700,15 @@ impl Engine {
             }
         }
 
-        out.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
-        out.into_iter()
+        let mut out: Vec<PrecedentNode> = out
+            .into_iter()
             .map(|k| PrecedentNode::Cell {
                 sheet: k.sheet,
                 addr: k.addr,
             })
-            .collect()
+            .collect();
+        sort_and_dedup_nodes(&mut out, &self.workbook);
+        out
     }
 
     fn precedents_transitive_nodes(&self, start: CellKey) -> Vec<PrecedentNode> {
@@ -5721,7 +5778,7 @@ impl Engine {
             }
         }
 
-        sort_and_dedup_nodes(&mut out);
+        sort_and_dedup_nodes(&mut out, &self.workbook);
         out
     }
 
@@ -6311,7 +6368,18 @@ fn precedent_to_node(precedent: Precedent, workbook: &Workbook) -> PrecedentNode
     }
 }
 
-fn precedent_node_cmp(a: &PrecedentNode, b: &PrecedentNode) -> Ordering {
+fn sheet_tab_key(sheet: SheetId, tab_index_by_sheet: &[usize]) -> (usize, SheetId) {
+    (
+        tab_index_by_sheet.get(sheet).copied().unwrap_or(usize::MAX),
+        sheet,
+    )
+}
+
+fn precedent_node_cmp(
+    a: &PrecedentNode,
+    b: &PrecedentNode,
+    tab_index_by_sheet: &[usize],
+) -> Ordering {
     let rank = |node: &PrecedentNode| match node {
         PrecedentNode::Cell { .. } => 0u8,
         PrecedentNode::Range { .. } => 1,
@@ -6330,8 +6398,8 @@ fn precedent_node_cmp(a: &PrecedentNode, b: &PrecedentNode) -> Ordering {
                 sheet: b_sheet,
                 addr: b_addr,
             },
-        ) => a_sheet
-            .cmp(b_sheet)
+        ) => sheet_tab_key(*a_sheet, tab_index_by_sheet)
+            .cmp(&sheet_tab_key(*b_sheet, tab_index_by_sheet))
             .then_with(|| a_addr.row.cmp(&b_addr.row))
             .then_with(|| a_addr.col.cmp(&b_addr.col)),
         (
@@ -6345,8 +6413,8 @@ fn precedent_node_cmp(a: &PrecedentNode, b: &PrecedentNode) -> Ordering {
                 start: b_start,
                 end: b_end,
             },
-        ) => a_sheet
-            .cmp(b_sheet)
+        ) => sheet_tab_key(*a_sheet, tab_index_by_sheet)
+            .cmp(&sheet_tab_key(*b_sheet, tab_index_by_sheet))
             .then_with(|| a_start.row.cmp(&b_start.row))
             .then_with(|| a_start.col.cmp(&b_start.col))
             .then_with(|| a_end.row.cmp(&b_end.row))
@@ -6364,8 +6432,8 @@ fn precedent_node_cmp(a: &PrecedentNode, b: &PrecedentNode) -> Ordering {
                 start: b_start,
                 end: b_end,
             },
-        ) => a_sheet
-            .cmp(b_sheet)
+        ) => sheet_tab_key(*a_sheet, tab_index_by_sheet)
+            .cmp(&sheet_tab_key(*b_sheet, tab_index_by_sheet))
             .then_with(|| a_origin.row.cmp(&b_origin.row))
             .then_with(|| a_origin.col.cmp(&b_origin.col))
             .then_with(|| a_start.row.cmp(&b_start.row))
@@ -6406,8 +6474,9 @@ fn precedent_node_cmp(a: &PrecedentNode, b: &PrecedentNode) -> Ordering {
     })
 }
 
-fn sort_and_dedup_nodes(nodes: &mut Vec<PrecedentNode>) {
-    nodes.sort_by(precedent_node_cmp);
+fn sort_and_dedup_nodes(nodes: &mut Vec<PrecedentNode>, workbook: &Workbook) {
+    let tab_index_by_sheet = workbook.tab_index_by_sheet_id();
+    nodes.sort_by(|a, b| precedent_node_cmp(a, b, &tab_index_by_sheet));
     nodes.dedup();
 }
 
@@ -6428,7 +6497,11 @@ fn normalize_range(start: CellAddr, end: CellAddr) -> (CellAddr, CellAddr) {
     )
 }
 
-fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId, CellAddr)> {
+fn expand_nodes_to_cells(
+    nodes: &[PrecedentNode],
+    limit: usize,
+    workbook: &Workbook,
+) -> Vec<(SheetId, CellAddr)> {
     #[derive(Debug, Clone)]
     enum Stream {
         Empty,
@@ -6529,15 +6602,23 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
     }
 
     let mut nodes: Vec<PrecedentNode> = nodes.to_vec();
-    sort_and_dedup_nodes(&mut nodes);
+    sort_and_dedup_nodes(&mut nodes, workbook);
 
     let mut streams: Vec<Stream> = nodes.into_iter().map(Stream::from_node).collect();
-    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<(SheetId, u32, u32, usize)>> =
-        std::collections::BinaryHeap::new();
+    let tab_index_by_sheet = workbook.tab_index_by_sheet_id();
+    let mut heap: std::collections::BinaryHeap<
+        std::cmp::Reverse<(usize, u32, u32, SheetId, usize)>,
+    > = std::collections::BinaryHeap::new();
 
     for (idx, stream) in streams.iter().enumerate() {
         if let Some((sheet, addr)) = stream.peek() {
-            heap.push(std::cmp::Reverse((sheet, addr.row, addr.col, idx)));
+            heap.push(std::cmp::Reverse((
+                tab_index_by_sheet.get(sheet).copied().unwrap_or(usize::MAX),
+                addr.row,
+                addr.col,
+                sheet,
+                idx,
+            )));
         }
     }
 
@@ -6546,7 +6627,7 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
     out.reserve(limit.min(1024));
 
     while out.len() < limit {
-        let Some(std::cmp::Reverse((sheet, row, col, idx))) = heap.pop() else {
+        let Some(std::cmp::Reverse((_tab, row, col, sheet, idx))) = heap.pop() else {
             break;
         };
 
@@ -6560,7 +6641,13 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
             .expect("heap indices are valid stream indices");
         stream.advance();
         if let Some((sheet, addr)) = stream.peek() {
-            heap.push(std::cmp::Reverse((sheet, addr.row, addr.col, idx)));
+            heap.push(std::cmp::Reverse((
+                tab_index_by_sheet.get(sheet).copied().unwrap_or(usize::MAX),
+                addr.row,
+                addr.col,
+                sheet,
+                idx,
+            )));
         }
     }
 

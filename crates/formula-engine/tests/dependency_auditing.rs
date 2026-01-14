@@ -286,6 +286,68 @@ fn sheet_range_3d_refs_participate_in_precedents_and_dependents_queries() {
 }
 
 #[test]
+fn sheet_range_precedents_follow_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.ensure_sheet("Sheet2");
+    engine.ensure_sheet("Sheet3");
+    engine.ensure_sheet("Summary");
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+
+    // Reverse the sheet tab order: Sheet3, Sheet2, Sheet1, Summary.
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    assert!(engine.reorder_sheet("Sheet2", 1));
+
+    assert_eq!(
+        engine.precedents("Summary", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: 2,
+                addr: CellAddr { row: 0, col: 0 }
+            },
+            PrecedentNode::Cell {
+                sheet: 1,
+                addr: CellAddr { row: 0, col: 0 }
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }
+            }
+        ]
+    );
+}
+
+#[test]
+fn expanded_sheet_range_precedents_follow_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.ensure_sheet("Sheet2");
+    engine.ensure_sheet("Sheet3");
+    engine.ensure_sheet("Summary");
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1:A2)")
+        .unwrap();
+
+    // Reverse the sheet tab order: Sheet3, Sheet2, Sheet1, Summary.
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    assert!(engine.reorder_sheet("Sheet2", 1));
+
+    assert_eq!(
+        engine.precedents_expanded("Summary", "A1", 6).unwrap(),
+        vec![
+            (2, CellAddr { row: 0, col: 0 }), // Sheet3!A1
+            (2, CellAddr { row: 1, col: 0 }), // Sheet3!A2
+            (1, CellAddr { row: 0, col: 0 }), // Sheet2!A1
+            (1, CellAddr { row: 1, col: 0 }), // Sheet2!A2
+            (0, CellAddr { row: 0, col: 0 }), // Sheet1!A1
+            (0, CellAddr { row: 1, col: 0 }), // Sheet1!A2
+        ]
+    );
+}
+
+#[test]
 fn sheet_range_3d_refs_create_per_sheet_range_nodes_for_full_column_refs() {
     let mut engine = Engine::new();
     // Ensure the sheet order is deterministic for the 3D span resolution.

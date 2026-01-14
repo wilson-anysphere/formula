@@ -106,11 +106,20 @@ impl DependencyTrace {
     }
 
     #[must_use]
-    pub fn precedents(&self) -> Vec<FnReference> {
+    pub fn precedents(
+        &self,
+        sheet_tab_index: impl Fn(usize) -> usize,
+    ) -> Vec<FnReference> {
         let mut out: Vec<FnReference> = self.precedents.iter().cloned().collect();
         out.sort_by(|a, b| {
-            a.sheet_id
-                .cmp(&b.sheet_id)
+            match (&a.sheet_id, &b.sheet_id) {
+                (FnSheetId::Local(a_sheet), FnSheetId::Local(b_sheet)) => sheet_tab_index(*a_sheet)
+                    .cmp(&sheet_tab_index(*b_sheet))
+                    .then_with(|| a_sheet.cmp(b_sheet)),
+                (FnSheetId::Local(_), FnSheetId::External(_)) => Ordering::Less,
+                (FnSheetId::External(_), FnSheetId::Local(_)) => Ordering::Greater,
+                (FnSheetId::External(a_key), FnSheetId::External(b_key)) => a_key.cmp(b_key),
+            }
                 .then_with(|| a.start.row.cmp(&b.start.row))
                 .then_with(|| a.start.col.cmp(&b.start.col))
                 .then_with(|| a.end.row.cmp(&b.end.row))
