@@ -48,6 +48,8 @@ Office-encrypted workbook note (Excel “Encrypt with Password” / `EncryptionI
 - By default, Office-encrypted `.xlsx`/`.xlsm`/`.xlsb` inputs are **skipped**.
 - To triage Office-encrypted workbooks, pass a password (recommended: via `--password-file` so it
   doesn’t appear in process args):
+- `tools.corpus.minimize` supports the same `--password` / `--password-file` options when inspecting
+  a single workbook.
 
 ```bash
 python -m tools.corpus.triage \

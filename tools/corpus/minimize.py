@@ -82,6 +82,8 @@ def _ensure_full_diff_entries(
     rust_exe: Path,
     workbook: WorkbookInput,
     *,
+    password: str | None = None,
+    password_file: Path | None = None,
     diff_ignore: set[str],
     diff_limit: int,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
@@ -103,6 +105,8 @@ def _ensure_full_diff_entries(
         rust_exe,
         workbook.data,
         workbook_name=workbook.display_name,
+        password=password,
+        password_file=password_file,
         diff_ignore=diff_ignore,
         diff_limit=diff_limit,
         recalc=False,
@@ -135,6 +139,8 @@ def _ensure_full_diff_entries(
             rust_exe,
             workbook.data,
             workbook_name=workbook.display_name,
+            password=password,
+            password_file=password_file,
             diff_ignore=diff_ignore,
             diff_limit=total,
             recalc=False,
@@ -233,6 +239,8 @@ def minimize_workbook(
     workbook: WorkbookInput,
     *,
     rust_exe: Path,
+    password: str | None = None,
+    password_file: Path | None = None,
     diff_ignore: set[str],
     diff_limit: int,
     compute_part_hashes: bool = True,
@@ -241,6 +249,8 @@ def minimize_workbook(
     rust_out, diff_details, diffs = _ensure_full_diff_entries(
         rust_exe,
         workbook,
+        password=password,
+        password_file=password_file,
         diff_ignore=diff_ignore,
         diff_limit=diff_limit,
     )
@@ -327,6 +337,8 @@ def minimize_workbook(
                 rust_exe,
                 workbook.data,
                 workbook_name=workbook.display_name,
+                password=password,
+                password_file=password_file,
                 diff_ignore=diff_ignore,
                 diff_limit=critical_total,
                 recalc=False,
@@ -655,6 +667,8 @@ def minimize_workbook_package(
     workbook: WorkbookInput,
     *,
     rust_exe: Path,
+    password: str | None = None,
+    password_file: Path | None = None,
     diff_ignore: set[str],
     diff_limit: int,
     out_xlsx: Path,
@@ -673,6 +687,8 @@ def minimize_workbook_package(
     baseline_summary = baseline or minimize_workbook(
         workbook,
         rust_exe=rust_exe,
+        password=password,
+        password_file=password_file,
         diff_ignore=diff_ignore,
         diff_limit=diff_limit,
     )
@@ -719,6 +735,8 @@ def minimize_workbook_package(
         trial_summary = minimize_workbook(
             WorkbookInput(display_name=workbook.display_name, data=trial_bytes),
             rust_exe=rust_exe,
+            password=password,
+            password_file=password_file,
             diff_ignore=diff_ignore,
             diff_limit=diff_limit,
             compute_part_hashes=False,
@@ -762,6 +780,22 @@ def main() -> int:
         "--fernet-key-env",
         default="CORPUS_ENCRYPTION_KEY",
         help="Env var containing Fernet key used to decrypt *.enc workbook inputs.",
+    )
+    pw_group = parser.add_mutually_exclusive_group()
+    pw_group.add_argument(
+        "--password",
+        help=(
+            "Optional password for Office-encrypted workbooks (Excel 'Encrypt with Password'). "
+            "Prefer --password-file to avoid exposing secrets in process args."
+        ),
+    )
+    pw_group.add_argument(
+        "--password-file",
+        type=Path,
+        help=(
+            "Read Office workbook password from a file (first line). "
+            "Enables inspecting Office-encrypted XLSX/XLSM/XLSB workbooks."
+        ),
     )
     parser.add_argument(
         "--privacy-mode",
@@ -811,6 +845,13 @@ def main() -> int:
 
     fernet_key = os.environ.get(args.fernet_key_env)
 
+    password_file: Path | None = None
+    if args.password_file:
+        password_file = args.password_file.expanduser()
+        if not password_file.is_file():
+            parser.error(f"--password-file does not exist or is not a file: {password_file}")
+        password_file = password_file.resolve()
+
     workbook = read_workbook_input(args.input, fernet_key=fernet_key)
     if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
         # Ensure the Rust helper never sees raw local filenames in privacy mode. The helper only
@@ -858,6 +899,8 @@ def main() -> int:
     summary = minimize_workbook(
         workbook,
         rust_exe=rust_exe,
+        password=args.password,
+        password_file=password_file,
         diff_ignore=diff_ignore,
         diff_limit=max(0, int(args.diff_limit)),
     )
@@ -881,6 +924,8 @@ def main() -> int:
             min_summary, removed_parts, min_bytes = minimize_workbook_package(
                 workbook,
                 rust_exe=rust_exe,
+                password=args.password,
+                password_file=password_file,
                 diff_ignore=diff_ignore,
                 diff_limit=max(0, int(args.diff_limit)),
                 out_xlsx=out_xlsx,
