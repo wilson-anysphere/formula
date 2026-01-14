@@ -11591,9 +11591,7 @@ export class SpreadsheetApp {
     // overlaid objects (charts/images/shapes) behave like Excel.
     const drawingViewport = this.getDrawingInteractionViewport();
     const drawings = this.listDrawingObjectsForSheet();
-    const zoom =
-      Number.isFinite(drawingViewport.zoom) && (drawingViewport.zoom as number) > 0 ? (drawingViewport.zoom as number) : 1;
-    const hitIndex = buildHitTestIndex(drawings, this.drawingGeom, { zoom });
+    const hitIndex = this.getDrawingHitTestIndex(drawings);
     const hit = hitTestDrawings(hitIndex, drawingViewport, x, y, this.drawingGeom);
     if (hit) {
       this.selectedDrawingId = hit.object.id;
