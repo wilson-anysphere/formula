@@ -1722,10 +1722,7 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
 impl From<IpcPivotFieldRef> for PivotFieldRef {
     fn from(value: IpcPivotFieldRef) -> Self {
         match value {
-            IpcPivotFieldRef::Text(raw) => {
-                let raw = raw.into_inner();
-                PivotFieldRef::from_unstructured(&raw)
-            }
+            IpcPivotFieldRef::Text(raw) => pivot_field_ref_from_ipc(raw.into_inner()),
             IpcPivotFieldRef::Column { table, column } => PivotFieldRef::DataModelColumn {
                 table: table.into_inner(),
                 column: column.into_inner(),

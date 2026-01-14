@@ -67,11 +67,19 @@ fn apply_request_init(
 /// This is intentionally kept independent of Tauri so it can be unit tested without the `desktop`
 /// feature enabled.
 pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFetchResult, String> {
-    use reqwest::Method;
+    network_fetch_impl_with_debug_assertions(url, init, cfg!(debug_assertions)).await
+}
+
+async fn network_fetch_impl_with_debug_assertions(
+    url: &str,
+    init: &JsonValue,
+    debug_assertions: bool,
+) -> Result<NetworkFetchResult, String> {
     use reqwest::header::LOCATION;
+    use reqwest::Method;
 
     let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid url: {e}"))?;
-    crate::commands::ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
+    crate::commands::ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", debug_assertions)?;
 
     let method = init
         .get("method")
@@ -81,7 +89,6 @@ pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFe
     let method = Method::from_bytes(method.as_bytes())
         .map_err(|_| format!("Unsupported method: {method}"))?;
 
-    let debug_assertions = cfg!(debug_assertions);
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             // Keep redirect behavior aligned with browser `fetch` (follow redirects), but enforce
@@ -308,6 +315,52 @@ mod tests {
         let err = network_fetch_impl(&url, &JsonValue::Null).await.unwrap_err();
         assert!(
             err.contains("network_fetch redirect") && err.contains("only http/https allowed"),
+            "unexpected error: {err}"
+        );
+
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn rejects_remote_http_in_release_mode() {
+        let err = network_fetch_impl_with_debug_assertions(
+            "http://example.com/",
+            &JsonValue::Null,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.contains("network_fetch: http URLs are only allowed for localhost in release builds")
+                && err.contains("example.com"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_redirect_to_remote_http_in_release_mode() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let Ok((mut socket, _peer)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await;
+
+            let response = "HTTP/1.1 302 Found\r\nLocation: http://example.com/\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+
+        let url = format!("http://{addr}/");
+        let err = network_fetch_impl_with_debug_assertions(&url, &JsonValue::Null, false)
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("network_fetch redirect: http URLs are only allowed for localhost in release builds")
+                && err.contains("example.com"),
             "unexpected error: {err}"
         );
 

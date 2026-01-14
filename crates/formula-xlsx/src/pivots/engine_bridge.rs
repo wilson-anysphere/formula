@@ -559,10 +559,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                 Some(set)
             });
 
-            Some(FilterField {
-                source_field: source_field.into(),
-                allowed,
-            })
+            Some(FilterField { source_field, allowed })
         })
         .collect::<Vec<_>>();
 
