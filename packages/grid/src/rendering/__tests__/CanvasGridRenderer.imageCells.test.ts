@@ -573,6 +573,92 @@ describe("CanvasGridRenderer image cells", () => {
     vi.useRealTimers();
   });
 
+  it("invalidateImage clears the error retry window so images can be retried immediately", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const provider: CellProvider = {
+        getCell: (row, col) =>
+          row === 0 && col === 0
+            ? {
+                row,
+                col,
+                value: null,
+                image: { imageId: "img1", altText: "img", width: 100, height: 50 }
+              }
+            : null
+      };
+ 
+      const bitmap = { width: 10, height: 10 } as any;
+      const createImageBitmapSpy = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("decode failed"))
+        .mockResolvedValueOnce(bitmap);
+      vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+ 
+      const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+ 
+      const gridCanvas = document.createElement("canvas");
+      const contentCanvas = document.createElement("canvas");
+      const selectionCanvas = document.createElement("canvas");
+ 
+      const grid = createRecordingContext(gridCanvas);
+      const content = createRecordingContext(contentCanvas);
+      const selection = createRecordingContext(selectionCanvas);
+ 
+      const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+        [gridCanvas, grid.ctx],
+        [contentCanvas, content.ctx],
+        [selectionCanvas, selection.ctx]
+      ]);
+ 
+      HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+        const existing = contexts.get(this);
+        if (existing) return existing;
+        const created = createRecordingContext(this).ctx;
+        contexts.set(this, created);
+        return created;
+      }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+ 
+      const renderer = new CanvasGridRenderer({
+        provider,
+        rowCount: 1,
+        colCount: 1,
+        defaultColWidth: 100,
+        defaultRowHeight: 50,
+        imageResolver
+      });
+      renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+      renderer.resize(100, 50, 1);
+ 
+      // Initial attempt: decode fails and is cached briefly.
+      renderer.renderImmediately();
+      await flushMicrotasks();
+      renderer.renderImmediately();
+      await flushMicrotasks();
+ 
+      expect(imageResolver).toHaveBeenCalledTimes(1);
+      expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
+ 
+      // Calling invalidateImage should drop the error entry and allow an immediate retry,
+      // even if we have not advanced time past the retry window.
+      renderer.invalidateImage("img1");
+ 
+      // Flush the new async request and repaint.
+      await flushMicrotasks();
+      renderer.renderImmediately();
+      await flushMicrotasks();
+      renderer.renderImmediately();
+      await flushMicrotasks();
+ 
+      expect(imageResolver).toHaveBeenCalledTimes(2);
+      expect(createImageBitmapSpy).toHaveBeenCalledTimes(2);
+      expect(content.rec.drawImages.length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries after an imageResolver failure (without permanently poisoning the cache)", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
