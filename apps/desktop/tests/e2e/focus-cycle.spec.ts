@@ -21,6 +21,26 @@ async function dispatchF6(page: import("@playwright/test").Page, opts: { shiftKe
   }, opts);
 }
 
+async function dispatchCtrlOrCmdShiftP(page: import("@playwright/test").Page): Promise<void> {
+  // `Ctrl/Cmd+Shift+P` can be intercepted by the browser/OS in some environments.
+  // Dispatching a synthetic `keydown` keeps the test deterministic and still exercises
+  // our in-app keybinding pipeline (KeybindingService -> CommandRegistry).
+  await page.evaluate((isMac) => {
+    const target = (document.activeElement as HTMLElement | null) ?? document.getElementById("grid") ?? window;
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "P",
+        code: "KeyP",
+        shiftKey: true,
+        metaKey: isMac,
+        ctrlKey: !isMac,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, process.platform === "darwin");
+}
+
 test.describe("focus cycling (Excel-style F6)", () => {
   test("F6 / Shift+F6 cycle focus between ribbon, formula bar, grid, sheet tabs, and status bar", async ({ page }) => {
     await gotoDesktop(page);
@@ -73,5 +93,26 @@ test.describe("focus cycling (Excel-style F6)", () => {
 
     await dispatchF6(page, { shiftKey: true });
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeFocused();
+  });
+
+  test("F6 does not cycle focus while the command palette (keybinding barrier) is open", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Ensure the grid has focus before opening the palette.
+    await page.click("#grid", { position: { x: 80, y: 40 } });
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
+      .toBe("grid");
+
+    await dispatchCtrlOrCmdShiftP(page);
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+    await expect(page.getByTestId("command-palette-input")).toBeFocused();
+
+    // F6 should not escape the palette's focus trap / keybinding barrier.
+    await dispatchF6(page);
+    await expect(page.getByTestId("command-palette-input")).toBeFocused();
+
+    await dispatchF6(page, { shiftKey: true });
+    await expect(page.getByTestId("command-palette-input")).toBeFocused();
   });
 });
