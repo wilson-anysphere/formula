@@ -1004,10 +1004,27 @@ mod tests {
     fn standard_cryptoapi_rc4_md5_40bit_padding_ciphertext_vector() {
         // Deterministic 40-bit RC4 key padding vectors from `docs/offcrypto-standard-cryptoapi-rc4.md`.
         //
-        // CryptoAPI/Office pad 40-bit keys to a 16-byte RC4 key by appending 11 zero bytes.
+        // MS-OFFCRYPTO Standard RC4 uses the raw 5-byte key material (`keyLen = keySize/8`), but
+        // zero-padding those 5 bytes to 16 changes RC4 KSA and yields a different keystream (a common
+        // interop pitfall when reusing legacy RC4-40 implementations).
         let password = "password";
         let salt: Vec<u8> = (0u8..=0x0F).collect();
         let plaintext = b"Hello, RC4 CryptoAPI!";
+
+        // Hb0 = MD5(H || LE32(0)). For MD5, the digest length is 16 bytes, so the 128-bit per-block
+        // key equals the full digest.
+        let deriver_hb0 = StandardKeyDeriver::new(
+            HashAlgorithm::Md5,
+            128,
+            &salt,
+            password,
+            StandardKeyDerivation::Rc4,
+        );
+        let hb0 = deriver_hb0.derive_key_for_block(0).expect("hb0");
+        assert_eq!(
+            hb0.as_slice(),
+            hex_decode("69badcae244868e209d4e053ccd2a3bc")
+        );
 
         let deriver = StandardKeyDeriver::new(
             HashAlgorithm::Md5,
@@ -1018,8 +1035,9 @@ mod tests {
         );
         let key0 = deriver.derive_key_for_block(0).expect("key0");
         assert_eq!(key0.as_slice(), hex_decode("69badcae24"));
+        assert_eq!(key0.as_slice(), &hb0[..5]);
 
-        // Raw 5-byte key (NOT CryptoAPI-compatible).
+        // Raw 5-byte key (`keyLen = keySize/8`).
         let mut ciphertext_raw = plaintext.to_vec();
         rc4_xor_in_place(&key0, &mut ciphertext_raw).expect("rc4 encrypt raw");
         assert_eq!(
@@ -1027,7 +1045,7 @@ mod tests {
             hex_decode("db037cd60d38c882019b5f5d8c43382373f476da28")
         );
 
-        // CryptoAPI padded 16-byte key (correct behavior).
+        // Demonstrate that zero-padding the 5-byte key changes ciphertext.
         let mut padded_key = [0u8; 16];
         padded_key[..5].copy_from_slice(&key0);
         let mut ciphertext_padded = plaintext.to_vec();
