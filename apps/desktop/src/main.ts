@@ -2202,6 +2202,13 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   delete out["home.number.moreFormats.custom"];
   delete out["format.clearFormats"];
 
+  // Clipboard + find/replace are non-mutating and should remain enabled in read-only mode.
+  delete out["clipboard.copy"];
+  delete out["home.editing.findSelect"];
+  delete out["edit.find"];
+  delete out["edit.replace"];
+  delete out["navigation.goTo"];
+
   // Ribbon AutoFilter MVP is view-local (row hiding via outline.hidden.filter), so allow it in read-only.
   delete out["home.editing.sortFilter"];
   delete out["home.editing.sortFilter.filter"];

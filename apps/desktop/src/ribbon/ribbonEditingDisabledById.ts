@@ -42,7 +42,9 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   // --- Clipboard --------------------------------------------------------------
   // Paste Special operates on the grid selection and is guarded against active text editing,
   // so disable it in edit mode to avoid "click does nothing" UX.
-  // Cut/Paste can mutate the sheet selection; disable them in edit mode for Excel parity.
+  // Copy/Cut/Paste can act on the sheet selection when focus leaves the editor (e.g. clicking
+  // the ribbon while the in-cell editor stays open). Disable them in edit mode for Excel parity.
+  "clipboard.copy": true,
   "clipboard.cut": true,
   "clipboard.paste": true,
   "clipboard.pasteSpecial": true,
@@ -50,6 +52,14 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "clipboard.pasteSpecial.formulas": true,
   "clipboard.pasteSpecial.formats": true,
   "clipboard.pasteSpecial.transpose": true,
+
+  // --- Find / Replace / Go To -------------------------------------------------
+  // These dialogs should not open while editing (matches keybinding gating and avoids stealing focus
+  // during formula bar range-selection mode).
+  "home.editing.findSelect": true,
+  "edit.find": true,
+  "edit.replace": true,
+  "navigation.goTo": true,
 
   // --- Formatting ------------------------------------------------------------
   "format.toggleSubscript": true,
