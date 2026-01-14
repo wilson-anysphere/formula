@@ -154,4 +154,30 @@ describe("imageBytesBinder", () => {
     binderA.destroy();
     binderB.destroy();
   });
-});
+
+  it("evicts oldest images when exceeding maxImages", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store, maxImages: 2 });
+
+    const img1: ImageEntry = { id: "img-1", mimeType: "image/png", bytes: new Uint8Array([1]) };
+    const img2: ImageEntry = { id: "img-2", mimeType: "image/png", bytes: new Uint8Array([2]) };
+    const img3: ImageEntry = { id: "img-3", mimeType: "image/png", bytes: new Uint8Array([3]) };
+
+    binder.onLocalImageInserted(img1);
+    binder.onLocalImageInserted(img2);
+    binder.onLocalImageInserted(img3);
+
+    const imagesMap = metadata.get("drawingImages") as any;
+    expect(imagesMap?.size).toBe(2);
+    expect(imagesMap?.get?.("img-1")).toBeUndefined();
+    expect(imagesMap?.get?.("img-2")).toBeTruthy();
+    expect(imagesMap?.get?.("img-3")).toBeTruthy();
+
+    binder.destroy();
+  });
+});  
