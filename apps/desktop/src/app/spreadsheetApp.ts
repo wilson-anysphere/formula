@@ -2199,14 +2199,29 @@ export class SpreadsheetApp {
            const charts = this.chartStore.listCharts();
            const prevCount = chartCountForCanvasModelPrune;
            const countChanged = charts.length !== prevCount;
-           if (charts.length < prevCount) {
-             try {
-               const keep = new Set(charts.map((chart) => chart.id));
-               this.chartCanvasStoreAdapter.pruneEntries(keep);
-             } catch {
-               // Best-effort: ignore pruning failures.
-             }
-           }
+            if (charts.length < prevCount) {
+              // Keep memory bounded: prune any cached per-chart metadata for charts that were deleted.
+              let keep: Set<string> | null = null;
+              try {
+                keep = new Set(charts.map((chart) => chart.id));
+                this.chartCanvasStoreAdapter.pruneEntries(keep);
+              } catch {
+                // Best-effort: ignore pruning failures.
+              }
+
+              // `markChartsDirtyFromDeltas` caches per-chart range rects; keep it bounded as charts are deleted.
+              if (keep) {
+                for (const id of this.chartRangeRectsCache.keys()) {
+                  if (!keep.has(id)) this.chartRangeRectsCache.delete(id);
+                }
+                for (const id of this.chartHasFormulaCells.keys()) {
+                  if (!keep.has(id)) this.chartHasFormulaCells.delete(id);
+                }
+                for (const id of this.dirtyChartIds) {
+                  if (!keep.has(id)) this.dirtyChartIds.delete(id);
+                }
+              }
+            }
            chartCountForCanvasModelPrune = charts.length;
 
             if (this.useCanvasCharts) {
