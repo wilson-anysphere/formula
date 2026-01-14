@@ -845,6 +845,10 @@ Rust:
 Engine adapter notes (in-tree today):
 
 - `what_if::EngineWhatIfModel` (defined in [`what_if/engine_model.rs`](../crates/formula-engine/src/what_if/engine_model.rs)) defaults to **single-threaded** recalculation (`RecalcMode::SingleThreaded`) to reduce per-iteration overhead; hosts can opt into `RecalcMode::MultiThreaded` via `EngineWhatIfModel::with_recalc_mode(...)`.
+- `EngineWhatIfModel` does **not** validate that referenced sheets exist:
+  - `Engine::get_cell_value` treats missing sheets as blank (`0` for numeric reads).
+  - `Engine::set_cell_value` creates missing sheets on demand.
+  - Hosts (and any future WASM bindings) should generally reject missing sheets to avoid accidentally creating new ones due to typos.
 - `EngineWhatIfModel` intentionally exposes a *scalar-only* view of engine values:
   - arrays/spills are degraded to their top-left value
   - errors are degraded to their error code string (e.g. `"#DIV/0!"`)
