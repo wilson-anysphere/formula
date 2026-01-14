@@ -7,6 +7,8 @@ use formula_model::RichText;
 use roxmltree::{Document, Node};
 use std::collections::{HashMap, HashSet};
 
+use crate::drawingml::anchor::flatten_alternate_content;
+
 use super::cache::{parse_num_cache, parse_num_ref, parse_str_cache, parse_str_ref};
 use super::parse_chart_space::parse_rich_text;
 use super::REL_NS;
@@ -1014,10 +1016,16 @@ fn child_attr<'a>(node: Node<'a, 'a>, child: &str, attr: &str) -> Option<&'a str
         .and_then(|n| n.attribute(attr))
 }
 
+fn is_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "layout"
+}
+
 fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
     let layout_node = node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "layout")?;
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_layout_node))
+        .find(|n| n.tag_name().name() == "layout")?;
     let manual_node = layout_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;
@@ -1098,6 +1106,43 @@ mod tests {
         let legend = model.legend.expect("legend should be parsed");
         assert_eq!(legend.position, LegendPosition::Right);
         assert!(legend.overlay);
+    }
+
+    #[test]
+    fn parses_manual_layout_under_alternate_content() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="cx">
+  <cx:chart>
+    <cx:legend>
+      <cx:legendPos val="r"/>
+      <mc:AlternateContent>
+        <mc:Choice Requires="cx">
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:x val="0.1"/>
+            </cx:manualLayout>
+          </cx:layout>
+        </mc:Choice>
+        <mc:Fallback>
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:x val="0.2"/>
+            </cx:manualLayout>
+          </cx:layout>
+        </mc:Fallback>
+      </mc:AlternateContent>
+    </cx:legend>
+    <cx:plotArea>
+      <cx:histogramChart/>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        let legend = model.legend.expect("legend should be parsed");
+        let layout = legend.layout.expect("legend should contain layout");
+        assert_eq!(layout.x, Some(0.1));
     }
 
     #[test]

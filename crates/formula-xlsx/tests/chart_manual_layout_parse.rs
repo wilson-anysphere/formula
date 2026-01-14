@@ -121,3 +121,45 @@ fn parses_manual_layout_for_title() {
     assert_eq!(layout.x, Some(0.1));
     assert_eq!(layout.y, Some(0.2));
 }
+
+#[test]
+fn parses_manual_layout_under_alternate_content() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:c14="http://schemas.microsoft.com/office/drawing/2007/8/2/chart"
+  mc:Ignorable="c14">
+  <c:chart>
+    <c:plotArea>
+      <mc:AlternateContent>
+        <mc:Choice Requires="c14">
+          <c:layout>
+            <c:manualLayout>
+              <c:x val="0.1"/>
+            </c:manualLayout>
+          </c:layout>
+        </mc:Choice>
+        <mc:Fallback>
+          <c:layout>
+            <c:manualLayout>
+              <c:x val="0.2"/>
+            </c:manualLayout>
+          </c:layout>
+        </mc:Fallback>
+      </mc:AlternateContent>
+      <c:barChart/>
+    </c:plotArea>
+  </c:chart>
+</c:chartSpace>
+"#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "manual-layout-alternate-content.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+
+    let layout = model
+        .plot_area_layout
+        .as_ref()
+        .expect("plot area manual layout present");
+    assert_eq!(layout.x, Some(0.1));
+}
