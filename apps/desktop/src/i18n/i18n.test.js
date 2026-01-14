@@ -11,6 +11,17 @@ test("switching locale changes translations", () => {
   assert.equal(t("menu.file"), "Datei");
 });
 
+test("number format command strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("command.format.numberFormat.general"), "General");
+
+  setLocale("de-DE");
+  assert.equal(t("command.format.numberFormat.general"), "Allgemein");
+
+  setLocale("ar");
+  assert.equal(t("command.format.numberFormat.general"), "عام");
+});
+
 test("rtl locale exposes rtl direction hook", () => {
   setLocale("ar");
   assert.equal(getDirection(), "rtl");

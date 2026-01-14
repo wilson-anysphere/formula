@@ -2270,45 +2270,45 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       if (format === "mixed") return "Mixed";
 
       const normalized = typeof format === "string" ? format.trim() : "";
-      if (!normalized || normalized.toLowerCase() === "general") return "General";
+      if (!normalized || normalized.toLowerCase() === "general") return t("command.format.numberFormat.general");
 
       const compact = normalized.toLowerCase().replace(/\s+/g, "");
 
-      if (/^[$€£¥](?:#,##0|0)(\.[0]+)?$/.test(compact)) return "Currency";
-      if (compact.includes("yyyy-mm-dd")) return "Long Date";
-      if (compact.includes("m/d/yyyy")) return "Short Date";
-      if (compact === NUMBER_FORMATS.date.toLowerCase()) return "Short Date";
-      if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return "Time";
-      if (compact.includes("%")) return "Percent";
+      if (/^[$€£¥](?:#,##0|0)(\.[0]+)?$/.test(compact)) return t("command.format.numberFormat.currency");
+      if (compact.includes("yyyy-mm-dd")) return t("command.format.numberFormat.longDate");
+      if (compact.includes("m/d/yyyy")) return t("command.format.numberFormat.shortDate");
+      if (compact === NUMBER_FORMATS.date.toLowerCase()) return t("command.format.numberFormat.shortDate");
+      if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return t("command.format.numberFormat.time");
+      if (compact.includes("%")) return t("command.format.numberFormat.percent");
       if (/^#,##0(\.[0]+)?$/.test(compact)) return "Comma";
-      if (/^0(\.[0]+)?$/.test(compact)) return "Number";
-      if (compact.includes("e")) return "Scientific";
-      if (compact.includes("/")) return "Fraction";
-      if (compact === "@") return "Text";
+      if (/^0(\.[0]+)?$/.test(compact)) return t("command.format.numberFormat.number");
+      if (compact.includes("e")) return t("command.format.numberFormat.scientific");
+      if (compact.includes("/")) return t("command.format.numberFormat.fraction");
+      if (compact === "@") return t("command.format.numberFormat.text");
 
       return "Custom";
     })();
 
-    const themePreferenceLabel = (() => {
+    const themeLabel = (() => {
       const preference = themeController.getThemePreference();
       switch (preference) {
         case "system":
-          return "System";
+          return t("command.view.theme.system");
         case "light":
-          return "Light";
+          return t("command.view.theme.light");
         case "dark":
-          return "Dark";
+          return t("command.view.theme.dark");
         case "high-contrast":
-          return "High Contrast";
+          return t("command.view.theme.highContrast");
         default:
           // Default to the UX baseline.
-          return "Light";
+          return t("command.view.theme.light");
       }
     })();
 
     const labelById: Record<string, string> = {
       "home.number.numberFormat": numberFormatLabel,
-      "view.appearance.theme": `Theme: ${themePreferenceLabel}`,
+      "view.appearance.theme": themeLabel,
     };
 
     // Font dropdown labels should reflect the current selection (Excel-style).
