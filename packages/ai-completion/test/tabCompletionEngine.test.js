@@ -4151,6 +4151,66 @@ test("FLOOR.MATH mode suggests 0 and 1", async () => {
   );
 });
 
+test("Rounding significance args suggest common values (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const cases = [
+    { name: "CEILING.MATH significance", currentInput: "=CEILING.MATH(A1, " },
+    { name: "FLOOR.MATH significance", currentInput: "=FLOOR.MATH(A1, " },
+    { name: "CEILING significance", currentInput: "=CEILING(A1, " },
+    { name: "FLOOR significance", currentInput: "=FLOOR(A1, " },
+    { name: "CEILING.PRECISE significance", currentInput: "=CEILING.PRECISE(A1, " },
+    { name: "FLOOR.PRECISE significance", currentInput: "=FLOOR.PRECISE(A1, " },
+    { name: "ISO.CEILING significance", currentInput: "=ISO.CEILING(A1, " },
+    { name: "MROUND multiple", currentInput: "=MROUND(A1, " },
+  ];
+
+  for (const { name, currentInput } of cases) {
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    for (const v of ["1", "0.1", "10"]) {
+      assert.ok(
+        suggestions.some((s) => s.text === `${currentInput}${v}`),
+        `Expected ${name} to suggest ${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+      );
+    }
+
+    assert.ok(
+      !suggestions.some((s) => s.text === `${currentInput}0`),
+      `Did not expect ${name} to suggest 0, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("MOD divisor suggests 2 and 10 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=MOD(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["2", "10"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected MOD to suggest divisor=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect MOD to suggest divisor=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("QUARTILE.INC quart suggests 1, 2, 3, 0, 4", async () => {
   const engine = new TabCompletionEngine();
 

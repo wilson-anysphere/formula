@@ -1393,6 +1393,17 @@ const RADIX_ENUM_10_2_16_8 = [
   { replacement: "8", displayText: "8 (octal)", confidence: 0.63 },
 ];
 
+const ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10 = [
+  { replacement: "1", confidence: 0.66 },
+  { replacement: "0.1", confidence: 0.65 },
+  { replacement: "10", confidence: 0.64 },
+];
+
+const MOD_DIVISOR_ENUM_2_10 = [
+  { replacement: "2", displayText: "2 (even/odd)", confidence: 0.66 },
+  { replacement: "10", displayText: "10 (last digit)", confidence: 0.65 },
+];
+
 const VLOOKUP_COL_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "2", displayText: "2 (2nd column)", confidence: 0.66 },
   { replacement: "1", displayText: "1 (1st column)", confidence: 0.65 },
@@ -1710,6 +1721,8 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     ],
   },
   "CEILING.MATH": {
+    // significance
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
     // mode
     2: [
       { replacement: "0", displayText: "0 (default; negatives toward 0)", confidence: 0.64 },
@@ -1717,11 +1730,37 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     ],
   },
   "FLOOR.MATH": {
+    // significance
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
     // mode
     2: [
       { replacement: "0", displayText: "0 (default; negatives away from 0)", confidence: 0.64 },
       { replacement: "1", displayText: "1 (negatives toward 0)", confidence: 0.63 },
     ],
+  },
+  CEILING: {
+    // significance
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
+  },
+  FLOOR: {
+    // significance
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
+  },
+  "CEILING.PRECISE": {
+    // significance
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
+  },
+  "FLOOR.PRECISE": {
+    // significance
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
+  },
+  "ISO.CEILING": {
+    // significance
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
+  },
+  MROUND: {
+    // multiple
+    1: ROUNDING_SIGNIFICANCE_ENUM_1_0_1_10,
   },
   LARGE: {
     // k
@@ -1794,6 +1833,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   DECIMAL: {
     // radix
     1: RADIX_ENUM_10_2_16_8,
+  },
+  MOD: {
+    // divisor
+    1: MOD_DIVISOR_ENUM_2_10,
   },
   "T.TEST": {
     // tails
