@@ -1,5 +1,5 @@
 use formula_model::charts::ChartAnchor;
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 
 use crate::workbook::ChartExtractionError;
 
@@ -25,6 +25,10 @@ pub fn extract_chart_refs(
     drawing_xml: &[u8],
     part_name: &str,
 ) -> Result<Vec<DrawingChartRef>, ChartExtractionError> {
+    fn is_chart_node(node: Node<'_, '_>) -> bool {
+        node.is_element() && node.tag_name().name() == "chart"
+    }
+
     let xml = std::str::from_utf8(drawing_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
     let doc = Document::parse(xml)
@@ -38,9 +42,7 @@ pub fn extract_chart_refs(
         };
         let anchor_model = anchor::anchor_to_chart_anchor(anchor_model);
 
-        for chart in anchor
-            .descendants()
-            .filter(|n| n.is_element() && n.tag_name().name() == "chart")
+        for chart in anchor::descendants_selecting_alternate_content(anchor, is_chart_node, is_chart_node)
         {
             let Some(rel_id) = chart
                 .attribute((

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 
 use formula_model::charts::ChartAnchor;
-use formula_model::drawings::{Anchor, AnchorPoint, CellOffset, EmuSize};
+use formula_model::drawings::{Anchor, AnchorPoint, CellOffset, DrawingObjectKind, EmuSize};
 use formula_model::CellRef;
 use formula_xlsx::drawings::DrawingPart;
 use formula_xlsx::XlsxPackage;
@@ -93,7 +93,7 @@ fn zip_with_drawing_part(drawing_xml: &str) -> Vec<u8> {
     zip.finish().expect("finish zip").into_inner()
 }
 
-fn assert_anchor_parses_consistently(drawing_xml: &str, expected: Anchor) {
+fn assert_anchor_parses_consistently(drawing_xml: &str, expected: Anchor) -> DrawingPart {
     // 1) Legacy chart ref extraction (`ChartAnchor`).
     let chart_refs =
         formula_xlsx::drawingml::extract_chart_refs(drawing_xml.as_bytes(), "drawing1.xml")
@@ -137,6 +137,8 @@ fn assert_anchor_parses_consistently(drawing_xml: &str, expected: Anchor) {
         drawing_part.objects[0].anchor, expected,
         "drawing part anchor parse mismatch"
     );
+
+    drawing_part
 }
 
 #[test]
@@ -271,4 +273,41 @@ fn parses_anchor_wrapped_in_mc_alternate_content_fallback_branch() {
         to: AnchorPoint::new(CellRef::new(4, 3), CellOffset::new(0, 0)),
     };
     assert_anchor_parses_consistently(&drawing_xml, expected);
+}
+
+#[test]
+fn parses_chart_frame_wrapped_in_mc_alternate_content_choice_branch() {
+    let choice_frame = chart_frame_xml().to_string();
+    let fallback_frame = choice_frame.replace("rId1", "rId2");
+
+    let object_xml = format!(
+        r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:Choice Requires="c14">{choice_frame}</mc:Choice>
+  <mc:Fallback>{fallback_frame}</mc:Fallback>
+</mc:AlternateContent>"#
+    );
+
+    let anchor_xml = format!(
+        r#"<xdr:twoCellAnchor>
+  <xdr:from><xdr:col>1</xdr:col><xdr:row>2</xdr:row></xdr:from>
+  <xdr:to><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:to>
+  {object_xml}
+  <xdr:clientData/>
+</xdr:twoCellAnchor>"#
+    );
+    let drawing_xml = wrap_wsdr(&anchor_xml);
+
+    let expected = Anchor::TwoCell {
+        from: AnchorPoint::new(CellRef::new(2, 1), CellOffset::new(0, 0)),
+        to: AnchorPoint::new(CellRef::new(4, 3), CellOffset::new(0, 0)),
+    };
+
+    let drawing_part = assert_anchor_parses_consistently(&drawing_xml, expected);
+    assert!(
+        matches!(
+            &drawing_part.objects[0].kind,
+            DrawingObjectKind::ChartPlaceholder { rel_id, raw_xml } if rel_id == "rId1" && raw_xml.contains("rId1") && !raw_xml.contains("rId2")
+        ),
+        "expected DrawingPart to materialize a single chart placeholder from the Choice branch"
+    );
 }

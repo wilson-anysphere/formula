@@ -131,6 +131,113 @@ pub(crate) fn wsdr_anchor_nodes<'a, 'input>(wsdr: Node<'a, 'input>) -> Vec<Node<
     out
 }
 
+/// Flattens `mc:AlternateContent` wrappers by selecting a single branch.
+///
+/// This mirrors the chartSpace parser's heuristic:
+/// - Prefer the first `mc:Choice` branch that contains any node matching `selector`
+///   (searching within that branch).
+/// - Otherwise, prefer the first `mc:Fallback` branch that contains any node matching `selector`.
+/// - Otherwise, fall back to the first non-empty branch.
+///
+/// The returned nodes are the selected branch's element children (recursively flattened).
+pub(crate) fn flatten_alternate_content<'a, 'input>(
+    node: Node<'a, 'input>,
+    selector: fn(Node<'a, 'input>) -> bool,
+) -> Vec<Node<'a, 'input>> {
+    if node.tag_name().name() != "AlternateContent" {
+        return vec![node];
+    }
+
+    let mut first_choice_children: Option<Vec<Node<'a, 'input>>> = None;
+    for choice in node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Choice")
+    {
+        let children: Vec<_> = choice
+            .children()
+            .filter(|n| n.is_element())
+            .flat_map(|n| flatten_alternate_content(n, selector))
+            .collect();
+        if first_choice_children.is_none() && !children.is_empty() {
+            first_choice_children = Some(children.clone());
+        }
+        if choice.descendants().any(selector) {
+            return children;
+        }
+    }
+
+    let mut first_fallback_children: Option<Vec<Node<'a, 'input>>> = None;
+    for fallback in node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Fallback")
+    {
+        let children: Vec<_> = fallback
+            .children()
+            .filter(|n| n.is_element())
+            .flat_map(|n| flatten_alternate_content(n, selector))
+            .collect();
+        if first_fallback_children.is_none() && !children.is_empty() {
+            first_fallback_children = Some(children.clone());
+        }
+        if fallback.descendants().any(selector) {
+            return children;
+        }
+    }
+
+    if let Some(children) = first_choice_children {
+        return children;
+    }
+    if let Some(children) = first_fallback_children {
+        return children;
+    }
+
+    // Unknown structure: treat AlternateContent as transparent and just emit its
+    // direct element children.
+    node.children()
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, selector))
+        .collect()
+}
+
+/// Returns the direct element children of `node`, flattening `mc:AlternateContent` wrappers.
+pub(crate) fn element_children_selecting_alternate_content<'a, 'input>(
+    node: Node<'a, 'input>,
+    selector: fn(Node<'a, 'input>) -> bool,
+) -> Vec<Node<'a, 'input>> {
+    node.children()
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, selector))
+        .collect()
+}
+
+/// Returns all descendants of `node` matching `desired`, traversing `mc:AlternateContent` wrappers
+/// by selecting a single branch using `selector`.
+pub(crate) fn descendants_selecting_alternate_content<'a, 'input>(
+    node: Node<'a, 'input>,
+    selector: fn(Node<'a, 'input>) -> bool,
+    desired: fn(Node<'a, 'input>) -> bool,
+) -> Vec<Node<'a, 'input>> {
+    fn walk<'a, 'input>(
+        node: Node<'a, 'input>,
+        selector: fn(Node<'a, 'input>) -> bool,
+        desired: fn(Node<'a, 'input>) -> bool,
+        out: &mut Vec<Node<'a, 'input>>,
+    ) {
+        for child in node.children().filter(|n| n.is_element()) {
+            for node in flatten_alternate_content(child, selector) {
+                if desired(node) {
+                    out.push(node);
+                }
+                walk(node, selector, desired, out);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(node, selector, desired, &mut out);
+    out
+}
+
 pub(crate) fn anchor_to_chart_anchor(anchor: Anchor) -> ChartAnchor {
     match anchor {
         Anchor::TwoCell { from, to } => ChartAnchor::TwoCell {

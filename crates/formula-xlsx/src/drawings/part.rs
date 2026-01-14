@@ -19,6 +19,22 @@ pub(crate) const REL_TYPE_IMAGE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 const GRAPHIC_DATA_CHART_URI: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
+fn is_pic_node(node: Node<'_, '_>) -> bool {
+    node.is_element() && node.tag_name().name() == "pic"
+}
+
+fn is_sp_node(node: Node<'_, '_>) -> bool {
+    node.is_element() && node.tag_name().name() == "sp"
+}
+
+fn is_chart_node(node: Node<'_, '_>) -> bool {
+    node.is_element() && node.tag_name().name() == "chart"
+}
+
+fn is_graphic_frame_node(node: Node<'_, '_>) -> bool {
+    node.is_element() && node.tag_name().name() == "graphicFrame"
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrawingRef(pub usize);
 
@@ -219,9 +235,12 @@ impl DrawingPart {
                 Err(_) => continue,
             };
 
-            if let Some(pic) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "pic")
+            if let Some(pic) = crate::drawingml::anchor::element_children_selecting_alternate_content(
+                anchor_node,
+                is_pic_node,
+            )
+            .into_iter()
+            .find(|n| is_pic_node(*n))
             {
                 match parse_pic(&pic, drawing_xml) {
                     Ok((id, pic_xml, embed)) => {
@@ -275,9 +294,12 @@ impl DrawingPart {
                 continue;
             }
 
-            if let Some(sp) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "sp")
+            if let Some(sp) = crate::drawingml::anchor::element_children_selecting_alternate_content(
+                anchor_node,
+                is_sp_node,
+            )
+            .into_iter()
+            .find(|n| is_sp_node(*n))
             {
                 let size = extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
                 match parse_named_node(&sp, drawing_xml, "cNvPr") {
@@ -301,9 +323,12 @@ impl DrawingPart {
                 continue;
             }
 
-            if let Some(frame) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
+            if let Some(frame) = crate::drawingml::anchor::element_children_selecting_alternate_content(
+                anchor_node,
+                is_chart_node,
+            )
+            .into_iter()
+            .find(|n| is_graphic_frame_node(*n))
             {
                 let size = extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
                 match parse_named_node(&frame, drawing_xml, "cNvPr") {
@@ -442,9 +467,12 @@ impl DrawingPart {
             };
             let anchor_preserved = parse_anchor_preserved(&anchor_node, drawing_xml);
 
-            if let Some(pic) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "pic")
+            if let Some(pic) = crate::drawingml::anchor::element_children_selecting_alternate_content(
+                anchor_node,
+                is_pic_node,
+            )
+            .into_iter()
+            .find(|n| is_pic_node(*n))
             {
                 if let Ok((id, pic_xml, embed)) = parse_pic(&pic, drawing_xml) {
                     if let Ok(image_id) = resolve_image_id_from_archive(
@@ -475,9 +503,12 @@ impl DrawingPart {
                 // Fall back to preserving the full anchor subtree when we can't resolve the image.
             }
 
-            if let Some(sp) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "sp")
+            if let Some(sp) = crate::drawingml::anchor::element_children_selecting_alternate_content(
+                anchor_node,
+                is_sp_node,
+            )
+            .into_iter()
+            .find(|n| is_sp_node(*n))
             {
                 if let Ok((id, sp_xml)) = parse_named_node(&sp, drawing_xml, "cNvPr") {
                     let size =
@@ -495,9 +526,12 @@ impl DrawingPart {
                 // Fall back to preserving the full anchor subtree when we can't parse the shape.
             }
 
-            if let Some(frame) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
+            if let Some(frame) = crate::drawingml::anchor::element_children_selecting_alternate_content(
+                anchor_node,
+                is_chart_node,
+            )
+            .into_iter()
+            .find(|n| is_graphic_frame_node(*n))
             {
                 if let Ok((id, frame_xml)) = parse_named_node(&frame, drawing_xml, "cNvPr") {
                     let chart_node = frame
