@@ -1376,6 +1376,15 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: '"totmem"', displayText: '"totmem" (total memory)', confidence: 0.63 },
     ],
   },
+  IMAGE: {
+    // sizing
+    2: [
+      { replacement: "0", displayText: "0 (fit)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (fill)", confidence: 0.65 },
+      { replacement: "2", displayText: "2 (original size)", confidence: 0.64 },
+      { replacement: "3", displayText: "3 (custom size)", confidence: 0.63 },
+    ],
+  },
   NUMBERVALUE: {
     // decimal_separator (in quotes)
     1: [

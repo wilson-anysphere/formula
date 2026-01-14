@@ -1940,6 +1940,25 @@ test('INFO type_text suggests "osversion" and "system"', async () => {
   }
 });
 
+test("IMAGE sizing suggests 0, 1, 2, 3", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=IMAGE("https://example.com/cat.png", "cat", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const code of ["0", "1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=IMAGE(\"https://example.com/cat.png\", \"cat\", ${code}`),
+      `Expected IMAGE to suggest sizing=${code}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test('NUMBERVALUE decimal_separator suggests "." and ","', async () => {
   const engine = new TabCompletionEngine();
 
