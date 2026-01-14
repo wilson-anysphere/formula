@@ -91,3 +91,33 @@ test("applyState accepts singleton-wrapped mergedRanges coordinates (interop)", 
   doc.applyState(snapshot);
   assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
 });
+
+test("applyState accepts singleton-wrapped mergedRanges entry objects (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          view: {
+            mergedRanges: [
+              {
+                0: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+              },
+            ],
+          },
+        },
+      ],
+      sheetOrder: ["Sheet1"],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+  assert.deepEqual(doc.getMergedRanges("Sheet1"), [{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
+});

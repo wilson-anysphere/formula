@@ -1573,7 +1573,8 @@ function normalizeSheetViewState(view) {
 
     for (const entry of entries) {
       if (!entry) continue;
-      const range = entry?.range ?? entry;
+      const unwrappedEntry = unwrapSingletonObjectWrapper(entry);
+      const range = unwrapSingletonObjectWrapper(unwrappedEntry?.range ?? unwrappedEntry);
       const startRowNum = Number(unwrapSingletonId(range?.startRow ?? range?.start?.row));
       const endRowNum = Number(unwrapSingletonId(range?.endRow ?? range?.end?.row));
       const startColNum = Number(unwrapSingletonId(range?.startCol ?? range?.start?.col));
