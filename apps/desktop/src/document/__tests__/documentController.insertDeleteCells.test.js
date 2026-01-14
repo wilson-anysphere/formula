@@ -316,3 +316,17 @@ test("insertCellsShiftRight throws when a merged range overlaps the shift band",
     /merged/i,
   );
 });
+
+test("insertCellsShiftRight throws when canEditCell blocks a destination cell (atomic shift)", () => {
+  const doc = new DocumentController({
+    canEditCell: (cell) => !(cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 1), // block B1
+  });
+
+  doc.setCellValue("Sheet1", "A1", "A");
+
+  assert.throws(() => doc.insertCellsShiftRight("Sheet1", "A1"), /permission/i);
+
+  // Ensure the operation did not partially clear/move cells.
+  assert.equal(doc.getCell("Sheet1", "A1").value, "A");
+  assert.equal(doc.getCell("Sheet1", "B1").value, null);
+});

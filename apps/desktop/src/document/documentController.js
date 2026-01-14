@@ -5130,6 +5130,20 @@ export class DocumentController {
       }
     }
 
+    // Cell-shift operations must be applied atomically. Unlike simple edits like `clearRange`,
+    // partial application can corrupt the sheet by clearing the source cell without writing
+    // the destination cell (or by skipping required formula rewrites).
+    //
+    // Since DocumentController's `canEditCell` filtering happens per-delta, reject the entire
+    // operation upfront when any affected cell is not editable.
+    if (typeof this.canEditCell === "function") {
+      for (const delta of deltas) {
+        if (!this.canEditCell({ sheetId: delta.sheetId, row: delta.row, col: delta.col })) {
+          throw new Error("Cannot shift cells because you don't have permission to edit one or more affected cells.");
+        }
+      }
+    }
+
     /** @type {RangeRunDelta[]} */
     const rangeRunDeltas = [];
     if (sheet.formatRunsByCol && sheet.formatRunsByCol.size > 0) {
