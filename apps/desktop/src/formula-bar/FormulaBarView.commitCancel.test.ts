@@ -220,6 +220,46 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("setReadOnly(false) re-enables focus-to-edit behavior after being read-only", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "hello", value: null });
+
+    view.setReadOnly(true, { role: "viewer" });
+    expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
+    expect(view.textarea.readOnly).toBe(true);
+    expect(view.textarea.getAttribute("aria-readonly")).toBe("true");
+    expect(view.textarea.title).toBe("Read-only (viewer)");
+
+    // Focusing while read-only must not enter edit mode.
+    view.textarea.focus();
+    expect(view.model.isEditing).toBe(false);
+    expect(onBeginEdit).not.toHaveBeenCalled();
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    view.textarea.blur();
+
+    view.setReadOnly(false);
+    expect(view.root.classList.contains("formula-bar--read-only")).toBe(false);
+    expect(view.textarea.readOnly).toBe(false);
+    expect(view.textarea.getAttribute("aria-readonly")).toBe("false");
+    expect(view.textarea.title).toBe("");
+
+    view.textarea.focus();
+    expect(view.model.isEditing).toBe(true);
+    expect(onBeginEdit).toHaveBeenCalledTimes(1);
+    expect(onBeginEdit).toHaveBeenCalledWith("A1");
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
+
+    host.remove();
+  });
+
   it("setReadOnly(true) exits edit mode without calling onCancel/onCommit", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
