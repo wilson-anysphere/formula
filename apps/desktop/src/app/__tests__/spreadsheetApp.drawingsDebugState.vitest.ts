@@ -175,5 +175,41 @@ describe("SpreadsheetApp drawings debug state", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
-});
 
+  it("accounts for shared-grid zoom when computing drawing rects", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+
+      const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
+      await app.insertPicturesFromFiles([file], { placeAt: { row: 0, col: 0 } });
+
+      const drawingId = app.getDrawingsDebugState().drawings[0]!.id;
+      const rect1 = app.getDrawingRectPx(drawingId);
+      expect(rect1).not.toBeNull();
+
+      app.setZoom(2);
+      const rect2 = app.getDrawingRectPx(drawingId);
+      expect(rect2).not.toBeNull();
+
+      // The on-screen size should scale proportionally with zoom.
+      expect(rect2!.width).toBeGreaterThan(rect1!.width);
+      expect(rect2!.height).toBeGreaterThan(rect1!.height);
+      expect(rect2!.width / rect1!.width).toBeCloseTo(2, 1);
+      expect(rect2!.height / rect1!.height).toBeCloseTo(2, 1);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+});
