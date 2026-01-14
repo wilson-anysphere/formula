@@ -119,9 +119,10 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return (payload as ImportedSheetBackgroundImageInfo[]) ?? [];
   }
 
-  async saveWorkbook(path?: string): Promise<void> {
+  async saveWorkbook(path?: string, options?: { password?: string }): Promise<void> {
     const args: Record<string, unknown> = {};
     if (path) args.path = path;
+    if (options?.password != null) args.password = options.password;
     await this.invoke("save_workbook", args);
   }
 

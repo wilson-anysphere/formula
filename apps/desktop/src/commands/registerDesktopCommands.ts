@@ -110,6 +110,12 @@ export function registerDesktopCommands(params: {
   showQuickPick: <T>(items: QuickPickItem<T>[], options?: { placeHolder?: string }) => Promise<T | null>;
   findReplace: FindReplaceCommandHandlers;
   workbenchFileHandlers: WorkbenchFileCommandHandlers;
+  /**
+   * Optional handler for File → Info → Protect Workbook → "Encrypt with Password…".
+   *
+   * The desktop shell owns file dialogs and save flows, so the implementation lives in `main.ts`.
+   */
+  encryptWithPassword?: (() => void | Promise<void>) | null;
   formatPainter?: FormatPainterCommandHandlers | null;
   ribbonMacroHandlers?: RibbonMacroCommandHandlers | null;
   dataQueriesHandlers?: DataQueriesCommandHandlers | null;
@@ -157,6 +163,7 @@ export function registerDesktopCommands(params: {
     showQuickPick,
     findReplace,
     workbenchFileHandlers,
+    encryptWithPassword = null,
     formatPainter = null,
     ribbonMacroHandlers = null,
     dataQueriesHandlers = null,
@@ -933,6 +940,23 @@ export function registerDesktopCommands(params: {
       when: "false",
     },
   );
+
+  commandRegistry.registerBuiltinCommand(
+    "file.info.protectWorkbook.encryptWithPassword",
+    "Encrypt with Password…",
+    async () => {
+      if (encryptWithPassword) {
+        await encryptWithPassword();
+      } else {
+        safeShowToast("Encrypt with Password is not available in this environment.", "warning");
+      }
+    },
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+
   commandRegistry.registerBuiltinCommand("file.print.print", "Print…", () => commandRegistry.executeCommand("workbench.print"), {
     category: commandCategoryFile,
     when: "false",

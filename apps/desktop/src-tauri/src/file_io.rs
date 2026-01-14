@@ -10,7 +10,7 @@ use formula_model::{
     sanitize_sheet_name, CellValue as ModelCellValue, ColProperties as ModelColProperties,
     DateSystem as WorkbookDateSystem, SheetVisibility, TabColor, WorksheetId,
 };
-use formula_offcrypto::{decrypt_ooxml_from_ole_bytes, OffcryptoError};
+use formula_office_crypto::OfficeCryptoError;
 use formula_xlsb::biff12_varint;
 use formula_xlsb::{
     CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, OpenOptions as XlsbOpenOptions,
@@ -58,6 +58,26 @@ const XLTX_WORKBOOK_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml";
 const XLTM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.template.macroEnabled.main+xml";
 const XLAM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.addin.macroEnabled.main+xml";
+
+/// Encrypt a raw OOXML ZIP package into an Office `EncryptedPackage` OLE/CFB wrapper.
+///
+/// This helper enforces a non-empty password and uses defaults that match Excel's common "Agile"
+/// encryption settings.
+pub(crate) fn encrypt_package_to_ole_bytes(
+    zip_bytes: &[u8],
+    password: &str,
+) -> anyhow::Result<Vec<u8>> {
+    let password = password.trim();
+    if password.is_empty() {
+        anyhow::bail!("{INVALID_PASSWORD_PREFIX} password must not be empty");
+    }
+    formula_office_crypto::encrypt_package_to_ole(
+        zip_bytes,
+        password,
+        formula_office_crypto::EncryptOptions::default(),
+    )
+    .map_err(anyhow::Error::new)
+}
 
 // Limits for extracting individual parts from untrusted XLSX/XLSM ZIP containers. These should be
 // generous enough for legitimate workbooks but finite to prevent ZIP-bomb OOM via untrusted
@@ -665,9 +685,9 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         .len();
 
     let origin_xlsx_bytes = if file_size <= max_origin_bytes as u64 {
-        Some(Arc::<[u8]>::from(
-            std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
-        ))
+        Some(Arc::<[u8]>::from(std::fs::read(path).with_context(
+            || format!("read workbook bytes {:?}", path),
+        )?))
     } else {
         None
     };
@@ -759,12 +779,10 @@ where
         XLSX_VBA_SIGNATURE_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
     );
 
-    if let Some(power_query_xml) =
-        read_optional_part(
+    if let Some(power_query_xml) = read_optional_part(
             FORMULA_POWER_QUERY_PART,
             XLSX_POWER_QUERY_XML_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
-        )
-    {
+        ) {
         out.power_query_xml = Some(power_query_xml.clone());
         out.original_power_query_xml = Some(power_query_xml);
     }
@@ -966,13 +984,11 @@ fn read_encrypted_ooxml_workbook_blocking(
 
     let raw_ole = std::fs::read(path).with_context(|| format!("read workbook {:?}", path))?;
 
-    let decrypted_zip = match decrypt_ooxml_from_ole_bytes(raw_ole, password) {
+    let decrypted_zip = match formula_office_crypto::decrypt_encrypted_package(&raw_ole, password) {
         Ok(bytes) => bytes,
         Err(err) => match err {
-            OffcryptoError::InvalidPassword => anyhow::bail!("{INVALID_PASSWORD_PREFIX} {err}"),
-            other => {
-                anyhow::bail!("encrypted workbook not supported: {other}");
-            }
+            OfficeCryptoError::InvalidPassword => anyhow::bail!("{INVALID_PASSWORD_PREFIX} {err}"),
+            other => anyhow::bail!("encrypted workbook not supported: {other}"),
         },
     };
 
@@ -2033,12 +2049,11 @@ fn workbook_xml_sheet_order_override(
     let workbook_xml =
         std::str::from_utf8(&workbook_xml_bytes).context("decode xl/workbook.xml")?;
 
-    let worksheet_parts =
-        formula_xlsx::worksheet_parts_from_reader_limited(
-            Cursor::new(origin_bytes),
-            XLSX_WORKBOOK_XML_MAX_BYTES,
-        )
-        .context("resolve worksheet parts")?;
+    let worksheet_parts = formula_xlsx::worksheet_parts_from_reader_limited(
+        Cursor::new(origin_bytes),
+        XLSX_WORKBOOK_XML_MAX_BYTES,
+    )
+    .context("resolve worksheet parts")?;
     if worksheet_parts.is_empty() {
         return Ok(None);
     }
@@ -2671,14 +2686,21 @@ fn patch_sheet_metadata_in_package(
     Ok(Some(cursor.into_inner()))
 }
 
-pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
+/// Build an XLSX-family package as an in-memory ZIP/OPC byte buffer.
+///
+/// This performs the same XLSX patch/export logic as [`write_xlsx_blocking`] but does **not** write
+/// anything to disk.
+///
+/// This is used by password-protected save flows, which must never write plaintext ZIP bytes to
+/// disk before wrapping them in an Office encryption container.
+pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
     let extension = path
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
 
     if matches!(extension.as_deref(), Some("xlsb")) {
-        return write_xlsb_blocking(path, workbook);
+        anyhow::bail!("building .xlsb bytes in memory is not supported");
     }
 
     let workbook_kind = extension
@@ -2862,8 +2884,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         if fast_path_possible {
             let part_overrides = sheet_metadata_part_overrides(origin_bytes, workbook)?;
             if part_overrides.is_empty() {
-                write_file_atomic(path, origin_bytes)
-                    .with_context(|| format!("write workbook {:?}", path))?;
                 return Ok(workbook
                     .origin_xlsx_bytes
                     .as_ref()
@@ -2881,8 +2901,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             )
             .context("patch sheet metadata (streaming)")?;
             let bytes = Arc::<[u8]>::from(cursor.into_inner());
-            write_file_atomic(path, bytes.as_ref())
-                .with_context(|| format!("write workbook {:?}", path))?;
             return Ok(bytes);
         }
 
@@ -2977,10 +2995,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             bytes = updated;
         }
 
-        let bytes = Arc::<[u8]>::from(bytes);
-        write_file_atomic(path, bytes.as_ref())
-            .with_context(|| format!("write workbook {:?}", path))?;
-        return Ok(bytes);
+        return Ok(Arc::<[u8]>::from(bytes));
     }
 
     let model = app_workbook_to_formula_model(workbook).context("convert workbook to model")?;
@@ -3008,9 +3023,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         || wants_power_query
         || needs_date_system_update
     {
-        let mut pkg =
-            XlsxPackage::from_bytes_limited(&bytes, XlsxPackageLimits::default())
-                .context("parse generated workbook package")?;
+        let mut pkg = XlsxPackage::from_bytes_limited(&bytes, XlsxPackageLimits::default())
+            .context("parse generated workbook package")?;
 
         if wants_vba {
             pkg.set_part(
@@ -3072,7 +3086,20 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
     }
 
-    let bytes = Arc::<[u8]>::from(bytes);
+    Ok(Arc::<[u8]>::from(bytes))
+}
+
+pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
+    let extension = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+
+    if matches!(extension.as_deref(), Some("xlsb")) {
+        return write_xlsb_blocking(path, workbook);
+    }
+
+    let bytes = build_xlsx_bytes_blocking(path, workbook)?;
     write_file_atomic(path, bytes.as_ref())
         .with_context(|| format!("write workbook {:?}", path))?;
     Ok(bytes)
@@ -3368,11 +3395,9 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
 
     match res {
         Ok(()) => Ok(()),
-        Err(AtomicWriteError::Io(err)) => Err(
-            Err::<(), _>(err)
-                .with_context(|| format!("write xlsb {:?}", path))
-                .unwrap_err(),
-        ),
+        Err(AtomicWriteError::Io(err)) => Err(Err::<(), _>(err)
+            .with_context(|| format!("write xlsb {:?}", path))
+            .unwrap_err()),
         Err(AtomicWriteError::Writer(err)) => Err(err),
     }
 }
@@ -4150,7 +4175,9 @@ mod tests {
         let cursor = Cursor::new(Vec::new());
         let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
         {
-            let mut stream = ole.create_stream("Workbook").expect("create Workbook stream");
+            let mut stream = ole
+                .create_stream("Workbook")
+                .expect("create Workbook stream");
             stream
                 .write_all(&workbook_stream)
                 .expect("write Workbook stream bytes");
@@ -4227,6 +4254,61 @@ mod tests {
             "expected decrypted bytes to be a ZIP/OPC package"
         );
         assert!(!workbook.sheets.is_empty(), "expected sheets to be parsed");
+    }
+
+    #[test]
+    fn encrypt_package_to_ole_bytes_rejects_empty_password() {
+        let err =
+            encrypt_package_to_ole_bytes(b"PK", "").expect_err("expected empty password to fail");
+        assert!(
+            err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
+            "expected invalid-password prefix, got: {err}"
+        );
+    }
+
+    #[test]
+    fn encrypted_save_produces_ole_file_and_roundtrips_via_open_with_password() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("encrypted.xlsx");
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.ensure_sheet_ids();
+        workbook.sheets[0].set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+
+        // Build plaintext ZIP bytes strictly in-memory, then encrypt into an OLE/CFB wrapper.
+        let zip_bytes = build_xlsx_bytes_blocking(&out_path, &workbook).expect("build xlsx bytes");
+        let ole_bytes =
+            encrypt_package_to_ole_bytes(zip_bytes.as_ref(), "password").expect("encrypt package");
+
+        write_file_atomic(&out_path, &ole_bytes).expect("write encrypted workbook");
+
+        let saved = std::fs::read(&out_path).expect("read saved bytes");
+        assert!(
+            saved.starts_with(&OLE_MAGIC),
+            "expected encrypted save to start with OLE magic"
+        );
+        assert!(
+            !saved.starts_with(b"PK"),
+            "expected encrypted save to not start with ZIP magic"
+        );
+
+        let err = read_xlsx_blocking_with_password(&out_path, Some("wrong-password"))
+            .expect_err("expected wrong password to fail");
+        assert!(
+            err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
+            "expected invalid-password prefix, got: {err}"
+        );
+
+        let opened = read_xlsx_blocking_with_password(&out_path, Some("password"))
+            .expect("open encrypted workbook");
+        let sheet = opened
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 should exist");
+        let cell = sheet.get_cell(0, 0);
+        assert_eq!(cell.computed_value, CellScalar::Number(123.0));
     }
 
     fn find_xlsb_cell_record(
@@ -5543,7 +5625,10 @@ mod tests {
         let loaded = read_xlsx_blocking(&out_path).expect("read workbook");
         let sheet = &loaded.sheets[0];
 
-        assert_eq!(sheet.col_properties.get(&0).and_then(|p| p.width), Some(20.0));
+        assert_eq!(
+            sheet.col_properties.get(&0).and_then(|p| p.width),
+            Some(20.0)
+        );
         assert_eq!(sheet.col_properties.get(&1).map(|p| p.hidden), Some(true));
     }
 

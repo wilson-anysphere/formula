@@ -2,15 +2,15 @@ use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotFieldRef, PivotKeyPart, ShowAsType,
     SortOrder, SubtotalPosition,
 };
+#[cfg(feature = "desktop")]
+use formula_model::charts::ChartModel as FormulaChartModel;
+#[cfg(feature = "desktop")]
+use formula_model::drawings::Anchor as FormulaDrawingAnchor;
 use formula_model::{SheetVisibility as ModelSheetVisibility, TabColor};
 use serde::{de, Deserialize, Serialize};
 #[cfg(any(feature = "desktop", test))]
 use serde_json::json;
 use serde_json::Value as JsonValue;
-#[cfg(feature = "desktop")]
-use formula_model::charts::ChartModel as FormulaChartModel;
-#[cfg(feature = "desktop")]
-use formula_model::drawings::Anchor as FormulaDrawingAnchor;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -1638,8 +1638,9 @@ pub struct IpcPivotField {
     #[serde(default)]
     pub sort_order: SortOrder,
     #[serde(default)]
-    pub manual_sort:
-        Option<LimitedVec<IpcPivotKeyPart, { crate::resource_limits::MAX_PIVOT_MANUAL_SORT_ITEMS }>>,
+    pub manual_sort: Option<
+        LimitedVec<IpcPivotKeyPart, { crate::resource_limits::MAX_PIVOT_MANUAL_SORT_ITEMS }>,
+    >,
 }
 
 /// IPC-friendly mirror of `formula_engine::pivot::PivotFieldRef` with resource limits applied.
@@ -2008,12 +2009,12 @@ pub struct PivotTableSummary {
 
 #[cfg(feature = "desktop")]
 use crate::file_io::read_workbook;
-#[cfg(feature = "desktop")]
-use crate::ipc_origin;
 #[cfg(any(feature = "desktop", test))]
 use crate::ipc_limits::MAX_IPC_PATH_BYTES;
 #[cfg(feature = "desktop")]
 use crate::ipc_limits::MAX_IPC_URL_BYTES;
+#[cfg(feature = "desktop")]
+use crate::ipc_origin;
 #[cfg(feature = "desktop")]
 use crate::macro_trust::SharedMacroTrustStore;
 #[cfg(feature = "desktop")]
@@ -2965,12 +2966,12 @@ pub async fn power_query_cache_key_get_or_create(
         "power query cache key access",
         ipc_origin::Verb::Is,
     )?;
-    ipc_origin::ensure_trusted_origin(
-        &url,
+    ipc_origin::ensure_trusted_origin(&url, "power query cache key access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(
+        &window,
         "power query cache key access",
         ipc_origin::Verb::Is,
     )?;
-    ipc_origin::ensure_stable_origin(&window, "power query cache key access", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCacheKeyStore::open_default();
@@ -2990,7 +2991,11 @@ pub async fn collab_token_get(
     token_key: String,
 ) -> Result<Option<CollabTokenEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collaboration tokens",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
@@ -3013,7 +3018,11 @@ pub async fn collab_token_set(
     entry: CollabTokenEntry,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collaboration tokens",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
@@ -3033,7 +3042,11 @@ pub async fn collab_token_delete(
     token_key: String,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "collaboration tokens", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collaboration tokens",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
@@ -3053,7 +3066,11 @@ pub async fn power_query_credential_get(
     scope_key: String,
 ) -> Result<Option<PowerQueryCredentialEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
@@ -3074,7 +3091,11 @@ pub async fn power_query_credential_set(
     secret: JsonValue,
 ) -> Result<PowerQueryCredentialEntry, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
@@ -3096,7 +3117,11 @@ pub async fn power_query_credential_delete(
     scope_key: String,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
@@ -3115,7 +3140,11 @@ pub async fn power_query_credential_list(
     window: tauri::WebviewWindow,
 ) -> Result<Vec<PowerQueryCredentialListEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "power query credentials", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
@@ -3136,7 +3165,11 @@ pub async fn collab_encryption_key_get(
     key_id: String,
 ) -> Result<Option<CollabEncryptionKeyEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
@@ -3158,7 +3191,11 @@ pub async fn collab_encryption_key_set(
     key_bytes_base64: String,
 ) -> Result<CollabEncryptionKeyListEntry, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
@@ -3181,7 +3218,11 @@ pub async fn collab_encryption_key_delete(
     key_id: String,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
@@ -3201,7 +3242,11 @@ pub async fn collab_encryption_key_list(
     doc_id: String,
 ) -> Result<Vec<CollabEncryptionKeyListEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "collab encryption keys", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
@@ -3221,7 +3266,11 @@ pub async fn power_query_refresh_state_get(
     workbook_id: String,
 ) -> Result<Option<JsonValue>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "power query refresh state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query refresh state",
+        ipc_origin::Verb::Is,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "power query refresh state", ipc_origin::Verb::Is)?;
 
@@ -3242,7 +3291,11 @@ pub async fn power_query_refresh_state_set(
     state: JsonValue,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_main_window(window.label(), "power query refresh state", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query refresh state",
+        ipc_origin::Verb::Is,
+    )?;
     ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "power query refresh state", ipc_origin::Verb::Is)?;
 
@@ -3670,7 +3723,8 @@ pub async fn list_imported_sheet_background_images(
         use std::io::Cursor;
 
         use crate::resource_limits::{
-            MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
+            MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
+            MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES,
         };
 
         fn extract_picture_rel_id(xml: &[u8]) -> Option<String> {
@@ -3768,7 +3822,9 @@ pub async fn list_imported_sheet_background_images(
             if let Some((bytes_base64, mime_type, byte_len)) =
                 cached_by_target.get(&target_part).cloned()
             {
-                if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES {
+                if total_bytes.saturating_add(byte_len)
+                    > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES
+                {
                     continue;
                 }
                 total_bytes = total_bytes.saturating_add(byte_len);
@@ -3794,7 +3850,9 @@ pub async fn list_imported_sheet_background_images(
             if byte_len > MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES {
                 continue;
             }
-            if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES {
+            if total_bytes.saturating_add(byte_len)
+                > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES
+            {
                 continue;
             }
             total_bytes = total_bytes.saturating_add(byte_len);
@@ -3978,6 +4036,7 @@ pub async fn list_imported_drawing_objects(
 pub async fn save_workbook(
     window: tauri::WebviewWindow,
     path: Option<LimitedString<MAX_IPC_PATH_BYTES>>,
+    password: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
@@ -4017,6 +4076,7 @@ pub async fn save_workbook(
     memory.flush_dirty_pages().map_err(|e| e.to_string())?;
 
     let save_path_clone = save_path.clone();
+    let password = password.clone();
     let (validated_save_path, written_bytes) = tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved_path = crate::fs_scope::resolve_save_path_in_allowed_roots(
@@ -4031,15 +4091,50 @@ pub async fn save_workbook(
             .and_then(|s| s.to_str())
             .unwrap_or_default();
 
+        if let Some(password) = password.as_deref() {
+            if password.trim().is_empty() {
+                return Err("INVALID_PASSWORD: password must not be empty".to_string());
+            }
+        }
+
         // XLSB saves must go through the `formula-xlsb` round-trip writer. The storage export
         // path only knows how to generate XLSX.
         if ext.eq_ignore_ascii_case("xlsb") {
+            if password.is_some() {
+                return Err(
+                    "ENCRYPTION_UNSUPPORTED: saving encrypted .xlsb workbooks is not supported yet; Save As .xlsx instead"
+                        .to_string(),
+                );
+            }
             crate::file_io::write_xlsb_to_disk_blocking(&resolved_path, &workbook)
                 .map_err(|e| e.to_string())?;
             return Ok::<_, String>((
                 validated_save_path,
                 std::sync::Arc::<[u8]>::from(Vec::new()),
             ));
+        }
+
+        if let Some(password) = password.as_deref() {
+            let zip_bytes = if workbook.origin_xlsx_bytes.is_some() {
+                crate::file_io::build_xlsx_bytes_blocking(&resolved_path, &workbook)
+                    .map_err(|e| e.to_string())?
+            } else {
+                crate::persistence::build_xlsx_from_storage(
+                    &storage,
+                    workbook_id,
+                    &workbook,
+                    &resolved_path,
+                )
+                .map_err(|e| e.to_string())?
+            };
+
+            let ole_bytes = crate::file_io::encrypt_package_to_ole_bytes(zip_bytes.as_ref(), password)
+                .map_err(|e| e.to_string())?;
+
+            crate::atomic_write::write_file_atomic(&resolved_path, &ole_bytes)
+                .map_err(|e| e.to_string())?;
+
+            return Ok::<_, String>((validated_save_path, zip_bytes));
         }
 
         // Prefer the existing patch-based save path when we have the original XLSX bytes.
@@ -4719,11 +4814,8 @@ pub fn apply_sheet_view_deltas(
             return out;
         };
 
-        out.col_widths = parse_axis_map(
-            obj.get("colWidths"),
-            &["col", "index"],
-            &["width", "size"],
-        );
+        out.col_widths =
+            parse_axis_map(obj.get("colWidths"), &["col", "index"], &["width", "size"]);
         out.row_heights = parse_axis_map(
             obj.get("rowHeights"),
             &["row", "index"],
@@ -4745,18 +4837,29 @@ pub fn apply_sheet_view_deltas(
 
     fn serialize_view_state(state: ViewState) -> JsonValue {
         let mut out = serde_json::Map::new();
-        out.insert("schemaVersion".to_string(), json!(SHEET_VIEW_SCHEMA_VERSION));
+        out.insert(
+            "schemaVersion".to_string(),
+            json!(SHEET_VIEW_SCHEMA_VERSION),
+        );
         if !state.col_widths.is_empty() {
-            out.insert("colWidths".to_string(), serialize_axis_map(state.col_widths));
+            out.insert(
+                "colWidths".to_string(),
+                serialize_axis_map(state.col_widths),
+            );
         }
         if !state.row_heights.is_empty() {
-            out.insert("rowHeights".to_string(), serialize_axis_map(state.row_heights));
+            out.insert(
+                "rowHeights".to_string(),
+                serialize_axis_map(state.row_heights),
+            );
         }
         JsonValue::Object(out)
     }
 
     let mut state = state.inner().lock().unwrap();
-    let sheet_uuid = state.persistent_sheet_uuid(&payload.sheet_id).map_err(app_error)?;
+    let sheet_uuid = state
+        .persistent_sheet_uuid(&payload.sheet_id)
+        .map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
         return Err(app_error(AppStateError::Persistence(
             "workbook is not backed by persistent storage".to_string(),
@@ -7581,7 +7684,11 @@ pub async fn open_external_url(
             return Err("main webview window not available".to_string());
         };
         let webview_url = webview.url().map_err(|err| err.to_string())?;
-        ipc_origin::ensure_trusted_origin(&webview_url, "external URL opening", ipc_origin::Verb::Is)?;
+        ipc_origin::ensure_trusted_origin(
+            &webview_url,
+            "external URL opening",
+            ipc_origin::Verb::Is,
+        )?;
         ipc_origin::ensure_stable_origin(&webview, "external URL opening", ipc_origin::Verb::Is)?;
     }
 
@@ -8114,34 +8221,40 @@ fn marketplace_bounded_header_string(
 async fn marketplace_download_payload_from_response(
     mut response: reqwest::Response,
 ) -> Result<MarketplaceDownloadPayload, String> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::resource_limits::MAX_MARKETPLACE_PACKAGE_BYTES;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    let (signature_base64, sha256, format_version, publisher, publisher_key_id, scan_status, files_sha256) =
-        {
-            let headers = response.headers();
+    let (
+        signature_base64,
+        sha256,
+        format_version,
+        publisher,
+        publisher_key_id,
+        scan_status,
+        files_sha256,
+    ) = {
+        let headers = response.headers();
 
-            let signature_base64 = marketplace_bounded_header_string(headers, "x-package-signature")?;
-            let sha256 = marketplace_bounded_header_string(headers, "x-package-sha256")?;
-            let format_version = marketplace_bounded_header_string(headers, "x-package-format-version")?
+        let signature_base64 = marketplace_bounded_header_string(headers, "x-package-signature")?;
+        let sha256 = marketplace_bounded_header_string(headers, "x-package-sha256")?;
+        let format_version =
+            marketplace_bounded_header_string(headers, "x-package-format-version")?
                 .and_then(|s| s.parse::<u32>().ok());
-            let publisher = marketplace_bounded_header_string(headers, "x-publisher")?;
-            let publisher_key_id =
-                marketplace_bounded_header_string(headers, "x-publisher-key-id")?;
-            let scan_status = marketplace_bounded_header_string(headers, "x-package-scan-status")?;
-            let files_sha256 =
-                marketplace_bounded_header_string(headers, "x-package-files-sha256")?;
+        let publisher = marketplace_bounded_header_string(headers, "x-publisher")?;
+        let publisher_key_id = marketplace_bounded_header_string(headers, "x-publisher-key-id")?;
+        let scan_status = marketplace_bounded_header_string(headers, "x-package-scan-status")?;
+        let files_sha256 = marketplace_bounded_header_string(headers, "x-package-files-sha256")?;
 
-            (
-                signature_base64,
-                sha256,
-                format_version,
-                publisher,
-                publisher_key_id,
-                scan_status,
-                files_sha256,
-            )
-        };
+        (
+            signature_base64,
+            sha256,
+            format_version,
+            publisher,
+            publisher_key_id,
+            scan_status,
+            files_sha256,
+        )
+    };
 
     let bytes = crate::network_limits::read_response_body_with_limit(
         &mut response,
@@ -8191,9 +8304,9 @@ pub async fn marketplace_download_package(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::file_io::read_xlsx_blocking;
     use crate::resource_limits::{MAX_MARKETPLACE_HEADER_BYTES, MAX_MARKETPLACE_PACKAGE_BYTES};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use formula_xlsx::drawingml::{PreservedDrawingParts, PreservedSheetPicture, SheetRelationshipStub};
     use std::io::Write;
     use std::path::Path;
@@ -8559,7 +8672,10 @@ mod tests {
             "http://[::1]/",
         ] {
             let url = Url::parse(candidate).expect("parse url");
-            assert!(is_local_http_allowed(&url), "expected {candidate} to be allowed");
+            assert!(
+                is_local_http_allowed(&url),
+                "expected {candidate} to be allowed"
+            );
         }
 
         let url = Url::parse("http://example.com/").expect("parse url");
@@ -8796,9 +8912,10 @@ mod tests {
                 })
             })
             .collect::<Vec<_>>();
-        cfg.as_object_mut()
-            .unwrap()
-            .insert("rowFields".to_string(), serde_json::Value::Array(row_fields));
+        cfg.as_object_mut().unwrap().insert(
+            "rowFields".to_string(),
+            serde_json::Value::Array(row_fields),
+        );
 
         let err =
             serde_json::from_value::<IpcPivotConfig>(cfg).expect_err("expected size limit to fail");
@@ -8993,11 +9110,12 @@ mod tests {
     #[test]
     fn apply_sheet_formatting_deltas_request_rejects_too_many_row_format_deltas() {
         let max = crate::resource_limits::MAX_SHEET_FORMATTING_ROW_DELTAS;
-        let err = <LimitedSheetRowFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
-            len: max + 1,
-        })
-        .expect_err("expected size_hint guard to reject oversized row deltas")
-        .to_string();
+        let err =
+            <LimitedSheetRowFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+                len: max + 1,
+            })
+            .expect_err("expected size_hint guard to reject oversized row deltas")
+            .to_string();
         assert!(
             err.contains("rowFormats") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
@@ -9007,11 +9125,12 @@ mod tests {
     #[test]
     fn apply_sheet_formatting_deltas_request_rejects_too_many_col_format_deltas() {
         let max = crate::resource_limits::MAX_SHEET_FORMATTING_COL_DELTAS;
-        let err = <LimitedSheetColFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
-            len: max + 1,
-        })
-        .expect_err("expected size_hint guard to reject oversized col deltas")
-        .to_string();
+        let err =
+            <LimitedSheetColFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+                len: max + 1,
+            })
+            .expect_err("expected size_hint guard to reject oversized col deltas")
+            .to_string();
         assert!(
             err.contains("colFormats") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
@@ -9021,11 +9140,12 @@ mod tests {
     #[test]
     fn apply_sheet_formatting_deltas_request_rejects_too_many_cell_format_deltas() {
         let max = crate::resource_limits::MAX_SHEET_FORMATTING_CELL_DELTAS;
-        let err = <LimitedSheetCellFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
-            len: max + 1,
-        })
-        .expect_err("expected size_hint guard to reject oversized cell deltas")
-        .to_string();
+        let err =
+            <LimitedSheetCellFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+                len: max + 1,
+            })
+            .expect_err("expected size_hint guard to reject oversized cell deltas")
+            .to_string();
         assert!(
             err.contains("cellFormats") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
@@ -9035,12 +9155,11 @@ mod tests {
     #[test]
     fn apply_sheet_formatting_deltas_request_rejects_too_many_run_columns() {
         let max = crate::resource_limits::MAX_SHEET_FORMATTING_RUN_COLS;
-        let err =
-            <LimitedSheetFormatRunsByColDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
-                len: max + 1,
-            })
-            .expect_err("expected size_hint guard to reject oversized run columns")
-            .to_string();
+        let err = <LimitedSheetFormatRunsByColDeltas as Deserialize>::deserialize(
+            SizeHintSeqDeserializer { len: max + 1 },
+        )
+        .expect_err("expected size_hint guard to reject oversized run columns")
+        .to_string();
         assert!(
             err.contains("formatRunsByCol") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
@@ -9103,8 +9222,8 @@ mod tests {
         type SheetIds = LimitedVec<ShortSheetId, 4>;
 
         let value = serde_json::json!(["a", "b", "c", "d", "e"]);
-        let err =
-            serde_json::from_value::<SheetIds>(value).expect_err("expected oversized array to fail");
+        let err = serde_json::from_value::<SheetIds>(value)
+            .expect_err("expected oversized array to fail");
         assert!(
             err.to_string().contains("max") && err.to_string().contains("4"),
             "unexpected error: {err}"

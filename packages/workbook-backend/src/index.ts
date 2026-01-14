@@ -152,7 +152,7 @@ export interface WorkbookBackend {
     values: RangeCellEdit[][];
   }): Promise<void>;
 
-  saveWorkbook?(path?: string): Promise<void>;
+  saveWorkbook?(path?: string, options?: { password?: string }): Promise<void>;
 }
 
 type RequiredKeys<T> = {

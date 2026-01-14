@@ -67,6 +67,7 @@ formula-engine = { path = "../../../crates/formula-engine" }
 formula-fs = { path = "../../../crates/formula-fs" }
 formula-format = { path = "../../../crates/formula-format" }
 formula-offcrypto = { path = "../../../crates/formula-offcrypto" }
+formula-office-crypto = { path = "../../../crates/formula-office-crypto" }
 formula-xls = { path = "../../../crates/formula-xls" }
 formula-model = { path = "../../../crates/formula-model" }
 formula-storage = { path = "../../../crates/formula-storage" }

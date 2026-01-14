@@ -2013,6 +2013,7 @@ dependencies = [
  "formula-fs",
  "formula-model",
  "formula-offcrypto",
+ "formula-office-crypto",
  "formula-storage",
  "formula-vba",
  "formula-vba-runtime",

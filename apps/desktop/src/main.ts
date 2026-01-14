@@ -8742,6 +8742,16 @@ registerDesktopCommands({
       });
     },
   },
+  encryptWithPassword: () => {
+    if (!tauriBackend) {
+      showDesktopOnlyToast("Encrypt with Password is available in the desktop app.");
+      return;
+    }
+    void handleSaveWithPassword().catch((err) => {
+      console.error("Failed to save workbook with password:", err);
+      showToast(`Failed to save workbook with password: ${String(err)}`, "error");
+    });
+  },
   openCommandPalette: () => openCommandPalette?.(),
   openGoalSeekDialog: () => showGoalSeekDialogModal(),
 });
@@ -10836,6 +10846,45 @@ async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?:
   }
 }
 
+async function handleSaveWithPassword(): Promise<void> {
+  commitAllPendingEditsForCommand();
+  if (!tauriBackend) return;
+  if (!activeWorkbook) return;
+
+  const password = await showInputBox({
+    prompt: "Encrypt workbook with password",
+    placeHolder: "Password",
+    type: "password",
+    okLabel: "Encrypt",
+    cancelLabel: "Cancel",
+  });
+  if (password == null) {
+    // If the user cancels the password prompt, fall back to the normal save flow.
+    await handleSave();
+    return;
+  }
+  if (password.trim() === "") {
+    showToast("Password cannot be empty.", "error");
+    return;
+  }
+
+  if (!activeWorkbook.path) {
+    const { save } = getTauriDialogOrThrow();
+    const path = await save({
+      filters: [
+        { name: t("fileDialog.filters.excelWorkbook"), extensions: ["xlsx"] },
+        { name: "Excel Macro-Enabled Workbook", extensions: ["xlsm"] },
+      ],
+    });
+    if (!path) return;
+    await handleSaveAsPath(path, { password });
+    return;
+  }
+
+  const savePath = coerceSavePathToXlsx(activeWorkbook.path);
+  await handleSaveAsPath(savePath, { password });
+}
+
 async function handleSaveAs(
   options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean; throwOnCancel?: boolean } = {},
 ): Promise<void> {
@@ -10865,7 +10914,7 @@ async function handleSaveAs(
 
 async function handleSaveAsPath(
   path: string,
-  options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean } = {},
+  options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean; password?: string } = {},
 ): Promise<void> {
   commitAllPendingEditsForCommand();
   if (!tauriBackend) return;
@@ -10886,9 +10935,11 @@ async function handleSaveAsPath(
     }
   }
   if (queuedInvoke) {
-    await queuedInvoke("save_workbook", { path: savePath });
+    const args: Record<string, unknown> = { path: savePath };
+    if (options.password != null) args.password = options.password;
+    await queuedInvoke("save_workbook", args);
   } else {
-    await tauriBackend.saveWorkbook(savePath);
+    await tauriBackend.saveWorkbook(savePath, options.password != null ? { password: options.password } : undefined);
   }
   activeWorkbook = { ...activeWorkbook, path: savePath };
   app.getDocument().markSaved();

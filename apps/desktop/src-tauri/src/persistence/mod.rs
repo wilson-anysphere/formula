@@ -1,13 +1,13 @@
 mod workbook_state;
 
-pub use workbook_state::{PersistentWorkbookState, WorkbookPersistenceLocation};
 pub use workbook_state::{open_memory_manager, open_storage};
+pub use workbook_state::{PersistentWorkbookState, WorkbookPersistenceLocation};
 
+use crate::atomic_write::write_file_atomic;
 use crate::file_io::{
     is_xlsx_family_extension, DefinedName as AppDefinedName, Sheet as AppSheet, Table as AppTable,
     Workbook as AppWorkbook,
 };
-use crate::atomic_write::write_file_atomic;
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
@@ -336,7 +336,7 @@ mod tests {
     }
 }
 
-/// Export a workbook from SQLite and write it as an `.xlsx`/`.xlsm` file.
+/// Export a workbook from SQLite and build an `.xlsx`/`.xlsm` package as an in-memory ZIP buffer.
 ///
 /// We currently write a fresh XLSX ZIP from the `formula-model` export and then
 /// re-apply a handful of preserved parts (VBA, drawing parts, pivot attachments)
@@ -346,7 +346,7 @@ mod tests {
 /// supports autosave/crash recovery. We intentionally do **not** use the older
 /// patch-based XLSX save path here yet because emitting `WorkbookCellPatches`
 /// directly from SQLite deltas is not implemented.
-pub fn write_xlsx_from_storage(
+pub fn build_xlsx_from_storage(
     storage: &formula_storage::Storage,
     workbook_id: Uuid,
     workbook_meta: &AppWorkbook,
@@ -370,7 +370,8 @@ pub fn write_xlsx_from_storage(
     apply_cached_formula_values(&mut model, workbook_meta);
 
     let mut cursor = Cursor::new(Vec::new());
-    formula_xlsx::write_workbook_to_writer(&model, &mut cursor).context("write workbook to bytes")?;
+    formula_xlsx::write_workbook_to_writer(&model, &mut cursor)
+        .context("write workbook to bytes")?;
     let mut bytes = cursor.into_inner();
 
     let extension = path
@@ -383,17 +384,20 @@ pub fn write_xlsx_from_storage(
         .unwrap_or(formula_xlsx::WorkbookKind::Workbook);
 
     let wants_vba = workbook_meta.vba_project_bin.is_some() && workbook_kind.is_macro_enabled();
-    let wants_vba_signature =
-        wants_vba && workbook_meta.vba_project_signature_bin.is_some();
+    let wants_vba_signature = wants_vba && workbook_meta.vba_project_signature_bin.is_some();
     let wants_preserved_drawings = workbook_meta.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook_meta.preserved_pivot_parts.is_some();
     let wants_power_query = workbook_meta.power_query_xml.is_some();
-    let wants_macro_strip = workbook_kind.is_macro_free() && workbook_meta.vba_project_bin.is_some();
+    let wants_macro_strip =
+        workbook_kind.is_macro_free() && workbook_meta.vba_project_bin.is_some();
     let wants_content_type_enforcement = workbook_kind != formula_xlsx::WorkbookKind::Workbook;
     let needs_date_system_update = extension
         .as_deref()
         .is_some_and(|ext| is_xlsx_family_extension(ext))
-        && matches!(workbook_meta.date_system, formula_model::DateSystem::Excel1904);
+        && matches!(
+            workbook_meta.date_system,
+            formula_model::DateSystem::Excel1904
+        );
 
     if wants_vba
         || wants_preserved_drawings
@@ -472,7 +476,16 @@ pub fn write_xlsx_from_storage(
         .context("write workbook print settings")?;
     }
 
-    let bytes = Arc::<[u8]>::from(bytes);
+    Ok(Arc::<[u8]>::from(bytes))
+}
+
+pub fn write_xlsx_from_storage(
+    storage: &formula_storage::Storage,
+    workbook_id: Uuid,
+    workbook_meta: &AppWorkbook,
+    path: &Path,
+) -> anyhow::Result<Arc<[u8]>> {
+    let bytes = build_xlsx_from_storage(storage, workbook_id, workbook_meta, path)?;
     write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {path:?}"))?;
     Ok(bytes)
 }
@@ -510,7 +523,8 @@ fn apply_cached_formula_values(model: &mut ModelWorkbook, workbook: &AppWorkbook
 
             // Preserve existing cached values when the engine can't evaluate the formula (commonly
             // surfaced as `#NAME?`). This keeps round-trips stable for formulas we don't support yet.
-            if matches!(computed, CellScalar::Error(_)) && !matches!(existing, CellScalar::Error(_)) {
+            if matches!(computed, CellScalar::Error(_)) && !matches!(existing, CellScalar::Error(_))
+            {
                 continue;
             }
 
@@ -530,7 +544,10 @@ mod write_xlsx_from_storage_tests {
     use std::io::Cursor;
     use std::path::Path;
 
-    fn import_app_workbook(storage: &formula_storage::Storage, workbook: &AppWorkbook) -> anyhow::Result<Uuid> {
+    fn import_app_workbook(
+        storage: &formula_storage::Storage,
+        workbook: &AppWorkbook,
+    ) -> anyhow::Result<Uuid> {
         let model = workbook_to_model(workbook).context("convert workbook to model")?;
         let meta = storage
             .import_model_workbook(&model, ImportModelWorkbookOptions::new("test"))
@@ -539,17 +556,15 @@ mod write_xlsx_from_storage_tests {
     }
 
     #[test]
-    fn write_xlsx_from_storage_creates_parent_dirs_and_overwrites_existing_file() -> anyhow::Result<()> {
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+    fn write_xlsx_from_storage_creates_parent_dirs_and_overwrites_existing_file(
+    ) -> anyhow::Result<()> {
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
 
         let mut workbook_meta = AppWorkbook::new_empty(None);
         workbook_meta.add_sheet("Sheet1".to_string());
         workbook_meta.ensure_sheet_ids();
-        workbook_meta.sheets[0].set_cell(
-            0,
-            0,
-            Cell::from_literal(Some(CellScalar::Number(123.0))),
-        );
+        workbook_meta.sheets[0].set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
 
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
 
@@ -557,19 +572,17 @@ mod write_xlsx_from_storage_tests {
         let out_path = tmp.path().join("nested/dir/export.xlsx");
 
         // Parent directories should be created automatically.
-        let first_bytes =
-            write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
-                .context("first export")?;
+        let first_bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+            .context("first export")?;
         assert!(out_path.exists(), "expected output file to exist");
         assert!(
-            out_path
-                .parent()
-                .expect("path should have parent")
-                .is_dir(),
+            out_path.parent().expect("path should have parent").is_dir(),
             "expected parent directories to be created"
         );
         assert_eq!(
-            std::fs::read(&out_path).context("read first output")?.as_slice(),
+            std::fs::read(&out_path)
+                .context("read first output")?
+                .as_slice(),
             first_bytes.as_ref(),
             "expected file bytes to match returned bytes"
         );
@@ -596,7 +609,10 @@ mod write_xlsx_from_storage_tests {
         Ok(())
     }
 
-    fn assert_content_type_contains_workbook_main(bytes: &[u8], expected: &str) -> anyhow::Result<()> {
+    fn assert_content_type_contains_workbook_main(
+        bytes: &[u8],
+        expected: &str,
+    ) -> anyhow::Result<()> {
         let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes).context("parse xlsx package")?;
         let ct_xml = pkg
             .part("[Content_Types].xml")
@@ -612,8 +628,8 @@ mod write_xlsx_from_storage_tests {
     #[test]
     fn write_xlsx_from_storage_enforces_workbook_kind_and_macro_behavior_for_xlsx_family(
     ) -> anyhow::Result<()> {
-        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../fixtures/xlsx/macros/basic.xlsm");
+        let fixture_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/macros/basic.xlsm");
         let mut workbook_meta =
             crate::file_io::read_xlsx_blocking(&fixture_path).context("read macro fixture")?;
         let signature_bytes = b"fake-vba-project-signature-for-storage-export-test".to_vec();
@@ -625,7 +641,8 @@ mod write_xlsx_from_storage_tests {
             .context("expected macro fixture to contain xl/vbaProject.bin")?;
         let expected_signature = signature_bytes.as_slice();
 
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
 
         let tmp = tempfile::tempdir().context("temp dir")?;
@@ -668,8 +685,11 @@ mod write_xlsx_from_storage_tests {
             let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
                 .with_context(|| format!("export to .{ext}"))?;
 
-            assert_content_type_contains_workbook_main(bytes.as_ref(), kind.workbook_content_type())
-                .with_context(|| format!("check workbook main content type for .{ext}"))?;
+            assert_content_type_contains_workbook_main(
+                bytes.as_ref(),
+                kind.workbook_content_type(),
+            )
+            .with_context(|| format!("check workbook main content type for .{ext}"))?;
 
             let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
                 .with_context(|| format!("parse exported .{ext} package"))?;
@@ -742,8 +762,8 @@ mod write_xlsx_from_storage_tests {
     fn write_xlsx_from_storage_writes_print_settings_for_xlsx_family() -> anyhow::Result<()> {
         let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../fixtures/xlsx/basic/print-settings.xlsx");
-        let workbook_meta =
-            crate::file_io::read_xlsx_blocking(&fixture_path).context("read print settings fixture")?;
+        let workbook_meta = crate::file_io::read_xlsx_blocking(&fixture_path)
+            .context("read print settings fixture")?;
 
         assert_eq!(
             workbook_meta.print_settings.sheets.len(),
@@ -774,12 +794,16 @@ mod write_xlsx_from_storage_tests {
         assert_eq!(sheet.page_setup.paper_size.code, 9);
         assert_eq!(
             sheet.page_setup.scaling,
-            Scaling::FitTo { width: 1, height: 0 }
+            Scaling::FitTo {
+                width: 1,
+                height: 0
+            }
         );
         assert!(sheet.manual_page_breaks.row_breaks_after.contains(&5));
         assert!(sheet.manual_page_breaks.col_breaks_after.contains(&2));
 
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
 
         let tmp = tempfile::tempdir().context("temp dir")?;
@@ -806,7 +830,8 @@ mod write_xlsx_from_storage_tests {
 
     #[test]
     fn write_xlsx_from_storage_reapplies_power_query_part() -> anyhow::Result<()> {
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
 
         let mut workbook_meta = AppWorkbook::new_empty(None);
         workbook_meta.add_sheet("Sheet1".to_string());
@@ -816,7 +841,9 @@ mod write_xlsx_from_storage_tests {
             0,
             Cell::from_literal(Some(CellScalar::Text("hello".to_string()))),
         );
-        let power_query_xml = b"<formula><powerQuery><![CDATA[{\"query\":\"test\"}]]></powerQuery></formula>".to_vec();
+        let power_query_xml =
+            b"<formula><powerQuery><![CDATA[{\"query\":\"test\"}]]></powerQuery></formula>"
+                .to_vec();
         workbook_meta.power_query_xml = Some(power_query_xml.clone());
 
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
@@ -826,8 +853,8 @@ mod write_xlsx_from_storage_tests {
         let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
             .context("export workbook with power query")?;
 
-        let pkg =
-            formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
+            .context("parse exported package")?;
         formula_xlsx::validate_opc_relationships(pkg.parts_map())
             .context("validate OPC relationships for exported workbook")?;
         let out_power_query = pkg
@@ -862,7 +889,8 @@ mod write_xlsx_from_storage_tests {
             .get("xl/drawings/drawing1.xml")
             .context("expected preserved drawing parts to contain xl/drawings/drawing1.xml")?;
 
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
 
         let tmp = tempfile::tempdir().context("temp dir")?;
@@ -870,8 +898,8 @@ mod write_xlsx_from_storage_tests {
         let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
             .context("export workbook with preserved drawings")?;
 
-        let pkg =
-            formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
+            .context("parse exported package")?;
         formula_xlsx::validate_opc_relationships(pkg.parts_map())
             .context("validate OPC relationships for exported workbook")?;
         let out_image = pkg
@@ -925,7 +953,8 @@ mod write_xlsx_from_storage_tests {
             .get("xl/pivotCache/pivotCacheDefinition1.xml")
             .context("expected preserved pivot parts to contain pivotCacheDefinition1.xml")?;
 
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
 
         let tmp = tempfile::tempdir().context("temp dir")?;
@@ -933,8 +962,8 @@ mod write_xlsx_from_storage_tests {
         let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
             .context("export workbook with preserved pivots")?;
 
-        let pkg =
-            formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
+            .context("parse exported package")?;
         formula_xlsx::validate_opc_relationships(pkg.parts_map())
             .context("validate OPC relationships for exported workbook")?;
         let out_pivot_table = pkg
@@ -960,17 +989,14 @@ mod write_xlsx_from_storage_tests {
 
     #[test]
     fn write_xlsx_from_storage_sets_date1904_for_xlsx_family_outputs() -> anyhow::Result<()> {
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
 
         let mut workbook_meta = AppWorkbook::new_empty(None);
         workbook_meta.date_system = formula_model::DateSystem::Excel1904;
         workbook_meta.add_sheet("Sheet1".to_string());
         workbook_meta.ensure_sheet_ids();
-        workbook_meta.sheets[0].set_cell(
-            0,
-            0,
-            Cell::from_literal(Some(CellScalar::Number(1.0))),
-        );
+        workbook_meta.sheets[0].set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(1.0))));
 
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
         let tmp = tempfile::tempdir().context("temp dir")?;
@@ -998,8 +1024,10 @@ mod write_xlsx_from_storage_tests {
     }
 
     #[test]
-    fn write_xlsx_from_storage_preserves_cached_values_when_engine_returns_error() -> anyhow::Result<()> {
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+    fn write_xlsx_from_storage_preserves_cached_values_when_engine_returns_error(
+    ) -> anyhow::Result<()> {
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
 
         // Seed the storage workbook with a formula cell that has a non-error cached value.
         let mut workbook_for_storage = AppWorkbook::new_empty(None);
@@ -1025,8 +1053,7 @@ mod write_xlsx_from_storage_tests {
 
         let tmp = tempfile::tempdir().context("temp dir")?;
         let out_path = tmp.path().join("cached-values.xlsx");
-        let bytes =
-            write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)?;
+        let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)?;
 
         let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
             .context("parse exported package")?;
@@ -1036,9 +1063,7 @@ mod write_xlsx_from_storage_tests {
         let reread = formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_ref()))
             .context("read exported workbook model")?;
         let sheet = reread.sheets.first().context("missing first sheet")?;
-        let cell = sheet
-            .cell(CellRef::new(0, 1))
-            .context("missing B1 cell")?;
+        let cell = sheet.cell(CellRef::new(0, 1)).context("missing B1 cell")?;
         assert_eq!(
             cell.value,
             formula_model::CellValue::Number(99.0),
@@ -1072,7 +1097,8 @@ mod write_xlsx_from_storage_tests {
         // workbook contains VBA, even though the fixture itself is an `.xlsx`.
         workbook_meta.vba_project_bin = Some(b"dummy-vba".to_vec());
 
-        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let storage =
+            formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
 
         let tmp = tempfile::tempdir().context("temp dir")?;
@@ -1102,7 +1128,8 @@ mod write_xlsx_from_storage_tests {
         let sheet_xml = pkg
             .part("xl/worksheets/sheet1.xml")
             .context("missing worksheet xml")?;
-        let sheet_xml = std::str::from_utf8(sheet_xml).context("worksheet xml is not valid utf8")?;
+        let sheet_xml =
+            std::str::from_utf8(sheet_xml).context("worksheet xml is not valid utf8")?;
         assert!(
             !sheet_xml.contains("<control ")
                 && !sheet_xml.contains("<control>")
