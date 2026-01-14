@@ -6814,12 +6814,6 @@ fn effective_value_kind(
     meta: Option<&crate::CellMeta>,
     cell: &formula_model::Cell,
 ) -> CellValueKind {
-    // If the cell has phonetic guide metadata, we must use an inline string so we can emit
-    // SpreadsheetML `<rPh>` runs in the `<is>` payload.
-    if cell.phonetic.is_some() && matches!(&cell.value, CellValue::String(_)) {
-        return CellValueKind::InlineString;
-    }
-
     if let Some(meta) = meta {
         if let Some(kind) = meta.value_kind.clone() {
             // Cells with less-common or unknown `t=` attributes require the original `<v>` payload
@@ -6833,6 +6827,16 @@ fn effective_value_kind(
                 return kind;
             }
         }
+    }
+
+    // If the cell has phonetic guide metadata, we prefer an inline string so we can emit
+    // SpreadsheetML `<rPh>` runs in the `<is>` payload.
+    //
+    // Note: this override is applied *after* honoring any compatible `CellMeta` value kind so
+    // that round-tripping a workbook can preserve existing shared string indices (and their
+    // associated phonetic/extension subtrees) when the visible text is unchanged.
+    if cell.phonetic.is_some() && matches!(&cell.value, CellValue::String(_)) {
+        return CellValueKind::InlineString;
     }
 
     infer_value_kind(cell)
