@@ -1523,6 +1523,8 @@ an owned byte buffer) plus an in-memory map of explicit part overrides:
 - Override only what you change: `set_part("xl/workbook.xml", bytes)`.
 - Save using the streaming rewriter: `write_to(...)` / `write_to_bytes()` (raw-copy for untouched
   ZIP entries).
+- Note: today `XlsxLazyPackage::write_to` is only available on native targets (it is not supported
+  on `wasm32`).
 
 Use `XlsxLazyPackage` when you need OPC-level round-trip preservation but want to keep memory usage
 low for large workbooks.
