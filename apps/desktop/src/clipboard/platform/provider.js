@@ -34,6 +34,9 @@ export const CLIPBOARD_LIMITS = {
 // layers (e.g. Web Clipboard API read -> Tauri provider fallback logic) without surfacing it to
 // callers.
 const SKIPPED_OVERSIZED_PLAINTEXT = Symbol("skippedOversizedPlainText");
+// Non-enumerable marker for callers that explicitly handle image paste/insert UX.
+// (Non-enumerable so existing deep-equality tests and `Object.keys` consumers are unaffected.)
+const SKIPPED_OVERSIZED_IMAGE_PNG = "skippedOversizedImagePng";
 
 function hasTauri() {
   return Boolean(globalThis.__TAURI__);
@@ -395,6 +398,9 @@ function encodeBase64(bytes) {
  */
 function mergeClipboardContent(target, source) {
   if (!source || typeof source !== "object") return;
+  if (source[SKIPPED_OVERSIZED_IMAGE_PNG]) {
+    Object.defineProperty(target, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
+  }
 
   if (
     typeof target.text !== "string" &&
@@ -413,6 +419,17 @@ function mergeClipboardContent(target, source) {
 
   if (!(target.imagePng instanceof Uint8Array)) {
     const pngBase64 = readPngBase64(source);
+    const oversizedBase64 = typeof pngBase64 === "string" && estimateBase64Bytes(pngBase64) > MAX_IMAGE_BYTES;
+    const oversizedBytes = (() => {
+      const candidate = source.imagePng ?? source.image_png;
+      if (candidate instanceof Uint8Array) return candidate.byteLength > MAX_IMAGE_BYTES;
+      if (candidate instanceof ArrayBuffer) return candidate.byteLength > MAX_IMAGE_BYTES;
+      if (ArrayBuffer.isView(candidate) && candidate.buffer instanceof ArrayBuffer) {
+        return candidate.byteLength > MAX_IMAGE_BYTES;
+      }
+      if (Array.isArray(candidate)) return candidate.length > MAX_IMAGE_BYTES;
+      return false;
+    })();
 
     const image =
       coerceUint8Array(source.imagePng) ??
@@ -430,7 +447,11 @@ function mergeClipboardContent(target, source) {
       if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
         const normalized = normalizeBase64String(pngBase64);
         if (normalized) target.pngBase64 = normalized;
+      } else if (oversizedBase64 || oversizedBytes) {
+        Object.defineProperty(target, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
       }
+    } else if (!image && (oversizedBase64 || oversizedBytes)) {
+      Object.defineProperty(target, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
     }
   }
 }
@@ -456,17 +477,17 @@ async function readClipboardItemText(item, type, maxBytes) {
  * @param {any} item
  * @param {string} type
  * @param {number} maxBytes
- * @returns {Promise<Uint8Array | undefined>}
+ * @returns {Promise<{ bytes?: Uint8Array, skippedOversized?: boolean }>}
  */
 async function readClipboardItemPng(item, type, maxBytes) {
   try {
     const blob = await item.getType(type);
-    if (!blob || typeof blob.size !== "number") return undefined;
-    if (blob.size > maxBytes) return undefined;
+    if (!blob || typeof blob.size !== "number") return { bytes: undefined, skippedOversized: false };
+    if (blob.size > maxBytes) return { bytes: undefined, skippedOversized: true };
     const buf = await blob.arrayBuffer();
-    return new Uint8Array(buf);
+    return { bytes: new Uint8Array(buf), skippedOversized: false };
   } catch {
-    return undefined;
+    return { bytes: undefined, skippedOversized: false };
   }
 }
 
@@ -589,6 +610,8 @@ function createTauriClipboardProvider() {
                 // Preserve base64 only when decoding fails (legacy/internal).
                 const normalized = normalizeBase64String(pngBase64);
                 if (normalized) native.pngBase64 = normalized;
+              } else {
+                Object.defineProperty(native, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
               }
             }
 
@@ -636,9 +659,14 @@ function createTauriClipboardProvider() {
         skippedOversizedPlainText = true;
       }
 
+      const skippedOversizedImagePng = Boolean(web && typeof web === "object" && web[SKIPPED_OVERSIZED_IMAGE_PNG]);
+
       /** @type {any} */
       const merged = { ...web };
       if (merged.imagePng != null) merged.imagePng = coerceUint8Array(merged.imagePng);
+      if (skippedOversizedImagePng) {
+        Object.defineProperty(merged, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
+      }
       // Ensure we don't leak internal sentinel properties to consumers.
       delete merged[SKIPPED_OVERSIZED_PLAINTEXT];
 
@@ -824,6 +852,7 @@ function createWebClipboardProvider(options = {}) {
       // If we skip an oversized plain-text payload from `clipboard.read()`, do not fall back to
       // `clipboard.readText()` (which may allocate the same oversized string anyway).
       let skipped_oversized_plain_text = false;
+      let skipped_oversized_image_png = false;
 
       // Prefer rich read if available.
       if (clipboard?.read) {
@@ -862,14 +891,16 @@ function createWebClipboardProvider(options = {}) {
               }
             }
             const rtf = rtfType ? await readClipboardItemText(item, rtfType, MAX_RICH_TEXT_BYTES) : undefined;
-            const imagePng = imagePngType ? await readClipboardItemPng(item, imagePngType, MAX_IMAGE_BYTES) : undefined;
+            const imagePngResult = imagePngType ? await readClipboardItemPng(item, imagePngType, MAX_IMAGE_BYTES) : undefined;
+            const imagePng = imagePngResult?.bytes;
+            if (imagePngResult?.skippedOversized) skipped_oversized_image_png = true;
 
             if (
               typeof html === "string" ||
               typeof text === "string" ||
               typeof rtf === "string" ||
-              imagePng instanceof Uint8Array
-            ) {
+               imagePng instanceof Uint8Array
+             ) {
               /** @type {any} */
               const out = {};
               if (typeof html === "string") out.html = html;
@@ -879,6 +910,9 @@ function createWebClipboardProvider(options = {}) {
               if (skipped_oversized_plain_text) {
                 Object.defineProperty(out, SKIPPED_OVERSIZED_PLAINTEXT, { value: true });
               }
+              if (skipped_oversized_image_png) {
+                Object.defineProperty(out, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
+              }
               return out;
             }
           }
@@ -887,11 +921,16 @@ function createWebClipboardProvider(options = {}) {
         }
       }
 
-      if (skipped_oversized_plain_text) {
+      if (skipped_oversized_plain_text || skipped_oversized_image_png) {
         /** @type {any} */
         const out = {};
         // Non-enumerable so consumers' `Object.keys` / JSON serialization ignore it.
-        Object.defineProperty(out, SKIPPED_OVERSIZED_PLAINTEXT, { value: true });
+        if (skipped_oversized_plain_text) {
+          Object.defineProperty(out, SKIPPED_OVERSIZED_PLAINTEXT, { value: true });
+        }
+        if (skipped_oversized_image_png) {
+          Object.defineProperty(out, SKIPPED_OVERSIZED_IMAGE_PNG, { value: true });
+        }
         return out;
       }
 

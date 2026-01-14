@@ -1,7 +1,10 @@
 import { createDrawingObjectId, type Anchor, type DrawingObject, type ImageEntry, type ImageStore } from "./types";
+import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
 
 // Keep this in sync with clipboard provider / Tauri clipboard guards.
 const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB (raw bytes)
+
+export { MAX_INSERT_IMAGE_BYTES };
 
 export async function insertImageFromFile(
   file: File,
@@ -17,6 +20,13 @@ export async function insertImageFromFile(
     images: ImageStore;
   },
 ): Promise<{ objects: DrawingObject[]; image: ImageEntry }> {
+  // Defensive guard: callers should filter before calling (so we can present good UX),
+  // but keep a hard stop here to avoid unbounded allocations if a new entry point
+  // forgets to enforce limits.
+  if (typeof file.size === "number" && file.size > MAX_INSERT_IMAGE_BYTES) {
+    throw new Error(`insertImageFromFile: image too large (${file.size} bytes)`);
+  }
+
   const bytes = await readFileBytes(file);
   const mimeType = file.type || guessMimeType(file.name);
   const image: ImageEntry = { id: opts.imageId, bytes, mimeType };

@@ -29,12 +29,12 @@ import {
   type GridGeometry as DrawingGridGeometry,
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
-import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromFile } from "../drawings/insertImage";
-import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { duplicateSelected as duplicateDrawingSelected } from "../drawings/commands";
+import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromFile } from "../drawings/insertImage";
 import { MAX_INSERT_IMAGE_BYTES } from "../drawings/insertImageLimits.js";
+import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -4928,6 +4928,36 @@ export class SpreadsheetApp {
       : [];
     if (normalized.length === 0) return;
 
+    const oversized: File[] = [];
+    const accepted: File[] = [];
+    for (const file of normalized) {
+      const size = typeof (file as any)?.size === "number" ? (file as any).size : null;
+      // If we can't determine size, reject rather than risk allocating huge buffers.
+      if (size == null || size > MAX_INSERT_IMAGE_BYTES) oversized.push(file);
+      else accepted.push(file);
+    }
+
+    const toastSkippedOversized = () => {
+      if (oversized.length === 0) return;
+      const mb = Math.round(MAX_INSERT_IMAGE_BYTES / 1024 / 1024);
+      const message =
+        oversized.length === 1
+          ? `Image too large (>${mb}MB). Choose a smaller file.`
+          : `Skipped ${oversized.length} images larger than ${mb}MB: ${oversized
+              .map((f) => (typeof f?.name === "string" && f.name.trim() ? f.name.trim() : "unnamed"))
+              .join(", ")}`;
+      try {
+        showToast(message, "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+    };
+
+    if (accepted.length === 0) {
+      toastSkippedOversized();
+      return;
+    }
+
     const guessMimeType = (name: string): string => {
       const ext = String(name ?? "").split(".").pop()?.toLowerCase();
       switch (ext) {
@@ -5069,20 +5099,16 @@ export class SpreadsheetApp {
 
     this.document.beginBatch({ label: "Insert Picture" });
     try {
-      for (let i = 0; i < normalized.length; i += 1) {
-        const file = normalized[i]!;
-        const fileSize = typeof file.size === "number" ? file.size : null;
-        if (fileSize != null && fileSize > MAX_INSERT_IMAGE_BYTES) {
-          throw new Error(`File is too large (${fileSize} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
-        }
+      for (let i = 0; i < accepted.length; i += 1) {
+        const file = accepted[i]!;
         const bytes = await readFileBytes(file);
         if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
           throw new Error(`File is too large (${bytes.byteLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
         }
         const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
 
-        const ext = (() => {
-          const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
+         const ext = (() => {
+           const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
           return raw && raw !== file.name ? raw : null;
         })();
         const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
@@ -5155,6 +5181,7 @@ export class SpreadsheetApp {
       }
 
       this.document.endBatch();
+      toastSkippedOversized();
     } catch (err) {
       this.document.cancelBatch();
       throw err;
@@ -7001,6 +7028,17 @@ export class SpreadsheetApp {
 
   private async insertImageFromPickedFile(file: File): Promise<void> {
     if (this.isReadOnly()) return;
+    const size = typeof (file as any)?.size === "number" ? (file as any).size : null;
+    if (size == null || size > MAX_INSERT_IMAGE_BYTES) {
+      const mb = Math.round(MAX_INSERT_IMAGE_BYTES / 1024 / 1024);
+      try {
+        showToast(`Image too large (>${mb}MB). Choose a smaller file.`, "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return;
+    }
+
     const imageId = (() => {
       const randomUUID = (globalThis as any)?.crypto?.randomUUID;
       if (typeof randomUUID === "function") {
@@ -11861,6 +11899,7 @@ export class SpreadsheetApp {
   }
 
   private onGridDragOver(e: DragEvent): void {
+    if (this.isEditing()) return;
     const dt = e.dataTransfer;
     if (!dt) return;
     const types = Array.from(dt.types ?? []);
@@ -11874,10 +11913,15 @@ export class SpreadsheetApp {
     if (!hasImage) return;
 
     e.preventDefault();
-    dt.dropEffect = "copy";
+    try {
+      dt.dropEffect = "copy";
+    } catch {
+      // ignore
+    }
   }
 
   private onGridDrop(e: DragEvent): void {
+    if (this.isEditing()) return;
     const dt = e.dataTransfer;
     if (!dt) return;
 
@@ -15180,25 +15224,47 @@ export class SpreadsheetApp {
 
   private async pasteClipboardImageAsDrawing(content: unknown): Promise<boolean> {
     const maxBytes = Number(CLIPBOARD_LIMITS?.maxImageBytes) > 0 ? Number(CLIPBOARD_LIMITS.maxImageBytes) : 5 * 1024 * 1024;
+    const mb = Math.round(maxBytes / 1024 / 1024);
+    const anyContent = content as any;
+
+    // Clipboard provider drops oversized images to avoid huge allocations; it also sets a
+    // non-enumerable marker so we can show user feedback here.
+    if (anyContent?.skippedOversizedImagePng === true) {
+      try {
+        showToast(`Image too large (>${mb}MB). Choose a smaller file.`, "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return true;
+    }
+
+    const direct = anyContent?.imagePng;
+    const base64 = anyContent?.pngBase64;
 
     const bytes: Uint8Array | null = (() => {
-      const anyContent = content as any;
-      const direct = anyContent?.imagePng;
       if (direct instanceof Uint8Array && direct.byteLength > 0) return direct;
-
-      const base64 = anyContent?.pngBase64;
       if (typeof base64 === "string" && base64.trim() !== "") {
         return decodeClipboardImageBase64ToBytes(base64, { maxBytes });
       }
-
       return null;
     })();
 
-    if (!bytes) return false;
+    if (!bytes) {
+      const hadImageHint = direct != null || (typeof base64 === "string" && base64.trim() !== "");
+      if (hadImageHint) {
+        try {
+          showToast("Unable to paste image from clipboard. Try copying the image again.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return true;
+      }
+      return false;
+    }
 
     if (bytes.byteLength > maxBytes) {
       try {
-        showToast(`Image too large to paste (>${Math.round(maxBytes / 1024 / 1024)}MB).`, "warning");
+        showToast(`Image too large (>${mb}MB). Choose a smaller file.`, "warning");
       } catch {
         // `showToast` requires a #toast-root; unit tests don't always include it.
       }
@@ -15356,6 +15422,7 @@ export class SpreadsheetApp {
       if (mode === "all" && !internalCells && externalGrid) {
         const anyContent = content as any;
         const hasImage =
+          anyContent?.skippedOversizedImagePng === true ||
           (anyContent?.imagePng instanceof Uint8Array && anyContent.imagePng.byteLength > 0) ||
           (typeof anyContent?.pngBase64 === "string" && anyContent.pngBase64.trim() !== "");
         if (hasImage) {
