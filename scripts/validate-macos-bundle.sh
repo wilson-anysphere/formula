@@ -67,9 +67,17 @@ validate-macos-bundle.sh
 
 Validate macOS desktop release artifacts produced by Tauri (.dmg, optionally .app.tar.gz).
 
+This script must run on macOS (it uses hdiutil/codesign/spctl/xcrun).
+
 Options:
   --dmg <path>   Validate a specific DMG (skip artifact discovery)
   -h, --help     Show help
+
+Artifact discovery (when --dmg is not provided):
+  - apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
+  - apps/desktop/target/**/release/bundle/dmg/*.dmg
+  - target/**/release/bundle/dmg/*.dmg
+  - plus CARGO_TARGET_DIR/** equivalents when CARGO_TARGET_DIR is set.
 
 Environment:
   APPLE_CERTIFICATE  When non-empty, enable codesign + spctl verification.
@@ -796,12 +804,11 @@ dedupe_lines() {
 main() {
   local dmgs=()
   local app_tars=()
+  local roots=()
 
   if [ -n "$DMG_OVERRIDE" ]; then
     dmgs+=("$DMG_OVERRIDE")
   else
-    local roots=()
-
     # Respect `CARGO_TARGET_DIR` when set (common in CI caching setups). Cargo interprets relative
     # paths relative to the build working directory (repo root in CI).
     if [ -n "${CARGO_TARGET_DIR:-}" ]; then
@@ -884,6 +891,10 @@ main() {
     fi
 
     warn "no DMG artifacts found."
+    if [ "${#roots[@]}" -gt 0 ]; then
+      warn "searched target roots:"
+      printf '  - %s\n' "${roots[@]}" >&2
+    fi
     if [ "${#app_tars[@]}" -gt 0 ]; then
       warn "found .app.tar.gz artifacts (but DMG is required for validation):"
       printf '  %s\n' "${app_tars[@]}" >&2
