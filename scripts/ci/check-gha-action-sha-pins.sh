@@ -91,8 +91,9 @@ extract_uses_lines() {
         }
       }
 
-      # Detect the start of a block scalar (e.g. `run: |`, `script: >-`).
-      if (code ~ /^[^:#]+:[ \t]*[>|][+-]?[ \t]*$/) {
+      # Detect the start of a block scalar (e.g. `run: |`, `script: >-`, `run: |2`).
+      # YAML also allows an optional indentation indicator (digits) after the chomping indicator.
+      if (code ~ /^[^:#]+:[ \t]*[>|][+-]?[0-9]*[ \t]*$/) {
         in_block=1;
         block_indent=ind;
       }
