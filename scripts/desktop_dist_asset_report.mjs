@@ -135,7 +135,9 @@ function parseArgs(argv) {
 
     const distDirMatch = arg.match(/^--dist-dir=(.*)$/);
     if (distDirMatch) {
-      out.distDir = distDirMatch[1];
+      const value = distDirMatch[1];
+      if (!value) throw new Error("Missing value for --dist-dir");
+      out.distDir = value;
       continue;
     }
     if (arg === "--dist-dir") {

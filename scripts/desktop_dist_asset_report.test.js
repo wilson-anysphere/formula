@@ -103,6 +103,12 @@ test("desktop_dist_asset_report rejects non-numeric budget env vars", () => {
   assert.match(proc.stderr, /Invalid FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB/);
 });
 
+test("desktop_dist_asset_report rejects --dist-dir= with empty value", () => {
+  const proc = spawnSync(process.execPath, [scriptPath, "--dist-dir="], { encoding: "utf8" });
+  assert.equal(proc.status, 2);
+  assert.match(proc.stderr, /Missing value for --dist-dir/);
+});
+
 test("desktop_dist_asset_report resolves missing relative --dist-dir against CWD (not repo root)", () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-cwd-"));
   const missingName = `missing-dist-${process.pid}-${Date.now()}`;
