@@ -65,14 +65,14 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
       ? (() => {
           const verifiedCount = claims.filter((c) => c?.verified === true).length;
           const summary = `Claims: ${verifiedCount}/${claims.length} verified`;
-          return el(
-            "details",
-            { "data-testid": "ai-audit-verification-claims", style: "margin-top: 6px;" },
+           return el(
+             "details",
+            { "data-testid": "ai-audit-verification-claims", style: "margin-top: var(--space-3);" },
             [
               el("summary", { style: "cursor: pointer;" }, [summary]),
               el(
                 "pre",
-                { style: "white-space: pre-wrap; font-size: 11px; opacity: 0.9; margin: 6px 0 0 0;" },
+                { style: "white-space: pre-wrap; font-size: 11px; opacity: 0.9; margin: var(--space-3) 0 0 0;" },
                 [JSON.stringify(claims, null, 2)],
               ),
             ],
@@ -88,7 +88,7 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
       "div",
       {
         "data-testid": "ai-audit-verification",
-        style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;",
+        style: "font-size: 12px; opacity: 0.85; margin-bottom: var(--space-3);",
       },
       children,
     );
@@ -99,7 +99,7 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
     {
       "data-testid": "ai-audit-verification",
       style:
-        "font-size: 12px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--warning-bg);",
+        "font-size: 12px; margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--warning-bg);",
     },
     children,
   );
@@ -220,7 +220,8 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
 
   const list = el("div", {
     "data-testid": "ai-audit-entries",
-    style: "display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; flex: 1;",
+    style:
+      "display: flex; flex-direction: column; gap: calc(var(--space-4) + var(--space-1)); overflow: auto; min-height: 0; flex: 1;",
   });
 
   let currentEntries: AIAuditEntry[] = [];
@@ -257,7 +258,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
         ? el("div", { style: "font-size: 12px; opacity: 0.8;" }, ["Tools: none"])
         : el(
             "div",
-            { style: "display: flex; flex-direction: column; gap: 4px; font-size: 12px;" },
+            { style: "display: flex; flex-direction: column; gap: var(--space-2); font-size: 12px;" },
             toolCalls.map((call) => el("div", { "data-testid": "ai-audit-tool-call" }, [formatToolCall(call)])),
           );
 
@@ -265,15 +266,18 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       "div",
       {
         "data-testid": "ai-audit-entry",
-        style: "border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; color: var(--text-primary);",
+        style:
+          "border: 1px solid var(--border); border-radius: var(--radius); padding: calc(var(--space-4) + var(--space-1)); color: var(--text-primary);",
       },
       [
-        el("div", { style: "font-size: 12px; opacity: 0.75; margin-bottom: 4px;" }, [
+        el("div", { style: "font-size: 12px; opacity: 0.75; margin-bottom: var(--space-2);" }, [
           `${formatTimestamp(entry.timestamp_ms)} • ${entry.mode} • ${entry.model}`,
         ]),
-        el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [`session_id: ${entry.session_id}`]),
-        el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [`workbook_id: ${workbookId ?? "—"}`]),
-        ...(stats ? [el("div", { style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;" }, [stats])] : []),
+        el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: var(--space-3);" }, [`session_id: ${entry.session_id}`]),
+        el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: var(--space-3);" }, [`workbook_id: ${workbookId ?? "—"}`]),
+        ...(stats
+          ? [el("div", { style: "font-size: 12px; opacity: 0.85; margin-bottom: var(--space-3);" }, [stats])]
+          : []),
         ...(verificationNode ? [verificationNode] : []),
         toolsNode,
       ],
@@ -517,7 +521,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     "div",
     {
       style:
-        "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 10px;",
+        "display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); margin-bottom: calc(var(--space-4) + var(--space-1));",
     },
     [
       sessionInput,
