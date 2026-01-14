@@ -217,6 +217,7 @@ fn find_matching_brace(source: &str, open_brace: usize) -> Option<usize> {
     None
 }
 
+
 fn function_body<'a>(source: &'a str, fn_name: &str) -> &'a str {
     let async_pat = format!("pub async fn {fn_name}");
     let sync_pat = format!("pub fn {fn_name}");
