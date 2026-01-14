@@ -730,13 +730,15 @@ fn xor_array_method1_for_password(
         let verifier = create_password_verifier_method1(&candidate);
 
         let mut key_bytes = key.to_le_bytes();
-        let stored_key_bytes = stored_key.to_le_bytes();
+        let mut stored_key_bytes = stored_key.to_le_bytes();
         let mut verifier_bytes = verifier.to_le_bytes();
-        let stored_verifier_bytes = stored_verifier.to_le_bytes();
+        let mut stored_verifier_bytes = stored_verifier.to_le_bytes();
 
         let ok = ct_eq(&key_bytes, &stored_key_bytes) & ct_eq(&verifier_bytes, &stored_verifier_bytes);
         key_bytes.zeroize();
+        stored_key_bytes.zeroize();
         verifier_bytes.zeroize();
+        stored_verifier_bytes.zeroize();
 
         if ok {
             return Some(Zeroizing::new(create_xor_array_method1(&candidate, key)));
