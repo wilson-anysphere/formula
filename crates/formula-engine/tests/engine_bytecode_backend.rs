@@ -7042,6 +7042,87 @@ fn bytecode_backend_reference_union_aggregates_error_precedence_matches_ast() {
 }
 
 #[test]
+fn bytecode_backend_reference_union_count_dedups_overlaps_matches_ast() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A4", 4.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNT((A1:A3,A2:A4))")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected COUNT + overlapping union to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=COUNT((A1:A3,A2:A4))", "B1");
+    // Unique cells are A1:A4 => COUNT = 4.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
+}
+
+#[test]
+fn bytecode_backend_reference_union_countblank_dedups_overlaps_matches_ast() {
+    let mut engine = Engine::new();
+
+    // Leave A1:A4 blank. The overlapping union should treat the overlapped cells once, so the
+    // unique set size is 4.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTBLANK((A1:A3,A2:A4))")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected COUNTBLANK + overlapping union to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=COUNTBLANK((A1:A3,A2:A4))", "B1");
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
+}
+
+#[test]
+fn bytecode_backend_reference_union_countif_blank_criteria_dedups_overlaps_matches_ast() {
+    let mut engine = Engine::new();
+
+    // All cells are blank; COUNTIF with criteria "" should count blanks. Overlaps must be
+    // deduplicated so A2:A3 are not counted twice.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTIF((A1:A3,A2:A4),\"\")")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected COUNTIF + overlapping union to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=COUNTIF((A1:A3,A2:A4),\"\")", "B1");
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
+}
+
+#[test]
 fn bytecode_backend_reference_algebra_accepts_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 
