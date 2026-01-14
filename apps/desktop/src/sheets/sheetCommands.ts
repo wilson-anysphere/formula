@@ -33,8 +33,6 @@ export function createAddSheetCommand(params: {
     try {
       const store = getWorkbookSheetStore();
       const activeId = app.getCurrentSheetId();
-      const allSheets = store.listAll();
-      const desiredName = generateDefaultSheetName(allSheets);
       const doc = app.getDocument();
 
       const collabSession = app.getCollabSession?.() ?? null;
@@ -42,6 +40,10 @@ export function createAddSheetCommand(params: {
         // In collab mode, the Yjs `session.sheets` array is the authoritative sheet list.
         // Create the new sheet by updating that metadata so it propagates to other clients.
         const existing = listSheetsFromCollabSession(collabSession);
+        // Derive the default name from the collab session (not the UI sheet store). The store
+        // may lag behind the session (e.g. when tests stub out `observeDeep`), and the session
+        // is authoritative for name uniqueness.
+        const desiredName = generateDefaultSheetName(existing);
         const existingIds = new Set(existing.map((sheet) => sheet.id));
 
         const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
@@ -75,6 +77,9 @@ export function createAddSheetCommand(params: {
         app.activateSheet(id);
         return;
       }
+
+      const allSheets = store.listAll();
+      const desiredName = generateDefaultSheetName(allSheets);
 
       // In local (non-collab) mode, the UI sheet store is the authoritative sheet list.
       // Mutate it first so sheet operations remain undoable in the DocumentController.
@@ -153,9 +158,13 @@ export function createDeleteActiveSheetCommand(params: {
       }
       if (!ok) return;
 
-      const deletedName = sheet.name;
       const allSheets = store.listAll();
-      const sheetOrder = allSheets.map((s) => s.name);
+      // For collab sessions, rely on the authoritative `session.sheets` metadata for sheet names
+      // and ordering. The UI sheet store can lag behind the session (e.g. when collab observers are
+      // stubbed in tests), and formulas are written against *names*.
+      const collabSheets = collabSession ? listSheetsFromCollabSession(collabSession) : null;
+      const deletedName = collabSheets?.find((s) => s.id === activeId)?.name ?? sheet.name;
+      const sheetOrder = collabSheets?.map((s) => s.name) ?? allSheets.map((s) => s.name);
       const nextActiveId = pickAdjacentVisibleSheetId(allSheets, activeId);
 
       try {
@@ -196,7 +205,14 @@ export function createDeleteActiveSheetCommand(params: {
         app.activateSheet(next);
       }
     } finally {
-      restoreFocusAfterSheetNavigation();
+      // Ribbon dropdown menu items restore focus to the trigger button after dispatching the command.
+      // Defer grid focus so it wins over that built-in focus restoration (Excel-like).
+      try {
+        if (typeof queueMicrotask === "function") queueMicrotask(() => restoreFocusAfterSheetNavigation());
+        else restoreFocusAfterSheetNavigation();
+      } catch {
+        // ignore focus errors
+      }
       deleteInFlight = false;
     }
   };
