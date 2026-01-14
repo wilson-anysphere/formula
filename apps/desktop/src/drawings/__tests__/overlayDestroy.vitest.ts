@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DrawingOverlay, pxToEmu, type GridGeometry, type Viewport } from "../overlay";
+import { DrawingOverlay, pxToEmu, type ChartRenderer, type GridGeometry, type Viewport } from "../overlay";
 import type { DrawingObject, ImageEntry, ImageStore } from "../types";
 
 function createStubCanvasContext(): CanvasRenderingContext2D {
@@ -128,5 +128,25 @@ describe("DrawingOverlay destroy()", () => {
     await overlay.render([], viewport);
     expect((overlay as any).shapeTextCache.size).toBe(0);
   });
-});
 
+  it("calls chartRenderer.destroy() when provided", () => {
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const images: ImageStore = {
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const destroy = vi.fn();
+    const chartRenderer: ChartRenderer = {
+      renderToCanvas: () => {},
+      destroy,
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
+    overlay.destroy();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+});
