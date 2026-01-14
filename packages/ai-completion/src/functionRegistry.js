@@ -412,6 +412,54 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "BESSELI",
+    description: "Returns the modified Bessel function In(x).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "n", type: "number" },
+    ],
+  },
+  {
+    name: "BESSELJ",
+    description: "Returns the Bessel function Jn(x).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "n", type: "number" },
+    ],
+  },
+  {
+    name: "BESSELK",
+    description: "Returns the modified Bessel function Kn(x).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "n", type: "number" },
+    ],
+  },
+  {
+    name: "BESSELY",
+    description: "Returns the Bessel function Yn(x).",
+    args: [
+      { name: "x", type: "value" },
+      { name: "n", type: "number" },
+    ],
+  },
+  {
+    name: "DELTA",
+    description: "Tests whether two values are equal.",
+    args: [
+      { name: "number1", type: "value" },
+      { name: "number2", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "GESTEP",
+    description: "Tests whether a number is greater than or equal to a threshold.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "step", type: "number", optional: true },
+    ],
+  },
+  {
     name: "SIGN",
     description: "Returns the sign of a number.",
     args: [

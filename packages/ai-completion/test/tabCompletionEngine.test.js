@@ -4302,6 +4302,42 @@ test("PERCENTRANK x suggests a left-cell reference (value-like)", async () => {
   );
 });
 
+test("DELTA number1 suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=DELTA(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=DELTA(A1"),
+    `Expected DELTA to suggest a left-cell reference for number1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("BESSELI x suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=BESSELI(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=BESSELI(A1"),
+    `Expected BESSELI to suggest a left-cell reference for x, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("QUARTILE.EXC quart suggests 1, 2, 3 (no 0/4)", async () => {
   const engine = new TabCompletionEngine();
 

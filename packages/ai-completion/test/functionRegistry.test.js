@@ -106,6 +106,17 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("ERF", 0), "value", "Expected ERF lower_limit to be value-like");
   assert.ok(registry.getFunction("ERF")?.args?.[1]?.optional, "Expected ERF upper_limit to be optional");
   assert.equal(registry.getArgType("ERFC", 0), "value", "Expected ERFC x to be value-like");
+  assert.equal(registry.getArgType("BESSELI", 0), "value", "Expected BESSELI x to be value-like");
+  assert.equal(registry.getArgType("BESSELI", 1), "number", "Expected BESSELI n to be numeric");
+  assert.equal(registry.getArgType("BESSELJ", 0), "value", "Expected BESSELJ x to be value-like");
+  assert.equal(registry.getArgType("BESSELK", 0), "value", "Expected BESSELK x to be value-like");
+  assert.equal(registry.getArgType("BESSELY", 0), "value", "Expected BESSELY x to be value-like");
+  assert.equal(registry.getArgType("DELTA", 0), "value", "Expected DELTA number1 to be value-like");
+  assert.equal(registry.getArgType("DELTA", 1), "number", "Expected DELTA number2 to be numeric");
+  assert.ok(registry.getFunction("DELTA")?.args?.[1]?.optional, "Expected DELTA number2 to be optional");
+  assert.equal(registry.getArgType("GESTEP", 0), "value", "Expected GESTEP number to be value-like");
+  assert.equal(registry.getArgType("GESTEP", 1), "number", "Expected GESTEP step to be numeric");
+  assert.ok(registry.getFunction("GESTEP")?.args?.[1]?.optional, "Expected GESTEP step to be optional");
   assert.equal(registry.getArgType("COSH", 0), "value", "Expected COSH number to be value-like");
   assert.equal(registry.getArgType("SINH", 0), "value", "Expected SINH number to be value-like");
   assert.equal(registry.getArgType("TANH", 0), "value", "Expected TANH number to be value-like");
