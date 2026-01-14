@@ -222,6 +222,41 @@ fn engine_pivot_infers_dates_from_column_number_formats_when_cell_styles_inherit
 }
 
 #[test]
+fn engine_pivot_prefers_row_number_format_over_column_date_format() {
+    use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "Date").unwrap();
+
+    let serial =
+        ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+    engine.set_cell_value("Sheet1", "A2", serial).unwrap();
+
+    // Set a date number format on the column.
+    let col_date_style = engine.intern_style(Style {
+        number_format: Some("m/d/yyyy".to_string()),
+        ..Style::default()
+    });
+    engine.set_col_style_id("Sheet1", 0, Some(col_date_style));
+
+    // Override the row with a non-date numeric format. Row formatting should win over column
+    // formatting (`sheet < col < row < cell`), so the serial should be treated as a number.
+    let row_number_style = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine.set_row_style_id("Sheet1", 1, Some(row_number_style)); // row 2
+
+    engine.recalculate();
+
+    let range = formula_model::Range::from_a1("A1:A2").unwrap();
+    let cache = engine.pivot_cache_from_range("Sheet1", range).unwrap();
+    assert_eq!(cache.records.len(), 1);
+    assert_eq!(cache.records[0][0], PivotValue::Number(serial));
+}
+
+#[test]
 fn engine_pivot_coerces_non_finite_numbers_to_num_error_text() {
     let mut engine = Engine::new();
 
