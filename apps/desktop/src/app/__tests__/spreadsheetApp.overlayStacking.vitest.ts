@@ -112,36 +112,45 @@ function expectOverlayZOrder(root: HTMLElement): void {
   const drawingLayer = root.querySelector(".drawing-layer");
   const chartLayer = root.querySelector(".grid-canvas--chart");
   const selectionLayer = root.querySelector(".grid-canvas--selection");
+  const chartSelectionLayer = root.querySelector(".chart-selection-canvas");
   const outlineLayer = root.querySelector(".outline-layer");
 
   expect(drawingLayer).toBeTruthy();
   expect(chartLayer).toBeTruthy();
   expect(selectionLayer).toBeTruthy();
+  expect(chartSelectionLayer).toBeTruthy();
   expect(outlineLayer).toBeTruthy();
 
   const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
   const chartZ = zIndexNumber(getComputedStyle(chartLayer as Element).zIndex);
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
+  const chartSelectionZ = zIndexNumber(getComputedStyle(chartSelectionLayer as Element).zIndex);
   const outlineZ = zIndexNumber(getComputedStyle(outlineLayer as Element).zIndex);
 
   // Overlay stacking (low → high):
   //   - chart canvas (z=2)
   //   - drawings/images overlay (z=3)
-  //   - selection + outline (z=4)
+  //   - selection + chart selection handles + outline (z=4)
   expect(chartZ).toBe(2);
   expect(drawingZ).toBe(3);
   expect(selectionZ).toBe(4);
+  expect(chartSelectionZ).toBe(4);
   expect(outlineZ).toBe(4);
 
   expect(chartZ).toBeLessThan(drawingZ);
   expect(drawingZ).toBeLessThan(selectionZ);
+  expect(chartSelectionZ).toBeGreaterThanOrEqual(selectionZ);
   expect(outlineZ).toBeGreaterThanOrEqual(selectionZ);
 
-  // Selection and outline overlays share the same z-index, so ensure outline is
-  // mounted after selection so it paints above when z-index ties.
-  if (outlineZ === selectionZ) {
+  // Selection, chart selection handles, and outline overlays share the same z-index, so ensure
+  // DOM insertion order preserves the visual stacking when z-index ties.
+  if (chartSelectionZ === selectionZ) {
     const children = Array.from(root.children);
-    expect(children.indexOf(outlineLayer!)).toBeGreaterThan(children.indexOf(selectionLayer!));
+    expect(children.indexOf(chartSelectionLayer!)).toBeGreaterThan(children.indexOf(selectionLayer!));
+  }
+  if (outlineZ === chartSelectionZ) {
+    const children = Array.from(root.children);
+    expect(children.indexOf(outlineLayer!)).toBeGreaterThan(children.indexOf(chartSelectionLayer!));
   }
 }
 
