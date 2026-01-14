@@ -247,9 +247,9 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       expect(renderSpy).toHaveBeenCalled();
       const objects = renderSpy.mock.calls.at(-1)?.[0] as any[];
-      const nonChartObjects = objects.filter((obj) => obj?.kind?.type !== "chart");
-      expect(nonChartObjects).toHaveLength(1);
-      expect(nonChartObjects[0]).toMatchObject({
+      const images = objects.filter((obj) => obj?.kind?.type === "image");
+      expect(images).toHaveLength(1);
+      expect(images[0]).toMatchObject({
         id: 12,
         kind: { type: "image", imageId: "image1.png" },
         anchor: { type: "twoCell" },
@@ -542,9 +542,9 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       (app as any).renderDrawings();
       expect(renderSpy).toHaveBeenCalled();
       const objects = renderSpy.mock.calls[0]?.[0] as any[];
-      const imageObjects = objects.filter((obj) => obj?.kind?.type === "image");
-      expect(imageObjects).toHaveLength(1);
-      expect(imageObjects[0]).toMatchObject({ kind: { type: "image", imageId } });
+      const images = objects.filter((obj) => obj?.kind?.type === "image");
+      expect(images).toHaveLength(1);
+      expect(images[0]).toMatchObject({ kind: { type: "image", imageId } });
 
       // Ensure the overlay image store is backed by the document's image map.
       const imageStore = (app as any).drawingImages;
@@ -643,13 +643,14 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
   });
 
   it("does not throw when chart selection overlay render throws", () => {
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
+    const priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
-    const priorCanvasCharts = process.env.CANVAS_CHARTS;
     process.env.CANVAS_CHARTS = "0";
+    delete process.env.USE_CANVAS_CHARTS;
     try {
       const err = new Error("boom");
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const root = createRoot();
@@ -661,9 +662,12 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       const app = new SpreadsheetApp(root, status);
 
-      renderSpy.mockClear();
       warnSpy.mockClear();
-      renderSpy.mockImplementationOnce(() => {
+      // Override just the chart selection overlay instance so drawing overlay renders don't
+      // consume the mock implementation.
+      const overlay = (app as any).chartSelectionOverlay as DrawingOverlay;
+      expect(overlay).toBeTruthy();
+      (overlay as any).render = vi.fn(() => {
         throw err;
       });
 
@@ -674,19 +678,23 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       app.destroy();
       root.remove();
     } finally {
-      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
-      else process.env.DESKTOP_GRID_MODE = prior;
       if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
       else process.env.CANVAS_CHARTS = priorCanvasCharts;
+      if (priorUseCanvasCharts === undefined) delete process.env.USE_CANVAS_CHARTS;
+      else process.env.USE_CANVAS_CHARTS = priorUseCanvasCharts;
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
 
   it("does not emit an unhandled rejection when chart selection overlay render returns a rejected promise", async () => {
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
+    const priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
-    vi.useRealTimers();
-    const priorCanvasCharts = process.env.CANVAS_CHARTS;
     process.env.CANVAS_CHARTS = "0";
+    delete process.env.USE_CANVAS_CHARTS;
+    vi.useRealTimers();
     try {
       const err = new Error("boom");
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -711,6 +719,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
         // Override just the chart selection overlay instance so drawing overlay renders don't
         // consume the mock implementation.
         const overlay = (app as any).chartSelectionOverlay as DrawingOverlay;
+        expect(overlay).toBeTruthy();
         (overlay as any).render = vi.fn(() => Promise.reject(err));
 
         (app as any).renderChartSelectionOverlay();
@@ -727,10 +736,12 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
         root.remove();
       }
     } finally {
-      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
-      else process.env.DESKTOP_GRID_MODE = prior;
       if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
       else process.env.CANVAS_CHARTS = priorCanvasCharts;
+      if (priorUseCanvasCharts === undefined) delete process.env.USE_CANVAS_CHARTS;
+      else process.env.USE_CANVAS_CHARTS = priorUseCanvasCharts;
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
 

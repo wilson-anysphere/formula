@@ -135,18 +135,24 @@ describe("SpreadsheetApp drawings undo/redo integration", () => {
       await app.insertPicturesFromFiles([file]);
 
       expect(doc.getSheetDrawings(sheetId)).toHaveLength(1);
-      expect((app as any).drawingObjects).toHaveLength(1);
+      const insertedImages = app.getDrawingObjects(sheetId).filter((obj) => obj.kind.type === "image");
+      expect(insertedImages).toHaveLength(1);
       expect(
-        renderSpy.mock.calls.some((call) => (call[0] as any[]).filter((obj) => obj?.kind?.type !== "chart").length === 1),
+        renderSpy.mock.calls.some(
+          (call) => (call[0] as any[]).filter((obj) => obj?.kind?.type === "image").length === 1,
+        ),
       ).toBe(true);
 
       renderSpy.mockClear();
       doc.undo();
 
       expect(doc.getSheetDrawings(sheetId)).toHaveLength(0);
-      expect((app as any).drawingObjects).toHaveLength(0);
+      const imagesAfterUndo = app.getDrawingObjects(sheetId).filter((obj) => obj.kind.type === "image");
+      expect(imagesAfterUndo).toHaveLength(0);
       expect(
-        renderSpy.mock.calls.some((call) => (call[0] as any[]).filter((obj) => obj?.kind?.type !== "chart").length === 0),
+        renderSpy.mock.calls.some(
+          (call) => (call[0] as any[]).filter((obj) => obj?.kind?.type === "image").length === 0,
+        ),
       ).toBe(true);
 
       app.destroy();

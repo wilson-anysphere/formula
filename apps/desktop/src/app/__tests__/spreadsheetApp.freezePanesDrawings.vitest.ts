@@ -150,6 +150,13 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
 
+      // SpreadsheetApp seeds a demo ChartStore chart on startup in non-collab mode. This test
+      // asserts frozen-pane clipping for workbook drawings; clear the seeded chart so it doesn't
+      // add extra clip rects/stroke calls to the drawings overlay.
+      for (const chart of app.listCharts()) {
+        (app as any).chartStore.deleteChart(chart.id);
+      }
+
       // Freeze 1 row + 1 col (sheet space) via the DocumentController.
       const doc = app.getDocument();
       doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });

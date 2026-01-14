@@ -114,8 +114,12 @@ describe("SpreadsheetApp shared-grid chart external recalc refresh", () => {
   });
 
   it("updates a visible formula chart on external edits outside the chart range (shared grid)", () => {
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
+    const priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
+    process.env.CANVAS_CHARTS = "0";
+    delete process.env.USE_CANVAS_CHARTS;
     try {
       const root = createRoot();
       const status = {
@@ -152,6 +156,10 @@ describe("SpreadsheetApp shared-grid chart external recalc refresh", () => {
       app.destroy();
       root.remove();
     } finally {
+      if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCanvasCharts;
+      if (priorUseCanvasCharts === undefined) delete process.env.USE_CANVAS_CHARTS;
+      else process.env.USE_CANVAS_CHARTS = priorUseCanvasCharts;
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
     }

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
+let priorCanvasCharts: string | undefined;
+let priorUseCanvasCharts: string | undefined;
 
 function getChartModel(app: SpreadsheetApp, chartId: string): any {
   const anyApp = app as any;
@@ -84,6 +86,11 @@ function createRoot(): HTMLElement {
 describe("SpreadsheetApp chart refresh on workbook metadata changes", () => {
   beforeEach(() => {
     priorGridMode = process.env.DESKTOP_GRID_MODE;
+    priorCanvasCharts = process.env.CANVAS_CHARTS;
+    priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
+    // These tests assert legacy `chartModels` refresh semantics.
+    process.env.CANVAS_CHARTS = "0";
+    delete process.env.USE_CANVAS_CHARTS;
 
     document.body.innerHTML = "";
 
@@ -115,6 +122,10 @@ describe("SpreadsheetApp chart refresh on workbook metadata changes", () => {
   afterEach(() => {
     if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
     else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+    else process.env.CANVAS_CHARTS = priorCanvasCharts;
+    if (priorUseCanvasCharts === undefined) delete process.env.USE_CANVAS_CHARTS;
+    else process.env.USE_CANVAS_CHARTS = priorUseCanvasCharts;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });

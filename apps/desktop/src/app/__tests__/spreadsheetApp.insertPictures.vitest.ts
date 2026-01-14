@@ -134,7 +134,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
     await app.insertPicturesFromFiles([file]);
 
     const sheetId = app.getCurrentSheetId();
-    const objects = app.getDrawingObjects(sheetId).filter((obj) => obj.kind.type !== "chart");
+    const objects = app.getDrawingObjects(sheetId).filter((obj) => obj.kind.type === "image");
     expect(objects).toHaveLength(1);
     const obj = objects[0]!;
     if (obj.kind.type !== "image") {
@@ -168,7 +168,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
     await app.insertPicturesFromFiles([file1, file2]);
 
     const sheetId = app.getCurrentSheetId();
-    const objects = app.getDrawingObjects(sheetId).filter((obj) => obj.kind.type !== "chart");
+    const objects = app.getDrawingObjects(sheetId).filter((obj) => obj.kind.type === "image");
     expect(objects).toHaveLength(2);
     expect(objects[0]!.zOrder).toBeLessThan(objects[1]!.zOrder);
     expect(app.getSelectedDrawingId()).toBe(objects[1]!.id);

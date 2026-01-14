@@ -238,7 +238,7 @@ describe("SpreadsheetApp picture clipboard DLP", () => {
     await app.whenIdle();
 
     expect(write).not.toHaveBeenCalled();
-    expect(app.getDrawingObjects().filter((obj) => obj.kind.type !== "chart")).toHaveLength(1);
+    expect(app.getDrawingObjects().filter((obj) => obj.kind.type === "image")).toHaveLength(1);
 
     app.destroy();
     root.remove();

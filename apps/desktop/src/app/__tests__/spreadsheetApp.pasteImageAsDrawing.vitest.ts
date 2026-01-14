@@ -169,12 +169,12 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
-    expect(objects).toHaveLength(1);
-    expect(objects[0]!.kind.type).toBe("image");
-    expect(app.getSelectedDrawingId()).toBe(objects[0]!.id);
+    const images = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
+    expect(images).toHaveLength(1);
+    expect(images[0]!.kind.type).toBe("image");
+    expect(app.getSelectedDrawingId()).toBe(images[0]!.id);
 
-    const imageId = (objects[0]!.kind as any).imageId;
+    const imageId = (images[0]!.kind as any).imageId;
     expect(typeof imageId).toBe("string");
     // Image bytes are stored out-of-band (IndexedDB + in-memory drawing image store)
     // rather than in DocumentController snapshots.
@@ -219,9 +219,9 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
-    expect(objects).toHaveLength(1);
-    expect(objects[0]!.kind.type).toBe("image");
+    const images = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
+    expect(images).toHaveLength(1);
+    expect(images[0]!.kind.type).toBe("image");
 
     app.destroy();
     root.remove();
@@ -253,9 +253,9 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
-    expect(objects).toHaveLength(1);
-    expect(objects[0]!.kind.type).toBe("image");
+    const images = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
+    expect(images).toHaveLength(1);
+    expect(images[0]!.kind.type).toBe("image");
 
     app.destroy();
     root.remove();
@@ -399,9 +399,9 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
-    expect(objects).toHaveLength(1);
-    expect(objects[0]!.kind.type).toBe("image");
+    const images = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
+    expect(images).toHaveLength(1);
+    expect(images[0]!.kind.type).toBe("image");
 
     app.destroy();
     root.remove();
