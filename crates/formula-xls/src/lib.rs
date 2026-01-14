@@ -1704,6 +1704,7 @@ fn import_xls_path_with_biff_reader(
                             for warning in recovered.warnings.drain(..) {
                                 push_import_warning(warnings, warning, warnings_suppressed);
                             }
+
                             for (cell_ref, formula_text) in recovered.formulas {
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                                 // Best-effort fallback only: do not override formulas that were
@@ -1717,30 +1718,30 @@ fn import_xls_path_with_biff_reader(
                                     .is_some_and(|f| f != ErrorValue::Unknown.as_str())
                                 {
                                     continue;
-                                }
+                            }
 
-                                // Strip NUL bytes so formula text is parseable/stable (matches the
-                                // calamine formula cleanup path).
-                                let formula_text_clean;
-                                let formula_text = if formula_text.contains('\0') {
-                                    formula_text_clean = formula_text.replace('\0', "");
-                                    formula_text_clean.as_str()
-                                } else {
-                                    formula_text.as_str()
-                                };
+                            // Strip NUL bytes so formula text is parseable/stable (matches the
+                            // calamine formula cleanup path).
+                            let formula_text_clean;
+                            let formula_text = if formula_text.contains('\0') {
+                                formula_text_clean = formula_text.replace('\0', "");
+                                formula_text_clean.as_str()
+                            } else {
+                                formula_text.as_str()
+                            };
 
-                                if let Some(normalized) = normalize_formula_text(formula_text) {
-                                    sheet.set_formula(anchor, Some(normalized));
-                                    if let Some(resolved) = style_id_for_cell_xf(
-                                        xf_style_ids.as_deref(),
-                                        sheet_cell_xfs,
-                                        anchor,
-                                    ) {
-                                        sheet.set_style_id(anchor, resolved);
-                                    }
+                            if let Some(normalized) = normalize_formula_text(formula_text) {
+                                sheet.set_formula(anchor, Some(normalized));
+                                if let Some(resolved) = style_id_for_cell_xf(
+                                    xf_style_ids.as_deref(),
+                                    sheet_cell_xfs,
+                                    anchor,
+                                ) {
+                                    sheet.set_style_id(anchor, resolved);
                                 }
                             }
-                        };
+                        }
+                    };
 
                     match biff::formulas::recover_ptgexp_formulas_from_shrfmla_and_array(
                         workbook_stream,

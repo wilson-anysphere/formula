@@ -417,6 +417,29 @@ pub fn build_array_formula_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture like [`build_shared_formula_area3d_fixture_xls`], but using a
+/// `PtgArea3d` token whose endpoints have *different* relative flags.
+///
+/// Intended decoded formulas:
+/// - `SharedArea3D!B1`: `Sheet1!A1:$A2`
+/// - `SharedArea3D!B2`: `Sheet1!A2:$A3`
+///
+/// This catches bugs where materialization/decoding incorrectly reuses the first endpoint’s
+/// relative flags for the second endpoint (or drops the flags entirely).
+pub fn build_shared_formula_area3d_mixed_flags_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_area3d_mixed_flags_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -5771,6 +5794,65 @@ fn build_shared_formula_ptgmemarean_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("Shared", &sheet, 1252)
 }
 
+fn build_shared_formula_area3d_mixed_flags_workbook_stream() -> Vec<u8> {
+    // Two-sheet workbook:
+    // - Sheet1: a simple value sheet used as the 3D reference target.
+    // - SharedArea3D: contains a shared-formula range B1:B2 whose shared rgce uses PtgArea3d with
+    //   different relative flags per endpoint.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Sheet1", "SharedArea3D"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables used by 3D formula tokens.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    // EXTERNSHEET entry for Sheet1 (itab=0).
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 (Sheet1) ---------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
+
+    // -- Sheet 1 (SharedArea3D) ---------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_area3d_shared_formula_mixed_flags_sheet_stream(
+        xf_cell,
+    ));
+
+    globals
+}
+
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -8428,6 +8510,63 @@ fn build_shared_area3d_shared_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // Shared-formula base rgce: PtgArea3d Sheet1!A1:A2 (ixti=0), with both endpoints row/col-relative.
     let base_rgce = ptg_area3d_with_rel_flags(0, 0, 1, 0, 0, true, true, true, true);
+
+    // Base cell B1: full formula token stream.
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &base_rgce),
+    );
+
+    // Shared formula definition for B1:B2.
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &base_rgce),
+    );
+
+    // B2: PtgExp referencing base cell B1 (row=0, col=1).
+    let ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_area3d_shared_formula_mixed_flags_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // SharedArea3D!B1:B2:
+    //   B1: Sheet1!A1:$A2
+    //   B2: Sheet1!A2:$A3
+    //
+    // This uses different relative flags for the two area endpoints:
+    // - start endpoint: row+col relative (no '$') => `A1`
+    // - end endpoint: row relative, col absolute => `$A2`
+    //
+    // Materialization across the shared formula must shift both rows and preserve the per-endpoint
+    // `$` flags.
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [1, 2) => B1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&1u16.to_le_bytes()); // first col (B)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Shared-formula base rgce: PtgArea3d Sheet1!A1:$A2 (ixti=0).
+    // Endpoint 1: rowRel + colRel (A1)
+    // Endpoint 2: rowRel + colAbs ($A2)
+    let base_rgce = ptg_area3d_with_rel_flags(0, 0, 1, 0, 0, true, true, true, false);
 
     // Base cell B1: full formula token stream.
     push_record(
