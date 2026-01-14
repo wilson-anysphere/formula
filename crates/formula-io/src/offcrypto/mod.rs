@@ -7,8 +7,11 @@
 //! **AES-ECB** (no IV). The stream framing + truncation rules are documented in
 //! `docs/offcrypto-standard-encryptedpackage.md`.
 //!
-//! Note: some producers use a non-standard segmented variant. When a salt is available,
-//! [`decrypt_standard_encrypted_package_stream`] will attempt to handle both ECB and that fallback.
+//! Note: some producers use a non-standard CBC-segmented variant. When a salt is available,
+//! [`decrypt_standard_encrypted_package_stream`] will attempt to handle both the baseline AES-ECB
+//! format and that fallback. Callers that already know the IV derivation hash algorithm (e.g. from
+//! `AlgIDHash` in the Standard/CryptoAPI encryption metadata) can use
+//! [`decrypt_encrypted_package_standard_aes`] with an explicit [`HashAlg`].
 //!
 //! Note: MS-OFFCRYPTO Standard encryption also has an **RC4** variant ("CryptoAPI RC4") whose
 //! `EncryptedPackage` payload is decrypted in **0x200-byte** blocks with per-block keys derived from
@@ -26,10 +29,14 @@ pub mod encrypted_package;
 pub mod standard;
 
 pub use encrypted_package::{
+    decrypt_encrypted_package_standard_aes,
+    decrypt_encrypted_package_standard_aes_sha1,
     decrypt_encrypted_package_standard_aes_to_writer,
     decrypt_standard_cryptoapi_rc4_encrypted_package_stream,
-    decrypt_standard_encrypted_package_stream, EncryptedPackageError,
+    decrypt_standard_encrypted_package_stream,
+    EncryptedPackageError,
     EncryptedPackageToWriterError,
+    HashAlg,
 };
 pub use standard::{
     parse_encryption_info_standard, verify_password_standard, EncryptionHeader, EncryptionVerifier,

@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 
 use sha1::{Digest, Sha1};
+use sha2::Sha256;
 
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
@@ -14,6 +15,13 @@ const AES_BLOCK_LEN: usize = 16;
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const ENCRYPTED_PACKAGE_RC4_BLOCK_LEN: usize = 0x200;
 const CRYPTOAPI_SPIN_COUNT: u32 = 50_000;
+
+/// Hash algorithm used for Standard (CryptoAPI) `EncryptedPackage` IV derivation (`AlgIDHash`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashAlg {
+    Sha1,
+    Sha256,
+}
 
 /// Errors returned by [`decrypt_standard_encrypted_package_stream`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -88,6 +96,30 @@ pub enum EncryptedPackageToWriterError {
         #[source]
         source: std::io::Error,
     },
+}
+
+fn derive_segment_iv(salt: &[u8], segment_index: u32, hash_alg: HashAlg) -> [u8; AES_BLOCK_LEN] {
+    let mut iv = [0u8; AES_BLOCK_LEN];
+    let segment_index = segment_index.to_le_bytes();
+
+    match hash_alg {
+        HashAlg::Sha1 => {
+            let mut hasher = Sha1::new();
+            hasher.update(salt);
+            hasher.update(segment_index);
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
+        }
+        HashAlg::Sha256 => {
+            let mut hasher = Sha256::new();
+            hasher.update(salt);
+            hasher.update(segment_index);
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
+        }
+    }
+
+    iv
 }
 
 fn padded_aes_len(len: usize) -> usize {
@@ -371,6 +403,113 @@ pub fn decrypt_standard_encrypted_package_stream(
     Ok(plaintext)
 }
 
+/// Decrypt a Standard (CryptoAPI) AES `EncryptedPackage` stream using the
+/// **CBC-segmented compatibility** layout.
+///
+/// Notes:
+/// - Baseline Standard/CryptoAPI AES uses **AES-ECB** (no IV) for `EncryptedPackage` (see
+///   [`decrypt_standard_encrypted_package_stream`]).
+/// - Some producers instead encrypt the package in 4096-byte segments using AES-CBC with a
+///   per-segment IV derived as:
+///   `IV = Hash(salt || LE32(segment_index))[0..16]`.
+///
+/// This helper implements the CBC-segmented variant and supports multiple IV hash algorithms
+/// (typically driven by `EncryptionHeader.AlgIDHash`).
+pub fn decrypt_encrypted_package_standard_aes(
+    encrypted_package_stream: &[u8],
+    key: &[u8],
+    salt: &[u8],
+    hash_alg: HashAlg,
+) -> Result<Vec<u8>, EncryptedPackageError> {
+    if encrypted_package_stream.len() < ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN {
+        return Err(EncryptedPackageError::StreamTooShort {
+            len: encrypted_package_stream.len(),
+        });
+    }
+
+    // Validate key length up front so we fail fast even for empty ciphertext.
+    if !matches!(key.len(), 16 | 24 | 32) {
+        return Err(EncryptedPackageError::InvalidAesKeyLength { key_len: key.len() });
+    }
+
+    let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
+    size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
+    let orig_size = u64::from_le_bytes(size_bytes);
+    let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
+
+    if ciphertext.is_empty() && orig_size == 0 {
+        return Ok(Vec::new());
+    }
+
+    if ciphertext.len() % AES_BLOCK_LEN != 0 {
+        return Err(EncryptedPackageError::CiphertextLenNotBlockAligned {
+            ciphertext_len: ciphertext.len(),
+        });
+    }
+
+    let orig_size_usize = usize::try_from(orig_size)
+        .map_err(|_| EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size })?;
+
+    // Guardrail: `EncryptedPackage` carries the original plaintext size separately. Treat inputs as
+    // malformed when the ciphertext is too short to possibly contain `orig_size` bytes (accounting
+    // for AES block padding).
+    let expected_min_ciphertext_len = orig_size
+        .checked_add((AES_BLOCK_LEN - 1) as u64)
+        .and_then(|v| v.checked_div(AES_BLOCK_LEN as u64))
+        .and_then(|blocks| blocks.checked_mul(AES_BLOCK_LEN as u64))
+        .ok_or(EncryptedPackageError::ImplausibleOrigSize {
+            orig_size,
+            ciphertext_len: ciphertext.len(),
+        })?;
+    if (ciphertext.len() as u64) < expected_min_ciphertext_len {
+        return Err(EncryptedPackageError::ImplausibleOrigSize {
+            orig_size,
+            ciphertext_len: ciphertext.len(),
+        });
+    }
+
+    let mut out = Vec::with_capacity(orig_size_usize);
+    let mut remaining = orig_size_usize;
+    let mut segment_index: u32 = 0;
+    let mut offset = ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN;
+
+    while remaining > 0 {
+        let plain_len = remaining.min(ENCRYPTED_PACKAGE_SEGMENT_LEN);
+        let cipher_len = padded_aes_len(plain_len);
+        let end = offset.checked_add(cipher_len).ok_or(EncryptedPackageError::ImplausibleOrigSize {
+            orig_size,
+            ciphertext_len: ciphertext.len(),
+        })?;
+        if end > encrypted_package_stream.len() {
+            return Err(EncryptedPackageError::ImplausibleOrigSize {
+                orig_size,
+                ciphertext_len: ciphertext.len(),
+            });
+        }
+
+        let iv = derive_segment_iv(salt, segment_index, hash_alg);
+        let mut buf = encrypted_package_stream[offset..end].to_vec();
+        aes_cbc_decrypt_in_place(key, &iv, &mut buf)?;
+        out.extend_from_slice(&buf[..plain_len]);
+
+        remaining -= plain_len;
+        offset = end;
+        segment_index = segment_index.wrapping_add(1);
+    }
+
+    Ok(out)
+}
+
+/// Convenience wrapper for the most common CBC-segmented Standard `EncryptedPackage` variant:
+/// AES-CBC with SHA-1 IV derivation.
+pub fn decrypt_encrypted_package_standard_aes_sha1(
+    encrypted_package_stream: &[u8],
+    key: &[u8],
+    salt: &[u8],
+) -> Result<Vec<u8>, EncryptedPackageError> {
+    decrypt_encrypted_package_standard_aes(encrypted_package_stream, key, salt, HashAlg::Sha1)
+}
+
 fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), EncryptedPackageError> {
     if buf.len() % AES_BLOCK_LEN != 0 {
         return Err(EncryptedPackageError::CiphertextLenNotBlockAligned {
@@ -567,6 +706,8 @@ mod tests {
     use super::*;
     use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
     use aes::{Aes128, Aes192, Aes256};
+    use cbc::cipher::block_padding::NoPadding;
+    use cbc::cipher::{BlockEncryptMut, KeyIvInit};
     use std::io::Cursor;
 
     fn fixed_key(len: usize) -> Vec<u8> {
@@ -583,6 +724,10 @@ mod tests {
 
     fn fixed_key_32() -> Vec<u8> {
         (0u8..=0x1F).collect()
+    }
+
+    fn fixed_salt_16() -> Vec<u8> {
+        (0u8..=0x0F).collect()
     }
 
     fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
@@ -636,8 +781,124 @@ mod tests {
         out
     }
 
+    fn pkcs7_pad(plaintext: &[u8]) -> Vec<u8> {
+        let mut out = plaintext.to_vec();
+        // PKCS#7 always pads, even if already aligned.
+        let pad_len = AES_BLOCK_LEN - (out.len() % AES_BLOCK_LEN);
+        out.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+        out
+    }
+
+    fn encrypt_segment_aes_cbc_no_padding(
+        key: &[u8],
+        iv: &[u8; AES_BLOCK_LEN],
+        plaintext: &[u8],
+    ) -> Vec<u8> {
+        assert!(plaintext.len() % AES_BLOCK_LEN == 0);
+        let mut buf = plaintext.to_vec();
+
+        match key.len() {
+            16 => {
+                cbc::Encryptor::<Aes128>::new_from_slices(key, iv)
+                    .unwrap()
+                    .encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
+                    .unwrap();
+            }
+            24 => {
+                cbc::Encryptor::<Aes192>::new_from_slices(key, iv)
+                    .unwrap()
+                    .encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
+                    .unwrap();
+            }
+            32 => {
+                cbc::Encryptor::<Aes256>::new_from_slices(key, iv)
+                    .unwrap()
+                    .encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
+                    .unwrap();
+            }
+            other => panic!("unsupported AES key length {other}"),
+        }
+
+        buf
+    }
+
+    fn encrypt_encrypted_package_stream_standard_cryptoapi_cbc(
+        key: &[u8],
+        salt: &[u8],
+        plaintext: &[u8],
+        hash_alg: HashAlg,
+    ) -> Vec<u8> {
+        let orig_size = plaintext.len() as u64;
+
+        let mut out = Vec::with_capacity(ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + plaintext.len());
+        out.extend_from_slice(&orig_size.to_le_bytes());
+
+        if plaintext.is_empty() {
+            return out;
+        }
+
+        let padded = pkcs7_pad(plaintext);
+        for (i, chunk) in padded.chunks(ENCRYPTED_PACKAGE_SEGMENT_LEN).enumerate() {
+            let iv = derive_segment_iv(salt, i as u32, hash_alg);
+            out.extend_from_slice(&encrypt_segment_aes_cbc_no_padding(key, &iv, chunk));
+        }
+
+        out
+    }
+
     fn make_plaintext(len: usize) -> Vec<u8> {
         (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    #[test]
+    fn derive_segment_iv_sha256_known_answer() {
+        // salt = 0x00..0x0F, segment_index = 0:
+        // sha256(salt || 0x00000000_le) = 855d3b82... (truncate to 16 bytes)
+        let salt: Vec<u8> = (0u8..=0x0F).collect();
+        let iv = derive_segment_iv(&salt, 0, HashAlg::Sha256);
+        assert_eq!(
+            iv,
+            [
+                0x85, 0x5d, 0x3b, 0x82, 0x55, 0x5e, 0xa5, 0xb9, 0x0c, 0x7f, 0x50, 0x93, 0x6e,
+                0x97, 0x41, 0x3a
+            ]
+        );
+    }
+
+    #[test]
+    fn cbc_round_trip_decrypts_sha1_and_sha256() {
+        let salt = fixed_salt_16();
+        let keys = [fixed_key_16(), fixed_key_24(), fixed_key_32()];
+
+        for key in keys {
+            for hash_alg in [HashAlg::Sha1, HashAlg::Sha256] {
+                for size in [0usize, 1, 15, 16, 17, 4095, 4096, 4097, 8192 + 123] {
+                    let plaintext = make_plaintext(size);
+                    let encrypted = encrypt_encrypted_package_stream_standard_cryptoapi_cbc(
+                        &key, &salt, &plaintext, hash_alg,
+                    );
+                    let decrypted =
+                        decrypt_encrypted_package_standard_aes(&encrypted, &key, &salt, hash_alg)
+                            .unwrap();
+                    assert_eq!(
+                        decrypted, plaintext,
+                        "CBC round-trip failed for size={size} key_len={} alg={hash_alg:?}",
+                        key.len()
+                    );
+                }
+            }
+        }
+
+        // Ensure the SHA-1 wrapper remains equivalent to explicitly requesting SHA-1.
+        let key = fixed_key_16();
+        let plaintext = make_plaintext(8192 + 123);
+        let encrypted =
+            encrypt_encrypted_package_stream_standard_cryptoapi_cbc(&key, &salt, &plaintext, HashAlg::Sha1);
+        let a = decrypt_encrypted_package_standard_aes_sha1(&encrypted, &key, &salt).unwrap();
+        let b = decrypt_encrypted_package_standard_aes(&encrypted, &key, &salt, HashAlg::Sha1).unwrap();
+        assert_eq!(a, plaintext);
+        assert_eq!(b, plaintext);
+        assert_eq!(a, b);
     }
 
     #[test]
