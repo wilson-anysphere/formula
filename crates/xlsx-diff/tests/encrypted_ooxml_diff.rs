@@ -70,7 +70,14 @@ fn diff_standard_fixture_against_plain_no_differences() -> Result<()> {
 fn diff_large_fixtures_against_plain_large_no_differences() -> Result<()> {
     let plain = fixture_path("plaintext-large.xlsx");
 
-    for encrypted in ["agile-large.xlsx", "standard-large.xlsx"] {
+    // `agile-large.xlsx` exercises multi-segment (4096-byte) decryption.
+    //
+    // Note: `standard-large.xlsx` is a synthetic "Standard-like" AES-CBC segmented fixture used to
+    // exercise the multi-segment code path in `formula-xlsx::offcrypto` (see
+    // `fixtures/encrypted/ooxml/README.md`). `xlsx-diff` decrypts via `formula-office-crypto`, which
+    // implements the MS-OFFCRYPTO / ECMA-376 Standard AES-ECB scheme and does not support the
+    // synthetic CBC variant.
+    for encrypted in ["agile-large.xlsx"] {
         let encrypted = fixture_path(encrypted);
         assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
     }
@@ -105,4 +112,3 @@ fn agile_empty_password_fixture_requires_explicit_empty_string() -> Result<()> {
     assert_diff_empty(&plain, &encrypted, None, Some(""))?;
     Ok(())
 }
-
