@@ -3413,7 +3413,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "number", type: "range" },
       { name: "radix", type: "number" },
-      { name: "min_length", type: "number", optional: true },
+      { name: "min_length", type: "value", optional: true },
     ],
   },
   {
@@ -3421,7 +3421,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a decimal number to binary.",
     args: [
       { name: "decimal_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3429,7 +3429,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a decimal number to hexadecimal.",
     args: [
       { name: "decimal_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3437,7 +3437,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a decimal number to octal.",
     args: [
       { name: "decimal_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3452,7 +3452,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a binary number to hexadecimal.",
     args: [
       { name: "binary_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3460,7 +3460,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a binary number to octal.",
     args: [
       { name: "binary_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3468,7 +3468,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a hexadecimal number to binary.",
     args: [
       { name: "hex_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3483,7 +3483,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts a hexadecimal number to octal.",
     args: [
       { name: "hex_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3491,7 +3491,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts an octal number to binary.",
     args: [
       { name: "octal_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {
@@ -3506,7 +3506,7 @@ const CURATED_FUNCTIONS = [
     description: "Converts an octal number to hexadecimal.",
     args: [
       { name: "octal_number", type: "range" },
-      { name: "places", type: "number", optional: true },
+      { name: "places", type: "value", optional: true },
     ],
   },
   {

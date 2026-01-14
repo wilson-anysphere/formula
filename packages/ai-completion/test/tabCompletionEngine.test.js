@@ -5470,6 +5470,42 @@ test("REPT number_times suggests a left-cell reference (value-like arg)", async 
   );
 });
 
+test("DEC2HEX places suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=DEC2HEX(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=DEC2HEX(A1, B1"),
+    `Expected DEC2HEX to suggest B1 for places, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("BASE min_length suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=BASE(A1, 10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=BASE(A1, 10, B1"),
+    `Expected BASE to suggest B1 for min_length, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 
