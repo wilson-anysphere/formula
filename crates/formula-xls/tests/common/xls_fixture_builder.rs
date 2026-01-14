@@ -16581,6 +16581,13 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
     let autofilter = autofilter_record(0, false, &doper1, &doper2);
     push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
 
+    // Second AUTOFILTER record: numeric BETWEEN filter on column B.
+    // Criterion: 10 <= value <= 20.
+    let doper1 = autofilter_doper_number(AUTOFILTER_OP_BETWEEN, 10.0);
+    let doper2 = autofilter_doper_number(AUTOFILTER_OP_NONE, 20.0);
+    let autofilter = autofilter_record(1, false, &doper1, &doper2);
+    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
+
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
 
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]

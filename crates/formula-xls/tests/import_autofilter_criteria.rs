@@ -25,13 +25,25 @@ fn import_autofilter_criteria() {
     assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
     assert_eq!(
         af.filter_columns,
-        vec![FilterColumn {
-            col_id: 0,
-            join: FilterJoin::Any,
-            criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".to_string()))],
-            values: Vec::new(),
-            raw_xml: Vec::new(),
-        }],
+        vec![
+            FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".to_string()))],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 1,
+                join: FilterJoin::All,
+                criteria: vec![
+                    FilterCriterion::Number(NumberComparison::GreaterThanOrEqual(10.0)),
+                    FilterCriterion::Number(NumberComparison::LessThanOrEqual(20.0)),
+                ],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+        ],
         "unexpected filter columns; warnings={:?}",
         result.warnings
     );
