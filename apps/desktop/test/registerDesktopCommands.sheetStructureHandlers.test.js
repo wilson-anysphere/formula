@@ -50,7 +50,7 @@ test("main.ts wires sheetStructureHandlers into registerDesktopCommands (Insert/
   );
   assert.match(
     segment,
-    /\btoggle\s*:\s*\(\)\s*=>\s*\{/,
+    /\btoggle\s*:\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/,
     "Expected autoFilterHandlers.toggle to be wired in main.ts",
   );
   assert.match(
@@ -65,8 +65,8 @@ test("main.ts wires sheetStructureHandlers into registerDesktopCommands (Insert/
   );
   assert.match(
     segment,
-    /\bclear\s*:\s*\(\)\s*=>\s*clearRibbonAutoFiltersForActiveSheet\b/,
-    "Expected autoFilterHandlers.clear to be wired to clearRibbonAutoFiltersForActiveSheet",
+    /\bclear\s*:\s*\(\)\s*=>\s*clearRibbonAutoFilterCriteriaForActiveSheet\b/,
+    "Expected autoFilterHandlers.clear to be wired to clearRibbonAutoFilterCriteriaForActiveSheet",
   );
   assert.match(
     segment,
