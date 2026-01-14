@@ -2848,7 +2848,7 @@ fn standard_derive_ecb_key_variants(
     // the `CryptDeriveKey` expansion step.
     let key_trunc = if key_len <= SHA1_LEN {
         let trunc = Zeroizing::new(h_block0[..key_len].to_vec());
-        if trunc.as_slice() == key_expanded.as_slice() {
+        if util::ct_eq(trunc.as_slice(), key_expanded.as_slice()) {
             None
         } else {
             Some(trunc)

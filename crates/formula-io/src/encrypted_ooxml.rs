@@ -286,7 +286,7 @@ fn decrypt_encrypted_package_standard(
             // AES-128 truncation fallback.
             if info.header.key_size == 128 {
                 if let Ok(key_trunc) = derive_standard_aes_key_truncate(&info, password) {
-                    if key_trunc != key0 {
+                    if !ct_eq(&key_trunc, &key0) {
                         match verify_password_standard_with_key(&info, &key_trunc).map_err(|err| {
                             DecryptError::InvalidInfo(format!(
                                 "failed to verify Standard password (truncation key): {err}"
