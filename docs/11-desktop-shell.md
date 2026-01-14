@@ -682,6 +682,8 @@ Deep-link scheme config/registration:
 
 **How the frontend chooses:** `DesktopOAuthBroker.openAuthUrl(...)` (`apps/desktop/src/power-query/oauthBroker.ts`) inspects the auth URL’s `redirect_uri` query param. If it is a supported loopback URI, it invokes `oauth_loopback_listen` **before** opening the system browser; otherwise it relies on `formula://…` deep-link delivery.
 
+If redirect capture is not available (e.g. not running under Tauri, missing event/invoke permissions, or using an unsupported `redirectUri`), the Power Query UI falls back to prompting the user to paste the full redirect URL manually (see `supportsDesktopOAuthRedirectCapture(...)` and `resolvePkceRedirect()` in `apps/desktop/src/panels/data-queries/DataQueriesPanelContainer.tsx`).
+
 Recommended redirect URIs (used by the desktop Power Query UI; see `apps/desktop/src/panels/data-queries/DataQueriesPanelContainer.tsx`):
 
 - Deep link: `formula://oauth/callback`
@@ -735,6 +737,7 @@ The backend buffers early redirects in memory (`OauthRedirectState` in `apps/des
 - **Redirect is received but auth doesn’t complete:** ensure the redirect URI used in the auth request matches exactly (scheme + host + port + path). The frontend matcher is strict about `pathname` and other endpoint parts (e.g. `/callback` vs `/callback/`, or `127.0.0.1` vs `localhost`).
 - **Redirect is received but the OAuth flow still errors on `state`:** make sure you’re using the latest auth attempt (PKCE `state` is per-attempt). Stale redirects (e.g. from an old browser tab) may be ignored or rejected by the OAuth manager.
 - **Using implicit flow (`#access_token` fragments):** loopback capture can only see query parameters; use auth-code + PKCE (code in the query string).
+- **You’re prompted to paste the redirect URL:** desktop redirect capture isn’t available for the configured `redirectUri`. Use the recommended deep link (`formula://oauth/callback`) or a supported loopback redirect (`http://127.0.0.1:<port>/oauth/callback` / `http://localhost:<port>/...` / `http://[::1]:<port>/...`).
 
 ##### Quick manual smoke tests
 
