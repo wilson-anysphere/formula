@@ -91,9 +91,10 @@ extract_uses_lines() {
         }
       }
 
-      # Detect the start of a block scalar (e.g. `run: |`, `script: >-`, `run: |2`).
-      # YAML also allows an optional indentation indicator (digits) after the chomping indicator.
-      if (code ~ /^[^:#]+:[ \t]*[>|][+-]?[0-9]*[ \t]*$/) {
+      # Detect the start of a block scalar (e.g. `run: |`, `script: >-`, `run: |2`, `run: |2-`).
+      # GitHub YAML parser accepts indentation/chomping indicators in either order, so treat any
+      # combination of digits/+/- after `|`/`>` as a block scalar start.
+      if (code ~ /^[^:#]+:[ \t]*[>|][0-9+-]*[ \t]*$/) {
         in_block=1;
         block_indent=ind;
       }

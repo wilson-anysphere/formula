@@ -102,8 +102,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: |
-          echo "uses: actions/checkout@v4"
-          echo "uses: actions/setup-node@v4"
+          # These lines are inside a YAML block scalar and should NOT be interpreted as workflow steps.
+          - uses: actions/checkout@v4
+          - uses: actions/setup-node@v4
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });
@@ -115,8 +116,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: |2-
-          echo "uses: actions/checkout@v4"
-          echo "uses: actions/setup-node@v4"
+          - uses: actions/checkout@v4
+          - uses: actions/setup-node@v4
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });
