@@ -99,11 +99,11 @@ test("binder preserves unknown sheet.view keys when the existing view is a renam
   assert.ok(sheet);
   const view = sheet.get("view");
   assert.ok(view && typeof view === "object");
-  assert.equal(view.frozenRows, 1);
-  assert.equal(view.frozenCols, 0);
-  assert.deepEqual(view.customKey, { foo: "bar" });
+  assert.equal(typeof view.get, "function", "expected sheet.view to remain a Y.Map");
+  assert.equal(view.get("frozenRows"), 1);
+  assert.equal(view.get("frozenCols"), 0);
+  assert.deepEqual(view.get("customKey"), { foo: "bar" });
 
   binder.destroy();
   doc.destroy();
 });
-

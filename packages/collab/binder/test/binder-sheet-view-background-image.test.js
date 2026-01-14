@@ -115,7 +115,11 @@ test("binder syncs sheet view backgroundImageId between Yjs and DocumentControll
     assert.ok(sheet);
     const view = sheet.get("view");
     assert.ok(view && typeof view === "object");
-    assert.equal(view.backgroundImageId, "bg3.png");
+    if (typeof view.get === "function") {
+      assert.equal(view.get("backgroundImageId"), "bg3.png");
+    } else {
+      assert.equal(view.backgroundImageId, "bg3.png");
+    }
   }
 
   // Local clear should remove the key from the Yjs view object.
@@ -126,10 +130,13 @@ test("binder syncs sheet view backgroundImageId between Yjs and DocumentControll
     assert.ok(sheet);
     const view = sheet.get("view");
     assert.ok(view && typeof view === "object");
-    assert.equal(view.backgroundImageId, undefined);
+    if (typeof view.get === "function") {
+      assert.equal(view.get("backgroundImageId"), undefined);
+    } else {
+      assert.equal(view.backgroundImageId, undefined);
+    }
   }
 
   binder.destroy();
   doc.destroy();
 });
-

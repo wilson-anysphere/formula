@@ -1790,6 +1790,38 @@ export function bindYjsToDocumentController(options) {
 
     if (prepared.length === 0) return;
 
+    /**
+     * Apply sparse axis override objects into a Y.Map-backed axis table.
+     *
+     * @param {any} axisMap
+     * @param {Record<string, number> | undefined} overrides
+     */
+    const applyAxisOverridesToYMap = (axisMap, overrides) => {
+      if (!axisMap) return;
+      const map = getYMap(axisMap);
+      if (!map) return;
+
+      const next = overrides ?? {};
+      const nextKeys = new Set(Object.keys(next));
+
+      // Delete keys that are no longer present.
+      const keysToDelete = [];
+      map.forEach((_value, key) => {
+        if (!nextKeys.has(key)) keysToDelete.push(key);
+      });
+      for (const key of keysToDelete) {
+        map.delete(key);
+      }
+
+      // Upsert next overrides.
+      for (const [key, value] of Object.entries(next)) {
+        const prev = map.get(key);
+        if (typeof prev !== "number" || Math.abs(prev - value) > 1e-6) {
+          map.set(key, value);
+        }
+      }
+    };
+
     const apply = () => {
       for (const item of prepared) {
         const { sheetId, view } = item;
@@ -1845,12 +1877,56 @@ export function bindYjsToDocumentController(options) {
             sheets.insert(found.index, [sheetMap]);
           }
 
+          const existingView = sheetMap.get("view");
+          const existingViewMap = getYMap(existingView);
+          if (existingViewMap) {
+            // When another binder (e.g. the desktop sheet-view binder) stores `sheet.view` as a Y.Map,
+            // update keys in-place instead of overwriting the whole value. This avoids:
+            // - clobbering unknown keys (drawings, merged ranges, etc)
+            // - rewriting large view payloads when only a single field changes
+            // - toggling between Y.Map and plain-object representations when multiple binders are attached
+            if (existingViewMap.get("frozenRows") !== view.frozenRows) existingViewMap.set("frozenRows", view.frozenRows);
+            if (existingViewMap.get("frozenCols") !== view.frozenCols) existingViewMap.set("frozenCols", view.frozenCols);
+
+            const nextBg = normalizeOptionalId(view.backgroundImageId);
+            if (nextBg) {
+              const prevBg = normalizeOptionalId(existingViewMap.get("backgroundImageId"));
+              if (prevBg !== nextBg) existingViewMap.set("backgroundImageId", nextBg);
+            } else {
+              existingViewMap.delete("backgroundImageId");
+            }
+            // Converge legacy key to the canonical one (even if the value is unchanged).
+            existingViewMap.delete("background_image_id");
+
+            const colWidthsRaw = existingViewMap.get("colWidths");
+            const rowHeightsRaw = existingViewMap.get("rowHeights");
+            const colWidthsMap = getYMap(colWidthsRaw);
+            const rowHeightsMap = getYMap(rowHeightsRaw);
+
+            if (colWidthsMap) {
+              applyAxisOverridesToYMap(colWidthsMap, view.colWidths);
+            } else if (view.colWidths) {
+              existingViewMap.set("colWidths", view.colWidths);
+            } else if (colWidthsRaw !== undefined) {
+              existingViewMap.delete("colWidths");
+            }
+
+            if (rowHeightsMap) {
+              applyAxisOverridesToYMap(rowHeightsMap, view.rowHeights);
+            } else if (view.rowHeights) {
+              existingViewMap.set("rowHeights", view.rowHeights);
+            } else if (rowHeightsRaw !== undefined) {
+              existingViewMap.delete("rowHeights");
+            }
+
+            continue;
+          }
+
           const nextView = { ...view };
 
           // Preserve any unknown keys stored alongside view state (e.g. BranchService-style
           // layered formatting defaults: defaultFormat/rowFormats/colFormats) so view-only
           // interactions (freeze panes, resizing) do not accidentally wipe them.
-          const existingView = sheetMap.get("view");
           if (existingView !== undefined) {
             const json = yjsValueToJson(existingView);
             if (isRecord(json)) {
