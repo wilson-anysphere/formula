@@ -812,9 +812,11 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                         : null;
                   if (message && message.includes(`invalid cell address: ${sheet}`)) {
                     (wb as any).setCellStyleId(params.address, params.styleId, sheet);
-                    break;
+                    // Continue; outer switch case will still set `result=null`.
+                    // (Avoid `break` here which would skip setting the RPC result.)
+                  } else {
+                    throw err;
                   }
-                  throw err;
                 }
               }
               result = null;

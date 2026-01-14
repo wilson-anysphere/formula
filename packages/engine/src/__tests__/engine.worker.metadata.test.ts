@@ -273,6 +273,28 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("falls back to the legacy sheet-last setCellStyleId signature when needed", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadataLegacyCellStyle.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCellStyleId",
+        params: { sheet: "Sheet1", address: "A1", styleId: 7 }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([["setCellStyleId", "A1", 7, "Sheet1"]]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("defaults blank sheet names to Sheet1 for sheet-scoped metadata RPCs", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
