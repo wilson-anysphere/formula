@@ -26480,18 +26480,19 @@ export class SpreadsheetApp {
     if (typeof canEditCell === "function") {
       try {
         const allowed = Boolean(canEditCell.call(this.document, { sheetId, row: cell.row, col: cell.col }));
-        if (!allowed) {
-          showCollabEditRejectedToast([
-            {
-              sheetId,
-              row: cell.row,
-              col: cell.col,
-              rejectionKind: "cell",
-              rejectionReason: this.inferCollabEditRejectionReason({ sheetId, row: cell.row, col: cell.col }),
-            },
-          ]);
-          return;
-        }
+          if (!allowed) {
+            const rejection = this.inferCollabEditRejection({ sheetId, row: cell.row, col: cell.col });
+            showCollabEditRejectedToast([
+              {
+                sheetId,
+                row: cell.row,
+                col: cell.col,
+                rejectionKind: "cell",
+                ...rejection,
+              },
+            ]);
+            return;
+          }
       } catch {
         // Best-effort: fall through to attempting the edit.
       }
@@ -26533,14 +26534,18 @@ export class SpreadsheetApp {
     this.document.setCellInput(sheetId, cell, rawValue, { label });
   }
 
-  private inferCollabEditRejectionReason(cell: { sheetId: string; row: number; col: number }): "permission" | "encryption" | "unknown" {
+  private inferCollabEditRejection(cell: {
+    sheetId: string;
+    row: number;
+    col: number;
+  }): { rejectionReason: "permission" | "encryption" | "unknown"; encryptionKeyId?: string; encryptionPayloadUnsupported?: boolean } {
     const session = this.collabSession;
-    if (!session) return "permission";
+    if (!session) return { rejectionReason: "permission" };
 
     // Best-effort: infer missing-key encryption failures so the toast can be specific.
     try {
       const encryption = typeof (session as any).getEncryptionConfig === "function" ? (session as any).getEncryptionConfig() : null;
-      if (!encryption || typeof encryption.keyForCell !== "function") return "permission";
+      if (!encryption || typeof encryption.keyForCell !== "function") return { rejectionReason: "permission" };
 
       const key = encryption.keyForCell(cell) ?? null;
       const shouldEncrypt =
@@ -26548,15 +26553,49 @@ export class SpreadsheetApp {
 
       // If the cell is already encrypted in the shared doc, or encryption is required by
       // config, and we don't have a key, treat this as an encryption rejection.
-      const cellKey = makeCellKey(cell);
-      const cellData = (session as any).cells?.get?.(cellKey) ?? null;
-      const hasEnc = cellData && typeof cellData.get === "function" ? cellData.get("enc") !== undefined : false;
-      if ((hasEnc || shouldEncrypt) && !key) return "encryption";
+      const cells = (session as any).cells;
+      const defaultSheetId = String((session as any)?.defaultSheetId ?? "").trim();
+      const keys: string[] = [makeCellKey(cell), `${cell.sheetId}:${cell.row},${cell.col}`];
+      if (defaultSheetId && cell.sheetId === defaultSheetId) {
+        keys.push(`r${cell.row}c${cell.col}`);
+      }
+      let encRaw: any = undefined;
+      if (cells && typeof cells.get === "function") {
+        for (const keyStr of keys) {
+          const cellData = cells.get(keyStr);
+          if (!cellData || typeof cellData.get !== "function") continue;
+          const candidate = cellData.get("enc");
+          if (candidate !== undefined) {
+            encRaw = candidate;
+            break;
+          }
+        }
+      }
+
+      if (encRaw !== undefined) {
+        const keyId = typeof encRaw === "object" && encRaw && typeof encRaw.keyId === "string" ? String(encRaw.keyId).trim() : "";
+        if (!key) {
+          return { rejectionReason: "encryption", ...(keyId ? { encryptionKeyId: keyId } : {}) };
+        }
+        if (!isEncryptedCellPayload(encRaw)) {
+          return {
+            rejectionReason: "encryption",
+            encryptionPayloadUnsupported: true,
+            ...(keyId ? { encryptionKeyId: keyId } : {}),
+          };
+        }
+        if (key.keyId !== encRaw.keyId) {
+          return { rejectionReason: "encryption", ...(keyId ? { encryptionKeyId: keyId } : {}) };
+        }
+        return { rejectionReason: "permission" };
+      }
+
+      if (shouldEncrypt && !key) return { rejectionReason: "encryption" };
     } catch {
       // ignore
     }
 
-    return "permission";
+    return { rejectionReason: "permission" };
   }
 
   private commitFormulaBar(text: string, commit: FormulaBarCommit): void {
