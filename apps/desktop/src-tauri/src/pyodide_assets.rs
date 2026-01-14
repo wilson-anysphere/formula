@@ -1,6 +1,7 @@
 use directories::ProjectDirs;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
@@ -131,8 +132,18 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    Ok(sha256_bytes(&bytes))
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    // Stream the hash computation to avoid large allocations for big Pyodide assets.
+    let mut buf = [0u8; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn file_has_expected_hash(path: &Path, expected_sha256: &str) -> Result<bool, String> {
