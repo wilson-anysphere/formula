@@ -68,7 +68,9 @@ test("desktop UI scripts should not override core design tokens", () => {
     /\[\s*(?:["'`])style(?:["'`])\s*]\s*\.\s*cssText\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
   const cssTextStyleBracketBracketAssignment =
     /\[\s*(?:["'`])style(?:["'`])\s*]\s*\[\s*(?:["'`])cssText(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
-  const setAttributeStyle = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi;
+  const setAttributeStyle = /\bsetAttribute\s*\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi;
+  const setAttributeStyleBracket =
+    /\[\s*(?:["'`])setAttribute(?:["'`])\s*]\s*\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi;
 
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
@@ -97,6 +99,7 @@ test("desktop UI scripts should not override core design tokens", () => {
       { re: cssTextStyleBracketAssignment, kind: "style['style'].cssText" },
       { re: cssTextStyleBracketBracketAssignment, kind: "style['style'][cssText]" },
       { re: setAttributeStyle, kind: "setAttribute(style)" },
+      { re: setAttributeStyleBracket, kind: "setAttribute[style]" },
     ]) {
       re.lastIndex = 0;
       while ((match = re.exec(stripped))) {

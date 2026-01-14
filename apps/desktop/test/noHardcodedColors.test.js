@@ -190,7 +190,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     /\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\.\s*cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
   const styleCssTextStyleBracketBracketAssignment =
     /\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\[\s*(?:["'\`])cssText(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
-  const setAttributeStyleAssignment = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
+  const setAttributeStyleAssignment = /\bsetAttribute\s*\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
+  const setAttributeStyleBracketAssignment =
+    /\[\s*(?:["'\`])setAttribute(?:["'\`])\s*]\s*\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
   const setPropertyStyleColor = new RegExp(
     // DOM style setProperty assignments (e.g. `el.style.setProperty("color", "red")` or `setProperty("--foo", "red")`)
     String.raw`\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
@@ -213,7 +215,12 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   );
   const setAttributeColor = new RegExp(
     // SVG/DOM attribute assignments (e.g. `el.setAttribute("fill", "red")`)
-    String.raw`\bsetAttribute\(\s*(["'])(?:fill|stroke|color|stop-color|flood-color|lighting-color)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    String.raw`\bsetAttribute\s*\(\s*(["'])(?:fill|stroke|color|stop-color|flood-color|lighting-color)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    "gi",
+  );
+  const setAttributeBracketColor = new RegExp(
+    // SVG/DOM attribute assignments via bracket notation (e.g. `el["setAttribute"]("fill", "red")`)
+    String.raw`\[\s*(?:["'\`])setAttribute(?:["'\`])\s*]\s*\(\s*(["'])(?:fill|stroke|color|stop-color|flood-color|lighting-color)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const jsxAttributeColor = new RegExp(
@@ -283,6 +290,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         { re: styleCssTextStyleBracketAssignment, kind: "style['style'].cssText" },
         { re: styleCssTextStyleBracketBracketAssignment, kind: "style['style'][cssText]" },
         { re: setAttributeStyleAssignment, kind: "setAttribute(style)" },
+        { re: setAttributeStyleBracketAssignment, kind: "setAttribute[style]" },
       ]) {
         re.lastIndex = 0;
         let match;
@@ -329,6 +337,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
           { re: setPropertyStyleStyleBracketColor, kind: "style.setProperty" },
           { re: setPropertyStyleStyleBracketBracketColor, kind: "style.setProperty" },
           { re: setAttributeColor, kind: "setAttribute" },
+          { re: setAttributeBracketColor, kind: "setAttribute" },
           { re: jsxAttributeColor, kind: "jsx attribute" },
           { re: jsxAttributeColorExpr, kind: "jsx attribute expr" },
         ]) {
