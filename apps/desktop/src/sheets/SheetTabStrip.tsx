@@ -520,7 +520,7 @@ export function SheetTabStrip({
     );
 
     if (!selected) return;
-    void activateSheetWithRenameGuard(selected);
+    await activateSheetWithRenameGuard(selected);
   }, [activateSheetWithRenameGuard, commitRename, editingSheetId, visibleSheets]);
 
   const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }) => {
@@ -545,7 +545,9 @@ export function SheetTabStrip({
         label: "Rename",
         enabled: !mutationsDisabled,
         onSelect: () => {
-          void beginRenameWithGuard(sheet);
+          void beginRenameWithGuard(sheet).catch(() => {
+            // Best-effort: avoid unhandled rejections from async rename bootstrapping.
+          });
         },
       },
       {
@@ -727,9 +729,17 @@ export function SheetTabStrip({
                     const message = err instanceof Error ? err.message : String(err);
                     onError?.(message);
                   }
-                })().finally(() => {
-                  if (restore?.isConnected) restore.focus({ preventScroll: true });
-                });
+                })()
+                  .finally(() => {
+                    try {
+                      if (restore?.isConnected) restore.focus({ preventScroll: true });
+                    } catch {
+                      // ignore
+                    }
+                  })
+                  .catch(() => {
+                    // Best-effort: avoid unhandled rejections from the `.finally` bookkeeping chain.
+                  });
               };
 
               input.click();
@@ -745,7 +755,9 @@ export function SheetTabStrip({
       label: "Delete",
       enabled: canDelete && !mutationsDisabled,
       onSelect: () => {
-        void deleteSheet(sheet);
+        void deleteSheet(sheet).catch(() => {
+          // Best-effort: avoid unhandled rejections from async delete flows.
+        });
       },
     });
 
@@ -1002,7 +1014,9 @@ export function SheetTabStrip({
                   lastContextMenuFocusRef.current = target;
                   const rect = target.getBoundingClientRect();
                   openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom });
-                })();
+                })().catch(() => {
+                  // Best-effort: context menu opening should never surface as an unhandled rejection.
+                });
                 return;
               }
 
@@ -1062,7 +1076,9 @@ export function SheetTabStrip({
             return;
           }
           // Dropping on the container inserts at the end of the visible list.
-          void moveSheet(fromId, { kind: "end" });
+          void moveSheet(fromId, { kind: "end" }).catch(() => {
+            // Best-effort: avoid unhandled rejections from async move handlers.
+          });
           clearDragIndicators();
         }}
         onDragLeave={(e) => {
@@ -1084,8 +1100,16 @@ export function SheetTabStrip({
             renameError={editingSheetId === sheet.id ? renameError : null}
             renameInputRef={renameInputRef}
             tabRef={sheet.id === activeSheetId ? activeTabRef : undefined}
-            onActivate={() => void activateSheetWithRenameGuard(sheet.id)}
-            onBeginRename={() => void beginRenameWithGuard(sheet)}
+            onActivate={() => {
+              void activateSheetWithRenameGuard(sheet.id).catch(() => {
+                // Best-effort: avoid unhandled rejections from async sheet activation.
+              });
+            }}
+            onBeginRename={() => {
+              void beginRenameWithGuard(sheet).catch(() => {
+                // Best-effort: avoid unhandled rejections from async rename bootstrapping.
+              });
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -1099,7 +1123,9 @@ export function SheetTabStrip({
                 }
                 lastContextMenuFocusRef.current = target;
                 openSheetTabContextMenu(sheet.id, anchor);
-              })();
+              })().catch(() => {
+                // Best-effort: context menu opening should never surface as an unhandled rejection.
+              });
             }}
             renameInFlight={renameInFlight && editingSheetId === sheet.id}
             onCommitRename={() => void commitRename(sheet.id)}
@@ -1140,6 +1166,8 @@ export function SheetTabStrip({
               void moveSheet(fromId, {
                 kind: shouldInsertAfter ? "after" : "before",
                 targetSheetId: sheet.id,
+              }).catch(() => {
+                // Best-effort: avoid unhandled rejections from async move handlers.
               });
             }}
           />
@@ -1158,7 +1186,9 @@ export function SheetTabStrip({
               if (!ok) return;
             }
             await onAddSheet();
-          })();
+          })().catch(() => {
+            // Best-effort: avoid unhandled rejections from async sheet creation.
+          });
         }}
         aria-label="Add sheet"
       >
@@ -1170,7 +1200,11 @@ export function SheetTabStrip({
         className="sheet-overflow"
         data-testid="sheet-overflow"
         aria-label="Show sheet list"
-        onClick={() => void openSheetPicker()}
+        onClick={() => {
+          void openSheetPicker().catch(() => {
+            // Best-effort: avoid unhandled rejections from the async sheet picker.
+          });
+        }}
       >
         ⋯
       </button>
