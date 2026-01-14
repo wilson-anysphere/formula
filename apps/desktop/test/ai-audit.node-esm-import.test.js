@@ -13,6 +13,8 @@ test("ai-audit is importable under Node ESM when executing TS sources directly",
   assert.equal(typeof mod.AIAuditRecorder, "function");
   assert.equal(typeof mod.MemoryAIAuditStore, "function");
   assert.equal(typeof mod.createDefaultAIAuditStore, "function");
+  assert.equal(typeof mod.NoopAIAuditStore, "function");
+  assert.equal(typeof mod.FailingAIAuditStore, "function");
   assert.equal(typeof RecorderFromTs, "function");
 
   const store = new mod.MemoryAIAuditStore();
@@ -36,4 +38,12 @@ test("ai-audit is importable under Node ESM when executing TS sources directly",
   assert.ok(defaultStore instanceof mod.BoundedAIAuditStore);
   // TypeScript-private but runtime-visible property used in other test suites too.
   assert.ok(defaultStore.store instanceof mod.MemoryAIAuditStore);
+
+  // Utility store exports.
+  const noop = new mod.NoopAIAuditStore();
+  await noop.logEntry({ id: "noop", timestamp_ms: Date.now(), session_id: "s", mode: "chat", input: null, model: "m", tool_calls: [] });
+  assert.deepEqual(await noop.listEntries(), []);
+
+  const failing = new mod.FailingAIAuditStore("boom");
+  await assert.rejects(() => failing.logEntry({ id: "x", timestamp_ms: Date.now(), session_id: "s", mode: "chat", input: null, model: "m", tool_calls: [] }));
 });
