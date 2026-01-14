@@ -295,7 +295,12 @@ impl XlsxPackage {
                 let Some(rid) = parsed.and_then(|p| p.cache_rid) else {
                     continue;
                 };
-                let resolved = resolve_relationship_target(self, timeline_part, &rid)?;
+                // Best-effort: treat malformed `.rels` parts as unresolved instead of failing the
+                // selection update. We still want to patch the explicitly provided cache part.
+                let resolved = match resolve_relationship_target(self, timeline_part, &rid) {
+                    Ok(resolved) => resolved,
+                    Err(_) => None,
+                };
                 if resolved
                     .as_deref()
                     .is_some_and(|target| target.trim_start_matches('/') == canonical)
@@ -308,9 +313,14 @@ impl XlsxPackage {
             if let Some(xml) = self.part(&canonical) {
                 if let Ok(parsed) = parse_timeline_xml(xml) {
                     if let Some(rid) = parsed.cache_rid.as_deref() {
-                        if let Some(cache_part) =
-                            resolve_relationship_target(self, &canonical, rid)?
-                        {
+                        // Best-effort: a malformed timeline `.rels` part should not prevent us
+                        // from patching the explicitly provided timeline part.
+                        let cache_part =
+                            match resolve_relationship_target(self, &canonical, rid) {
+                                Ok(cache_part) => cache_part,
+                                Err(_) => None,
+                            };
+                        if let Some(cache_part) = cache_part {
                             targets.insert(cache_part);
                         }
                     }
@@ -2513,6 +2523,54 @@ mod timeline_selection_write_tests {
             parts.timelines[0].selection.end.as_deref(),
             Some("2024-04-30")
         );
+    }
+
+    #[test]
+    fn set_timeline_selection_patches_cache_even_if_timeline_rels_is_malformed() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+        let timeline_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+          name="Timeline1" uid="{00000000-0000-0000-0000-000000000001}">
+  <timelineCache r:id="rId1"/>
+</timeline>"#;
+
+        // Intentionally malformed `.rels` payload: the `<Relationship>` start tag is never closed.
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.microsoft.com/office/2007/relationships/timelineCacheDefinition"
+                Target="../timelineCaches/timelineCacheDefinition1.xml">
+</Relationships>"#;
+
+        let cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <selection startDate="2024-01-01" endDate="2024-01-31"/>
+</timelineCacheDefinition>"#;
+
+        let mut pkg = build_package(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/timelines/timeline1.xml", timeline_xml),
+            ("xl/timelines/_rels/timeline1.xml.rels", rels_xml),
+            ("xl/timelineCaches/timelineCacheDefinition1.xml", cache_xml),
+        ]);
+
+        let selection = TimelineSelectionState {
+            start: Some("2024-02-01".to_string()),
+            end: Some("2024-02-29".to_string()),
+        };
+
+        pkg.set_timeline_selection("xl/timelineCaches/timelineCacheDefinition1.xml", &selection)
+            .expect("set selection should be best-effort for malformed rels");
+
+        let updated = pkg
+            .part("xl/timelineCaches/timelineCacheDefinition1.xml")
+            .expect("cache part exists");
+        let updated_str = std::str::from_utf8(updated).expect("utf8");
+        assert!(updated_str.contains("startDate=\"2024-02-01\""));
+        assert!(updated_str.contains("endDate=\"2024-02-29\""));
     }
 }
 
