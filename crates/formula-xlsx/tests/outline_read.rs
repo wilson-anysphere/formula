@@ -1,5 +1,6 @@
 use formula_xlsx::outline::{read_outline_from_xlsx_bytes, write_outline_to_xlsx_bytes};
 use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes};
+use formula_model::Outline;
 
 const FIXTURE: &[u8] = include_bytes!("fixtures/grouped_rows.xlsx");
 const SHEET_PATH: &str = "xl/worksheets/sheet1.xml";
@@ -178,4 +179,20 @@ fn outline_read_workbook_model_from_bytes_does_not_mark_outline_hidden_rows_user
             "expected col_properties.hidden to be false for outline-hidden col {col}"
         );
     }
+}
+
+#[test]
+fn outline_load_from_bytes_without_outline_keeps_default() {
+    const NO_OUTLINE_FIXTURE: &[u8] = include_bytes!("fixtures/merged-cells.xlsx");
+    let doc = load_from_bytes(NO_OUTLINE_FIXTURE).expect("load fixture");
+    let sheet = &doc.workbook.sheets[0];
+    assert_eq!(sheet.outline, Outline::default());
+}
+
+#[test]
+fn outline_read_workbook_model_from_bytes_without_outline_keeps_default() {
+    const NO_OUTLINE_FIXTURE: &[u8] = include_bytes!("fixtures/merged-cells.xlsx");
+    let workbook = read_workbook_model_from_bytes(NO_OUTLINE_FIXTURE).expect("load workbook model");
+    let sheet = &workbook.sheets[0];
+    assert_eq!(sheet.outline, Outline::default());
 }

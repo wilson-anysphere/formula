@@ -93,10 +93,14 @@ fn parse_row_outline(outline: &mut Outline, e: &BytesStart<'_>) -> Result<(), Ou
         }
     }
     if let Some(index) = row_index {
-        let stored = outline.rows.entry_mut(index);
-        stored.level = entry.level;
-        stored.collapsed = entry.collapsed;
-        stored.hidden.user = entry.hidden.user;
+        // Only store non-default entries so `Outline` stays compact (and so sheets without any
+        // outline metadata keep `Outline::default()`).
+        if entry != OutlineEntry::default() {
+            let stored = outline.rows.entry_mut(index);
+            stored.level = entry.level;
+            stored.collapsed = entry.collapsed;
+            stored.hidden.user = entry.hidden.user;
+        }
     }
     Ok(())
 }
@@ -118,11 +122,15 @@ fn parse_col_outline(outline: &mut Outline, e: &BytesStart<'_>) -> Result<(), Ou
     }
     let Some(min) = min else { return Ok(()); };
     let Some(max) = max else { return Ok(()); };
-    for index in min..=max {
-        let stored = outline.cols.entry_mut(index);
-        stored.level = entry.level;
-        stored.collapsed = entry.collapsed;
-        stored.hidden.user = entry.hidden.user;
+    // Only store non-default entries so `Outline` stays compact (and so sheets without any outline
+    // metadata keep `Outline::default()`).
+    if entry != OutlineEntry::default() {
+        for index in min..=max {
+            let stored = outline.cols.entry_mut(index);
+            stored.level = entry.level;
+            stored.collapsed = entry.collapsed;
+            stored.hidden.user = entry.hidden.user;
+        }
     }
     Ok(())
 }
