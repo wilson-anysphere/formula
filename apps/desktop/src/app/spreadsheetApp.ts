@@ -15639,7 +15639,43 @@ export class SpreadsheetApp {
       return /\.(png|jpe?g|gif|bmp|webp|svg)$/.test(name);
     };
 
-    const imageFiles = Array.from(dt.files ?? []).filter((file) => isImageFile(file));
+    const droppedFiles = (() => {
+      const out: File[] = [];
+      const seen = new Set<string>();
+
+      const push = (file: File) => {
+        if (!file) return;
+        const name = typeof (file as any).name === "string" ? String((file as any).name) : "";
+        const size = typeof (file as any).size === "number" ? Number((file as any).size) : 0;
+        const lastModified = typeof (file as any).lastModified === "number" ? Number((file as any).lastModified) : 0;
+        const key = `${name}\n${size}\n${lastModified}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push(file);
+      };
+
+      for (const file of Array.from(dt.files ?? [])) {
+        push(file);
+      }
+
+      // Some environments provide file handles via `dataTransfer.items` but leave `files` empty.
+      for (const item of Array.from(dt.items ?? [])) {
+        if (!item || typeof item !== "object") continue;
+        if ((item as any).kind !== "file") continue;
+        const getAsFile = (item as any).getAsFile;
+        if (typeof getAsFile !== "function") continue;
+        try {
+          const file = getAsFile.call(item) as File | null;
+          if (file) push(file);
+        } catch {
+          // ignore
+        }
+      }
+
+      return out;
+    })();
+
+    const imageFiles = droppedFiles.filter((file) => isImageFile(file));
     if (imageFiles.length === 0) return;
 
     if (this.isEditing()) return;
