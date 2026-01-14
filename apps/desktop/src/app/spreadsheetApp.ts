@@ -2685,7 +2685,27 @@ export class SpreadsheetApp {
             target === this.referenceCanvas ||
             target === this.auditingCanvas ||
             target === this.presenceCanvas;
-          return isGridSurface;
+          if (!isGridSurface) return false;
+
+          // In canvas-charts mode, charts are rendered above workbook drawings. If a chart is under the pointer,
+          // let chart interactions win so drawings don't steal clicks from charts underneath.
+          if (this.useCanvasCharts) {
+            const chartHit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
+            if (chartHit) {
+              // Exception: allow interacting with visible selection handles for a selected drawing, even if a chart
+              // happens to be behind the handle bounds.
+              if (this.selectedDrawingId != null) {
+                this.maybeRefreshRootPosition({ force: true });
+                const x = e.clientX - this.rootLeft;
+                const y = e.clientY - this.rootTop;
+                const cursor = this.drawingCursorAtPoint(x, y);
+                if (cursor && cursor !== "move") return true;
+              }
+              return false;
+            }
+          }
+
+          return true;
         },
         onPointerDownHit: () => {
           if (this.editor.isOpen()) {
@@ -9685,7 +9705,27 @@ export class SpreadsheetApp {
           target === this.referenceCanvas ||
           target === this.auditingCanvas ||
           target === this.presenceCanvas;
-        return isGridSurface;
+        if (!isGridSurface) return false;
+
+        // In canvas-charts mode, charts are rendered above workbook drawings. If a chart is under the pointer,
+        // let chart interactions win so drawings don't steal clicks from charts underneath.
+        if (this.useCanvasCharts) {
+          const chartHit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
+          if (chartHit) {
+            // Exception: allow interacting with visible selection handles for a selected drawing, even if a chart
+            // happens to be behind the handle bounds.
+            if (this.selectedDrawingId != null) {
+              this.maybeRefreshRootPosition({ force: true });
+              const x = e.clientX - this.rootLeft;
+              const y = e.clientY - this.rootTop;
+              const cursor = this.drawingCursorAtPoint(x, y);
+              if (cursor && cursor !== "move") return true;
+            }
+            return false;
+          }
+        }
+
+        return true;
       },
       onPointerDownHit: () => {
         if (this.editor.isOpen()) {
@@ -10088,26 +10128,29 @@ export class SpreadsheetApp {
     }
 
     const drawingCursor = this.drawingCursorAtPoint(x, y);
-    const chartCursor = drawingCursor ? null : this.chartCursorAtPoint(x, y);
-    const nextCursor = drawingCursor ?? chartCursor ?? "";
+    // Handle precedence: selection handles should win over any underlying objects.
+    const drawingHandleCursor = drawingCursor != null && drawingCursor !== "move" ? drawingCursor : null;
+    const chartCursor =
+      !this.useCanvasCharts && drawingCursor
+        ? null
+        : this.chartCursorAtPoint(x, y);
+    const chartHandleCursor = chartCursor != null && chartCursor !== "move" ? chartCursor : null;
+    const nextCursor =
+      drawingHandleCursor ??
+      chartHandleCursor ??
+      (this.useCanvasCharts ? (chartCursor ?? drawingCursor ?? "") : (drawingCursor ?? chartCursor ?? ""));
     if (this.root.style.cursor !== nextCursor) {
       this.root.style.cursor = nextCursor;
     }
     // In shared-grid mode, the selection canvas sets its own cursor value, so apply drawing
     // cursor feedback there as well when the pointermove targets the canvas surface.
-    const cursorOverride = drawingCursor ?? chartCursor;
+    const cursorOverride = nextCursor || null;
     if (cursorOverride && this.selectionCanvas.style.cursor !== cursorOverride) {
       this.selectionCanvas.style.cursor = cursorOverride;
     }
 
-    if (drawingCursor) {
+    if (drawingCursor || chartCursor) {
       // Drawings sit above cell content; suppress comment tooltips while hovering drawings.
-      this.clearSharedHoverCellCache();
-      this.hideCommentTooltip();
-      return;
-    }
-    if (chartCursor) {
-      // Charts sit above cell content; suppress comment tooltips while hovering chart bounds.
       this.clearSharedHoverCellCache();
       this.hideCommentTooltip();
       return;
@@ -16963,19 +17006,21 @@ export class SpreadsheetApp {
       y >= fillHandle.y &&
       y <= fillHandle.y + fillHandle.height;
     const drawingCursor = this.drawingCursorAtPoint(x, y);
-    const chartCursor = drawingCursor ? null : this.chartCursorAtPoint(x, y);
-    const nextCursor = drawingCursor ?? chartCursor ?? (overFillHandle ? "crosshair" : "");
+    // Handle precedence: selection handles should win over any underlying objects.
+    const drawingHandleCursor = drawingCursor != null && drawingCursor !== "move" ? drawingCursor : null;
+    const chartCursor = !this.useCanvasCharts && drawingCursor ? null : this.chartCursorAtPoint(x, y);
+    const chartHandleCursor = chartCursor != null && chartCursor !== "move" ? chartCursor : null;
+    const baseCursor =
+      drawingHandleCursor ??
+      chartHandleCursor ??
+      (this.useCanvasCharts ? (chartCursor ?? drawingCursor) : (drawingCursor ?? chartCursor));
+    const nextCursor = baseCursor ?? (overFillHandle ? "crosshair" : "");
     if (this.root.style.cursor !== nextCursor) {
       this.root.style.cursor = nextCursor;
     }
 
-    if (drawingCursor) {
+    if (drawingCursor || chartCursor) {
       // Drawings sit above cell content; suppress comment tooltips while hovering drawings.
-      this.hideCommentTooltip();
-      return;
-    }
-    if (chartCursor) {
-      // Charts sit above cell content; suppress comment tooltips while hovering the chart area.
       this.hideCommentTooltip();
       return;
     }
