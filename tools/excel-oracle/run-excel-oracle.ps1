@@ -160,6 +160,36 @@ function Encode-RangeValue {
   }
 }
 
+function Get-StableCaseSetPath {
+  param([Parameter(Mandatory = $true)][string]$PathStr)
+
+  # Normalize a cases path string to keep datasets portable and privacy-safe:
+  # - Convert backslashes to forward slashes
+  # - If the path is absolute, strip user/mount-point prefixes by keeping a repo-relative suffix
+  #   (tests/, tools/, crates/, shared/) when present, otherwise fall back to the basename.
+  $raw = $PathStr.Trim()
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $raw }
+
+  $normalized = $raw.Replace("\", "/")
+  $lower = $normalized.ToLowerInvariant()
+
+  foreach ($marker in @("/tests/", "/tools/", "/crates/", "/shared/")) {
+    $idx = $lower.LastIndexOf($marker)
+    if ($idx -ge 0) {
+      $suffix = $normalized.Substring($idx + 1).TrimStart("/")
+      if (-not [string]::IsNullOrWhiteSpace($suffix)) {
+        return $suffix
+      }
+    }
+  }
+
+  $looksAbs = $normalized.StartsWith("/") -or $normalized.StartsWith("//") -or ($normalized -match "^[A-Za-z]:/")
+  if (-not $looksAbs) {
+    return $normalized
+  }
+  return [System.IO.Path]::GetFileName($normalized)
+}
+
 if (-not (Test-Path -LiteralPath $CasesPath)) {
   throw "CasesPath not found: $CasesPath"
 }
@@ -360,7 +390,7 @@ try {
       operatingSystem = [string]$excel.OperatingSystem
     }
     caseSet = [ordered]@{
-      path = $CasesPath
+      path = (Get-StableCaseSetPath -PathStr $CasesPath)
       sha256 = $caseHash
       count = $caseList.Count
     }
