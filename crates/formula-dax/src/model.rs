@@ -545,33 +545,6 @@ impl UnmatchedFactRows {
         }
     }
 
-    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&usize) -> bool) {
-        match self {
-            UnmatchedFactRows::Sparse(rows) => rows.retain(|row| keep(row)),
-            UnmatchedFactRows::Dense { bits, len, count } => {
-                let mut new_bits = vec![0u64; bits.len()];
-                let mut new_count = 0usize;
-                for (word_idx, &word) in bits.iter().enumerate() {
-                    let mut w = word;
-                    while w != 0 {
-                        let tz = w.trailing_zeros() as usize;
-                        let row = word_idx * 64 + tz;
-                        if row >= *len {
-                            break;
-                        }
-                        if keep(&row) {
-                            new_bits[word_idx] |= 1u64 << tz;
-                            new_count += 1;
-                        }
-                        w &= w - 1;
-                    }
-                }
-                *bits = new_bits;
-                *count = new_count;
-            }
-        }
-    }
-
     pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
         match self {
             UnmatchedFactRows::Sparse(rows) => {
@@ -592,34 +565,6 @@ impl UnmatchedFactRows {
                         w &= w - 1;
                     }
                 }
-            }
-        }
-    }
-
-    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&usize) -> bool) {
-        match self {
-            UnmatchedFactRows::Sparse(rows) => rows.retain(|row| keep(row)),
-            UnmatchedFactRows::Dense { bits, len, count } => {
-                let mut new_count = 0usize;
-                for (word_idx, word) in bits.iter_mut().enumerate() {
-                    let mut w = *word;
-                    let mut new_word = 0u64;
-                    while w != 0 {
-                        let tz = w.trailing_zeros() as usize;
-                        let row = word_idx * 64 + tz;
-                        if row >= *len {
-                            break;
-                        }
-                        let mask = 1u64 << tz;
-                        if keep(&row) {
-                            new_word |= mask;
-                            new_count += 1;
-                        }
-                        w &= w - 1;
-                    }
-                    *word = new_word;
-                }
-                *count = new_count;
             }
         }
     }
@@ -752,6 +697,8 @@ pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
     /// Column index of `rel.from_column` in the `from_table`.
     pub(crate) from_idx: usize,
+    /// Column index of `rel.to_column` in the `to_table`.
+    pub(crate) to_idx: usize,
     pub(crate) to_index: HashMap<Value, RowSet>,
     /// Relationship index for the fact-side (from_table) foreign key.
     ///
@@ -1295,6 +1242,7 @@ impl DataModel {
         self.relationships.push(RelationshipInfo {
             rel: relationship,
             from_idx,
+            to_idx,
             to_index,
             from_index,
             unmatched_fact_rows,

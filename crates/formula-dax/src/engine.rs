@@ -4637,7 +4637,7 @@ fn resolve_row_sets_trace_enabled() -> bool {
 fn maybe_trace_resolve_row_sets(
     model: &DataModel,
     filter: &FilterContext,
-    sets: &HashMap<String, Vec<bool>>,
+    sets: &HashMap<String, BitVec>,
     iterations: usize,
     propagate_calls: usize,
     propagate_changes: usize,
@@ -4650,11 +4650,7 @@ fn maybe_trace_resolve_row_sets(
     let mut table_counts: Vec<(&str, usize, usize)> = sets
         .iter()
         .map(|(name, allowed)| {
-            (
-                name.as_str(),
-                allowed.iter().filter(|v| **v).count(),
-                allowed.len(),
-            )
+            (name.as_str(), allowed.count_ones(), allowed.len())
         })
         .collect();
     table_counts.sort_by_key(|(name, _, _)| *name);
@@ -4730,7 +4726,7 @@ fn propagate_filter(
                     .table(to_table_name)
                     .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
 
-                let all_visible = to_set.iter().all(|allowed| *allowed);
+                let all_visible = to_set.all_true();
 
                 if all_visible {
                     to_table
@@ -4749,11 +4745,7 @@ fn propagate_filter(
                             out
                         })
                 } else {
-                    let visible_rows: Vec<usize> = to_set
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, allowed)| allowed.then_some(idx))
-                        .collect();
+                    let visible_rows: Vec<usize> = to_set.iter_ones().collect();
 
                     if visible_rows.is_empty() {
                         Vec::new()
