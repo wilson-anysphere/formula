@@ -188,7 +188,7 @@ const CURATED_FUNCTIONS = [
     description: "Rounds a number to a specified number of digits.",
     args: [
       { name: "number", type: "value" },
-      { name: "num_digits", type: "number" },
+      { name: "num_digits", type: "value" },
     ],
   },
   {
@@ -196,7 +196,7 @@ const CURATED_FUNCTIONS = [
     description: "Rounds a number up, away from zero.",
     args: [
       { name: "number", type: "value" },
-      { name: "num_digits", type: "number" },
+      { name: "num_digits", type: "value" },
     ],
   },
   {
@@ -204,7 +204,7 @@ const CURATED_FUNCTIONS = [
     description: "Rounds a number down, toward zero.",
     args: [
       { name: "number", type: "value" },
-      { name: "num_digits", type: "number" },
+      { name: "num_digits", type: "value" },
     ],
   },
   {
@@ -219,7 +219,7 @@ const CURATED_FUNCTIONS = [
     description: "Truncates a number to an integer by removing the fractional part.",
     args: [
       { name: "number", type: "value" },
-      { name: "num_digits", type: "number", optional: true },
+      { name: "num_digits", type: "value", optional: true },
     ],
   },
   {

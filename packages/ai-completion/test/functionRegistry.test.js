@@ -77,10 +77,14 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("ABS", 0), "value", "Expected ABS number to be value-like");
   assert.equal(registry.getFunction("ROUND")?.args?.[1]?.name, "num_digits", "Expected ROUND arg2 to be num_digits");
   assert.equal(registry.getArgType("ROUND", 0), "value", "Expected ROUND number to be value-like");
+  assert.equal(registry.getArgType("ROUND", 1), "value", "Expected ROUND num_digits to be value-like");
   assert.equal(registry.getArgType("ROUNDUP", 0), "value", "Expected ROUNDUP number to be value-like");
+  assert.equal(registry.getArgType("ROUNDUP", 1), "value", "Expected ROUNDUP num_digits to be value-like");
   assert.equal(registry.getArgType("ROUNDDOWN", 0), "value", "Expected ROUNDDOWN number to be value-like");
+  assert.equal(registry.getArgType("ROUNDDOWN", 1), "value", "Expected ROUNDDOWN num_digits to be value-like");
   assert.equal(registry.getArgType("INT", 0), "value", "Expected INT number to be value-like");
   assert.ok(registry.getFunction("TRUNC")?.args?.[1]?.optional, "Expected TRUNC num_digits to be optional");
+  assert.equal(registry.getArgType("TRUNC", 1), "value", "Expected TRUNC num_digits to be value-like");
   assert.equal(registry.getArgType("POWER", 0), "value", "Expected POWER number to be value-like");
   assert.equal(registry.getArgType("POWER", 1), "number", "Expected POWER power to be a number");
   assert.equal(registry.getArgType("SQRT", 0), "value", "Expected SQRT number to be value-like");
