@@ -94,3 +94,147 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
         &vec![1.0, 2.0]
     );
 }
+
+#[test]
+fn chooses_fallback_when_choice_contains_unsupported_chart_type() {
+    // If `mc:Choice` contains a chart type we don't yet support, but `mc:Fallback`
+    // contains a supported chart, we should still parse the fallback chart.
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <c:chart>
+    <c:plotArea>
+      <mc:AlternateContent>
+        <mc:Choice>
+          <c:fooChart />
+        </mc:Choice>
+        <mc:Fallback>
+          <c:barChart>
+            <c:barDir val="col"/>
+            <c:axId val="123"/>
+            <c:axId val="456"/>
+            <c:ser>
+              <c:tx><c:v>Series 1</c:v></c:tx>
+              <c:cat>
+                <c:strRef>
+                  <c:f>Sheet1!$A$2:$A$3</c:f>
+                  <c:strCache>
+                    <c:ptCount val="2"/>
+                    <c:pt idx="0"><c:v>A</c:v></c:pt>
+                    <c:pt idx="1"><c:v>B</c:v></c:pt>
+                  </c:strCache>
+                </c:strRef>
+              </c:cat>
+              <c:val>
+                <c:numRef>
+                  <c:f>Sheet1!$B$2:$B$3</c:f>
+                  <c:numCache>
+                    <c:formatCode>General</c:formatCode>
+                    <c:ptCount val="2"/>
+                    <c:pt idx="0"><c:v>1</c:v></c:pt>
+                    <c:pt idx="1"><c:v>2</c:v></c:pt>
+                  </c:numCache>
+                </c:numRef>
+              </c:val>
+            </c:ser>
+          </c:barChart>
+        </mc:Fallback>
+      </mc:AlternateContent>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert!(
+        model
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("AlternateContent")),
+        "expected AlternateContent warning diagnostic"
+    );
+
+    assert_eq!(model.series.len(), 1);
+}
+
+#[test]
+fn selects_choice_branch_that_contains_desired_chart() {
+    // Multiple `mc:Choice` branches may appear with different `Requires` values.
+    // We don't evaluate those requirements yet, but we should still search within
+    // all Choice branches before falling back.
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <c:chart>
+    <c:plotArea>
+      <mc:AlternateContent>
+        <mc:Choice>
+          <c:spPr />
+        </mc:Choice>
+        <mc:Choice>
+          <c:barChart>
+            <c:barDir val="col"/>
+            <c:axId val="123"/>
+            <c:axId val="456"/>
+            <c:ser>
+              <c:tx><c:v>Series 1</c:v></c:tx>
+              <c:cat>
+                <c:strRef>
+                  <c:f>Sheet1!$A$2:$A$3</c:f>
+                  <c:strCache>
+                    <c:ptCount val="2"/>
+                    <c:pt idx="0"><c:v>A</c:v></c:pt>
+                    <c:pt idx="1"><c:v>B</c:v></c:pt>
+                  </c:strCache>
+                </c:strRef>
+              </c:cat>
+              <c:val>
+                <c:numRef>
+                  <c:f>Sheet1!$B$2:$B$3</c:f>
+                  <c:numCache>
+                    <c:formatCode>General</c:formatCode>
+                    <c:ptCount val="2"/>
+                    <c:pt idx="0"><c:v>1</c:v></c:pt>
+                    <c:pt idx="1"><c:v>2</c:v></c:pt>
+                  </c:numCache>
+                </c:numRef>
+              </c:val>
+            </c:ser>
+          </c:barChart>
+          <c:catAx>
+            <c:axId val="123" />
+            <c:axPos val="b" />
+            <c:crossAx val="456" />
+            <c:crosses val="autoZero" />
+          </c:catAx>
+          <c:valAx>
+            <c:axId val="456" />
+            <c:axPos val="l" />
+            <c:crossAx val="123" />
+            <c:crosses val="autoZero" />
+          </c:valAx>
+        </mc:Choice>
+        <mc:Fallback>
+          <c:fooChart />
+        </mc:Fallback>
+      </mc:AlternateContent>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert!(
+        model
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("AlternateContent")),
+        "expected AlternateContent warning diagnostic"
+    );
+    assert_eq!(model.axes.len(), 2, "expected two axes to be parsed");
+    assert_eq!(model.series.len(), 1);
+}
