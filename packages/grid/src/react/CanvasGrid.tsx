@@ -1041,14 +1041,29 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       selectionCanvasViewportOriginRef.current = null;
     };
 
-    const getViewportPoint = (event: { clientX: number; clientY: number }) => {
+    const dragViewportPointScratch = { x: 0, y: 0 };
+    const hoverViewportPointScratch = { x: 0, y: 0 };
+
+    const getViewportPoint = (event: { clientX: number; clientY: number }, out?: { x: number; y: number }) => {
       const origin = selectionCanvasViewportOriginRef.current;
+      let x: number;
+      let y: number;
       if (origin) {
-        return { x: event.clientX - origin.left, y: event.clientY - origin.top };
+        x = event.clientX - origin.left;
+        y = event.clientY - origin.top;
+      } else {
+        const rect = selectionCanvas.getBoundingClientRect();
+        x = event.clientX - rect.left;
+        y = event.clientY - rect.top;
       }
 
-      const rect = selectionCanvas.getBoundingClientRect();
-      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      if (out) {
+        out.x = x;
+        out.y = y;
+        return out;
+      }
+
+      return { x, y };
     };
 
     const getResizeHit = (viewportX: number, viewportY: number): ResizeHit | null => {
@@ -1454,7 +1469,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       event.preventDefault();
       keyboardAnchorRef.current = null;
       cacheViewportOrigin();
-      const point = getViewportPoint(event);
+      const point = getViewportPoint(event, dragViewportPointScratch);
       lastPointerViewportRef.current = point;
       dragModeRef.current = null;
       fillHandleStateRef.current = null;
@@ -1739,15 +1754,25 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       const touchMode = touchModeRef.current ?? "auto";
       if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
-        if (!touchPointers.has(event.pointerId)) return;
+        const touchPoint = touchPointers.get(event.pointerId);
+        if (!touchPoint) return;
 
         event.preventDefault();
-        touchPointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+        touchPoint.clientX = event.clientX;
+        touchPoint.clientY = event.clientY;
 
         if (touchPinch && touchPointers.size >= 2) {
-          const points = Array.from(touchPointers.values());
-          const a = points[0]!;
-          const b = points[1]!;
+          let a: { clientX: number; clientY: number } | null = null;
+          let b: { clientX: number; clientY: number } | null = null;
+          for (const point of touchPointers.values()) {
+            if (!a) {
+              a = point;
+            } else {
+              b = point;
+              break;
+            }
+          }
+          if (!a || !b) return;
           const distance = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 1;
           const centerClientX = (a.clientX + b.clientX) / 2;
           const centerClientY = (a.clientY + b.clientY) / 2;
@@ -1783,7 +1808,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       event.preventDefault();
 
-      const point = getViewportPoint(event);
+      const point = getViewportPoint(event, dragViewportPointScratch);
       lastPointerViewportRef.current = point;
 
       const picked = renderer.pickCellAt(point.x, point.y);
@@ -2179,7 +2204,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         (event.target === selectionCanvas || event.target instanceof HTMLCanvasElement) &&
         Number.isFinite(event.offsetX) &&
         Number.isFinite(event.offsetY);
-      const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : getViewportPoint(event);
+      const point = hoverViewportPointScratch;
+      if (useOffsets) {
+        point.x = event.offsetX;
+        point.y = event.offsetY;
+      } else {
+        getViewportPoint(event, point);
+      }
 
       if (enableResizeRef.current) {
         const hit = getResizeHit(point.x, point.y);
@@ -2212,7 +2243,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         (event.target === selectionCanvas || event.target instanceof HTMLCanvasElement) &&
         Number.isFinite(event.offsetX) &&
         Number.isFinite(event.offsetY);
-      const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : getViewportPoint(event);
+      const point = hoverViewportPointScratch;
+      if (useOffsets) {
+        point.x = event.offsetX;
+        point.y = event.offsetY;
+      } else {
+        getViewportPoint(event, point);
+      }
 
       // Auto-fit is handled via pointer-driven double-click detection (so it works with
       // `pointerdown.preventDefault()` and on touch devices). Keep dblclick for in-cell edit only.
