@@ -21,6 +21,74 @@ const TAURI_GLOBAL_REF_RE_SOURCE =
 const GLOBAL_OBJECT_REF_RE_SOURCE =
   "(?:\\(\\s*(?:globalThis|window|self)\\s+as\\s+any\\s*\\)|(?:globalThis|window|self)(?:\\s+as\\s+any)?)";
 
+function buildAnyCastableRefSource(escapedIdentifier: string): string {
+  // Matches either:
+  // - `(ident as any)` (starts with `(`, so cannot be preceded by `\\b`)
+  // - `ident` / `ident as any` (word-boundary delimited)
+  return `(?:\\(\\s*${escapedIdentifier}\\s+as\\s+any\\s*\\)|\\b${escapedIdentifier}\\b(?:\\s+as\\s+any)?)`;
+}
+
+function collectGlobalObjectAliases(content: string): Set<string> {
+  const globalRoots = new Set<string>();
+
+  // Capture patterns like:
+  //   const g = globalThis;
+  //   const w = window;
+  //   const g = globalThis as any;
+  //   const g = (globalThis as any);
+  const globalAssignRe = new RegExp(
+    `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}(?!\\s*(?:\\?\\.|\\.|\\[))`,
+    "g",
+  );
+
+  let match: RegExpExecArray | null = null;
+  while ((match = globalAssignRe.exec(content)) != null) {
+    const name = match[1];
+    if (name) globalRoots.add(name);
+    if (match[0].length === 0) globalAssignRe.lastIndex += 1;
+  }
+
+  return globalRoots;
+}
+
+function collectTauriAliasesFromGlobalAliases(content: string, globalAliases: Set<string>): Set<string> {
+  const tauriRoots = new Set<string>();
+  if (globalAliases.size === 0) return tauriRoots;
+
+  for (const globalAlias of globalAliases) {
+    const r = escapeRegExp(globalAlias);
+    const g = buildAnyCastableRefSource(r);
+
+    const assignDotRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b`,
+      "g",
+    );
+    const assignBracketRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\]`,
+      "g",
+    );
+    const destructureRenameRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${g}`,
+      "g",
+    );
+    const destructureRenameQuotedRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?['\\\"]__TAURI__['\\\"]\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${g}`,
+      "g",
+    );
+
+    for (const re of [assignDotRe, assignBracketRe, destructureRenameRe, destructureRenameQuotedRe]) {
+      let match: RegExpExecArray | null = null;
+      while ((match = re.exec(content)) != null) {
+        const name = match[1];
+        if (name) tauriRoots.add(name);
+        if (match[0].length === 0) re.lastIndex += 1;
+      }
+    }
+  }
+
+  return tauriRoots;
+}
+
 async function collectSourceFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
   const entries = await readdir(dir, { withFileTypes: true });
@@ -89,7 +157,11 @@ function collectTauriAliases(content: string): Set<string> {
   return tauriRoots;
 }
 
-function collectTauriCoreAliases(content: string, tauriRoots: Set<string>): Set<string> {
+function collectTauriCoreAliases(
+  content: string,
+  tauriRoots: Set<string>,
+  globalAliases: Set<string>,
+): Set<string> {
   const coreAliases = new Set<string>();
 
   // Alias patterns like:
@@ -134,6 +206,71 @@ function collectTauriCoreAliases(content: string, tauriRoots: Set<string>): Set<
     const name = match[1];
     if (name) coreAliases.add(name);
     if (match[0].length === 0) coreDestructureRenameRe.lastIndex += 1;
+  }
+
+  for (const globalAlias of globalAliases) {
+    const r = escapeRegExp(globalAlias);
+    const g = buildAnyCastableRefSource(r);
+
+    const coreAssignFromGlobalDotRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.|\\.)\\s*core\\b`,
+      "g",
+    );
+    const coreAssignFromGlobalDotBracketRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]core['\\\"]\\s*\\]`,
+      "g",
+    );
+    const coreAssignFromGlobalBracketDotRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\]\\s*(?:\\?\\.|\\.)\\s*core\\b`,
+      "g",
+    );
+    const coreAssignFromGlobalBracketBracketRe = new RegExp(
+      `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]core['\\\"]\\s*\\]`,
+      "g",
+    );
+
+    for (const re of [
+      coreAssignFromGlobalDotRe,
+      coreAssignFromGlobalDotBracketRe,
+      coreAssignFromGlobalBracketDotRe,
+      coreAssignFromGlobalBracketBracketRe,
+    ]) {
+      let match: RegExpExecArray | null = null;
+      while ((match = re.exec(content)) != null) {
+        const name = match[1];
+        if (name) coreAliases.add(name);
+        if (match[0].length === 0) re.lastIndex += 1;
+      }
+    }
+
+    const coreDestructureFromGlobalDirectRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bcore\\b(?!\\s*:)` +
+        `[^}]*\\}\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b`,
+      "g",
+    );
+    const coreDestructureFromGlobalBracketRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bcore\\b(?!\\s*:)` +
+        `[^}]*\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\]`,
+      "g",
+    );
+    if (coreDestructureFromGlobalDirectRe.test(content) || coreDestructureFromGlobalBracketRe.test(content)) coreAliases.add("core");
+
+    const coreDestructureRenameFromGlobalDirectRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bcore\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[^}]*\\}\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b`,
+      "g",
+    );
+    const coreDestructureRenameFromGlobalBracketRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[^}]*\\bcore\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[^}]*\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['\\\"]__TAURI__['\\\"]\\s*\\]`,
+      "g",
+    );
+    for (const re of [coreDestructureRenameFromGlobalDirectRe, coreDestructureRenameFromGlobalBracketRe]) {
+      let match: RegExpExecArray | null = null;
+      while ((match = re.exec(content)) != null) {
+        const name = match[1];
+        if (name) coreAliases.add(name);
+        if (match[0].length === 0) re.lastIndex += 1;
+      }
+    }
   }
 
   for (const root of tauriRoots) {
@@ -208,6 +345,46 @@ function buildBannedResForTauriCoreAlias(core: string): RegExp[] {
   ];
 }
 
+function buildBannedResForGlobalAlias(globalAlias: string): RegExp[] {
+  const r = escapeRegExp(globalAlias);
+  const g = buildAnyCastableRefSource(r);
+
+  return [
+    // Direct: g.__TAURI__.core.invoke
+    new RegExp(`${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.|\\.)\\s*core\\s*(?:\\?\\.|\\.)\\s*invoke\\b`),
+    // g.__TAURI__["core"].invoke
+    new RegExp(
+      `${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.)?\\s*\\[\\s*['"]core['"]\\s*\\]\\s*(?:\\?\\.|\\.)\\s*invoke\\b`,
+    ),
+    // g.__TAURI__.core["invoke"]
+    new RegExp(
+      `${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.|\\.)\\s*core\\s*(?:\\?\\.)?\\s*\\[\\s*['"]invoke['"]\\s*\\]`,
+    ),
+    // g.__TAURI__["core"]["invoke"]
+    new RegExp(
+      `${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.)?\\s*\\[\\s*['"]core['"]\\s*\\]\\s*(?:\\?\\.)?\\s*\\[\\s*['"]invoke['"]\\s*\\]`,
+    ),
+    // g["__TAURI__"].core.invoke
+    new RegExp(
+      `${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]\\s*(?:\\?\\.|\\.)\\s*core\\s*(?:\\?\\.|\\.)\\s*invoke\\b`,
+    ),
+    // Destructuring: const { invoke } = g.__TAURI__.core;
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\s*(?:\\?\\.|\\.)\\s*core\\b`,
+    ),
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]\\s*(?:\\?\\.|\\.)\\s*core\\b`,
+    ),
+    // Nested destructuring: const { core: { invoke } } = g.__TAURI__;
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\bcore\\b[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b`,
+    ),
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\bcore\\b[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]`,
+    ),
+  ];
+}
+
 describe("tauri/invoke guardrails", () => {
   it("does not access __TAURI__.core.invoke outside src/tauri helpers", async () => {
     const files = await collectSourceFiles(SRC_ROOT);
@@ -254,13 +431,22 @@ describe("tauri/invoke guardrails", () => {
       if (!content.includes("__TAURI__")) continue;
 
       const matches = (re: RegExp) => re.test(content);
-      if (bannedRes.some(matches)) {
+      const globalAliases = collectGlobalObjectAliases(content);
+      const dynamicBannedRes: RegExp[] = [];
+      for (const alias of globalAliases) {
+        dynamicBannedRes.push(...buildBannedResForGlobalAlias(alias));
+      }
+
+      if ([...bannedRes, ...dynamicBannedRes].some(matches)) {
         violations.add(normalized);
         continue;
       }
 
       const aliases = collectTauriAliases(content);
-      const coreAliases = collectTauriCoreAliases(content, aliases);
+      for (const alias of collectTauriAliasesFromGlobalAliases(content, globalAliases)) {
+        aliases.add(alias);
+      }
+      const coreAliases = collectTauriCoreAliases(content, aliases, globalAliases);
       if (aliases.size === 0 && coreAliases.size === 0) continue;
 
       const aliasRes: RegExp[] = [];
