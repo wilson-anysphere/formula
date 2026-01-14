@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, waitForDesktopReady } from "./helpers";
 import { startLocalSyncServer, type LocalSyncServerHandle } from "./sync-server";
 
 test.describe("collab status indicator (collab mode)", () => {
@@ -96,13 +96,7 @@ test.describe("collab status indicator (collab mode)", () => {
     });
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
-    await page.evaluate(async () => {
-      const app = window.__formulaApp as any;
-      if (app && typeof app.whenIdle === "function") {
-        await Promise.race([app.whenIdle(), new Promise<void>((r) => setTimeout(r, 10_000))]);
-      }
-    });
+    await waitForDesktopReady(page, { idleTimeoutMs: 10_000 });
 
     expect(beforeUnloadDialogs).toBe(0);
   });
