@@ -544,6 +544,7 @@ export function bindImageBytesToCollabSession(options: {
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      hydratedRawValues.clear();
       try {
         metadata.unobserveDeep(handleMetadataDeepChange);
       } catch {
