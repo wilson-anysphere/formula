@@ -78,8 +78,7 @@ fn sensitive_ipc_events_require_trusted_origin() {
     assert_contains_in_order(
         oauth_redirect_ready_listener,
         "is_trusted_app_origin",
-        "guard.ready = true",
-        "OAUTH_REDIRECT_READY_EVENT handler must verify the main window origin is trusted before marking ready",
+        "mark_ready_and_drain",
+        "OAUTH_REDIRECT_READY_EVENT handler must verify the main window origin is trusted before draining",
     );
 }
-
