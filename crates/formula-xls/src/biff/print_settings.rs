@@ -14,8 +14,6 @@ const RECORD_RIGHTMARGIN: u16 = 0x0027;
 const RECORD_TOPMARGIN: u16 = 0x0028;
 const RECORD_BOTTOMMARGIN: u16 = 0x0029;
 const RECORD_WSBOOL: u16 = 0x0081;
-// WSBOOL [MS-XLS] stores miscellaneous sheet flags, including `fFitToPage`.
-const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 
 // WSBOOL options.
 //

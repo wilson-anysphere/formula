@@ -489,7 +489,7 @@ pub fn decrypt_agile_encrypted_package_stream<R: Read + Seek, W: Write>(
     password: &str,
     out: &mut W,
 ) -> Result<u64> {
-    let info = parse_agile_encryption_info(encryption_info)?;
+    let info = parse_agile_encryption_info(encryption_info, &DecryptOptions::default())?;
 
     // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
     // ensure we can report which field was malformed.
