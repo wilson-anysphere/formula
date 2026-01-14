@@ -1682,7 +1682,10 @@ jobs:
               exit 1
             fi
             echo "dpkg Depends: ${depends}"
-            for needle in "webkit2gtk" "libgtk-3" "appindicator"; do
+            # Keep these checks intentionally fuzzy (substring matches) to tolerate distro/package naming
+            # differences (e.g. Ubuntu 24.04's *t64 transition) while still ensuring the core runtime
+            # stack is declared.
+            for needle in "webkit2gtk" "libgtk-3" "appindicator" "librsvg" "libssl"; do
               if ! grep -qi "$needle" <<<"${depends}"; then
                 echo "::error::Expected runtime dependency '$needle' missing from dpkg Depends for ${deb}" >&2
                 exit 1
