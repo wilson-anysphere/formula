@@ -117,12 +117,6 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     });
     Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
 
-    // jsdom (as used by vitest) does not provide PointerEvent in all environments.
-    // SpreadsheetApp only relies on MouseEvent fields (clientX/Y, button) for drawing hit tests.
-    if (typeof (globalThis as any).PointerEvent === "undefined") {
-      Object.defineProperty(globalThis, "PointerEvent", { configurable: true, value: MouseEvent });
-    }
-
     Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
 
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -133,10 +127,10 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     // jsdom does not always provide PointerEvent; SpreadsheetApp listens for pointer events
     // in shared-grid mode. For tests, a MouseEvent-compatible shim is sufficient.
     if (typeof (globalThis as any).PointerEvent === "undefined") {
-      (globalThis as any).PointerEvent = (window as any).MouseEvent;
+      Object.defineProperty(globalThis, "PointerEvent", { configurable: true, value: MouseEvent });
     }
     if (typeof (window as any).PointerEvent === "undefined") {
-      (window as any).PointerEvent = (window as any).MouseEvent;
+      Object.defineProperty(window, "PointerEvent", { configurable: true, value: (globalThis as any).PointerEvent });
     }
 
     (globalThis as any).ResizeObserver = class {
