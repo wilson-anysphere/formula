@@ -307,6 +307,11 @@ jobs:
         # remain usable in JS runtimes.
         run: wasm-pack test --node crates/formula-wasm --release
 
+      - name: Build formula-wasm Node bundle (pkg-node)
+        # `packages/engine` unit tests load the wasm bundle through this script (CommonJS `--target nodejs`)
+        # and it's easy for it to regress without an explicit CI invocation.
+        run: node scripts/build-formula-wasm-node.mjs
+
       - name: Smoke-check WASM assets (no pnpm install)
         run: node packages/engine/scripts/smoke-wasm.mjs
 
