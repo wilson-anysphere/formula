@@ -88,6 +88,23 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.expectingRange).toBe(true);
   });
 
+  it("does not treat decimal commas as argument separators in semicolon locales", async () => {
+    setLocale("de-DE");
+
+    const parser = createLocaleAwarePartialFormulaParser({});
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=SUMME(1,";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    // The de-DE locale uses ';' for arguments and ',' for decimals.
+    expect(result.argIndex).toBe(0);
+    expect(result.currentArg?.text).toBe("1,");
+    expect(result.functionName).toBe("SUM");
+  });
+
   it("falls back to the JS parser when the engine throws", async () => {
     setLocale("en-US");
 

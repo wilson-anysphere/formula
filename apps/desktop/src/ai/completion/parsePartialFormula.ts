@@ -64,6 +64,26 @@ const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = 
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
 };
 
+type FormulaArgSeparator = "," | ";";
+
+function getLocaleArgSeparator(localeId: string): FormulaArgSeparator {
+  // Keep in sync with `crates/formula-engine/src/ast.rs` (`LocaleConfig::*`).
+  //
+  // The WASM engine currently only ships these locales. Their separators match Excel:
+  // - en-US: `,` args + `.` decimals
+  // - de-DE/fr-FR/es-ES: `;` args + `,` decimals
+  //
+  // Treat unknown locales as canonical `,` separator.
+  switch (localeId) {
+    case "de-DE":
+    case "fr-FR":
+    case "es-ES":
+      return ";";
+    default:
+      return ",";
+  }
+}
+
 function canonicalizeFunctionNameForLocale(name: string, localeId: string): string {
   const raw = String(name ?? "");
   if (!raw) return raw;
@@ -80,6 +100,159 @@ function canonicalizeFunctionNameForLocale(name: string, localeId: string): stri
   return hasPrefix ? `${PREFIX}${mapped}` : mapped;
 }
 
+function findOpenParenIndex(prefix: string): number | null {
+  // Port of `packages/ai-completion/src/formulaPartialParser.js` open-paren scan.
+  /** @type {number[]} */
+  const openParens: number[] = [];
+  let inString = false;
+  let inSheetQuote = false;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  for (let i = 0; i < prefix.length; i++) {
+    const ch = prefix[i];
+    if (inString) {
+      if (ch === '"') {
+        // Excel escapes quotes inside string literals via doubled quotes: "".
+        if (prefix[i + 1] === '"') {
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+    if (inSheetQuote) {
+      if (ch === "'") {
+        // Excel escapes apostrophes inside sheet names via doubled quotes: ''.
+        if (prefix[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (ch === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (ch === "'" && bracketDepth === 0) {
+      inSheetQuote = true;
+      continue;
+    }
+    if (bracketDepth !== 0) continue;
+    if (ch === "(") {
+      openParens.push(i);
+    } else if (ch === ")") {
+      openParens.pop();
+    }
+  }
+
+  if (openParens.length === 0) return null;
+  return openParens[openParens.length - 1] ?? null;
+}
+
+function getArgContextWithSeparator(
+  prefix: string,
+  openParenIndex: number,
+  cursorPosition: number,
+  argSeparator: FormulaArgSeparator,
+): { argIndex: number; currentArg: { text: string; start: number; end: number } } {
+  // Port of `packages/ai-completion/src/formulaPartialParser.js` arg scanner, but with a
+  // caller-provided `argSeparator` so locale-aware callers can avoid mis-parsing decimal commas.
+  const baseDepth = 1;
+  let depth = baseDepth;
+  let argIndex = 0;
+  let lastArgSeparatorIndex = -1;
+  let inString = false;
+  let inSheetQuote = false;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+
+  for (let i = openParenIndex + 1; i < cursorPosition; i++) {
+    const ch = prefix[i];
+    if (inString) {
+      if (ch === '"') {
+        if (prefix[i + 1] === '"') {
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+    if (inSheetQuote) {
+      if (ch === "'") {
+        if (prefix[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "'" && bracketDepth === 0) {
+      inSheetQuote = true;
+      continue;
+    }
+    if (ch === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (ch === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (ch === "(" && bracketDepth === 0) depth++;
+    else if (ch === ")" && bracketDepth === 0) depth = Math.max(baseDepth, depth - 1);
+    else if (depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
+      if (ch === argSeparator) {
+        argIndex += 1;
+        lastArgSeparatorIndex = i;
+      }
+    }
+  }
+
+  let rawStart = lastArgSeparatorIndex === -1 ? openParenIndex + 1 : lastArgSeparatorIndex + 1;
+  let start = rawStart;
+  while (start < cursorPosition && /\s/.test(prefix[start])) start++;
+  const currentArg = {
+    start,
+    end: cursorPosition,
+    text: prefix.slice(start, cursorPosition),
+  };
+
+  return { argIndex, currentArg };
+}
+
 function canonicalizeInCallContext(
   ctx: PartialFormulaContext,
   localeId: string,
@@ -88,11 +261,15 @@ function canonicalizeInCallContext(
   if (!ctx?.isFormula || !ctx.inFunctionCall || typeof ctx.functionName !== "string") return ctx;
   const argIndex = Number.isInteger(ctx.argIndex) ? (ctx.argIndex as number) : 0;
   const canonicalFnName = canonicalizeFunctionNameForLocale(ctx.functionName, localeId);
-  if (!canonicalFnName || canonicalFnName === ctx.functionName) return ctx;
+  if (!canonicalFnName) return ctx;
+
+  const expectingRange = Boolean(functionRegistry?.isRangeArg?.(canonicalFnName, argIndex));
+  const needsUpdate = canonicalFnName !== ctx.functionName || expectingRange !== Boolean(ctx.expectingRange);
+  if (!needsUpdate) return ctx;
   return {
     ...ctx,
     functionName: canonicalFnName,
-    expectingRange: Boolean(functionRegistry?.isRangeArg?.(canonicalFnName, argIndex)),
+    expectingRange,
   };
 }
 
@@ -140,6 +317,20 @@ export function createLocaleAwarePartialFormulaParser(options: {
       baseline = parsePartialFormulaFallback(input, cursor, functionRegistry);
     } catch {
       baseline = { isFormula: true, inFunctionCall: false };
+    }
+    // The fallback parser is intentionally locale-agnostic, and will treat `,` as an argument
+    // separator until a `;` appears. In semicolon locales (where `,` is the decimal separator),
+    // that can mis-classify partial numbers like `1,` as "arg 1". Fix up the arg span/index
+    // using the known locale separator so completion edits remain stable.
+    const openParenIndex = findOpenParenIndex(prefix);
+    if (openParenIndex != null) {
+      const { argIndex, currentArg } = getArgContextWithSeparator(
+        prefix,
+        openParenIndex,
+        cursor,
+        getLocaleArgSeparator(localeId),
+      );
+      baseline = { ...baseline, argIndex, currentArg };
     }
     baseline = canonicalizeInCallContext(baseline, localeId, functionRegistry);
 
@@ -211,4 +402,3 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | nul
       });
   });
 }
-
