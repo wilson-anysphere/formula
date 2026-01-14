@@ -60,7 +60,12 @@ fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocale
         }
 
         let canon = canon.to_ascii_uppercase();
-        let loc = loc.to_ascii_uppercase();
+        // Locale translation tables are keyed using the same case folding as runtime parsing:
+        // Unicode-aware uppercasing (`char::to_uppercase`), not ASCII-only uppercasing.
+        //
+        // This ensures collisions like `fü` vs `FÜ` are detected here the same way they'd be at
+        // runtime when building `loc_to_canon`.
+        let loc = casefold_unicode(loc);
 
         if let Some(first_line) = canon_first_seen.get(&canon).copied() {
             duplicate_canon.push(format!("{canon} (lines {first_line} and {line_no})"));
@@ -113,6 +118,29 @@ fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocale
 
 fn casefold_unicode(s: &str) -> String {
     s.chars().flat_map(|c| c.to_uppercase()).collect()
+}
+
+#[test]
+fn locale_function_tsv_completeness_detects_unicode_case_collisions_in_localized_keys() {
+    let tsv = "FOO\tfü\nBAR\tFÜ\n";
+    let path = Path::new("<in-memory>");
+    let err = match std::panic::catch_unwind(|| parse_locale_tsv("xx-XX", path, tsv)) {
+        Ok(_) => panic!("expected parse_locale_tsv to panic due to localized-key collision"),
+        Err(err) => err,
+    };
+    let msg = err
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| err.downcast_ref::<&str>().copied())
+        .unwrap_or("<non-string panic>");
+    assert!(
+        msg.contains("Duplicate localized keys"),
+        "expected duplicate localized keys report, got: {msg}"
+    );
+    assert!(
+        msg.contains("line 1") && msg.contains("line 2"),
+        "expected line numbers in report, got: {msg}"
+    );
 }
 
 fn parse_error_tsv(
@@ -271,7 +299,7 @@ fn discover_tsvs_in_dir(dir: &Path) -> BTreeMap<String, PathBuf> {
 }
 
 #[test]
-fn locale_function_tsvs_are_complete_and_unique() {
+fn locale_function_tsv_completeness_function_tsvs_are_complete_and_unique() {
     let inventory_names = inventory_function_names();
 
     let dir = locale_data_dir();
@@ -349,7 +377,7 @@ fn locale_function_tsvs_are_complete_and_unique() {
 }
 
 #[test]
-fn locale_error_tsvs_are_complete_and_unique() {
+fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
     let expected: BTreeSet<String> = [
         ErrorKind::Null,
         ErrorKind::Div0,
