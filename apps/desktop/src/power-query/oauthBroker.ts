@@ -42,6 +42,13 @@ export function matchesRedirectUri(redirectUri: string, redirectUrl: string): bo
     return false;
   }
 
+  // Reject userinfo (`scheme://user:pass@host/...`) for all redirect URLs. OAuth redirects never
+  // require HTTP auth credentials, and allowing userinfo can lead to confusing/misleading URLs
+  // (especially when rendered as raw strings).
+  if (expected.username !== "" || expected.password !== "" || actual.username !== "" || actual.password !== "") {
+    return false;
+  }
+
   // Match the redirect "endpoint" exactly.
   // OAuth providers should treat redirects as exact matches; we follow that
   // expectation here (case-insensitive host comparison is handled by URL).

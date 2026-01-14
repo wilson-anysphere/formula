@@ -7,6 +7,11 @@ describe("matchesRedirectUri", () => {
     expect(matchesRedirectUri("formula://oauth/callback", "formula://oauth/callback?code=abc&state=123")).toBe(true);
   });
 
+  it("rejects redirect URLs with userinfo", () => {
+    expect(matchesRedirectUri("formula://oauth/callback", "formula://user@oauth/callback?code=abc")).toBe(false);
+    expect(matchesRedirectUri("http://127.0.0.1:4242/callback", "http://user@127.0.0.1:4242/callback?code=abc")).toBe(false);
+  });
+
   it("rejects a deep link with the wrong host", () => {
     expect(matchesRedirectUri("formula://oauth/callback", "formula://not-oauth/callback?code=abc")).toBe(false);
   });
