@@ -432,6 +432,59 @@ pub(crate) fn verify_password_standard(
     }
 }
 
+#[allow(dead_code)]
+fn verify_password_standard_with_key(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    hash_alg: HashAlgorithm,
+    key0: &[u8],
+) -> Result<(), OfficeCryptoError> {
+    let expected_hash_len = verifier.verifier_hash_size as usize;
+
+    match header.alg_id {
+        CALG_RC4 => {
+            // Reuse the RC4 verifier implementation in `verify_password_standard_with_key_and_mode`,
+            // but ignore the returned mode.
+            let _ = verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0)?;
+            Ok(())
+        }
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            // MS-OFFCRYPTO Standard AES specifies that verifier fields are encrypted with AES-ECB
+            // (no IV). This helper intentionally does **not** attempt CBC fallbacks; callers that
+            // need additional compatibility should handle that explicitly.
+            let verifier_plain = aes_ecb_decrypt(key0, &verifier.encrypted_verifier)?;
+            let verifier_hash_plain_full = aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash)?;
+
+            let verifier_hash_plain =
+                verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(format!(
+                        "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
+                        verifier_hash_plain_full.len(),
+                        expected_hash_len
+                    ))
+                })?;
+
+            let verifier_hash = hash_alg.digest(&verifier_plain);
+            let verifier_hash = verifier_hash.get(..expected_hash_len).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(format!(
+                    "hash output shorter than verifierHashSize (got {}, need {})",
+                    verifier_hash.len(),
+                    expected_hash_len
+                ))
+            })?;
+
+            if ct_eq(verifier_hash_plain, verifier_hash) {
+                Ok(())
+            } else {
+                Err(OfficeCryptoError::InvalidPassword)
+            }
+        }
+        other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported cipher AlgID {other:#x}"
+        ))),
+    }
+}
+
 fn verify_password_standard_rc4_key_style(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
@@ -865,6 +918,7 @@ fn decrypt_standard_encrypted_package_rc4(
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum StandardScheme {
     /// Standard / ECMA-376: AES-ECB using the block-0 file key (no IV).
     ///
