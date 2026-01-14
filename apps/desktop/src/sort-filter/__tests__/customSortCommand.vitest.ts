@@ -72,5 +72,55 @@ describe("custom sort command wiring", () => {
     // OK should close + clean up the dialog.
     expect(document.querySelector("dialog.custom-sort-dialog")).toBeNull();
   });
-});
 
+  it("switches to generic column labels when headers are disabled", async () => {
+    const doc = new DocumentController();
+    doc.setRangeValues("Sheet1", "A1:B2", [
+      ["Name", "Age"],
+      ["Alice", 30],
+    ]);
+
+    const applySpy = vi.spyOn(sortSelection, "applySortSpecToSelection").mockReturnValue(true);
+
+    await act(async () => {
+      handleCustomSortCommand("data.sortFilter.sort.customSort", {
+        isEditing: () => false,
+        getDocument: () => doc,
+        getSheetId: () => "Sheet1",
+        getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }],
+        getCellValue: (sheetId, cell) => {
+          const state = doc.getCell(sheetId, cell) as { value: any };
+          return (state?.value ?? null) as any;
+        },
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.custom-sort-dialog");
+    expect(dialog).not.toBeNull();
+
+    const headerToggle = dialog!.querySelector<HTMLInputElement>('[data-testid="sort-dialog-has-header"]');
+    expect(headerToggle).toBeInstanceOf(HTMLInputElement);
+    expect(headerToggle?.checked).toBe(true);
+
+    const columnSelect = dialog!.querySelector<HTMLSelectElement>('[data-testid="sort-dialog-column-0"]');
+    expect(columnSelect).toBeInstanceOf(HTMLSelectElement);
+    const headerOptions = Array.from(columnSelect!.querySelectorAll("option")).map((o) => o.textContent);
+    expect(headerOptions).toEqual(["Name", "Age"]);
+
+    await act(async () => {
+      headerToggle!.click();
+    });
+
+    expect(headerToggle?.checked).toBe(false);
+    const fallbackOptions = Array.from(columnSelect!.querySelectorAll("option")).map((o) => o.textContent);
+    expect(fallbackOptions).toEqual(["A", "B"]);
+
+    await act(async () => {
+      dialog!.querySelector<HTMLButtonElement>('[data-testid="sort-dialog-ok"]')!.click();
+    });
+
+    expect(applySpy).toHaveBeenCalledTimes(1);
+    expect((applySpy.mock.calls[0]?.[0] as any)?.spec?.hasHeader).toBe(false);
+  });
+});
