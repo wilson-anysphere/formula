@@ -104,4 +104,77 @@ describe("ToolExecutor (spread safety)", () => {
       Array.prototype.push = originalPush;
     }
   });
+
+  it("compute_statistics correlation handles large ranges without materializing values[]", async () => {
+    const rows = 100_000; // 2 * 100k = 200k cells (default max_tool_range_cells)
+    const range = `Sheet1!A1:B${rows}`;
+
+    const leftCell: any = { value: 0 };
+    const rightCell: any = { value: 0 };
+    let currentRow = 0;
+
+    const row = new Proxy(
+      { length: 2 } as any,
+      {
+        get(_target, prop) {
+          if (prop === "length") return 2;
+          const idx = Number(prop);
+          if (idx === 0) {
+            leftCell.value = currentRow;
+            return leftCell;
+          }
+          if (idx === 1) {
+            rightCell.value = currentRow * 2;
+            return rightCell;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const cells = new Proxy(
+      { length: rows } as any,
+      {
+        get(_target, prop) {
+          if (prop === "length") return rows;
+          const idx = Number(prop);
+          if (Number.isInteger(idx) && idx >= 0 && idx < rows) {
+            currentRow = idx;
+            return row;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const spreadsheet: any = {
+      readRange() {
+        return cells;
+      },
+    };
+
+    const originalPush = Array.prototype.push;
+    let pushCount = 0;
+    (Array.prototype as any).push = function (...args: any[]) {
+      pushCount++;
+      return originalPush.apply(this, args as any);
+    };
+    try {
+      const executor = new ToolExecutor(spreadsheet);
+      const result = await executor.execute({
+        name: "compute_statistics",
+        parameters: { range, measures: ["correlation"] },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.tool).toBe("compute_statistics");
+      if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+
+      expect(result.data?.statistics.correlation).toBeCloseTo(1, 12);
+      // No per-cell `values[]` pushes should occur.
+      expect(pushCount).toBeLessThan(1_000);
+    } finally {
+      Array.prototype.push = originalPush;
+    }
+  });
 });
