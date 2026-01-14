@@ -221,11 +221,16 @@ fn translate_formula_with_style(
                 idx += 1;
             }
             TokenKind::Number(raw) => {
-                out.push_str(&translate_number(
-                    raw,
-                    src_config.decimal_separator,
-                    dst_config.decimal_separator,
-                ));
+                match dir {
+                    Direction::ToCanonical => out.push_str(&translate_number(
+                        raw,
+                        src_config.decimal_separator,
+                        dst_config.decimal_separator,
+                    )),
+                    Direction::ToLocalized => {
+                        out.push_str(&localize_number(raw, src_config.decimal_separator, dst_config))
+                    }
+                }
                 idx += 1;
             }
             TokenKind::Ident(raw)
@@ -465,6 +470,74 @@ fn translate_number(raw: &str, decimal_in: char, decimal_out: char) -> String {
     raw.chars()
         .map(|ch| if ch == decimal_in { decimal_out } else { ch })
         .collect()
+}
+
+fn localize_number(raw: &str, decimal_in: char, dst: &LocaleConfig) -> String {
+    let translated = translate_number(raw, decimal_in, dst.decimal_separator);
+    let Some(group_sep) = dst.thousands_separator else {
+        return translated;
+    };
+
+    // Avoid inserting grouping separators that would make the formula ambiguous or conflict with
+    // formula syntax.
+    //
+    // Note: en-US sets `thousands_separator: None` because `,` conflicts with the arg separator.
+    // This check is defensive for any future locale configs.
+    if group_sep == dst.decimal_separator || group_sep == dst.arg_separator || group_sep == ' ' {
+        return translated;
+    }
+
+    // Split mantissa/exponent (`E` is always uppercase after lexing).
+    let (mantissa, exponent) = if let Some(idx) = translated.find('E') {
+        (&translated[..idx], &translated[idx..])
+    } else {
+        (translated.as_str(), "")
+    };
+
+    // Split integer/fractional portions.
+    let (int_part, frac_part) = if let Some(idx) = mantissa.find(dst.decimal_separator) {
+        (&mantissa[..idx], &mantissa[idx..])
+    } else {
+        (mantissa, "")
+    };
+
+    // Avoid allocating if there's nothing to do.
+    if int_part.len() <= 3 || !int_part.chars().all(|c| c.is_ascii_digit()) {
+        return translated;
+    }
+
+    let grouped_int = insert_thousands_separators(int_part, group_sep);
+    let mut out = String::with_capacity(grouped_int.len() + frac_part.len() + exponent.len());
+    out.push_str(&grouped_int);
+    out.push_str(frac_part);
+    out.push_str(exponent);
+    out
+}
+
+fn insert_thousands_separators(int_part: &str, sep: char) -> String {
+    debug_assert!(int_part.chars().all(|c| c.is_ascii_digit()));
+
+    let len = int_part.len();
+    if len <= 3 {
+        return int_part.to_string();
+    }
+
+    // Group from the left: the first group is 1-3 digits, followed by groups of 3 digits.
+    let first = match len % 3 {
+        0 => 3,
+        n => n,
+    };
+
+    let sep_count = (len - 1) / 3;
+    let mut out = String::with_capacity(len + sep_count);
+    out.push_str(&int_part[..first]);
+    let mut idx = first;
+    while idx < len {
+        out.push(sep);
+        out.push_str(&int_part[idx..idx + 3]);
+        idx += 3;
+    }
+    out
 }
 
 fn token_slice<'a>(src: &'a str, tok: &Token) -> Result<&'a str, FormulaParseError> {
