@@ -209,7 +209,9 @@ impl XlsxPackage {
         // Prefer the workbook-level pivotCaches mapping over filename guessing. In practice the
         // numeric suffix in `pivotCacheDefinitionN.xml` does not always line up with `cacheId`.
         if let Some(rel_id) = workbook_pivot_cache_rel_id(workbook_xml, cache_id)? {
-            if let Some(part_name) = resolve_relationship_target(self, "xl/workbook.xml", &rel_id)?
+            // Best-effort: if the relationships part is malformed (or otherwise unparsable), treat
+            // it as "mapping cannot be resolved" and fall back to filename guessing.
+            if let Ok(Some(part_name)) = resolve_relationship_target(self, "xl/workbook.xml", &rel_id)
             {
                 if let Some(bytes) = self.part(&part_name) {
                     return Ok(Some((part_name, parse_pivot_cache_definition(bytes)?)));
