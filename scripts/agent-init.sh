@@ -209,7 +209,7 @@ unset _formula_path_without_cargo_bin
 # ============================================================================
 
 setup_display() {
-  if [ -z "$DISPLAY" ]; then
+  if [ -z "${DISPLAY:-}" ]; then
     # Try to find an existing Xvfb
     if [ -e /tmp/.X99-lock ]; then
       export DISPLAY=:99
@@ -246,7 +246,7 @@ echo "║  CARGO_BUILD_JOBS:  ${CARGO_BUILD_JOBS}"
 echo "║  RAYON_NUM_THREADS: ${RAYON_NUM_THREADS}"
 echo "║  CARGO_HOME:        ${CARGO_HOME}"
 echo "║  MAKEFLAGS:         ${MAKEFLAGS}"
-if [ -n "$DISPLAY" ]; then
+if [ -n "${DISPLAY:-}" ]; then
 echo "║  DISPLAY:           ${DISPLAY}"
 fi
 echo "╚════════════════════════════════════════════════════════════════╝"

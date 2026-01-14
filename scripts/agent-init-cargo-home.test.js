@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
@@ -202,6 +202,24 @@ test('agent-init exports FORMULA_ALLOW_GLOBAL_CARGO_HOME when set without export
   assert.equal(out, 'FORMULA_ALLOW_GLOBAL_CARGO_HOME=1');
 });
 
+test('agent-init can be sourced with nounset enabled and DISPLAY unset (bash)', { skip: !hasBash }, () => {
+  const stubDir = mkdtempSync(resolve(tmpdir(), 'formula-xvfb-stub-'));
+  const stubPath = resolve(stubDir, 'Xvfb');
+  writeFileSync(stubPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+  const out = runBash(
+    [
+      `export PATH="${stubDir}:$PATH"`,
+      'set -u',
+      'unset DISPLAY',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "ok"',
+    ].join(' && '),
+  );
+
+  assert.equal(out, 'ok');
+});
+
 test('agent-init does not enable errexit in bash when it was previously disabled', { skip: !hasBash }, () => {
   const out = runBash(
     [
@@ -323,6 +341,25 @@ test('agent-init exports FORMULA_CARGO_JOBS when set without export under /bin/s
 
   assert.equal(stderr, '');
   assert.equal(stdout, 'FORMULA_CARGO_JOBS=7');
+});
+
+test('agent-init can be sourced with nounset enabled and DISPLAY unset under /bin/sh', { skip: !hasSh }, () => {
+  const stubDir = mkdtempSync(resolve(tmpdir(), 'formula-xvfb-stub-'));
+  const stubPath = resolve(stubDir, 'Xvfb');
+  writeFileSync(stubPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+  const { stdout, stderr } = runSh(
+    [
+      `export PATH="${stubDir}:$PATH"`,
+      'set -u',
+      'unset DISPLAY',
+      '. scripts/agent-init.sh >/dev/null',
+      'printf "ok"',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'ok');
 });
 
 test('agent-init does not enable errexit in /bin/sh when it was previously disabled', { skip: !hasSh }, () => {
