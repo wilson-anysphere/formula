@@ -405,7 +405,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     if (this.sheetNameResolver) {
       try {
         const resolved = this.sheetNameResolver.getSheetIdByName(name);
-        if (resolved) return resolved;
+        // Avoid resurrecting deleted sheets (or creating phantom sheets) when the resolver is stale.
+        // Only accept resolved ids that are known to the underlying DocumentController.
+        if (resolved) {
+          const meta = typeof (this.controller as any).getSheetMeta === "function" ? (this.controller as any).getSheetMeta(resolved) : null;
+          if (meta) return resolved;
+        }
       } catch {
         // ignore
       }
@@ -432,7 +437,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       if (sheetNameResolver) {
         try {
           const resolved = sheetNameResolver.getSheetIdByName(name);
-          if (resolved) return resolved;
+          // Avoid resurrecting deleted sheets (or creating phantom sheets) when the resolver is stale.
+          // Only accept resolved ids that are known to the underlying DocumentController.
+          if (resolved) {
+            const meta = typeof (controller as any).getSheetMeta === "function" ? (controller as any).getSheetMeta(resolved) : null;
+            if (meta) return resolved;
+          }
         } catch {
           // ignore
         }
@@ -1047,7 +1057,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     // Prefer the shared resolver when available (handles renamed sheet display names).
     if (this.sheetNameResolver) {
       const resolved = this.sheetNameResolver.getSheetIdByName(name);
-      if (resolved) return resolved;
+      // Avoid resurrecting deleted sheets (or creating phantom sheets) when the resolver is stale.
+      // Only accept resolved ids that are known to the underlying DocumentController.
+      if (resolved) {
+        const meta = typeof (this.controller as any).getSheetMeta === "function" ? (this.controller as any).getSheetMeta(resolved) : null;
+        if (meta) return resolved;
+      }
     }
 
     // Fallback: avoid creating phantom sheets by only allowing known sheet ids.

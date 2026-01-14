@@ -37,6 +37,36 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getSheetIds()).not.toContain("DoesNotExist");
   });
 
+  it("does not resurrect deleted sheets when sheetNameResolver mappings are stale", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+    controller.setCellValue("Sheet2", "A1", 2);
+
+    const sheetNames = new Map<string, string>([["Sheet2", "Budget"]]);
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetNames);
+
+    const api = new DocumentControllerSpreadsheetApi(controller, { sheetNameResolver });
+
+    // Delete the sheet but keep the resolver mapping around (simulating a stale UI cache).
+    controller.deleteSheet("Sheet2");
+    expect(controller.getSheetIds()).toEqual(["Sheet1"]);
+
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Budget!A1", value: 99 },
+    });
+
+    expect(result.ok).toBe(false);
+    // Ensure the tool call did not recreate the deleted sheet.
+    expect(controller.getSheetIds()).toEqual(["Sheet1"]);
+    expect(controller.getSheetIds()).not.toContain("Sheet2");
+    expect(controller.getSheetIds()).not.toContain("Budget");
+
+    expect(() => api.getCell({ sheet: "Budget", row: 1, col: 1 })).toThrow(/Unknown sheet/i);
+    expect(controller.getSheetIds()).toEqual(["Sheet1"]);
+  });
+
   it("allows ToolExecutor to apply updates through DocumentController", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 1);
