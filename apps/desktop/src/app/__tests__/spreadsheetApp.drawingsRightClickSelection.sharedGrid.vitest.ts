@@ -191,6 +191,52 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     root.remove();
   });
 
+  it("preserves drawing selection on context-click misses (without drawing interactions enabled)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+    expect(app.getGridMode()).toBe("shared");
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+    app.selectDrawingById(1);
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+    const missX = rowHeaderWidth + 200;
+    const missY = colHeaderHeight + 200;
+    expect(app.hitTestDrawingAtClientPoint(missX, missY)).toBeNull();
+
+    const down = createPointerLikeMouseEvent("pointerdown", { clientX: missX, clientY: missY, button: 2 });
+    selectionCanvas.dispatchEvent(down);
+
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect((down as any).__formulaDrawingContextClick).toBeUndefined();
+    expect(down.defaultPrevented).toBe(false);
+    expect(bubbled).toHaveBeenCalledTimes(1);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("selects the drawing without moving the active cell on right click (with drawing interactions enabled)", () => {
     const root = createRoot();
     const status = {
@@ -238,6 +284,53 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
 
     expect(app.getSelectedDrawingId()).toBe(1);
     expect(app.getActiveCell()).toEqual(beforeActive);
+    expect(down.defaultPrevented).toBe(false);
+    expect(bubbled).toHaveBeenCalledTimes(1);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("preserves drawing selection on context-click misses (with drawing interactions enabled)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("shared");
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+    app.selectDrawingById(1);
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+    const missX = rowHeaderWidth + 200;
+    const missY = colHeaderHeight + 200;
+    expect(app.hitTestDrawingAtClientPoint(missX, missY)).toBeNull();
+
+    const down = createPointerLikeMouseEvent("pointerdown", { clientX: missX, clientY: missY, button: 2 });
+    selectionCanvas.dispatchEvent(down);
+
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect((down as any).__formulaDrawingContextClick).toBeUndefined();
     expect(down.defaultPrevented).toBe(false);
     expect(bubbled).toHaveBeenCalledTimes(1);
 
