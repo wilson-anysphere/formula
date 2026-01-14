@@ -37,6 +37,14 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
         "expected exactly one FILTERMODE warning, got warnings={:?}",
         result.warnings
     );
+
+    assert!(
+        result.warnings.iter().any(|w| w
+            .message
+            .contains("FILTERMODE is set but no AutoFilter criteria records were found")),
+        "expected missing-criteria warning when FILTERMODE is present without AUTOFILTER records; warnings={:?}",
+        result.warnings
+    );
 }
 
 #[test]

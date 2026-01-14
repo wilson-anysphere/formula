@@ -53,10 +53,11 @@ fn import_autofilter_criteria() {
     assert!(af.sort_state.is_none());
 
     assert!(
-        !result.warnings.iter().any(|w| w
-            .message
-            .contains("failed to import `.xls` AutoFilter criteria")),
-        "unexpected `.xls` AutoFilter criteria warning; warnings={:?}",
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("failed to fully import `.xls` autofilter criteria")),
+        "unexpected `.xls` autofilter criteria warning; warnings={:?}",
         result.warnings
     );
 }
@@ -97,10 +98,11 @@ fn import_autofilter_criteria_absolute_entry_index() {
     assert!(af.sort_state.is_none());
 
     assert!(
-        !result.warnings.iter().any(|w| w
-            .message
-            .contains("failed to import `.xls` AutoFilter criteria")),
-        "unexpected `.xls` AutoFilter criteria warning; warnings={:?}",
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("failed to fully import `.xls` autofilter criteria")),
+        "unexpected `.xls` autofilter criteria warning; warnings={:?}",
         result.warnings
     );
 }
