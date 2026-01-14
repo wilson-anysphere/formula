@@ -136,7 +136,7 @@ describe("drawings/modelAdapters", () => {
       z_order: 10,
     };
 
-    const ui = convertModelDrawingObjectToUiDrawingObject(model, { sheetId: "sheet1" });
+    const ui = convertModelDrawingObjectToUiDrawingObject(model, { sheetId: "  sheet1  " });
     expect(ui.id).toBe(7);
     expect(ui.kind.type).toBe("chart");
     expect(ui.kind).toMatchObject({ chartId: "sheet1:7" });

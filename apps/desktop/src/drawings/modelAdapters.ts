@@ -1248,6 +1248,8 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           return parseSheetId(pick(anchorValue, ["sheetId", "sheet_id"]));
         })();
         const sheetId = anchorSheetId ?? defaultSheetId;
+        const sheetIdTrimmed = typeof sheetId === "string" ? sheetId.trim() : "";
+        const sheetIdForKindContext = sheetIdTrimmed !== "" ? sheetIdTrimmed : undefined;
 
         const kindValue = pick(raw, ["kind"]);
         const kind = convertDocumentDrawingKindToUiKind(kindValue);
@@ -1260,9 +1262,8 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
             const patchedKind: DrawingObjectKind =
               kind.type === "chart" &&
               (!kind.chartId || kind.chartId.trim() === "" || kind.chartId === "unknown") &&
-              sheetId &&
-              sheetId.trim() !== ""
-                ? { ...kind, chartId: `${sheetId}:${String(id)}` }
+              sheetIdTrimmed !== ""
+                ? { ...kind, chartId: `${sheetIdTrimmed}:${String(id)}` }
                 : kind;
             const derivedTransform =
               transform ??
@@ -1309,7 +1310,7 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
           if (anchor) {
             try {
-              const modelKind = convertModelDrawingObjectKind(kindValue, { sheetId: sheetId ?? undefined, drawingObjectId: id });
+              const modelKind = convertModelDrawingObjectKind(kindValue, { sheetId: sheetIdForKindContext, drawingObjectId: id });
               const labelRaw = isRecord(kindValue) ? readOptionalString(pick(kindValue, ["label"])) : undefined;
               let label: string | undefined;
               if (typeof labelRaw === "string") {
@@ -1325,9 +1326,8 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
               const patchedKindWithChartId: DrawingObjectKind =
                 patchedKind.type === "chart" &&
                 (!patchedKind.chartId || patchedKind.chartId.trim() === "" || patchedKind.chartId === "unknown") &&
-                sheetId &&
-                sheetId.trim() !== ""
-                  ? { ...patchedKind, chartId: `${sheetId}:${String(id)}` }
+                sheetIdTrimmed !== ""
+                  ? { ...patchedKind, chartId: `${sheetIdTrimmed}:${String(id)}` }
                   : patchedKind;
 
               const derivedTransform =
