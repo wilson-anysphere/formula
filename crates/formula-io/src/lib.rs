@@ -2188,6 +2188,8 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         });
     };
 
+    // Sanity checks for malformed encrypted containers.
+    //
     // `EncryptedPackage` streams should start with an 8-byte plaintext length header and include at
     // least one ciphertext byte.
     //
@@ -2201,6 +2203,14 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             source: Box::new(xlsx::OffCryptoError::EncryptedPackageTooShort {
                 len: encrypted_package.len(),
             }),
+        });
+    }
+    // Agile encryption requires an XML payload after the 8-byte version header.
+    if (version_major, version_minor) == (4, 4) && encryption_info.len() <= 8 {
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
         });
     }
     let decrypted = if (version_major, version_minor) == (4, 4) {
