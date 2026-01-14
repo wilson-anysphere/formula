@@ -89,7 +89,7 @@ function createHarness(
     ? `<button type="button" data-testid="open-version-history-panel">Version history</button>`
     : "";
   const zoomDisabledAttr = opts.zoomDisabled ? "disabled" : "";
-  const formulaInput = includeFormulaInput ? `<input data-testid="formula-input" />` : "";
+  const formulaInput = includeFormulaInput ? `<textarea data-testid="formula-input"></textarea>` : "";
 
   document.body.innerHTML = `
       <div id="ribbon">
@@ -371,6 +371,33 @@ describe("F6 focus cycling keybinding dispatch", () => {
     expect(document.activeElement).toBe(elements.formulaAddress);
     expect(elements.formulaInput).not.toBeNull();
     expect(document.activeElement).not.toBe(elements.formulaInput);
+  });
+
+  it("cycles out of the formula editor input (textarea) via the keybinding pipeline", async () => {
+    const { service, elements } = createHarness({ includeFormulaInput: true });
+    expect(elements.formulaInput).not.toBeNull();
+
+    // Focus inside the formula bar editor textarea.
+    elements.formulaInput!.focus();
+    expect(document.activeElement).toBe(elements.formulaInput);
+
+    // Forward from formula bar -> grid.
+    let res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.grid);
+
+    // Reverse from grid -> formula bar should focus the address input (name box).
+    res = await dispatchF6(service, document.activeElement, { shiftKey: true });
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.formulaAddress);
+
+    // Reverse again -> ribbon.
+    res = await dispatchF6(service, document.activeElement, { shiftKey: true });
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.ribbonTab);
   });
 
   it("treats the secondary grid root as part of the grid region", async () => {
