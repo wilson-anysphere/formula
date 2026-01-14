@@ -2333,15 +2333,17 @@ pub fn power_query_state_set(
 pub async fn sql_query(
     window: tauri::WebviewWindow,
     connection: JsonValue,
-    sql: String,
-    params: Option<Vec<JsonValue>>,
+    sql: LimitedString<{ crate::ipc_limits::MAX_SQL_QUERY_TEXT_BYTES }>,
+    params: Option<LimitedVec<JsonValue, { crate::ipc_limits::MAX_SQL_QUERY_PARAMS }>>,
     credentials: Option<JsonValue>,
 ) -> Result<crate::sql::SqlQueryResult, String> {
     ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
 
-    crate::sql::sql_query(connection, sql, params.unwrap_or_default(), credentials)
+    let sql = sql.into_inner();
+    let params = params.map(|p| p.into_inner()).unwrap_or_default();
+    crate::sql::sql_query(connection, sql, params, credentials)
         .await
         .map_err(|e| e.to_string())
 }
@@ -2352,13 +2354,14 @@ pub async fn sql_query(
 pub async fn sql_get_schema(
     window: tauri::WebviewWindow,
     connection: JsonValue,
-    sql: String,
+    sql: LimitedString<{ crate::ipc_limits::MAX_SQL_QUERY_TEXT_BYTES }>,
     credentials: Option<JsonValue>,
 ) -> Result<crate::sql::SqlSchemaResult, String> {
     ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
 
+    let sql = sql.into_inner();
     crate::sql::sql_get_schema(connection, sql, credentials)
         .await
         .map_err(|e| e.to_string())

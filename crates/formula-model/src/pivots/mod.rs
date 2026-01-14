@@ -10,7 +10,9 @@ mod schema;
 pub mod slicers;
 pub mod workbook;
 
-pub use model::{DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel};
+pub use model::{
+    DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel,
+};
 pub use schema::{CalculatedField, CalculatedItem};
 pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel};
 
