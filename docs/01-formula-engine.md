@@ -156,6 +156,12 @@ The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, a
     * The engine preserves the formula’s casing for single-sheet external keys; providers that want
       Excel-compatible behavior should generally match sheet keys case-insensitively.
 
+Example (quoted external sheet name):
+
+```txt
+'[Book.xlsx]Sheet 1'!A1  =>  sheet key "[Book.xlsx]Sheet 1"
+```
+
 `ExternalValueProvider::get` return semantics:
 
 * For **local sheet names** (e.g. `"Sheet1"`), returning `None` is treated as a blank cell (`Value::Blank`).
