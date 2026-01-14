@@ -167,6 +167,7 @@ export class EngineWorker {
     wasmBinaryUrl?: string;
     channelFactory?: () => MessageChannelLike;
     signal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<EngineWorker> {
     const channel = options.channelFactory?.() ?? new MessageChannel();
     const port = channel.port1;
@@ -197,6 +198,11 @@ export class EngineWorker {
       throw new Error("EngineWorker.connect aborted");
     }
 
+    const timeoutMsRaw = options.timeoutMs;
+    const timeoutMs =
+      typeof timeoutMsRaw === "number" && Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0 ? Math.trunc(timeoutMsRaw) : null;
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let settled = false;
     // Use `let` so the `onReady` handler can safely reference it even in the (unlikely)
     // event that a mock Worker posts "ready" synchronously.
@@ -209,6 +215,10 @@ export class EngineWorker {
       }
       if (options.signal && onAbort) {
         options.signal.removeEventListener("abort", onAbort);
+      }
+      if (timeoutId != null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
       }
     };
 
@@ -238,6 +248,16 @@ export class EngineWorker {
           return;
         }
         options.signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      if (timeoutMs != null) {
+        timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          removeListeners();
+          cleanup();
+          reject(new Error(`EngineWorker.connect timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
       }
     });
 

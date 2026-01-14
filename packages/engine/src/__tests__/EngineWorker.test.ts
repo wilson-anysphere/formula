@@ -1082,6 +1082,24 @@ describe("EngineWorker RPC", () => {
     expect(worker.serverPort).toBeNull();
   });
 
+  it("rejects connect when the ready handshake does not arrive before timeoutMs", async () => {
+    vi.useFakeTimers();
+    const worker = new HangingWorker();
+    const promise = EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel,
+      timeoutMs: 50,
+    });
+
+    const expectation = expect(promise).rejects.toThrow(/timed out/i);
+    await vi.advanceTimersByTimeAsync(50);
+    await expectation;
+    expect(worker.terminated).toBe(true);
+
+    vi.useRealTimers();
+  });
+
   it("cleans up ports + abort listener when Worker.postMessage throws", async () => {
     class ThrowingWorker implements WorkerLike {
       terminated = false;

@@ -391,13 +391,25 @@ export interface EngineClient {
   terminate(): void;
 }
 
-export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinaryUrl?: string }): EngineClient {
+export function createEngineClient(options?: {
+  wasmModuleUrl?: string;
+  wasmBinaryUrl?: string;
+  /**
+   * Maximum time to wait for the worker "ready" handshake before failing the connection.
+   *
+   * The engine worker posts "ready" immediately after receiving the init message (before WASM is
+   * loaded), so this should only trip when the worker fails to start (bundle load errors, CSP
+   * issues, etc). Failing fast avoids hanging `init()` forever.
+   */
+  connectTimeoutMs?: number;
+}): EngineClient {
   if (typeof Worker === "undefined") {
     throw new Error("createEngineClient() requires a Worker-capable environment");
   }
 
   const wasmModuleUrl = options?.wasmModuleUrl ?? defaultWasmModuleUrl();
   const wasmBinaryUrl = options?.wasmBinaryUrl ?? defaultWasmBinaryUrl();
+  const connectTimeoutMs = options?.connectTimeoutMs ?? 10_000;
 
   // Vite supports Worker construction via `new URL(..., import.meta.url)` and will
   // bundle the Worker entrypoint correctly for both dev and production builds.
@@ -440,7 +452,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       worker: activeWorker,
       wasmModuleUrl,
       wasmBinaryUrl,
-      signal: abortController.signal
+      signal: abortController.signal,
+      timeoutMs: connectTimeoutMs
     });
 
     enginePromise = new Promise<EngineWorker>((resolve, reject) => {
