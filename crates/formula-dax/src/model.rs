@@ -1197,7 +1197,7 @@ impl DataModel {
                                 }];
                                 let mut b = ColumnarTableBuilder::new(schema, options);
                                 for _ in 0..leading_nulls {
-                                    b.append_row(&[formula_columnar::Value::Null]);
+                                    b.append_value(formula_columnar::Value::Null);
                                 }
 
                                 let encoded = match &value {
@@ -1206,14 +1206,14 @@ impl DataModel {
                                     Value::Boolean(bv) => formula_columnar::Value::Boolean(*bv),
                                     Value::Blank => formula_columnar::Value::Null,
                                 };
-                                b.append_row(&[encoded]);
+                                b.append_value(encoded);
 
                                 inferred_type = Some(ty);
                                 builder = Some(b);
                             }
                             (Some(_), Value::Blank) => {
                                 if let Some(b) = builder.as_mut() {
-                                    b.append_row(&[formula_columnar::Value::Null]);
+                                    b.append_value(formula_columnar::Value::Null);
                                 }
                             }
                             (Some(ty), v) => {
@@ -1250,7 +1250,7 @@ impl DataModel {
                                     Value::Blank => formula_columnar::Value::Null,
                                 };
                                 if let Some(b) = builder.as_mut() {
-                                    b.append_row(&[encoded]);
+                                    b.append_value(encoded);
                                 }
                             }
                         }
@@ -1267,7 +1267,7 @@ impl DataModel {
                             }];
                             let mut b = ColumnarTableBuilder::new(schema, options);
                             for _ in 0..row_count {
-                                b.append_row(&[formula_columnar::Value::Null]);
+                                b.append_value(formula_columnar::Value::Null);
                             }
                             b
                         }

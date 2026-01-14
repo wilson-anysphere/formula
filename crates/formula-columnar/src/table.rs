@@ -3493,6 +3493,43 @@ impl ColumnarTableBuilder {
         }
     }
 
+    /// Append a single value to a one-column builder.
+    ///
+    /// This is a micro-optimization for streaming ingestion patterns that construct a
+    /// single-column table (e.g. when encoding calculated columns) and want to avoid the
+    /// per-row slice creation + loop overhead of [`Self::append_row`].
+    ///
+    /// # Panics
+    /// Panics if the builder schema has more than one column.
+    pub fn append_value(&mut self, value: Value) {
+        assert_eq!(
+            self.builders.len(),
+            1,
+            "append_value requires a single-column schema"
+        );
+
+        if let Some(builder) = self.builders.get_mut(0) {
+            match builder {
+                ColumnBuilder::Int(b) => b.push(&value),
+                ColumnBuilder::Float(b) => b.push(&value),
+                ColumnBuilder::Bool(b) => b.push(&value),
+                ColumnBuilder::Dict(b) => b.push(&value),
+            }
+        }
+
+        self.rows += 1;
+        if self.rows % self.options.page_size_rows == 0 {
+            if let Some(builder) = self.builders.get_mut(0) {
+                match builder {
+                    ColumnBuilder::Int(b) => b.flush(),
+                    ColumnBuilder::Float(b) => b.flush(),
+                    ColumnBuilder::Bool(b) => b.flush(),
+                    ColumnBuilder::Dict(b) => b.flush(),
+                }
+            }
+        }
+    }
+
     pub fn finalize(mut self) -> ColumnarTable {
         for builder in &mut self.builders {
             match builder {
