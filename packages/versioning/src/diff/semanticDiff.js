@@ -45,13 +45,35 @@ export function cellKey(row, col) {
 }
 
 /**
+ * @param {string} value
+ * @param {number} start
+ * @param {number} end
+ * @returns {number | null}
+ */
+function parseUnsignedInt(value, start, end) {
+  if (end <= start) return null;
+  let out = 0;
+  for (let i = start; i < end; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 48 || code > 57) return null;
+    out = out * 10 + (code - 48);
+  }
+  return out;
+}
+
+/**
  * @param {string} key
  * @returns {CellRef}
  */
 export function parseCellKey(key) {
-  const m = key.match(/^r(\d+)c(\d+)$/);
-  if (!m) throw new Error(`Invalid cell key: ${key}`);
-  return { row: Number(m[1]), col: Number(m[2]) };
+  if (typeof key !== "string" || key.length < 3) throw new Error(`Invalid cell key: ${key}`);
+  if (key.charCodeAt(0) !== 114) throw new Error(`Invalid cell key: ${key}`); // 'r'
+  const cIdx = key.indexOf("c", 1);
+  if (cIdx === -1) throw new Error(`Invalid cell key: ${key}`);
+  const row = parseUnsignedInt(key, 1, cIdx);
+  const col = parseUnsignedInt(key, cIdx + 1, key.length);
+  if (row == null || col == null) throw new Error(`Invalid cell key: ${key}`);
+  return { row, col };
 }
 
 /**
@@ -205,24 +227,17 @@ export function semanticDiff(before, after) {
   /** @type {DiffResult} */
   const result = { added: [], removed: [], modified: [], moved: [], formatOnly: [] };
 
-  const beforeKeys = new Set(before.cells.keys());
-  const afterKeys = new Set(after.cells.keys());
-
   /** @type {string[]} */
   const removedKeys = [];
   /** @type {string[]} */
   const addedKeys = [];
 
-  for (const key of beforeKeys) {
-    if (!afterKeys.has(key)) removedKeys.push(key);
-  }
-  for (const key of afterKeys) {
-    if (!beforeKeys.has(key)) addedKeys.push(key);
-  }
-
-  // Common keys: modified / formatOnly detection.
-  for (const key of beforeKeys) {
-    if (!afterKeys.has(key)) continue;
+  // Common keys: modified / formatOnly detection + collect removed keys.
+  for (const key of before.cells.keys()) {
+    if (!after.cells.has(key)) {
+      removedKeys.push(key);
+      continue;
+    }
     const beforeCell = before.cells.get(key);
     const afterCell = after.cells.get(key);
     const beforeEncMeta = encryptionMeta(beforeCell);
@@ -264,15 +279,23 @@ export function semanticDiff(before, after) {
     });
   }
 
+  // Collect added keys.
+  for (const key of after.cells.keys()) {
+    if (!before.cells.has(key)) addedKeys.push(key);
+  }
+
   // Build signature index for added keys to detect moves.
-  /** @type {Map<string, string[]>} */
+  /** @type {Map<string, { keys: string[], idx: number }>} */
   const addedBySig = new Map();
   for (const key of addedKeys) {
     const cell = after.cells.get(key);
     const sig = cellSignature(cell);
-    const list = addedBySig.get(sig) ?? [];
-    list.push(key);
-    addedBySig.set(sig, list);
+    let entry = addedBySig.get(sig);
+    if (!entry) {
+      entry = { keys: [], idx: 0 };
+      addedBySig.set(sig, entry);
+    }
+    entry.keys.push(key);
   }
 
   /** @type {Set<string>} */
@@ -280,10 +303,10 @@ export function semanticDiff(before, after) {
   for (const key of removedKeys) {
     const cell = before.cells.get(key);
     const sig = cellSignature(cell);
-    const list = addedBySig.get(sig);
-    if (list && list.length > 0) {
+    const entry = addedBySig.get(sig);
+    if (entry && entry.idx < entry.keys.length) {
       const encMeta = encryptionMeta(cell);
-      const destKey = list.shift();
+      const destKey = entry.keys[entry.idx++];
       movedDestinations.add(destKey);
       result.moved.push({
         oldLocation: parseCellKey(key),
