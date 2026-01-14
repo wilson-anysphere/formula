@@ -677,6 +677,7 @@ mockups/README.md                # Full design system
 
 /* Accent - professional blue */
 --accent: #0969da;
+--link: #0969da;
 --accent-bg: #ddf4ff;
 
 /* Semantic */

@@ -121,6 +121,7 @@ Every pixel counts. Tighten spacing, add subtle shades for depth. No wasted whit
 
 /* Accent - professional blue */
 --accent: #0969da;          /* Primary accent */
+--link: #0969da;            /* Hyperlinks */
 --accent-bg: #ddf4ff;       /* Accent background */
 --accent-border: #54aeff;   /* Accent border */
 
