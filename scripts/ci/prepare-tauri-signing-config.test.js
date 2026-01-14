@@ -185,3 +185,35 @@ test("fails fast when FORMULA_REQUIRE_CODESIGN=1 on Windows and required secrets
   // In enforcement mode we should fail before mutating the config.
   assert.equal(config.bundle.windows.certificateThumbprint, "ABCDEF");
 });
+
+test("exports Tauri updater signing env vars only when configured", () => {
+  const minimalConfig = { bundle: { macOS: {}, windows: {} } };
+
+  {
+    const { proc, githubEnv } = runWithConfig(
+      {
+        RUNNER_OS: "Linux",
+        TAURI_PRIVATE_KEY: "private-key",
+        TAURI_KEY_PASSWORD: "pw",
+      },
+      minimalConfig,
+    );
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.match(githubEnv, /\bTAURI_PRIVATE_KEY<</);
+    assert.match(githubEnv, /\bTAURI_KEY_PASSWORD<</);
+  }
+
+  {
+    const { proc, githubEnv } = runWithConfig(
+      {
+        RUNNER_OS: "Linux",
+        TAURI_PRIVATE_KEY: "private-key",
+        TAURI_KEY_PASSWORD: "",
+      },
+      minimalConfig,
+    );
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.match(githubEnv, /\bTAURI_PRIVATE_KEY<</);
+    assert.doesNotMatch(githubEnv, /\bTAURI_KEY_PASSWORD<</);
+  }
+});

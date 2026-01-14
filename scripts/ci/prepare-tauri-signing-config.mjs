@@ -304,6 +304,16 @@ function main() {
     exportGithubEnv("WINDOWS_CERTIFICATE", process.env.WINDOWS_CERTIFICATE ?? "");
     exportGithubEnv("WINDOWS_CERTIFICATE_PASSWORD", process.env.WINDOWS_CERTIFICATE_PASSWORD ?? "");
   }
+
+  // Tauri updater signing is optional on forks/dry-runs. We only export these env vars when the
+  // secrets are actually configured so `tauri-action`/`cargo tauri` don't attempt to parse empty
+  // strings (which can fail the build).
+  if (envHasValue("TAURI_PRIVATE_KEY")) {
+    exportGithubEnv("TAURI_PRIVATE_KEY", process.env.TAURI_PRIVATE_KEY ?? "");
+    if (envHasValue("TAURI_KEY_PASSWORD")) {
+      exportGithubEnv("TAURI_KEY_PASSWORD", process.env.TAURI_KEY_PASSWORD ?? "");
+    }
+  }
 }
 
 main();
