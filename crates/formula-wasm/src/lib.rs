@@ -4690,11 +4690,6 @@ impl WasmWorkbook {
                 wb.engine
                     .set_cell_value(&sheet_name, &address, cell_value_to_engine(&cell.value))
                     .map_err(|err| js_err(err.to_string()))?;
-                if let Some(phonetic) = &phonetic {
-                    wb.engine
-                        .set_cell_phonetic(&sheet_name, &address, Some(phonetic.clone()))
-                        .map_err(|err| js_err(err.to_string()))?;
-                }
                 if let Some(formula) = cell.formula.as_deref() {
                     // `formula-model` stores formulas without a leading '='.
                     let display = display_formula_text(formula);
@@ -4702,6 +4697,13 @@ impl WasmWorkbook {
                         // Best-effort: if the formula fails to parse (unsupported syntax), leave the
                         // cached value and still store the display formula in the input map.
                         let _ = wb.engine.set_cell_formula(&sheet_name, &address, &display);
+                        if let Some(phonetic) = &phonetic {
+                            // `Engine::set_cell_formula` clears phonetic metadata, so re-apply it
+                            // after setting the formula.
+                            wb.engine
+                                .set_cell_phonetic(&sheet_name, &address, Some(phonetic.clone()))
+                                .map_err(|err| js_err(err.to_string()))?;
+                        }
 
                         let sheet_cells = wb
                             .sheets
@@ -4710,6 +4712,12 @@ impl WasmWorkbook {
                         sheet_cells.insert(address.clone(), JsonValue::String(display));
                         continue;
                     }
+                }
+
+                if let Some(phonetic) = &phonetic {
+                    wb.engine
+                        .set_cell_phonetic(&sheet_name, &address, Some(phonetic.clone()))
+                        .map_err(|err| js_err(err.to_string()))?;
                 }
 
                 // Non-formula cell; store scalar value as input.
@@ -7071,6 +7079,37 @@ mod tests {
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "C1"),
             EngineValue::Number(2.0)
+        );
+    }
+
+    #[test]
+    fn from_model_json_preserves_phonetic_metadata_for_formula_cells() {
+        let mut model = formula_model::Workbook::new();
+        let sheet_id = model.add_sheet("Sheet1").unwrap();
+        let sheet = model.sheet_mut(sheet_id).unwrap();
+
+        // A1 is a formula cell that returns a string; the model also stores cached value and
+        // phonetic guide metadata.
+        let mut cell = formula_model::Cell::new(formula_model::CellValue::String("漢字".to_string()));
+        // `formula-model` stores formulas without a leading '='.
+        cell.formula = Some("\"漢字\"".to_string());
+        cell.phonetic = Some("かんじ".to_string());
+        sheet.set_cell(formula_model::CellRef::from_a1("A1").unwrap(), cell);
+
+        sheet.set_formula_a1("B1", Some("PHONETIC(A1)".to_string()))
+            .unwrap();
+
+        let json = serde_json::to_string(&model).unwrap();
+        let mut wb = WasmWorkbook::from_model_json(json).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"),
+            Some("かんじ")
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Text("かんじ".to_string())
         );
     }
 
