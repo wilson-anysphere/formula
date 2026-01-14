@@ -90,10 +90,21 @@ match open_workbook_with_options(
 
 Notes:
 
+- Encrypted OOXML decryption is behind the `formula-io` cargo feature
+  **`encrypted-workbooks`** (enabled by default). If you depend on `formula-io` with
+  `default-features = false`, you must enable it explicitly or encrypted OOXML files will surface
+  as `UnsupportedEncryption`.
 - For “open into model” use cases, prefer `open_workbook_model_with_password(..)` for encrypted
   OOXML containers; see `docs/21-offcrypto.md` for the exact API matrix.
 - If you want to prompt before attempting a full open, use
   `formula_io::detect_workbook_encryption(..)`.
+
+Example `Cargo.toml` (when using `default-features = false`):
+
+```toml
+# Enable encrypted workbook support (OOXML + legacy `.xls`) explicitly.
+formula-io = { version = "*", default-features = false, features = ["encrypted-workbooks"] }
+```
 
 ### Rust: `formula-xlsx` convenience decryption helpers (advanced)
 
