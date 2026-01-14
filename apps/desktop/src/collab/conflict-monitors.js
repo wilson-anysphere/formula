@@ -89,6 +89,9 @@ export function createDesktopFormulaConflictMonitor(opts) {
  * @param {number | null} [opts.maxOpRecordAgeMs] Optional age-based pruning window
  *   for records in the shared `cellStructuralOps` log. When enabled, records older
  *   than `Date.now() - maxOpRecordAgeMs` may be deleted by any client (best-effort).
+ *   Pruning is additionally conservative relative to the local op log queue head:
+ *   records are only pruned when they are older than both the age cutoff and the
+ *   oldest local op record (queue head).
  *   Pruning is conservative (newly-arriving records are not deleted in the same
  *   op-log transaction they are added) and incremental for very large logs.
  */
