@@ -172,7 +172,7 @@ function stableHash32(input: string): number {
 
 function stableStringify(value: unknown): string {
   try {
-    return JSON.stringify(value, (_key, v) => {
+    const serialized = JSON.stringify(value, (_key, v) => {
       if (!isRecord(v)) return v;
       const out: Record<string, unknown> = {};
       for (const key of Object.keys(v).sort()) {
@@ -180,6 +180,9 @@ function stableStringify(value: unknown): string {
       }
       return out;
     });
+    // `JSON.stringify` returns `undefined` for inputs like `undefined` / functions / symbols.
+    // Guard so callers like `stableHash32(stableStringify(...))` never throw.
+    return typeof serialized === "string" ? serialized : String(value);
   } catch {
     return String(value);
   }
