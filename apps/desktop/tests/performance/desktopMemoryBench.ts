@@ -417,5 +417,13 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
     console.log(`[desktop-memory]   idleRssMb=${rssMb.toFixed(1)}mb`);
   }
 
-  return [buildResult('desktop.memory.idle_rss_mb.p95', values, targetMb)];
+  const p95 = buildResult('desktop.memory.idle_rss_mb.p95', values, targetMb);
+  const p50: BenchmarkResult = {
+    ...p95,
+    name: 'desktop.memory.idle_rss_mb.p50',
+    // Informational: CI gating is based on the p95 budget.
+    targetMs: undefined,
+    passed: true,
+  };
+  return [p95, p50];
 }

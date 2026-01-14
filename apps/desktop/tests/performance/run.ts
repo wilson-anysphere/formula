@@ -58,10 +58,12 @@ function printSummary(results: BenchmarkResult[]): void {
   for (const r of results) {
     const status = r.passed ? 'PASS' : 'FAIL';
     const name = r.name.padEnd(longestName);
-    const p95 = formatValue(r.p95, r.unit).padStart(10);
+    const stat = r.name.endsWith('.p50') ? 'p50' : 'p95';
+    const value = r.name.endsWith('.p50') ? r.median : r.p95;
+    const formatted = formatValue(value, r.unit).padStart(10);
     const target = (r.targetMs === undefined ? 'unset' : formatValue(r.targetMs, r.unit)).padStart(10);
     // eslint-disable-next-line no-console
-    console.log(`${status}  ${name}  p95=${p95}  target=${target}`);
+    console.log(`${status}  ${name}  ${stat}=${formatted}  target=${target}`);
   }
 }
 
@@ -300,10 +302,15 @@ async function main(): Promise<void> {
     benchmarks: results,
   };
 
+  const primaryValue = (r: BenchmarkResult): number => {
+    if (r.name.endsWith('.p50')) return r.median;
+    return r.p95;
+  };
+
   const actionResults: ActionBenchmark[] = results.map((r) => ({
     name: r.name,
     unit: r.unit,
-    value: r.p95,
+    value: primaryValue(r),
   }));
 
   writeFileSync(resolve(repoRoot, details), JSON.stringify(report, null, 2));
