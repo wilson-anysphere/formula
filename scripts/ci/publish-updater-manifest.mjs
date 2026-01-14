@@ -368,6 +368,8 @@ async function main() {
 
   /** @type {Record<string, any>} */
   const mergedPlatforms = {};
+  /** @type {Record<string, unknown>} */
+  const mergedRootExtras = {};
 
   // Use the first manifest (deterministically: lexicographic file order) as the source of
   // ancillary metadata like notes/pub_date. This avoids depending on matrix job completion order.
@@ -401,6 +403,25 @@ async function main() {
     if (index === 0) {
       baseManifest = manifest;
       baseManifestPath = file;
+    }
+
+    // Merge any unknown top-level fields for forward compatibility with future Tauri manifest
+    // schema changes. We accept a union of keys across manifests as long as values are identical
+    // when present (otherwise the merged output would be non-deterministic).
+    if (isPlainObject(manifest)) {
+      for (const [key, value] of Object.entries(manifest)) {
+        if (key === "version" || key === "notes" || key === "pub_date" || key === "platforms") continue;
+        const normalized = sortObjectKeysDeep(value);
+        if (!(key in mergedRootExtras)) {
+          mergedRootExtras[key] = normalized;
+          continue;
+        }
+        if (JSON.stringify(sortObjectKeysDeep(mergedRootExtras[key])) !== JSON.stringify(normalized)) {
+          throw new Error(
+            `Conflicting top-level manifest field ${JSON.stringify(key)} across manifests (source: ${file}).`,
+          );
+        }
+      }
     }
 
     for (const [target, entry] of Object.entries(platforms)) {
@@ -444,21 +465,10 @@ async function main() {
     console.log(`publish-updater-manifest: notes/pub_date sourced from ${baseManifestPath}`);
   }
 
-  // Preserve any additional top-level fields from the base manifest for forward compatibility
-  // with future Tauri manifest schema changes. (We still override version/platforms and pick
-  // notes/pub_date deterministically.)
-  /** @type {Record<string, unknown>} */
-  const extraRootFields = {};
-  if (isPlainObject(baseManifest)) {
-    for (const [key, value] of Object.entries(baseManifest)) {
-      if (key === "version" || key === "notes" || key === "pub_date" || key === "platforms") continue;
-      extraRootFields[key] = sortObjectKeysDeep(value);
-    }
-  }
   const extraRootFieldsSorted = Object.fromEntries(
-    Object.keys(extraRootFields)
+    Object.keys(mergedRootExtras)
       .sort((a, b) => a.localeCompare(b))
-      .map((key) => [key, extraRootFields[key]]),
+      .map((key) => [key, mergedRootExtras[key]]),
   );
 
   // Deterministic output: sort platform keys so the merged `latest.json` is stable even when
