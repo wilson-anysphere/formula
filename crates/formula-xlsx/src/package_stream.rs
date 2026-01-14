@@ -254,14 +254,14 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
         };
 
         for name in self.part_names() {
-            let name = name.strip_prefix('/').unwrap_or(name);
-            if name == "xl/vbaProject.bin" {
+            let key = crate::zip_util::zip_part_name_lookup_key(name);
+            if key == b"xl/vbaproject.bin" {
                 presence.has_vba = true;
             }
-            if name.starts_with("xl/macrosheets/") {
+            if key.starts_with(b"xl/macrosheets/") {
                 presence.has_xlm_macrosheets = true;
             }
-            if name.starts_with("xl/dialogsheets/") {
+            if key.starts_with(b"xl/dialogsheets/") {
                 presence.has_dialog_sheets = true;
             }
 

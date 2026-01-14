@@ -967,14 +967,14 @@ impl XlsxPackage {
         };
 
         for name in self.part_names() {
-            let name = name.strip_prefix('/').unwrap_or(name);
-            if name == "xl/vbaProject.bin" {
+            let key = crate::zip_util::zip_part_name_lookup_key(name);
+            if key == b"xl/vbaproject.bin" {
                 presence.has_vba = true;
             }
-            if name.starts_with("xl/macrosheets/") {
+            if key.starts_with(b"xl/macrosheets/") {
                 presence.has_xlm_macrosheets = true;
             }
-            if name.starts_with("xl/dialogsheets/") {
+            if key.starts_with(b"xl/dialogsheets/") {
                 presence.has_dialog_sheets = true;
             }
 
@@ -1789,14 +1789,14 @@ impl crate::XlsxDocument {
 
         for name in self.parts().keys() {
             let name = name.as_str();
-            let name = name.strip_prefix('/').unwrap_or(name);
-            if name == "xl/vbaProject.bin" {
+            let key = crate::zip_util::zip_part_name_lookup_key(name);
+            if key == b"xl/vbaproject.bin" {
                 presence.has_vba = true;
             }
-            if name.starts_with("xl/macrosheets/") {
+            if key.starts_with(b"xl/macrosheets/") {
                 presence.has_xlm_macrosheets = true;
             }
-            if name.starts_with("xl/dialogsheets/") {
+            if key.starts_with(b"xl/dialogsheets/") {
                 presence.has_dialog_sheets = true;
             }
 
@@ -1926,6 +1926,41 @@ mod tests {
         let extracted = read_part_from_reader(Cursor::new(bytes), "/xl/workbook.xml")
             .expect("read workbook.xml with leading slash");
         assert_eq!(extracted, Some(workbook.to_vec()));
+    }
+
+    #[test]
+    fn macro_presence_tolerates_backslashes_and_case() {
+        let bytes = build_package(&[
+            ("XL\\vbaProject.bin", b"vba"),
+            ("XL\\macrosheets\\sheet1.xml", b"macro"),
+            ("XL\\dialogsheets\\sheet1.xml", b"dialog"),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read test pkg");
+        let presence = pkg.macro_presence();
+        assert_eq!(
+            presence,
+            MacroPresence {
+                has_vba: true,
+                has_xlm_macrosheets: true,
+                has_dialog_sheets: true,
+            }
+        );
+
+        let mut doc = crate::XlsxDocument::new(formula_model::Workbook::new());
+        doc.parts.insert("XL\\vbaProject.bin".to_string(), b"vba".to_vec());
+        doc.parts
+            .insert("XL\\macrosheets\\sheet1.xml".to_string(), b"macro".to_vec());
+        doc.parts
+            .insert("XL\\dialogsheets\\sheet1.xml".to_string(), b"dialog".to_vec());
+        assert_eq!(
+            doc.macro_presence(),
+            MacroPresence {
+                has_vba: true,
+                has_xlm_macrosheets: true,
+                has_dialog_sheets: true,
+            }
+        );
     }
 
     #[test]
