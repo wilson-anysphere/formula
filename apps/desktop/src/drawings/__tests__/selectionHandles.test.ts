@@ -153,6 +153,69 @@ describe("drawings selection handles", () => {
     }
   });
 
+  it("DrawingInteractionController only calls onSelectionChange when selection actually changes", () => {
+    const listeners = new Map<string, (e: any) => void>();
+    const canvas: any = makeCanvas(listeners);
+
+    const geom: GridGeometry = {
+      cellOriginPx: () => ({ x: 0, y: 0 }),
+      cellSizePx: () => ({ width: 0, height: 0 }),
+    };
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
+
+    let objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(200) },
+          size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      },
+    ];
+
+    const callbacks = {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next: DrawingObject[]) => {
+        objects = next;
+      },
+      onSelectionChange: vi.fn(),
+    };
+
+    new DrawingInteractionController(canvas as HTMLCanvasElement, geom, callbacks);
+
+    const pointerDown = listeners.get("pointerdown");
+    const pointerUp = listeners.get("pointerup");
+    expect(pointerDown).toBeTypeOf("function");
+    expect(pointerUp).toBeTypeOf("function");
+
+    // Select the object.
+    pointerDown!(makePointerEvent(140, 220, 1));
+    pointerUp!(makePointerEvent(140, 220, 1));
+    expect(callbacks.onSelectionChange).toHaveBeenCalledTimes(1);
+    expect(callbacks.onSelectionChange).toHaveBeenLastCalledWith(1);
+
+    // Clicking again on the already-selected object should not re-fire selection change.
+    pointerDown!(makePointerEvent(140, 220, 2));
+    pointerUp!(makePointerEvent(140, 220, 2));
+    expect(callbacks.onSelectionChange).toHaveBeenCalledTimes(1);
+
+    // Clicking away should clear selection and fire a change once.
+    pointerDown!(makePointerEvent(10, 10, 3));
+    pointerUp!(makePointerEvent(10, 10, 3));
+    expect(callbacks.onSelectionChange).toHaveBeenCalledTimes(2);
+    expect(callbacks.onSelectionChange).toHaveBeenLastCalledWith(null);
+
+    // Clicking away again should not re-fire (selection already null).
+    pointerDown!(makePointerEvent(10, 10, 4));
+    pointerUp!(makePointerEvent(10, 10, 4));
+    expect(callbacks.onSelectionChange).toHaveBeenCalledTimes(2);
+  });
+
   it("DrawingInteractionController updates cursor on hover for selected object handles", () => {
     const listeners = new Map<string, (e: any) => void>();
     const canvas: any = makeCanvas(listeners);

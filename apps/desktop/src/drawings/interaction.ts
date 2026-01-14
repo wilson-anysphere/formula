@@ -484,8 +484,11 @@ export class DrawingInteractionController {
     if (hit && this.callbacks.onPointerDownHit && this.callbacks.onPointerDownHit(e, hit) === false) {
       return;
     }
-    this.selectedId = hit?.object.id ?? null;
-    this.callbacks.onSelectionChange?.(this.selectedId);
+    const nextSelectedId = hit?.object.id ?? null;
+    if (nextSelectedId !== this.selectedId) {
+      this.selectedId = nextSelectedId;
+      this.callbacks.onSelectionChange?.(this.selectedId);
+    }
     if (!hit) {
       this.element.style.cursor = "default";
       return;
