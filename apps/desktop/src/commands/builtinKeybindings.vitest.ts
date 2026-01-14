@@ -223,6 +223,19 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("format.toggleStrikethrough", otherIndex)).toBe("Ctrl+5");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", otherIndex)).toBe("Ctrl+D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", otherIndex)).toBe("Ctrl+R");
+    expect(getPrimaryCommandKeybindingDisplay("home.cells.insert.insertCells", otherIndex)).toBe("Ctrl+Shift+Plus");
+    expect(otherIndex.get("home.cells.insert.insertCells")).toEqual(
+      expect.arrayContaining([
+        "Ctrl+Shift+Plus",
+        "Ctrl+Shift+=",
+        "Ctrl+Plus",
+        "Ctrl+Shift+Meta+Plus",
+        "Ctrl+Shift+Meta+=",
+        "Ctrl+Meta+Plus",
+      ]),
+    );
+    expect(getPrimaryCommandKeybindingDisplay("home.cells.delete.deleteCells", otherIndex)).toBe("Ctrl+-");
+    expect(otherIndex.get("home.cells.delete.deleteCells")).toEqual(expect.arrayContaining(["Ctrl+-", "Ctrl+Meta+-"]));
     expect(getPrimaryCommandKeybindingDisplay("edit.selectCurrentRegion", otherIndex)).toBe("Ctrl+Shift+*");
     expect(otherIndex.get("edit.selectCurrentRegion")).toEqual(
       expect.arrayContaining(["Ctrl+Shift+*", "Ctrl+Shift+8", "Ctrl+*"]),
@@ -275,6 +288,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("format.toggleStrikethrough", macIndex)).toBe("⌃5");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", macIndex)).toBe("⌘D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", macIndex)).toBe("⌘R");
+    expect(getPrimaryCommandKeybindingDisplay("home.cells.insert.insertCells", macIndex)).toBe("⌃⇧+");
+    expect(getPrimaryCommandKeybindingDisplay("home.cells.delete.deleteCells", macIndex)).toBe("⌃-");
     expect(getPrimaryCommandKeybindingDisplay("edit.selectCurrentRegion", macIndex)).toBe("⇧⌘*");
     expect(macIndex.get("edit.selectCurrentRegion")).toEqual(expect.arrayContaining(["⇧⌘*", "⇧⌘8", "⌘*"]));
     expect(getPrimaryCommandKeybindingDisplay("edit.insertDate", macIndex)).toBe("⌘;");
