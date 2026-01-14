@@ -1145,6 +1145,9 @@ def main() -> int:
         ),
         "mismatches": mismatches,
     }
+    # Defense in depth: redact any remaining `path`/`*Path` fields anywhere in the report (including
+    # unexpected extra metadata nested under result values).
+    report = _redact_paths_in_obj(report, privacy_mode=args.privacy_mode)
     report = _redact_error_details_in_obj(report, privacy_mode=args.privacy_mode)
     report = _redact_string_values_in_obj(report, privacy_mode=args.privacy_mode)
 
