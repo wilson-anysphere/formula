@@ -34,6 +34,9 @@ const VIEW_KEYS = new Set([
   "colWidths",
   "rowHeights",
   "mergedRanges",
+  "merged_ranges",
+  "mergedRegions",
+  "merged_regions",
   // Backwards compatibility with older clients.
   "mergedCells",
   "merged_cells",
@@ -428,15 +431,26 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
     viewRaw !== undefined ? readAxisOverrides(readYMapOrObject(viewRaw, "colWidths")) : readAxisOverrides(sheet?.get?.("colWidths"));
   const rowHeights =
     viewRaw !== undefined ? readAxisOverrides(readYMapOrObject(viewRaw, "rowHeights")) : readAxisOverrides(sheet?.get?.("rowHeights"));
-  const mergedRanges =
-    viewRaw !== undefined
-      ? readMergedRanges(readYMapOrObject(viewRaw, "mergedRanges") ?? readYMapOrObject(viewRaw, "mergedCells"))
-      : readMergedRanges(sheet?.get?.("mergedRanges") ?? sheet?.get?.("mergedCells") ?? sheet?.get?.("merged_cells"));
-  const mergedRangesWithSnakeCase =
-    mergedRanges ??
-    (viewRaw !== undefined
-      ? readMergedRanges(readYMapOrObject(viewRaw, "merged_cells"))
-      : undefined);
+  let mergedRangesRaw: unknown = undefined;
+  if (viewRaw !== undefined) {
+    mergedRangesRaw =
+      readYMapOrObject(viewRaw, "mergedRanges") ??
+      readYMapOrObject(viewRaw, "merged_ranges") ??
+      readYMapOrObject(viewRaw, "mergedRegions") ??
+      readYMapOrObject(viewRaw, "merged_regions") ??
+      readYMapOrObject(viewRaw, "mergedCells") ??
+      readYMapOrObject(viewRaw, "merged_cells");
+  }
+  if (mergedRangesRaw === undefined) {
+    mergedRangesRaw =
+      sheet?.get?.("mergedRanges") ??
+      sheet?.get?.("merged_ranges") ??
+      sheet?.get?.("mergedRegions") ??
+      sheet?.get?.("merged_regions") ??
+      sheet?.get?.("mergedCells") ??
+      sheet?.get?.("merged_cells");
+  }
+  const mergedRanges = readMergedRanges(mergedRangesRaw);
 
   let backgroundRaw: unknown = undefined;
   if (viewRaw !== undefined) {
@@ -464,7 +478,7 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
   if (backgroundImageId) out.backgroundImageId = backgroundImageId;
   if (colWidths) out.colWidths = colWidths;
   if (rowHeights) out.rowHeights = rowHeights;
-  if (mergedRangesWithSnakeCase) out.mergedRanges = mergedRangesWithSnakeCase;
+  if (mergedRanges) out.mergedRanges = mergedRanges;
   if (drawings) out.drawings = drawings;
   return out;
 }
@@ -800,11 +814,17 @@ export function bindSheetViewToCollabSession(options: {
               if (prevMergedRanges) {
                 viewMap.delete("mergedRanges");
                 sheet.delete("mergedRanges");
+                viewMap.delete("merged_ranges");
+                sheet.delete("merged_ranges");
                 // Backwards compatibility cleanup.
                 viewMap.delete("mergedCells");
                 sheet.delete("mergedCells");
                 viewMap.delete("merged_cells");
                 sheet.delete("merged_cells");
+                viewMap.delete("mergedRegions");
+                sheet.delete("mergedRegions");
+                viewMap.delete("merged_regions");
+                sheet.delete("merged_regions");
               }
             } else if (!mergedRangesEquals(prevMergedRanges, nextMergedRanges)) {
               const cloned = nextMergedRanges.map((r) => ({
@@ -816,6 +836,13 @@ export function bindSheetViewToCollabSession(options: {
               // Store on both the nested view map (preferred) and the top-level for backwards compatibility.
               viewMap.set("mergedRanges", cloned);
               sheet.set("mergedRanges", cloned);
+              // Alternative key names (legacy).
+              viewMap.set("merged_ranges", cloned);
+              sheet.set("merged_ranges", cloned);
+              viewMap.set("mergedRegions", cloned);
+              sheet.set("mergedRegions", cloned);
+              viewMap.set("merged_regions", cloned);
+              sheet.set("merged_regions", cloned);
               // Also write the legacy key so older clients can still render merged regions.
               viewMap.set("mergedCells", cloned);
               sheet.set("mergedCells", cloned);

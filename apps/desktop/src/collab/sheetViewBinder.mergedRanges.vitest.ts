@@ -174,4 +174,32 @@ describe("bindSheetViewToCollabSession (mergedRanges)", () => {
 
     binder.destroy();
   });
+
+  it("hydrates mergedRanges from the merged_ranges key (alternate naming) and reacts to nested view updates", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    const viewMap = new Y.Map<any>();
+    sheetMap.set("view", viewMap);
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    doc.transact(() => {
+      viewMap.set("merged_ranges", [{ startRow: 0, endRow: 2, startCol: 0, endCol: 1 }]);
+    });
+
+    expect(document.getMergedRanges(sheetId)).toEqual([{ startRow: 0, endRow: 2, startCol: 0, endCol: 1 }]);
+
+    binder.destroy();
+  });
 });
