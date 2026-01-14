@@ -72,8 +72,8 @@ fn pivot_grand_totals_defaults_true_when_fields_missing() {
     let decoded: PivotConfig = serde_json::from_value(json!({"grandTotals": {}})).unwrap();
     assert_eq!(decoded.grand_totals, GrandTotals::default());
 
-    let decoded: PivotConfig = serde_json::from_value(json!({"grandTotals": {"rows": false}}))
-        .unwrap();
+    let decoded: PivotConfig =
+        serde_json::from_value(json!({"grandTotals": {"rows": false}})).unwrap();
     assert!(!decoded.grand_totals.rows);
     assert!(decoded.grand_totals.columns);
 }
@@ -322,8 +322,14 @@ fn dax_column_ref_parser_handles_basic_and_quoted_tables() {
 
 #[test]
 fn dax_measure_ref_parser_handles_basic_and_rejects_nested_brackets() {
-    assert_eq!(parse_dax_measure_ref("[Measure]"), Some("Measure".to_string()));
-    assert_eq!(parse_dax_measure_ref(" [ Measure ] "), Some("Measure".to_string()));
+    assert_eq!(
+        parse_dax_measure_ref("[Measure]"),
+        Some("Measure".to_string())
+    );
+    assert_eq!(
+        parse_dax_measure_ref(" [ Measure ] "),
+        Some("Measure".to_string())
+    );
 
     assert_eq!(parse_dax_measure_ref("[]"), None);
     assert_eq!(parse_dax_measure_ref("[Table[Column]]"), None);
