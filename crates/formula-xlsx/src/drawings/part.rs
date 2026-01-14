@@ -1102,6 +1102,8 @@ fn parse_named_node(
         .or_else(|| node.descendants().find(|n| n.is_element() && n.tag_name().name() == name_tag))
         .and_then(|n| n.attribute("id"))
         .unwrap_or("0");
+    let nv_id = nv_id.trim();
+    let nv_id = if nv_id.is_empty() { "0" } else { nv_id };
     let id = nv_id
         .parse::<u32>()
         .map_err(|e| XlsxError::Invalid(format!("invalid object id {nv_id:?}: {e}")))?;

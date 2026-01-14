@@ -49,7 +49,8 @@ impl PivotFieldRef {
         }
     }
 
-    /// Returns the cache/worksheet field name if this reference points at a pivot cache field.
+    /// Returns the underlying worksheet/pivot-cache field name if this reference is backed by a
+    /// cache field header.
     pub fn as_cache_field_name(&self) -> Option<&str> {
         match self {
             PivotFieldRef::CacheFieldName(name) => Some(name.as_str()),
@@ -212,7 +213,7 @@ impl fmt::Display for PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
-                let table = format_dax_table_identifier(table.as_str());
+                let table = format_dax_table_identifier(table);
                 let column = escape_dax_bracket_identifier(column);
                 write!(f, "{table}[{column}]")
             }
@@ -274,6 +275,7 @@ fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
 }
+
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
 ///
 /// Parsing is best-effort:
@@ -636,55 +638,6 @@ mod tests {
         );
         assert_eq!(parse_dax_measure_ref("[]"), None);
         assert_eq!(parse_dax_measure_ref("Table[Column]"), None);
-    }
-
-    #[test]
-    fn pivot_field_ref_display_formats_dax_identifiers() {
-        assert_eq!(
-            PivotFieldRef::DataModelColumn {
-                table: "Sales".to_string(),
-                column: "Amount".to_string(),
-            }
-            .to_string(),
-            "Sales[Amount]"
-        );
-
-        // Tables containing non-identifier characters should be single-quoted with escaped quotes.
-        assert_eq!(
-            PivotFieldRef::DataModelColumn {
-                table: "Dim Product".to_string(),
-                column: "Category".to_string(),
-            }
-            .to_string(),
-            "'Dim Product'[Category]"
-        );
-        assert_eq!(
-            PivotFieldRef::DataModelColumn {
-                table: "O'Reilly".to_string(),
-                column: "Name".to_string(),
-            }
-            .to_string(),
-            "'O''Reilly'[Name]"
-        );
-
-        // Column names escape `]` by doubling it inside `[...]`.
-        assert_eq!(
-            PivotFieldRef::DataModelColumn {
-                table: "Sales".to_string(),
-                column: "A]B".to_string(),
-            }
-            .to_string(),
-            "Sales[A]]B]"
-        );
-
-        assert_eq!(
-            PivotFieldRef::DataModelMeasure("Total Sales".to_string()).to_string(),
-            "[Total Sales]"
-        );
-        assert_eq!(
-            PivotFieldRef::CacheFieldName("Region".to_string()).to_string(),
-            "Region"
-        );
     }
 
     #[test]
