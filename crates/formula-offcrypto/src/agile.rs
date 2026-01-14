@@ -347,21 +347,23 @@ mod tests {
 
     #[test]
     fn agile_verify_password_mismatch_returns_invalid_password_and_uses_ct_eq() {
-        reset_ct_eq_calls();
-
         let input = b"verifier-hash-input";
-        let mut expected = HashAlgorithm::Sha1.digest(input);
-        // Flip a bit to force a mismatch.
-        expected[0] ^= 0x01;
+        for alg in [HashAlgorithm::Sha1, HashAlgorithm::Md5] {
+            reset_ct_eq_calls();
 
-        let err = verify_password(input, &expected, HashAlgorithm::Sha1)
-            .expect_err("expected verifier mismatch to return an error");
-        assert!(matches!(err, OffcryptoError::InvalidPassword));
+            let mut expected = alg.digest(input);
+            // Flip a bit to force a mismatch.
+            expected[0] ^= 0x01;
 
-        assert!(
-            ct_eq_call_count() >= 1,
-            "expected constant-time compare helper to be invoked"
-        );
+            let err = verify_password(input, &expected, alg)
+                .expect_err("expected verifier mismatch to return an error");
+            assert!(matches!(err, OffcryptoError::InvalidPassword));
+
+            assert!(
+                ct_eq_call_count() >= 1,
+                "expected constant-time compare helper to be invoked (alg={alg})"
+            );
+        }
     }
 
     #[test]
