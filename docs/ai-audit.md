@@ -495,13 +495,13 @@ await migrateLocalStorageAuditEntriesToSqlite({
 
 ## 5) Exporting audit logs
 
-`@formula/ai-audit` includes a deterministic export helper in `packages/ai-audit/src/export.ts`:
+`@formula/ai-audit` includes a deterministic export helper in `packages/ai-audit/src/export.ts`.
+
+For convenience it is re-exported from `@formula/ai-audit`, but if you only need export functionality (and want to avoid importing store implementations) you can use the lightweight entrypoint:
 
 ```ts
-import { serializeAuditEntries } from "@formula/ai-audit";
+import { serializeAuditEntries } from "@formula/ai-audit/export";
 ```
-
-This helper is also available via the lightweight entrypoint `@formula/ai-audit/export` if you only need export functionality.
 
 It takes an array of `AIAuditEntry` and returns a string:
 
@@ -531,7 +531,8 @@ By default, `serializeAuditEntries(...)` also uses `redactToolResults: true` (re
 ### Example: export as NDJSON (recommended for large logs)
 
 ```ts
-import { AIAuditRecorder, MemoryAIAuditStore, serializeAuditEntries } from "@formula/ai-audit";
+import { AIAuditRecorder, MemoryAIAuditStore } from "@formula/ai-audit";
+import { serializeAuditEntries } from "@formula/ai-audit/export";
 import { writeFile } from "node:fs/promises";
 
 // `store` can be any AIAuditStore implementation (Memory, LocalStorage, SQLite, etc).
@@ -564,7 +565,8 @@ await writeFile("./ai-audit.ndjson", ndjson + "\n", "utf8");
 ### Example: export as a JSON array
 
 ```ts
-import { AIAuditRecorder, MemoryAIAuditStore, serializeAuditEntries } from "@formula/ai-audit";
+import { AIAuditRecorder, MemoryAIAuditStore } from "@formula/ai-audit";
+import { serializeAuditEntries } from "@formula/ai-audit/export";
 import { writeFile } from "node:fs/promises";
 
 const store = new MemoryAIAuditStore();
