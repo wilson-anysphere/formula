@@ -559,3 +559,103 @@ fn insert_row_updates_unmatched_fact_rows_for_columnar_m2m_relationships() {
         7.0.into()
     );
 }
+
+#[test]
+fn userelationship_override_works_with_m2m_for_columnar_fact() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
+    dim.push_row(vec![1.into(), 10.into(), "A".into()]).unwrap();
+    dim.push_row(vec![2.into(), 20.into(), "B".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    // Cross the keys so the active vs. inactive relationship yields different totals under the
+    // same Dim filter.
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::Number(100.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(200.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    model
+        .add_measure(
+            "Total via KeyB",
+            "CALCULATE([Total], USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let filter_a = FilterContext::empty().with_column_equals("Dim", "Attr", "A".into());
+    assert_eq!(model.evaluate_measure("Total", &filter_a).unwrap(), 100.0.into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &filter_a).unwrap(),
+        200.0.into()
+    );
+
+    let filter_b = FilterContext::empty().with_column_equals("Dim", "Attr", "B".into());
+    assert_eq!(model.evaluate_measure("Total", &filter_b).unwrap(), 200.0.into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &filter_b).unwrap(),
+        100.0.into()
+    );
+}
