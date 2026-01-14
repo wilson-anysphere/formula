@@ -10,7 +10,7 @@ use crate::persistence::{
 use chrono::Datelike;
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
-use formula_engine::FormatRun;
+use formula_engine::metadata::FormatRun;
 use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotTable as EnginePivotTable, PivotValue};
 use formula_engine::pivot::source::build_pivot_source_range_with_number_formats;
 use formula_engine::style_bridge::ui_style_to_model_style;
@@ -31,7 +31,7 @@ use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData as StorageCellData,
     CellRange as StorageCellRange, ImportModelWorkbookOptions,
 };
-use formula_model::{CellRef as ModelCellRef, Range as ModelRange, SheetVisibility, Style, TabColor};
+use formula_model::{CellRef as ModelCellRef, Range as ModelRange, SheetVisibility, TabColor};
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
