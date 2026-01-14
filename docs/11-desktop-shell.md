@@ -394,6 +394,10 @@ Notable keys:
 - `bundle.fileAssociations` registers spreadsheet file types with the OS:
   `.xlsx`, `.xls`, `.xlsm`, `.xltx`, `.xltm`, `.xlam`, `.xlsb`, `.csv`, `.parquet`.
   - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
+- `plugins.deep-link.desktop.schemes` registers **URL schemes** (deep links) with the OS at **bundle/install time**.
+  - In this repo we use the `formula://...` scheme for OAuth redirects; ensure `schemes` includes `"formula"`.
+  - On Linux, the freedesktop `.desktop` file includes these as `MimeType=x-scheme-handler/<scheme>`.
+  - Important: on Linux, the `.desktop` file only includes file MIME types when `bundle.fileAssociations[].mimeType` is set (it does **not** guess from extensions).
 - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
   appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
 - `bundle.linux.rpm.depends` documents runtime deps for RPM-based distros using **RPM rich dependencies**

@@ -109,6 +109,9 @@ node scripts/check-desktop-version.mjs vX.Y.Z
 # when the updater is active.
 node scripts/check-updater-config.mjs
 
+# Ensures the packaged app registers the `formula://` URL scheme (installer/bundle metadata).
+node scripts/check-desktop-url-scheme.mjs
+
 # Ensures the committed Cargo.lock matches the desktop build dependency graph.
 # (Fails if cargo would update Cargo.lock during the build.)
 cargo metadata --locked --format-version=1 --manifest-path apps/desktop/src-tauri/Cargo.toml --features desktop >/dev/null

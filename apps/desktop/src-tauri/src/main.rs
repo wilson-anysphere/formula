@@ -2278,14 +2278,15 @@ fn main() {
             tray::init(app)?;
             menu::init(app)?;
 
-            // Register deep-link URL schemes with the OS (Linux/Windows) so OAuth PKCE redirects
-            // can round-trip back into the running desktop app instance.
+            // `formula://` deep links are registered at bundle/install time via
+            // `tauri.conf.json` (plugins.deep-link.desktop.schemes) so OAuth redirects can
+            // round-trip back into the desktop app.
+            //
+            // Still attempt a best-effort runtime registration on supported platforms
+            // (Windows/Linux) to help "portable" installs (AppImage, unpacked artifacts).
             //
             // On macOS, schemes are registered via `Info.plist` (`CFBundleURLTypes`) and cannot be
             // installed dynamically at runtime.
-            //
-            // This is best-effort because some environments may deny registration and we still want
-            // the app to launch normally.
             #[cfg(any(target_os = "linux", windows))]
             if let Err(err) = app.handle().deep_link().register_all() {
                 eprintln!("[deep-link] failed to register deep link handlers: {err}");

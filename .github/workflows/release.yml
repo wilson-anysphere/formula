@@ -232,6 +232,9 @@ jobs:
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
 
+      - name: Validate desktop URL scheme registration metadata (formula://)
+        run: node scripts/check-desktop-url-scheme.mjs
+
       - name: Validate Tauri updater signing secrets
         # Forks/dry-runs often do not configure release secrets. We always validate updater
         # signing secrets in the upstream repo (so official releases can't ship without
