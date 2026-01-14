@@ -191,6 +191,7 @@ fn model_workbook_import_export_round_trips() {
             Cell {
                 value: CellValue::Number(1.0),
                 formula: None,
+                phonetic: None,
                 style_id: bold_id,
             },
         );
@@ -199,6 +200,7 @@ fn model_workbook_import_export_round_trips() {
             Cell {
                 value: CellValue::Empty,
                 formula: Some("SUM(A1)".to_string()),
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -208,6 +210,7 @@ fn model_workbook_import_export_round_trips() {
             Cell {
                 value: CellValue::String("far".to_string()),
                 formula: None,
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -240,6 +243,7 @@ fn model_workbook_import_export_round_trips() {
             Cell {
                 value: CellValue::RichText(rich.clone()),
                 formula: None,
+                phonetic: None,
                 style_id: plain_id,
             },
         );
@@ -248,6 +252,7 @@ fn model_workbook_import_export_round_trips() {
             Cell {
                 value: CellValue::Array(array.clone()),
                 formula: None,
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -258,6 +263,7 @@ fn model_workbook_import_export_round_trips() {
                     origin: CellRef::new(1, 0),
                 }),
                 formula: None,
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -266,6 +272,7 @@ fn model_workbook_import_export_round_trips() {
             Cell {
                 value: CellValue::Error(ErrorValue::Div0),
                 formula: None,
+                phonetic: None,
                 style_id: 0,
             },
         );
