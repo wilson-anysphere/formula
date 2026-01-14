@@ -1,7 +1,7 @@
 mod common;
 
 use common::build_model;
-use formula_dax::{DaxEngine, FilterContext, RowContext, Value};
+use formula_dax::{DataModel, DaxEngine, FilterContext, RowContext, Table, Value};
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -101,4 +101,36 @@ fn in_operator_table_expression_requires_one_column() {
         .unwrap_err();
     let message = err.to_string();
     assert!(message.contains("one-column"));
+}
+
+#[test]
+fn in_operator_calculate_filter_rhs_physical_mask() {
+    // Regression coverage: `IN` should support RHS table expressions that evaluate to a
+    // `TableResult::PhysicalMask` (dense row set). This exercises the `IN` HashSet extraction path
+    // for bitmap-backed physical tables.
+    let mut model = DataModel::new();
+
+    let mut keys = Table::new("Keys", vec!["Value"]);
+    for i in 1..=256 {
+        keys.push_row(vec![i.into()]).unwrap();
+    }
+    model.add_table(keys).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "CustomerId"]);
+    orders.push_row(vec![100.into(), 1.into()]).unwrap();
+    orders.push_row(vec![101.into(), 250.into()]).unwrap();
+    model.add_table(orders).unwrap();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(Orders), Orders[CustomerId] IN FILTER(Keys, Keys[Value] <= 200))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    // Only the CustomerId=1 row should match the IN filter.
+    assert_eq!(value, Value::from(1i64));
 }
