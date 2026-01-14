@@ -54,7 +54,7 @@
 
 .python-panel__editor-wrap:focus-within {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .python-panel__editor {

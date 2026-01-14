@@ -105,7 +105,7 @@ dialog.page-setup-dialog .page-setup-dialog__input:focus-visible,
 dialog.page-setup-dialog .page-setup-dialog__select:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 dialog.page-setup-dialog .page-setup-dialog__input--paper-size {

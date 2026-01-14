@@ -29,7 +29,7 @@
 .grid-scrollbar-thumb:hover,
 .grid-scrollbar-thumb:active {
   background: var(--formula-grid-cell-text, var(--text-primary));
-  box-shadow: 0 0 0 2px var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
+  box-shadow: 0 0 0 var(--space-1) var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
 }
 
 .grid-scrollbar-thumb:focus-visible {

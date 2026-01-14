@@ -17,7 +17,7 @@
 }
 
 .ribbon:focus-within {
-  box-shadow: inset 0 0 0 2px var(--selection-border);
+  box-shadow: inset 0 0 0 var(--space-1) var(--selection-border);
 }
 
 .ribbon__tabstrip {
@@ -224,7 +224,7 @@
 }
 
 :root[data-theme="high-contrast"] .ribbon__tab.ribbon__tab--file:hover:not(:focus-visible) {
-  box-shadow: inset 0 0 0 1px var(--text-on-accent);
+  box-shadow: inset 0 0 0 calc(var(--space-1) / 2) var(--text-on-accent);
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {
@@ -233,7 +233,7 @@
   }
 
   .ribbon__tab.ribbon__tab--file:hover:not(:focus-visible) {
-    box-shadow: inset 0 0 0 1px var(--text-on-accent);
+    box-shadow: inset 0 0 0 calc(var(--space-1) / 2) var(--text-on-accent);
   }
 }
 

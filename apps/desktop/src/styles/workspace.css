@@ -81,7 +81,7 @@
 }
 
 .grid-root[data-split-active="true"] {
-  box-shadow: inset 0 0 0 2px var(--formula-grid-selection-border, var(--selection-border));
+  box-shadow: inset 0 0 0 var(--space-1) var(--formula-grid-selection-border, var(--selection-border));
 }
 
 #grid-splitter {
@@ -197,11 +197,11 @@
 .dock-panel__tab:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .dock-panel__tab[aria-selected="true"]:focus-visible {
-  box-shadow: 0 0 0 2px var(--selection-bg), var(--shadow-surface);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg), var(--shadow-surface);
 }
 
 .dock-panel__controls {
@@ -243,7 +243,7 @@
 .dock-panel__control:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .dock-panel__control svg {
@@ -325,7 +325,7 @@
 .collab-panel__message button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .collab-panel__message button:disabled {
@@ -390,7 +390,7 @@
 .collab-version-history button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .collab-version-history button:disabled {
@@ -447,7 +447,7 @@
 .collab-version-history__input:focus,
 .collab-version-history__textarea:focus {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .collab-version-history__checkbox {
@@ -661,7 +661,7 @@
 
 .collab-version-history__compare-select:focus {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .collab-version-history__diff-group {
@@ -792,7 +792,7 @@
 
 .branch-manager__new-branch input:focus {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .branch-manager__new-branch input:disabled {
@@ -826,7 +826,7 @@
 .branch-manager button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .branch-manager button:disabled {
@@ -914,7 +914,7 @@
 .branch-merge button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .branch-merge button:disabled {
@@ -1115,7 +1115,7 @@
 .branch-merge__manual-cell-editor select:focus,
 .branch-merge__manual-cell-editor textarea:focus {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .branch-merge__manual-cell-editor textarea {

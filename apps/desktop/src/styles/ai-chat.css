@@ -117,7 +117,7 @@
 
 .ai-chat-agent__textarea:focus {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .ai-chat-agent__textarea:disabled {
@@ -156,7 +156,7 @@
 .ai-chat-agent__buttons button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .ai-chat-agent__buttons button:disabled {
@@ -399,7 +399,7 @@
 .ai-chat-panel__attachment-button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .ai-chat-panel__input {
@@ -421,7 +421,7 @@
 
 .ai-chat-panel__input:focus {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .ai-chat-panel__input:disabled {
@@ -457,7 +457,7 @@
 .ai-chat-approval-modal__button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .ai-chat-panel__button:disabled,

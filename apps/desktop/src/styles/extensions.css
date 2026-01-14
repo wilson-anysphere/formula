@@ -52,7 +52,7 @@
 
 .extensions-panel__button:focus-visible {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .extensions-panel__button:disabled {

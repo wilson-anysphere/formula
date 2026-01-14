@@ -52,7 +52,7 @@
 }
 
 .context-menu__separator {
-  height: 1px;
+  height: calc(var(--space-1) / 2);
   margin: var(--space-2);
   background: var(--border);
 }

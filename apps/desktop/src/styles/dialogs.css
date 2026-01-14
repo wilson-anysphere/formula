@@ -64,7 +64,7 @@
 .dialog__controls button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .dialog__controls button:disabled {
@@ -231,7 +231,7 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__header-button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .organize-sheets-dialog__header-button:disabled {
@@ -273,7 +273,7 @@ dialog.custom-sort-dialog::backdrop {
   height: 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  box-shadow: inset 0 0 0 1px var(--bg-primary);
+  box-shadow: inset 0 0 0 calc(var(--space-1) / 2) var(--bg-primary);
   flex: 0 0 auto;
 }
 
@@ -314,7 +314,7 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__actions button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .organize-sheets-dialog__actions button:disabled {
@@ -334,7 +334,7 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__rename-input:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .organize-sheets-dialog__error {

@@ -71,7 +71,7 @@
 .comments-panel__close-button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .comments-panel__active-cell {
@@ -185,7 +185,7 @@
 .comment-thread__reply-input:focus,
 .comment-thread__reply-input:focus-visible {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .comments-panel__new-comment-input:disabled,
@@ -228,7 +228,7 @@
 .comment-thread__submit-reply-button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .comments-panel__submit-button:disabled,

@@ -79,13 +79,13 @@
 
 .query-editor-container__toolbar select:focus-visible {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 @supports not selector(:focus-visible) {
   .query-editor-container__toolbar select:focus {
     border-color: var(--selection-border);
-    box-shadow: 0 0 0 2px var(--selection-bg);
+    box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
   }
 
   .query-editor-container__toolbar button:focus,
@@ -96,7 +96,7 @@
   .query-editor-add-step__suggestion:focus {
     outline: none;
     border-color: var(--selection-border);
-    box-shadow: 0 0 0 2px var(--selection-bg);
+    box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
   }
 
   .query-editor-add-step__menu-item:focus {
@@ -170,7 +170,7 @@
 .query-editor-container__toolbar button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .query-editor-container__action-error {
@@ -251,7 +251,7 @@
 .query-editor__sidebar-actions button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .query-editor__main {
@@ -358,7 +358,7 @@
 .query-editor-steps__button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .query-editor-steps__button--selected {
@@ -506,13 +506,13 @@
 
 .query-editor-add-step__ai-input:focus-visible {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 @supports not selector(:focus-visible) {
   .query-editor-add-step__ai-input:focus {
     border-color: var(--selection-border);
-    box-shadow: 0 0 0 2px var(--selection-bg);
+    box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
   }
 }
 
@@ -589,7 +589,7 @@
 .query-editor-add-step__suggestion:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .query-editor-add-step__suggestions {

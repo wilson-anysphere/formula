@@ -31,7 +31,7 @@
 .formula-sort-filter__input:focus,
 .formula-sort-filter__select:focus {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .formula-sort-filter__checkbox {
@@ -66,7 +66,7 @@
 .formula-sort-filter__button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .formula-sort-filter__button:disabled {
@@ -283,7 +283,7 @@
 
 .formula-table-filter-dropdown .formula-sort-filter__button:focus-visible {
   border-color: var(--formula-grid-selection-border, var(--selection-border));
-  box-shadow: 0 0 0 2px var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
+  box-shadow: 0 0 0 var(--space-1) var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
 }
 
 @supports selector(:has(*)) {

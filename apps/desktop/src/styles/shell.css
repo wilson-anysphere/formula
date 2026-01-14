@@ -172,7 +172,7 @@ dialog.print-preview-dialog::backdrop {
 .goto-dialog select:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .find-replace-dialog button,
@@ -205,7 +205,7 @@ dialog.print-preview-dialog::backdrop {
 .goto-dialog button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .find-replace-dialog button:disabled,
@@ -251,7 +251,7 @@ dialog.print-preview-dialog::backdrop {
 .grid-root:focus-visible {
   /* Show a stable keyboard focus ring around the grid region (separate from the
      active-cell selection border) so F6-driven focus cycling has a clear affordance. */
-  box-shadow: inset 0 0 0 2px var(--formula-grid-selection-border, var(--selection-border));
+  box-shadow: inset 0 0 0 var(--space-1) var(--formula-grid-selection-border, var(--selection-border));
 }
 
 .grid-canvas {
@@ -329,7 +329,7 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar:focus-within {
-  box-shadow: inset 0 0 0 2px var(--selection-border);
+  box-shadow: inset 0 0 0 var(--space-1) var(--selection-border);
 }
 
 .statusbar__main {
@@ -465,7 +465,7 @@ dialog.print-preview-dialog::backdrop {
 .statusbar button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .statusbar select {
@@ -491,7 +491,7 @@ dialog.print-preview-dialog::backdrop {
 .statusbar select:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 @media (max-width: 900px) {
@@ -536,10 +536,10 @@ dialog.print-preview-dialog::backdrop {
   */
   .statusbar [data-testid="sheet-position"] {
     position: absolute;
-    width: 1px;
-    height: 1px;
+    width: calc(var(--space-1) / 2);
+    height: calc(var(--space-1) / 2);
     padding: 0;
-    margin: -1px;
+    margin: calc((var(--space-1) / 2) * -1);
     overflow: hidden;
     clip: rect(0 0 0 0);
     clip-path: inset(50%);

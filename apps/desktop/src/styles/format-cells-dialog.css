@@ -169,7 +169,7 @@ dialog.format-cells-dialog::backdrop {
 
 .format-cells-dialog__swatch[data-selected="true"] {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .format-cells-dialog__actions {
