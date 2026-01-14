@@ -517,6 +517,78 @@ fn phonetic_metadata_moves_with_cell_on_move_range() {
 }
 
 #[test]
+fn phonetic_metadata_moves_with_cell_on_insert_cells_shift_right() {
+    let mut sheet = TestSheet::new();
+    sheet.set("B1", "漢字");
+    sheet.set_phonetic("B1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::InsertCellsShiftRight {
+        sheet: "Sheet1".to_string(),
+        range: Range::from_a1("A1").expect("range"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(C1)"),
+        Value::Text("かんじ".to_string())
+    );
+    assert_eq!(sheet.eval("=PHONETIC(B1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_moves_with_cell_on_insert_cells_shift_down() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::InsertCellsShiftDown {
+        sheet: "Sheet1".to_string(),
+        range: Range::from_a1("A1").expect("range"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A2)"),
+        Value::Text("かんじ".to_string())
+    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_moves_with_cell_on_delete_cells_shift_left() {
+    let mut sheet = TestSheet::new();
+    sheet.set("B1", "漢字");
+    sheet.set_phonetic("B1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::DeleteCellsShiftLeft {
+        sheet: "Sheet1".to_string(),
+        range: Range::from_a1("A1").expect("range"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+    assert_eq!(sheet.eval("=PHONETIC(B1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_moves_with_cell_on_delete_cells_shift_up() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A2", "漢字");
+    sheet.set_phonetic("A2", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::DeleteCellsShiftUp {
+        sheet: "Sheet1".to_string(),
+        range: Range::from_a1("A1").expect("range"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+    assert_eq!(sheet.eval("=PHONETIC(A2)"), Value::Text(String::new()));
+}
+
+#[test]
 fn phonetic_metadata_is_removed_when_clear_cell_deletes_record() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "漢字");
