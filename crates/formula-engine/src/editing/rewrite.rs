@@ -1,4 +1,4 @@
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 
 use crate::{
     parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellAddr,
@@ -163,6 +163,17 @@ pub fn rewrite_formula_for_range_map_with_resolver(
 ) -> (String, bool) {
     rewrite_formula_via_ast(formula, cell_origin, |expr| {
         rewrite_expr_for_range_map(expr, ctx_sheet, edit, &mut resolve_sheet_order_index)
+    })
+}
+
+pub fn rewrite_formula_for_sheet_delete(
+    formula: &str,
+    cell_origin: CellAddr,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> (String, bool) {
+    rewrite_formula_via_ast(formula, cell_origin, |expr| {
+        rewrite_expr_for_sheet_delete(expr, deleted_sheet, sheet_order)
     })
 }
 
@@ -472,6 +483,261 @@ fn range_has_external_workbook(expr: &Expr) -> bool {
         Expr::RowRef(r) => r.workbook.is_some(),
         Expr::ColRef(r) => r.workbook.is_some(),
         _ => false,
+    }
+}
+
+fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
+    crate::value::cmp_case_insensitive(a, b) == Ordering::Equal
+}
+
+fn sheet_index_in_order(sheet_order: &[String], name: &str) -> Option<usize> {
+    sheet_order
+        .iter()
+        .position(|sheet_name| sheet_name_eq_case_insensitive(sheet_name, name))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DeleteSheetRefRewrite {
+    Unchanged,
+    Adjusted(SheetRef),
+    Invalidate,
+}
+
+fn rewrite_sheet_ref_for_delete(
+    sheet: &SheetRef,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> DeleteSheetRefRewrite {
+    match sheet {
+        SheetRef::Sheet(name) => {
+            if sheet_name_eq_case_insensitive(name, deleted_sheet) {
+                DeleteSheetRefRewrite::Invalidate
+            } else {
+                DeleteSheetRefRewrite::Unchanged
+            }
+        }
+        SheetRef::SheetRange { start, end } => {
+            let start_matches = sheet_name_eq_case_insensitive(start, deleted_sheet);
+            let end_matches = sheet_name_eq_case_insensitive(end, deleted_sheet);
+            if !start_matches && !end_matches {
+                return DeleteSheetRefRewrite::Unchanged;
+            }
+
+            let Some(start_idx) = sheet_index_in_order(sheet_order, start) else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+            let Some(end_idx) = sheet_index_in_order(sheet_order, end) else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+
+            // The span references only the deleted sheet.
+            if start_idx == end_idx {
+                return DeleteSheetRefRewrite::Invalidate;
+            }
+
+            let dir: isize = if end_idx > start_idx { 1 } else { -1 };
+            let mut new_start_idx = start_idx as isize;
+            let mut new_end_idx = end_idx as isize;
+
+            // When deleting a 3D boundary, Excel shifts it one sheet toward the other boundary.
+            if start_matches {
+                new_start_idx += dir;
+            }
+            if end_matches {
+                new_end_idx -= dir;
+            }
+
+            let Some(new_start) = new_start_idx
+                .try_into()
+                .ok()
+                .and_then(|idx: usize| sheet_order.get(idx))
+            else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+            let Some(new_end) = new_end_idx
+                .try_into()
+                .ok()
+                .and_then(|idx: usize| sheet_order.get(idx))
+            else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+
+            if sheet_name_eq_case_insensitive(new_start, new_end) {
+                DeleteSheetRefRewrite::Adjusted(SheetRef::Sheet(new_start.clone()))
+            } else {
+                DeleteSheetRefRewrite::Adjusted(SheetRef::SheetRange {
+                    start: new_start.clone(),
+                    end: new_end.clone(),
+                })
+            }
+        }
+    }
+}
+
+fn rewrite_cell_ref_for_sheet_delete(
+    r: &AstCellRef,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (expr_ref(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (expr_ref(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (expr_ref(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (expr_ref(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_row_ref_for_sheet_delete(
+    r: &AstRowRef,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::RowRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::RowRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::RowRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::RowRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_col_ref_for_sheet_delete(
+    r: &AstColRef,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::ColRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::ColRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::ColRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::ColRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_name_ref_for_sheet_delete(
+    r: &crate::NameRef,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::NameRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::NameRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::NameRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::NameRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_structured_ref_for_sheet_delete(
+    r: &crate::StructuredRef,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::StructuredRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::StructuredRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::StructuredRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::StructuredRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_expr_for_sheet_delete(
+    expr: &Expr,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> (Expr, bool) {
+    match expr {
+        Expr::FieldAccess(access) => {
+            let (base, changed) =
+                rewrite_expr_for_sheet_delete(access.base.as_ref(), deleted_sheet, sheet_order);
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field: access.field.clone(),
+                }),
+                true,
+            )
+        }
+        Expr::CellRef(r) => rewrite_cell_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
+        Expr::RowRef(r) => rewrite_row_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
+        Expr::ColRef(r) => rewrite_col_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
+        Expr::NameRef(r) => rewrite_name_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
+        Expr::StructuredRef(r) => rewrite_structured_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
+        Expr::Binary(b) if b.op == BinaryOp::Range => {
+            let (left, left_changed) =
+                rewrite_expr_for_sheet_delete(&b.left, deleted_sheet, sheet_order);
+            let (right, right_changed) =
+                rewrite_expr_for_sheet_delete(&b.right, deleted_sheet, sheet_order);
+
+            if matches!(left, Expr::Error(_)) || matches!(right, Expr::Error(_)) {
+                return (Expr::Error(REF_ERROR.to_string()), true);
+            }
+            if !left_changed && !right_changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::Binary(BinaryExpr {
+                    op: b.op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }),
+                true,
+            )
+        }
+        _ => rewrite_expr_children(expr, |child| {
+            rewrite_expr_for_sheet_delete(child, deleted_sheet, sheet_order)
+        }),
     }
 }
 

@@ -3,7 +3,8 @@ use crate::calc_settings::{CalcSettings, CalculationMode};
 use crate::date::ExcelDateSystem;
 use crate::editing::rewrite::{
     rewrite_formula_for_copy_delta, rewrite_formula_for_range_map_with_resolver,
-    rewrite_formula_for_structural_edit_with_resolver, GridRange, RangeMapEdit, StructuralEdit,
+    rewrite_formula_for_sheet_delete, rewrite_formula_for_structural_edit_with_resolver, GridRange,
+    RangeMapEdit, StructuralEdit,
 };
 use crate::editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
@@ -821,6 +822,128 @@ impl Engine {
         self.workbook.workbook_filename = filename;
     }
 
+    /// Delete a worksheet from the workbook and rewrite any remaining formulas/defined names that
+    /// referenced it.
+    ///
+    /// This matches Excel's sheet delete semantics:
+    /// - Local references to the deleted sheet become `#REF!`.
+    /// - 3D references (`Sheet1:Sheet3!A1`) shift their boundaries inward when the deleted sheet was
+    ///   a boundary.
+    /// - External workbook references (`[Book.xlsx]Sheet1!A1`) are **not** rewritten.
+    pub fn delete_sheet(&mut self, sheet: &str) -> Result<(), EngineError> {
+        let Some(deleted_sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok(());
+        };
+        let deleted_sheet_name = self
+            .workbook
+            .sheet_name(deleted_sheet_id)
+            .unwrap_or(sheet)
+            .to_string();
+
+        // Keep the pre-delete sheet tab order so 3D span boundary shift logic can resolve adjacent
+        // sheets (Excel shifts a deleted 3D boundary one sheet inward).
+        let sheet_order_names: Vec<String> = self
+            .workbook
+            .sheet_ids_in_order()
+            .iter()
+            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| name.to_string()))
+            .collect();
+
+        // Mark the sheet as deleted while keeping its id stable.
+        self.workbook
+            .sheet_name_to_id
+            .remove(&Workbook::sheet_key(&deleted_sheet_name));
+        if let Some(name) = self.workbook.sheet_names.get_mut(deleted_sheet_id) {
+            *name = None;
+        }
+        self.workbook
+            .sheet_order
+            .retain(|&id| id != deleted_sheet_id);
+
+        // Drop any sheet-scoped state for the deleted worksheet.
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(deleted_sheet_id) {
+            sheet_state.cells.clear();
+            sheet_state.tables.clear();
+            sheet_state.names.clear();
+            sheet_state.row_properties.clear();
+            sheet_state.col_properties.clear();
+        }
+
+        // Rewrite formulas stored in remaining sheets.
+        let remaining_sheet_ids = self.workbook.sheet_ids_in_order().to_vec();
+        for sheet_id in &remaining_sheet_ids {
+            let Some(sheet) = self.workbook.sheets.get_mut(*sheet_id) else {
+                continue;
+            };
+            for (addr, cell) in sheet.cells.iter_mut() {
+                let Some(formula) = cell.formula.clone() else {
+                    continue;
+                };
+                let origin = crate::CellAddr::new(addr.row, addr.col);
+                let (rewritten, changed) = rewrite_formula_for_sheet_delete(
+                    &formula,
+                    origin,
+                    &deleted_sheet_name,
+                    &sheet_order_names,
+                );
+                if changed {
+                    cell.formula = Some(rewritten);
+                }
+            }
+        }
+
+        // Rewrite workbook-scoped names.
+        for def in self.workbook.names.values_mut() {
+            let formula = match &mut def.definition {
+                NameDefinition::Constant(_) => continue,
+                NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => formula,
+            };
+            let origin = crate::CellAddr::new(0, 0);
+            let (rewritten, changed) = rewrite_formula_for_sheet_delete(
+                formula,
+                origin,
+                &deleted_sheet_name,
+                &sheet_order_names,
+            );
+            if changed {
+                *formula = rewritten;
+            }
+        }
+
+        // Rewrite sheet-scoped names in remaining sheets.
+        for sheet_id in &remaining_sheet_ids {
+            let Some(sheet) = self.workbook.sheets.get_mut(*sheet_id) else {
+                continue;
+            };
+            for def in sheet.names.values_mut() {
+                let formula = match &mut def.definition {
+                    NameDefinition::Constant(_) => continue,
+                    NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => formula,
+                };
+                let origin = crate::CellAddr::new(0, 0);
+                let (rewritten, changed) = rewrite_formula_for_sheet_delete(
+                    formula,
+                    origin,
+                    &deleted_sheet_name,
+                    &sheet_order_names,
+                );
+                if changed {
+                    *formula = rewritten;
+                }
+            }
+        }
+
+        // Sheet deletion changes tab order and can invalidate references; rebuild compiled
+        // representations to ensure 3D spans and dependencies refresh correctly.
+        self.recompile_all_defined_names()?;
+        self.rebuild_graph()?;
+
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+        Ok(())
+    }
+
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
     ///
     /// When unset, sheets default to Excel-compatible dimensions
@@ -1557,6 +1680,72 @@ impl Engine {
         }
 
         self.sync_dirty_from_calc_graph();
+
+        Ok(())
+    }
+
+    fn recompile_all_defined_names(&mut self) -> Result<(), EngineError> {
+        let mut updates: Vec<(Option<SheetId>, String, Option<CompiledExpr>)> = Vec::new();
+
+        for (name, def) in &self.workbook.names {
+            let compiled = match &def.definition {
+                NameDefinition::Constant(_) => None,
+                NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                    let ast = crate::parse_formula(
+                        formula,
+                        crate::ParseOptions {
+                            locale: crate::LocaleConfig::en_us(),
+                            reference_style: crate::ReferenceStyle::A1,
+                            normalize_relative_to: None,
+                        },
+                    )?;
+                    let parsed = lower_ast(&ast, None);
+                    Some(self.compile_name_expr(&parsed))
+                }
+            };
+            updates.push((None, name.clone(), compiled));
+        }
+
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            for (name, def) in &sheet.names {
+                let compiled = match &def.definition {
+                    NameDefinition::Constant(_) => None,
+                    NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                        let ast = crate::parse_formula(
+                            formula,
+                            crate::ParseOptions {
+                                locale: crate::LocaleConfig::en_us(),
+                                reference_style: crate::ReferenceStyle::A1,
+                                normalize_relative_to: None,
+                            },
+                        )?;
+                        let parsed = lower_ast(&ast, None);
+                        Some(self.compile_name_expr(&parsed))
+                    }
+                };
+                updates.push((Some(sheet_id), name.clone(), compiled));
+            }
+        }
+
+        for (scope_sheet, name, compiled) in updates {
+            match scope_sheet {
+                None => {
+                    if let Some(def) = self.workbook.names.get_mut(&name) {
+                        def.compiled = compiled;
+                    }
+                }
+                Some(sheet_id) => {
+                    if let Some(def) = self
+                        .workbook
+                        .sheets
+                        .get_mut(sheet_id)
+                        .and_then(|s| s.names.get_mut(&name))
+                    {
+                        def.compiled = compiled;
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
