@@ -1011,7 +1011,17 @@ function spliceReferenceSpans(
 ): HighlightSpan[] {
   if (referenceTokens.length === 0) return spans;
 
-  const refs = [...referenceTokens].sort((a, b) => a.start - b.start);
+  let refs: ReadonlyArray<{ start: number; end: number }> = referenceTokens;
+  let sorted = true;
+  let lastStart = -Infinity;
+  for (const ref of referenceTokens) {
+    if (ref.start < lastStart) {
+      sorted = false;
+      break;
+    }
+    lastStart = ref.start;
+  }
+  if (!sorted) refs = [...referenceTokens].sort((a, b) => a.start - b.start);
   const out: HighlightSpan[] = [];
   let pos = 0;
   let spanIndex = 0;
