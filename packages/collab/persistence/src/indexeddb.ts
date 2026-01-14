@@ -157,7 +157,10 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
     entry.resolveDestroyed();
     entry.doc.off("destroy", entry.onDocDestroy);
     entry.doc.off("update", entry.onDocUpdate);
-    entry.persistence.destroy();
+    // `y-indexeddb`'s `destroy()` returns a Promise. Ignore failures to avoid unhandled
+    // rejections during teardown (e.g. if IndexedDB open failed or the DB was closed
+    // concurrently).
+    void (entry.persistence as any).destroy?.().catch?.(() => {});
     this.entries.delete(docId);
     this.updateCounts.delete(docId);
     const timer = this.compactTimers.get(docId);
@@ -445,7 +448,7 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
     const tmpDoc = new Y.Doc();
     const tmp = new IndexeddbPersistence(docId, tmpDoc);
     await tmp.clearData();
-    tmp.destroy();
+    void (tmp as any).destroy?.().catch?.(() => {});
     tmpDoc.destroy();
   }
 }
