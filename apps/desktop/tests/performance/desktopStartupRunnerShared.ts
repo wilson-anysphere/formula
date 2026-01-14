@@ -304,7 +304,7 @@ export function shouldUseXvfb(): boolean {
   return false;
 }
 
-export { mean, median, percentile, stdDev } from './benchmark.ts';
+export { mean, median, percentile, stdDev, buildBenchmarkResultFromValues } from './benchmark.ts';
 
 export function parseStartupLine(line: string): StartupMetrics | null {
   // Example:
