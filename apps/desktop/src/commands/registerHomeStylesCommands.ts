@@ -91,6 +91,16 @@ export function registerHomeStylesCommands(params: {
         return;
       }
 
+      if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true && !decision.allRangesBand) {
+        try {
+          showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+        } catch {
+          // ignore (toast root missing in tests/headless)
+        }
+        focusGrid();
+        return;
+      }
+
       const presetId = await showQuickPick<GoodBadNeutralCellStyleId>(getGoodBadNeutralCellStyleQuickPickItems(), {
         placeHolder: "Good, Bad, and Neutral",
       });
