@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+let priorGridMode: string | undefined;
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -73,11 +75,17 @@ function createRoot(): HTMLElement {
 
 describe("SpreadsheetApp formula-bar range preview tooltip", () => {
   afterEach(() => {
+    if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+    else process.env.DESKTOP_GRID_MODE = priorGridMode;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
+    priorGridMode = process.env.DESKTOP_GRID_MODE;
+    // Use legacy grid mode for these tests to avoid shared-grid viewport callbacks
+    // firing before the SpreadsheetApp constructor has fully initialized all overlays.
+    process.env.DESKTOP_GRID_MODE = "legacy";
     document.body.innerHTML = "";
 
     const storage = createInMemoryLocalStorage();
@@ -405,6 +413,60 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     const cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
     // Sample grid is capped to 3 rows; includes header row for #All.
     expect(cells).toEqual(["Amount", "Other", "1", "10", "2", "20"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("renders a preview for structured table reference specifiers (Table1[#Headers])", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    // Table range includes header row at A1:B1 and data rows at A2:B4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, "Other");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 1);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 10);
+
+    app.getSearchWorkbook().addTable({
+      name: "Table1",
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 1,
+      columns: ["Amount", "Other"],
+    });
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=SUM(Table1[#Headers])", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = Array.from(highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? []);
+    const refSpan = refSpans.find((s) => s.textContent === "Table1[#Headers]") ?? null;
+    expect(refSpan?.textContent).toBe("Table1[#Headers]");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    const header = tooltip!.querySelector<HTMLElement>(".formula-range-preview-tooltip__header");
+    expect(header?.textContent).toBe("Table1[#Headers] (A1:B1)");
+
+    const cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual(["Amount", "Other"]);
 
     app.destroy();
     root.remove();
