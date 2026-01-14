@@ -6355,7 +6355,7 @@ export class SpreadsheetApp {
       // Ensure the drawings overlay is up-to-date after the batch completes.
       this.renderDrawings();
       this.renderSelection();
-      this.emitDrawingsChanged();
+      this.dispatchDrawingsChanged();
       this.focus();
     }
   }
@@ -8855,7 +8855,7 @@ export class SpreadsheetApp {
     // Deleting an object changes both the drawings list and the active selection.
     // Emit explicit notifications so panels like Selection Pane update immediately even
     // if DocumentController emits change events asynchronously.
-    this.emitDrawingsChanged();
+    this.dispatchDrawingsChanged();
   }
 
   duplicateSelectedDrawing(): void {
@@ -9652,7 +9652,7 @@ export class SpreadsheetApp {
       }
       this.renderDrawings();
       this.renderSelection();
-      this.emitDrawingsChanged();
+      this.dispatchDrawingsChanged();
       this.focus();
     } catch (err) {
       throw err;
@@ -19214,7 +19214,7 @@ export class SpreadsheetApp {
     this.drawingHitTestIndex = null;
     this.drawingHitTestIndexObjects = null;
     this.refresh();
-    this.emitDrawingsChanged();
+    this.dispatchDrawingsChanged();
     this.focus();
   }
 
@@ -19490,7 +19490,7 @@ export class SpreadsheetApp {
       this.dispatchDrawingSelectionChanged();
     }
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
-    this.emitDrawingsChanged();
+    this.dispatchDrawingsChanged();
     this.focus();
     return true;
   }
