@@ -814,6 +814,41 @@ impl Engine {
         self.workbook.ensure_sheet(sheet);
     }
 
+    /// Resolve a worksheet name to its stable sheet id.
+    ///
+    /// Matching is case-insensitive and Unicode/NFKC-aware (Excel-like).
+    pub fn sheet_id(&self, name: &str) -> Option<SheetId> {
+        self.workbook.sheet_id(name)
+    }
+
+    /// Resolve a stable sheet id back to its display name.
+    pub fn sheet_name(&self, id: SheetId) -> Option<&str> {
+        self.workbook.sheet_name(id)
+    }
+
+    /// Returns stable sheet ids in the current workbook tab order.
+    pub fn sheet_ids_in_order(&self) -> Vec<SheetId> {
+        self.workbook.sheet_ids_in_order().to_vec()
+    }
+
+    /// Returns worksheet display names in the current workbook tab order.
+    pub fn sheet_names_in_order(&self) -> Vec<String> {
+        self.workbook
+            .sheet_ids_in_order()
+            .iter()
+            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| name.to_string()))
+            .collect()
+    }
+
+    /// Returns `(sheet_id, display_name)` pairs in the current workbook tab order.
+    pub fn sheets_in_order(&self) -> Vec<(SheetId, String)> {
+        self.workbook
+            .sheet_ids_in_order()
+            .iter()
+            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| (id, name.to_string())))
+            .collect()
+    }
+
     /// Reorder a worksheet within the workbook's tab order.
     ///
     /// 3D sheet spans like `Sheet1:Sheet3!A1` are defined in terms of workbook tab order, so
