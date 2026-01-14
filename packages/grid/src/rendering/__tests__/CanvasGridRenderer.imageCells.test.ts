@@ -483,6 +483,100 @@ describe("CanvasGridRenderer image cells", () => {
     }
   });
 
+  it("revokes object URLs when the <img> fallback fails to load", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "img1", altText: "img", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const createImageBitmapSpy = vi.fn((src: any) => {
+      if (src instanceof Blob) {
+        const err = new Error("decode failed");
+        (err as any).name = "InvalidStateError";
+        return Promise.reject(err);
+      }
+      return Promise.resolve({ width: 10, height: 10 } as any);
+    });
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const URLCtor = globalThis.URL as any;
+    const originalCreateObjectURL = URLCtor?.createObjectURL;
+    const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:fake");
+    const revokeObjectURL = vi.fn();
+    URLCtor.createObjectURL = createObjectURL;
+    URLCtor.revokeObjectURL = revokeObjectURL;
+
+    try {
+      class FakeImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_value: string) {
+          this.onerror?.();
+        }
+      }
+      vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+      const renderer = new CanvasGridRenderer({
+        provider,
+        rowCount: 1,
+        colCount: 1,
+        defaultColWidth: 100,
+        defaultRowHeight: 50,
+        imageResolver
+      });
+      renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+      renderer.resize(100, 50, 1);
+
+      renderer.renderImmediately();
+      await flushMicrotasks();
+      renderer.renderImmediately();
+      await flushMicrotasks();
+
+      expect(imageResolver).toHaveBeenCalledTimes(1);
+      expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
+      expect(createImageBitmapSpy.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+      else URLCtor.createObjectURL = originalCreateObjectURL;
+      if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+      else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
   it("evicts least-recently-used decoded images when the image cache exceeds its max size", async () => {
     const provider: CellProvider = {
       getCell: (row, col) =>
