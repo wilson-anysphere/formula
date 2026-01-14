@@ -720,10 +720,43 @@ export class DocumentCellProvider implements CellProvider {
 
   private resolveLinkColor(): string {
     if (this.resolvedLinkColor != null) return this.resolvedLinkColor;
-    // Canvas renderers cannot consume raw `var(--token)` values, so resolve the
-    // computed color now. We intentionally use a system color fallback so unit
-    // tests / non-DOM environments remain readable.
-    const resolved = resolveCssVar("--formula-grid-link", { fallback: "LinkText" });
+    // Canvas renderers cannot consume raw `var(--token)` values. Additionally, system
+    // color keywords (e.g. `LinkText`) are not always accepted by canvas color parsers,
+    // so best-effort normalize the token into a computed `rgb(...)` string via a
+    // hidden DOM probe when available.
+    //
+    // We intentionally use a system color fallback so unit tests / non-DOM
+    // environments remain readable.
+    let resolved = resolveCssVar("--formula-grid-link", { fallback: "LinkText" });
+
+    const root = globalThis?.document?.documentElement ?? null;
+    if (root && typeof getComputedStyle === "function") {
+      const probe = root.ownerDocument.createElement("div");
+      probe.style.position = "absolute";
+      probe.style.width = "0";
+      probe.style.height = "0";
+      probe.style.overflow = "hidden";
+      probe.style.pointerEvents = "none";
+      probe.style.visibility = "hidden";
+      probe.style.setProperty("contain", "strict");
+
+      root.appendChild(probe);
+      try {
+        probe.style.color = "";
+        probe.style.color = resolved;
+
+        // If the assignment was rejected (invalid value), keep the raw token
+        // (it may still be valid in other environments).
+        if (probe.style.color) {
+          const computed = getComputedStyle(probe).color;
+          const normalized = computed?.trim();
+          if (normalized) resolved = normalized;
+        }
+      } finally {
+        probe.remove();
+      }
+    }
+
     this.resolvedLinkColor = resolved;
     return resolved;
   }
