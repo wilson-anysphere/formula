@@ -149,9 +149,17 @@ fn de_de_function_translation_table_covers_all_registered_functions() {
 }
 
 #[test]
-fn canonicalize_supports_thousands_and_leading_decimal_in_de_de() {
-    let canonical = locale::canonicalize_formula("=SUMME(1.234,56;,5)", &locale::DE_DE).unwrap();
+fn canonicalize_accepts_thousands_grouping_in_de_de_but_localize_omits_grouping() {
+    let localized_with_grouping = "=SUMME(1.234,56;,5)";
+    let canonical = locale::canonicalize_formula(localized_with_grouping, &locale::DE_DE).unwrap();
     assert_eq!(canonical, "=SUM(1234.56,.5)");
+
+    // Excel accepts thousands separators in localized input, but `FormulaLocal` does not insert
+    // grouping when serializing formulas back. Localization should omit grouping as well.
+    assert_eq!(
+        locale::localize_formula(&canonical, &locale::DE_DE).unwrap(),
+        "=SUMME(1234,56;,5)"
+    );
 }
 
 #[test]
