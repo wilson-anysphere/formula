@@ -593,6 +593,86 @@ fn phonetic_metadata_moves_with_cell_on_delete_cells_shift_up() {
 }
 
 #[test]
+fn phonetic_metadata_moves_with_cell_on_insert_rows() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::InsertRows {
+        sheet: "Sheet1".to_string(),
+        row: 0,
+        count: 1,
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A2)"),
+        Value::Text("かんじ".to_string())
+    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_moves_with_cell_on_insert_cols() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::InsertCols {
+        sheet: "Sheet1".to_string(),
+        col: 0,
+        count: 1,
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(B1)"),
+        Value::Text("かんじ".to_string())
+    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_does_not_stick_to_address_on_delete_rows() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    sheet.set("A2", "東京");
+
+    sheet.apply_operation(EditOp::DeleteRows {
+        sheet: "Sheet1".to_string(),
+        row: 0,
+        count: 1,
+    });
+
+    // After deleting the first row, the content from A2 moves into A1. The old phonetic metadata
+    // must not "stick" to the address.
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("東京".to_string())
+    );
+}
+
+#[test]
+fn phonetic_metadata_does_not_stick_to_address_on_delete_cols() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    sheet.set("B1", "東京");
+
+    sheet.apply_operation(EditOp::DeleteCols {
+        sheet: "Sheet1".to_string(),
+        col: 0,
+        count: 1,
+    });
+
+    // After deleting the first column, the content from B1 moves into A1. The old phonetic metadata
+    // must not "stick" to the address.
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("東京".to_string())
+    );
+}
+
+#[test]
 fn phonetic_metadata_is_removed_when_clear_cell_deletes_record() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "漢字");
@@ -701,6 +781,35 @@ fn phonetic_metadata_is_retained_on_style_only_edits() {
     sheet.set_cell_style_id("A1", style_id);
     assert_eq!(
         sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+}
+
+#[test]
+fn phonetic_metadata_is_retained_on_number_format_only_edits() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "漢字").unwrap();
+    engine
+        .set_cell_phonetic("Sheet1", "A1", Some("かんじ".to_string()))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=PHONETIC(A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("かんじ".to_string())
+    );
+
+    // Formatting-only edits should not clear phonetic metadata.
+    engine
+        .set_cell_number_format("Sheet1", "A1", Some("0.00".to_string()))
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
         Value::Text("かんじ".to_string())
     );
 }
