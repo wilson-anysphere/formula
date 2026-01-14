@@ -79,7 +79,8 @@
 }
 
 .grid-canvas--drawings {
-  /* Semantic hook for the drawings/images overlay canvas (no-op by default). */
+  z-index: 3;
+  z-index: var(--grid-z-drawings-overlay, 3);
 }
 
 .grid-canvas--shared-drawings {
