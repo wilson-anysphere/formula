@@ -1296,12 +1296,13 @@ function applyErrorSpan(formula: string, spans: HighlightSpan[], errorSpan: Form
 
     const overlapStart = Math.max(span.start, start);
     const overlapEnd = Math.min(span.end, end);
+    const errorClassName = span.className ? `${span.className} formula-bar-token--error` : "formula-bar-token--error";
     pushSpan({
       ...span,
       start: overlapStart,
       end: overlapEnd,
       text: formula.slice(overlapStart, overlapEnd),
-      className: [span.className, "formula-bar-token--error"].filter(Boolean).join(" "),
+      className: errorClassName,
     });
 
     if (span.end > end) {
