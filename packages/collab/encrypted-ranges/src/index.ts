@@ -71,8 +71,10 @@ function createSheetIdResolverFromWorkbook(doc: Y.Doc): (ref: string) => string 
   const idsByCi = new Map<string, string>();
   const idsByNameCi = new Map<string, string>();
 
-  const entries = typeof (sheets as any)?.toArray === "function" ? (sheets as any).toArray() : [];
-  for (const entry of entries) {
+  const yarr = sheets as any;
+  const length = typeof yarr?.length === "number" ? yarr.length : typeof yarr?.toArray === "function" ? yarr.toArray().length : 0;
+  for (let i = 0; i < length; i += 1) {
+    const entry = yarr.get(i);
     const map = getYMap(entry);
     const obj = map ? null : entry && typeof entry === "object" ? (entry as any) : null;
     const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
