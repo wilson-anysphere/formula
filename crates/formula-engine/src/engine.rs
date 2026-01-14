@@ -8250,6 +8250,7 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// * For **external workbook** lookups (where `sheet` is a key like `"[Book.xlsx]Sheet1"`), returning
 ///   `None` is treated as an unresolved external link and evaluates to `#REF!`. Providers should
 ///   return `Some(Value::Blank)` to represent a blank cell in an external workbook.
+/// * `addr` is 0-indexed (`A1` = `CellAddr { row: 0, col: 0 }`).
 ///
 /// # Threading / performance
 ///

@@ -161,6 +161,7 @@ The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, a
 * For **local sheet names** (e.g. `"Sheet1"`), returning `None` is treated as a blank cell (`Value::Blank`).
 * For **external sheet keys** (e.g. `"[Book.xlsx]Sheet1"`), returning `None` is treated as an unresolved external link and
   evaluates to `#REF!`. Providers should return `Some(Value::Blank)` to represent a blank cell in an external workbook.
+* `addr` is 0-indexed (`A1` = `CellAddr { row: 0, col: 0 }`).
 
 Implementation notes:
 
