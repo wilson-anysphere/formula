@@ -120,6 +120,29 @@ describe("createRibbonActionsFromCommands", () => {
     expect(run).toHaveBeenCalledWith(true);
   });
 
+  it("suppresses follow-up onCommand calls scheduled via a microtask that then queues a timer after onToggle", async () => {
+    const registry = new CommandRegistry();
+    const run = vi.fn();
+    registry.registerBuiltinCommand("ribbon.toggle.microtaskTimer", "Toggle", run);
+
+    const actions = createRibbonActionsFromCommands({ commandRegistry: registry });
+    actions.onToggle?.("ribbon.toggle.microtaskTimer", true);
+    // Some hosts may enqueue work in microtasks that then schedules the follow-up `onCommand`
+    // on a timer (e.g. Promise.then(() => setTimeout(...))).
+    await new Promise<void>((resolve) => {
+      queueMicrotask(() => {
+        setTimeout(() => {
+          actions.onCommand?.("ribbon.toggle.microtaskTimer");
+          resolve();
+        }, 0);
+      });
+    });
+    await flushMicrotasks();
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(true);
+  });
+
   it("allows unknown toggles to fall through to onUnknownCommand when onUnknownToggle returns false", async () => {
     const registry = new CommandRegistry();
     const onUnknownCommand = vi.fn();
