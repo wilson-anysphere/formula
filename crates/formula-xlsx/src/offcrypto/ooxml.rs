@@ -177,8 +177,8 @@ fn decrypt_standard_cryptoapi_aes(
     // 5) Decrypt the `EncryptedPackage` stream.
     //
     // Standard/CryptoAPI encryption has multiple variants in the wild. In practice, the main
-    // interoperability differences are in how the package ciphertext is chunked and how the AES-CBC
-    // IV (and sometimes key) are varied per chunk.
+    // interoperability differences are in how the package ciphertext is chunked and how per-chunk
+    // parameters (e.g. IV/key selection) are varied.
     //
     // Try a small set of schemes and pick the first result that looks like an OOXML ZIP payload.
     //
@@ -186,7 +186,7 @@ fn decrypt_standard_cryptoapi_aes(
     // by chance with wrong IVs/keys, and we want decryption to reliably surface WrongPassword
     // instead of returning garbage bytes that fail later.
     //
-    // 1) The spec-like CBC-per-segment-IV scheme.
+    // 1) Segmented mode (legacy compatibility).
     if let Ok(out) = decrypt_encrypted_package_stream(
         encrypted_package_stream,
         &key0,

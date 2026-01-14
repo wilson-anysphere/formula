@@ -257,10 +257,7 @@ pub fn decrypt_encrypted_package_standard_aes_to_writer<R: Read, W: Write>(
 ///
 /// Algorithm summary:
 /// - First 8 bytes are the original plaintext size (`orig_size`) as a little-endian `u64`.
-/// - Remaining bytes are AES ciphertext.
-///   - Baseline MS-OFFCRYPTO/ECMA-376: AES-ECB (no IV).
-///   - Some producers: segmented AES-CBC with per-segment IV derived from `salt` (see
-///     `docs/offcrypto-standard-encryptedpackage.md`).
+/// - Remaining bytes are AES ciphertext (baseline MS-OFFCRYPTO/ECMA-376: AES-ECB, no IV).
 /// - The concatenated plaintext is truncated to `orig_size` (do **not** rely on PKCS#7 unpadding).
 ///
 /// When `salt` is present, this function will try both modes and pick the most plausible output
@@ -313,14 +310,14 @@ pub fn decrypt_standard_encrypted_package_stream(
     }
 
     let mut plaintext = if !salt.is_empty() {
-        // Some producers encrypt Standard/CryptoAPI `EncryptedPackage` using segmented AES-CBC
-        // with a per-segment IV derived from the Standard salt ("Variant B" in our docs).
+        // Some producers encrypt Standard/CryptoAPI `EncryptedPackage` using a non-standard
+        // segmented mode.
         //
         // Unfortunately, some real-world files still use AES-ECB while also carrying a salt, so
         // we cannot select the mode purely from `salt.is_empty()`.
         //
         // Approach:
-        // - Try both CBC and ECB.
+        // - Try both candidate decryptions (ECB and the segmented fallback).
         // - Prefer whichever candidate looks like a valid ZIP (OOXML payload).
         // - If neither looks like a ZIP, fall back to PKCS#7 padding shape as a weak heuristic,
         //   then default to ECB for compatibility.

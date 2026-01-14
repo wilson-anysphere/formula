@@ -18,14 +18,12 @@ The intent is that an engineer can implement this without reading any external r
 For repo-specific implementation notes (which parameter subsets we accept, crate entrypoints, writer
 defaults), see `docs/office-encryption.md`.
 
-Important nuance: “Standard/CryptoAPI AES” is **not perfectly uniform** across producers. This guide
-describes the **Excel/`msoffcrypto-tool`-style** variant implemented by `crates/formula-offcrypto`,
-where the verifier fields and `EncryptedPackage` are decrypted with **AES-ECB** (no IV) after key
-derivation.
+Important nuance: this guide describes the **Excel/`msoffcrypto-tool`-style** Standard/CryptoAPI AES
+variant implemented by `crates/formula-offcrypto`, where the verifier fields and `EncryptedPackage`
+are decrypted with **AES-ECB** (no IV) after key derivation.
 
-If you see “every password is wrong” failures on Standard-encrypted inputs, it may be a mode/IV
-mismatch (CBC-style variants exist). See `docs/offcrypto-standard-encryptedpackage.md` and
-`crates/formula-office-crypto/src/standard.rs` (`StandardScheme`) for variant context.
+If you need broader real-world compatibility across non-Excel producers, prefer
+`crates/formula-office-crypto`’s Standard decryptor.
 
 For Agile (4.4) OOXML password decryption details (different scheme; XML descriptor + `dataIntegrity`
 HMAC), see `docs/22-ooxml-encryption.md`.
@@ -317,7 +315,7 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
 (AES-256), and `SHA1(inner||outer)` yields 40 bytes.
 
-### 5.3) IV derivation: none for Standard AES-ECB (compatibility notes)
+### 5.3) IV derivation: none for Standard AES-ECB
 
 RC4 is a stream cipher and has no IV.
 
@@ -328,17 +326,6 @@ fixtures), both:
 * the `EncryptedPackage` ciphertext
 
 are decrypted with **AES-ECB**, which uses **no IV**.
-
-Some third-party producers and internal tooling use **non-standard AES-CBC** layouts for
-`EncryptedPackage` (segmented or stream-CBC). If you need maximum compatibility, one commonly
-encountered IV derivation for CBC-segmented variants is:
-
-```text
-IV_full = Hash( Salt || LE32(segmentIndex) )
-IV = IV_full[0:16]   // AES block size
-```
-
-This IV derivation is **not used** by the baseline Standard AES-ECB algorithm described in §7.2.1.
 
 ---
 
@@ -526,14 +513,6 @@ key (32 bytes, CryptDeriveKey expansion) =
 
 `EncryptedPackage` for baseline Standard AES is decrypted with **AES-ECB** and uses **no IV**.
 
-Optional (CBC-segmented variant only): if you encounter an `EncryptedPackage` encrypted with a
-per-segment IV derived as `IV = SHA1(salt || LE32(segmentIndex))[0:16]`, then:
-
-```text
-iv0 (segmentIndex=0) =
-  719ea750a65a93d80e1e0ba33a2ba0e7
-```
-
 ### 8.1) AES-128 + AES-ECB `EncryptedPackage` sanity check (real file bytes)
 
 This vector matches a real Standard-encrypted workbook in this repo:
@@ -622,13 +601,6 @@ H_block0 = e2f8cde457e5d449eb205057c88d201d14531ff3
 
 key (AES-128, 16 bytes; CryptDeriveKey result) =
   40b13a71f90b966e375408f2d181a1aa
-
-Optional (CBC-segmented variant only): with `IV = SHA1(salt || LE32(segmentIndex))[0:16]`:
-
-```text
-iv0 (segmentIndex=0) =
-  a1cdc25336964d314dd968da998d05b8
-```
 
 Sanity check:
 
