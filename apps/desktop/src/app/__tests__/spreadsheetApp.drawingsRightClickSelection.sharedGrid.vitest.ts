@@ -143,7 +143,7 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     vi.restoreAllMocks();
   });
 
-  it("selects the drawing without moving the active cell on right click", () => {
+  it("selects the drawing without moving the active cell on right click (without drawing interactions enabled)", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -151,8 +151,47 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
       activeValue: document.createElement("div"),
     };
 
-    // Right-click selection is handled by the DrawingInteractionController (which is behind
-    // `enableDrawingInteractions`).
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("shared");
+
+    // Move the active cell away from A1 so we can detect selection changes.
+    app.activateCell({ row: 5, col: 5 }, { scrollIntoView: false, focus: false });
+    const beforeActive = app.getActiveCell();
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+
+    // Seed draw objects using the public test helper so the capture-based hit test sees them.
+    app.setDrawingObjects([drawing]);
+
+    // Right-click within the picture bounds. This should select the drawing but *not* move the active cell.
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    selectionCanvas.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: 60, clientY: 30, button: 2 }));
+
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect(app.getActiveCell()).toEqual(beforeActive);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("selects the drawing without moving the active cell on right click (with drawing interactions enabled)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // Right-click selection is handled by the DrawingInteractionController when enabled.
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
     expect(app.getGridMode()).toBe("shared");
 
