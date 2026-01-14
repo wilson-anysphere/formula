@@ -117,7 +117,9 @@ impl ValueLocaleConfig {
             "en" => match parts.region {
                 // Note: the formula parsing locale still maps `en-GB` to `en-US` (English function
                 // names + `,` argument separators), but value parsing needs the date-order tweak.
-                Some("gb") | Some("uk") => Some(Self::en_gb()),
+                Some("gb") | Some("uk") | Some("au") | Some("nz") | Some("ie") | Some("za") => {
+                    Some(Self::en_gb())
+                }
                 _ => Some(Self::en_us()),
             },
             "ja" => Some(Self::ja_jp()),

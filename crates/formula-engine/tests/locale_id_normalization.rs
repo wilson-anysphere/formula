@@ -29,6 +29,12 @@ fn get_locale_normalizes_locale_ids() {
         // `en-GB` is accepted as an alias for the formula locale (English function names +
         // `,` separators).
         ("en-GB", &locale::EN_US),
+        // Other English locales still use the `en-US` formula parsing locale, even though value
+        // parsing may use a different date order.
+        ("en-AU", &locale::EN_US),
+        ("en-NZ", &locale::EN_US),
+        ("en-IE", &locale::EN_US),
+        ("en-ZA", &locale::EN_US),
         // Ignore BCP-47 variants/extensions.
         ("fr-FR-u-nu-latn", &locale::FR_FR),
         ("de-CH-1996", &locale::DE_DE),
@@ -59,6 +65,10 @@ fn value_locale_config_for_locale_id_normalizes_locale_ids() {
         // Exact IDs still work.
         ("en-US", ValueLocaleConfig::en_us()),
         ("en-GB", ValueLocaleConfig::en_gb()),
+        ("en-AU", ValueLocaleConfig::en_gb()),
+        ("en-NZ", ValueLocaleConfig::en_gb()),
+        ("en-IE", ValueLocaleConfig::en_gb()),
+        ("en-ZA", ValueLocaleConfig::en_gb()),
         ("de-DE", ValueLocaleConfig::de_de()),
         ("fr-FR", ValueLocaleConfig::fr_fr()),
         ("es-ES", ValueLocaleConfig::es_es()),
