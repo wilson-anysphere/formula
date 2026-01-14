@@ -753,6 +753,19 @@ mod tests {
     }
 
     #[test]
+    fn pivot_field_ref_display_allows_unicode_table_identifiers_without_quotes() {
+        // DAX identifiers are Unicode-aware; ensure we don't over-quote common non-ASCII names.
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "Straße".to_string(),
+                column: "Amount".to_string(),
+            }
+            .to_string(),
+            "Straße[Amount]"
+        );
+    }
+
+    #[test]
     fn pivot_field_ref_serde_back_compat() {
         // Plain strings should decode as cache field names.
         let raw = serde_json::json!("Region");
