@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { distinctColumnValues, TableViewRow } from "./tableView";
+import { t } from "../i18n/index.js";
 
 export interface AutoFilterDropdownProps {
   rows: TableViewRow[];
@@ -28,12 +29,14 @@ export function AutoFilterDropdown({
   );
   const [query, setQuery] = useState("");
 
-  const valueLabel = (value: string): string => (value === "" ? "(Blanks)" : value);
+  const blanksLabel = t("filterDropdown.blanks");
+  const valueLabel = (value: string): string => (value === "" ? blanksLabel : value);
   const visibleValues = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return values;
-    return values.filter((v) => (v === "" ? "(blanks)" : v).toLowerCase().includes(q));
-  }, [values, query]);
+    const blank = blanksLabel.toLowerCase();
+    return values.filter((v) => (v === "" ? blank : v).toLowerCase().includes(q));
+  }, [values, query, blanksLabel]);
   const selectedVisibleCount = useMemo(() => {
     let count = 0;
     for (const v of visibleValues) {
@@ -77,15 +80,15 @@ export function AutoFilterDropdown({
       <div className="formula-table-filter-dropdown__search">
         <input
           className="formula-sort-filter__input"
-          placeholder="Search"
-          aria-label="Search filter values"
+          placeholder={t("filterDropdown.search.placeholder")}
+          aria-label={t("filterDropdown.search.ariaLabel")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           autoFocus
         />
       </div>
       <div className="formula-table-filter-dropdown__list">
-        {visibleValues.length === 0 && <div className="formula-table-filter-dropdown__empty">No matches</div>}
+        {visibleValues.length === 0 && <div className="formula-table-filter-dropdown__empty">{t("filterDropdown.noMatches")}</div>}
         {visibleValues.length > 0 && (
           <label key="__select_all__" className="formula-sort-filter__row formula-table-filter-dropdown__item">
             <input
@@ -95,7 +98,7 @@ export function AutoFilterDropdown({
               checked={allSelected}
               onChange={toggleAll}
             />
-            <span>{query.trim() ? "Select All Search Results" : "Select All"}</span>
+            <span>{query.trim() ? t("filterDropdown.selectAllSearchResults") : t("filterDropdown.selectAll")}</span>
           </label>
         )}
         {visibleValues.map((v) => (
