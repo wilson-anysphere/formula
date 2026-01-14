@@ -356,11 +356,6 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         showToast("This command requires collaboration mode.", "warning");
         return;
       }
-      const manager = getEncryptionManager(app);
-      if (!manager) {
-        showToast("Encryption is not available for this workbook.", "error");
-        return;
-      }
 
       const active = app.getActiveCell();
       const sheetId = app.getCurrentSheetId();

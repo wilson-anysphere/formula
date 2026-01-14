@@ -59,7 +59,6 @@ describe("registerEncryptionUiCommands", () => {
 
     const app: any = {
       getCollabSession: () => ({ doc, cells }),
-      getEncryptedRangeManager: () => ({ list: () => [] }),
       getActiveCell: () => ({ row: 0, col: 0 }),
       getCurrentSheetId: () => "Sheet1",
       getCurrentSheetDisplayName: () => "Sheet1",
@@ -116,7 +115,6 @@ describe("registerEncryptionUiCommands", () => {
 
     const app: any = {
       getCollabSession: () => ({ doc, cells }),
-      getEncryptedRangeManager: () => ({ list: () => [] }),
       getActiveCell: () => ({ row: 0, col: 0 }),
       getCurrentSheetId: () => "Sheet1",
       getCurrentSheetDisplayName: () => "Sheet1",
