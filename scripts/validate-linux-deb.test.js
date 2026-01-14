@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -266,6 +266,7 @@ function runValidator({
   desktopWithMimeType,
   mimeXmlContent,
   debNameOverride,
+  tauriConfPath,
 } = {}) {
   const proc = spawnSync(
     "bash",
@@ -287,12 +288,79 @@ function runValidator({
         ...(desktopMimeValue ? { FAKE_DESKTOP_MIME_VALUE: desktopMimeValue } : {}),
         ...(desktopExecLine ? { FAKE_DESKTOP_EXEC_LINE: desktopExecLine } : {}),
         ...(debNameOverride ? { FORMULA_DEB_NAME_OVERRIDE: debNameOverride } : {}),
+        ...(tauriConfPath ? { FORMULA_TAURI_CONF_PATH: tauriConfPath } : {}),
       },
     },
   );
   if (proc.error) throw proc.error;
   return proc;
 }
+
+test("validate-linux-deb honors FORMULA_TAURI_CONF_PATH (relative to repo root)", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const overrideVersion = "0.0.0";
+  const confParent = join(repoRoot, "target");
+  mkdirSync(confParent, { recursive: true });
+  const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
+  const confPath = join(confDir, "tauri.conf.json");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConf, version: overrideVersion }), { encoding: "utf8" });
+
+  try {
+    const proc = runValidator({
+      cwd: tmp,
+      debArg: "Formula.deb",
+      dependsFile,
+      contentsFile,
+      fakeVersion: overrideVersion,
+      tauriConfPath: relative(repoRoot, confPath),
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+  } finally {
+    rmSync(confDir, { recursive: true, force: true });
+  }
+});
+
+test("validate-linux-deb rejects tauri identifiers containing path separators", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const confParent = join(repoRoot, "target");
+  mkdirSync(confParent, { recursive: true });
+  const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
+  const confPath = join(confDir, "tauri.conf.json");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConf, identifier: "com/example.formula.desktop" }), {
+    encoding: "utf8",
+  });
+
+  try {
+    const proc = runValidator({
+      cwd: tmp,
+      debArg: "Formula.deb",
+      dependsFile,
+      contentsFile,
+      tauriConfPath: relative(repoRoot, confPath),
+    });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /identifier.*valid filename/i);
+    assert.match(proc.stderr, /path separators/i);
+  } finally {
+    rmSync(confDir, { recursive: true, force: true });
+  }
+});
 
 test(
   "validate-linux-deb accepts a DEB whose metadata + payload look correct",
