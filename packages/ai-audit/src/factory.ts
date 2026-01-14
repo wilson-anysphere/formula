@@ -14,6 +14,10 @@ export interface CreateDefaultAIAuditStoreOptions {
   /**
    * Prefer a specific backing store. When unset, a reasonable default is selected
    * based on the runtime (browser/webview vs Node).
+   *
+   * Note: `prefer: "sqlite"` is not supported in the default/browser entrypoint
+   * and will throw. Use the Node entrypoint (`@formula/ai-audit/node`) or import
+   * `SqliteAIAuditStore` from `@formula/ai-audit/sqlite` directly.
    */
   prefer?: "sqlite" | "indexeddb" | "localstorage" | "memory";
   /**

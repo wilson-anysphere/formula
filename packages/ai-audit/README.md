@@ -94,6 +94,10 @@ const store = await createDefaultAIAuditStore({
 });
 ```
 
+Notes:
+- In Node, `prefer: "indexeddb"` is treated as unsupported and will fall back to `localStorage` (if available) or in-memory storage.
+- In browsers/webviews, `prefer: "sqlite"` is unsupported in the default entrypoint; use `@formula/ai-audit/sqlite` directly.
+
 In Node, `@formula/ai-audit/sqlite` also exposes helpers for resolving the `sql.js` wasm assets:
 
 ```ts
