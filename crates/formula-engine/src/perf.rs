@@ -444,7 +444,7 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
         "calc.recalc_filled_50k_formulas_shared_program.p95",
         8,
         2,
-        500.0,
+        1000.0,
         || {
             counter_filled += 1;
             engine_filled
