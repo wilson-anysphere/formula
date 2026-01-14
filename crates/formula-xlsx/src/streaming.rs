@@ -1969,7 +1969,7 @@ fn resolve_worksheet_part_for_selector(
     // Sheet name selector (case-insensitive, matching Excel).
     if let Some(sheet) = workbook_sheets
         .iter()
-        .find(|s| s.name.eq_ignore_ascii_case(selector))
+        .find(|s| formula_model::sheet_name_eq_case_insensitive(&s.name, selector))
     {
         return rel_targets.get(&sheet.rel_id).cloned().ok_or_else(|| {
             crate::XlsxError::Invalid(format!("missing worksheet relationship for {}", sheet.name))
