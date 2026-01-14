@@ -1501,7 +1501,8 @@ Validation + edge cases (Rust behavior):
   - Simplex infers a linear model by finite differences at the starting point; if the objective or any constraint is non-finite during inference it returns a `SolverError` (not a partial outcome).
 - GRG-specific: only `Continuous` variables participate in the gradient; integer/binary vars are effectively held fixed (use Simplex or Evolutionary for mixed-integer problems).
 - Progress + cancellation:
-  - `SolveOptions.progress` returns `false` to cancel; solver returns `SolveStatus::Cancelled` with the best solution found so far.
+  - `SolveOptions.progress` returns `false` to cancel; solver returns `SolveStatus::Cancelled`.
+    - `bestVars` contains the best solution found so far when available; it may be empty if the solver cancels before finding *any* feasible solution (notably for `Simplex`).
 - Side effects:
   - The solver overwrites `variableCells` repeatedly while searching.
   - On return, `applySolution` controls final state:
