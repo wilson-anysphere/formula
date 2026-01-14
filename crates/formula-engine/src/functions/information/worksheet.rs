@@ -420,6 +420,10 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // Excel returns a number where the integer part is the column width (in characters),
             // rounded down, and the first decimal digit is `0` when the column uses the sheet
             // default width or `1` when it uses an explicit per-column override.
+            //
+            // Hidden columns always return `0`, regardless of the stored width.
+            //
+            // Column widths are stored in Excel "character" units (OOXML `col/@width`).
             const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
 
             let props = ctx.col_properties(&reference.sheet_id, addr.col);

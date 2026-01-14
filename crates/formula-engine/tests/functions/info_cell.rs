@@ -1836,3 +1836,55 @@ fn cell_format_uses_row_and_column_styles_when_cell_style_is_default() {
         Value::Text("G".to_string())
     );
 }
+
+#[test]
+fn cell_width_matches_excel_encoding_for_default_custom_and_hidden_columns() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // Default width (no explicit column metadata): Excel encodes whether the column uses an
+    // explicit per-column width. The flag is `.0` for sheet-default, `.1` for explicit widths.
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
+
+    // Explicit custom width override *even when equal to the standard width* sets the `.1` flag.
+    engine.set_col_width("Sheet1", 0, Some(8.43_f32));
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.1);
+
+    // A wider custom width.
+    engine.set_col_width("Sheet1", 0, Some(25.0_f32));
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 25.1);
+
+    // Hidden columns always report 0, regardless of the stored width.
+    engine.set_col_hidden("Sheet1", 0, true);
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
+}
+
+#[test]
+fn cell_width_recalculates_when_column_width_changes_in_auto_mode() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
+        .unwrap();
+
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
+
+    // Column width changes should trigger a recalculation in automatic mode.
+    engine.set_col_width("Sheet1", 0, Some(25.0_f32));
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 25.1);
+}

@@ -13133,6 +13133,31 @@ fn walk_expr_flags(
                 }
 
                 match spec.name {
+                    "CELL" => {
+                        // Excel worksheet metadata can affect certain CELL info_types even when no
+                        // referenced cell values change (notably `CELL("width")` which depends on
+                        // column width/hidden state). Excel treats these formulas as volatile; the
+                        // engine approximates that behavior by marking `CELL("width", ...)` calls
+                        // volatile at compile time.
+                        //
+                        // Keep the volatility narrow (info_type-dependent) so other CELL keys that
+                        // are purely value/address based do not force unrelated recalculation.
+                        if let Some(info_type) = args.first() {
+                            match info_type {
+                                Expr::Text(s) => {
+                                    if s.trim().eq_ignore_ascii_case("width") {
+                                        *volatile = true;
+                                    }
+                                }
+                                // If the info_type is non-constant, conservatively treat the
+                                // formula as volatile since it could evaluate to "width" at
+                                // runtime.
+                                _ => {
+                                    *volatile = true;
+                                }
+                            }
+                        }
+                    }
                     "LET" => {
                         if args.len() < 3 || args.len() % 2 == 0 {
                             return;
@@ -15316,23 +15341,24 @@ mod tests {
     fn cell_width_reflects_column_metadata() {
         let mut engine = Engine::new();
         engine
-            .set_cell_formula("Sheet1", "A1", r#"=CELL("width", A1)"#)
+            // Put the formula in a different cell to avoid creating a self-reference cycle.
+            .set_cell_formula("Sheet1", "B1", r#"=CELL("width", A1)"#)
             .unwrap();
         engine.recalculate_single_threaded();
         // Excel returns the column width rounded down to whole characters, with a `0.0` fractional
         // marker when the column uses the sheet default width.
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(8.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(8.0));
 
         // Column widths are stored in Excel "character" units (OOXML `col/@width`).
         engine.set_col_width("Sheet1", 0, Some(15.0));
         engine.recalculate_single_threaded();
         // When a column uses an explicit width override, Excel reports a `0.1` fractional marker.
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(15.1));
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(15.1));
 
         // Hidden columns should return 0 for CELL("width").
         engine.set_col_hidden("Sheet1", 0, true);
         engine.recalculate_single_threaded();
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
     }
 
     #[test]
