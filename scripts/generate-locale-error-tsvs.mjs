@@ -60,14 +60,55 @@ function parseArgs(argv) {
  * @returns {string[]} canonical error literals (e.g. "#VALUE!")
  */
 function extractCanonicalErrorLiterals(rustSource) {
-  // We intentionally scrape the source instead of duplicating the list to ensure
+  // We intentionally scrape the Rust source instead of duplicating the list to ensure
   // this generator stays in sync with `ErrorKind::as_code`.
   //
+  // To avoid accidentally matching unrelated `ErrorKind::... => "..."` patterns elsewhere in
+  // the file, we first slice out the `as_code` function body and then apply a lightweight regex
+  // to extract the string literals.
+  const fnMatch =
+    /\bpub\s+const\s+fn\s+as_code\b/u.exec(rustSource) ??
+    /\bfn\s+as_code\b/u.exec(rustSource);
+  if (fnMatch == null) {
+    throw new Error(
+      `Failed to locate ErrorKind::as_code in ${path.relative(repoRoot, rustErrorKindPath)} (expected to scrape canonical error literals from Rust source)`,
+    );
+  }
+
+  const fnIdx = fnMatch.index;
+  const braceStart = rustSource.indexOf("{", fnIdx);
+  if (braceStart < 0) {
+    throw new Error(
+      `Failed to locate opening '{' for ErrorKind::as_code in ${path.relative(repoRoot, rustErrorKindPath)}`,
+    );
+  }
+
+  let depth = 0;
+  let braceEnd = -1;
+  for (let i = braceStart; i < rustSource.length; i++) {
+    const ch = rustSource[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        braceEnd = i;
+        break;
+      }
+    }
+  }
+  if (braceEnd < 0) {
+    throw new Error(
+      `Failed to locate closing '}' for ErrorKind::as_code in ${path.relative(repoRoot, rustErrorKindPath)}`,
+    );
+  }
+
+  const asCodeBody = rustSource.slice(braceStart, braceEnd + 1);
+
   // Match lines like: `ErrorKind::Value => "#VALUE!",`
   const re = /ErrorKind::[A-Za-z0-9_]+\s*=>\s*"([^"]+)"/g;
   /** @type {string[]} */
   const codes = [];
-  for (const match of rustSource.matchAll(re)) {
+  for (const match of asCodeBody.matchAll(re)) {
     codes.push(match[1]);
   }
   const unique = Array.from(new Set(codes));

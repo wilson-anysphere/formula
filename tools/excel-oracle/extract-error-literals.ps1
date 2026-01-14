@@ -298,9 +298,44 @@ function Extract-CanonicalErrorLiterals {
 
   $src = Get-Content -LiteralPath $RustPath -Raw -Encoding UTF8
 
+  # Extract the `ErrorKind::as_code` function body before applying a lightweight regex. This
+  # avoids accidentally matching `ErrorKind::... => "..."` patterns elsewhere in the file.
+  $fnMatch = [regex]::Match($src, '\bpub\s+const\s+fn\s+as_code\b')
+  if (-not $fnMatch.Success) {
+    $fnMatch = [regex]::Match($src, '\bfn\s+as_code\b')
+  }
+  if (-not $fnMatch.Success) {
+    throw "Failed to locate ErrorKind::as_code in $RustPath (expected to scrape canonical error literals from Rust source)."
+  }
+
+  $fnIdx = $fnMatch.Index
+  $braceStart = $src.IndexOf("{", $fnIdx)
+  if ($braceStart -lt 0) {
+    throw "Failed to locate opening '{' for ErrorKind::as_code in $RustPath"
+  }
+
+  $depth = 0
+  $braceEnd = -1
+  for ($i = $braceStart; $i -lt $src.Length; $i++) {
+    $ch = $src.Substring($i, 1)
+    if ($ch -eq "{") { $depth++ }
+    elseif ($ch -eq "}") {
+      $depth--
+      if ($depth -eq 0) {
+        $braceEnd = $i
+        break
+      }
+    }
+  }
+  if ($braceEnd -lt 0) {
+    throw "Failed to locate closing '}' for ErrorKind::as_code in $RustPath"
+  }
+
+  $asCodeBody = $src.Substring($braceStart, $braceEnd - $braceStart + 1)
+
   # Match lines like: `ErrorKind::Value => "#VALUE!",`
   $re = [regex]'ErrorKind::[A-Za-z0-9_]+\s*=>\s*"([^"]+)"'
-  $matches = $re.Matches($src)
+  $matches = $re.Matches($asCodeBody)
   if ($matches.Count -eq 0) {
     throw "Failed to extract any error literals from $RustPath (regex=$re)"
   }
