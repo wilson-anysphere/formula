@@ -103,8 +103,6 @@ function colIndexToLabel(index: number): string {
   return out || "A";
 }
 
-const NUMERIC_LITERAL_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-
 function deriveColumnsFromSelection(params: {
   host: CustomSortDialogHost;
   sheetId: string;
@@ -112,7 +110,8 @@ function deriveColumnsFromSelection(params: {
 }): { headerColumns: Array<{ index: number; name: string }>; fallbackColumns: Array<{ index: number; name: string }>; initialHasHeader: boolean } {
   const selection = normalizeRange(params.selection);
   const width = selection.endCol - selection.startCol + 1;
-  const fallbackLabels = Array.from({ length: width }, (_, idx) => colIndexToLabel(idx));
+  // Use the sheet's column letters for the selection (e.g. D/E/F when selecting columns D–F).
+  const fallbackLabels = Array.from({ length: width }, (_, idx) => colIndexToLabel(selection.startCol + idx));
   const fallbackColumns = fallbackLabels.map((name, index) => ({ index, name }));
 
   const rawHeaderTexts = fallbackLabels.map((_fallback, idx) => {
@@ -130,13 +129,9 @@ function deriveColumnsFromSelection(params: {
     name: headerTexts[idx]!,
   }));
 
-  const initialHasHeader = rawHeaderTexts.some((text) => {
-    if (!text) return false;
-    const upper = text.toUpperCase();
-    if (upper === "TRUE" || upper === "FALSE") return false;
-    if (NUMERIC_LITERAL_RE.test(text)) return false;
-    return true;
-  });
+  // Heuristic: if the first row contains any non-empty values, assume it's a header row.
+  // Users can always toggle this off if the selection does not include headers.
+  const initialHasHeader = rawHeaderTexts.some((text) => text !== "");
 
   return { headerColumns, fallbackColumns, initialHasHeader };
 }
