@@ -3595,7 +3595,7 @@ mod tests {
         let result = PivotEngine::calculate(&cache, &cfg).unwrap();
         assert_eq!(
             result.data[0][0],
-            PivotValue::Text("'Sales Table'[Region]".to_string())
+            PivotValue::Text("Sales Table[Region]".to_string())
         );
     }
 
