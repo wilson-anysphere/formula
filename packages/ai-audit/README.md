@@ -29,6 +29,8 @@ const configured = await createDefaultAIAuditStore({
 });
 ```
 
+Note: `createDefaultAIAuditStore()` is async because it may do a lightweight IndexedDB probe to detect blocked/denied storage and fall back safely. Prefer creating the store once and reusing it.
+
 `createDefaultAIAuditStore()` wraps the selected backend in `BoundedAIAuditStore` by default. To hard-cap per-entry size manually (or to wrap a custom store), wrap any store:
 
 ```ts

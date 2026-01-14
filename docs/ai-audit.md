@@ -306,6 +306,8 @@ const store = await createDefaultAIAuditStore({
 });
 ```
 
+Note: `createDefaultAIAuditStore()` is async because it may do a lightweight IndexedDB probe to detect blocked/denied storage and fall back safely. Prefer creating the store once and reusing it.
+
 Default selection behavior:
 
 - **Browser-like runtimes** (`window` exists): `IndexedDbAIAuditStore` → `LocalStorageAIAuditStore` → `MemoryAIAuditStore`.
