@@ -160,3 +160,52 @@ fn decodes_value_class_ptg_name_as_udf_function_name_via_sentinel_funcvar() {
         "expected @FunctionCall(Name_123), got {ast:?}"
     );
 }
+
+#[test]
+fn decodes_ptg_namex_as_udf_function_name_via_sentinel_funcvar() {
+    // NameX-based UDF call pattern:
+    //   args..., PtgNameX(func), PtgFuncVar(argc+1, 0x00FF)
+    let mut rgce = Vec::new();
+    rgce.extend_from_slice(&ptg_int(1));
+    rgce.extend_from_slice(&ptg_int(2));
+    rgce.extend_from_slice(&ptg_namex(1, 2, 0x39));
+    rgce.extend_from_slice(&ptg_funcvar_udf(3));
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "ExternName_IXTI1_N2(1,2)");
+    assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(
+            &ast.expr,
+            Expr::FunctionCall(call) if call.name.original == "ExternName_IXTI1_N2"
+        ),
+        "expected FunctionCall(ExternName_IXTI1_N2), got {ast:?}"
+    );
+}
+
+#[test]
+fn decodes_value_class_ptg_namex_as_udf_function_name_via_sentinel_funcvar() {
+    // Same pattern as `decodes_ptg_namex_as_udf_function_name_via_sentinel_funcvar`, but using the
+    // value-class `PtgNameX` variant (0x59). The decoder should preserve the implicit intersection
+    // marker.
+    let mut rgce = Vec::new();
+    rgce.extend_from_slice(&ptg_int(1));
+    rgce.extend_from_slice(&ptg_int(2));
+    rgce.extend_from_slice(&ptg_namex(1, 2, 0x59));
+    rgce.extend_from_slice(&ptg_funcvar_udf(3));
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@ExternName_IXTI1_N2(1,2)");
+    assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(
+            &ast.expr,
+            Expr::Unary(u)
+                if u.op == UnaryOp::ImplicitIntersection
+                    && matches!(&*u.expr, Expr::FunctionCall(call) if call.name.original == "ExternName_IXTI1_N2")
+        ),
+        "expected @FunctionCall(ExternName_IXTI1_N2), got {ast:?}"
+    );
+}
