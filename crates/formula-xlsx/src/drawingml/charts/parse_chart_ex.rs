@@ -259,7 +259,6 @@ fn detect_chart_kind(
     } else {
         hints.join(", ")
     };
-
     // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
     // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
@@ -304,7 +303,6 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
 
     out
 }
-
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
     // Prefer explicit known chart-type nodes. Some ChartEx parts contain other
     // `*Chart`-suffixed elements (e.g. style/theme) that can appear before the
