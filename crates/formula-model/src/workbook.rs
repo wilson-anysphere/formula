@@ -654,19 +654,15 @@ impl Workbook {
             }
 
             if source_changed {
-                // Only allocate a new cache if the original pivot already had one; otherwise keep
-                // the model minimal and let higher layers decide when to assign a cache id.
-                if pivot.cache_id.is_some() {
-                    let cache_id: PivotCacheId = crate::new_uuid();
-                    duplicated.cache_id = Some(cache_id);
-                    self.pivot_caches.push(PivotCacheModel {
-                        id: cache_id,
-                        source: duplicated.source.clone(),
-                        needs_refresh: true,
-                    });
-                } else {
-                    duplicated.cache_id = None;
-                }
+                // When the pivot source points at duplicated data, split the cache so the copied
+                // pivot can be refreshed independently.
+                let cache_id: PivotCacheId = crate::new_uuid();
+                duplicated.cache_id = Some(cache_id);
+                self.pivot_caches.push(PivotCacheModel {
+                    id: cache_id,
+                    source: duplicated.source.clone(),
+                    needs_refresh: true,
+                });
             }
 
             self.pivot_tables.push(duplicated);
