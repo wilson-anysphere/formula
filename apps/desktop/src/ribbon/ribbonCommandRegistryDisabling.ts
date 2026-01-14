@@ -128,6 +128,13 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "data.sortFilter.reapply",
   "data.sortFilter.advanced.clearFilter",
 
+  // Home → Editing → Clear dropdown is intentionally handled in the desktop shell (routed to the
+  // existing `format.clear*` implementations). Keep these ids enabled so the ribbon does not
+  // fall back to the default "Ribbon: …" toast/no-op behavior.
+  "home.editing.clear.clearAll",
+  "home.editing.clear.clearFormats",
+  "home.editing.clear.clearContents",
+
   // Sort/filter (ribbon-only handlers / partially implemented).
   "home.editing.sortFilter.sortAtoZ",
   "home.editing.sortFilter.sortZtoA",

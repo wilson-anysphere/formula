@@ -58,6 +58,7 @@ import {
   handleRibbonToggle as handleRibbonFormattingToggle,
 } from "./ribbon/commandHandlers.js";
 import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
+import { resolveHomeEditingClearCommandTarget } from "./ribbon/homeEditingClearCommandRouting.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -8666,6 +8667,21 @@ function handleRibbonCommand(commandId: string): void {
         showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     };
+    // Home → Editing → Clear dropdown menu items are ribbon-only ids. Route the implemented
+    // variants to the existing `format.clear*` commands so they share logic with other
+    // surfaces (command palette / keybindings / Home → Font → Clear).
+    if (
+      commandId === "home.editing.clear.clearAll" ||
+      commandId === "home.editing.clear.clearFormats" ||
+      commandId === "home.editing.clear.clearContents"
+    ) {
+      const editingClearTarget = resolveHomeEditingClearCommandTarget(commandId);
+      if (editingClearTarget) {
+        executeBuiltinCommand(editingClearTarget);
+      }
+      return;
+    }
+
     const cellStylesPrefix = "home.styles.cellStyles.";
     if (commandId.startsWith(cellStylesPrefix)) {
       // Keep these ids explicitly referenced so ribbon wiring coverage can validate that
@@ -8685,7 +8701,22 @@ function handleRibbonCommand(commandId: string): void {
         app.focus();
         return;
       }
+    }
 
+    // Merge & Center command ids are implemented in the shared ribbon command handlers module.
+    // Keep explicit checks here so ribbon wiring coverage tests can assert these enabled,
+    // non-CommandRegistry ids are still handled by the desktop shell.
+    if (
+      commandId === "home.alignment.mergeCenter.mergeCenter" ||
+      commandId === "home.alignment.mergeCenter.mergeCells" ||
+      commandId === "home.alignment.mergeCenter.mergeAcross" ||
+      commandId === "home.alignment.mergeCenter.unmergeCells"
+    ) {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+        return;
+      }
+    }
+    if (commandId === "home.styles.cellStyles.goodBadNeutral") {
       void (async () => {
         // Formatting actions should never run while the user is editing (primary or split-view secondary editor).
         if (isSpreadsheetEditing()) return;

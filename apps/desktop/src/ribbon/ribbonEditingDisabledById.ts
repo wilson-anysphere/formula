@@ -40,6 +40,9 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "format.clearAll": true,
   "format.clearFormats": true,
   "edit.clearContents": true,
+  "home.editing.clear.clearAll": true,
+  "home.editing.clear.clearFormats": true,
+  "home.editing.clear.clearContents": true,
   "home.editing.clear.clearComments": true,
   "home.editing.clear.clearHyperlinks": true,
 
