@@ -276,8 +276,12 @@ Implementation status:
     integrity verification is performed).
   - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not validate
     `dataIntegrity`; the high-level `open_workbook*` APIs currently decrypt to in-memory buffers.
-- `crates/formula-offcrypto` parses `encryptedHmacKey`/`encryptedHmacValue` for completeness but does
-  not currently validate them.
+- `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting Agile packages via
+  `decrypt_encrypted_package` with `DecryptOptions.verify_integrity = true` (default: `false`).
+  - It verifies only the spec/Excel target (the full `EncryptedPackage` stream bytes) and returns
+    `OffcryptoError::IntegrityCheckFailed` on mismatch.
+  - Other helper APIs (e.g. `decrypt_agile_ooxml_from_bytes`) currently do not perform integrity
+    verification.
 - HMAC verification is strongly recommended when possible to distinguish wrong passwords from “ZIP
   happened to parse”.
 
