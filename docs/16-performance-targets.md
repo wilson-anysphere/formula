@@ -15,7 +15,7 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | Cold start to interactive | <1.0s | Time from launch to first input accepted |
 | Warm start | <0.5s | Time from launch with cached data |
 | Time to first render | <0.3s | Time from launch to grid visible |
-| Frontend asset download size (compressed JS/CSS/WASM) | <10MB | Brotli/gzip-compressed total of `dist/assets/**/*.{js,css,wasm}` (see `node scripts/frontend_asset_size_report.mjs`) |
+| Frontend asset download size (compressed JS/CSS/WASM) | <10MB | Brotli-compressed total of `dist/assets/**/*.{js,css,wasm}` (default; gzip optional via `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=gzip`; see `node scripts/frontend_asset_size_report.mjs`) |
 | Desktop installer artifact size (DMG/MSI/EXE/AppImage) | <50MB per artifact | `python scripts/desktop_bundle_size_report.py` on Tauri build output (`target/**/release/bundle`) |
 
 ### File Operations
