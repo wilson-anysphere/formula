@@ -122,15 +122,19 @@ Name=Formula
 MimeType=\${mime_value}
 DESKTOP
 
-    echo "LICENSE stub" > "$dest/usr/share/doc/$fake_package/LICENSE"
-    echo "NOTICE stub" > "$dest/usr/share/doc/$fake_package/NOTICE"
-    cat > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml" <<'XML'
+     echo "LICENSE stub" > "$dest/usr/share/doc/$fake_package/LICENSE"
+     echo "NOTICE stub" > "$dest/usr/share/doc/$fake_package/NOTICE"
+    if [[ -n "\${FAKE_MIME_XML_CONTENT:-}" ]]; then
+      printf '%s\n' "$FAKE_MIME_XML_CONTENT" > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml"
+    else
+      cat > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml" <<'XML'
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.apache.parquet">
     <glob pattern="*.parquet" />
   </mime-type>
 </mime-info>
 XML
+    fi
     exit 0
     ;;
   *)
@@ -198,6 +202,7 @@ function runValidator({
   fakeBinary,
   desktopMimeValue,
   desktopExecLine,
+  mimeXmlContent,
   debNameOverride,
 } = {}) {
   const proc = spawnSync(
@@ -215,6 +220,7 @@ function runValidator({
         FAKE_DPKG_DEB_BINARY: fakeBinary ?? expectedMainBinary,
         FAKE_DPKG_DEB_DEPENDS_FILE: dependsFile,
         FAKE_DPKG_DEB_CONTENTS_FILE: contentsFile,
+        ...(mimeXmlContent ? { FAKE_MIME_XML_CONTENT: mimeXmlContent } : {}),
         ...(desktopMimeValue ? { FAKE_DESKTOP_MIME_VALUE: desktopMimeValue } : {}),
         ...(desktopExecLine ? { FAKE_DESKTOP_EXEC_LINE: desktopExecLine } : {}),
         ...(debNameOverride ? { FORMULA_DEB_NAME_OVERRIDE: debNameOverride } : {}),
@@ -472,4 +478,29 @@ test("validate-linux-deb fails when Parquet shared-mime-info definition is missi
   const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /Parquet shared-mime-info/i);
+});
+
+test("validate-linux-deb fails when Parquet shared-mime-info definition is missing expected content", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    mimeXmlContent: `<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.apache.parquet" />
+</mime-info>`,
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  // When python3 is present, the strict verifier reports no packaged shared-mime-info definition
+  // matching the expected MIME + glob; otherwise the bash fallback emits a "missing expected content"
+  // error. Match either so the test remains hermetic across environments.
+  assert.match(proc.stderr, /(missing expected content|no packaged shared-mime-info definition)/i);
 });
