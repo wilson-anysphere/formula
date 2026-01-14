@@ -53,10 +53,14 @@ pub struct PreservedPivotParts {
     pub content_types_xml: Vec<u8>,
     /// Raw pivot/slicer/timeline parts copied byte-for-byte.
     pub parts: BTreeMap<String, Vec<u8>>,
-    /// Full sheet list from the source workbook (`xl/workbook.xml`) in display order.
+    /// Worksheet list from the source workbook (`xl/workbook.xml`) in display order.
     ///
     /// This enables name rewrites for pivot cache `worksheetSource` references when worksheets are
     /// renamed between preservation and re-application.
+    ///
+    /// Note: This intentionally excludes chart sheets (and other non-worksheet sheet types) so the
+    /// stored `index` remains stable even when chart sheets are re-attached at a different position
+    /// during regeneration-based saves.
     pub workbook_sheets: Vec<PreservedWorkbookSheet>,
     /// The `<pivotCaches>` subtree from `xl/workbook.xml` (outer XML).
     pub workbook_pivot_caches: Option<Vec<u8>>,
@@ -198,14 +202,25 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
     )?;
     let workbook_sheets = sheets
         .iter()
-        .map(|sheet| PreservedWorkbookSheet {
+        .filter(|sheet| sheet.part_name.starts_with("xl/worksheets/"))
+        .enumerate()
+        .map(|(index, sheet)| PreservedWorkbookSheet {
             name: sheet.name.clone(),
-            index: sheet.index,
+            index,
         })
         .collect::<Vec<_>>();
     let mut sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables> = BTreeMap::new();
 
+    let mut worksheet_index = 0usize;
     for sheet in &sheets {
+        // Pivot tables can only live on worksheet parts. Skip chart sheets and other sheet types so
+        // the stored `sheet_index` matches the worksheet-only order used for rename mapping.
+        if !sheet.part_name.starts_with("xl/worksheets/") {
+            continue;
+        }
+        let sheet_index = worksheet_index;
+        worksheet_index += 1;
+
         let sheet_rels_part = rels_for_part(&sheet.part_name);
         let Some(sheet_rels_xml) = read_zip_part_optional(&mut archive, &sheet_rels_part)? else {
             continue;
@@ -277,7 +292,7 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         sheet_pivot_tables.insert(
             sheet.name.clone(),
             PreservedSheetPivotTables {
-                sheet_index: sheet.index,
+                sheet_index,
                 sheet_id: sheet.sheet_id,
                 pivot_tables_xml,
                 pivot_table_rels,
@@ -399,14 +414,26 @@ impl XlsxPackage {
         let sheets = workbook_sheet_parts(self)?;
         let workbook_sheets = sheets
             .iter()
-            .map(|sheet| PreservedWorkbookSheet {
+            .filter(|sheet| sheet.part_name.starts_with("xl/worksheets/"))
+            .enumerate()
+            .map(|(index, sheet)| PreservedWorkbookSheet {
                 name: sheet.name.clone(),
-                index: sheet.index,
+                index,
             })
             .collect::<Vec<_>>();
         let mut sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables> = BTreeMap::new();
 
+        let mut worksheet_index = 0usize;
         for sheet in &sheets {
+            // Pivot tables can only live on worksheet parts. Skip chart sheets and other sheet
+            // types so the stored `sheet_index` matches the worksheet-only order used for rename
+            // mapping.
+            if !sheet.part_name.starts_with("xl/worksheets/") {
+                continue;
+            }
+            let sheet_index = worksheet_index;
+            worksheet_index += 1;
+
             let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
@@ -468,7 +495,7 @@ impl XlsxPackage {
             sheet_pivot_tables.insert(
                 sheet.name.clone(),
                 PreservedSheetPivotTables {
-                    sheet_index: sheet.index,
+                    sheet_index,
                     sheet_id: sheet.sheet_id,
                     pivot_tables_xml,
                     pivot_table_rels,
@@ -499,11 +526,32 @@ impl XlsxPackage {
         }
 
         let sheets = workbook_sheet_parts(self)?;
+
+        // Build a worksheet-only view of the workbook sheet list.
+        //
+        // Pivot cache worksheet sources can only point at worksheets (never chartsheets), and
+        // regeneration-based saves may re-attach chartsheets at a different position in
+        // `xl/workbook.xml`. Using worksheet-only indices prevents chart sheets from breaking the
+        // preserved index mapping when worksheets are renamed.
+        let worksheet_sheets = sheets
+            .iter()
+            .filter(|sheet| sheet.part_name.starts_with("xl/worksheets/"))
+            .enumerate()
+            .map(|(index, sheet)| crate::preserve::sheet_match::WorkbookSheetPart {
+                name: sheet.name.clone(),
+                index,
+                sheet_id: sheet.sheet_id,
+                part_name: sheet.part_name.clone(),
+            })
+            .collect::<Vec<_>>();
+
         let mut sheet_name_map: HashMap<String, String> = HashMap::new();
         for preserved_sheet in &preserved.workbook_sheets {
-            let Some(matched) =
-                match_sheet_by_name_or_index(&sheets, &preserved_sheet.name, preserved_sheet.index)
-            else {
+            let Some(matched) = match_sheet_by_name_or_index(
+                &worksheet_sheets,
+                &preserved_sheet.name,
+                preserved_sheet.index,
+            ) else {
                 continue;
             };
             if matched.name != preserved_sheet.name {
@@ -558,7 +606,7 @@ impl XlsxPackage {
 
         for (sheet_name, preserved_sheet) in &preserved.sheet_pivot_tables {
             let Some(sheet) =
-                match_sheet_by_name_or_index(&sheets, sheet_name, preserved_sheet.sheet_index)
+                match_sheet_by_name_or_index(&worksheet_sheets, sheet_name, preserved_sheet.sheet_index)
             else {
                 continue;
             };

@@ -5857,10 +5857,6 @@ mod tests {
                     name: "Sheet2".to_string(),
                     index: 1,
                 },
-                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
-                    name: "Chart1".to_string(),
-                    index: 2,
-                },
             ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
@@ -6020,10 +6016,6 @@ mod tests {
                     name: "Sheet2".to_string(),
                     index: 1,
                 },
-                formula_xlsx::pivots::preserve::PreservedWorkbookSheet {
-                    name: "Chart1".to_string(),
-                    index: 2,
-                },
             ],
             workbook_pivot_caches: None,
             workbook_pivot_cache_rels: Vec::new(),
@@ -6167,12 +6159,6 @@ mod tests {
             .find(|s| s.name == "Sheet2")
             .expect("Sheet2 should remain in workbook_sheets");
         assert_eq!(sheet2.index, 0, "Sheet2 index should shift after delete");
-        let chart = pivots
-            .workbook_sheets
-            .iter()
-            .find(|s| s.name == "Chart1")
-            .expect("Chart1 should remain in workbook_sheets");
-        assert_eq!(chart.index, 1, "Chart index should shift after delete");
 
         let drawings = workbook
             .preserved_drawing_parts
