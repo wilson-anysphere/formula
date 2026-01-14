@@ -202,3 +202,36 @@ fn crossfilter_oneway_rightfiltersleft_propagates_only_from_right_to_left() {
         4.into()
     );
 }
+
+#[test]
+fn crossfilter_is_order_independent_with_other_calculate_filters() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty();
+
+    // Both expressions should yield the same result regardless of argument ordering.
+    // If CROSSFILTER is applied after the fact-side filter, Customers should be restricted by
+    // the matching Orders row.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Customers), Orders[Amount] = 20, CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Customers), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH), Orders[Amount] = 20)",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
