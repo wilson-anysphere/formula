@@ -42,6 +42,14 @@ const upstreamDir = path.join(
 
 const outDir = path.join(repoRoot, "crates", "formula-engine", "src", "locale", "data");
 
+/**
+ * Normalize newlines so `--check` is stable across platforms / git autocrlf settings.
+ * @param {string} value
+ */
+function normalizeNewlines(value) {
+  return value.replace(/\r\n/g, "\n");
+}
+
 function parseArgs(argv) {
   /** @type {{ check: boolean }} */
   const out = { check: false };
@@ -293,9 +301,11 @@ async function main() {
     const existing = await readUtf8IfExists(outPath);
 
     if (check) {
-      if (existing == null) {
+      const existingNormalized = existing == null ? null : normalizeNewlines(existing);
+      const outputNormalized = normalizeNewlines(output);
+      if (existingNormalized == null) {
         mismatches.push(path.relative(repoRoot, outPath));
-      } else if (existing !== output) {
+      } else if (existingNormalized !== outputNormalized) {
         mismatches.push(path.relative(repoRoot, outPath));
       }
     } else {
