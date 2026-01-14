@@ -35,7 +35,7 @@ function runWithConfigAndPlist(config, plistContents) {
 }
 
 function basePlistWithFormulaScheme() {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>xlsx</string>\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
 }
 
 function baseConfig({ fileAssociations }) {
@@ -130,5 +130,31 @@ test("fails when .xlsx association is missing a mimeType entry", () => {
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /Missing Linux mimeType fields/i);
+  assert.match(proc.stderr, /xlsx/i);
+});
+
+test("fails when macOS Info.plist is missing CFBundleDocumentTypes", () => {
+  const config = baseConfig({
+    fileAssociations: [
+      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    ],
+  });
+  const plist = basePlistWithFormulaScheme().replace(/<key>CFBundleDocumentTypes[\s\S]*$/i, "</dict>\n</plist>\n");
+  const proc = runWithConfigAndPlist(config, plist);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing macOS file association registration/i);
+  assert.match(proc.stderr, /CFBundleDocumentTypes/i);
+});
+
+test("fails when macOS Info.plist CFBundleDocumentTypes does not include xlsx", () => {
+  const config = baseConfig({
+    fileAssociations: [
+      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    ],
+  });
+  const plist = basePlistWithFormulaScheme().replace("<string>xlsx</string>", "<string>txt</string>");
+  const proc = runWithConfigAndPlist(config, plist);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing macOS file association registration/i);
   assert.match(proc.stderr, /xlsx/i);
 });

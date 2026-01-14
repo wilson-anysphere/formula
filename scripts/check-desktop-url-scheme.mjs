@@ -182,7 +182,7 @@ function main() {
     return;
   }
 
-  // ---- macOS: Info.plist contains CFBundleURLSchemes -> formula
+  // ---- macOS: Info.plist contains CFBundleURLSchemes -> formula, and CFBundleDocumentTypes includes xlsx.
   try {
     const plist = readFileSync(infoPlistPath, "utf8");
     // Keep this lightweight: we just need to know the scheme is present.
@@ -191,6 +191,16 @@ function main() {
         "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleURLSchemes including:",
         `  - ${REQUIRED_SCHEME}`,
         "Fix: add/update CFBundleURLTypes/CFBundleURLSchemes in Info.plist.",
+      ]);
+    }
+
+    const hasDocumentTypes = /<key>\s*CFBundleDocumentTypes\s*<\/key>/i.test(plist);
+    const hasXlsxExt = new RegExp(`<string>\\s*${REQUIRED_FILE_EXT}\\s*<\\/string>`, "i").test(plist);
+    if (!hasDocumentTypes || !hasXlsxExt) {
+      errBlock("Missing macOS file association registration (Info.plist)", [
+        "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleDocumentTypes including:",
+        `  - ${REQUIRED_FILE_EXT}`,
+        "Fix: add/update CFBundleDocumentTypes/CFBundleTypeExtensions in Info.plist.",
       ]);
     }
   } catch (e) {
