@@ -12340,7 +12340,7 @@ mod tests {
             Ref::new(0, 0, true, true), // A1
             Ref::new(1, 0, true, true), // A2
         );
-        let area = SheetRangeRef::new(3, range);
+        let area = SheetRangeRef::new(SheetId::Local(3), range);
         let mr = MultiRangeRef::new(Arc::from([area]));
         let base = CellCoord::new(0, 0);
         let _ = fn_isblank(&[Value::MultiRange(mr)], &grid, base);
