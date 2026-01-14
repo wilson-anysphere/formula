@@ -17,7 +17,8 @@ Options:
   -h, --help            Show help
 
 Environment:
-  GITHUB_TOKEN          GitHub token with actions:read permission
+  GITHUB_TOKEN          GitHub token with actions:read permission (preferred)
+  GH_TOKEN              Alternative token env var (optional)
   GITHUB_API_URL        GitHub API base URL (default: https://api.github.com)
   GITHUB_SERVER_URL     GitHub server base URL for links (default: https://github.com)
 `);
@@ -265,12 +266,12 @@ async function main() {
     fatal(`Missing repository. Pass --repo <owner/name> or set GITHUB_REPOSITORY.`);
   }
 
-  const token = process.env.GITHUB_TOKEN;
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) {
     fatal(
       [
-        `Missing GITHUB_TOKEN.`,
-        `Set the GITHUB_TOKEN environment variable to a GitHub token with "actions:read" permission.`,
+        `Missing GitHub token.`,
+        `Set the GITHUB_TOKEN (preferred) or GH_TOKEN environment variable to a GitHub token with "actions:read" permission.`,
         `In GitHub Actions, you can typically use: env: { GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }} }`,
       ].join("\n"),
     );

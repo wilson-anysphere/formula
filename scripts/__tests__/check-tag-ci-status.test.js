@@ -173,6 +173,38 @@ test("passes when CI has a successful completed run for the given commit", async
   );
 });
 
+test("accepts GH_TOKEN as an alternative to GITHUB_TOKEN", async () => {
+  const sha = "abababababababababababababababababababab";
+
+  await withMockGitHub(
+    {
+      workflows: [{ id: 123, name: "CI", path: ".github/workflows/ci.yml" }],
+      runsByWorkflowId: {
+        "123": [
+          {
+            id: 1,
+            head_sha: sha,
+            status: "completed",
+            conclusion: "success",
+            html_url: "http://example.local/runs/1",
+          },
+        ],
+      },
+    },
+    async (baseUrl) => {
+      const result = await runScript(["--repo", "acme/widgets", "--sha", sha, "--workflow", "CI"], {
+        GH_TOKEN: "test-token",
+        GITHUB_TOKEN: undefined,
+        GITHUB_API_URL: baseUrl,
+        GITHUB_SERVER_URL: "http://example.local",
+      });
+
+      assert.equal(result.code, 0, `expected exit 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+      assert.match(result.stdout, /CI status check passed/i);
+    },
+  );
+});
+
 test("fails with a clear error when no successful CI run exists", async () => {
   const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
