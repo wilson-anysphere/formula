@@ -8,8 +8,11 @@ export function installEpipeHandler(): void {
   // trace if unhandled.
   //
   // Gracefully exit on EPIPE so CLI runner scripts behave like typical Unix tools.
-  process.stdout.on('error', (err) => {
+  const onError = (err: unknown) => {
     const code = (err as NodeJS.ErrnoException | null)?.code;
     if (code === 'EPIPE') process.exit(0);
-  });
+  };
+
+  process.stdout.on('error', onError);
+  process.stderr.on('error', onError);
 }

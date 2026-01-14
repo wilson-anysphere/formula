@@ -14,9 +14,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 // Gracefully exit when piping output into a consumer that closes early (e.g. `head`), to avoid a
 // noisy EPIPE stack trace.
-process.stdout.on("error", (err) => {
+const onEpipe = (err) => {
   if (err && err.code === "EPIPE") process.exit(0);
-});
+};
+process.stdout.on("error", onEpipe);
+process.stderr.on("error", onEpipe);
 
 function usage() {
   // eslint-disable-next-line no-console
