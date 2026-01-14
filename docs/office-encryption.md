@@ -300,9 +300,8 @@ Implementation status:
     integrity verification is performed).
   - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not validate
     `dataIntegrity`.
-    - It is used for some compatibility fallbacks (for example Agile files that omit
-      `<dataIntegrity>`) and to open Standard/CryptoAPI AES-encrypted `.xlsx`/`.xlsm` into a model
-      without materializing the decrypted ZIP bytes (`open_workbook_model_with_password` /
+    - It is used to open Standard/CryptoAPI AES-encrypted `.xlsx`/`.xlsm` into a model without
+      materializing the decrypted ZIP bytes (`open_workbook_model_with_password` /
       `open_workbook_model_with_options`). Encrypted `.xlsb` currently decrypts to an in-memory ZIP
       before opening.
     - Other encrypted-open paths (including `open_workbook_with_password` / `open_workbook_with_options`)
