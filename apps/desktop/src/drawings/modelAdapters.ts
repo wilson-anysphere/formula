@@ -919,7 +919,7 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
     }
     case "unknown":
       {
-        const derived = label ?? extractDrawingObjectName(rawXml) ?? undefined;
+        const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
         return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
       }
     case "chartplaceholder": {

@@ -47,3 +47,24 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects derives chart labels from r
   assert.equal(ui[0]?.kind?.label, "Chart 1");
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects derives unknown graphicFrame labels from rawXml when label is missing", () => {
+  const rawXml =
+    '<xdr:graphicFrame><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"></a:graphicData></a:graphic></xdr:graphicFrame>';
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "unknown", rawXml },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: 100, cy: 50 },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.equal(ui[0]?.kind?.type, "unknown");
+  assert.equal(ui[0]?.kind?.label, "SmartArt");
+});
