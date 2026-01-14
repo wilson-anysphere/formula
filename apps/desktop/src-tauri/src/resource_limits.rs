@@ -7,8 +7,6 @@
 
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::value::RawValue;
-use serde_json::Value as JsonValue;
 use std::fmt;
 
 /// Maximum number of filesystem entries processed by the `list_dir` command.
@@ -506,73 +504,5 @@ impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedString<MAX_BYTES> 
         }
 
         deserializer.deserialize_str(LimitedStringVisitor::<MAX_BYTES>)
-    }
-}
-
-/// A `serde_json::Value` wrapper that rejects inputs larger than `MAX_BYTES` (in raw JSON bytes)
-/// during deserialization.
-///
-/// This is intended for privileged IPC endpoints that need to accept arbitrary JSON objects while
-/// still defending against a compromised WebView attempting to allocate huge nested values.
-///
-/// Implementation notes:
-/// - We deserialize to `&RawValue` first (borrowed from the input) so we can check the raw JSON
-///   length without allocating a full `Value`.
-/// - After the size check passes, we parse the raw JSON into a `serde_json::Value`.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(transparent)]
-pub struct LimitedJsonValue<const MAX_BYTES: usize>(pub JsonValue);
-
-impl<const MAX_BYTES: usize> LimitedJsonValue<MAX_BYTES> {
-    #[inline]
-    pub fn into_inner(self) -> JsonValue {
-        self.0
-    }
-
-    #[inline]
-    pub fn as_ref(&self) -> &JsonValue {
-        &self.0
-    }
-}
-
-impl<const MAX_BYTES: usize> std::ops::Deref for LimitedJsonValue<MAX_BYTES> {
-    type Target = JsonValue;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<const MAX_BYTES: usize> From<JsonValue> for LimitedJsonValue<MAX_BYTES> {
-    #[inline]
-    fn from(value: JsonValue) -> Self {
-        Self(value)
-    }
-}
-
-impl<const MAX_BYTES: usize> From<LimitedJsonValue<MAX_BYTES>> for JsonValue {
-    #[inline]
-    fn from(value: LimitedJsonValue<MAX_BYTES>) -> Self {
-        value.0
-    }
-}
-
-impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedJsonValue<MAX_BYTES> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = <&RawValue as Deserialize>::deserialize(deserializer)?;
-        let len = raw.get().as_bytes().len();
-        if len > MAX_BYTES {
-            return Err(de::Error::custom(format!(
-                "JSON payload is too large (max {MAX_BYTES} bytes)"
-            )));
-        }
-
-        serde_json::from_str::<JsonValue>(raw.get())
-            .map(LimitedJsonValue)
-            .map_err(de::Error::custom)
     }
 }

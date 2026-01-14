@@ -1782,9 +1782,9 @@ impl AppState {
         if let Some(default_format) = payload.default_format.as_ref() {
             let style_id = match default_format {
                 None => None,
-                Some(format) if format.is_null() => None,
+                Some(format) if format.as_ref().is_null() => None,
                 Some(format) => {
-                    let id = self.engine.intern_style(ui_style_to_model_style(format));
+                    let id = self.engine.intern_style(ui_style_to_model_style(format.as_ref()));
                     (id != 0).then_some(id)
                 }
             };
@@ -1799,10 +1799,12 @@ impl AppState {
                 let Ok(row) = u32::try_from(delta.row) else {
                     continue;
                 };
-                let style_id = if delta.format.is_null() {
+                let style_id = if delta.format.as_ref().is_null() {
                     None
                 } else {
-                    let id = self.engine.intern_style(ui_style_to_model_style(&delta.format));
+                    let id =
+                        self.engine
+                            .intern_style(ui_style_to_model_style(delta.format.as_ref()));
                     (id != 0).then_some(id)
                 };
                 self.engine.set_row_style_id(&sheet_name, row, style_id);
@@ -1817,10 +1819,12 @@ impl AppState {
                 let Ok(col) = u32::try_from(delta.col) else {
                     continue;
                 };
-                let style_id = if delta.format.is_null() {
+                let style_id = if delta.format.as_ref().is_null() {
                     None
                 } else {
-                    let id = self.engine.intern_style(ui_style_to_model_style(&delta.format));
+                    let id =
+                        self.engine
+                            .intern_style(ui_style_to_model_style(delta.format.as_ref()));
                     (id != 0).then_some(id)
                 };
                 self.engine.set_col_style_id(&sheet_name, col, style_id);
@@ -1854,10 +1858,11 @@ impl AppState {
                     if end_row_exclusive <= start_row {
                         continue;
                     }
-                    let style_id = if run.format.is_null() {
+                    let style_id = if run.format.as_ref().is_null() {
                         0
                     } else {
-                        self.engine.intern_style(ui_style_to_model_style(&run.format))
+                        self.engine
+                            .intern_style(ui_style_to_model_style(run.format.as_ref()))
                     };
                     runs.push(FormatRun {
                         start_row,
@@ -1881,14 +1886,14 @@ impl AppState {
                     continue;
                 };
                 let addr = coord_to_a1(row, col);
-                if delta.format.is_null() {
+                if delta.format.as_ref().is_null() {
                     let _ = self.engine.set_cell_style_id(&sheet_name, &addr, 0);
                     continue;
                 }
 
                 let style_id = self
                     .engine
-                    .intern_style(ui_style_to_model_style(&delta.format));
+                    .intern_style(ui_style_to_model_style(delta.format.as_ref()));
                 let _ = self.engine.set_cell_style_id(&sheet_name, &addr, style_id);
             }
         }

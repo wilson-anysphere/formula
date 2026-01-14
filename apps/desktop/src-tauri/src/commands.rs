@@ -21,8 +21,7 @@ use url::Url;
 
 use crate::macro_trust::MacroTrustDecision;
 use crate::resource_limits::{
-    LimitedJsonValue, MAX_CELL_FORMULA_BYTES, MAX_CELL_VALUE_STRING_BYTES,
-    MAX_SHEET_FORMATTING_FORMAT_BYTES,
+    MAX_CELL_FORMULA_BYTES, MAX_CELL_VALUE_STRING_BYTES, MAX_SHEET_FORMATTING_FORMAT_BYTES,
 };
 #[cfg(feature = "desktop")]
 use crate::storage::collab_encryption_keys::{
@@ -573,7 +572,8 @@ const SHEET_VIEW_SCHEMA_VERSION: i64 = 1;
 /// IPC-deserialized UI style JSON payload with a conservative size cap.
 ///
 /// Used for sheet formatting delta payloads (`defaultFormat`, row/col/cell formats, range-run formats).
-pub type SheetFormatJson = LimitedJsonValue<{ MAX_SHEET_FORMATTING_FORMAT_BYTES }>;
+pub type SheetFormatJson =
+    crate::ipc_limits::LimitedJsonValue<{ MAX_SHEET_FORMATTING_FORMAT_BYTES }>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -5276,7 +5276,7 @@ pub(crate) fn apply_sheet_formatting_deltas_inner(
     if let Some(default_format) = payload.default_format.as_ref() {
         formatting_state.default_format = default_format
             .as_ref()
-            .map(|format| format.0.clone())
+            .map(|format| format.as_ref().clone())
             .unwrap_or(JsonValue::Null);
     }
     if let Some(LimitedSheetRowFormatDeltas(deltas)) = payload.row_formats.as_ref() {
@@ -5284,12 +5284,12 @@ pub(crate) fn apply_sheet_formatting_deltas_inner(
             if delta.row < 0 {
                 continue;
             }
-            if delta.format.is_null() {
+            if delta.format.as_ref().is_null() {
                 formatting_state.row_formats.remove(&delta.row);
             } else {
                 formatting_state
                     .row_formats
-                    .insert(delta.row, delta.format.0.clone());
+                    .insert(delta.row, delta.format.as_ref().clone());
             }
         }
     }
@@ -5298,12 +5298,12 @@ pub(crate) fn apply_sheet_formatting_deltas_inner(
             if delta.col < 0 {
                 continue;
             }
-            if delta.format.is_null() {
+            if delta.format.as_ref().is_null() {
                 formatting_state.col_formats.remove(&delta.col);
             } else {
                 formatting_state
                     .col_formats
-                    .insert(delta.col, delta.format.0.clone());
+                    .insert(delta.col, delta.format.as_ref().clone());
             }
         }
     }
@@ -5317,12 +5317,14 @@ pub(crate) fn apply_sheet_formatting_deltas_inner(
                 .0
                 .iter()
                 .filter(|r| {
-                    r.start_row >= 0 && r.end_row_exclusive > r.start_row && !r.format.is_null()
+                    r.start_row >= 0
+                        && r.end_row_exclusive > r.start_row
+                        && !r.format.as_ref().is_null()
                 })
                 .map(|r| FormatRun {
                     start_row: r.start_row,
                     end_row_exclusive: r.end_row_exclusive,
-                    format: r.format.0.clone(),
+                    format: r.format.as_ref().clone(),
                 })
                 .collect::<Vec<_>>();
             runs.sort_by(|a, b| {
@@ -5344,14 +5346,14 @@ pub(crate) fn apply_sheet_formatting_deltas_inner(
             if delta.row < 0 || delta.col < 0 {
                 continue;
             }
-            if delta.format.is_null() {
+            if delta.format.as_ref().is_null() {
                 formatting_state
                     .cell_formats
                     .remove(&(delta.row, delta.col));
             } else {
                 formatting_state
                     .cell_formats
-                    .insert((delta.row, delta.col), delta.format.0.clone());
+                    .insert((delta.row, delta.col), delta.format.as_ref().clone());
             }
         }
     }
@@ -10124,8 +10126,8 @@ mod tests {
     fn apply_sheet_formatting_deltas_request_rejects_oversized_format_payloads() {
         let max = crate::resource_limits::MAX_SHEET_FORMATTING_FORMAT_BYTES;
 
-        // `SheetFormatJson` caps the raw JSON bytes of each `format` object. Use a large string so
-        // the raw JSON representation exceeds the limit.
+        // `SheetFormatJson` enforces a conservative JSON size budget during deserialization. Use a
+        // large string so the payload exceeds the limit once we account for JSON overhead.
         let too_big = "a".repeat(max);
         let json = format!(
             "{{\"sheetId\":\"Sheet1\",\"rowFormats\":[{{\"row\":0,\"format\":{{\"k\":\"{too_big}\"}}}}]}}"
@@ -10135,7 +10137,7 @@ mod tests {
             .expect_err("expected oversized format payload to be rejected")
             .to_string();
         assert!(
-            err.contains("JSON payload is too large") && err.contains(&max.to_string()),
+            err.contains("JSON value is too large") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
         );
     }

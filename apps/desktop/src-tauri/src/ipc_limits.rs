@@ -4,7 +4,7 @@
 /// lead to excessive memory usage and slow processing (e.g. workbook cloning, script parsing, or
 /// spawning subprocesses).
 use serde::de;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fmt;
 
@@ -260,9 +260,24 @@ impl<const MAX_BYTES: usize> AsRef<JsonValue> for LimitedJsonValue<MAX_BYTES> {
     }
 }
 
+impl<const MAX_BYTES: usize> From<JsonValue> for LimitedJsonValue<MAX_BYTES> {
+    fn from(value: JsonValue) -> Self {
+        LimitedJsonValue(value)
+    }
+}
+
 impl<const MAX_BYTES: usize> From<LimitedJsonValue<MAX_BYTES>> for JsonValue {
     fn from(value: LimitedJsonValue<MAX_BYTES>) -> Self {
         value.0
+    }
+}
+
+impl<const MAX_BYTES: usize> Serialize for LimitedJsonValue<MAX_BYTES> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 
