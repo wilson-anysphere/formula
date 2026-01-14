@@ -1773,6 +1773,30 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "edit.fillUp",
+    t("command.edit.fillUp"),
+    () => app.fillUp(),
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.edit.fillUp"),
+      keywords: ["fill", "fill up", "excel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.fillLeft",
+    t("command.edit.fillLeft"),
+    () => app.fillLeft(),
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.edit.fillLeft"),
+      keywords: ["fill", "fill left", "excel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "edit.selectCurrentRegion",
     t("command.edit.selectCurrentRegion"),
     () => {
