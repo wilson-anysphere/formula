@@ -192,15 +192,20 @@ function parseRepoFromRemoteUrl(remoteUrl) {
 
   // Examples:
   // - https://github.com/owner/name.git
+  // - https://<token>@github.com/owner/name.git
   // - git@github.com:owner/name.git
   // - ssh://git@github.com/owner/name.git
-  const httpsMatch = trimmed.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+  const httpsMatch = trimmed.match(
+    /^https?:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i
+  );
   if (httpsMatch) return normalizeRepo(`${httpsMatch[1]}/${httpsMatch[2]}`);
 
-  const sshMatch = trimmed.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+  const sshMatch = trimmed.match(/^[^@]+@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
   if (sshMatch) return normalizeRepo(`${sshMatch[1]}/${sshMatch[2]}`);
 
-  const sshProtoMatch = trimmed.match(/^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+  const sshProtoMatch = trimmed.match(
+    /^ssh:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i
+  );
   if (sshProtoMatch) return normalizeRepo(`${sshProtoMatch[1]}/${sshProtoMatch[2]}`);
 
   return "";
