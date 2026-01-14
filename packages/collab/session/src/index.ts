@@ -2005,11 +2005,16 @@ export class CollabSession {
     if (!canEditByPermissions) return false;
 
     // If the cell is already encrypted in Yjs, only allow edits when a key is available
-    // so we can preserve encryption invariants (never write plaintext into an encrypted cell).
+    // so we can preserve encryption invariants (never write plaintext into an encrypted cell),
+    // and only when the key id matches the ciphertext payload (so we never clobber encrypted
+    // content we cannot decrypt, including future/unknown payload schemas).
     const encRaw = this.getEncryptedPayloadForCell(cell);
     if (encRaw !== undefined) {
       const key = this.encryption?.keyForCell(cell) ?? null;
-      return Boolean(key);
+      if (!key) return false;
+      if (!isEncryptedCellPayload(encRaw)) return false;
+      if (key.keyId !== encRaw.keyId) return false;
+      return true;
     }
 
     if (this.encryption) {
@@ -2341,6 +2346,20 @@ export class CollabSession {
     }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
+    // If the cell already has an encrypted payload, only allow overwriting it when
+    // the resolver provides a *matching* key id (and the payload schema is supported).
+    // This prevents clobbering ciphertext authored by newer clients or written with a
+    // different key id.
+    if (existingEnc !== undefined && key) {
+      if (!isEncryptedCellPayload(existingEnc)) {
+        throw new Error(`Unsupported encrypted cell payload for cell ${cellKey}`);
+      }
+      if (key.keyId !== existingEnc.keyId) {
+        throw new Error(
+          `Encryption key id mismatch for cell ${cellKey} (payload=${existingEnc.keyId}, resolver=${key.keyId})`
+        );
+      }
+    }
     const encryptFormat = Boolean(this.encryption?.encryptFormat);
     const shouldEncrypt =
       existingEnc !== undefined ||
@@ -2551,6 +2570,18 @@ export class CollabSession {
     }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
+    // If the cell already has an encrypted payload, only allow overwriting it when
+    // the resolver provides a *matching* key id (and the payload schema is supported).
+    if (existingEnc !== undefined && key) {
+      if (!isEncryptedCellPayload(existingEnc)) {
+        throw new Error(`Unsupported encrypted cell payload for cell ${cellKey}`);
+      }
+      if (key.keyId !== existingEnc.keyId) {
+        throw new Error(
+          `Encryption key id mismatch for cell ${cellKey} (payload=${existingEnc.keyId}, resolver=${key.keyId})`
+        );
+      }
+    }
     const encryptFormat = Boolean(this.encryption?.encryptFormat);
     const wantsEncryption =
       existingEnc !== undefined ||
@@ -2793,6 +2824,16 @@ export class CollabSession {
 
       if (!shouldEncrypt) continue;
       if (!key) throw new Error(`Missing encryption key for cell ${update.cellKey}`);
+      if (existingEnc !== undefined) {
+        if (!isEncryptedCellPayload(existingEnc)) {
+          throw new Error(`Unsupported encrypted cell payload for cell ${update.cellKey}`);
+        }
+        if (key.keyId !== existingEnc.keyId) {
+          throw new Error(
+            `Encryption key id mismatch for cell ${update.cellKey} (payload=${existingEnc.keyId}, resolver=${key.keyId})`
+          );
+        }
+      }
 
       /** @type {CellPlaintext} */
       const plaintext: CellPlaintext =
