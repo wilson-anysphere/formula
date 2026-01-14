@@ -1000,13 +1000,24 @@ jobs:
           shopt -s nullglob
           dsym_dirs=()
           for root in "${roots[@]}"; do
+            # Preferred: Rust/tauri build outputs in the Cargo target dir (outside `bundle/**`).
+            # Keep the symbols out of `**/release/bundle/**` so the bundle-size gate and
+            # dry-run bundle artifacts never include them.
+            dsym_dirs+=("${root}"/release/*.dSYM)
+            dsym_dirs+=("${root}"/*/release/*.dSYM)
+
+            # Fallback: some Tauri versions/tools may place dSYM bundles alongside the .app in
+            # `bundle/macos/`. If that happens, we copy them out (below) and then delete them so
+            # downstream strip/bundle verification doesn't fail.
             dsym_dirs+=("${root}"/release/bundle/macos/*.dSYM)
             dsym_dirs+=("${root}"/*/release/bundle/macos/*.dSYM)
           done
           shopt -u nullglob
 
           if ((${#dsym_dirs[@]} == 0)); then
-            echo "debug-symbols: ERROR no .dSYM bundles found under **/release/bundle/macos/**" >&2
+            echo "debug-symbols: ERROR no .dSYM bundles found in Cargo release outputs." >&2
+            echo "debug-symbols: Searched roots:" >&2
+            printf '  - %s\n' "${roots[@]}" >&2
             exit 1
           fi
           mapfile -t dsym_dirs < <(printf '%s\n' "${dsym_dirs[@]}" | sort -u)
@@ -1018,6 +1029,15 @@ jobs:
             rm -f "$out"
             # Use `ditto` to preserve bundle structure/metadata for dSYM directories.
             ditto -c -k --sequesterRsrc --keepParent "$dsym" "$out"
+          done
+
+          # If any dSYM bundles were emitted into `**/release/bundle/**`, remove them so they
+          # don't bloat dry-run bundle artifacts or fail strip/bundle verification checks.
+          for dsym in "${dsym_dirs[@]}"; do
+            if [[ "$dsym" == *"/release/bundle/"* ]]; then
+              echo "debug-symbols: removing bundle-local dSYM: $dsym"
+              rm -rf "$dsym"
+            fi
           done
 
           ls -lah debug-symbols
