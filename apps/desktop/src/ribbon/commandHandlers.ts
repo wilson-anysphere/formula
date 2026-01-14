@@ -87,8 +87,29 @@ function activeCellFontSizePt(ctx: RibbonCommandHandlerContext): number {
   const cell = ctx.app.getActiveCell();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const docAny = ctx.app.getDocument() as any;
+  // Avoid resurrecting deleted sheets. `getCellFormat` / `getCell` can materialize sheets lazily.
+  try {
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (workbookHasAnySheets && !sheets.has(sheetId) && !sheetMeta.has(sheetId)) return 11;
+    }
+  } catch {
+    // Best-effort: fall through to legacy behavior.
+  }
   const effectiveSize = docAny.getCellFormat?.(sheetId, cell)?.font?.size;
-  const state = docAny.getCell?.(sheetId, cell);
+  const state =
+    typeof docAny.peekCell === "function"
+      ? docAny.peekCell(sheetId, cell)
+      : docAny.getCell?.(sheetId, cell);
   const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
   const size = typeof effectiveSize === "number" ? effectiveSize : style.font?.size;
   return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
@@ -99,6 +120,24 @@ function activeCellNumberFormat(ctx: RibbonCommandHandlerContext): string | null
   const cell = ctx.app.getActiveCell();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const docAny = ctx.app.getDocument() as any;
+  // Avoid resurrecting deleted sheets. `getCellFormat` can materialize sheets lazily.
+  try {
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (workbookHasAnySheets && !sheets.has(sheetId) && !sheetMeta.has(sheetId)) return null;
+    }
+  } catch {
+    // Best-effort: fall through to legacy behavior.
+  }
   const style = docAny.getCellFormat?.(sheetId, cell);
   return getStyleNumberFormat(style);
 }
@@ -108,6 +147,24 @@ function activeCellIndentLevel(ctx: RibbonCommandHandlerContext): number {
   const cell = ctx.app.getActiveCell();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const docAny = ctx.app.getDocument() as any;
+  // Avoid resurrecting deleted sheets. `getCellFormat` can materialize sheets lazily.
+  try {
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (workbookHasAnySheets && !sheets.has(sheetId) && !sheetMeta.has(sheetId)) return 0;
+    }
+  } catch {
+    // Best-effort: fall through to legacy behavior.
+  }
   const raw = docAny.getCellFormat?.(sheetId, cell)?.alignment?.indent;
   const value = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : 0;
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;

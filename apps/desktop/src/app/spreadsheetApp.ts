@@ -23891,6 +23891,11 @@ export class SpreadsheetApp {
     if (!action) return false;
 
     e.preventDefault();
+    // Avoid resurrecting deleted sheets. Formatting shortcuts ultimately call sheet-mutating
+    // DocumentController APIs (e.g. `setRangeFormat`) which will lazily materialize missing
+    // sheet ids. If the UI is temporarily holding a stale/deleted sheet id (during sheet
+    // deletion/undo/applyState), treat formatting shortcuts as no-ops.
+    if (this.isSheetKnownMissing(this.sheetId)) return true;
 
     const selectionRanges = this.selection.ranges.length
       ? this.selection.ranges

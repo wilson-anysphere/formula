@@ -428,6 +428,43 @@ describe("registerBuiltinCommands: read-only formatting defaults", () => {
   });
 });
 
+describe("registerBuiltinCommands: stale sheet ids", () => {
+  it("does not apply formatting when the current sheet id is known-missing (no resurrection)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(_panelId: string) {},
+      closePanel(_panelId: string) {},
+    } as any;
+
+    const doc = {
+      // Mirror DocumentController internal shape used by the known-missing heuristic.
+      model: { sheets: new Map([["Sheet1", {}]]) },
+      sheetMeta: new Map(),
+      getCellFormat: vi.fn(() => ({})),
+      setRangeFormat: vi.fn(() => true),
+    };
+
+    const app = {
+      isEditing: () => false,
+      isReadOnly: () => false,
+      getDocument: () => doc,
+      // Stale/deleted sheet id.
+      getCurrentSheetId: () => "Sheet2",
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getSelectionRanges: () => [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+      getGridLimits: () => ({ maxRows: 10_000, maxCols: 200 }),
+      focus: vi.fn(),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    await commandRegistry.executeCommand("format.toggleBold", true);
+
+    expect(doc.setRangeFormat).not.toHaveBeenCalled();
+  });
+});
+
 describe("registerBuiltinCommands: sheet navigation", () => {
   it("uses DocumentController.getVisibleSheetIds when UI sheet-store order is not provided", async () => {
     const commandRegistry = new CommandRegistry();

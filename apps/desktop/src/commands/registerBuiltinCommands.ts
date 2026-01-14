@@ -319,6 +319,31 @@ export function registerBuiltinCommands(params: {
     const sheetId = typeof (app as any)?.getCurrentSheetId === "function" ? (app as any).getCurrentSheetId() : null;
     if (!doc || !sheetId) return;
 
+    // Avoid resurrecting deleted sheets. DocumentController lazily materializes sheets when
+    // formatting APIs touch them (e.g. `setRangeFormat`), so stale sheet ids during
+    // sheet deletion/undo/applyState windows must be treated as no-ops.
+    const sheetKnownMissing = (() => {
+      const id = String(sheetId ?? "").trim();
+      if (!id) return true;
+      const docAny: any = doc as any;
+      const sheets: any = docAny?.model?.sheets;
+      const sheetMeta: any = docAny?.sheetMeta;
+      if (
+        sheets &&
+        typeof sheets.has === "function" &&
+        typeof sheets.size === "number" &&
+        sheetMeta &&
+        typeof sheetMeta.has === "function" &&
+        typeof sheetMeta.size === "number"
+      ) {
+        const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+        if (!workbookHasAnySheets) return false;
+        return !sheets.has(id) && !sheetMeta.has(id);
+      }
+      return false;
+    })();
+    if (sheetKnownMissing) return;
+
     const selection = typeof (app as any)?.getSelectionRanges === "function" ? (app as any).getSelectionRanges() : [];
     const limits = getGridLimitsForFormatting();
     const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
@@ -400,9 +425,26 @@ export function registerBuiltinCommands(params: {
       const sheetId = (app as any).getCurrentSheetId?.();
       const cell = (app as any).getActiveCell?.();
       const docAny = (app as any).getDocument?.();
-      if (!sheetId || !cell || !docAny) return 11;
-      const effectiveSize = docAny.getCellFormat?.(sheetId, cell)?.font?.size;
-      const state = docAny.getCell?.(sheetId, cell);
+      const id = typeof sheetId === "string" ? sheetId.trim() : "";
+      if (!id || !cell || !docAny) return 11;
+
+      // Avoid resurrecting deleted sheets when querying formatting state.
+      const sheets: any = docAny?.model?.sheets;
+      const sheetMeta: any = docAny?.sheetMeta;
+      if (
+        sheets &&
+        typeof sheets.has === "function" &&
+        typeof sheets.size === "number" &&
+        sheetMeta &&
+        typeof sheetMeta.has === "function" &&
+        typeof sheetMeta.size === "number"
+      ) {
+        const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+        if (workbookHasAnySheets && !sheets.has(id) && !sheetMeta.has(id)) return 11;
+      }
+
+      const effectiveSize = docAny.getCellFormat?.(id, cell)?.font?.size;
+      const state = typeof docAny.peekCell === "function" ? docAny.peekCell(id, cell) : docAny.getCell?.(id, cell);
       const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
       const size = typeof effectiveSize === "number" ? effectiveSize : style.font?.size;
       return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
@@ -416,8 +458,25 @@ export function registerBuiltinCommands(params: {
       const sheetId = (app as any).getCurrentSheetId?.();
       const cell = (app as any).getActiveCell?.();
       const docAny = (app as any).getDocument?.();
-      if (!sheetId || !cell || !docAny) return null;
-      const style = docAny.getCellFormat?.(sheetId, cell);
+      const id = typeof sheetId === "string" ? sheetId.trim() : "";
+      if (!id || !cell || !docAny) return null;
+
+      // Avoid resurrecting deleted sheets when querying formatting state.
+      const sheets: any = docAny?.model?.sheets;
+      const sheetMeta: any = docAny?.sheetMeta;
+      if (
+        sheets &&
+        typeof sheets.has === "function" &&
+        typeof sheets.size === "number" &&
+        sheetMeta &&
+        typeof sheetMeta.has === "function" &&
+        typeof sheetMeta.size === "number"
+      ) {
+        const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+        if (workbookHasAnySheets && !sheets.has(id) && !sheetMeta.has(id)) return null;
+      }
+
+      const style = docAny.getCellFormat?.(id, cell);
       return getStyleNumberFormat(style);
     } catch {
       return null;

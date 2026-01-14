@@ -208,6 +208,42 @@ describe("SpreadsheetApp AutoSum (Alt+=)", () => {
     }
   });
 
+  it("does not resurrect a deleted sheet when a formatting shortcut runs while the app holds a stale sheet id", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    try {
+      const doc = app.getDocument();
+
+      // Ensure the default sheet exists and create a second sheet we can delete.
+      doc.getCell("Sheet1", { row: 0, col: 0 });
+      doc.addSheet({ sheetId: "Sheet2", name: "Sheet2", insertAfterId: "Sheet1" });
+      expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet2"]);
+
+      doc.deleteSheet("Sheet2");
+      expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+      // Simulate a stale active sheet id in UI state.
+      (app as any).sheetId = "Sheet2";
+
+      // Ctrl+B triggers the bold formatting shortcut in legacy grid mode.
+      const event = new KeyboardEvent("keydown", { ctrlKey: true, code: "KeyB", key: "b", cancelable: true });
+      root.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+
+      // Formatting should no-op and must not recreate Sheet2.
+      expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+    } finally {
+      app.destroy();
+      root.remove();
+    }
+  });
+
   it.each([
     { localeId: "de-DE", expectedFn: "SUMME" },
     { localeId: "fr-FR", expectedFn: "SOMME" },
