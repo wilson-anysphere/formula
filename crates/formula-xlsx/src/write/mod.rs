@@ -865,17 +865,11 @@ fn build_parts(
         let cols_changed = &sheet.col_properties != &orig_cols;
 
         // `parse_col_properties` ignores outline-related attributes (`outlineLevel`, `collapsed`).
-        // If callers mutate only `sheet.outline.cols`, we still need to rewrite `<cols>` so the
-        // outline metadata is preserved/emitted.
-        let outline_cols_changed = if orig.is_some()
-            && sheet
-                .outline
-                .cols
-                .iter()
-                .any(|(_, entry)| entry.level > 0 || entry.hidden.is_hidden() || entry.collapsed)
-        {
+        // If callers mutate only `sheet.outline.cols` (including clearing outline levels), we
+        // still need to rewrite `<cols>` so the outline metadata is preserved/emitted.
+        let outline_cols_changed = if let Some(orig) = orig {
             let desired = cols_xml_props_from_sheet(sheet);
-            let orig_xml = std::str::from_utf8(orig.expect("checked is_some")).map_err(|e| {
+            let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                 WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
             let original_cols = parse_cols_xml_props(orig_xml)?;

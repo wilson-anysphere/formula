@@ -90,3 +90,29 @@ fn outline_save_to_vec_rewrites_cols_when_outline_changes() {
     }
 }
 
+#[test]
+fn outline_save_to_vec_rewrites_cols_when_outline_removed() {
+    let mut doc = load_from_bytes(FIXTURE).expect("load fixture");
+    let sheet_id = doc
+        .workbook
+        .sheets
+        .first()
+        .map(|s| s.id)
+        .expect("sheet exists");
+
+    // Populate outline metadata in the worksheet model so we can mutate it without depending on
+    // `load_from_bytes` parsing behavior.
+    let outline = read_outline_from_xlsx_bytes(FIXTURE, SHEET_PATH).expect("read outline");
+    let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
+    sheet.outline = outline;
+
+    // Remove the outline level from detail cols 2-4.
+    sheet.ungroup_cols(2, 4);
+
+    let saved = doc.save_to_vec().expect("save");
+    let outline2 = read_outline_from_xlsx_bytes(&saved, SHEET_PATH).expect("read outline");
+
+    for col in 2..=4 {
+        assert_eq!(outline2.cols.entry(col).level, 0, "col {col} outlineLevel");
+    }
+}
