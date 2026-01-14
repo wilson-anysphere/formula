@@ -992,7 +992,11 @@ impl DataModel {
                         v.is_blank() || &v != key
                     });
                 }
-                UnmatchedFactRows::Dense { bits, len, count } => {
+                UnmatchedFactRows::Dense {
+                    bits,
+                    len,
+                    ref mut count,
+                } => {
                     let key = &key_for_updates;
                     let clear_row = |row: usize, bits: &mut [u64], len: usize, count: &mut usize| {
                         if row >= len {
@@ -1003,13 +1007,13 @@ impl DataModel {
                         let mask = 1u64 << bit;
                         if (bits[word] & mask) != 0 {
                             bits[word] &= !mask;
-                            *count = count.saturating_sub(1);
+                            *count = (*count).saturating_sub(1);
                         }
                     };
 
                     if let Some(rows) = from_table_ref.filter_eq(from_idx, key) {
                         for row in rows {
-                            clear_row(row, bits, *len, count);
+                            clear_row(row, bits.as_mut_slice(), *len, count);
                         }
                     } else {
                         // Fallback: scan and compare.
@@ -1018,7 +1022,7 @@ impl DataModel {
                                 .value_by_idx(row, from_idx)
                                 .unwrap_or(Value::Blank);
                             if &v == key {
-                                clear_row(row, bits, *len, count);
+                                clear_row(row, bits.as_mut_slice(), *len, count);
                             }
                         }
                     }
