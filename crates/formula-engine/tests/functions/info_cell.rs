@@ -338,6 +338,24 @@ fn cell_width_self_reference_is_not_a_circular_dependency() {
 }
 
 #[test]
+fn cell_width_omitted_reference_uses_current_cell_and_is_not_circular() {
+    // Excel allows `CELL("width")` without the optional reference argument; it should use the
+    // current cell as the implicit reference without introducing a self-edge.
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CELL(\"width\")");
+    sheet.recalculate();
+
+    assert_number(&sheet.get("A1"), 8.0);
+    assert_eq!(sheet.circular_reference_count(), 0);
+
+    // Column metadata edits should affect the result on the next recalculation.
+    sheet.set_col_width(0, Some(25.0));
+    sheet.recalculate();
+    assert_number(&sheet.get("A1"), 25.1);
+    assert_eq!(sheet.circular_reference_count(), 0);
+}
+
+#[test]
 fn cell_sheet_default_style_affects_format_prefix_and_protect() {
     use formula_engine::Engine;
     use formula_model::{Alignment, HorizontalAlignment, Protection};
@@ -419,6 +437,12 @@ fn cell_width_updates_on_sheet_default_width_change_in_automatic_mode() {
 
     engine.set_sheet_default_col_width("Sheet1", Some(20.0));
     assert_number(&engine.get_cell_value("Sheet1", "B1"), 20.0);
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), before_tick);
+
+    // Clearing the sheet default should revert to Excel's standard width (8.43 -> 8.0 encoding)
+    // without forcing unrelated non-volatile formulas to recalculate.
+    engine.set_sheet_default_col_width("Sheet1", None);
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), before_tick);
 }
 
