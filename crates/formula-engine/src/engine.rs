@@ -1883,25 +1883,6 @@ impl Engine {
             sheet_state.format_runs_by_col.clear();
         }
 
-        // Drop any pivots that referenced the deleted sheet name (either as source or destination).
-        //
-        // Keeping these definitions around can cause surprising behavior: if a caller later refreshes
-        // a pivot whose destination sheet was deleted, `refresh_pivot` will write output using
-        // `Engine::set_cell_value`, which calls `ensure_sheet` and would implicitly recreate a new
-        // sheet under the old name.
-        self.workbook.pivots.retain(|_, pivot| {
-            if formula_model::sheet_name_eq_case_insensitive(&pivot.destination.sheet, &deleted_sheet_name)
-            {
-                return false;
-            }
-            match &pivot.source {
-                PivotSource::Range { sheet, .. } => {
-                    !formula_model::sheet_name_eq_case_insensitive(sheet, &deleted_sheet_name)
-                }
-                PivotSource::Table { .. } => true,
-            }
-        });
-
         // Rewrite formulas stored in remaining sheets.
         let remaining_sheet_ids = self.workbook.sheet_ids_in_order().to_vec();
         for sheet_id in &remaining_sheet_ids {
