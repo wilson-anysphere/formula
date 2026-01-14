@@ -47,7 +47,19 @@ export interface WorkbookSchemaCellMapLike {
   get(key: string): unknown;
 }
 
-export type WorkbookSchemaSheetInput = WorkbookSchemaKeyedSheetObjectInput | unknown[][] | WorkbookSchemaCellMapLike | string;
+/**
+ * Sparse cell map as a plain object keyed by `"row,col"` or `"row:col"`.
+ *
+ * This is accepted at runtime via heuristics (see `looksLikeSparseCoordKeyedObject`).
+ */
+export type WorkbookSchemaSparseCellObjectMap = Record<string, unknown>;
+
+export type WorkbookSchemaSheetInput =
+  | WorkbookSchemaKeyedSheetObjectInput
+  | unknown[][]
+  | WorkbookSchemaCellMapLike
+  | WorkbookSchemaSparseCellObjectMap
+  | string;
 
 /**
  * Supported shapes for `workbook.sheets`.
