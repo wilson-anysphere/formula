@@ -2402,6 +2402,81 @@ mod tests {
     }
 
     #[test]
+    fn rc4_standard_password_truncation_can_split_surrogate_pairs() {
+        // Truncation is defined in terms of UTF-16 code units, not Unicode scalar values.
+        // This means it can split a non-BMP character's surrogate pair when the 15-code-unit limit
+        // falls between the high and low surrogate.
+        //
+        // These two passwords differ only in the *low surrogate* of their final non-BMP emoji, so
+        // they should be treated as equivalent by the legacy RC4 Standard key derivation.
+        let prefix = "0123456789ABCD"; // 14 ASCII chars = 14 UTF-16 code units
+        let password = format!("{prefix}🔒"); // U+1F512 => surrogate pair D83D DD12
+        let password_same_truncation = format!("{prefix}😀"); // U+1F600 => surrogate pair D83D DE00
+        let wrong_password = format!("1123456789ABCD🔒"); // differs within the first 15 code units
+
+        // Confirm the full UTF-16 representations differ.
+        assert_ne!(
+            password.encode_utf16().collect::<Vec<_>>(),
+            password_same_truncation.encode_utf16().collect::<Vec<_>>(),
+            "sanity: passwords should differ before truncation"
+        );
+
+        // Confirm our UTF-16LE truncation drops the low surrogate (16th code unit).
+        let pw_bytes = password_to_utf16le(&password);
+        let pw_bytes_same = password_to_utf16le(&password_same_truncation);
+        assert_eq!(
+            &pw_bytes[..],
+            &pw_bytes_same[..],
+            "expected passwords to match after truncation to 15 UTF-16 code units"
+        );
+        assert_eq!(pw_bytes.len(), 15 * 2);
+        assert_eq!(
+            &pw_bytes[28..30],
+            &[0x3D, 0xD8], // 0xD83D little-endian (high surrogate)
+            "expected last retained code unit to be the emoji high surrogate"
+        );
+
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        // BIFF8 RC4 FILEPASS placeholder (Standard Encryption / major=1, minor=2 => 128-bit key).
+        let mut filepass_placeholder = vec![0u8; 6 + 16 + 16 + 16];
+        filepass_placeholder[0..2].copy_from_slice(&BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_placeholder[2..4].copy_from_slice(&1u16.to_le_bytes()); // major
+        filepass_placeholder[4..6].copy_from_slice(&2u16.to_le_bytes()); // minor (128-bit)
+
+        // Cross the 1024-byte rekey boundary to ensure we exercise block stepping.
+        let r1 = record(0x00FC, &dummy_payload(1000, 0x90));
+        let r2 = record(0x00FD, &dummy_payload(80, 0xA0));
+
+        let mut plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_placeholder),
+            r1,
+            r2,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        encrypt_workbook_stream_for_test(&mut encrypted, &password).expect("encrypt");
+
+        // FILEPASS is plaintext and populated by the encryption helper; patch the expected plaintext
+        // stream so we can compare full bytes after decryption.
+        let range = filepass_payload_range(&plain);
+        plain[range.clone()].copy_from_slice(&encrypted[range.clone()]);
+
+        for candidate in [password.as_str(), password_same_truncation.as_str()] {
+            let mut decrypted = encrypted.clone();
+            decrypt_workbook_stream(&mut decrypted, candidate).expect("decrypt");
+            assert_eq!(decrypted, plain);
+        }
+
+        let mut buf = encrypted.clone();
+        let err = decrypt_workbook_stream(&mut buf, &wrong_password).expect_err("wrong password");
+        assert_eq!(err, DecryptError::WrongPassword);
+    }
+
+    #[test]
     fn xor_decrypt_tolerates_trailing_padding_bytes_after_eof() {
         let password = "pw";
         let bof_payload = [0x00, 0x06, 0x05, 0x00];
