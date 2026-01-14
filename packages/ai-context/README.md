@@ -565,6 +565,7 @@ The policy engine can return decisions like **ALLOW**, **REDACT**, or **BLOCK** 
 
 - throw on **BLOCK** (callers should catch `DlpViolationError`)
 - redact content on **REDACT** (sheet cells or retrieved chunks depending on the call)
+- under **structured** DLP redaction, replace user-controlled schema/metadata tokens (e.g. sheet/table/namedRange names, chunk titles) with placeholders so non-heuristic sensitive strings can’t leak even with a no-op redactor
 - when a **structured** decision requires **REDACT**, strip prompt-facing `attachments` down to a minimal `{ type, reference }` skeleton so arbitrary attachment payload fields cannot bypass redaction
 - redact *sensitive queries* before embedding when policy would not allow cloud AI processing for that query (defense-in-depth)
 - emit audit events when an `auditLogger` is provided
