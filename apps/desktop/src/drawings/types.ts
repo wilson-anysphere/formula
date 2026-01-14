@@ -1,5 +1,7 @@
 export type Emu = number;
 
+export type DrawingObjectId = number;
+
 export interface EmuSize {
   cx: Emu;
   cy: Emu;
@@ -41,7 +43,7 @@ export interface DrawingTransform {
 }
 
 export interface DrawingObject {
-  id: number;
+  id: DrawingObjectId;
   kind: DrawingObjectKind;
   anchor: Anchor;
   /** Lower means behind. */

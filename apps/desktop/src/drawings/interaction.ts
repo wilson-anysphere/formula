@@ -267,7 +267,6 @@ export class DrawingInteractionController {
 
     const rect = this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
-
     const viewport = this.callbacks.getViewport();
     const zoom = sanitizeZoom(viewport.zoom);
     const objects = this.callbacks.getObjects();

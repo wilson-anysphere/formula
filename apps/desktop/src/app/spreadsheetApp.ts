@@ -38,7 +38,14 @@ import {
   type GridGeometry as DrawingGridGeometry,
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
-import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
+import {
+  createDrawingObjectId,
+  type Anchor as DrawingAnchor,
+  type DrawingObject,
+  type DrawingObjectId,
+  type ImageEntry,
+  type ImageStore,
+} from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { duplicateSelected as duplicateDrawingSelected } from "../drawings/commands";
 import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromFile } from "../drawings/insertImage";
@@ -1053,7 +1060,8 @@ export class SpreadsheetApp {
   private drawingObjects: DrawingObject[] = [];
   private drawingHitTestIndex: HitTestIndex | null = null;
   private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
-  private selectedDrawingId: number | null = null;
+  private selectedDrawingId: DrawingObjectId | null = null;
+  private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
   private nextDrawingImageId = 1;
   private insertImageInput: HTMLInputElement | null = null;
@@ -6401,11 +6409,41 @@ export class SpreadsheetApp {
    * Prefers the explicit drawing selection state, but falls back to chart selection
    * in canvas-charts mode (so chart selection continues to show handles in split view).
    */
-  getSelectedDrawingId(): number | null {
+  getSelectedDrawingId(): DrawingObjectId | null {
     if (this.selectedDrawingId != null) return this.selectedDrawingId;
     if (!this.useCanvasCharts) return null;
     if (!this.selectedChartId) return null;
     return chartStoreIdToDrawingId(this.selectedChartId);
+  }
+
+  /**
+   * Select a drawing by id (or clear selection).
+   *
+   * Used by context menu right-click selection so the object under the cursor becomes
+   * the active selection without changing the active cell.
+   */
+  selectDrawingById(id: DrawingObjectId | null): void {
+    this.selectedDrawingId = id;
+
+    // Drawings and charts are mutually exclusive selections; selecting a drawing should clear
+    // any active chart selection so selection handles don't double-render.
+    if (id != null && this.selectedChartId != null) {
+      this.setSelectedChartId(null);
+    }
+
+    // Keep any active interaction controller in sync without implicitly enabling interactions.
+    this.drawingInteractionController?.setSelectedId(id);
+
+    const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+    this.renderDrawings(sharedViewport);
+  }
+
+  /**
+   * Registers (or clears) the split-view secondary pane so drawing hit-testing can
+   * route client coordinates to the correct grid surface.
+   */
+  setSplitViewSecondaryGridView(view: { container: HTMLElement; grid: DesktopSharedGrid } | null): void {
+    this.splitViewSecondaryGrid = view;
   }
 
   getGridLimits(): GridLimits {
@@ -7003,6 +7041,88 @@ export class SpreadsheetApp {
    * These are public primarily so external integration points (context menus, keyboard shortcuts,
    * e2e harnesses) can interact with drawing objects without needing direct state access.
    */
+  hitTestDrawingAtClientPoint(clientX: number, clientY: number): { id: DrawingObjectId } | null {
+    // Prefer the cached list (kept up to date by `renderDrawings`), but fall back to a fresh
+    // list if the cache hasn't been populated yet.
+    const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
+    if (objects.length === 0) return null;
+
+    // --- Primary pane ----------------------------------------------------------
+    this.maybeRefreshRootPosition({ force: true });
+    const x = clientX - this.rootLeft;
+    const y = clientY - this.rootTop;
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+      const viewport = this.getDrawingInteractionViewport(sharedViewport);
+      if (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height) {
+        const index = this.getDrawingHitTestIndex(objects);
+        const hit = hitTestDrawings(index, viewport, x, y, this.drawingGeom);
+        if (hit) return { id: hit.object.id };
+      }
+    }
+
+    // --- Split-view secondary pane -------------------------------------------
+    const secondary = this.splitViewSecondaryGrid;
+    if (secondary) {
+      const rect = secondary.container.getBoundingClientRect();
+      const sx = clientX - rect.left;
+      const sy = clientY - rect.top;
+      if (!Number.isFinite(sx) || !Number.isFinite(sy)) return null;
+      if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return null;
+
+      const scroll = secondary.grid.getScroll();
+      const viewportState = secondary.grid.renderer.scroll.getViewportState();
+      const headerRows = 1;
+      const headerCols = 1;
+      const headerWidth = headerCols > 0 ? secondary.grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+      const headerHeight = headerRows > 0 ? secondary.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+      const headerOffsetX = Math.min(headerWidth, rect.width);
+      const headerOffsetY = Math.min(headerHeight, rect.height);
+      const zoom = secondary.grid.renderer.getZoom();
+      const { frozenRows, frozenCols } = this.getFrozen();
+
+      const viewport: DrawingViewport = {
+        scrollX: scroll.x,
+        scrollY: scroll.y,
+        width: rect.width,
+        height: rect.height,
+        dpr: 1,
+        zoom,
+        frozenRows,
+        frozenCols,
+        headerOffsetX,
+        headerOffsetY,
+        frozenWidthPx: viewportState.frozenWidth,
+        frozenHeightPx: viewportState.frozenHeight,
+      };
+
+      const geom: DrawingGridGeometry = {
+        cellOriginPx: (cell) => {
+          const gridRow = cell.row + headerRows;
+          const gridCol = cell.col + headerCols;
+          return {
+            x: secondary.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+            y: secondary.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+          };
+        },
+        cellSizePx: (cell) => {
+          const gridRow = cell.row + headerRows;
+          const gridCol = cell.col + headerCols;
+          return {
+            width: secondary.grid.renderer.getColWidth(gridCol),
+            height: secondary.grid.renderer.getRowHeight(gridRow),
+          };
+        },
+      };
+
+      const index = buildHitTestIndex(objects, geom, { zoom });
+      const hit = hitTestDrawings(index, viewport, sx, sy, geom);
+      if (hit) return { id: hit.object.id };
+    }
+
+    return null;
+  }
+
   pickDrawingAtClientPoint(clientX: number, clientY: number): number | null {
     const objects = this.listDrawingObjectsForSheet();
     if (objects.length === 0) return null;
