@@ -15,7 +15,6 @@ fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
         buf.len() % AES_BLOCK_LEN == 0,
         "plaintext must be block-aligned for AES-ECB"
     );
-
     fn encrypt_with<C>(key: &[u8], buf: &mut [u8])
     where
         C: BlockEncrypt + KeyInit,
@@ -53,7 +52,6 @@ fn encrypt_standard_encrypted_package_stream(plaintext: &[u8], key: &[u8]) -> Ve
     }
     aes_ecb_encrypt_in_place(key, &mut buf);
     out.extend_from_slice(&buf);
-
     out
 }
 
@@ -112,7 +110,7 @@ proptest! {
             }
             Corruption::RemoveBytesFromNonFinalSegment => {
                 // Remove two AES blocks so ciphertext remains block-aligned but is guaranteed to be
-                // too short to reproduce `orig_size`.
+                // too short to reproduce `orig_size` (accounting for AES block padding).
                 //
                 // Remove from the first segment (non-final) to also exercise segment boundary logic.
                 let start = ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + (ENCRYPTED_PACKAGE_SEGMENT_LEN / 2);

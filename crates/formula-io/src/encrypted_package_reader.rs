@@ -294,6 +294,7 @@ mod tests {
     use aes::{Aes128, Aes192, Aes256};
     use cbc::cipher::block_padding::NoPadding;
     use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     fn patterned_bytes(len: usize) -> Vec<u8> {
@@ -450,6 +451,109 @@ mod tests {
         )
         .expect("full decrypt");
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[derive(Debug, Clone)]
+    enum ReadSeekOp {
+        SeekStart(u64),
+        SeekCurrent(i64),
+        SeekEnd(i64),
+        Read(usize),
+    }
+
+    fn read_seek_op_strategy() -> impl Strategy<Value = ReadSeekOp> {
+        // Keep the ranges conservative so the test is fast and doesn't explore pathological i64
+        // corner cases. The goal is to stress the segmented-cache logic across random access
+        // patterns.
+        let seek_abs_max = 25_000u64;
+        let seek_rel_max = 25_000i64;
+        let read_len_max = SEGMENT_SIZE * 2;
+
+        prop_oneof![
+            (0u64..=seek_abs_max).prop_map(ReadSeekOp::SeekStart),
+            (-seek_rel_max..=seek_rel_max).prop_map(ReadSeekOp::SeekCurrent),
+            (-seek_rel_max..=seek_rel_max).prop_map(ReadSeekOp::SeekEnd),
+            (0usize..=read_len_max).prop_map(ReadSeekOp::Read),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 32,
+            max_shrink_iters: 0,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_standard_cryptoapi_reader_matches_plaintext(
+            plaintext in proptest::collection::vec(any::<u8>(), 0..=20_000),
+            ops in proptest::collection::vec(read_seek_op_strategy(), 0..=64),
+        ) {
+            let key = [7u8; 16];
+
+            let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &plaintext);
+            let ciphertext = encrypted_stream.get(8..).unwrap_or(&[]);
+
+            let inner = Cursor::new(ciphertext.to_vec());
+            let mut reader = DecryptedPackageReader::new(
+                inner,
+                EncryptionMethod::StandardCryptoApi { key: key.to_vec() },
+                plaintext.len() as u64,
+            );
+
+            let mut expected_pos: u64 = 0;
+            let plaintext_len = plaintext.len() as u64;
+
+            for op in ops {
+                match op {
+                    ReadSeekOp::SeekStart(pos) => {
+                        let res = reader.seek(SeekFrom::Start(pos));
+                        prop_assert!(res.is_ok());
+                        expected_pos = pos;
+                    }
+                    ReadSeekOp::SeekCurrent(off) => {
+                        let new_pos = expected_pos as i128 + off as i128;
+                        let res = reader.seek(SeekFrom::Current(off));
+                        if new_pos < 0 {
+                            prop_assert!(res.is_err());
+                        } else {
+                            prop_assert_eq!(res.unwrap(), new_pos as u64);
+                            expected_pos = new_pos as u64;
+                        }
+                    }
+                    ReadSeekOp::SeekEnd(off) => {
+                        let new_pos = plaintext_len as i128 + off as i128;
+                        let res = reader.seek(SeekFrom::End(off));
+                        if new_pos < 0 {
+                            prop_assert!(res.is_err());
+                        } else {
+                            prop_assert_eq!(res.unwrap(), new_pos as u64);
+                            expected_pos = new_pos as u64;
+                        }
+                    }
+                    ReadSeekOp::Read(len) => {
+                        let mut buf = vec![0u8; len];
+                        let n = reader.read(&mut buf).expect("read should not error");
+
+                        let expected_n = if expected_pos >= plaintext_len {
+                            0usize
+                        } else {
+                            let remaining = (plaintext_len - expected_pos) as usize;
+                            remaining.min(len)
+                        };
+                        prop_assert_eq!(n, expected_n);
+
+                        if n > 0 {
+                            prop_assert_eq!(
+                                &buf[..n],
+                                &plaintext[expected_pos as usize..expected_pos as usize + n]
+                            );
+                            expected_pos += n as u64;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
