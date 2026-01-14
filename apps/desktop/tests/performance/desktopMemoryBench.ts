@@ -29,7 +29,6 @@ import {
   getProcessTreeRssBytesLinux,
   resolvePerfHome,
   runOnce as runDesktopOnce,
-  shouldUseXvfb,
 } from './desktopStartupUtil.ts';
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -63,7 +62,6 @@ async function sampleIdleRssMbLinux(options: {
   profileDir: string;
 }): Promise<number> {
   const { binPath, timeoutMs, settleMs, profileDir } = options;
-  const useXvfb = shouldUseXvfb();
 
   let sampledRssMb: number | null = null;
   let sampleError: Error | null = null;
@@ -71,7 +69,6 @@ async function sampleIdleRssMbLinux(options: {
   await runDesktopOnce({
     binPath,
     timeoutMs,
-    xvfb: useXvfb,
     profileDir,
     afterCapture: async (child, _metrics, signal) => {
       try {
@@ -91,9 +88,6 @@ async function sampleIdleRssMbLinux(options: {
           signal,
         );
         if (!resolvedPid) {
-          if (useXvfb) {
-            throw new Error('Failed to resolve desktop PID under Xvfb wrapper for RSS sampling');
-          }
           throw new Error('Failed to resolve desktop PID for RSS sampling');
         }
 

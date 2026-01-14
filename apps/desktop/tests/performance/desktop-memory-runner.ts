@@ -11,7 +11,6 @@ import {
   repoRoot,
   resolvePerfHome,
   runOnce as runDesktopOnce,
-  shouldUseXvfb,
 } from './desktopStartupUtil.ts';
 
 type Summary = {
@@ -238,20 +237,18 @@ async function processTreeMemoryMb(options: {
   rootPid: number;
   binPath: string;
   timeoutMs: number;
-  useXvfb: boolean;
   signal?: AbortSignal;
 }): Promise<number> {
-  const { rootPid, binPath, timeoutMs, useXvfb, signal } = options;
+  const { rootPid, binPath, timeoutMs, signal } = options;
 
   if (process.platform === 'win32') {
     return processTreeWorkingSetBytesWindows(rootPid) / (1024 * 1024);
   }
 
   if (process.platform === 'linux') {
-    let resolvedPid = rootPid;
-    if (useXvfb) {
-      const found = await findPidForExecutableLinux(rootPid, binPath, Math.min(2000, timeoutMs), signal);
-      if (found) resolvedPid = found;
+    const resolvedPid = await findPidForExecutableLinux(rootPid, binPath, Math.min(2000, timeoutMs), signal);
+    if (!resolvedPid) {
+      throw new Error('Failed to resolve desktop PID for RSS sampling');
     }
 
     const bytes = await getProcessTreeRssBytesLinux(resolvedPid);
@@ -262,15 +259,12 @@ async function processTreeMemoryMb(options: {
 }
 
 async function runOnce(binPath: string, timeoutMs: number, settleMs: number, profileDir: string): Promise<number> {
-  const useXvfb = shouldUseXvfb();
-
   let sampledRssMb: number | null = null;
   let sampleError: Error | null = null;
 
   await runDesktopOnce({
     binPath,
     timeoutMs,
-    xvfb: useXvfb,
     profileDir,
     afterCapture: async (child, _metrics, signal) => {
       try {
@@ -283,7 +277,7 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number, pro
           throw new Error('Desktop process PID was not available for memory sampling');
         }
 
-        const rssMb = await processTreeMemoryMb({ rootPid: pid, binPath, timeoutMs, useXvfb, signal });
+        const rssMb = await processTreeMemoryMb({ rootPid: pid, binPath, timeoutMs, signal });
         if (!Number.isFinite(rssMb) || rssMb <= 0) {
           throw new Error('Failed to sample desktop memory (process may have exited)');
         }
