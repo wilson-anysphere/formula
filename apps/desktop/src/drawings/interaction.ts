@@ -525,27 +525,34 @@ export function resizeAnchor(
   zoom: number = 1,
 ): DrawingObject["anchor"] {
   const z = sanitizeZoom(zoom);
+  const originA1 = (() => {
+    try {
+      return geom.cellOriginPx({ row: 0, col: 0 });
+    } catch {
+      return { x: 0, y: 0 };
+    }
+  })();
   const rect =
     anchor.type === "absolute"
       ? {
-          left: emuToPx(anchor.pos.xEmu),
-          top: emuToPx(anchor.pos.yEmu),
-          right: emuToPx(anchor.pos.xEmu + anchor.size.cx),
-          bottom: emuToPx(anchor.pos.yEmu + anchor.size.cy),
+          left: originA1.x + emuToPx(anchor.pos.xEmu) * z,
+          top: originA1.y + emuToPx(anchor.pos.yEmu) * z,
+          right: originA1.x + emuToPx(anchor.pos.xEmu + anchor.size.cx) * z,
+          bottom: originA1.y + emuToPx(anchor.pos.yEmu + anchor.size.cy) * z,
         }
       : anchor.type === "oneCell"
         ? (() => {
-            const p = anchorPointToSheetPx(anchor.from, geom);
+            const p = anchorPointToSheetPx(anchor.from, geom, z);
             return {
               left: p.x,
               top: p.y,
-              right: p.x + emuToPx(anchor.size.cx),
-              bottom: p.y + emuToPx(anchor.size.cy),
+              right: p.x + emuToPx(anchor.size.cx) * z,
+              bottom: p.y + emuToPx(anchor.size.cy) * z,
             };
           })()
         : (() => {
-            const from = anchorPointToSheetPx(anchor.from, geom);
-            const to = anchorPointToSheetPx(anchor.to, geom);
+            const from = anchorPointToSheetPx(anchor.from, geom, z);
+            const to = anchorPointToSheetPx(anchor.to, geom, z);
             return { left: from.x, top: from.y, right: to.x, bottom: to.y };
           })();
 
@@ -667,7 +674,7 @@ export function resizeAnchor(
 
   switch (anchor.type) {
     case "oneCell": {
-      const start = anchorPointToSheetPx(anchor.from, geom);
+      const start = anchorPointToSheetPx(anchor.from, geom, z);
       const nextFrom = shiftAnchorPoint(anchor.from, left - start.x, top - start.y, geom, z);
       return {
         ...anchor,
@@ -678,13 +685,13 @@ export function resizeAnchor(
     case "absolute": {
       return {
         ...anchor,
-        pos: { xEmu: pxToEmu(left / z), yEmu: pxToEmu(top / z) },
+        pos: { xEmu: pxToEmu((left - originA1.x) / z), yEmu: pxToEmu((top - originA1.y) / z) },
         size: { cx: pxToEmu(widthPx / z), cy: pxToEmu(heightPx / z) },
       };
     }
     case "twoCell": {
-      const startFrom = anchorPointToSheetPx(anchor.from, geom);
-      const startTo = anchorPointToSheetPx(anchor.to, geom);
+      const startFrom = anchorPointToSheetPx(anchor.from, geom, z);
+      const startTo = anchorPointToSheetPx(anchor.to, geom, z);
       const nextFrom = shiftAnchorPoint(anchor.from, left - startFrom.x, top - startFrom.y, geom, z);
       const nextTo = shiftAnchorPoint(anchor.to, right - startTo.x, bottom - startTo.y, geom, z);
       return { ...anchor, from: nextFrom, to: nextTo };
@@ -692,9 +699,10 @@ export function resizeAnchor(
   }
 }
 
-function anchorPointToSheetPx(point: AnchorPoint, geom: GridGeometry): { x: number; y: number } {
+function anchorPointToSheetPx(point: AnchorPoint, geom: GridGeometry, zoom: number = 1): { x: number; y: number } {
+  const z = sanitizeZoom(zoom);
   const origin = geom.cellOriginPx(point.cell);
-  return { x: origin.x + emuToPx(point.offset.xEmu), y: origin.y + emuToPx(point.offset.yEmu) };
+  return { x: origin.x + emuToPx(point.offset.xEmu) * z, y: origin.y + emuToPx(point.offset.yEmu) * z };
 }
 
 function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
