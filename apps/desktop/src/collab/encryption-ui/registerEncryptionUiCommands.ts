@@ -35,6 +35,15 @@ function rangesIntersect(
   return true;
 }
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array)) return false;
+  if (a.byteLength !== b.byteLength) return false;
+  for (let i = 0; i < a.byteLength; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 function roleCanEncrypt(role: string | null | undefined): boolean {
   return role === "owner" || role === "admin" || role === "editor";
 }
@@ -392,11 +401,48 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         showToast("Encryption is not available for this workbook.", "error");
         return;
       }
+
+      // Guard against accidentally overwriting an existing key id with different bytes
+      // (which would make previously-encrypted cells unreadable).
+      let existing: Uint8Array | null = null;
       try {
-        await keyStore.set(parsed.docId, parsed.keyId, bytesToBase64(parsed.keyBytes));
+        const cached = keyStore.getCachedKey(parsed.docId, parsed.keyId);
+        existing = cached?.keyBytes ?? null;
+        if (!existing) {
+          const entry = await keyStore.get(parsed.docId, parsed.keyId);
+          if (entry) existing = base64ToBytes(entry.keyBytesBase64);
+        }
       } catch {
-        showToast("Failed to store encryption key.", "error");
-        return;
+        // Best-effort: treat lookup failure as "missing key" and continue.
+      }
+
+      if (existing && !bytesEqual(existing, parsed.keyBytes)) {
+        const overwrite = await showQuickPick(
+          [
+            {
+              label: `Overwrite existing key "${parsed.keyId}"`,
+              description: "Dangerous: this can make previously-encrypted cells unreadable.",
+              value: "overwrite",
+            },
+            { label: "Cancel", value: "cancel" },
+          ],
+          { placeHolder: "A different key with this id already exists" },
+        );
+        if (overwrite !== "overwrite") return;
+      }
+
+      const action: "import" | "overwrite" | "already" =
+        !existing ? "import" : bytesEqual(existing, parsed.keyBytes) ? "already" : "overwrite";
+
+      let storedKeyId = parsed.keyId;
+      if (action !== "already") {
+        try {
+          const result = await keyStore.set(parsed.docId, parsed.keyId, bytesToBase64(parsed.keyBytes));
+          storedKeyId = result.keyId;
+        } catch {
+          showToast("Failed to store encryption key.", "error");
+          return;
+        }
       }
 
       // Refresh the collab binder so any already-encrypted cells are rehydrated with the newly available key.
@@ -405,8 +451,13 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       } catch {
         // Best-effort.
       }
-
-      showToast(`Imported encryption key "${parsed.keyId}".`, "info");
+      if (action === "already") {
+        showToast(`Encryption key "${storedKeyId}" is already imported.`, "info");
+      } else if (action === "overwrite") {
+        showToast(`Overwrote encryption key "${storedKeyId}".`, "warning");
+      } else {
+        showToast(`Imported encryption key "${storedKeyId}".`, "info");
+      }
     },
     {
       category: COMMAND_CATEGORY,

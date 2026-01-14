@@ -249,6 +249,10 @@ type EncryptedRange = {
 };
 ```
 
+Notes:
+
+- `keyId` is a **stable identifier** for out-of-band key material. Do not “rotate” a key by overwriting the bytes for an existing `keyId`; existing ciphertext references the old bytes and would become undecryptable.
+
 Legacy schemas tolerated (read support):
 
 - `metadata.encryptedRanges` stored as `Y.Map<id, Y.Map>` (map key is treated as the range id)
