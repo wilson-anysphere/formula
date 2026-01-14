@@ -28,10 +28,13 @@ const MODERN_FUNCTION_ALTERNATIVES = {
   VARP: "VAR.P",
 
   // Legacy distribution/inverse functions whose modern equivalents insert `.` segments.
+  CRITBINOM: "BINOM.INV",
   NORMDIST: "NORM.DIST",
   NORMINV: "NORM.INV",
   NORMSDIST: "NORM.S.DIST",
   NORMSINV: "NORM.S.INV",
+  TDIST: "T.DIST.2T",
+  TINV: "T.INV.2T",
   LOGNORMDIST: "LOGNORM.DIST",
   LOGINV: "LOGNORM.INV",
   BINOMDIST: "BINOM.DIST",

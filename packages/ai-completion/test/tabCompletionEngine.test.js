@@ -443,6 +443,7 @@ test("Legacy distribution aliases suggest modern dotted function alternatives", 
   const engine = new TabCompletionEngine();
 
   const cases = [
+    { currentInput: "=CRITB", legacy: "=CRITBINOM(", modern: "=BINOM.INV(" },
     { currentInput: "=GAMMAD", legacy: "=GAMMADIST(", modern: "=GAMMA.DIST(" },
     { currentInput: "=EXPOND", legacy: "=EXPONDIST(", modern: "=EXPON.DIST(" },
     { currentInput: "=HYPGEOMD", legacy: "=HYPGEOMDIST(", modern: "=HYPGEOM.DIST(" },
@@ -450,6 +451,8 @@ test("Legacy distribution aliases suggest modern dotted function alternatives", 
     { currentInput: "=BETAD", legacy: "=BETADIST(", modern: "=BETA.DIST(" },
     { currentInput: "=BETAI", legacy: "=BETAINV(", modern: "=BETA.INV(" },
     { currentInput: "=LOGINV", legacy: "=LOGINV(", modern: "=LOGNORM.INV(" },
+    { currentInput: "=TDI", legacy: "=TDIST(", modern: "=T.DIST.2T(" },
+    { currentInput: "=TINV", legacy: "=TINV(", modern: "=T.INV.2T(" },
     { currentInput: "=FTEST", legacy: "=FTEST(", modern: "=F.TEST(" },
     { currentInput: "=ZTEST", legacy: "=ZTEST(", modern: "=Z.TEST(" },
     { currentInput: "=TTEST", legacy: "=TTEST(", modern: "=T.TEST(" },
