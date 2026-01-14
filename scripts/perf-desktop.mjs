@@ -69,7 +69,11 @@ function isSubpath(parentDir, maybeChild) {
 function resolvePerfHome() {
   const fromEnv = process.env.FORMULA_PERF_HOME;
   if (fromEnv && fromEnv.trim() !== "") {
-    return path.isAbsolute(fromEnv) ? fromEnv : path.resolve(repoRoot, fromEnv);
+    // Always normalize (collapse `..` segments) so safety checks below can't be bypassed by
+    // path tricks like `target/perf-home/..` (which would otherwise resolve to `target` at
+    // deletion time).
+    const candidate = path.isAbsolute(fromEnv) ? fromEnv : path.resolve(repoRoot, fromEnv);
+    return path.resolve(candidate);
   }
   return path.resolve(repoRoot, "target", "perf-home");
 }
