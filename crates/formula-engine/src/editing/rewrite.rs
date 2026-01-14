@@ -2223,4 +2223,28 @@ mod tests {
         assert!(changed);
         assert_eq!(out, "=#REF!");
     }
+
+    #[test]
+    fn copy_delta_rewrites_external_workbook_refs() {
+        let (out, changed) = rewrite_formula_for_copy_delta(
+            "=[Book.xlsx]Sheet1!A1",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            1,
+            1,
+        );
+        assert!(changed);
+        assert_eq!(out, "=[Book.xlsx]Sheet1!B2");
+
+        // Absolute references should not move when copying.
+        let (out, changed) = rewrite_formula_for_copy_delta(
+            "=[Book.xlsx]Sheet1!$A$1",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            1,
+            1,
+        );
+        assert!(!changed);
+        assert_eq!(out, "=[Book.xlsx]Sheet1!$A$1");
+    }
 }
