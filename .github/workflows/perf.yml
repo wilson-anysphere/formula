@@ -245,8 +245,7 @@ jobs:
           # Keep PR runtime reasonable; use more iterations on main for stable signals.
           FORMULA_DESKTOP_STARTUP_RUNS: ${{ steps.desktop_bench.outputs.runs }}
           FORMULA_DESKTOP_MEMORY_RUNS: ${{ steps.desktop_bench.outputs.runs }}
-          # Extra slack: WebKit startup can occasionally take longer on noisy CI runners.
-          FORMULA_DESKTOP_MEMORY_TIMEOUT_MS: 30000
+          FORMULA_DESKTOP_MEMORY_TIMEOUT_MS: 20000
           # Give the app a short window to settle after TTI before sampling RSS.
           FORMULA_DESKTOP_MEMORY_SETTLE_MS: 3000
           FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: 20000
