@@ -300,6 +300,36 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("allows focus({cursor:'all'}) in read-only mode to select all text without entering edit mode", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "hello", value: null });
+
+    view.setReadOnly(true);
+    expect(view.root.classList.contains("formula-bar--read-only")).toBe(true);
+    expect(view.textarea.readOnly).toBe(true);
+
+    view.focus({ cursor: "all" });
+
+    expect(document.activeElement).toBe(view.textarea);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(view.textarea.value).toBe("hello");
+    expect(view.textarea.selectionStart).toBe(0);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+    expect(onBeginEdit).not.toHaveBeenCalled();
+    expect(cancel.hidden).toBe(true);
+    expect(cancel.disabled).toBe(true);
+    expect(commit.hidden).toBe(true);
+    expect(commit.disabled).toBe(true);
+
+    host.remove();
+  });
+
   it("focus({cursor:'all'}) begins editing and selects all text when not read-only", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
