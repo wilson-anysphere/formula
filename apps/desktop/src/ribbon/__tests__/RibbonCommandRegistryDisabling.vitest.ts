@@ -173,13 +173,13 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 
-  it("keeps exempt ribbon ids enabled via the exemption list (not CommandRegistry)", () => {
+  it("disables unregistered ribbon ids via the CommandRegistry baseline (no exemptions)", () => {
     const commandRegistry = new CommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    // File tab ids are routed through special-case ribbon overrides in the desktop shell (not CommandRegistry),
-    // so they must remain exempt from the registry-backed disabling allowlist.
-    expect(baselineDisabledById["file.save.save"]).toBeUndefined();
+    // File tab ids are registered as commands by `registerDesktopCommands`, so when the registry is empty
+    // they should be disabled like any other unregistered ribbon id.
+    expect(baselineDisabledById["file.save.save"]).toBe(true);
 
     // Home → Cells structural edit commands should be disabled when the CommandRegistry does not
     // register them (baseline allowlist behavior).
@@ -324,6 +324,43 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     }
   });
 
+  it("registers File tab ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = [
+      "file.new.blankWorkbook",
+      "file.open.open",
+      "file.save.save",
+      "file.save.saveAs",
+      "file.save.saveAs.copy",
+      "file.save.saveAs.download",
+      "file.save.autoSave",
+      "file.info.manageWorkbook.versions",
+      "file.info.manageWorkbook.branches",
+      "file.export.createPdf",
+      "file.export.export.pdf",
+      "file.export.export.csv",
+      "file.export.export.xlsx",
+      "file.export.changeFileType.pdf",
+      "file.export.changeFileType.csv",
+      "file.export.changeFileType.tsv",
+      "file.export.changeFileType.xlsx",
+      "file.print.print",
+      "file.print.printPreview",
+      "file.print.pageSetup",
+      "file.print.pageSetup.printTitles",
+      "file.print.pageSetup.margins",
+      "file.options.close",
+    ] as const;
+
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
   it("registers Custom Sort ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
     const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
@@ -352,7 +389,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     }
   });
 
-  it("keeps exempt menu items enabled even when the CommandRegistry does not register them", () => {
+  it("keeps registered menu items enabled while disabling unregistered ones", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
     const schema: RibbonSchema = {
@@ -373,8 +410,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   menuItems: [
                     { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
                     { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
-                    // Exempt id: File tab actions are intentionally handled outside CommandRegistry, so they
-                    // must remain enabled even when the CommandRegistry does not register them.
+                    // Registered id: prove menu items remain enabled when the CommandRegistry registers them.
                     { id: "file.save.save", label: "Save", ariaLabel: "Save" },
                   ],
                 },
@@ -388,6 +424,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     };
 
     const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("file.save.save", "Save", () => {});
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema });
 
     act(() => {
@@ -432,7 +469,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(rowHeight?.disabled).toBe(true);
     expect(colWidth?.disabled).toBe(true);
 
-    // Exempt menu items remain enabled even without a corresponding CommandRegistry entry.
+    // Registered menu items remain enabled even when other menu items are disabled.
     expect(save?.disabled).toBe(false);
 
     act(() => root.unmount());

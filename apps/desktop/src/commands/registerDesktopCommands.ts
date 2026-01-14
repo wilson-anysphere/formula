@@ -14,6 +14,7 @@ import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import { executeCellsStructuralRibbonCommand } from "../ribbon/cellsStructuralCommands.js";
 import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.js";
 import { handleInsertPicturesRibbonCommand } from "../main.insertPicturesRibbonCommand.js";
+import { exportDocumentRangeToCsv } from "../import-export/csv/export.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerAxisSizingCommands } from "./registerAxisSizingCommands.js";
@@ -171,6 +172,7 @@ export function registerDesktopCommands(params: {
   const commandCategoryFormat = t("commandCategory.format");
   const commandCategoryEditing = t("commandCategory.editing");
   const commandCategoryData = t("commandCategory.data");
+  const commandCategoryFile = t("menu.file");
   const isEditingFn =
     isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? (app as any).isEditing() : false));
   const focusGrid = (): void => {
@@ -185,6 +187,35 @@ export function registerDesktopCommands(params: {
       showToast(message, type);
     } catch {
       // `showToast` requires a DOM #toast-root; ignore in tests/headless.
+    }
+  };
+  const sanitizeFilename = (raw: string): string => {
+    const cleaned = String(raw ?? "")
+      // Windows-reserved + generally-illegal filename characters.
+      .replace(/[\\/:*?"<>|]+/g, "_")
+      .trim();
+    return cleaned || "export";
+  };
+  const downloadText = (text: string, filename: string, mime: string): void => {
+    // Download behavior is browser-specific. Make this best-effort so unit tests/non-browser
+    // contexts can still register commands without crashing.
+    if (typeof document === "undefined") return;
+    if (typeof Blob === "undefined") return;
+    if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return;
+
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -666,6 +697,253 @@ export function registerDesktopCommands(params: {
 
   registerWorkbenchFileCommands({ commandRegistry, handlers: workbenchFileHandlers });
 
+  // Ribbon schema uses Excel-like `file.*` ids, but the canonical desktop commands are the
+  // `workbench.*` file commands (plus a few desktop-only export helpers). Register the ribbon ids
+  // as hidden aliases so ribbon baseline enable/disable can rely on CommandRegistry registration
+  // (without maintaining a growing exemption list).
+
+  const selectionBoundingBox0Based = (): CellRange => {
+    const active = app.getActiveCell();
+    const selectionRanges = app.getSelectionRanges();
+    if (!Array.isArray(selectionRanges) || selectionRanges.length === 0) {
+      return { start: { row: active.row, col: active.col }, end: { row: active.row, col: active.col } };
+    }
+ 
+    let minRow = Number.POSITIVE_INFINITY;
+    let maxRow = Number.NEGATIVE_INFINITY;
+    let minCol = Number.POSITIVE_INFINITY;
+    let maxCol = Number.NEGATIVE_INFINITY;
+ 
+    for (const r of selectionRanges) {
+      const startRow0 = Math.min(r.startRow, r.endRow);
+      const endRow0 = Math.max(r.startRow, r.endRow);
+      const startCol0 = Math.min(r.startCol, r.endCol);
+      const endCol0 = Math.max(r.startCol, r.endCol);
+      minRow = Math.min(minRow, startRow0);
+      maxRow = Math.max(maxRow, endRow0);
+      minCol = Math.min(minCol, startCol0);
+      maxCol = Math.max(maxCol, endCol0);
+    }
+ 
+    if (!Number.isFinite(minRow) || !Number.isFinite(minCol) || !Number.isFinite(maxRow) || !Number.isFinite(maxCol)) {
+      return { start: { row: active.row, col: active.col }, end: { row: active.row, col: active.col } };
+    }
+ 
+    return { start: { row: minRow, col: minCol }, end: { row: maxRow, col: maxCol } };
+  };
+ 
+  const clipBandSelectionToUsedRange = (sheetId: string, range0: CellRange): CellRange => {
+    const normalized: CellRange = {
+      start: { row: Math.min(range0.start.row, range0.end.row), col: Math.min(range0.start.col, range0.end.col) },
+      end: { row: Math.max(range0.start.row, range0.end.row), col: Math.max(range0.start.col, range0.end.col) },
+    };
+ 
+    const rawLimits = typeof (app as any)?.getGridLimits === "function" ? (app as any).getGridLimits() : null;
+    const limits = {
+      maxRows:
+        Number.isInteger((rawLimits as any)?.maxRows) && (rawLimits as any).maxRows > 0
+          ? (rawLimits as any).maxRows
+          : DEFAULT_GRID_LIMITS.maxRows,
+      maxCols:
+        Number.isInteger((rawLimits as any)?.maxCols) && (rawLimits as any).maxCols > 0
+          ? (rawLimits as any).maxCols
+          : DEFAULT_GRID_LIMITS.maxCols,
+    };
+ 
+    const active = app.getActiveCell();
+    const activeCellFallback0: CellRange = {
+      start: { row: active.row, col: active.col },
+      end: { row: active.row, col: active.col },
+    };
+ 
+    const isFullHeight = normalized.start.row === 0 && normalized.end.row === limits.maxRows - 1;
+    const isFullWidth = normalized.start.col === 0 && normalized.end.col === limits.maxCols - 1;
+    if (!isFullHeight && !isFullWidth) return normalized;
+ 
+    const used = app.getDocument().getUsedRange(sheetId);
+    if (!used) return activeCellFallback0;
+ 
+    const startRow = Math.max(normalized.start.row, used.startRow);
+    const endRow = Math.min(normalized.end.row, used.endRow);
+    const startCol = Math.max(normalized.start.col, used.startCol);
+    const endCol = Math.min(normalized.end.col, used.endCol);
+    const clipped =
+      startRow <= endRow && startCol <= endCol
+        ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
+        : null;
+    return clipped ?? activeCellFallback0;
+  };
+ 
+  const exportDelimitedText = (args: { delimiter: string; extension: string; mime: string; label: string }): void => {
+    try {
+      if (isEditingFn()) return;
+ 
+      const sheetId = app.getCurrentSheetId();
+      const sheetName = typeof (app as any)?.getCurrentSheetDisplayName === "function" ? (app as any).getCurrentSheetDisplayName() : sheetId;
+      const doc = app.getDocument();
+ 
+      // Use the selection by default, but clip full-row/full-column/full-sheet selections to the
+      // used range to avoid attempting to export millions of empty cells.
+      const exportRange0 = clipBandSelectionToUsedRange(sheetId, selectionBoundingBox0Based());
+ 
+      const csv = exportDocumentRangeToCsv(doc, sheetId, exportRange0 as any, { delimiter: args.delimiter });
+      downloadText(csv, `${sanitizeFilename(sheetName)}.${args.extension}`, args.mime);
+    } catch (err) {
+      console.error(`Failed to export ${args.label}:`, err);
+      safeShowToast(`Failed to export ${args.label}: ${String(err)}`, "error");
+    } finally {
+      focusGrid();
+    }
+  };
+ 
+  commandRegistry.registerBuiltinCommand("file.new.blankWorkbook", "Blank workbook", () => workbenchFileHandlers.newWorkbook(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand("file.open.open", "Open…", () => workbenchFileHandlers.openWorkbook(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand("file.save.save", "Save", () => workbenchFileHandlers.saveWorkbook(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand("file.save.saveAs", "Save As…", () => workbenchFileHandlers.saveWorkbookAs(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand("file.save.saveAs.copy", "Save a Copy…", () => workbenchFileHandlers.saveWorkbookAs(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand(
+    "file.save.saveAs.download",
+    "Download a Copy",
+    () => workbenchFileHandlers.saveWorkbookAs(),
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "file.save.autoSave",
+    "AutoSave",
+    (enabled?: boolean) => {
+      // Allow both toggle-style invocation (no args) and ribbon toggle invocation (boolean arg).
+      return workbenchFileHandlers.setAutoSaveEnabled(enabled);
+    },
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+  commandRegistry.registerBuiltinCommand("file.print.print", "Print…", () => workbenchFileHandlers.print(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand("file.print.printPreview", "Print Preview", () => workbenchFileHandlers.printPreview(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand("file.options.close", "Close", () => workbenchFileHandlers.closeWorkbook(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+ 
+  commandRegistry.registerBuiltinCommand("file.export.export.xlsx", "Excel Workbook", () => workbenchFileHandlers.saveWorkbookAs(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand(
+    "file.export.changeFileType.xlsx",
+    "Change File Type: Excel Workbook",
+    () => workbenchFileHandlers.saveWorkbookAs(),
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+  commandRegistry.registerBuiltinCommand("file.export.export.csv", "Export: CSV", () => exportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" }), {
+    category: commandCategoryFile,
+    when: "false",
+  });
+  commandRegistry.registerBuiltinCommand(
+    "file.export.changeFileType.csv",
+    "Change File Type: CSV",
+    () => exportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" }),
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "file.export.changeFileType.tsv",
+    "Change File Type: TSV",
+    () =>
+      exportDelimitedText({
+        delimiter: "\t",
+        extension: "tsv",
+        mime: "text/tab-separated-values",
+        label: "TSV",
+      }),
+    {
+      category: commandCategoryFile,
+      when: "false",
+    },
+  );
+ 
+  if (pageLayoutHandlers) {
+    commandRegistry.registerBuiltinCommand("file.print.pageSetup", "Page Setup…", () => pageLayoutHandlers.openPageSetupDialog(), {
+      category: commandCategoryFile,
+      when: "false",
+    });
+    commandRegistry.registerBuiltinCommand(
+      "file.print.pageSetup.printTitles",
+      "Print Titles…",
+      () => pageLayoutHandlers.openPageSetupDialog(),
+      {
+        category: commandCategoryFile,
+        when: "false",
+      },
+    );
+    commandRegistry.registerBuiltinCommand("file.print.pageSetup.margins", "Margins", () => pageLayoutHandlers.openPageSetupDialog(), {
+      category: commandCategoryFile,
+      when: "false",
+    });
+ 
+    commandRegistry.registerBuiltinCommand("file.export.createPdf", "Create PDF/XPS", () => pageLayoutHandlers.exportPdf(), {
+      category: commandCategoryFile,
+      when: "false",
+    });
+    commandRegistry.registerBuiltinCommand("file.export.export.pdf", "Export: PDF", () => pageLayoutHandlers.exportPdf(), {
+      category: commandCategoryFile,
+      when: "false",
+    });
+    commandRegistry.registerBuiltinCommand("file.export.changeFileType.pdf", "Change File Type: PDF", () => pageLayoutHandlers.exportPdf(), {
+      category: commandCategoryFile,
+      when: "false",
+    });
+  }
+ 
+  if (layoutController) {
+    const registerPanelAlias = (id: string, title: string, targetId: string) => {
+      commandRegistry.registerBuiltinCommand(
+        id,
+        title,
+        async () => {
+          if (commandRegistry.getCommand(targetId)) {
+            await commandRegistry.executeCommand(targetId);
+          } else {
+            safeShowToast("This panel is not available in this environment.", "warning");
+          }
+        },
+        { category: commandCategoryFile, when: "false" },
+      );
+    };
+    registerPanelAlias("file.info.manageWorkbook.versions", "Version History", "view.togglePanel.versionHistory");
+    registerPanelAlias("file.info.manageWorkbook.branches", "Branches", "view.togglePanel.branchManager");
+  }
+ 
   if (formatPainter) {
     registerFormatPainterCommand({ commandRegistry, ...formatPainter });
   }

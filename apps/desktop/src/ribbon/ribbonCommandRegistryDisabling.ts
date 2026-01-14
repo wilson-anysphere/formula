@@ -11,38 +11,9 @@ import { defaultRibbonSchema, type RibbonSchema } from "./ribbonSchema.js";
  * when possible so other UI surfaces (e.g. command palette / keybindings) stay consistent.
  */
 export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>([
-  // --- File tab / backstage actions --------------------------------------------
-  //
-  // File operations are routed through `RibbonActions.fileActions` and/or special-cased
-  // handling in `apps/desktop/src/main.ts` (they are not CommandRegistry ids).
-  "file.new.blankWorkbook",
-  "file.open.open",
-  "file.save.save",
-  "file.save.saveAs",
-  "file.save.saveAs.copy",
-  "file.save.saveAs.download",
-  "file.save.autoSave",
-  "file.info.manageWorkbook.versions",
-  "file.info.manageWorkbook.branches",
-  "file.export.createPdf",
-  "file.export.export.pdf",
-  "file.export.export.csv",
-  "file.export.export.xlsx",
-  "file.export.changeFileType.pdf",
-  "file.export.changeFileType.csv",
-  "file.export.changeFileType.tsv",
-  "file.export.changeFileType.xlsx",
-  "file.print.print",
-  "file.print.printPreview",
-  "file.print.pageSetup",
-  "file.print.pageSetup.printTitles",
-  "file.print.pageSetup.margins",
-  "file.options.close",
-
-  // (Removed: Home → Styles items are either registered via CommandRegistry or intentionally disabled;
-  // What-If Analysis + Solver are registered commands and do not require exemptions.)
-
-  // (Removed: Insert → Pictures ids are registered commands and do not require exemptions.)
+  // Intentionally empty: prefer registering ribbon ids as real CommandRegistry commands (including
+  // hidden aliases for UI-specific ids) so baseline ribbon disabling can rely entirely on
+  // registration instead of exemptions.
 ]);
 
 function isExemptViaPattern(_commandId: string): boolean {

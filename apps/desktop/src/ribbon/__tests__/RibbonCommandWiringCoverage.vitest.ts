@@ -265,13 +265,10 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     ).toEqual([]);
   });
 
-  it("ensures enabled ribbon ids that are not registered as commands are handled in desktop ribbon fallback handlers", () => {
+  it("ensures all enabled ribbon ids are registered CommandRegistry commands (no baseline exemptions needed)", () => {
     const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
-    const schemaIdSet = new Set(schemaCommandIds);
     const dropdownTriggerIds = collectRibbonDropdownTriggerIds(defaultRibbonSchema);
     const schemaDisabledIds = collectRibbonSchemaDisabledIds(defaultRibbonSchema);
-    const implementedIds = extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaIdSet);
-    const implementedSet = new Set(implementedIds);
 
     const commandRegistry = new CommandRegistry();
     registerCommandsForRibbonDisablingTest(commandRegistry);
@@ -284,17 +281,13 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
       .filter((id) => commandRegistry.getCommand(id) == null)
       .filter((id) => !disabledById[id]);
 
-    // Guard: we should always have at least one exempt/non-command ribbon id (e.g. File tab wiring).
-    expect(enabledButUnregistered.length).toBeGreaterThan(0);
-    const missing = enabledButUnregistered.filter((id) => !implementedSet.has(id)).sort();
     expect(
-      missing,
+      enabledButUnregistered,
       [
-        "Found ribbon ids that would be enabled but are not registered as commands and are not handled in desktop ribbon fallback handlers.",
-        "These ids should either be registered as builtin commands, explicitly handled in the desktop shell,",
-        "or removed from the CommandRegistry exemption list so they are disabled by default.",
+        "Found ribbon ids that would be enabled but are not registered as CommandRegistry commands.",
+        "These ids should be registered as builtin commands (preferred) or disabled by default.",
         "",
-        ...missing.map((id) => `- ${id}`),
+        ...enabledButUnregistered.map((id) => `- ${id}`),
       ].join("\n"),
     ).toEqual([]);
   });
