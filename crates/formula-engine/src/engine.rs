@@ -409,25 +409,6 @@ impl Workbook {
         self.sheet_order = new_order;
     }
 
-    fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
-        if !self.sheet_exists(sheet) {
-            return false;
-        }
-        if new_index >= self.sheet_order.len() {
-            return false;
-        }
-        let Some(current) = self.sheet_order.iter().position(|&id| id == sheet) else {
-            return false;
-        };
-        if current == new_index {
-            return true;
-        }
-
-        self.sheet_order.remove(current);
-        self.sheet_order.insert(new_index, sheet);
-        true
-    }
-
     fn sheet_order_index(&self, sheet: SheetId) -> Option<usize> {
         self.sheet_order.iter().position(|&id| id == sheet)
     }
@@ -449,7 +430,6 @@ impl Workbook {
         self.sheet_order.insert(new_index, sheet);
         true
     }
-
     /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
     ///
     /// This respects the current workbook tab order and supports reversed spans.
@@ -1291,7 +1271,6 @@ impl Engine {
 
         true
     }
-
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
     ///
     /// When unset, sheets default to Excel-compatible dimensions
