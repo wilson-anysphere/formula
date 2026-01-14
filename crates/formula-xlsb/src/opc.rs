@@ -2481,6 +2481,29 @@ mod zip_guardrail_tests {
             other => panic!("unexpected error: {other}"),
         }
     }
+
+    #[test]
+    fn rejects_oversized_package_when_opening_from_reader() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_pkg = EnvVarGuard::set(ENV_MAX_XLSB_PACKAGE_BYTES, "20");
+
+        // This does not need to be a valid ZIP. The size cap should fail fast before any parsing.
+        let bytes = vec![0u8; 21];
+        let err = XlsbWorkbook::open_from_reader_with_options(Cursor::new(bytes), OpenOptions::default())
+            .err()
+            .expect("expected package too large error");
+
+        match err {
+            ParseError::Io(io_err) => {
+                assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidData);
+                assert!(
+                    io_err.to_string().contains("XLSB package too large"),
+                    "unexpected error message: {io_err}"
+                );
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
 }
 
 fn parse_relationships(xml_bytes: &[u8]) -> Result<HashMap<String, String>, ParseError> {
