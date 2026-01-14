@@ -144,35 +144,45 @@ because it determines which scheme you’re dealing with:
 
 ## Public API usage
 
-Use the password-aware helpers (in `crates/formula-io`) when handling encrypted OOXML files:
+Use the password-aware helpers (in `crates/formula-io`) when handling encrypted OOXML files.
+
+Preferred API: `open_workbook_with_options` + `OpenOptions.password`:
 
 ```rust
-use formula_io::{open_workbook_with_password, Error};
+use formula_io::{open_workbook_with_options, OpenOptions};
+
+let workbook = open_workbook_with_options(
+    "book.xlsx", // may be encrypted
+    OpenOptions {
+        password: Some("correct horse battery staple".to_string()),
+        ..Default::default()
+    },
+)?;
+```
+
+Interactive flow (prompt when needed):
+
+```rust
+use formula_io::{open_workbook, open_workbook_with_options, Error, OpenOptions};
 
 let path = "book.xlsx"; // may be encrypted
 
-match open_workbook_with_password(path, None) {
+match open_workbook(path) {
     Ok(workbook) => {
         // Unencrypted workbook opened normally.
         let _ = workbook;
     }
     Err(Error::PasswordRequired { .. }) => {
-        // Encrypted OOXML container detected (requires `formula-io/encrypted-workbooks`);
-        // prompt user for password and retry:
+        // Encrypted OOXML container detected (requires `formula-io/encrypted-workbooks`).
+        // Prompt user for password and retry:
         let password = "correct horse battery staple";
-        match open_workbook_with_password(path, Some(password)) {
-            Ok(workbook) => {
-                // With `formula-io/encrypted-workbooks` enabled, this succeeds for Agile (4.4) and
-                // Standard/CryptoAPI (minor=2) encrypted `.xlsx`/`.xlsm`/`.xlsb` when the password is
-                // correct.
-                let _ = workbook;
-            }
-            Err(Error::InvalidPassword { .. }) => {
-                // Wrong password, integrity mismatch, unsupported encryption parameters, or when
-                // `encrypted-workbooks` is not enabled.
-            }
-            Err(other) => return Err(other),
-        }
+        let _ = open_workbook_with_options(
+            path,
+            OpenOptions {
+                password: Some(password.to_string()),
+                ..Default::default()
+            },
+        )?;
     }
     Err(Error::UnsupportedEncryption { .. }) => {
         // Encrypted workbook detected, but this build doesn't support decrypting it (for example
@@ -198,9 +208,10 @@ match open_workbook_model_with_password("book.xlsx", Some("...")) {
 }
 ```
 
-Note: when `formula-io/encrypted-workbooks` is enabled, `open_workbook_with_options` is the
-password-aware entrypoint when you need to pass additional open options. It can also decrypt and
-open encrypted OOXML wrappers when a password is provided.
+Convenience helpers:
+
+- `open_workbook_with_password(path, Some(password))` is a thin wrapper around `OpenOptions.password`.
+- `open_workbook_model_with_password(..)` opens directly into a `formula_model::Workbook`.
 
 Behavior notes:
 
@@ -214,6 +225,8 @@ Behavior notes:
     encrypted `.xlsx`/`.xlsm`/`.xlsb`.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
     is provided.
+  - `open_workbook_model_with_options` intentionally does not decrypt encrypted OOXML wrappers; use
+    `open_workbook_model_with_password` for encrypted OOXML → `formula_model::Workbook`.
   - Decryption happens in memory; do not write decrypted bytes to disk. See
     [`docs/21-encrypted-workbooks.md#security-notes-handling-decrypted-bytes-safely`](./21-encrypted-workbooks.md#security-notes-handling-decrypted-bytes-safely).
 - Without `formula-io/encrypted-workbooks`, encrypted OOXML containers surface
@@ -225,7 +238,7 @@ When handling user reports, these error variants map cleanly to “what happened
 
 | Error | Meaning | Typical remediation |
 |------|---------|---------------------|
-| `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. (For encrypted OOXML containers, this is only returned when `formula-io/encrypted-workbooks` is enabled; otherwise they surface as `UnsupportedEncryption`.) | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))`, or ask the user to remove encryption in Excel. |
+| `PasswordRequired` | The file is encrypted/password-protected, but no password was provided. (For encrypted OOXML containers, this is only returned when `formula-io/encrypted-workbooks` is enabled; otherwise they surface as `UnsupportedEncryption`.) | Retry with `open_workbook_with_options(.., OpenOptions { password: Some(..) })` (or `open_workbook_with_password(.., Some(password))`), or ask the user to remove encryption in Excel. |
 | `InvalidPassword` | Password was provided but decryption/verification failed (wrong password, Agile `dataIntegrity` mismatch, unsupported encryption parameters, or a corrupt container). | Ask the user to re-enter the password and confirm it opens in Excel. If you control the build, ensure `formula-io/encrypted-workbooks` is enabled. If Formula still cannot open it, capture `EncryptionInfo` version + the exact error, then ask the user to remove encryption and re-save. |
 | `UnsupportedOoxmlEncryption` | We identified an encrypted OOXML container, but the `EncryptionInfo` version is not recognized/implemented (i.e. not Standard/CryptoAPI `minor == 2` or Agile `4.4`). | Ask the user to remove encryption (open in Excel → remove password → re-save), or provide an unencrypted copy. |
 | `EncryptedWorkbook` | Legacy `.xls` BIFF encryption was detected (BIFF `FILEPASS`). | Retry with `open_workbook_with_password(.., Some(password))` / `open_workbook_model_with_password(.., Some(password))` (routes to the `.xls` importer for legacy `.xls`). If that still fails, the encryption scheme may be unsupported; ask the user to remove encryption in Excel or provide an unencrypted copy. |
