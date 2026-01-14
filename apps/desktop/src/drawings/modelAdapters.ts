@@ -804,8 +804,8 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
       const offsetValue = pick(fromValue, ["offset"]);
       const offset: CellOffset = isRecord(offsetValue)
         ? {
-            xEmu: readOptionalNumber(pick(offsetValue, ["xEmu", "x_emu"])) ?? resolveOffsetEmu("x"),
-            yEmu: readOptionalNumber(pick(offsetValue, ["yEmu", "y_emu"])) ?? resolveOffsetEmu("y"),
+            xEmu: resolveOffsetEmuMaybeFrom(offsetValue, "x") ?? resolveOffsetEmu("x"),
+            yEmu: resolveOffsetEmuMaybeFrom(offsetValue, "y") ?? resolveOffsetEmu("y"),
           }
         : { xEmu: resolveOffsetEmu("x"), yEmu: resolveOffsetEmu("y") };
       return { type: "oneCell", from: { cell: { row, col }, offset }, size: resolvedSize };
@@ -832,8 +832,8 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
         const offsetValue = pick(point, ["offset"]);
         const offset: CellOffset = isRecord(offsetValue)
           ? {
-              xEmu: readOptionalNumber(pick(offsetValue, ["xEmu", "x_emu"])) ?? 0,
-              yEmu: readOptionalNumber(pick(offsetValue, ["yEmu", "y_emu"])) ?? 0,
+              xEmu: resolveOffsetEmuMaybeFrom(offsetValue, "x") ?? 0,
+              yEmu: resolveOffsetEmuMaybeFrom(offsetValue, "y") ?? 0,
             }
           : { xEmu: 0, yEmu: 0 };
         return { cell: { row, col }, offset };
