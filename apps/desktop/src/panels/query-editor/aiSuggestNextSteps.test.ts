@@ -62,6 +62,61 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "take", count: 10 }]);
   });
 
+  it("drops take operations with invalid counts", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "take", count: -1 },
+          { type: "take", count: 3.5 },
+          { type: "take", count: 7 },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("top rows", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "take", count: 7 }]);
+  });
+
+  it("drops addColumn suggestions that would collide with an existing column name", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "addColumn", name: "Flag", formula: "1" },
+          { type: "take", count: 5 },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Flag", type: "number" }], []);
+    const ops = await suggestQueryNextSteps("add flag", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "take", count: 5 }]);
+  });
+
+  it("drops renameColumn suggestions that would collide with an existing column name", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "renameColumn", oldName: "Region", newName: "Sales" },
+          { type: "take", count: 5 },
+        ]),
+      },
+    });
+
+    const preview = new DataTable(
+      [
+        { name: "Region", type: "string" },
+        { name: "Sales", type: "number" },
+      ],
+      [],
+    );
+    const ops = await suggestQueryNextSteps("rename", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "take", count: 5 }]);
+  });
+
   it("supports code-fenced JSON responses", async () => {
     chatMock.mockResolvedValue({
       message: {

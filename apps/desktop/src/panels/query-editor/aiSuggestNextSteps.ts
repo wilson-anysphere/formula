@@ -115,6 +115,17 @@ function isAggregationOp(value: unknown): value is Aggregation["op"] {
   return value === "sum" || value === "count" || value === "average" || value === "min" || value === "max" || value === "countDistinct";
 }
 
+function dedupePreserveOrder(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
 function coerceFilterPredicate(value: unknown, allowedColumns: Set<string>): FilterPredicate | null {
   if (!isPlainObject(value)) return null;
   const type = value.type;
@@ -162,7 +173,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
   if (allowedColumns.size === 0) {
     if (type === "take") {
       const count = (value as { count?: unknown }).count;
-      if (typeof count !== "number" || !Number.isFinite(count)) return null;
+      if (typeof count !== "number" || !Number.isFinite(count) || !Number.isInteger(count) || count < 0) return null;
       return { type: "take", count };
     }
     if (type === "distinctRows") {
@@ -181,7 +192,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
   switch (type) {
     case "take": {
       const count = (value as { count?: unknown }).count;
-      if (typeof count !== "number" || !Number.isFinite(count)) return null;
+      if (typeof count !== "number" || !Number.isFinite(count) || !Number.isInteger(count) || count < 0) return null;
       return { type: "take", count };
     }
     case "distinctRows": {
@@ -189,33 +200,35 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       if (columns == null) return { type: "distinctRows", columns: null };
       if (!isStringArray(columns)) return null;
       if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "distinctRows", columns };
+      return { type: "distinctRows", columns: dedupePreserveOrder(columns) };
     }
     case "removeRowsWithErrors": {
       const columns = (value as { columns?: unknown }).columns;
       if (columns == null) return { type: "removeRowsWithErrors", columns: null };
       if (!isStringArray(columns)) return null;
       if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "removeRowsWithErrors", columns };
+      return { type: "removeRowsWithErrors", columns: dedupePreserveOrder(columns) };
     }
     case "removeColumns": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
       if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "removeColumns", columns };
+      return { type: "removeColumns", columns: dedupePreserveOrder(columns) };
     }
     case "selectColumns": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
       if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "selectColumns", columns };
+      return { type: "selectColumns", columns: dedupePreserveOrder(columns) };
     }
     case "renameColumn": {
       const oldName = (value as { oldName?: unknown }).oldName;
       const newName = (value as { newName?: unknown }).newName;
       if (!validateColumn(oldName, allowedColumns)) return null;
       if (typeof newName !== "string" || !newName.trim()) return null;
-      return { type: "renameColumn", oldName, newName };
+      const trimmedNewName = newName.trim();
+      if (trimmedNewName !== oldName && allowedColumns.has(trimmedNewName)) return null;
+      return { type: "renameColumn", oldName, newName: trimmedNewName };
     }
     case "changeType": {
       const column = (value as { column?: unknown }).column;
@@ -235,7 +248,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
       if (columns.some((c) => !allowedColumns.has(c))) return null;
-      return { type: "fillDown", columns };
+      return { type: "fillDown", columns: dedupePreserveOrder(columns) };
     }
     case "replaceValues": {
       const column = (value as { column?: unknown }).column;
@@ -249,7 +262,9 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       const formula = (value as { formula?: unknown }).formula;
       if (typeof name !== "string" || !name.trim()) return null;
       if (typeof formula !== "string" || !formula.trim()) return null;
-      return { type: "addColumn", name, formula };
+      const trimmedName = name.trim();
+      if (allowedColumns.has(trimmedName)) return null;
+      return { type: "addColumn", name: trimmedName, formula: formula.trim() };
     }
     case "sortRows": {
       const sortBy = (value as { sortBy?: unknown }).sortBy;
@@ -282,6 +297,9 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       if (!isStringArray(groupColumns) || groupColumns.length === 0) return null;
       if (groupColumns.some((c) => !allowedColumns.has(c))) return null;
       if (!Array.isArray(aggregations) || aggregations.length === 0) return null;
+      const dedupedGroupColumns = dedupePreserveOrder(groupColumns);
+      if (dedupedGroupColumns.length === 0) return null;
+      const usedOutputNames = new Set<string>(dedupedGroupColumns);
       const outAggs: Aggregation[] = [];
       for (const agg of aggregations) {
         if (!isPlainObject(agg)) return null;
@@ -291,9 +309,21 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
         if (!validateColumn(column, allowedColumns)) return null;
         if (!isAggregationOp(op)) return null;
         if (as != null && (typeof as !== "string" || !as.trim())) return null;
-        outAggs.push(as ? { column, op, as } : { column, op });
+
+        const baseName = typeof as === "string" && as.trim() ? as.trim() : `${op} of ${column}`;
+        let name = baseName;
+        let suffix = 1;
+        while (usedOutputNames.has(name)) {
+          name = `${baseName} ${suffix}`;
+          suffix += 1;
+        }
+        usedOutputNames.add(name);
+
+        // Only include `as` when necessary; keep it omitted when the AI didn't
+        // specify one and the engine's default name is safe.
+        outAggs.push(as == null && name === baseName ? { column, op } : { column, op, as: name });
       }
-      return { type: "groupBy", groupColumns, aggregations: outAggs };
+      return { type: "groupBy", groupColumns: dedupedGroupColumns, aggregations: outAggs };
     }
     default:
       return null;
