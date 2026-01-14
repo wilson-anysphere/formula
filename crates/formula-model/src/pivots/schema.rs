@@ -133,7 +133,9 @@ impl<'de> Deserialize<'de> for PivotFieldRef {
                 }
                 Ok(PivotFieldRef::CacheFieldName(raw))
             }
-            Helper::Column { table, column } => Ok(PivotFieldRef::DataModelColumn { table, column }),
+            Helper::Column { table, column } => {
+                Ok(PivotFieldRef::DataModelColumn { table, column })
+            }
             Helper::Measure { measure } => Ok(PivotFieldRef::DataModelMeasure(measure)),
             Helper::MeasureName { name } => Ok(PivotFieldRef::DataModelMeasure(name)),
         }
@@ -462,8 +464,8 @@ impl PivotConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::PivotField;
+    use super::*;
 
     use pretty_assertions::assert_eq;
 

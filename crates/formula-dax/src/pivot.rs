@@ -3,11 +3,11 @@ use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::model::{normalize_ident, Cardinality, RelationshipPathDirection, RowSet, ToIndex};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DataModel, DaxEngine, Value};
-#[cfg(feature = "pivot-model")]
-use formula_model::pivots::PivotValue;
 use formula_columnar::BitVec;
 #[cfg(feature = "pivot-model")]
 use formula_model::pivots::PivotFieldRef;
+#[cfg(feature = "pivot-model")]
+use formula_model::pivots::PivotValue;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -215,7 +215,8 @@ pub struct PivotResultGrid {
 }
 
 fn canonicalize_table_name(model: &DataModel, table: &str) -> DaxResult<String> {
-    model.table(table)
+    model
+        .table(table)
         .map(|t| t.name().to_string())
         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))
 }
@@ -502,12 +503,13 @@ fn build_group_key_accessors<'a>(
     for col in group_by {
         let col_table_key = normalize_ident(&col.table);
         if col_table_key == base_table_key {
-            let idx = base_table_ref
-                .column_idx(&col.column)
-                .ok_or_else(|| DaxError::UnknownColumn {
-                    table: base_table.to_string(),
-                    column: col.column.clone(),
-                })?;
+            let idx =
+                base_table_ref
+                    .column_idx(&col.column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: base_table.to_string(),
+                        column: col.column.clone(),
+                    })?;
             accessors.push(GroupKeyAccessor::Base { idx });
             continue;
         }
@@ -1379,8 +1381,7 @@ fn pivot_columnar_group_by(
         None
     };
 
-    let Some(grouped_rows) =
-        table_ref.group_by_aggregations_mask(&group_idxs, &agg_specs, allowed)
+    let Some(grouped_rows) = table_ref.group_by_aggregations_mask(&group_idxs, &agg_specs, allowed)
     else {
         return Ok(None);
     };
@@ -1685,8 +1686,7 @@ fn pivot_columnar_star_schema_group_by(
         None
     };
 
-    let Some(grouped_rows) =
-        table_ref.group_by_aggregations_mask(&group_idxs, &agg_specs, allowed)
+    let Some(grouped_rows) = table_ref.group_by_aggregations_mask(&group_idxs, &agg_specs, allowed)
     else {
         return Ok(None);
     };

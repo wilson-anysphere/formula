@@ -27,14 +27,14 @@ use thiserror::Error;
 
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
-pub mod source;
 mod definition;
+pub mod source;
+pub(crate) use definition::refresh_pivot;
+pub(crate) use definition::PivotRefreshContext;
 pub use definition::{
     PivotDestination, PivotRefreshError, PivotRefreshOutput, PivotSource, PivotTableDefinition,
     PivotTableId,
 };
-pub(crate) use definition::refresh_pivot;
-pub(crate) use definition::PivotRefreshContext;
 
 pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
     match field {
@@ -194,10 +194,7 @@ impl PivotCache {
         let normalized_names = Self::normalize_field_names(headers);
         let mut fields = Vec::with_capacity(headers.len());
         for (idx, name) in normalized_names.into_iter().enumerate() {
-            fields.push(CacheField {
-                name,
-                index: idx,
-            });
+            fields.push(CacheField { name, index: idx });
         }
 
         let records = range[1..].to_vec();
@@ -1131,9 +1128,14 @@ pub struct PivotEngine;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PivotRowKind {
     Header,
-    Leaf { row_key_idx: usize },
+    Leaf {
+        row_key_idx: usize,
+    },
     /// A subtotal row for the prefix `prefix_key` (length = level + 1).
-    Subtotal { level: usize, prefix_key: PivotKey },
+    Subtotal {
+        level: usize,
+        prefix_key: PivotKey,
+    },
     GrandTotal,
 }
 
@@ -2884,7 +2886,10 @@ impl PivotEngine {
                 let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
                     continue;
                 };
-                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                let Some(n) = data
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .and_then(|v| v.as_number())
                 else {
                     continue;
                 };
@@ -2913,7 +2918,10 @@ impl PivotEngine {
                 let Some(group_id) = col_group_ids.get(col_idx).copied() else {
                     continue;
                 };
-                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                let Some(n) = data
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .and_then(|v| v.as_number())
                 else {
                     continue;
                 };
@@ -2955,7 +2963,10 @@ impl PivotEngine {
                 let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
                     continue;
                 };
-                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                let Some(n) = data
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .and_then(|v| v.as_number())
                 else {
                     continue;
                 };
@@ -3013,7 +3024,10 @@ impl PivotEngine {
                 let Some(group_id) = col_group_ids.get(col_idx).copied() else {
                     continue;
                 };
-                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                let Some(n) = data
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .and_then(|v| v.as_number())
                 else {
                     continue;
                 };
@@ -3324,7 +3338,8 @@ mod tests {
     }
 
     #[test]
-    fn pivot_value_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints() {
+    fn pivot_value_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints()
+    {
         let s = PivotValue::Number(1e20).display_string();
         assert_ne!(s, i64::MAX.to_string());
         assert!(s.contains('E'), "{s}");
@@ -4722,7 +4737,12 @@ mod tests {
     #[test]
     fn show_as_percent_of_base_item_column_field_applies_to_subtotals() {
         let data = vec![
-            pv_row(&["Region".into(), "Product".into(), "Year".into(), "Sales".into()]),
+            pv_row(&[
+                "Region".into(),
+                "Product".into(),
+                "Year".into(),
+                "Sales".into(),
+            ]),
             pv_row(&["East".into(), "A".into(), "2019".into(), 10.into()]),
             pv_row(&["East".into(), "A".into(), "2020".into(), 20.into()]),
             pv_row(&["East".into(), "B".into(), "2019".into(), 30.into()]),
@@ -4768,8 +4788,20 @@ mod tests {
                     "2020 - Sum of Sales".into(),
                     "Grand Total - Sum of Sales".into(),
                 ],
-                vec!["East".into(), "A".into(), 1.0.into(), 2.0.into(), 3.0.into()],
-                vec!["East".into(), "B".into(), 1.0.into(), 2.0.into(), 3.0.into()],
+                vec![
+                    "East".into(),
+                    "A".into(),
+                    1.0.into(),
+                    2.0.into(),
+                    3.0.into()
+                ],
+                vec![
+                    "East".into(),
+                    "B".into(),
+                    1.0.into(),
+                    2.0.into(),
+                    3.0.into()
+                ],
                 vec![
                     "East Total".into(),
                     PivotValue::Blank,
@@ -4777,8 +4809,20 @@ mod tests {
                     2.0.into(),
                     3.0.into(),
                 ],
-                vec!["West".into(), "A".into(), 1.0.into(), 3.0.into(), 4.0.into()],
-                vec!["West".into(), "B".into(), 1.0.into(), 2.0.into(), 3.0.into()],
+                vec![
+                    "West".into(),
+                    "A".into(),
+                    1.0.into(),
+                    3.0.into(),
+                    4.0.into()
+                ],
+                vec![
+                    "West".into(),
+                    "B".into(),
+                    1.0.into(),
+                    2.0.into(),
+                    3.0.into()
+                ],
                 vec![
                     "West Total".into(),
                     PivotValue::Blank,
@@ -5241,7 +5285,11 @@ mod tests {
 
         // The cache should expose non-empty, unique names.
         assert_eq!(
-            cache.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            cache
+                .fields
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["Column1", "Sales", "Sales (2)"]
         );
 

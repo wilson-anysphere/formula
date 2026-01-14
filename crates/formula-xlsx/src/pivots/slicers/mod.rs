@@ -109,9 +109,10 @@ pub fn slicer_selection_to_engine_filter_field_with_resolver(
         Some(items) => {
             let mut selected = HashSet::with_capacity(items.len());
             for item in items {
-                selected.insert(resolve(item).unwrap_or_else(|| {
-                    formula_engine::pivot::PivotKeyPart::Text(item.clone())
-                }));
+                selected
+                    .insert(resolve(item).unwrap_or_else(|| {
+                        formula_engine::pivot::PivotKeyPart::Text(item.clone())
+                    }));
             }
             Some(selected)
         }
@@ -839,11 +840,8 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .map(|drawings| drawings.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
-        let (placed_on_sheets, placed_on_sheet_names) = placement_sheet_info(
-            &placed_on_drawings,
-            &drawing_to_sheets,
-            &sheet_name_by_part,
-        );
+        let (placed_on_sheets, placed_on_sheet_names) =
+            placement_sheet_info(&placed_on_drawings, &drawing_to_sheets, &sheet_name_by_part);
 
         let selection = cache_part
             .as_deref()
@@ -898,11 +896,8 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .map(|drawings| drawings.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
-        let (placed_on_sheets, placed_on_sheet_names) = placement_sheet_info(
-            &placed_on_drawings,
-            &drawing_to_sheets,
-            &sheet_name_by_part,
-        );
+        let (placed_on_sheets, placed_on_sheet_names) =
+            placement_sheet_info(&placed_on_drawings, &drawing_to_sheets, &sheet_name_by_part);
 
         let mut selection = parse_timeline_selection(xml, excel_date_system).unwrap_or_default();
         if (selection.start.is_none() || selection.end.is_none()) && cache_part.is_some() {
@@ -1212,7 +1207,9 @@ fn parse_slicer_cache_item(
             && !value.is_empty()
         {
             key_item_name = Some(value);
-        } else if attr_key.eq_ignore_ascii_case(b"caption") && key_caption.is_none() && !value.is_empty()
+        } else if attr_key.eq_ignore_ascii_case(b"caption")
+            && key_caption.is_none()
+            && !value.is_empty()
         {
             key_caption = Some(value);
         } else if attr_key.eq_ignore_ascii_case(b"uniqueName")
@@ -1903,7 +1900,9 @@ mod engine_filter_field_tests {
             slicer_selection_to_engine_filter_field_with_resolver("Region", &selection, |_| None);
 
         let mut expected_allowed = HashSet::new();
-        expected_allowed.insert(formula_engine::pivot::PivotKeyPart::Text("East".to_string()));
+        expected_allowed.insert(formula_engine::pivot::PivotKeyPart::Text(
+            "East".to_string(),
+        ));
         let expected = formula_engine::pivot::FilterField {
             source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
             allowed: Some(expected_allowed),

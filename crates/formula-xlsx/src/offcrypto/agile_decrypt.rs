@@ -1,8 +1,8 @@
 //! MS-OFFCRYPTO Agile decryption for OOXML `EncryptedPackage`.
 
-use std::io::{Read, Seek, SeekFrom, Write};
 use digest::Digest as _;
 use hmac::{Hmac, Mac};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 use super::aes_cbc::{
     decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AES_BLOCK_SIZE,
@@ -24,6 +24,14 @@ const KEY_ENCRYPTOR_URI_PASSWORD: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
 const KEY_ENCRYPTOR_URI_CERTIFICATE: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasswordKeyIvDerivation {
+    /// Use the raw password `saltValue` (truncated to `blockSize`) as the AES-CBC IV.
+    SaltValue,
+    /// Derive the IV using the standard MS-OFFCRYPTO `derive_iv(salt, blockKey, blockSize)` scheme.
+    Derived,
+}
 
 #[derive(Debug, Clone)]
 struct KeyData {
@@ -58,14 +66,6 @@ struct AgileEncryptionInfo {
     key_data: KeyData,
     data_integrity: DataIntegrity,
     password_key: PasswordKeyEncryptor,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PasswordKeyIvDerivation {
-    /// Use the password `saltValue` directly as the AES-CBC IV (MS-OFFCRYPTO spec behaviour).
-    SaltValue,
-    /// Derive the IV from `saltValue` + the per-blob block key (seen in some producers).
-    Derived,
 }
 
 fn decrypt_agile_package_key_from_password(
@@ -485,7 +485,8 @@ fn decrypt_agile_encrypted_package_impl(
         })?;
 
     if !ct_eq(actual_hmac_ciphertext, &expected_hmac) {
-        let actual_hmac_plaintext = compute_hmac(info.key_data.hash_algorithm, &hmac_key, &plaintext)?;
+        let actual_hmac_plaintext =
+            compute_hmac(info.key_data.hash_algorithm, &hmac_key, &plaintext)?;
         let actual_hmac_plaintext = actual_hmac_plaintext
             .get(..info.key_data.hash_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -608,13 +609,12 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
             info.key_data.hash_algorithm,
         )?;
         let decrypted =
-            decrypt_aes_cbc_no_padding(&key_value, &iv, &info.data_integrity.encrypted_hmac_key).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            decrypt_aes_cbc_no_padding(&key_value, &iv, &info.data_integrity.encrypted_hmac_key)
+                .map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "dataIntegrity".to_string(),
                     attr: "encryptedHmacKey".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
         decrypted
             .get(..info.key_data.hash_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -631,16 +631,13 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
             info.key_data.block_size,
             info.key_data.hash_algorithm,
         )?;
-        let decrypted = decrypt_aes_cbc_no_padding(
-            &key_value,
-            &iv,
-            &info.data_integrity.encrypted_hmac_value,
-        )
-        .map_err(|e| OffCryptoError::InvalidAttribute {
-            element: "dataIntegrity".to_string(),
-            attr: "encryptedHmacValue".to_string(),
-            reason: e.to_string(),
-        })?;
+        let decrypted =
+            decrypt_aes_cbc_no_padding(&key_value, &iv, &info.data_integrity.encrypted_hmac_value)
+                .map_err(|e| OffCryptoError::InvalidAttribute {
+                    element: "dataIntegrity".to_string(),
+                    attr: "encryptedHmacValue".to_string(),
+                    reason: e.to_string(),
+                })?;
         decrypted
             .get(..info.key_data.hash_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -709,31 +706,33 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
                 info.key_data.block_size,
                 info.key_data.hash_algorithm,
             )?;
-            decrypt_aes_cbc_no_padding_in_place(&key_value, &iv, &mut buf[..filled]).map_err(|e| {
-                OffCryptoError::InvalidAttribute {
+            decrypt_aes_cbc_no_padding_in_place(&key_value, &iv, &mut buf[..filled]).map_err(
+                |e| OffCryptoError::InvalidAttribute {
                     element: "EncryptedPackage".to_string(),
                     attr: "ciphertext".to_string(),
                     reason: e.to_string(),
-                }
-            })?;
+                },
+            )?;
 
             let to_write = std::cmp::min(remaining_to_write, filled as u64) as usize;
             plaintext_mac.update(&buf[..to_write]);
-            out.write_all(&buf[..to_write]).map_err(|source| OffCryptoError::Io {
-                context: "writing decrypted plaintext",
-                source,
-            })?;
+            out.write_all(&buf[..to_write])
+                .map_err(|source| OffCryptoError::Io {
+                    context: "writing decrypted plaintext",
+                    source,
+                })?;
             remaining_to_write -= to_write as u64;
             written += to_write as u64;
         }
 
-        segment_index = segment_index.checked_add(1).ok_or_else(|| {
-            OffCryptoError::InvalidAttribute {
-                element: "EncryptedPackage".to_string(),
-                attr: "segmentIndex".to_string(),
-                reason: "EncryptedPackage segment index overflow".to_string(),
-            }
-        })?;
+        segment_index =
+            segment_index
+                .checked_add(1)
+                .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                    element: "EncryptedPackage".to_string(),
+                    attr: "segmentIndex".to_string(),
+                    reason: "EncryptedPackage segment index overflow".to_string(),
+                })?;
     }
 
     if remaining_to_write != 0 {
@@ -845,9 +844,11 @@ fn parse_agile_encryption_info(
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "keyEncryptor")
     {
-        let uri = key_encryptor.attribute("uri").ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
-            element: "keyEncryptor".to_string(),
-            attr: "uri".to_string(),
+        let uri = key_encryptor.attribute("uri").ok_or_else(|| {
+            OffCryptoError::MissingRequiredAttribute {
+                element: "keyEncryptor".to_string(),
+                attr: "uri".to_string(),
+            }
         })?;
 
         if !available_uris.iter().any(|u| u == uri) {
@@ -974,7 +975,10 @@ fn parse_key_data(
     })
 }
 
-fn parse_data_integrity(node: roxmltree::Node<'_, '_>, opts: &ParseOptions) -> Result<DataIntegrity> {
+fn parse_data_integrity(
+    node: roxmltree::Node<'_, '_>,
+    opts: &ParseOptions,
+) -> Result<DataIntegrity> {
     Ok(DataIntegrity {
         encrypted_hmac_key: parse_base64_attr(node, "encryptedHmacKey", opts)?,
         encrypted_hmac_value: parse_base64_attr(node, "encryptedHmacValue", opts)?,
@@ -1028,7 +1032,12 @@ fn parse_password_key_encryptor(
 
     if let Some(w) = warnings {
         maybe_warn_hash_size(w, "encryptedKey", hash_algorithm, hash_size);
-        maybe_warn_salt_size(w, "encryptedKey", node.attribute("saltSize"), salt_value.len());
+        maybe_warn_salt_size(
+            w,
+            "encryptedKey",
+            node.attribute("saltSize"),
+            salt_value.len(),
+        );
     }
 
     Ok(PasswordKeyEncryptor {
