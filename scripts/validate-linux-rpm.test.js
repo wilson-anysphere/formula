@@ -365,7 +365,7 @@ function runValidator({
   return proc;
 }
 
-test("validate-linux-rpm rejects tauri identifiers containing path separators", { skip: !hasBash }, () => {
+test("validate-linux-rpm honors FORMULA_TAURI_CONF_PATH (relative to repo root)", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
   const binDir = join(tmp, "bin");
   mkdirSync(binDir, { recursive: true });
@@ -389,11 +389,47 @@ test("validate-linux-rpm rejects tauri identifiers containing path separators", 
     { encoding: "utf8" },
   );
 
+  const overrideVersion = "0.0.0";
   const confParent = join(repoRoot, "target");
   mkdirSync(confParent, { recursive: true });
   const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
   const confPath = join(confDir, "tauri.conf.json");
-  writeFileSync(confPath, JSON.stringify({ ...tauriConf, identifier: "com/example.formula.desktop" }), "utf8");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConf, version: overrideVersion }), { encoding: "utf8" });
+
+  try {
+    const proc = runValidator({
+      cwd: tmp,
+      rpmArg: "Formula.rpm",
+      fakeListFile: listFile,
+      fakeRequiresFile: requiresFile,
+      fakeVersion: overrideVersion,
+      tauriConfPath: relative(repoRoot, confPath),
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+  } finally {
+    rmSync(confDir, { recursive: true, force: true });
+  }
+});
+
+test("validate-linux-rpm rejects tauri identifiers containing path separators", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+
+  // Fake RPM artifact (the validator should fail before it inspects it).
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(listFile, "", { encoding: "utf8" });
+  const requiresFile = join(tmp, "rpm-requires.txt");
+  writeFileSync(requiresFile, "", { encoding: "utf8" });
+
+  const confParent = join(repoRoot, "target");
+  mkdirSync(confParent, { recursive: true });
+  const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
+  const confPath = join(confDir, "tauri.conf.json");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConf, identifier: "com/example.formula.desktop" }), { encoding: "utf8" });
 
   try {
     const proc = runValidator({

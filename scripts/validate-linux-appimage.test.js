@@ -256,6 +256,30 @@ test("validate-linux-appimage --help prints usage and exits 0", { skip: !hasBash
   assert.doesNotMatch(proc.stderr, /command not found/i);
 });
 
+test("validate-linux-appimage honors FORMULA_TAURI_CONF_PATH (relative to repo root)", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  const overrideVersion = "0.0.0";
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, appImageVersion: overrideVersion });
+
+  const confParent = join(repoRoot, "target");
+  mkdirSync(confParent, { recursive: true });
+  const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
+  const confPath = join(confDir, "tauri.conf.json");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConfig, version: overrideVersion }), { encoding: "utf8" });
+
+  try {
+    const proc = runValidatorWithArgs(appImagePath, {
+      env: {
+        FORMULA_TAURI_CONF_PATH: relative(repoRoot, confPath),
+      },
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+  } finally {
+    rmSync(confDir, { recursive: true, force: true });
+  }
+});
+
 test("validate-linux-appimage rejects tauri identifiers containing path separators", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");
@@ -265,11 +289,15 @@ test("validate-linux-appimage rejects tauri identifiers containing path separato
   mkdirSync(confParent, { recursive: true });
   const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
   const confPath = join(confDir, "tauri.conf.json");
-  writeFileSync(confPath, JSON.stringify({ ...tauriConfig, identifier: "com/example.formula.desktop" }), "utf8");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConfig, identifier: "com/example.formula.desktop" }), {
+    encoding: "utf8",
+  });
 
   try {
     const proc = runValidatorWithArgs(appImagePath, {
-      env: { FORMULA_TAURI_CONF_PATH: relative(repoRoot, confPath) },
+      env: {
+        FORMULA_TAURI_CONF_PATH: relative(repoRoot, confPath),
+      },
     });
     assert.notEqual(proc.status, 0, "expected non-zero exit status");
     assert.match(proc.stderr, /identifier.*valid filename/i);
