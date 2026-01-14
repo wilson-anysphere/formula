@@ -1252,6 +1252,8 @@ export class SpreadsheetApp {
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly chartCursorScratchRect = { left: 0, top: 0, width: 0, height: 0 };
   private readonly chartCursorScratchBounds = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly chartAnchorPointScratchFrom = { col: 0, row: 0, colOffEmu: 0, rowOffEmu: 0 };
+  private readonly chartAnchorPointScratchTo = { col: 0, row: 0, colOffEmu: 0, rowOffEmu: 0 };
   private readonly drawingSelectionHandleCentersScratch: ResizeHandleCenter[] = [];
   private selectedDrawingId: DrawingObjectId | null = null;
   private selectedDrawingIndex: number | null = null;
@@ -13910,17 +13912,15 @@ export class SpreadsheetApp {
     return layout;
   }
 
-  private chartPointPxToAnchorPoint(point: { x: number; y: number }): {
-    col: number;
-    row: number;
-    colOffEmu: number;
-    rowOffEmu: number;
-  } {
-    const zoom = this.getZoom();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-
-    const x = Math.max(0, point.x);
-    const y = Math.max(0, point.y);
+  private chartPointPxToAnchorPoint(
+    xIn: number,
+    yIn: number,
+    zIn: number,
+    out: { col: number; row: number; colOffEmu: number; rowOffEmu: number },
+  ): { col: number; row: number; colOffEmu: number; rowOffEmu: number } {
+    const z = Number.isFinite(zIn) && zIn > 0 ? zIn : 1;
+    const x = Math.max(0, xIn);
+    const y = Math.max(0, yIn);
 
     if (this.sharedGrid) {
       const renderer = this.sharedGrid.renderer;
@@ -13942,12 +13942,11 @@ export class SpreadsheetApp {
 
       const originX = cols.positionOf(gridCol) - headerWidth;
       const originY = rows.positionOf(gridRow) - headerHeight;
-      return {
-        col,
-        row,
-        colOffEmu: Math.round(pxToEmu((x - originX) / z)),
-        rowOffEmu: Math.round(pxToEmu((y - originY) / z)),
-      };
+      out.col = col;
+      out.row = row;
+      out.colOffEmu = Math.round(pxToEmu((x - originX) / z));
+      out.rowOffEmu = Math.round(pxToEmu((y - originY) / z));
+      return out;
     }
 
     const colVisual = Math.floor(x / this.cellWidth);
@@ -13964,12 +13963,11 @@ export class SpreadsheetApp {
 
     const originX = safeColVisual * this.cellWidth;
     const originY = safeRowVisual * this.cellHeight;
-    return {
-      col,
-      row,
-      colOffEmu: Math.round(pxToEmu((x - originX) / z)),
-      rowOffEmu: Math.round(pxToEmu((y - originY) / z)),
-    };
+    out.col = col;
+    out.row = row;
+    out.colOffEmu = Math.round(pxToEmu((x - originX) / z));
+    out.rowOffEmu = Math.round(pxToEmu((y - originY) / z));
+    return out;
   }
 
   private computeChartAnchorFromRectPx(
@@ -13995,7 +13993,7 @@ export class SpreadsheetApp {
     }
 
     if (anchorKind === "oneCell") {
-      const from = this.chartPointPxToAnchorPoint({ x, y });
+      const from = this.chartPointPxToAnchorPoint(x, y, z, this.chartAnchorPointScratchFrom);
       return {
         kind: "oneCell",
         fromCol: from.col,
@@ -14008,8 +14006,8 @@ export class SpreadsheetApp {
     }
 
     // twoCell
-    const from = this.chartPointPxToAnchorPoint({ x, y });
-    const to = this.chartPointPxToAnchorPoint({ x: x + width, y: y + height });
+    const from = this.chartPointPxToAnchorPoint(x, y, z, this.chartAnchorPointScratchFrom);
+    const to = this.chartPointPxToAnchorPoint(x + width, y + height, z, this.chartAnchorPointScratchTo);
     return {
       kind: "twoCell",
       fromCol: from.col,
