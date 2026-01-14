@@ -516,20 +516,12 @@ impl CreatePivotTableRequest {
             row_fields: self
                 .row_fields
                 .into_iter()
-                .map(|field| PivotField {
-                    source_field: pivot_field_ref_from_legacy_string(field),
-                    sort_order: SortOrder::default(),
-                    manual_sort: None,
-                })
+                .map(|field| PivotField::new(pivot_field_ref_from_legacy_string(field)))
                 .collect(),
             column_fields: self
                 .column_fields
                 .into_iter()
-                .map(|field| PivotField {
-                    source_field: pivot_field_ref_from_legacy_string(field),
-                    sort_order: SortOrder::default(),
-                    manual_sort: None,
-                })
+                .map(|field| PivotField::new(pivot_field_ref_from_legacy_string(field)))
                 .collect(),
             value_fields: self
                 .value_fields
