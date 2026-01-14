@@ -38,11 +38,19 @@ fn canonicalize_and_localize_unicode_case_insensitive_function_names_for_es_es()
         let canonical = locale::canonicalize_formula(localized, &locale::ES_ES).unwrap();
         assert_eq!(canonical, "=YEAR(1)");
     }
+    for localized in ["=frac.año(1;2)", "=Frac.Año(1;2)", "=FRAC.AÑO(1;2)"] {
+        let canonical = locale::canonicalize_formula(localized, &locale::ES_ES).unwrap();
+        assert_eq!(canonical, "=YEARFRAC(1,2)");
+    }
 
     // Reverse translation should use the spelling from `src/locale/data/es-ES.tsv`.
     assert_eq!(
         locale::localize_formula("=year(1)", &locale::ES_ES).unwrap(),
         "=AÑO(1)"
+    );
+    assert_eq!(
+        locale::localize_formula("=yearfrac(1,2)", &locale::ES_ES).unwrap(),
+        "=FRAC.AÑO(1;2)"
     );
 }
 
