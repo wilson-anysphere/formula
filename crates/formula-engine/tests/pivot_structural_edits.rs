@@ -158,6 +158,61 @@ fn insert_rows_shifts_pivot_definition_and_refresh_uses_updated_addresses() {
 }
 
 #[test]
+fn insert_rows_shifts_pivot_definition_when_edit_uses_sheet_key_and_pivot_uses_display_name() {
+    let mut engine = Engine::new();
+    seed_sales_data_on(&mut engine, "sheet1_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "sheet1_key".to_string(),
+            row: 0,
+            count: 2,
+        })
+        .unwrap();
+
+    // Both the source and destination should shift down by 2 rows, even though the edit addressed
+    // the sheet by its stable key while the pivot definition stored the user-visible display name.
+    let pivot = engine.pivot_table(pivot_id).unwrap();
+    assert_eq!(pivot.destination.cell, cell("D3"));
+    assert_eq!(
+        pivot.source,
+        PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A3:B7")),
+        }
+    );
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+
+    // Output written at shifted destination (D3) on the display-named sheet.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D3"),
+        Value::Text("Region".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "E6"), Value::Number(700.0));
+    // Original destination remains empty.
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Blank);
+}
+
+#[test]
 fn insert_rows_matches_sheet_names_case_insensitively_for_unicode_text() {
     let mut engine = Engine::new();
 

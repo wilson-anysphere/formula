@@ -5203,6 +5203,12 @@ impl Engine {
         let mut moved_ranges = Vec::new();
 
         let sheet_names = sheet_names_by_id(&self.workbook);
+        // For pivot-definition structural edits, treat stable sheet keys and user-visible display
+        // names as aliases for the same worksheet.
+        let mut sheet_name_to_id: HashMap<String, SheetId> = self.workbook.sheet_key_to_id.clone();
+        for (k, v) in &self.workbook.sheet_display_name_to_id {
+            sheet_name_to_id.entry(k.clone()).or_insert(*v);
+        }
         let edited_sheet_id: SheetId;
 
         match op {
@@ -5568,8 +5574,10 @@ impl Engine {
         }
 
         // Keep pivot table definitions in sync with the structural workbook edit.
+        let mut resolve_sheet_id =
+            |name: &str| sheet_name_to_id.get(&Workbook::sheet_key(name)).copied();
         for pivot in self.workbook.pivots.values_mut() {
-            pivot.apply_edit_op(&op_clone);
+            pivot.apply_edit_op_with_sheet_resolver(&op_clone, &mut resolve_sheet_id);
         }
 
         if let Err(err) = self.grow_sheet_dimensions_to_fit_cells(edited_sheet_id) {

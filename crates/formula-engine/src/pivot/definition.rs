@@ -70,6 +70,21 @@ fn default_true() -> bool {
 
 impl PivotTableDefinition {
     pub fn apply_edit_op(&mut self, op: &EditOp) {
+        let mut resolver = |_name: &str| None;
+        self.apply_edit_op_with_sheet_resolver(op, &mut resolver);
+    }
+
+    /// Apply a structural edit operation to this pivot definition, using a caller-provided sheet
+    /// resolver to match sheet-key/display-name aliases.
+    ///
+    /// `resolve_sheet_id` should return a stable sheet id for a given sheet name (either stable key
+    /// or user-visible display name). When available, pivot metadata will treat two sheet names as
+    /// equivalent if they resolve to the same sheet id, even when the raw strings differ.
+    pub fn apply_edit_op_with_sheet_resolver(
+        &mut self,
+        op: &EditOp,
+        resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    ) {
         match op {
             EditOp::InsertRows { sheet, row, count } => {
                 let edit = StructuralEdit::InsertRows {
@@ -77,7 +92,7 @@ impl PivotTableDefinition {
                     row: *row,
                     count: *count,
                 };
-                self.apply_structural_edit(&edit);
+                self.apply_structural_edit(&edit, resolve_sheet_id);
             }
             EditOp::DeleteRows { sheet, row, count } => {
                 let edit = StructuralEdit::DeleteRows {
@@ -85,7 +100,7 @@ impl PivotTableDefinition {
                     row: *row,
                     count: *count,
                 };
-                self.apply_structural_edit(&edit);
+                self.apply_structural_edit(&edit, resolve_sheet_id);
             }
             EditOp::InsertCols { sheet, col, count } => {
                 let edit = StructuralEdit::InsertCols {
@@ -93,7 +108,7 @@ impl PivotTableDefinition {
                     col: *col,
                     count: *count,
                 };
-                self.apply_structural_edit(&edit);
+                self.apply_structural_edit(&edit, resolve_sheet_id);
             }
             EditOp::DeleteCols { sheet, col, count } => {
                 let edit = StructuralEdit::DeleteCols {
@@ -101,7 +116,7 @@ impl PivotTableDefinition {
                     col: *col,
                     count: *count,
                 };
-                self.apply_structural_edit(&edit);
+                self.apply_structural_edit(&edit, resolve_sheet_id);
             }
             EditOp::InsertCellsShiftRight { sheet, range } => {
                 let width = range.width();
@@ -117,7 +132,7 @@ impl PivotTableDefinition {
                     delta_col: width as i32,
                     deleted_region: None,
                 };
-                self.apply_range_map_edit(&edit);
+                self.apply_range_map_edit(&edit, resolve_sheet_id);
             }
             EditOp::InsertCellsShiftDown { sheet, range } => {
                 let height = range.height();
@@ -133,7 +148,7 @@ impl PivotTableDefinition {
                     delta_col: 0,
                     deleted_region: None,
                 };
-                self.apply_range_map_edit(&edit);
+                self.apply_range_map_edit(&edit, resolve_sheet_id);
             }
             EditOp::DeleteCellsShiftLeft { sheet, range } => {
                 let width = range.width();
@@ -155,7 +170,7 @@ impl PivotTableDefinition {
                         range.end.col,
                     )),
                 };
-                self.apply_range_map_edit(&edit);
+                self.apply_range_map_edit(&edit, resolve_sheet_id);
             }
             EditOp::DeleteCellsShiftUp { sheet, range } => {
                 let height = range.height();
@@ -177,7 +192,7 @@ impl PivotTableDefinition {
                         range.end.col,
                     )),
                 };
-                self.apply_range_map_edit(&edit);
+                self.apply_range_map_edit(&edit, resolve_sheet_id);
             }
             EditOp::MoveRange {
                 sheet,
@@ -196,7 +211,7 @@ impl PivotTableDefinition {
                     delta_col: dst_top_left.col as i32 - src.start.col as i32,
                     deleted_region: None,
                 };
-                self.apply_range_map_edit(&edit);
+                self.apply_range_map_edit(&edit, resolve_sheet_id);
             }
             // CopyRange does not move existing cells, so pivot definitions do not shift.
             EditOp::CopyRange {
@@ -211,15 +226,19 @@ impl PivotTableDefinition {
                         dst_top_left.col + src.width().saturating_sub(1),
                     ),
                 );
-                self.invalidate_if_overlaps(sheet, &dst);
+                self.invalidate_if_overlaps(sheet, &dst, resolve_sheet_id);
             }
             EditOp::Fill { sheet, src: _, dst } => {
-                self.invalidate_if_overlaps(sheet, dst);
+                self.invalidate_if_overlaps(sheet, dst, resolve_sheet_id);
             }
         }
     }
 
-    fn apply_structural_edit(&mut self, edit: &StructuralEdit) {
+    fn apply_structural_edit(
+        &mut self,
+        edit: &StructuralEdit,
+        resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    ) {
         let edit_sheet = match edit {
             StructuralEdit::InsertRows { sheet, .. }
             | StructuralEdit::DeleteRows { sheet, .. }
@@ -228,10 +247,10 @@ impl PivotTableDefinition {
         };
 
         // Destination top-left cell behaves like a cell reference.
-        if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
+        if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
             if let Some(cell) = rewrite_cell_ref_for_structural_edit(
                 self.destination.cell,
-                &self.destination.sheet,
+                edit_sheet,
                 edit,
             ) {
                 self.destination.cell = cell;
@@ -248,9 +267,9 @@ impl PivotTableDefinition {
 
         // Update source range reference.
         if let PivotSource::Range { sheet, range } = &mut self.source {
-            if sheet_name_eq_case_insensitive(sheet, edit_sheet) {
+            if sheet_matches(sheet, edit_sheet, resolve_sheet_id) {
                 if let Some(r) = *range {
-                    *range = rewrite_range_for_structural_edit(r, sheet, edit);
+                    *range = rewrite_range_for_structural_edit(r, edit_sheet, edit);
                     if range.is_none() {
                         self.needs_refresh = true;
                     }
@@ -260,9 +279,9 @@ impl PivotTableDefinition {
 
         // Update (or invalidate) last output footprint.
         if let Some(prev) = self.last_output_range {
-            if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
+            if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
                 self.last_output_range =
-                    rewrite_range_for_structural_edit(prev, &self.destination.sheet, edit);
+                    rewrite_range_for_structural_edit(prev, edit_sheet, edit);
                 if self.last_output_range.is_none() {
                     self.needs_refresh = true;
                 }
@@ -270,17 +289,21 @@ impl PivotTableDefinition {
         }
 
         // If the structural edit intersects the pivot output region, treat it as needing refresh.
-        self.invalidate_if_structural_edit_overlaps_output(edit);
+        self.invalidate_if_structural_edit_overlaps_output(edit, resolve_sheet_id);
     }
 
-    fn apply_range_map_edit(&mut self, edit: &RangeMapEdit) {
+    fn apply_range_map_edit(
+        &mut self,
+        edit: &RangeMapEdit,
+        resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    ) {
         let edit_sheet = edit.sheet.as_str();
         let prev_output = self.last_output_range;
 
-        if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
+        if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
             if let Some(cell) = rewrite_cell_ref_for_range_map_edit(
                 self.destination.cell,
-                &self.destination.sheet,
+                edit_sheet,
                 edit,
             ) {
                 self.destination.cell = cell;
@@ -295,9 +318,9 @@ impl PivotTableDefinition {
         }
 
         if let PivotSource::Range { sheet, range } = &mut self.source {
-            if sheet_name_eq_case_insensitive(sheet, edit_sheet) {
+            if sheet_matches(sheet, edit_sheet, resolve_sheet_id) {
                 if let Some(r) = *range {
-                    *range = rewrite_range_for_range_map_edit(r, sheet, edit);
+                    *range = rewrite_range_for_range_map_edit(r, edit_sheet, edit);
                     if range.is_none() {
                         self.needs_refresh = true;
                     }
@@ -306,20 +329,25 @@ impl PivotTableDefinition {
         }
 
         if let Some(prev) = self.last_output_range {
-            if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
+            if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
                 self.last_output_range =
-                    rewrite_range_for_range_map_edit(prev, &self.destination.sheet, edit);
+                    rewrite_range_for_range_map_edit(prev, edit_sheet, edit);
                 if self.last_output_range.is_none() {
                     self.needs_refresh = true;
                 }
             }
         }
 
-        self.invalidate_if_range_map_edit_overlaps_output(prev_output, edit);
+        self.invalidate_if_range_map_edit_overlaps_output(prev_output, edit, resolve_sheet_id);
     }
 
-    fn invalidate_if_overlaps(&mut self, sheet: &str, region: &Range) {
-        if !sheet_name_eq_case_insensitive(&self.destination.sheet, sheet) {
+    fn invalidate_if_overlaps(
+        &mut self,
+        sheet: &str,
+        region: &Range,
+        resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    ) {
+        if !sheet_matches(&self.destination.sheet, sheet, resolve_sheet_id) {
             return;
         }
         let Some(output) = self.last_output_range else {
@@ -330,7 +358,11 @@ impl PivotTableDefinition {
         }
     }
 
-    fn invalidate_if_structural_edit_overlaps_output(&mut self, edit: &StructuralEdit) {
+    fn invalidate_if_structural_edit_overlaps_output(
+        &mut self,
+        edit: &StructuralEdit,
+        resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    ) {
         let Some(output) = self.last_output_range else {
             return;
         };
@@ -340,7 +372,7 @@ impl PivotTableDefinition {
             | StructuralEdit::InsertCols { sheet, .. }
             | StructuralEdit::DeleteCols { sheet, .. } => sheet.as_str(),
         };
-        if !sheet_name_eq_case_insensitive(&self.destination.sheet, sheet) {
+        if !sheet_matches(&self.destination.sheet, sheet, resolve_sheet_id) {
             return;
         }
 
@@ -380,11 +412,12 @@ impl PivotTableDefinition {
         &mut self,
         prev_output: Option<Range>,
         edit: &RangeMapEdit,
+        resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     ) {
         let Some(output) = prev_output else {
             return;
         };
-        if !sheet_name_eq_case_insensitive(&self.destination.sheet, &edit.sheet) {
+        if !sheet_matches(&self.destination.sheet, &edit.sheet, resolve_sheet_id) {
             return;
         }
 
@@ -413,6 +446,17 @@ impl PivotTableDefinition {
         if output.intersects(&dst_range) {
             self.needs_refresh = true;
         }
+    }
+}
+
+fn sheet_matches(
+    left: &str,
+    right: &str,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+) -> bool {
+    match (resolve_sheet_id(left), resolve_sheet_id(right)) {
+        (Some(a), Some(b)) => a == b,
+        _ => sheet_name_eq_case_insensitive(left, right),
     }
 }
 
