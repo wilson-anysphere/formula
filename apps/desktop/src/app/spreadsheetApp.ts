@@ -9227,6 +9227,12 @@ export class SpreadsheetApp {
         if (this.root.style.cursor) this.root.style.cursor = "";
         return;
       }
+      if (this.conflictUiContainer && this.conflictUiContainer.contains(target)) {
+        this.clearSharedHoverCellCache();
+        this.hideCommentTooltip();
+        if (this.root.style.cursor) this.root.style.cursor = "";
+        return;
+      }
     }
     if (this.commentsPanelVisible) {
       this.hideCommentTooltip();
@@ -15433,7 +15439,10 @@ export class SpreadsheetApp {
         if (
           this.vScrollbarTrack.contains(target) ||
           this.hScrollbarTrack.contains(target) ||
-          this.outlineLayer.contains(target)
+          this.outlineLayer.contains(target) ||
+          this.commentsPanel.contains(target) ||
+          (this.conflictUiContainer && this.conflictUiContainer.contains(target)) ||
+          this.editor.element.contains(target)
         ) {
           this.hideCommentTooltip();
           this.root.style.cursor = "";
