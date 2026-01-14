@@ -66,12 +66,14 @@ def check_job(
 
     def is_desktop_build_cmd(line: str) -> bool:
         # Match both:
-        # - `run: pnpm build:desktop` (desktop frontend build)
+        # - `run: pnpm build:desktop` (workspace desktop frontend build)
+        # - `run: pnpm -C apps/desktop build` (package-local desktop frontend build)
         # - `cargo tauri build` / `tauri build` (Tauri bundles invoke `pnpm build` via beforeBuildCommand)
         if is_comment(line):
             return False
         return bool(
             re.search(r"\bpnpm\b.*\bbuild:desktop\b", line)
+            or re.search(r"\bpnpm\b.*\b(?:-C|--dir)\b\s+apps/desktop\b.*\bbuild(?=$|\s)", line)
             or re.search(r"\btauri\s+build\b", line)
         )
 
