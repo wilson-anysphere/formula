@@ -410,6 +410,53 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(stored.get("endCol")).toBe(1);
   });
 
+  it("manager normalization dedupes legacy sheetName entries against canonical sheetId entries", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map<unknown>();
+    sheet.set("id", "sheet-123");
+    sheet.set("name", "Budget");
+    sheets.push([sheet]);
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<Y.Map<unknown>>();
+
+    const canonical = new Y.Map<unknown>();
+    canonical.set("id", "a");
+    canonical.set("sheetId", "sheet-123");
+    canonical.set("startRow", 0);
+    canonical.set("startCol", 0);
+    canonical.set("endRow", 0);
+    canonical.set("endCol", 0);
+    canonical.set("keyId", "k1");
+
+    const legacy = new Y.Map<unknown>();
+    legacy.set("id", "b");
+    // Same logical range, but stored with the sheet display name.
+    legacy.set("sheetName", "Budget");
+    legacy.set("startRow", 0);
+    legacy.set("startCol", 0);
+    legacy.set("endRow", 0);
+    legacy.set("endCol", 0);
+    legacy.set("keyId", "k1");
+
+    doc.transact(() => {
+      ranges.push([canonical, legacy]);
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    // Mutate the legacy id; normalization should keep the mutated id and drop the duplicate.
+    mgr.update("b", { endCol: 2 });
+
+    const list = mgr.list();
+    expect(list.map((r) => r.id)).toEqual(["b"]);
+    expect(list[0]?.sheetId).toBe("sheet-123");
+    expect(list[0]?.endCol).toBe(2);
+  });
+
   it("manager normalization dedupes identical ranges across different ids (e.g. from concurrent inserts)", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });

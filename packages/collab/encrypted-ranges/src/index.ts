@@ -236,8 +236,15 @@ function isSameRange(a: EncryptedRange, b: EncryptedRangeAddInput): boolean {
 }
 
 function rangeSignature(range: Pick<EncryptedRange, "sheetId" | "startRow" | "startCol" | "endRow" | "endCol" | "keyId">): string {
+  return rangeSignatureWithSheetId(range.sheetId, range);
+}
+
+function rangeSignatureWithSheetId(
+  sheetId: string,
+  range: Pick<EncryptedRange, "startRow" | "startCol" | "endRow" | "endCol" | "keyId">
+): string {
   // Use a delimiter that cannot appear in numbers to avoid ambiguous concatenations.
-  return `${range.sheetId}\n${range.startRow},${range.startCol},${range.endRow},${range.endCol}\n${range.keyId}`;
+  return `${sheetId}\n${range.startRow},${range.startCol},${range.endRow},${range.endCol}\n${range.keyId}`;
 }
 
 export class EncryptedRangeManager {
@@ -468,7 +475,8 @@ export class EncryptedRangeManager {
         ids.add(parsed.id);
 
         // Dedupe identical ranges (can happen after concurrent inserts).
-        const sig = rangeSignature(parsed);
+        const canonicalSheetId = resolveSheetId(parsed.sheetId) ?? parsed.sheetId;
+        const sig = rangeSignatureWithSheetId(canonicalSheetId, parsed);
         if (signatures.has(sig)) {
           needsNormalize = true;
           break;
@@ -483,7 +491,7 @@ export class EncryptedRangeManager {
 
         const sheetIdVal = map.get("sheetId");
         if (typeof sheetIdVal !== "string") needsNormalize = true;
-        else if (sheetIdVal.trim() !== parsed.sheetId) needsNormalize = true;
+        else if (sheetIdVal.trim() !== canonicalSheetId) needsNormalize = true;
 
         const keyIdVal = map.get("keyId");
         if (typeof keyIdVal !== "string") needsNormalize = true;
@@ -513,11 +521,11 @@ export class EncryptedRangeManager {
       if (!needsNormalize) return;
     }
 
-    const cloneRangeToLocal = (parsed: EncryptedRange): Y.Map<unknown> => {
+    const cloneRangeToLocal = (parsed: EncryptedRange, canonicalSheetId?: string): Y.Map<unknown> => {
       const out = new Y.Map<unknown>();
       out.set("id", parsed.id);
-      const resolvedSheetId = resolveSheetId(parsed.sheetId);
-      out.set("sheetId", resolvedSheetId ?? parsed.sheetId);
+      const resolvedSheetId = canonicalSheetId ?? resolveSheetId(parsed.sheetId) ?? parsed.sheetId;
+      out.set("sheetId", resolvedSheetId);
       out.set("startRow", parsed.startRow);
       out.set("startCol", parsed.startCol);
       out.set("endRow", parsed.endRow);
@@ -550,7 +558,8 @@ export class EncryptedRangeManager {
       const tryPushParsed = (parsed: EncryptedRange) => {
         // Enforce unique ids in the canonical schema.
         if (ids.has(parsed.id)) return;
-        const sig = rangeSignature(parsed);
+        const canonicalSheetId = resolveSheetId(parsed.sheetId) ?? parsed.sheetId;
+        const sig = rangeSignatureWithSheetId(canonicalSheetId, parsed);
 
         // Dedupe identical ranges (can happen after concurrent inserts). When
         // `preferId` is provided (e.g. update/remove), prefer keeping that id so
@@ -567,14 +576,14 @@ export class EncryptedRangeManager {
           // Replace the previously-kept entry with the preferred id.
           ids.delete(existingId);
           ids.add(parsed.id);
-          out[idx] = cloneRangeToLocal(parsed);
+          out[idx] = cloneRangeToLocal(parsed, canonicalSheetId);
           idBySignature.set(sig, parsed.id);
           return;
         }
 
         ids.add(parsed.id);
         const idx = out.length;
-        out.push(cloneRangeToLocal(parsed));
+        out.push(cloneRangeToLocal(parsed, canonicalSheetId));
         indexBySignature.set(sig, idx);
         idBySignature.set(sig, parsed.id);
       };
