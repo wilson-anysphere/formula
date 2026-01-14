@@ -16,6 +16,7 @@ const marketplaceSharedEntry = fileURLToPath(new URL("../../shared", import.meta
 const collabUndoEntry = fileURLToPath(new URL("../../packages/collab/undo/index.js", import.meta.url));
 const collabCommentsEntry = fileURLToPath(new URL("../../packages/collab/comments/src/index.ts", import.meta.url));
 const collabSessionEntry = fileURLToPath(new URL("../../packages/collab/session/src/index.ts", import.meta.url));
+const collabWorkbookEntry = fileURLToPath(new URL("../../packages/collab/workbook/src/index.ts", import.meta.url));
 const collabEncryptionEntry = fileURLToPath(new URL("../../packages/collab/encryption/src/index.ts", import.meta.url));
 const collabEncryptedRangesEntry = fileURLToPath(new URL("../../packages/collab/encrypted-ranges/src/index.ts", import.meta.url));
 const collabWorkbookEntry = fileURLToPath(new URL("../../packages/collab/workbook/src/index.ts", import.meta.url));
@@ -148,6 +149,7 @@ export default defineConfig({
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
+      { find: "@formula/collab-workbook", replacement: collabWorkbookEntry },
       { find: "@formula/collab-encryption", replacement: collabEncryptionEntry },
       { find: "@formula/collab-encrypted-ranges", replacement: collabEncryptedRangesEntry },
       { find: "@formula/collab-workbook", replacement: collabWorkbookEntry },
