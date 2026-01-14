@@ -7309,6 +7309,8 @@ export class SpreadsheetApp {
       // Ensure any in-flight sync operations finish before we replace the workbook.
       await this.wasmSyncPromise;
       this.clearComputedValuesByCoord();
+      const prevActiveSheetId = this.sheetId;
+      const prevSheetOrder = this.document.getSheetIds();
       this.document.applyState(snapshot);
       // The DocumentController snapshot format can include workbook-scoped image bytes
       // (`snapshot.images`). Keep the UI-level in-cell image store aligned with the
@@ -7324,24 +7326,46 @@ export class SpreadsheetApp {
       // ImageBitmap caches also live inside individual CanvasGridRenderer instances (shared-grid
       // mode). Clear them so we don't show stale in-cell images for reused ids across versions.
       this.sharedGrid?.renderer?.clearImageCache?.();
-      let sheetChanged = false;
       const sheetIds = this.document.getSheetIds();
-      if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
+      const visibleSheetIds = this.document.getVisibleSheetIds();
+      const visibleSet = new Set(visibleSheetIds);
+      const sheetIdSet = new Set(sheetIds);
+      const activeStillExists = sheetIdSet.has(prevActiveSheetId);
+      const activeStillVisible = visibleSet.has(prevActiveSheetId);
+
+      // If the previous active sheet is missing or no longer visible after restore, mimic Excel:
+      // activate the adjacent visible sheet (next to the right, else left) instead of always
+      // jumping to the first sheet.
+      const nextActiveSheetId =
+        sheetIds.length > 0 && (!activeStillExists || !activeStillVisible)
+          ? (() => {
+              const orderedCurrentVisibility = prevSheetOrder.map((id) => ({
+                id,
+                visibility: visibleSet.has(id) ? "visible" : "hidden",
+              }));
+              const preferred = pickAdjacentVisibleSheetId(orderedCurrentVisibility, prevActiveSheetId);
+              return (
+                (preferred && sheetIdSet.has(preferred) ? preferred : null) ?? visibleSheetIds[0] ?? sheetIds[0] ?? null
+              );
+            })()
+          : prevActiveSheetId;
+
+      const sheetChanged = Boolean(nextActiveSheetId && nextActiveSheetId !== prevActiveSheetId);
+      if (sheetChanged && nextActiveSheetId) {
         // Switching sheets as part of a restore should behave like a normal sheet change:
-         // drawings are sheet-scoped, so clear any prior selection and invalidate caches before
-         // swapping `sheetId`.
-         this.drawingInteractionController?.reset({ clearSelection: true });
-         this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
-         this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
-         this.selectedDrawingId = null;
-         this.selectedDrawingIndex = null;
-         this.drawingOverlay.setSelectedId(null);
+        // drawings are sheet-scoped, so clear any prior selection and invalidate caches before
+        // swapping `sheetId`.
+        this.drawingInteractionController?.reset({ clearSelection: true });
+        this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
+        this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
+        this.selectedDrawingId = null;
+        this.selectedDrawingIndex = null;
+        this.drawingOverlay.setSelectedId(null);
         this.drawingObjectsCache = null;
         this.canvasChartCombinedDrawingObjectsCache = null;
         this.invalidateDrawingHitTestIndexCaches();
 
-        this.sheetId = sheetIds[0];
-        sheetChanged = true;
+        this.sheetId = nextActiveSheetId;
         this.reindexCommentCells();
         this.chartStore.setDefaultSheet(this.sheetId);
       }
