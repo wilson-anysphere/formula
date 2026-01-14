@@ -56,6 +56,16 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
         return value
     if value.startswith("sha256="):
         return value
+
+    # Keep repo-relative paths readable; only hash strings that look like absolute filesystem paths.
+    looks_abs = bool(
+        value.startswith(("/", "\\", "~"))
+        or value.startswith("//")
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+    )
+    if not looks_abs:
+        return value
+
     return f"sha256={_sha256_text(value)}"
 
 
