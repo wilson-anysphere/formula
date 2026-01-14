@@ -355,13 +355,13 @@ jobs:
           set -euo pipefail
 
           roots=()
-          for candidate in "apps/desktop/src-tauri/target" "target"; do
+          for candidate in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
             if [ -d "$candidate" ]; then
               roots+=("$candidate")
             fi
           done
           if [ "${#roots[@]}" -eq 0 ]; then
-            echo "linux-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target or target/)." >&2
+            echo "linux-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target, apps/desktop/target, or target/)." >&2
             exit 1
           fi
 
@@ -404,13 +404,13 @@ jobs:
         run: |
           set -euo pipefail
           roots=()
-          for candidate in "apps/desktop/src-tauri/target" "target"; do
+          for candidate in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
             if [ -d "$candidate" ]; then
               roots+=("$candidate")
             fi
           done
           if [ "${#roots[@]}" -eq 0 ]; then
-            echo "macos-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target or target/)." >&2
+            echo "macos-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target, apps/desktop/target, or target/)." >&2
             exit 1
           fi
 
@@ -472,10 +472,11 @@ jobs:
 
           $targetRoots = @(
             (Join-Path $env:GITHUB_WORKSPACE 'apps\desktop\src-tauri\target'),
+            (Join-Path $env:GITHUB_WORKSPACE 'apps\desktop\target'),
             (Join-Path $env:GITHUB_WORKSPACE 'target')
           ) | Where-Object { Test-Path $_ }
           if (-not $targetRoots -or $targetRoots.Count -eq 0) {
-            throw "windows-validate: ERROR: No Cargo target directories found (expected apps\\desktop\\src-tauri\\target or target\\)."
+            throw "windows-validate: ERROR: No Cargo target directories found (expected apps\\desktop\\src-tauri\\target, apps\\desktop\\target, or target\\)."
           }
 
           $msis = Get-ChildItem -Path $targetRoots -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue |
@@ -570,6 +571,19 @@ jobs:
             apps/desktop/src-tauri/target/**/release/bundle/**/*.sig
             apps/desktop/src-tauri/target/**/release/bundle/**/latest.json
             apps/desktop/src-tauri/target/**/release/bundle/**/update.json
+            apps/desktop/target/**/release/bundle/**/*.dmg
+            apps/desktop/target/**/release/bundle/**/*.AppImage
+            apps/desktop/target/**/release/bundle/**/*.deb
+            apps/desktop/target/**/release/bundle/**/*.rpm
+            apps/desktop/target/**/release/bundle/**/*.msi
+            apps/desktop/target/**/release/bundle/**/*.exe
+            apps/desktop/target/**/release/bundle/**/*.pkg
+            apps/desktop/target/**/release/bundle/**/*.zip
+            apps/desktop/target/**/release/bundle/**/*.tar.gz
+            apps/desktop/target/**/release/bundle/**/*.tgz
+            apps/desktop/target/**/release/bundle/**/*.sig
+            apps/desktop/target/**/release/bundle/**/latest.json
+            apps/desktop/target/**/release/bundle/**/update.json
             target/**/release/bundle/**/*.dmg
             target/**/release/bundle/**/*.AppImage
             target/**/release/bundle/**/*.deb
