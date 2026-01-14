@@ -210,7 +210,7 @@ fn rc4_cryptoapi_unicode_password_wrong_password_errors() {
 
 #[test]
 fn rc4_cryptoapi_wrong_password_error_does_not_leak_password() {
-    let err = formula_xls::import_xls_path_with_password(fixture_path(), WRONG_PASSWORD)
+    let err = formula_xls::import_xls_path_with_password(fixture_path(), Some(WRONG_PASSWORD))
         .expect_err("expected wrong password error");
 
     let display = err.to_string();
@@ -238,7 +238,7 @@ fn rc4_cryptoapi_unicode_password_different_normalization_fails() {
 fn decrypts_rc4_cryptoapi_biff8_xls_with_unicode_emoji_password() {
     let result = formula_xls::import_xls_path_with_password(
         unicode_emoji_fixture_path(),
-        UNICODE_EMOJI_PASSWORD,
+        Some(UNICODE_EMOJI_PASSWORD),
     )
     .expect("expected decrypt + import to succeed");
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
@@ -248,7 +248,7 @@ fn decrypts_rc4_cryptoapi_biff8_xls_with_unicode_emoji_password() {
 #[test]
 fn rc4_cryptoapi_unicode_emoji_password_wrong_password_errors() {
     let err =
-        formula_xls::import_xls_path_with_password(unicode_emoji_fixture_path(), "wrong password")
+        formula_xls::import_xls_path_with_password(unicode_emoji_fixture_path(), Some("wrong password"))
             .expect_err("expected wrong password error");
     assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
