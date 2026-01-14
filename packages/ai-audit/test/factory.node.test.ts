@@ -85,6 +85,11 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
   });
 
+  it("respects bounded:false for the default memory store", async () => {
+    const store = await createDefaultAIAuditStore({ bounded: false });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it("propagates bounded options to BoundedAIAuditStore", async () => {
     const store = await createDefaultAIAuditStore({ bounded: { max_entry_chars: 123 } });
     expect(store).toBeInstanceOf(BoundedAIAuditStore);
