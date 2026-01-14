@@ -109,22 +109,31 @@ Note on version gating in helper APIs:
   `crates/formula-office-crypto`’s decryptor.
 
 ### Legacy `.xls`: BIFF `FILEPASS` (BIFF5/BIFF8)
-Currently supported in `formula-xls`:
+Currently supported in `formula-xls` (see also the fixture inventory in
+[`crates/formula-xls/tests/fixtures/encrypted/README.md`](../crates/formula-xls/tests/fixtures/encrypted/README.md)):
 
 - **BIFF8 XOR obfuscation** (`wEncryptionType=0x0000`)
 - **BIFF8 RC4 “standard”** (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
-  - Note: this scheme uses only the first 15 UTF-16 code units of the password (Excel truncation).
+  - Password is truncated to the first **15 UTF-16 code units** (Excel legacy behavior).
 - **BIFF8 RC4 CryptoAPI** (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
-  - RC4 with SHA-1 and 50,000 password-hash iterations (see [Legacy `.xls` key derivation](#legacy-xls-biff8-filepass-rc4-cryptoapi)).
-  - RC4 `KeySizeBits` values: `0/40`, `56`, `128`
-    - Some producers encode 40-bit RC4 as `keySize=0` (legacy export restrictions).
-    - Note: for `KeySizeBits == 40`, the derived 5-byte key material must be **padded to 16 bytes**
-      (`key_material || 0x00*11`) before running RC4 KSA (CryptoAPI interoperability quirk).
+  - Supports both CryptoAPI FILEPASS payload layouts we see in the wild (see
+    [Legacy `.xls` `FILEPASS` details](#legacy-xls-filepass-encryption-biff5biff8)):
+    - `wEncryptionSubType==0x0002` with a length-prefixed embedded `EncryptionInfo`
+    - legacy `wEncryptionInfo==0x0004` with an embedded `EncryptionHeader` + `EncryptionVerifier`
+  - `AlgIDHash` is typically `CALG_SHA1`, but some producers use `CALG_MD5`.
+  - Fixed 50,000 password-hash iterations (CryptoAPI loop; **not PBKDF2**) for the `subType=0x0002`
+    layout.
+  - `KeySizeBits` values: `0/40`, `56`, `128`
+    - `KeySizeBits==0` is treated as 40-bit RC4.
+    - Key bytes are the first `KeySizeBits/8` bytes of the per-block digest (5/7/16 bytes; no 40-bit
+      padding-to-16 quirk for BIFF CryptoAPI).
 - (best-effort) **BIFF5-era XOR obfuscation** (Excel 5/95)
 
 Not implemented:
 
-- other BIFF encryption variants (including CryptoAPI AES for BIFF)
+- BIFF CryptoAPI with `AlgID != CALG_RC4` (including AES CryptoAPI-for-BIFF variants).
+- BIFF CryptoAPI with `AlgIDHash` not in {`CALG_SHA1`, `CALG_MD5`} or other uncommon verifier/hash variants.
+- Other uncommon BIFF encryption variants.
 
 ## Container format details (what’s inside the OLE file)
 
@@ -437,7 +446,8 @@ Excel-ground-truth output).
 Repo fixtures:
 
 - OOXML encrypted fixtures live in `fixtures/encrypted/ooxml/` (see that directory’s README).
-- BIFF8 `.xls` encrypted fixtures for `FILEPASS` live under `crates/formula-xls/tests/fixtures/`.
+- BIFF `.xls` encrypted fixtures for `FILEPASS` live under `crates/formula-xls/tests/fixtures/encrypted/`
+  (see [`crates/formula-xls/tests/fixtures/encrypted/README.md`](../crates/formula-xls/tests/fixtures/encrypted/README.md)).
 
 Note: the Apache POI-based generator under `tools/encrypted-ooxml-fixtures/` can emit Standard
 encryption with an `EncryptionInfo` version of `4.2` (still Standard/CryptoAPI; `versionMinor == 2`).
@@ -491,43 +501,118 @@ otherwise:
 These defaults are intended for **interoperability** with Excel, not for novel cryptographic
 design.
 
-## Legacy `.xls` (BIFF8) `FILEPASS` RC4 CryptoAPI
+## Legacy `.xls` `FILEPASS` encryption (BIFF5/BIFF8)
 
 This is distinct from OOXML `EncryptedPackage` encryption.
 
-Implementation: `crates/formula-xls/src/decrypt.rs` (used by
-`formula_xls::import_xls_path_with_password`).
+Implementation entry points:
 
-### Key derivation (RC4 CryptoAPI)
+- `formula_xls::import_xls_path_with_password` / `formula_xls::import_xls_bytes_with_password`
+- Under the hood:
+  - XOR + RC4 “standard”: `crates/formula-xls/src/biff/encryption.rs`
+  - RC4 CryptoAPI: `crates/formula-xls/src/decrypt.rs`
 
-Terminology:
+Fixtures / test corpus:
+[`crates/formula-xls/tests/fixtures/encrypted/README.md`](../crates/formula-xls/tests/fixtures/encrypted/README.md).
 
-- `salt` is `EncryptionVerifier.salt` from the CryptoAPI `EncryptionInfo` embedded inside the BIFF
-  `FILEPASS` record.
-- `pw` is UTF-16LE(password) (no BOM, no terminator).
+### Password semantics (Excel legacy)
 
-Algorithm (as implemented):
+- **XOR obfuscation:** passwords are effectively limited to **15 bytes**; extra characters are
+  ignored.
+  - Excel uses a legacy password-to-bytes mapping for XOR. Our implementation is best-effort for
+    Unicode passwords by trying both MS-OFFCRYPTO “method 1” and “method 2” byte derivations.
+- **RC4 “standard” truncation:** only the first **15 UTF-16 code units** are significant; extra
+  characters are ignored.
+- **RC4 CryptoAPI:** uses the full password string (UTF-16LE, no 15-character truncation).
+- **Empty passwords:** supported when the workbook was encrypted that way (pass `""`).
+
+### Decryption model (BIFF record stream)
+
+The BIFF workbook stream is a sequence of records:
 
 ```text
-// `Hash` is typically SHA-1 (AlgIDHash=CALG_SHA1), but some producers may use MD5.
-H = Hash(salt || pw)
+u16 record_id
+u16 record_len
+u8  record_payload[record_len]
+```
+
+Encryption begins immediately after the `FILEPASS` record and continues until the end of the
+workbook stream:
+
+- Record headers (`record_id` + `record_len`) are always plaintext.
+- Record payload bytes after `FILEPASS` are encrypted/obfuscated (with a few scheme-specific
+  exceptions for legacy XOR/CryptoAPI variants).
+- After successful decryption, we **mask the `FILEPASS` record id** to `0xFFFF` (leaving record sizes
+  and payload bytes intact). This allows downstream BIFF parsers (and `calamine`) that do not
+  implement encryption to treat the stream as plaintext without shifting offsets (notably
+  `BoundSheet8.lbPlyPos`).
+- For XOR obfuscation (and the legacy CryptoAPI layout below), some records/fields remain plaintext
+  even after `FILEPASS` (notably `BOF`/`FILEPASS`/`INTERFACEHDR`, and `BoundSheet8.lbPlyPos`).
+
+### CryptoAPI (`wEncryptionType=0x0001`) FILEPASS payload layouts
+
+RC4 CryptoAPI (`wEncryptionSubType=0x0002`) appears in two payload layouts in the wild; we support
+both.
+
+#### Layout A: `wEncryptionSubType == 0x0002` (length-prefixed `EncryptionInfo`)
+
+FILEPASS payload layout:
+
+```text
+u16 wEncryptionType    = 0x0001
+u16 wEncryptionSubType = 0x0002
+u32 dwEncryptionInfoLen
+u8  encryptionInfo[dwEncryptionInfoLen]  // MS-OFFCRYPTO EncryptionInfo (CryptoAPI)
+```
+
+Key derivation (as implemented; fixed 50,000 iterations; `Hash` is `SHA1` or `MD5` based on
+`EncryptionHeader.AlgIDHash`):
+
+```text
+pw = UTF16LE(password)
+H  = Hash(salt || pw)
 for i in 0..50000:
   H = Hash(LE32(i) || H)
 
-// Per-block RC4 key (`keyLen` is `KeySizeBits / 8` from the CryptoAPI header: 5 for 40-bit, 7 for
-// 56-bit, 16 for 128-bit). Some producers also use `KeySizeBits==0` to mean 40-bit RC4.
+// KeySizeBits can be 0 (meaning 40-bit), 40, 56, or 128.
 H_block = Hash(H || LE32(blockIndex))
-K_block = H_block[0..keyLen]
+K_block = H_block[0..keyLen]             // keyLen = (KeySizeBits==0 ? 40 : KeySizeBits)/8
 ```
 
-### Payload decryption model (record-payload-only RC4 stream)
+Decrypt model:
 
-- The BIFF workbook stream is treated as a stream of **record payload bytes only** (record headers
-  are not decrypted).
-- RC4 keystream is applied across payload bytes, rekeying every **1024 bytes** of payload.
-- After successful decryption, the `FILEPASS` record id is masked to `0xFFFF` (leaving record sizes
-  intact) so downstream parsers that do not implement encryption can parse the stream without
-  shifting offsets.
+- Treat the encrypted byte stream as **record payload bytes only** (record headers are not
+  decrypted and do not advance the RC4 position).
+- Rekey every **1024 bytes** of payload.
+
+#### Layout B: legacy `wEncryptionInfo == 0x0004` (embedded header/verifier)
+
+Some RC4 CryptoAPI workbooks use an older FILEPASS layout where the CryptoAPI header/verifier are
+embedded directly in the FILEPASS payload (no length-prefixed `EncryptionInfo` blob):
+
+```text
+u16 wEncryptionType = 0x0001
+u16 wEncryptionInfo = 0x0004
+u16 vMajor
+u16 vMinor
+u16 reserved        = 0
+u32 headerSize
+u8  encryptionHeader[headerSize]
+u8  encryptionVerifier[...]
+```
+
+Nuances (as implemented; mirrors Excel/Apache POI behavior):
+
+- **Different key-material derivation:** the legacy layout derives key material as
+  `Hash(salt || UTF16LE(password))` (no 50,000-iteration spin loop).
+  - Some legacy headers omit/zero `AlgIDHash`; we treat `AlgIDHash==0` as SHA-1 for compatibility.
+- **Different stream-position semantics:** the RC4 block index + in-block position are derived from
+  the **absolute workbook-stream offset**. Record headers are not encrypted, but they still advance
+  the RC4 “encryption stream position”.
+- A small set of records are **never encrypted** (notably `BOF`, `FILEPASS`, `INTERFACEHDR`), but
+  their plaintext bytes still advance the RC4 position.
+- `BoundSheet8.lbPlyPos` (the first 4 bytes of the `BOUNDSHEET` payload) remains plaintext so sheet
+  offsets remain valid after masking `FILEPASS`.
 
 ## Security notes
 
