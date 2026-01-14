@@ -283,6 +283,95 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "FACT",
+    description: "Returns the factorial of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "FACTDOUBLE",
+    description: "Returns the double factorial of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "COMBIN",
+    description: "Returns the number of combinations for a given number of items.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "number_chosen", type: "value" },
+    ],
+  },
+  {
+    name: "COMBINA",
+    description: "Returns the number of combinations with repetitions for a given number of items.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "number_chosen", type: "value" },
+    ],
+  },
+  {
+    name: "PERMUT",
+    description: "Returns the number of permutations for a given number of objects.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "number_chosen", type: "value" },
+    ],
+  },
+  {
+    name: "PERMUTATIONA",
+    description: "Returns the number of permutations with repetitions for a given number of objects.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "number_chosen", type: "value" },
+    ],
+  },
+  {
+    name: "GAMMA",
+    description: "Returns the Gamma function value.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "GAMMALN",
+    description: "Returns the natural logarithm of the Gamma function.",
+    args: [
+      { name: "x", type: "value" },
+    ],
+  },
+  {
+    name: "GAMMALN.PRECISE",
+    description: "Returns the natural logarithm of the Gamma function, for positive numbers.",
+    args: [
+      { name: "x", type: "value" },
+    ],
+  },
+  {
+    name: "GAUSS",
+    description: "Returns the probability that a standard normal random variable is less than z.",
+    args: [
+      { name: "z", type: "value" },
+    ],
+  },
+  {
+    name: "ERF",
+    description: "Returns the error function integrated between lower_limit and upper_limit.",
+    args: [
+      { name: "lower_limit", type: "value" },
+      { name: "upper_limit", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "ERFC",
+    description: "Returns the complementary error function.",
+    args: [
+      { name: "x", type: "value" },
+    ],
+  },
+  {
     name: "SIGN",
     description: "Returns the sign of a number.",
     args: [
