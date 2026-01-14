@@ -12,7 +12,8 @@
  *   sibling `<bundle>.sig` release asset)
  *
  * Generates:
- * - `SHA256SUMS.txt` for primary bundle artifacts (excluding `.sig` files)
+ * - `SHA256SUMS.txt` for primary bundle artifacts (excluding `.sig` files by default).
+ *   Use `--all-assets` to hash every release asset and `--include-sigs` to include `.sig` files.
  *
  * Usage:
  *   node scripts/verify-desktop-release-assets.mjs --tag v0.1.0 --repo owner/repo
