@@ -602,6 +602,175 @@ describe("SpreadsheetApp.hitTestDrawingAtClientPoint (canvas charts, split view)
     root.remove();
   });
 
+  it("preserves ChartStore chart selection on context-click misses in the secondary pane", () => {
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 300,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const { chart_id: chartId } = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Split View Chart",
+      position: "A1",
+    });
+
+    // Override anchor to a deterministic absolute position for stable hit testing.
+    (app as any).chartStore.updateChartAnchor(chartId, {
+      kind: "absolute",
+      xEmu: pxToEmu(30),
+      yEmu: pxToEmu(20),
+      cxEmu: pxToEmu(80),
+      cyEmu: pxToEmu(60),
+    });
+
+    const secondaryContainer = document.createElement("div");
+    secondaryContainer.tabIndex = 0;
+    Object.defineProperty(secondaryContainer, "clientWidth", { configurable: true, value: 400 });
+    Object.defineProperty(secondaryContainer, "clientHeight", { configurable: true, value: 300 });
+    secondaryContainer.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 500,
+          top: 0,
+          right: 900,
+          bottom: 300,
+          x: 500,
+          y: 0,
+          toJSON: () => {},
+        }) as any,
+    );
+    document.body.appendChild(secondaryContainer);
+
+    const view = new SecondaryGridView({
+      container: secondaryContainer,
+      document: app.getDocument(),
+      getSheetId: () => app.getCurrentSheetId(),
+      rowCount: 50,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
+      images: app.getDrawingImages(),
+      getSelectedDrawingId: () => app.getSelectedDrawingId(),
+      chartRenderer: app.getDrawingChartRenderer(),
+    });
+
+    const selectionCanvas = secondaryContainer.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    if (!selectionCanvas) throw new Error("Missing secondary selection canvas");
+    selectionCanvas.getBoundingClientRect = secondaryContainer.getBoundingClientRect as any;
+
+    app.setSplitViewSecondaryGridView({ container: secondaryContainer, grid: view.grid });
+
+    const sheetId = app.getCurrentSheetId();
+    const chartDrawingId = chartIdToDrawingId(chartId);
+    const chartObj = app.getDrawingObjects(sheetId).find((o) => o.id === chartDrawingId) ?? null;
+    expect(chartObj).toBeTruthy();
+
+    const rect = secondaryContainer.getBoundingClientRect();
+    const scroll = view.grid.getScroll();
+    const viewportState = view.grid.renderer.scroll.getViewportState();
+    const headerRows = 1;
+    const headerCols = 1;
+    const headerWidth = view.grid.renderer.scroll.cols.totalSize(headerCols);
+    const headerHeight = view.grid.renderer.scroll.rows.totalSize(headerRows);
+    const headerOffsetX = Math.min(headerWidth, rect.width);
+    const headerOffsetY = Math.min(headerHeight, rect.height);
+    const zoom = view.grid.renderer.getZoom();
+    const { frozenRows, frozenCols } = app.getFrozen();
+
+    const viewport = {
+      scrollX: scroll.x,
+      scrollY: scroll.y,
+      width: rect.width,
+      height: rect.height,
+      dpr: 1,
+      zoom,
+      frozenRows,
+      frozenCols,
+      headerOffsetX,
+      headerOffsetY,
+      frozenWidthPx: viewportState.frozenWidth,
+      frozenHeightPx: viewportState.frozenHeight,
+    };
+
+    const geom = {
+      cellOriginPx: (cell: { row: number; col: number }) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: view.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: view.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell: { row: number; col: number }) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          width: view.grid.renderer.getColWidth(gridCol),
+          height: view.grid.renderer.getRowHeight(gridRow),
+        };
+      },
+    };
+
+    const objRect = drawingObjectToViewportRect(chartObj!, viewport as any, geom as any);
+    const hitClientX = rect.left + objRect.x + 5;
+    const hitClientY = rect.top + objRect.y + 5;
+
+    const missClientX = rect.left + rect.width - 10;
+    const missClientY = rect.top + rect.height - 10;
+    expect(app.hitTestDrawingAtClientPoint(missClientX, missClientY)).toBe(null);
+
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", {
+        clientX: hitClientX,
+        clientY: hitClientY,
+        button: 2,
+        pointerId: 1,
+      }),
+    );
+    expect(app.getSelectedChartId()).toBe(chartId);
+
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", {
+        clientX: missClientX,
+        clientY: missClientY,
+        button: 2,
+        pointerId: 2,
+      }),
+    );
+    expect(app.getSelectedChartId()).toBe(chartId);
+
+    view.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
+
   it("deletes ChartStore charts via Delete key from the secondary pane", () => {
     const root = document.createElement("div");
     root.tabIndex = 0;

@@ -312,4 +312,54 @@ describe("SpreadsheetApp canvas charts vs drawing handles (shared grid)", () => 
     app.destroy();
     root.remove();
   });
+
+  it("preserves ChartStore chart selection on context-click misses", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+    expect(app.getGridMode()).toBe("shared");
+    expect((app as any).chartDrawingInteraction).toBeTruthy();
+
+    const { chart_id: chartId } = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Preserve selection",
+      position: "A1",
+    });
+    // Deterministic absolute anchor for stable hit testing.
+    (app as any).chartStore.updateChartAnchor(chartId, {
+      kind: "absolute",
+      xEmu: pxToEmu(0),
+      yEmu: pxToEmu(0),
+      cxEmu: pxToEmu(100),
+      cyEmu: pxToEmu(100),
+    });
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+    const hitX = rowHeaderWidth + 10;
+    const hitY = colHeaderHeight + 10;
+    const missX = rowHeaderWidth + 300;
+    const missY = colHeaderHeight + 300;
+
+    expect(app.hitTestDrawingAtClientPoint(missX, missY)).toBe(null);
+
+    selectionCanvas.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: hitX, clientY: hitY, button: 2 }));
+    expect(app.getSelectedChartId()).toBe(chartId);
+
+    selectionCanvas.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: missX, clientY: missY, button: 2 }));
+    expect(app.getSelectedChartId()).toBe(chartId);
+
+    app.destroy();
+    root.remove();
+  });
 });

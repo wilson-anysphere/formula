@@ -3461,25 +3461,39 @@ export class SpreadsheetApp {
               // When the formula bar is in range-selection mode, chart hits should not steal the
               // pointerdown; let normal grid range selection continue.
               if (this.formulaBar?.isFormulaEditing()) return false;
+              const pointerType = (e as any).pointerType ?? "mouse";
+              const button = typeof (e as any).button === "number" ? (e as any).button : 0;
+              const isMouse = pointerType === "mouse";
+              const isMacPlatform = (() => {
+                try {
+                  const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+                  return /Mac|iPhone|iPad|iPod/.test(platform);
+                } catch {
+                  return false;
+                }
+              })();
+              const isMacContextClick = isMouse && isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey;
+              const isContextClick = isMouse && (button === 2 || isMacContextClick);
+
               const target = e.target as HTMLElement | null | undefined;
               // Tests may call pointer handlers directly with synthetic events that omit `target`.
               // Treat them as grid-surface events so chart interaction logic stays testable.
-              if (!target) return true;
               // Only treat pointerdown events originating from the grid surface (canvases/root) as
               // chart selection/drags. This avoids interfering with interactive DOM overlays
               // (scrollbars, outline buttons, comments panel, etc) even when a chart extends underneath them.
-              const isGridSurface =
-                target === this.root ||
-                target === this.selectionCanvas ||
-                target === this.gridCanvas ||
-                target === this.drawingCanvas ||
-                target === this.chartCanvas ||
-                target === this.chartSelectionCanvas ||
-                target === this.referenceCanvas ||
-                target === this.auditingCanvas ||
-                target === this.presenceCanvas
-              ;
-              if (!isGridSurface) return false;
+              if (target) {
+                const isGridSurface =
+                  target === this.root ||
+                  target === this.selectionCanvas ||
+                  target === this.gridCanvas ||
+                  target === this.drawingCanvas ||
+                  target === this.chartCanvas ||
+                  target === this.chartSelectionCanvas ||
+                  target === this.referenceCanvas ||
+                  target === this.auditingCanvas ||
+                  target === this.presenceCanvas;
+                if (!isGridSurface) return false;
+              }
 
               // ChartStore charts render above workbook drawings, but drawing selection handles are
               // rendered above *all* objects. If a workbook drawing is selected, allow interactions
@@ -3493,6 +3507,15 @@ export class SpreadsheetApp {
                 if (hit && hit.id === this.selectedDrawingId) {
                   return false;
                 }
+              }
+
+              // Preserve chart selection on context-click misses (Excel-like behavior). This mirrors
+              // non-canvas chart mode (`onChartPointerDownCapture`) and legacy drawing selection
+              // semantics where right-clicking the grid should open cell context menus without
+              // dropping the existing object selection.
+              if (isContextClick && this.selectedChartId != null) {
+                const chartHit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
+                if (!chartHit) return false;
               }
 
               return true;
@@ -3549,10 +3572,10 @@ export class SpreadsheetApp {
                 this.editor.commit("command");
               }
             },
-             onSelectionChange: (selectedId) => {
-               selectedCanvasChartDrawingId = selectedId;
-               selectedCanvasChartIndex = null;
-               lastCanvasChartAnchor = null;
+            onSelectionChange: (selectedId) => {
+              selectedCanvasChartDrawingId = selectedId;
+              selectedCanvasChartIndex = null;
+              lastCanvasChartAnchor = null;
 
               let nextChartId: string | null = null;
               if (selectedId != null) {
@@ -9511,10 +9534,25 @@ export class SpreadsheetApp {
           // When the formula bar is in range-selection mode, chart hits should not steal the
           // pointerdown; let normal grid range selection continue.
           if (this.formulaBar?.isFormulaEditing()) return false;
+          const pointerType = (e as any).pointerType ?? "mouse";
+          const button = typeof (e as any).button === "number" ? (e as any).button : 0;
+          const isMouse = pointerType === "mouse";
+          const isMacPlatform = (() => {
+            try {
+              const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+              return /Mac|iPhone|iPad|iPod/.test(platform);
+            } catch {
+              return false;
+            }
+          })();
+          const isMacContextClick = isMouse && isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey;
+          const isContextClick = isMouse && (button === 2 || isMacContextClick);
+
           const target = e.target as HTMLElement | null;
-          if (!target) return true;
-          const isGridSurface = target === view.container || target.tagName === "CANVAS";
-          if (!isGridSurface) return false;
+          if (target) {
+            const isGridSurface = target === view.container || target.tagName === "CANVAS";
+            if (!isGridSurface) return false;
+          }
 
           // Charts render above workbook drawings, but drawing selection handles are rendered
           // above all objects. If a drawing is currently selected, allow interactions on its
@@ -9526,6 +9564,16 @@ export class SpreadsheetApp {
           if (this.selectedDrawingId != null) {
             const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
             if (hit && hit.id === this.selectedDrawingId) {
+              return false;
+            }
+          }
+
+          // Preserve chart selection on context-click misses (Excel-like behavior). In split view,
+          // the secondary pane uses a shared-grid selection canvas; allow right-clicking cells to
+          // open context menus without dropping the current chart selection.
+          if (isContextClick && this.selectedChartId != null) {
+            const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
+            if (!hit || !isChartStoreDrawingId(hit.id)) {
               return false;
             }
           }
@@ -9671,9 +9719,10 @@ export class SpreadsheetApp {
 
     const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
     if (!hit) {
-      // Clicking anywhere outside a drawing clears any object selection (drawings/charts), but still allows the
-      // grid to handle the pointerdown (e.g. row/column header selection in the secondary pane).
-      if (prevSelected != null) {
+      // Primary clicks outside a drawing clear any object selection (drawings/charts), but context-click
+      // misses should preserve selection so right-clicking cells can open context menus without dropping
+      // the current object selection (Excel-like).
+      if (!isContextClick && prevSelected != null) {
         if (this.selectedChartId != null) {
           this.setSelectedChartId(null);
         }
