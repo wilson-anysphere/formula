@@ -99,11 +99,7 @@ fn numeric_categories_with_date_axis_emits_no_warning() {
 
     let model = parse_chart_space(xml.as_bytes(), "chart1.xml").expect("parse chartSpace");
     assert_eq!(model.series.len(), 1);
-    assert!(
-        model.diagnostics.is_empty(),
-        "unexpected diagnostics: {:?}",
-        model.diagnostics
-    );
+    assert!(model.diagnostics.is_empty(), "unexpected diagnostics: {:?}", model.diagnostics);
 
     let ser = &model.series[0];
     assert!(ser.categories.is_none());
@@ -142,7 +138,11 @@ fn parses_numeric_categories_from_cat_numlit() {
     "#;
 
     let model = parse_chart_space(xml.as_bytes(), "chart1.xml").expect("parse chartSpace");
-    assert!(model.diagnostics.is_empty(), "unexpected diagnostics: {:?}", model.diagnostics);
+    assert!(
+        model.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        model.diagnostics
+    );
     assert_eq!(model.series.len(), 1);
 
     let ser = &model.series[0];
@@ -157,3 +157,4 @@ fn parses_numeric_categories_from_cat_numlit() {
         "numLit should populate literal values"
     );
 }
+

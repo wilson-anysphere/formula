@@ -354,8 +354,8 @@ impl XlsxPackage {
                     None
                 };
 
-                // Without `rdrichvalue.xml` local-image metadata we cannot recover `CalcOrigin`;
-                // default to `0` (unknown) rather than guessing.
+                // `CalcOrigin` is only available via the rdRichValue local-image metadata tables.
+                // When those parts are missing, we cannot recover it and default to `0` (unknown).
                 let mut calc_origin: u32 = 0;
                 let mut alt_text: Option<String> = None;
 
