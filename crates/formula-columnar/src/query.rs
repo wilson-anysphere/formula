@@ -3407,6 +3407,9 @@ pub fn hash_join(
         operation: "JOIN key",
     })?;
 
+    // For dictionary-encoded string keys, map right dictionary indices into the left dictionary
+    // index space. When both sides share the same dictionary (common when joining cloned tables),
+    // the mapping can be treated as an identity and we avoid allocating the vector entirely.
     let dict_mapping = if left_type == ColumnType::String {
         let left_dict = left
             .dictionary(left_on)
@@ -3414,7 +3417,11 @@ pub fn hash_join(
         let right_dict = right
             .dictionary(right_on)
             .ok_or(QueryError::MissingDictionary { col: right_on })?;
-        Some(build_dict_mapping(&left_dict, &right_dict))
+        if Arc::ptr_eq(&left_dict, &right_dict) {
+            None
+        } else {
+            Some(build_dict_mapping(&left_dict, &right_dict))
+        }
     } else {
         None
     };
@@ -3452,15 +3459,15 @@ pub fn hash_join(
             let scalar = cursor.next();
             let key = match (key_kind, scalar) {
                 (_, Scalar::Null) => continue,
-                (KeyKind::Dict, Scalar::U32(ix)) => {
-                    let Some(mapping) = dict_mapping.as_ref() else {
-                        continue;
-                    };
-                    let Some(mapped) = mapping.get(ix as usize).and_then(|m| *m) else {
-                        continue;
-                    };
-                    KeyValue::Dict(mapped)
-                }
+                (KeyKind::Dict, Scalar::U32(ix)) => match dict_mapping.as_ref() {
+                    Some(mapping) => {
+                        let Some(mapped) = mapping.get(ix as usize).and_then(|m| *m) else {
+                            continue;
+                        };
+                        KeyValue::Dict(mapped)
+                    }
+                    None => KeyValue::Dict(ix),
+                },
                 (kind, s) => scalar_to_key(kind, s),
             };
             if matches!(key, KeyValue::Null) {
@@ -3573,6 +3580,10 @@ struct JoinKeyPlan {
     kind: KeyKind,
     /// For string keys, maps right dictionary indices into the left dictionary index space.
     /// Missing entries mean the right value is not present in the left dictionary and can never match.
+    ///
+    /// `None` is used for two cases:
+    /// - non-string join keys (`kind != KeyKind::Dict`)
+    /// - string join keys where both sides share the same dictionary (identity mapping)
     right_dict_to_left: Option<Vec<Option<u32>>>,
 }
 
@@ -3631,7 +3642,11 @@ fn plan_join_keys(
             let right_dict = right
                 .dictionary(right_col)
                 .ok_or(QueryError::MissingDictionary { col: right_col })?;
-            Some(build_dict_mapping(&left_dict, &right_dict))
+            if Arc::ptr_eq(&left_dict, &right_dict) {
+                None
+            } else {
+                Some(build_dict_mapping(&left_dict, &right_dict))
+            }
         } else {
             None
         };
@@ -3654,10 +3669,10 @@ fn join_key_from_scalar_for_right(
 ) -> Option<KeyValue> {
     match (plan.kind, scalar) {
         (_, Scalar::Null) => None,
-        (KeyKind::Dict, Scalar::U32(ix)) => {
-            let mapping = plan.right_dict_to_left.as_ref()?;
-            mapping.get(ix as usize).and_then(|m| *m).map(KeyValue::Dict)
-        }
+        (KeyKind::Dict, Scalar::U32(ix)) => match plan.right_dict_to_left.as_ref() {
+            Some(mapping) => mapping.get(ix as usize).and_then(|m| *m).map(KeyValue::Dict),
+            None => Some(KeyValue::Dict(ix)),
+        },
         (kind, s) => {
             let key = scalar_to_key(kind, s);
             if matches!(key, KeyValue::Null) {
