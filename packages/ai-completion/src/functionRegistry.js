@@ -203,6 +203,27 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "GCD",
+    description: "Returns the greatest common divisor.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "LCM",
+    description: "Returns the least common multiple.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "MULTINOMIAL",
+    description: "Returns the multinomial of a set of numbers.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "AGGREGATE",
     description: "Returns an aggregate in a list or database, ignoring hidden rows and errors.",
     args: [

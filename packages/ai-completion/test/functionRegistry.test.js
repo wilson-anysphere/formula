@@ -99,6 +99,11 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("SUBTOTAL", 1), "Expected SUBTOTAL ref1 to be a range");
   assert.ok(registry.isRangeArg("SUBTOTAL", 2), "Expected SUBTOTAL ref2 to be a range (varargs)");
 
+  // Math varargs often operate over ranges.
+  assert.ok(registry.isRangeArg("GCD", 0), "Expected GCD number1 to be a range");
+  assert.ok(registry.isRangeArg("LCM", 0), "Expected LCM number1 to be a range");
+  assert.ok(registry.isRangeArg("MULTINOMIAL", 0), "Expected MULTINOMIAL number1 to be a range");
+
   // AGGREGATE(function_num, options, ref1, [ref2], ...)
   assert.equal(registry.isRangeArg("AGGREGATE", 0), false, "Expected AGGREGATE function_num not to be a range");
   assert.equal(registry.isRangeArg("AGGREGATE", 1), false, "Expected AGGREGATE options not to be a range");
