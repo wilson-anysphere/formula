@@ -367,15 +367,18 @@ restrictions (notably: no `]`), so this split is unambiguous.
     available, external 3D spans (e.g. `[Book.xlsx]Sheet1:Sheet3!A1`) are expanded for invalidation
     so `mark_external_sheet_dirty("[Book.xlsx]Sheet2")` will refresh dependents. Without `sheet_order`
     (or when span endpoints are missing), invalidating the whole workbook may still be required.
-  * External structured refs (table refs) are currently treated as volatile regardless of
-    `set_external_refs_volatile`, since external table metadata is not represented in the explicit
-    invalidation index yet.
+  * External structured refs (table refs) respect `set_external_refs_volatile(...)` and participate
+    in explicit invalidation. Workbook-only structured refs like `[Book.xlsx]Table1[Col]` are
+    indexed at the workbook level (since there is no explicit sheet key).
   * Dynamic-deps formulas (e.g. `INDIRECT`, `OFFSET`) can construct external workbook references at
     runtime. After such a formula has been evaluated at least once, the engine indexes the external
     sheet/workbook keys it dereferenced so `mark_external_sheet_dirty` /
     `mark_external_workbook_dirty` can invalidate it when `set_external_refs_volatile(false)`.
 * **Auditing APIs:** `Engine::precedents(...)` reports external single-sheet references
   (`[Book.xlsx]Sheet1!A1`).
+  * `Engine::precedents(...)` also reports external structured refs when table metadata is
+    available via `ExternalValueProvider::workbook_table(...)`, expanding them into
+    `ExternalRange` / `ExternalCell` nodes.
   * For dynamic-deps formulas like `INDIRECT("[Book.xlsx]Sheet1!A1")`, the external precedents are
     captured during evaluation (not parse time), so they appear in `precedents(...)` after the cell
     has been evaluated.
@@ -649,8 +652,9 @@ Hosts can opt into explicit invalidation semantics by disabling external volatil
 - `Engine::mark_external_sheet_dirty("[Book.xlsx]Sheet1")` (canonical external sheet key)
 - `Engine::mark_external_workbook_dirty("Book.xlsx")` (workbook id inside `[...]`)
 
-Note: external structured refs (table refs) currently remain volatile regardless of
-`set_external_refs_volatile`, and do not participate in explicit invalidation.
+Note: workbook-only external structured refs like `[Book.xlsx]Table1[Col]` are indexed only to the
+workbook id (not a specific sheet key), since the formula itself does not identify the sheet. If
+you need to refresh those dependents after a change, call `mark_external_workbook_dirty(...)`.
 
 ## Dependency Graph
 
