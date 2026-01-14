@@ -107,6 +107,20 @@ test("validate-windows-bundles.ps1 MSI URL protocol fallback scan is scheme-spec
   );
 });
 
+test("validate-windows-bundles.ps1 MSI file association fallback avoids bare extension markers", () => {
+  const match = text.match(/\$needles\s*=\s*@\([\s\S]*?\)\s*\n\s*if\s*\(\s*\$requiredExtensionNoDot\s+-ieq\s+\"xlsx\"/s);
+  assert.ok(match, "Expected MSI file association fallback to define $needles marker list.");
+  const block = match[0];
+  // The fallback should prefer registry-path context rather than just scanning for ".xlsx" or "xlsx"
+  // anywhere in the MSI binary.
+  assert.doesNotMatch(block, /\n\s*\$dotExt\s*,?\s*\n/, "Expected file association fallback to avoid bare $dotExt entries.");
+  assert.doesNotMatch(
+    block,
+    /\n\s*\$requiredExtensionNoDot\s*,?\s*\n/,
+    "Expected file association fallback to avoid bare $requiredExtensionNoDot entries.",
+  );
+});
+
 test("validate-windows-bundles.ps1 validates all configured file association extensions (not just .xlsx) via MSI", () => {
   assert.match(
     text,

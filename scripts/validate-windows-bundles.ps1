@@ -1492,9 +1492,7 @@ try {
             "HKEY_CLASSES_ROOT\\$dotExt",
             "HKEY_CLASSES_ROOT\$dotExt",
             "HKCR\\$dotExt",
-            "HKCR $dotExt",
-            $dotExt,
-            $requiredExtensionNoDot
+            "HKCR $dotExt"
           )
           if ($requiredExtensionNoDot -ieq "xlsx") {
             # Common ProgId used by Excel for `.xlsx` file associations.
