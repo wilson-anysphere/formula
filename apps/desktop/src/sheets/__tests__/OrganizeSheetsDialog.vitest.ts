@@ -99,6 +99,65 @@ describe("OrganizeSheetsDialog", () => {
     expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=Budget2024!A1");
   });
 
+  it("surfaces rename validation errors and keeps the rename UI open", async () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Budget", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "s1";
+    const renameSheetById = vi.fn(async (sheetId: string, newName: string) => {
+      // `WorkbookSheetStore.rename` enforces Excel-like validation (including duplicates).
+      store.rename(sheetId, newName);
+    });
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById,
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const renameBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-s2"]');
+    expect(renameBtn).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      renameBtn!.click();
+    });
+
+    const input = dialog!.querySelector<HTMLInputElement>('[data-testid="organize-sheet-rename-input-s2"]');
+    expect(input).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      (input as HTMLInputElement).value = "Sheet1";
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(renameSheetById).toHaveBeenCalledTimes(1);
+    expect(renameSheetById).toHaveBeenCalledWith("s2", "Sheet1");
+    expect(store.getName("s2")).toBe("Budget");
+
+    const error = dialog!.querySelector('[data-testid="organize-sheets-error"]');
+    expect(error).toBeInstanceOf(HTMLElement);
+    expect(error?.textContent?.trim()).toBeTruthy();
+
+    // Ensure the rename UI is still active after the error (Excel-style).
+    expect(dialog!.querySelector('[data-testid="organize-sheet-rename-input-s2"]')).toBeInstanceOf(HTMLInputElement);
+  });
+
   it("enforces the 'cannot hide the last visible sheet' invariant", () => {
     const doc = new DocumentController();
     const store = new WorkbookSheetStore([
@@ -311,5 +370,41 @@ describe("OrganizeSheetsDialog", () => {
 
     expect(store.getById("s2")?.visibility).toBe("visible");
     expect(activeSheetId).toBe("s2");
+  });
+
+  it("restores focus via host.focusGrid when closing the dialog", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+    let activeSheetId = "s1";
+    const focusGrid = vi.fn();
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid,
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const closeBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheets-close"]');
+    expect(closeBtn).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      closeBtn!.click();
+    });
+
+    expect(focusGrid).toHaveBeenCalledTimes(1);
   });
 });
