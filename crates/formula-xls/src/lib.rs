@@ -898,7 +898,7 @@ fn import_xls_path_with_biff_reader(
         // worksheet BIFF substream. Parse and apply them before borrowing `sheet_mut` so we can
         // call `Workbook::set_*` helpers without running into borrow conflicts.
         //
-        // Only implemented for BIFF8 currently; BIFF5 SETUP layout differs.
+        // Only implemented for BIFF8 currently; BIFF5 worksheet record layouts differ.
         if biff_version == Some(biff::BiffVersion::Biff8) {
             if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx)
             {

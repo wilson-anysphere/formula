@@ -116,8 +116,11 @@ pub(crate) fn parse_biff_sheet_print_settings(
     let mut saw_any_record = false;
 
     // WSBOOL.fFitToPage controls whether SETUP's iFitWidth/iFitHeight apply.
+    //
     // Keep the raw SETUP scaling fields around and compute scaling at the end so record order
-    // doesn't matter and "last wins" semantics are respected.
+    // doesn't matter and "last wins" semantics are respected. Some `.xls` producers omit SETUP
+    // even when fit-to-page is enabled; in that case we preserve the intent as
+    // `FitTo { width: 0, height: 0 }`.
     let mut wsbool_fit_to_page: Option<bool> = None;
     let mut setup_scale: Option<u16> = None;
     let mut setup_fit_width: Option<u16> = None;
@@ -198,7 +201,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
             ),
             RECORD_WSBOOL => {
                 // WSBOOL [MS-XLS 2.4.376]
-                // fFitToPage: bit8 (mask 0x0100)
+                // fFitToPage: bit8 (mask 0x0100).
                 if data.len() < 2 {
                     push_warning_bounded(
                         &mut out.warnings,
@@ -211,7 +214,12 @@ pub(crate) fn parse_biff_sheet_print_settings(
                     continue;
                 }
                 let grbit = u16::from_le_bytes([data[0], data[1]]);
-                wsbool_fit_to_page = Some((grbit & WSBOOL_OPTION_FIT_TO_PAGE) != 0);
+                let fit_to_page = (grbit & WSBOOL_OPTION_FIT_TO_PAGE) != 0;
+                wsbool_fit_to_page = Some(fit_to_page);
+                if fit_to_page {
+                    // Only treat WSBOOL as a print-settings signal when fFitToPage is set.
+                    saw_any_record = true;
+                }
             }
             records::RECORD_EOF => break,
             _ => {}
@@ -225,6 +233,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
         }
     }
 
+    // Compute scaling based on WSBOOL.fFitToPage (when present) and SETUP fields.
     let fit_to_page = if setup_no_pls {
         false
     } else {
@@ -232,19 +241,19 @@ pub(crate) fn parse_biff_sheet_print_settings(
             setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
         })
     };
+    if fit_to_page {
+        page_setup.scaling = match (setup_fit_width, setup_fit_height) {
+            (Some(width), Some(height)) => Scaling::FitTo { width, height },
+            _ => Scaling::FitTo { width: 0, height: 0 },
+        };
+    } else {
+        let scale = setup_scale.unwrap_or(100);
+        page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });
+    }
 
     // WSBOOL.fFitToPage can imply non-default scaling even when SETUP is missing. Treat it as a
     // signal that print settings exist so downstream import paths can preserve FitTo mode.
     if saw_any_record || fit_to_page {
-        if fit_to_page {
-            page_setup.scaling = Scaling::FitTo {
-                width: setup_fit_width.unwrap_or(0),
-                height: setup_fit_height.unwrap_or(0),
-            };
-        } else {
-            let scale = setup_scale.unwrap_or(100);
-            page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });
-        }
         out.page_setup = Some(page_setup);
     }
 
