@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import os
 import platform
@@ -48,6 +49,13 @@ def _human_bytes(size_bytes: int) -> str:
             return f"{size:.1f} {unit}"
         size /= 1000
     return f"{size_bytes} B"
+
+
+def _write_json_out(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 
 def _is_truthy_env(val: str | None) -> bool:
@@ -398,6 +406,12 @@ def main() -> int:
         help="Optional markdown output path (in addition to stdout).",
     )
     parser.add_argument(
+        "--json-out",
+        type=Path,
+        default=None,
+        help="Optional path to write a machine-readable JSON report.",
+    )
+    parser.add_argument(
         "--limit-mb",
         type=int,
         default=None,
@@ -488,6 +502,19 @@ def main() -> int:
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(md, encoding="utf-8")
+        if args.json_out:
+            _write_json_out(
+                args.json_out,
+                {
+                    "status": "error",
+                    "error": f"cargo metadata failed: {exc}",
+                    "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                    "package": package,
+                    "bin_name": bin_name,
+                    "features": features,
+                    "target": target,
+                },
+            )
         return 1
 
     candidate_bin_paths = _candidate_binary_paths(repo_root, target_dir, bin_name, target)
@@ -548,6 +575,21 @@ def main() -> int:
             if args.out:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
                 args.out.write_text(md, encoding="utf-8")
+            if args.json_out:
+                _write_json_out(
+                    args.json_out,
+                    {
+                        "status": "error",
+                        "error": "build failed",
+                        "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                        "package": package,
+                        "bin_name": bin_name,
+                        "features": features,
+                        "target": target,
+                        "build_cmd": build_cmd,
+                        "build_ran": build_ran,
+                    },
+                )
             return 1
 
     existing = _first_existing_path(candidate_bin_paths)
@@ -596,6 +638,24 @@ def main() -> int:
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(md, encoding="utf-8")
+        if args.json_out:
+            _write_json_out(
+                args.json_out,
+                {
+                    "status": "error",
+                    "error": "binary not found",
+                    "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                    "package": package,
+                    "bin_name": bin_name,
+                    "features": features,
+                    "target": target,
+                    "target_dir": _relpath(target_dir, repo_root),
+                    "bin_path": _relpath(default_bin_path, repo_root),
+                    "searched_paths": [_relpath(p, repo_root) for p in candidate_bin_paths],
+                    "build_cmd": build_cmd,
+                    "build_ran": build_ran,
+                },
+            )
         return 1
 
     bin_size_bytes = bin_path.stat().st_size
@@ -749,6 +809,45 @@ def main() -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(md, encoding="utf-8")
+    if args.json_out:
+        llvm_tool = Path(llvm_size_cmd[0]).name if llvm_size_cmd else None
+        _write_json_out(
+            args.json_out,
+            {
+                "status": "ok",
+                "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                "git": {"sha": git_sha, "ref": git_ref},
+                "package": package,
+                "bin_name": bin_name,
+                "features": features,
+                "target": target,
+                "target_dir": _relpath(target_dir, repo_root),
+                "bin_path": _relpath(bin_path, repo_root),
+                "bin_size_bytes": bin_size_bytes,
+                "limit_mb": limit_mb,
+                "enforce": enforce,
+                "over_limit": over_limit,
+                "toolchain": {"rustc": rustc_version, "cargo": cargo_version},
+                "tools": {
+                    "cargo_bloat": cargo_bloat_version,
+                    "llvm_size": llvm_tool,
+                    "file": file_info,
+                    "stripped": stripped,
+                },
+                "commands": {
+                    "build": build_cmd,
+                    "cargo_bloat_crates": crates_cmd,
+                    "cargo_bloat_symbols": symbols_cmd,
+                    "llvm_size": llvm_size_cmd,
+                },
+                "outputs": {
+                    "cargo_bloat_crates": crates_out.combined if crates_out else None,
+                    "cargo_bloat_symbols": symbols_out.combined if symbols_out else None,
+                    "llvm_size": llvm_size_out.combined if llvm_size_out else None,
+                },
+                "build_ran": build_ran,
+            },
+        )
 
     # Informational by default: only fail when explicitly enforcing a size limit.
     if enforce and over_limit:
