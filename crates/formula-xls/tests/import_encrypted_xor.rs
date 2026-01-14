@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use formula_model::{CellRef, CellValue, VerticalAlignment};
 
 const PASSWORD: &str = "password";
+const UNICODE_PASSWORD: &str = "pässwörd";
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -11,6 +12,14 @@ fn fixture_path() -> PathBuf {
         .join("fixtures")
         .join("encrypted")
         .join("biff8_xor_pw_open.xls")
+}
+
+fn unicode_fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_xor_unicode_pw_open.xls")
 }
 
 fn read_workbook_stream_from_xls_bytes(data: &[u8]) -> Vec<u8> {
@@ -111,6 +120,38 @@ fn xor_wrong_password_errors() {
 fn xor_missing_password_reports_encrypted_workbook() {
     let err = formula_xls::import_xls_path(fixture_path()).expect_err("expected encrypted workbook");
     assert!(matches!(err, formula_xls::ImportError::EncryptedWorkbook));
+}
+
+#[test]
+fn decrypts_xor_biff8_xls_with_unicode_password() {
+    let result =
+        formula_xls::import_xls_path_with_password(unicode_fixture_path(), Some(UNICODE_PASSWORD))
+            .expect("expected decrypt + import to succeed");
+
+    let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+}
+
+#[test]
+fn xor_unicode_password_wrong_password_errors() {
+    let err =
+        formula_xls::import_xls_path_with_password(unicode_fixture_path(), Some("wrong password"))
+            .expect_err("expected wrong password error");
+    assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
+}
+
+#[test]
+fn xor_unicode_password_different_normalization_fails() {
+    // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
+    let nfd = "pa\u{0308}sswo\u{0308}rd";
+    assert_ne!(
+        nfd, UNICODE_PASSWORD,
+        "strings should differ before UTF-16 encoding"
+    );
+
+    let err = formula_xls::import_xls_path_with_password(unicode_fixture_path(), Some(nfd))
+        .expect_err("expected wrong password error");
+    assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
 
 #[test]

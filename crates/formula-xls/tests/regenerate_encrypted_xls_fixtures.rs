@@ -1086,6 +1086,13 @@ fn regenerate_encrypted_xls_fixtures() {
     std::fs::write(&xor_path, xor_bytes)
         .unwrap_or_else(|err| panic!("write encrypted fixture {xor_path:?} failed: {err}"));
 
+    // Unicode-password variant (non-ASCII).
+    let xor_unicode_path = fixtures_dir.join("biff8_xor_unicode_pw_open.xls");
+    let xor_unicode_bytes = build_xor_encrypted_xls_bytes("pässwörd");
+    std::fs::write(&xor_unicode_path, xor_unicode_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {xor_unicode_path:?} failed: {err}");
+    });
+
     // XOR long-password fixture (15-byte truncation semantics).
     let xor_long_path = fixtures_dir.join("biff8_xor_pw_open_long_password.xls");
     let xor_long_bytes = build_xor_encrypted_xls_bytes("0123456789abcdef");
