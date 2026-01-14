@@ -642,9 +642,11 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
         attrs.push_str(&format!(r#" baseColWidth="{base}""#));
     }
     if let Some(width) = sheet.default_col_width {
+        let width = trim_float(width as f64);
         attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
     }
     if let Some(height) = sheet.default_row_height {
+        let height = trim_float(height as f64);
         attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
     }
     format!(r#"<sheetFormatPr{attrs}/>"#)
