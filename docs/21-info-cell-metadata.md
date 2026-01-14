@@ -346,7 +346,9 @@ This section documents the “wiring points” for hosts.
   - `EngineClient.setSheetOrigin(sheet, originA1 | null)`
   - `originA1` should be an in-bounds A1 address (`"C5"` or `"$C$5"`); the engine returns absolute A1 with `$`.
   - Passing `null` (or `""` via the worker RPC layer) clears the origin and restores the default `"$A$1"`.
-  - Compatibility note: `INFO("origin")` also supports a legacy string-based fallback (`EngineClient.setInfoOrigin` / `EngineClient.setInfoOriginForSheet`). If the value parses as A1, it is normalized to absolute A1; otherwise it is returned verbatim.
+  - Compatibility note:
+    - `EngineClient.setInfoOriginForSheet(sheet, originA1|null)` is a legacy alias for `setSheetOrigin` (A1-only, validated).
+    - `EngineClient.setInfoOrigin(origin|null)` sets a workbook-level legacy string fallback used when no per-sheet origin is set. If it parses as A1 it is normalized to absolute A1; otherwise it is returned verbatim.
 
 - Workbook file metadata (`CELL("filename")`, `INFO("directory")` fallback):
   - `EngineClient.setWorkbookFileMetadata(directory, filename)`

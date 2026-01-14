@@ -108,7 +108,6 @@ export class WasmWorkbook {
 
     // Legacy `EngineInfo.origin` / `origin_by_sheet` plumbing (still supported by the real engine).
     this.infoOrigin = null;
-    this.infoOriginBySheet = new Map();
   }
 
   _sheetMap(map, sheet) {
@@ -154,13 +153,10 @@ export class WasmWorkbook {
   }
 
   setInfoOriginForSheet(sheet, origin) {
-    const sheetName = normalizeSheet(sheet);
-    const normalized = normalizeInfoString(origin, { key: "origin" });
-    if (normalized == null) {
-      this.infoOriginBySheet.delete(sheetName);
-    } else {
-      this.infoOriginBySheet.set(sheetName, normalized);
-    }
+    // The real wasm engine treats `setInfoOriginForSheet` as a legacy alias for `setSheetOrigin`,
+    // not as a string-based metadata fallback. Keep the mock in sync so tests reflect production
+    // behavior (A1 normalization + per-sheet precedence).
+    this.setSheetOrigin(sheet, origin);
   }
 
   setCell(address, value, sheet) {
@@ -221,9 +217,6 @@ export class WasmWorkbook {
       case "origin": {
         const sheetOrigin = this.sheetOriginBySheet.get(sheetName);
         if (sheetOrigin != null) return sheetOrigin;
-
-        const legacySheetOrigin = this.infoOriginBySheet.get(sheetName);
-        if (legacySheetOrigin != null) return legacyOriginForExcel(legacySheetOrigin);
 
         if (this.infoOrigin != null) return legacyOriginForExcel(this.infoOrigin);
 
