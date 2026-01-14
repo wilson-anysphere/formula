@@ -722,6 +722,15 @@ export class DocumentCellProvider implements CellProvider {
     this.sheetCaches.clear();
     this.lastSheetId = null;
     this.lastSheetCache = null;
+    // Some style conversions (e.g. default border colors) resolve theme CSS vars
+    // into concrete canvas colors, so flush style caches on full invalidation to
+    // ensure theme switches re-render correctly.
+    this.styleCache.clear();
+    this.sheetDefaultResolvedFormatCache.clear();
+    this.sheetColResolvedFormatCache.clear();
+    this.sheetRowResolvedFormatCache.clear();
+    this.sheetRunResolvedFormatCache.clear();
+    this.sheetCellResolvedFormatCache.clear();
     this.resolvedFormatCache.clear();
     this.resolvedLinkColor = null;
     this.mergedRangesBySheet.clear();
