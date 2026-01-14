@@ -16,6 +16,9 @@ import FR_FR_FUNCTION_TSV from "../../../../../crates/formula-engine/src/locale/
 
 type RangeArgRegistry = {
   isRangeArg: (fnName: string, argIndex: number) => boolean;
+  // Optional: some registry implementations (e.g. FunctionRegistry) provide `search()` which we can
+  // use to disambiguate A1-looking function names like "LOG10" from cell references like "A1".
+  search?: (prefix: string, options?: { limit?: number }) => any[];
 };
 
 type EngineClientLike = {
@@ -269,11 +272,30 @@ function isIdentChar(ch: string): boolean {
   return Boolean(UNICODE_ALNUM_RE && UNICODE_ALNUM_RE.test(ch));
 }
 
-function functionNameFromIdent(identToken: string | null): string | null {
+/**
+ * Best-effort check: does the host function registry contain any functions that start with
+ * the given prefix?
+ *
+ * This is used to disambiguate a small set of Excel functions that look like A1 cell references
+ * (e.g. `LOG10` looks like column `LOG`, row `10`).
+ */
+function hasFunctionPrefix(functionRegistry: unknown, prefix: string): boolean {
+  const search =
+    functionRegistry && typeof (functionRegistry as any).search === "function" ? (functionRegistry as any).search : null;
+  if (!search) return false;
+  try {
+    const matches = search.call(functionRegistry, prefix, { limit: 1 });
+    return Array.isArray(matches) && matches.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function functionNameFromIdent(identToken: string | null, functionRegistry: unknown): string | null {
   const token = typeof identToken === "string" ? identToken : "";
   if (!token) return null;
   // Avoid returning something that is obviously a cell ref like "A1".
-  if (/^[A-Za-z]{1,3}\d+$/.test(token)) return null;
+  if (/^[A-Za-z]{1,3}\d+$/.test(token) && !hasFunctionPrefix(functionRegistry, token)) return null;
   return casefoldIdent(token);
 }
 
@@ -298,7 +320,7 @@ export function createLocaleAwareStarterFunctions(): () => string[] {
   };
 }
 
-function findOpenParenIndex(prefix: string): number | null {
+function findOpenParenIndex(prefix: string, functionRegistry: unknown): number | null {
   // Port of `packages/ai-completion/src/formulaPartialParser.js` open-paren scan.
   /** @type {{ index: number; functionName: string | null }[]} */
   const openParens: Array<{ index: number; functionName: string | null }> = [];
@@ -376,7 +398,7 @@ function findOpenParenIndex(prefix: string): number | null {
     }
     if (bracketDepth !== 0) continue;
     if (ch === "(") {
-      openParens.push({ index: i, functionName: functionNameFromIdent(pendingIdent) });
+      openParens.push({ index: i, functionName: functionNameFromIdent(pendingIdent, functionRegistry) });
       pendingIdent = null;
     } else if (ch === ")") {
       openParens.pop();
@@ -550,7 +572,7 @@ export function createLocaleAwarePartialFormulaParser(options: {
       // separator until a `;` appears. In semicolon locales (where `,` is the decimal separator),
       // that can mis-classify partial numbers like `1,` as "arg 1". Fix up the arg span/index
       // using the known locale separator so completion edits remain stable.
-      const openParenIndex = findOpenParenIndex(prefix);
+      const openParenIndex = findOpenParenIndex(prefix, functionRegistry);
       if (openParenIndex != null) {
         const { argIndex, currentArg } = getArgContextWithSeparator(
           prefix,

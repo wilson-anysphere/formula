@@ -130,6 +130,24 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.functionName).toBe("SUM");
   });
 
+  it("does not treat decimal commas as argument separators for A1-like function names (LOG10)", async () => {
+    setLocale("de-DE");
+
+    const parser = createLocaleAwarePartialFormulaParser({});
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=LOG10(1,";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    // LOG10 resembles a cell reference (LOG + 10), but should still be parsed as a function call.
+    expect(result.functionName).toBe("LOG10");
+    // The de-DE locale uses ';' for arguments and ',' for decimals.
+    expect(result.argIndex).toBe(0);
+    expect(result.currentArg?.text).toBe("1,");
+  });
+
   it("falls back to the JS parser when the engine throws", async () => {
     setLocale("en-US");
 
