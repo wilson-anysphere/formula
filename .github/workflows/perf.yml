@@ -248,7 +248,9 @@ jobs:
         # If we decided to run the real desktop (Tauri) benchmarks, enforce that the expected
         # metrics were actually produced (so we don't silently skip the perf gate due to a config
         # regression).
-        if: always() && steps.desktop_bench.outputs.run == 'true'
+        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.build_desktop_binary.outcome == 'success'
+        env:
+          DESKTOP_STARTUP_BENCH_KIND: ${{ steps.desktop_bench.outputs.kind }}
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
@@ -263,13 +265,17 @@ jobs:
             process.exit(1);
           }
           const names = new Set(results.map((r) => r && r.name).filter((n) => typeof n === 'string'));
-          const required = [
-            'desktop.startup.window_visible_ms.p95',
-            'desktop.startup.tti_ms.p95',
-          ];
+          const kind = String(process.env.DESKTOP_STARTUP_BENCH_KIND || '').trim().toLowerCase();
+          const required =
+            kind === 'shell'
+              ? ['desktop.shell_startup.window_visible_ms.p95', 'desktop.shell_startup.tti_ms.p95']
+              : ['desktop.startup.window_visible_ms.p95', 'desktop.startup.tti_ms.p95'];
           const missing = required.filter((n) => !names.has(n));
           if (missing.length) {
             console.error(`[perf] Missing desktop startup benchmark metrics: ${missing.join(', ')}`);
+            console.error(
+              `[perf] Startup bench kind=${JSON.stringify(kind || 'full')} (expected metrics: ${required.join(', ')})`,
+            );
             console.error('[perf] Ensure FORMULA_RUN_DESKTOP_STARTUP_BENCH=1 and the desktop binary emits [startup] metrics.');
             process.exit(1);
           }
