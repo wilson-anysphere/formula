@@ -282,6 +282,9 @@ fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use formula_model::{CellRef, VerticalAlignment};
+    use std::io::{Cursor, Read};
+    use std::path::PathBuf;
 
     fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(4 + payload.len());
@@ -474,6 +477,100 @@ mod tests {
         expected[filepass_offset..filepass_offset + 2]
             .copy_from_slice(&RECORD_MASKED.to_le_bytes());
         assert_eq!(decrypted, expected);
+    }
+
+    #[test]
+    fn decrypts_real_cryptoapi_fixture_and_preserves_workbook_globals_structure() {
+        // Regression guard for `.xls` files where workbook-global records after FILEPASS (XF/FONT/etc)
+        // must be decrypted so downstream BIFF parsers can import styles and other metadata.
+        const PASSWORD: &str = "correct horse battery staple";
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("encrypted")
+            .join("biff8_rc4_cryptoapi_pw_open.xls");
+
+        let bytes = std::fs::read(&path).expect("read fixture");
+        let cursor = Cursor::new(bytes);
+        let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+        let mut workbook_stream = None;
+        for candidate in ["/Workbook", "/Book", "Workbook", "Book"] {
+            if let Ok(mut stream) = ole.open_stream(candidate) {
+                let mut buf = Vec::new();
+                stream.read_to_end(&mut buf).expect("read workbook stream");
+                workbook_stream = Some(buf);
+                break;
+            }
+        }
+        let workbook_stream = workbook_stream.expect("fixture missing workbook stream");
+
+        let decrypted =
+            decrypt_biff8_workbook_stream_rc4_cryptoapi(&workbook_stream, PASSWORD).expect("decrypt");
+
+        // The decryptor masks FILEPASS so parsers do not treat it as an encryption terminator.
+        assert!(
+            !crate::biff::records::workbook_globals_has_filepass_record(&decrypted),
+            "expected FILEPASS record to be masked after decryption"
+        );
+
+        // Ensure the decrypted workbook globals still contain the expected record types.
+        let mut xf_count = 0usize;
+        let mut font_count = 0usize;
+        let mut boundsheet_count = 0usize;
+
+        let mut iter = crate::biff::records::BiffRecordIter::from_offset(&decrypted, 0)
+            .expect("record iter");
+        while let Some(next) = iter.next() {
+            let record = next.expect("record");
+            match record.record_id {
+                0x00E0 => xf_count += 1,         // XF
+                0x0031 => font_count += 1,       // FONT
+                0x0085 => boundsheet_count += 1, // BOUNDSHEET
+                crate::biff::records::RECORD_EOF => break,
+                _ => {}
+            }
+        }
+
+        assert!(xf_count > 0, "expected at least one XF record after decryption");
+        assert!(font_count > 0, "expected at least one FONT record after decryption");
+        assert!(
+            boundsheet_count > 0,
+            "expected at least one BOUNDSHEET record after decryption"
+        );
+
+        // Sanity-check that BIFF global/style parsing sees at least one non-default cell style on
+        // the fixture (Sheet1!A1 uses a non-default vertical alignment in the source workbook).
+        let biff_version = crate::biff::detect_biff_version(&decrypted);
+        let codepage = crate::biff::parse_biff_codepage(&decrypted);
+
+        let globals =
+            crate::biff::globals::parse_biff_workbook_globals(&decrypted, biff_version, codepage)
+                .expect("parse workbook globals");
+        let bound_sheets =
+            crate::biff::parse_biff_bound_sheets(&decrypted, biff_version, codepage)
+                .expect("parse bound sheets");
+        assert!(!bound_sheets.is_empty(), "expected at least one bound sheet");
+        let sheet0_offset = bound_sheets[0].offset;
+
+        let cell_xfs =
+            crate::biff::sheet::parse_biff_sheet_cell_xf_indices_filtered(&decrypted, sheet0_offset, None)
+                .expect("parse cell xfs");
+        let xf_idx = *cell_xfs
+            .get(&CellRef::new(0, 0))
+            .expect("expected A1 xf index in sheet stream") as u32;
+
+        let style = globals.resolve_style(xf_idx);
+        assert_ne!(style, formula_model::Style::default());
+        assert_eq!(
+            style
+                .alignment
+                .as_ref()
+                .and_then(|alignment| alignment.vertical),
+            Some(VerticalAlignment::Top),
+            "expected A1 style to preserve vertical alignment from decrypted XF records"
+        );
     }
 }
 

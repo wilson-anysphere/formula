@@ -869,19 +869,6 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
         let data = record.data;
         match record.record_id {
-            // Manual page breaks (best-effort; can be empty).
-            RECORD_HORIZONTALPAGEBREAKS => parse_horizontal_page_breaks_record(
-                data,
-                record.offset,
-                &mut out.manual_page_breaks,
-                &mut out.warnings,
-            ),
-            RECORD_VERTICALPAGEBREAKS => parse_vertical_page_breaks_record(
-                data,
-                record.offset,
-                &mut out.manual_page_breaks,
-                &mut out.warnings,
-            ),
             // Page setup/margins/scaling.
             RECORD_SETUP => {
                 // SETUP [MS-XLS 2.4.296]
@@ -920,16 +907,16 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 let num_ftr = f64::from_le_bytes(data[24..32].try_into().unwrap());
 
                 // grbit flags:
-                // - fPortrait (bit1): 0=landscape, 1=portrait
+                // - fLandscape (bit1): 1=landscape, 0=portrait
                 // - fNoPls (bit2): if set, printer-related fields are undefined and must be ignored
-                // - fNoOrient (bit6): if set, fPortrait must be ignored and orientation defaults to portrait
-                const GRBIT_F_PORTRAIT: u16 = 0x0002;
+                // - fNoOrient (bit6): if set, fLandscape must be ignored and orientation defaults to portrait
+                const GRBIT_F_LANDSCAPE: u16 = 0x0002;
                 const GRBIT_F_NOPLS: u16 = 0x0004;
                 const GRBIT_F_NOORIENT: u16 = 0x0040;
 
                 let f_no_pls = (grbit & GRBIT_F_NOPLS) != 0;
                 let f_no_orient = (grbit & GRBIT_F_NOORIENT) != 0;
-                let f_portrait = (grbit & GRBIT_F_PORTRAIT) != 0;
+                let f_landscape = (grbit & GRBIT_F_LANDSCAPE) != 0;
 
                 if !f_no_pls {
                     setup_fit_width = Some(i_fit_width);
@@ -953,10 +940,10 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
                     page_setup.orientation = if f_no_orient {
                         Orientation::Portrait
-                    } else if f_portrait {
-                        Orientation::Portrait
-                    } else {
+                    } else if f_landscape {
                         Orientation::Landscape
+                    } else {
+                        Orientation::Portrait
                     };
                 }
 
@@ -3625,7 +3612,7 @@ mod tests {
                     77,     // iScale (ignored when fit-to-page)
                     2,      // iFitWidth
                     3,      // iFitHeight
-                    0x0000, // fPortrait=0 => landscape
+                    0x0002, // landscape (fLandscape=1)
                     0.5,    // header inches
                     0.6,    // footer inches
                 ),
@@ -3660,7 +3647,7 @@ mod tests {
 
     #[test]
     fn parses_percent_scaling_when_fit_to_page_disabled() {
-        let grbit = 0x0000u16; // fPortrait=0 => landscape
+        let grbit = 0x0002u16; // fLandscape=1
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
             record(

@@ -6502,15 +6502,13 @@ fn build_page_setup_sheet_stream(xf_cell: u16, cfg: PageSetupFixtureSheet) -> Ve
     push_record(
         &mut sheet,
         RECORD_HPAGEBREAKS,
-        // BIFF8 stores the 0-based index of the first row below the break; the model stores the
-        // 0-based row index after which the break occurs (so import subtracts 1).
+        // BIFF8 stores the 0-based index of the first row *after* the break.
         &hpagebreaks_record(&[cfg.row_break_after.saturating_add(1)]),
     );
     push_record(
         &mut sheet,
         RECORD_VPAGEBREAKS,
-        // BIFF8 stores the 0-based index of the first column to the right of the break; import
-        // subtracts 1 to produce the model's "breaks after" indices.
+        // BIFF8 stores the 0-based index of the first column *after* the break.
         &vpagebreaks_record(&[cfg.col_break_after.saturating_add(1)]),
     );
 

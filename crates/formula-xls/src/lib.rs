@@ -749,36 +749,44 @@ fn import_xls_path_with_biff_reader(
         // Worksheet print settings (page setup + margins + manual page breaks) are stored in the
         // worksheet BIFF substream. Parse and apply them before borrowing `sheet_mut` so we can
         // call `Workbook::set_*` helpers without running into borrow conflicts.
-        if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx) {
-            if let Some(sheet_info) = biff_sheets.as_ref().and_then(|v| v.get(biff_idx)) {
-                if sheet_info.offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
-                        biff_idx, sheet_name, sheet_info.offset
-                    )));
-                } else {
-                    match biff::parse_biff_sheet_print_settings(workbook_stream, sheet_info.offset) {
-                        Ok(mut parsed) => {
-                            warnings.extend(parsed.warnings.drain(..).map(|warning| {
-                                ImportWarning::new(format!(
-                                    "failed to fully import `.xls` print settings for BIFF sheet index {} (`{}`): {warning}",
-                                    biff_idx, sheet_name
-                                ))
-                            }));
+        //
+        // Only implemented for BIFF8 currently; BIFF5 SETUP layout differs.
+        if biff_version == Some(biff::BiffVersion::Biff8) {
+            if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx)
+            {
+                if let Some(sheet_info) = biff_sheets.as_ref().and_then(|v| v.get(biff_idx)) {
+                    if sheet_info.offset >= workbook_stream.len() {
+                        warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                            biff_idx, sheet_name, sheet_info.offset
+                        )));
+                    } else {
+                        match biff::parse_biff_sheet_print_settings(
+                            workbook_stream,
+                            sheet_info.offset,
+                        ) {
+                            Ok(mut parsed) => {
+                                warnings.extend(parsed.warnings.drain(..).map(|warning| {
+                                    ImportWarning::new(format!(
+                                        "failed to fully import `.xls` print settings for BIFF sheet index {} (`{}`): {warning}",
+                                        biff_idx, sheet_name
+                                    ))
+                                }));
 
-                            // Even if the sheet has default page setup and no breaks, updating is
-                            // harmless and ensures later print settings (print area/titles) share a
-                            // single `SheetPrintSettings` entry when needed.
-                            out.set_sheet_page_setup(
-                                sheet_id,
-                                parsed.page_setup.unwrap_or_default(),
-                            );
-                            out.set_manual_page_breaks(sheet_id, parsed.manual_page_breaks);
+                                // Even if the sheet has default page setup and no breaks, updating
+                                // is harmless and ensures later print settings (print area/titles)
+                                // share a single `SheetPrintSettings` entry when needed.
+                                out.set_sheet_page_setup(
+                                    sheet_id,
+                                    parsed.page_setup.unwrap_or_default(),
+                                );
+                                out.set_manual_page_breaks(sheet_id, parsed.manual_page_breaks);
+                            }
+                            Err(err) => warnings.push(ImportWarning::new(format!(
+                                "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): {err}",
+                                biff_idx, sheet_name
+                            ))),
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` print settings for BIFF sheet index {} (`{}`): {err}",
-                            biff_idx, sheet_name
-                        ))),
                     }
                 }
             }
