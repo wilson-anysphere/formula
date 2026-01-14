@@ -2324,6 +2324,8 @@ jobs:
     if: needs.preflight.outputs.upload != 'true'
     permissions:
       contents: read
+      id-token: write
+      attestations: write
     strategy: *build_strategy
     runs-on: ${{ matrix.platform }}
     steps: *build_steps
