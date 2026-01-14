@@ -8788,6 +8788,12 @@ function handleRibbonCommand(commandId: string): void {
       case "insert.illustrations.onlinePictures":
         void handleInsertPicturesRibbonCommand(commandId, app);
         return;
+      case "home.cells.format.rowHeight":
+        void promptAndApplyAxisSizing(app, "rowHeight", { isEditing: () => isSpreadsheetEditing() });
+        return;
+      case "home.cells.format.columnWidth":
+        void promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() });
+        return;
       case "home.cells.format":
         // This command is a dropdown with menu items; the top-level command is not expected
         // to fire when the menu is present. Keep this as a fallback.
