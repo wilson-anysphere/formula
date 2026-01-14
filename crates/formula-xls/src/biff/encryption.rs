@@ -896,7 +896,7 @@ fn derive_rc4_block_key(intermediate_key: &[u8; 16], block: u32) -> [u8; 16] {
 ///
 /// This is symmetric: applying it twice with the same key yields the original bytes.
 struct Rc4BiffStream {
-    intermediate_key: [u8; 16],
+    intermediate_key: Zeroizing<[u8; 16]>,
     key_len: usize,
     block: u32,
     pos_in_block: usize,
@@ -904,7 +904,7 @@ struct Rc4BiffStream {
 }
 
 impl Rc4BiffStream {
-    fn new(intermediate_key: [u8; 16], key_len: usize) -> Self {
+    fn new(intermediate_key: Zeroizing<[u8; 16]>, key_len: usize) -> Self {
         let mut block_key = derive_rc4_block_key(&intermediate_key, 0);
         let cipher = Rc4::new(&block_key[..key_len]);
         block_key.zeroize();
@@ -942,7 +942,6 @@ impl Rc4BiffStream {
 
 impl Drop for Rc4BiffStream {
     fn drop(&mut self) {
-        self.intermediate_key.zeroize();
         // Ensure the expanded key schedule doesn't linger beyond the decryptor's lifetime.
         self.cipher.zeroize();
         self.block = 0;
@@ -950,7 +949,10 @@ impl Drop for Rc4BiffStream {
     }
 }
 
-fn verify_rc4_password(filepass: &FilePassRc4, password: &str) -> Result<[u8; 16], DecryptError> {
+fn verify_rc4_password(
+    filepass: &FilePassRc4,
+    password: &str,
+) -> Result<Zeroizing<[u8; 16]>, DecryptError> {
     let intermediate_key = Zeroizing::new(derive_rc4_intermediate_key(password, &filepass.salt));
     let mut block_key = derive_rc4_block_key(&*intermediate_key, 0);
     let mut rc4 = Rc4::new(&block_key[..filepass.key_len]);
@@ -974,7 +976,7 @@ fn verify_rc4_password(filepass: &FilePassRc4, password: &str) -> Result<[u8; 16
         return Err(DecryptError::WrongPassword);
     }
 
-    Ok(*intermediate_key)
+    Ok(intermediate_key)
 }
 
 fn decrypt_biff8_rc4_standard(
