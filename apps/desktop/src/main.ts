@@ -2178,6 +2178,11 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
 
   // Pure view-only commands should remain enabled in read-only mode.
   delete out["view.toggleShowFormulas"];
+  delete out["view.window.freezePanes"];
+  delete out["view.freezePanes"];
+  delete out["view.freezeTopRow"];
+  delete out["view.freezeFirstColumn"];
+  delete out["view.unfreezePanes"];
   delete out["audit.togglePrecedents"];
   delete out["audit.toggleDependents"];
   delete out["audit.toggleTransitive"];
