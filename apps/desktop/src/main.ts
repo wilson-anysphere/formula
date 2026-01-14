@@ -7969,22 +7969,24 @@ registerDesktopCommands({
     openOrganizeSheets,
   },
   autoFilterHandlers: {
-    toggle: () => {
-      // Excel-style: "Filter" is a toggle. For this MVP we treat it as:
-      // - if any filter is active on the sheet, clear it
-      // - otherwise, prompt for values and apply a simple row-hiding filter
-      if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
-        clearRibbonAutoFiltersForActiveSheet();
-        return;
-      }
-      void applyRibbonAutoFilterFromSelection().catch((err) => {
-        console.error("Failed to apply filter:", err);
-        showToast(`Failed to apply filter: ${String(err)}`, "error");
+    toggle: async (pressed?: boolean) => {
+      try {
+        const nextEnabled =
+          typeof pressed === "boolean" ? pressed : !ribbonAutoFilterStore.hasAny(app.getCurrentSheetId());
+        if (nextEnabled) {
+          await applyRibbonAutoFilterFromSelection();
+        } else {
+          clearRibbonAutoFiltersForActiveSheet();
+        }
+      } catch (err) {
+        console.error("Failed to toggle filter:", err);
+        showToast(`Failed to toggle filter: ${String(err)}`, "error");
         scheduleRibbonSelectionFormatStateUpdate();
+      } finally {
         app.focus();
-      });
+      }
     },
-    clear: () => clearRibbonAutoFiltersForActiveSheet(),
+    clear: () => clearRibbonAutoFilterCriteriaForActiveSheet(),
     reapply: () => reapplyRibbonAutoFiltersForActiveSheet(),
   },
   ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
@@ -9430,21 +9432,6 @@ const ribbonActions = createRibbonActionsFromCommands({
     "view.toggleSplitView": async (pressed) => {
       try {
         await commandRegistry.executeCommand("view.toggleSplitView", pressed);
-      } finally {
-        app.focus();
-      }
-    },
-    "data.sortFilter.filter": async (pressed) => {
-      try {
-        if (pressed) {
-          await applyRibbonAutoFilterFromSelection();
-        } else {
-          clearRibbonAutoFiltersForActiveSheet();
-        }
-      } catch (err) {
-        console.error("Failed to toggle filter:", err);
-        showToast(`Failed to toggle filter: ${String(err)}`, "error");
-        scheduleRibbonSelectionFormatStateUpdate();
       } finally {
         app.focus();
       }

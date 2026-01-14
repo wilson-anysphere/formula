@@ -78,9 +78,9 @@ export type RibbonAutoFilterCommandHandlers = {
    *
    * The desktop shell owns the MVP AutoFilter store + dialog UI, so this is passed in from `main.ts`.
    */
-  toggle: () => void | Promise<void>;
+  toggle: (pressed?: boolean) => void | Promise<void>;
   /**
-   * Clear any active ribbon AutoFilters on the active sheet.
+   * Clear the active ribbon AutoFilter criteria on the active sheet (while keeping filter ranges active).
    */
   clear: () => void | Promise<void>;
   /**
@@ -1015,12 +1015,12 @@ export function registerDesktopCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "data.sortFilter.filter",
     "Filter",
-    async () => {
+    async (pressed?: boolean) => {
       // Ribbon AutoFilter MVP is view-local; allow it in read-only collab roles as well.
       if (isEditingFn()) return;
       const handlers = getAutoFilterHandlers();
       if (!handlers) return;
-      await handlers.toggle();
+      await handlers.toggle(pressed);
     },
     {
       category: commandCategoryData,
@@ -1041,7 +1041,7 @@ export function registerDesktopCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Clear the current AutoFilter",
+      description: "Clear the current AutoFilter criteria",
       keywords: ["clear", "filter", "auto filter", "autofilter"],
     },
   );
@@ -1073,7 +1073,7 @@ export function registerDesktopCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Clear the current AutoFilter",
+      description: "Clear the current AutoFilter criteria",
       keywords: ["clear filter", "filter", "auto filter", "autofilter"],
     },
   );
