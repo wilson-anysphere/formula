@@ -2143,7 +2143,6 @@ mod engine_filter_field_tests {
     use super::*;
     use std::collections::HashSet;
     use formula_engine::pivot::PivotFieldRef;
-
     use std::io::{Cursor, Write};
 
     use zip::write::FileOptions;

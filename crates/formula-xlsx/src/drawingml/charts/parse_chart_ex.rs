@@ -269,14 +269,11 @@ fn detect_chart_kind(doc: &Document<'_>, diagnostics: &mut Vec<ChartDiagnostic>)
     } else {
         hints.join(", ")
     };
-    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
     // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
     // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!(
-            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
-        ),
+        message: format!("ChartEx chart kind could not be inferred; hints: {hint_list}"),
     });
 
     "unknown".to_string()
