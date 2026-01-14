@@ -229,7 +229,7 @@ fn parse_legend(
 }
 fn detect_chart_kind(
     doc: &Document<'_>,
-    _root_ns: &str,
+    root_ns: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> String {
     let root_ns = doc
@@ -282,7 +282,9 @@ fn detect_chart_kind(
     // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!("ChartEx chart kind could not be inferred; hints: {hint_list}"),
+        message: format!(
+            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
+        ),
     });
 
     "unknown".to_string()
@@ -315,6 +317,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             if seen.insert(hint.clone()) {
                 out.push(hint);
                 if out.len() >= MAX_HINTS {
+                    out.sort();
                     return out;
                 }
             }
@@ -329,11 +332,13 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             if seen.insert(hint.clone()) {
                 out.push(hint);
                 if out.len() >= MAX_HINTS {
+                    out.sort();
                     return out;
                 }
             }
         }
     }
+    out.sort();
     out
 }
 
