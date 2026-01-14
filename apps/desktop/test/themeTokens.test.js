@@ -214,6 +214,22 @@ test("core design tokens are only defined in tokens.css", () => {
         !prop.startsWith("--error") &&
         !prop.startsWith("--warning") &&
         !prop.startsWith("--success") &&
+        !prop.startsWith("--titlebar-") &&
+        !prop.startsWith("--sheet-tab-") &&
+        !prop.startsWith("--chart-") &&
+        !prop.startsWith("--tooltip-") &&
+        !prop.startsWith("--cmdk-") &&
+        !prop.startsWith("--shadow-") &&
+        !prop.startsWith("--formula-") &&
+        !prop.startsWith("--grid-header-") &&
+        prop !== "--grid-line" &&
+        prop !== "--panel-bg" &&
+        prop !== "--panel-border" &&
+        prop !== "--panel-shadow" &&
+        prop !== "--dialog-bg" &&
+        prop !== "--dialog-border" &&
+        prop !== "--dialog-shadow" &&
+        prop !== "--dialog-backdrop" &&
         prop !== "--link" &&
         prop !== "--font-sans" &&
         prop !== "--font-mono"

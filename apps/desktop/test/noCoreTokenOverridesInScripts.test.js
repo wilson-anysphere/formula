@@ -50,7 +50,7 @@ test("desktop UI scripts should not override core design tokens", () => {
   // Only match direct `.style.setProperty("--token", ...)` / `.style.removeProperty("--token")`
   // calls so we don't trigger on other string usages like `getPropertyValue("--space-4")`.
   const tokenOp =
-    /\.style\.(?<op>setProperty|removeProperty)\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*\2/gi;
+    /\.style\.(?<op>setProperty|removeProperty)\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*\2/gi;
 
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
