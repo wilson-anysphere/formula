@@ -728,6 +728,14 @@ mod tests {
         );
         assert_eq!(
             PivotFieldRef::DataModelColumn {
+                table: "var".to_string(),
+                column: "X".to_string()
+            }
+            .to_string(),
+            "'var'[X]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
                 table: "T".to_string(),
                 column: "Col]Name".to_string()
             }
