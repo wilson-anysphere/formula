@@ -1185,13 +1185,21 @@ export class DocumentControllerWorkbookAdapter {
     // Prefer the UI resolver when available (handles renames).
     if (this.sheetNameResolver) {
       const resolved = this.sheetNameResolver.getSheetIdByName(raw);
-      if (resolved) return resolved;
+      if (resolved) {
+        // Avoid resurrecting deleted sheets (or creating phantom sheets) when the resolver is stale.
+        // Only accept ids that are known to the underlying DocumentController.
+        const meta = this.documentController.getSheetMeta?.(resolved) ?? null;
+        if (meta) return resolved;
+      }
 
       // If the caller provided a sheet id, translate id->name->id to canonicalize.
       const resolvedName = this.sheetNameResolver.getSheetNameById(raw);
       if (resolvedName) {
         const roundTrip = this.sheetNameResolver.getSheetIdByName(resolvedName);
-        if (roundTrip) return roundTrip;
+        if (roundTrip) {
+          const meta = this.documentController.getSheetMeta?.(roundTrip) ?? null;
+          if (meta) return roundTrip;
+        }
       }
     }
 
@@ -1290,6 +1298,7 @@ class DocumentControllerRangeAdapter {
   }
 
   getValues() {
+    this.#assertSheetExists();
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
     assertScriptRangeWithinLimit(rows, cols, this.address, "getValues");
@@ -1309,6 +1318,7 @@ class DocumentControllerRangeAdapter {
   }
 
   getFormulas() {
+    this.#assertSheetExists();
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
     assertScriptRangeWithinLimit(rows, cols, this.address, "getFormulas");
@@ -1328,6 +1338,7 @@ class DocumentControllerRangeAdapter {
   }
 
   setValues(values) {
+    this.#assertSheetExists();
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
     assertScriptRangeWithinLimit(rows, cols, this.address, "setValues");
@@ -1346,6 +1357,7 @@ class DocumentControllerRangeAdapter {
   }
 
   setFormulas(formulas) {
+    this.#assertSheetExists();
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
     assertScriptRangeWithinLimit(rows, cols, this.address, "setFormulas");
@@ -1379,6 +1391,7 @@ class DocumentControllerRangeAdapter {
   }
 
   setValue(value) {
+    this.#assertSheetExists();
     const range = this.coords;
     if (range.startRow !== range.endRow || range.startCol !== range.endCol) {
       throw new Error(`setValue is only valid for a single cell, got range ${this.address}`);
@@ -1409,6 +1422,7 @@ class DocumentControllerRangeAdapter {
   }
 
   getFormat() {
+    this.#assertSheetExists();
     const doc = this.sheet.workbook.documentController;
     const coord = { row: this.coords.startRow, col: this.coords.startCol };
 
@@ -1432,6 +1446,7 @@ class DocumentControllerRangeAdapter {
   }
 
   getFormats() {
+    this.#assertSheetExists();
     const doc = this.sheet.workbook.documentController;
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
@@ -1468,6 +1483,7 @@ class DocumentControllerRangeAdapter {
   }
 
   setFormat(format) {
+    this.#assertSheetExists();
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
     // Most script formatting calls are small; check every cell so a partially protected range fails
@@ -1490,6 +1506,7 @@ class DocumentControllerRangeAdapter {
   }
 
   setFormats(formats) {
+    this.#assertSheetExists();
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
     assertScriptRangeWithinLimit(rows, cols, this.address, "setFormats");
@@ -1528,12 +1545,28 @@ class DocumentControllerRangeAdapter {
     this.sheet.workbook._notifyMutate();
   }
 
+  #assertSheetExists() {
+    const doc = this.sheet.workbook.documentController;
+    const sheetId = this.sheet.sheetId;
+    const sheets = doc?.model?.sheets;
+    // DocumentController materializes sheets lazily; treat the default Sheet1 as existing
+    // even when the controller hasn't created any sheets yet.
+    if (sheets instanceof Map) {
+      if (sheets.size === 0 && String(sheetId).toLowerCase() === "sheet1") return;
+      if (sheets.has(sheetId)) return;
+    }
+    const meta = doc?.sheetMeta;
+    if (meta instanceof Map && meta.has(sheetId)) return;
+    throw new Error(`Unknown sheet: ${this.sheet.name}`);
+  }
+
   /**
    * @param {number} row
    * @param {number} col
    * @param {{ action: string, kind: "cell" | "format" }} params
    */
   #assertCanEditCell(row, col, params) {
+    this.#assertSheetExists();
     const doc = this.sheet.workbook.documentController;
     if (typeof doc?.canEditCell !== "function") return;
     if (doc.canEditCell({ sheetId: this.sheet.sheetId, row, col })) return;

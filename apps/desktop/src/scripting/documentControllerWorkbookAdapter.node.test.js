@@ -146,3 +146,28 @@ test("DocumentControllerWorkbookAdapter throws instead of silently no-oping when
 
   workbook.dispose();
 });
+
+test("DocumentControllerWorkbookAdapter does not resurrect deleted sheets when holding stale sheet handles", () => {
+  const controller = new DocumentController();
+  controller.setCellValue("Sheet1", "A1", 1);
+  controller.setCellValue("sheet-1", "A1", 2);
+
+  const sheetNameResolver = {
+    getSheetNameById: (id) => (String(id) === "sheet-1" ? "Budget" : null),
+    getSheetIdByName: (name) => (String(name).trim().toLowerCase() === "budget" ? "sheet-1" : null),
+  };
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { sheetNameResolver, activeSheetName: "Sheet1" });
+  const budget = workbook.getSheet("Budget");
+
+  controller.deleteSheet("sheet-1");
+  assert.deepEqual(controller.getSheetIds(), ["Sheet1"]);
+
+  assert.throws(() => budget.getRange("A1").getValues(), /Unknown sheet/i);
+  assert.deepEqual(controller.getSheetIds(), ["Sheet1"]);
+
+  assert.throws(() => budget.getRange("A1").setValue(123), /Unknown sheet/i);
+  assert.deepEqual(controller.getSheetIds(), ["Sheet1"]);
+
+  workbook.dispose();
+});
