@@ -2029,7 +2029,10 @@ use crate::file_io::read_workbook;
 #[cfg(any(feature = "desktop", test))]
 use crate::ipc_limits::MAX_IPC_PATH_BYTES;
 #[cfg(feature = "desktop")]
-use crate::ipc_limits::MAX_IPC_URL_BYTES;
+use crate::ipc_limits::{
+    MAX_IPC_COLLAB_ENCRYPTION_KEY_BASE64_BYTES, MAX_IPC_COLLAB_TOKEN_BYTES,
+    MAX_IPC_SECURE_STORE_KEY_BYTES, MAX_IPC_URL_BYTES,
+};
 #[cfg(feature = "desktop")]
 use crate::ipc_origin;
 #[cfg(feature = "desktop")]
@@ -3097,7 +3100,7 @@ pub async fn power_query_cache_key_get_or_create(
 #[tauri::command]
 pub async fn collab_token_get(
     window: tauri::WebviewWindow,
-    token_key: String,
+    token_key: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
 ) -> Result<Option<CollabTokenEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3108,12 +3111,32 @@ pub async fn collab_token_get(
     ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
+    let token_key = token_key.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
         store.get(&token_key).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollabTokenEntryIpc {
+    pub token: LimitedString<MAX_IPC_COLLAB_TOKEN_BYTES>,
+    #[serde(default)]
+    pub expires_at_ms: Option<i64>,
+}
+
+#[cfg(feature = "desktop")]
+impl From<CollabTokenEntryIpc> for CollabTokenEntry {
+    fn from(value: CollabTokenEntryIpc) -> Self {
+        CollabTokenEntry {
+            token: value.token.into_inner(),
+            expires_at_ms: value.expires_at_ms,
+        }
+    }
 }
 
 /// Collaboration: persist a sync token entry for a key.
@@ -3123,8 +3146,8 @@ pub async fn collab_token_get(
 #[tauri::command]
 pub async fn collab_token_set(
     window: tauri::WebviewWindow,
-    token_key: String,
-    entry: CollabTokenEntry,
+    token_key: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
+    entry: CollabTokenEntryIpc,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3135,6 +3158,8 @@ pub async fn collab_token_set(
     ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
+    let token_key = token_key.into_inner();
+    let entry: CollabTokenEntry = entry.into();
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
         store.set(&token_key, entry).map_err(|e| e.to_string())
@@ -3148,7 +3173,7 @@ pub async fn collab_token_set(
 #[tauri::command]
 pub async fn collab_token_delete(
     window: tauri::WebviewWindow,
-    token_key: String,
+    token_key: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3159,6 +3184,7 @@ pub async fn collab_token_delete(
     ipc_origin::ensure_trusted_origin(&url, "collaboration tokens", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collaboration tokens", ipc_origin::Verb::Are)?;
 
+    let token_key = token_key.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabTokenStore::open_default().map_err(|e| e.to_string())?;
         store.delete(&token_key).map_err(|e| e.to_string())
@@ -3172,7 +3198,7 @@ pub async fn collab_token_delete(
 #[tauri::command]
 pub async fn power_query_credential_get(
     window: tauri::WebviewWindow,
-    scope_key: String,
+    scope_key: LimitedString<{ crate::power_query_validation::MAX_CREDENTIAL_SCOPE_KEY_LEN }>,
 ) -> Result<Option<PowerQueryCredentialEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3183,6 +3209,7 @@ pub async fn power_query_credential_get(
     ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
+    let scope_key = scope_key.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.get(&scope_key).map_err(|e| e.to_string())
@@ -3196,7 +3223,7 @@ pub async fn power_query_credential_get(
 #[tauri::command]
 pub async fn power_query_credential_set(
     window: tauri::WebviewWindow,
-    scope_key: String,
+    scope_key: LimitedString<{ crate::power_query_validation::MAX_CREDENTIAL_SCOPE_KEY_LEN }>,
     secret: JsonValue,
 ) -> Result<PowerQueryCredentialEntry, String> {
     let url = window.url().map_err(|err| err.to_string())?;
@@ -3208,6 +3235,7 @@ pub async fn power_query_credential_set(
     ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
+    let scope_key = scope_key.into_inner();
     crate::power_query_validation::validate_power_query_credential_payload(&scope_key, &secret)
         .map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -3223,7 +3251,7 @@ pub async fn power_query_credential_set(
 #[tauri::command]
 pub async fn power_query_credential_delete(
     window: tauri::WebviewWindow,
-    scope_key: String,
+    scope_key: LimitedString<{ crate::power_query_validation::MAX_CREDENTIAL_SCOPE_KEY_LEN }>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3234,6 +3262,7 @@ pub async fn power_query_credential_delete(
     ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "power query credentials", ipc_origin::Verb::Are)?;
 
+    let scope_key = scope_key.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.delete(&scope_key).map_err(|e| e.to_string())
@@ -3270,8 +3299,8 @@ pub async fn power_query_credential_list(
 #[tauri::command]
 pub async fn collab_encryption_key_get(
     window: tauri::WebviewWindow,
-    doc_id: String,
-    key_id: String,
+    doc_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
+    key_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
 ) -> Result<Option<CollabEncryptionKeyEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3282,6 +3311,8 @@ pub async fn collab_encryption_key_get(
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
+    let doc_id = doc_id.into_inner();
+    let key_id = key_id.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
         store.get(&doc_id, &key_id).map_err(|e| e.to_string())
@@ -3295,9 +3326,9 @@ pub async fn collab_encryption_key_get(
 #[tauri::command]
 pub async fn collab_encryption_key_set(
     window: tauri::WebviewWindow,
-    doc_id: String,
-    key_id: String,
-    key_bytes_base64: String,
+    doc_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
+    key_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
+    key_bytes_base64: LimitedString<MAX_IPC_COLLAB_ENCRYPTION_KEY_BASE64_BYTES>,
 ) -> Result<CollabEncryptionKeyListEntry, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3308,6 +3339,9 @@ pub async fn collab_encryption_key_set(
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
+    let doc_id = doc_id.into_inner();
+    let key_id = key_id.into_inner();
+    let key_bytes_base64 = key_bytes_base64.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
         store
@@ -3323,8 +3357,8 @@ pub async fn collab_encryption_key_set(
 #[tauri::command]
 pub async fn collab_encryption_key_delete(
     window: tauri::WebviewWindow,
-    doc_id: String,
-    key_id: String,
+    doc_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
+    key_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3335,6 +3369,8 @@ pub async fn collab_encryption_key_delete(
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
+    let doc_id = doc_id.into_inner();
+    let key_id = key_id.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
         store.delete(&doc_id, &key_id).map_err(|e| e.to_string())
@@ -3348,7 +3384,7 @@ pub async fn collab_encryption_key_delete(
 #[tauri::command]
 pub async fn collab_encryption_key_list(
     window: tauri::WebviewWindow,
-    doc_id: String,
+    doc_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
 ) -> Result<Vec<CollabEncryptionKeyListEntry>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3359,6 +3395,7 @@ pub async fn collab_encryption_key_list(
     ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
     ipc_origin::ensure_stable_origin(&window, "collab encryption keys", ipc_origin::Verb::Are)?;
 
+    let doc_id = doc_id.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
         store.list(&doc_id).map_err(|e| e.to_string())
@@ -3372,7 +3409,7 @@ pub async fn collab_encryption_key_list(
 #[tauri::command]
 pub async fn power_query_refresh_state_get(
     window: tauri::WebviewWindow,
-    workbook_id: String,
+    workbook_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
 ) -> Result<Option<JsonValue>, String> {
     let url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_main_window(
@@ -3383,6 +3420,7 @@ pub async fn power_query_refresh_state_get(
     ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "power query refresh state", ipc_origin::Verb::Is)?;
 
+    let workbook_id = workbook_id.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
         store.load(&workbook_id).map_err(|e| e.to_string())
@@ -3396,7 +3434,7 @@ pub async fn power_query_refresh_state_get(
 #[tauri::command]
 pub async fn power_query_refresh_state_set(
     window: tauri::WebviewWindow,
-    workbook_id: String,
+    workbook_id: LimitedString<MAX_IPC_SECURE_STORE_KEY_BYTES>,
     state: JsonValue,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
@@ -3410,6 +3448,7 @@ pub async fn power_query_refresh_state_set(
 
     crate::power_query_validation::validate_power_query_refresh_state_payload(&state)
         .map_err(|e| e.to_string())?;
+    let workbook_id = workbook_id.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
         store.save(&workbook_id, state).map_err(|e| e.to_string())

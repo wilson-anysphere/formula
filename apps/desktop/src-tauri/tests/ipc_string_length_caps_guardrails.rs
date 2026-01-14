@@ -37,6 +37,21 @@ limits={limit_tokens:?}\n--- snippet ---\n{}",
     );
 }
 
+fn assert_marker_has_ipc_string_cap(src: &str, marker: &str, limit_tokens: &[&str]) {
+    let start = src
+        .find(marker)
+        .unwrap_or_else(|| panic!("expected marker {marker:?} to exist"));
+    let body = &src[start..];
+    let snippet = &body[..body.len().min(2000)];
+
+    let snippet_has_limits = limit_tokens.iter().all(|t| snippet.contains(t));
+    assert!(
+        snippet.contains("LimitedString") && snippet_has_limits,
+        "expected {marker} to reference LimitedString<...> with limits={limit_tokens:?}\n--- snippet ---\n{}",
+        &snippet[..snippet.len().min(400)]
+    );
+}
+
 #[test]
 fn privileged_ipc_commands_have_string_length_caps() {
     let commands_src = include_str!("../src/commands.rs");
@@ -90,6 +105,74 @@ fn privileged_ipc_commands_have_string_length_caps() {
         commands_src,
         "pub fn power_query_state_set",
         &["MAX_POWER_QUERY_XML_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn collab_token_get",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn collab_token_set",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn collab_token_delete",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_marker_has_ipc_string_cap(
+        commands_src,
+        "pub struct CollabTokenEntryIpc",
+        &["MAX_IPC_COLLAB_TOKEN_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn power_query_credential_get",
+        &["MAX_CREDENTIAL_SCOPE_KEY_LEN"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn power_query_credential_set",
+        &["MAX_CREDENTIAL_SCOPE_KEY_LEN"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn power_query_credential_delete",
+        &["MAX_CREDENTIAL_SCOPE_KEY_LEN"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn power_query_refresh_state_get",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn power_query_refresh_state_set",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn collab_encryption_key_get",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn collab_encryption_key_set",
+        &[
+            "MAX_IPC_SECURE_STORE_KEY_BYTES",
+            "MAX_IPC_COLLAB_ENCRYPTION_KEY_BASE64_BYTES",
+        ],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn collab_encryption_key_delete",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn collab_encryption_key_list",
+        &["MAX_IPC_SECURE_STORE_KEY_BYTES"],
     );
 
     let main_src = include_str!("../src/main.rs");

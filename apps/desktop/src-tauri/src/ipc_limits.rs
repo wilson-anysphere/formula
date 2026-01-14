@@ -63,6 +63,27 @@ pub const MAX_SHEET_ID_BYTES: usize = 128;
 /// vectors when deserializing untrusted IPC inputs.
 pub const MAX_PRINT_AREA_RANGES: usize = 1_000;
 
+/// Maximum size (in bytes) of keys used to index OS-keychain-backed encrypted stores over IPC.
+///
+/// These keys are used as document IDs inside encrypted JSON blobs (tokens, encryption keys,
+/// refresh state, etc). They should be short (typically an identifier or URL-ish string), but a
+/// compromised WebView could otherwise send arbitrarily large values and force large allocations or
+/// create pathological on-disk store entries.
+pub const MAX_IPC_SECURE_STORE_KEY_BYTES: usize = 1_024; // 1 KiB
+
+/// Maximum size (in bytes) of collaboration token strings accepted over IPC.
+///
+/// Tokens are secrets and should be relatively small (e.g. JWTs). This cap prevents a compromised
+/// WebView from persisting multi-megabyte "tokens" into the encrypted store (memory + disk DoS).
+pub const MAX_IPC_COLLAB_TOKEN_BYTES: usize = 64 * 1024; // 64 KiB
+
+/// Maximum size (in bytes) of a base64-encoded collaboration cell encryption key accepted over IPC.
+///
+/// Cell encryption keys are fixed-size (32 bytes) so the expected base64 string is tiny (~44 bytes).
+/// This cap is intentionally generous while preventing untrusted IPC inputs from forcing large
+/// allocations during base64 decode.
+pub const MAX_IPC_COLLAB_ENCRYPTION_KEY_BASE64_BYTES: usize = 256;
+
 /// Maximum size (in bytes) of system notification titles accepted over IPC.
 ///
 /// Rationale: notification titles are short UI strings; anything larger is likely unintended or
