@@ -631,7 +631,7 @@ Verification (signed artifacts):
   signtool verify /pa /all /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\nsis\*.exe
   signtool verify /pa /all /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\msi\*.msi
   ```
-  - Release CI runs `pwsh scripts/validate-windows-bundles.ps1` on the produced installers when
+  - Release CI runs `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-windows-bundles.ps1` on the produced installers when
     `WINDOWS_CERTIFICATE` is configured. This validates that the expected installers were produced
     and that they are Authenticode-signed and timestamped.
 
