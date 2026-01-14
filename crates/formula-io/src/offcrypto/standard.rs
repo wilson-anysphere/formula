@@ -511,14 +511,14 @@ fn digest_len(alg_id_hash: u32) -> Result<usize, OffcryptoError> {
 ///
 /// Use this for password verifier digests to avoid timing side channels.
 pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
     let mut diff = 0u8;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
+    let max_len = a.len().max(b.len());
+    for idx in 0..max_len {
+        let av = a.get(idx).copied().unwrap_or(0);
+        let bv = b.get(idx).copied().unwrap_or(0);
+        diff |= av ^ bv;
     }
-    diff == 0
+    diff == 0 && a.len() == b.len()
 }
 
 /// Verify a password against the Standard (CryptoAPI) `EncryptionVerifier` structure.
