@@ -28,9 +28,7 @@ fn cell_prefix_respects_explicit_alignment_null_clear() {
             ..StylePatch::default()
         },
     );
-    engine
-        .set_cell_patch_style_id("Sheet1", "A1", 2)
-        .unwrap();
+    engine.set_cell_patch_style_id("Sheet1", "A1", 2).unwrap();
 
     engine
         .set_cell_formula("Sheet1", "B1", r#"=CELL("prefix",A1)"#)
@@ -65,9 +63,7 @@ fn effective_number_format_respects_explicit_null_clear() {
             ..StylePatch::default()
         },
     );
-    engine
-        .set_cell_patch_style_id("Sheet1", "A1", 2)
-        .unwrap();
+    engine.set_cell_patch_style_id("Sheet1", "A1", 2).unwrap();
 
     let style = engine.effective_cell_style("Sheet1", "A1").unwrap();
     assert!(style.number_format.is_none());
@@ -99,9 +95,7 @@ fn cell_protect_respects_layered_locked_overrides() {
             ..StylePatch::default()
         },
     );
-    engine
-        .set_cell_patch_style_id("Sheet1", "A1", 2)
-        .unwrap();
+    engine.set_cell_patch_style_id("Sheet1", "A1", 2).unwrap();
 
     engine
         .set_cell_formula("Sheet1", "B1", r#"=CELL("protect",A1)"#)
