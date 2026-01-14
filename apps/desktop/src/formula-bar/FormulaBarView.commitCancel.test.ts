@@ -46,6 +46,10 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(4, 4);
     view.textarea.dispatchEvent(new Event("input"));
 
+    // JSDOM may log uncaught errors to the virtual console even if we prevent the window error event.
+    // Silence console noise for this resilience regression test.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
     // In browsers, exceptions thrown inside event listeners are reported as window "error"
     // events rather than being rethrown from `dispatchEvent`. Capture + suppress it so Vitest
     // doesn't treat it as an unhandled exception, while still asserting the view updated its
@@ -56,6 +60,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     window.addEventListener("error", onWindowError);
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
     window.removeEventListener("error", onWindowError);
+    consoleError.mockRestore();
 
     expect(onWindowError).toHaveBeenCalledTimes(1);
     const err = onWindowError.mock.calls[0]?.[0]?.error;
