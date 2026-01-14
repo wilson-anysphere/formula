@@ -2476,7 +2476,7 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
             (sheets, ctx, props, defined_names, Some(workbook_bin))
         } else {
             let max = max_xlsb_zip_part_bytes();
-            let mut wb = zip.by_name(&workbook_part)?;
+            let wb = zip.by_name(&workbook_part)?;
             let size = wb.size();
             if size > max {
                 return Err(ParseError::PartTooLarge {
@@ -2485,8 +2485,16 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
                     max,
                 });
             }
-            let (sheets, ctx, props, defined_names) =
-                parse_workbook(&mut wb, &workbook_rels, options.decode_formulas)?;
+            let mut limited = wb.take(max.saturating_add(1));
+            let parsed = parse_workbook(&mut limited, &workbook_rels, options.decode_formulas);
+            if limited.limit() == 0 {
+                return Err(ParseError::PartTooLarge {
+                    part: workbook_part.clone(),
+                    size: max.saturating_add(1),
+                    max,
+                });
+            }
+            let (sheets, ctx, props, defined_names) = parsed?;
             (sheets, ctx, props, defined_names, None)
         };
     let mut workbook_context = workbook_context;
@@ -2532,7 +2540,7 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
                 // Like `workbook.bin`, shared strings can be very large. Stream parse when we don't
                 // need raw bytes for round-trip preservation.
                 match zip.by_name(part) {
-                    Ok(mut sst) => {
+                    Ok(sst) => {
                         let max = max_xlsb_zip_part_bytes();
                         let size = sst.size();
                         if size > max {
@@ -2542,7 +2550,16 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
                                 max,
                             });
                         }
-                        let table = parse_shared_strings(&mut sst)?;
+                        let mut limited = sst.take(max.saturating_add(1));
+                        let parsed = parse_shared_strings(&mut limited);
+                        if limited.limit() == 0 {
+                            return Err(ParseError::PartTooLarge {
+                                part: part.to_string(),
+                                size: max.saturating_add(1),
+                                max,
+                            });
+                        }
+                        let table = parsed?;
                         let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
                         (strings, table)
                     }
@@ -2738,6 +2755,78 @@ mod zip_guardrail_tests {
         out
     }
 
+    fn corrupt_zip_entry_uncompressed_size(zip_bytes: &mut [u8], entry_name: &str, new_size: u32) {
+        // ZIP local file header signature `PK\x03\x04`.
+        const LOCAL_SIG: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
+        // ZIP central directory header signature `PK\x01\x02`.
+        const CENTRAL_SIG: [u8; 4] = [0x50, 0x4B, 0x01, 0x02];
+
+        let entry_name = entry_name.as_bytes();
+
+        let mut patched_local = false;
+        for i in 0..zip_bytes.len().saturating_sub(4) {
+            if zip_bytes.get(i..i + 4) != Some(&LOCAL_SIG) {
+                continue;
+            }
+            if i + 30 > zip_bytes.len() {
+                continue;
+            }
+            let name_len =
+                u16::from_le_bytes(zip_bytes[i + 26..i + 28].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(zip_bytes[i + 28..i + 30].try_into().unwrap()) as usize;
+            let name_start = i + 30;
+            let name_end = name_start.saturating_add(name_len);
+            let extra_end = name_end.saturating_add(extra_len);
+            if extra_end > zip_bytes.len() {
+                continue;
+            }
+            if zip_bytes.get(name_start..name_end) != Some(entry_name) {
+                continue;
+            }
+            // Uncompressed size is at offset 22..26 in the local header.
+            zip_bytes[i + 22..i + 26].copy_from_slice(&new_size.to_le_bytes());
+            patched_local = true;
+            break;
+        }
+
+        let mut patched_central = false;
+        for i in 0..zip_bytes.len().saturating_sub(4) {
+            if zip_bytes.get(i..i + 4) != Some(&CENTRAL_SIG) {
+                continue;
+            }
+            if i + 46 > zip_bytes.len() {
+                continue;
+            }
+            let name_len =
+                u16::from_le_bytes(zip_bytes[i + 28..i + 30].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(zip_bytes[i + 30..i + 32].try_into().unwrap()) as usize;
+            let comment_len =
+                u16::from_le_bytes(zip_bytes[i + 32..i + 34].try_into().unwrap()) as usize;
+            let name_start = i + 46;
+            let name_end = name_start.saturating_add(name_len);
+            let extra_end = name_end.saturating_add(extra_len);
+            let comment_end = extra_end.saturating_add(comment_len);
+            if comment_end > zip_bytes.len() {
+                continue;
+            }
+            if zip_bytes.get(name_start..name_end) != Some(entry_name) {
+                continue;
+            }
+            // Uncompressed size is at offset 24..28 in the central directory header.
+            zip_bytes[i + 24..i + 28].copy_from_slice(&new_size.to_le_bytes());
+            patched_central = true;
+            break;
+        }
+
+        assert!(patched_local, "did not find local header for entry: {entry_name:?}");
+        assert!(
+            patched_central,
+            "did not find central directory header for entry: {entry_name:?}"
+        );
+    }
+
     #[test]
     fn rejects_oversized_unknown_zip_part() {
         let _lock = ENV_LOCK.lock().unwrap();
@@ -2761,6 +2850,78 @@ mod zip_guardrail_tests {
         match err {
             ParseError::PartTooLarge { part, size, max } => {
                 assert_eq!(part, "xl/unknown.bin");
+                assert_eq!(size, 11);
+                assert_eq!(max, 10);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_workbook_part_when_zip_metadata_lies() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "10");
+        let _max_preserved = EnvVarGuard::set(ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES, "1024");
+
+        let workbook_bin = [0u8; 11];
+        let mut bytes = build_xlsb_zip_with_workbook_parts(&workbook_bin, &[], &[]);
+
+        // Corrupt the ZIP metadata so `ZipFile::size()` returns a value under the limit, while the
+        // actual uncompressed entry payload is larger.
+        corrupt_zip_entry_uncompressed_size(&mut bytes, DEFAULT_WORKBOOK_PART, 1);
+
+        let options = OpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+
+        let err = XlsbWorkbook::open_from_vec_with_options(bytes, options)
+            .err()
+            .expect("expected oversized part error");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, DEFAULT_WORKBOOK_PART);
+                assert_eq!(size, 11);
+                assert_eq!(max, 10);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_shared_strings_part_when_zip_metadata_lies() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "10");
+        let _max_preserved = EnvVarGuard::set(ENV_MAX_XLSB_PRESERVED_TOTAL_BYTES, "1024");
+
+        let workbook_bin = [];
+        let shared_strings = [0u8; 11];
+        let mut bytes = build_xlsb_zip_with_workbook_parts(
+            &workbook_bin,
+            &[],
+            &[(DEFAULT_SHARED_STRINGS_PART, &shared_strings)],
+        );
+
+        // Corrupt ZIP metadata for `xl/sharedStrings.bin` to bypass the size() precheck.
+        corrupt_zip_entry_uncompressed_size(&mut bytes, DEFAULT_SHARED_STRINGS_PART, 1);
+
+        let options = OpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+
+        let err = XlsbWorkbook::open_from_vec_with_options(bytes, options)
+            .err()
+            .expect("expected oversized part error");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, DEFAULT_SHARED_STRINGS_PART);
                 assert_eq!(size, 11);
                 assert_eq!(max, 10);
             }
