@@ -291,6 +291,48 @@ mod tests {
     }
 
     #[test]
+    fn identifiers_in_config_are_case_insensitive() {
+        let mut model = DataModel::new();
+        let mut fact = Table::new("Fact", vec!["Category", "Amount"]);
+        fact.push_row(vec![Value::from("A"), Value::from(10.0)])
+            .unwrap();
+        fact.push_row(vec![Value::from("B"), Value::from(5.0)])
+            .unwrap();
+        fact.push_row(vec![Value::from("A"), Value::from(2.0)])
+            .unwrap();
+        model.add_table(fact).unwrap();
+
+        // Use lowercased identifiers throughout to ensure config parsing + pivot execution are
+        // case-insensitive, while output headers preserve the model's original casing.
+        let mut value_field = sum_amount_value_field();
+        value_field.source_field = "amount".to_string();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("category")],
+            column_fields: vec![],
+            value_fields: vec![value_field],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals::default(),
+        };
+
+        let grid = pivot_crosstab_from_config(&model, "fact", &cfg).unwrap();
+        assert_eq!(
+            grid,
+            PivotResultGrid {
+                data: vec![
+                    vec![Value::from("Fact[Category]"), Value::from("Sum of Amount")],
+                    vec![Value::from("A"), Value::from(12.0)],
+                    vec![Value::from("B"), Value::from(5.0)],
+                ],
+            }
+        );
+    }
+
+    #[test]
     fn dimension_table_group_by_with_relationship() {
         let mut model = DataModel::new();
         let mut dim = Table::new("Dim", vec!["Id", "Name"]);
