@@ -143,10 +143,17 @@ async function githubGetJson(url, opts) {
  * @param {{ owner: string; repo: string; workflowName: string; token: string }}
  */
 async function resolveCiWorkflow({ owner, repo, workflowName, token }) {
-  const url = `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/actions/workflows?per_page=${DEFAULT_PER_PAGE}`;
-  /** @type {{ workflows?: Array<{ id: number; name: string; path: string }> }} */
-  const data = await githubGetJson(url, { token });
-  const workflows = Array.isArray(data?.workflows) ? data.workflows : [];
+  /** @type {Array<{ id: number; name: string; path: string }>} */
+  const workflows = [];
+
+  for (let page = 1; page <= 20; page++) {
+    const url = `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/actions/workflows?per_page=${DEFAULT_PER_PAGE}&page=${page}`;
+    /** @type {{ workflows?: Array<{ id: number; name: string; path: string }> }} */
+    const data = await githubGetJson(url, { token });
+    const batch = Array.isArray(data?.workflows) ? data.workflows : [];
+    workflows.push(...batch);
+    if (batch.length < DEFAULT_PER_PAGE) break;
+  }
 
   const expected = workflows.filter(
     (w) => w?.name === workflowName && w?.path === EXPECTED_CI_WORKFLOW_PATH,
