@@ -118,6 +118,36 @@ class FakeProvider {
   }
 }
 
+class FakeSessionWithSyncState {
+  doc: Y.Doc;
+  provider: FakeProvider;
+  presence: any = null;
+  private syncState: { connected: boolean; synced: boolean };
+  private readonly statusListeners = new Set<(state: { connected: boolean; synced: boolean }) => void>();
+
+  constructor(opts: { doc: Y.Doc; provider: FakeProvider; connected: boolean; synced?: boolean }) {
+    this.doc = opts.doc;
+    this.provider = opts.provider;
+    this.syncState = { connected: opts.connected, synced: Boolean(opts.synced) };
+  }
+
+  getSyncState() {
+    return this.syncState;
+  }
+
+  onStatusChange(cb: (state: { connected: boolean; synced: boolean }) => void) {
+    this.statusListeners.add(cb);
+    return () => this.statusListeners.delete(cb);
+  }
+
+  setSyncState(next: { connected: boolean; synced: boolean }) {
+    this.syncState = next;
+    for (const cb of Array.from(this.statusListeners)) {
+      cb(next);
+    }
+  }
+}
+
 class FakeNodeWs {
   private readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
 
@@ -461,6 +491,71 @@ describe("sync-server reserved root guard disconnect UX", () => {
         5_000,
       );
     });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("re-enables version history mutations after reconnect when using an injected store", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const ws = new FakeBrowserWebSocket();
+    const provider = new FakeProvider(ws);
+    const session = new FakeSessionWithSyncState({
+      doc: new Y.Doc({ guid: "doc-injected-version-store" }),
+      provider,
+      connected: true,
+      synced: true,
+    }) as any;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const injectedStoreFactory = vi.fn(() => ({}));
+
+    await act(async () => {
+      root.render(<CollabVersionHistoryPanel session={session} createVersionStore={injectedStoreFactory} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".collab-version-history__input") instanceof HTMLInputElement);
+    });
+
+    const inputBefore = container.querySelector(".collab-version-history__input") as HTMLInputElement | null;
+    expect(inputBefore).toBeInstanceOf(HTMLInputElement);
+    expect(inputBefore?.disabled).toBe(false);
+
+    await act(async () => {
+      ws.emitClose(1008, "reserved root mutation");
+      session.setSyncState({ connected: false, synced: false });
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+
+    const inputAfterDisconnect = container.querySelector(".collab-version-history__input") as HTMLInputElement | null;
+    expect(inputAfterDisconnect).toBeInstanceOf(HTMLInputElement);
+    expect(inputAfterDisconnect?.disabled).toBe(true);
+
+    // Simulate a successful reconnect. When using an injected (out-of-doc) store,
+    // the panel should stop treating the sticky reserved-root-guard error as a
+    // permanent lockout and re-enable UI mutations once the provider is connected.
+    await act(async () => {
+      session.setSyncState({ connected: true, synced: true });
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".collab-version-history__input") instanceof HTMLInputElement);
+    });
+
+    const inputAfterReconnect = container.querySelector(".collab-version-history__input") as HTMLInputElement | null;
+    expect(inputAfterReconnect).toBeInstanceOf(HTMLInputElement);
+    expect(inputAfterReconnect?.disabled).toBe(false);
 
     await act(async () => {
       root.unmount();
