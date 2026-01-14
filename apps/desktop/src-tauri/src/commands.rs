@@ -1728,7 +1728,6 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
         deserializer.deserialize_any(PivotFieldRefVisitor)
     }
 }
-
 impl From<IpcPivotFieldRef> for PivotFieldRef {
     fn from(value: IpcPivotFieldRef) -> Self {
         match value {
@@ -1740,7 +1739,9 @@ impl From<IpcPivotFieldRef> for PivotFieldRef {
             IpcPivotFieldRef::Measure { measure } => {
                 PivotFieldRef::DataModelMeasure(measure.into_inner())
             }
-            IpcPivotFieldRef::MeasureName { name } => PivotFieldRef::DataModelMeasure(name.into_inner()),
+            IpcPivotFieldRef::MeasureName { name } => {
+                PivotFieldRef::DataModelMeasure(name.into_inner())
+            }
         }
     }
 }
