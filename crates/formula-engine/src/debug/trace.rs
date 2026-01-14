@@ -715,7 +715,21 @@ fn is_ident_start(ch: char) -> bool {
 }
 
 fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
-    let (start, end) = name.split_once(':')?;
+    // When an external workbook key contains an absolute/relative path, the workbook id can
+    // contain `:` (e.g. a Windows drive letter: `[C:\path\Book.xlsx]Sheet1`).
+    //
+    // Only treat `:` as a 3D sheet-span separator when it appears in the sheet portion after the
+    // closing `]`, not inside the workbook id.
+    let (start, end) = if let Some(rest) = name.strip_prefix('[') {
+        let close_rel = rest.find(']')?;
+        let close = 1 + close_rel;
+        let sheet_part = &name[close + 1..];
+        let colon_rel = sheet_part.find(':')?;
+        let colon = close + 1 + colon_rel;
+        (&name[..colon], &name[colon + 1..])
+    } else {
+        name.split_once(':')?
+    };
     if start.is_empty() || end.is_empty() {
         return None;
     }
@@ -4273,6 +4287,15 @@ mod tests {
                 .expect("expected path-qualified external ref");
         assert_eq!(workbook, r"C:\path\Book.xlsx");
         assert_eq!(sheet, "Sheet1");
+    }
+
+    #[test]
+    fn split_sheet_span_name_ignores_drive_colons_in_external_sheet_keys() {
+        assert_eq!(split_sheet_span_name(r"[C:\path\Book.xlsx]Sheet1"), None);
+        assert_eq!(
+            split_sheet_span_name(r"[C:\path\Book.xlsx]Sheet1:Sheet3"),
+            Some((r"[C:\path\Book.xlsx]Sheet1".to_string(), "Sheet3".to_string()))
+        );
     }
 
     #[test]
