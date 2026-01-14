@@ -1912,6 +1912,14 @@ fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookForma
     None
 }
 
+#[cfg(feature = "encrypted-workbooks")]
+fn zip_contains_workbook_bin(decrypted_bytes: &[u8]) -> bool {
+    matches!(
+        sniff_ooxml_zip_workbook_kind(decrypted_bytes),
+        Some(WorkbookFormat::Xlsb)
+    )
+}
+
 fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> {
     // Most XLSX/ZIP containers start with `PK`.
     if encrypted_package.starts_with(b"PK") {
