@@ -83,9 +83,93 @@ fn build_shared_strings_bin_noncanonical_headers(unique_count_in_header: u32) ->
     out
 }
 
+fn build_shared_strings_bin_noncanonical_headers_with_trailing_unknown_record(
+    unique_count_in_header: u32,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+
+    // BrtSST: [totalCount:u32][uniqueCount:u32]
+    let total_count: u32 = 2;
+    let mut sst_payload = Vec::new();
+    sst_payload.extend_from_slice(&total_count.to_le_bytes());
+    sst_payload.extend_from_slice(&unique_count_in_header.to_le_bytes());
+    write_record_raw(
+        &mut out,
+        &record_id_sst_noncanonical(),
+        &varint_u32_noncanonical_2bytes(8),
+        &sst_payload,
+    );
+
+    // BrtSI: "Hello"
+    let si1 = build_plain_si_payload("Hello");
+    write_record_raw(
+        &mut out,
+        &record_id_si_noncanonical(),
+        &varint_u32_noncanonical_2bytes(si1.len() as u8),
+        &si1,
+    );
+
+    // BrtSI: "World" (use canonical id/len bytes to ensure mixed encodings are preserved)
+    let si2 = build_plain_si_payload("World");
+    write_record_raw(&mut out, &[0x13], &[si2.len() as u8], &si2);
+
+    // Unknown record after the SI entries but before BrtSSTEnd.
+    // Use non-canonical header bytes to ensure the streaming patcher preserves them.
+    let unknown_payload = [0xDE, 0xAD, 0xBE, 0xEF];
+    write_record_raw(
+        &mut out,
+        &varint_u32_noncanonical_2bytes(0x22),
+        &varint_u32_noncanonical_2bytes(unknown_payload.len() as u8),
+        &unknown_payload,
+    );
+
+    // BrtSSTEnd (len=0 encoded non-canonically)
+    write_record_raw(
+        &mut out,
+        &record_id_sst_end_noncanonical(),
+        &varint_u32_noncanonical_2bytes(0),
+        &[],
+    );
+
+    // Unknown record after BrtSSTEnd (should remain after the end marker).
+    let after_payload = [0x99];
+    write_record_raw(
+        &mut out,
+        &varint_u32_noncanonical_2bytes(0x23),
+        &varint_u32_noncanonical_2bytes(after_payload.len() as u8),
+        &after_payload,
+    );
+
+    out
+}
+
 #[test]
 fn streaming_shared_strings_patcher_matches_in_memory_writer_with_noncanonical_headers() {
     let input = build_shared_strings_bin_noncanonical_headers(2);
+
+    // In-memory writer (existing behavior)
+    let mut w = SharedStringsWriter::new(input.clone()).expect("SharedStringsWriter::new");
+    w.intern_plain("New").expect("intern_plain");
+    w.note_total_ref_delta(1).expect("note_total_ref_delta");
+    let expected = w.into_bytes().expect("into_bytes");
+
+    // Streaming patcher
+    let mut actual = Vec::new();
+    SharedStringsWriterStreaming::patch(
+        Cursor::new(input),
+        &mut actual,
+        &[String::from("New")],
+        2, // base SI count ("Hello", "World")
+        1, // total ref delta
+    )
+    .expect("streaming patch");
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn streaming_shared_strings_patcher_inserts_before_trailing_unknown_records_like_in_memory_writer() {
+    let input = build_shared_strings_bin_noncanonical_headers_with_trailing_unknown_record(2);
 
     // In-memory writer (existing behavior)
     let mut w = SharedStringsWriter::new(input.clone()).expect("SharedStringsWriter::new");

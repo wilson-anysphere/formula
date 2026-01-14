@@ -258,7 +258,8 @@ impl SharedStringsWriter {
 /// materializing the entire part in memory. Existing records (including record ID/length varint
 /// bytes) are copied byte-for-byte, except:
 /// - the first 8 bytes of the `BrtSST` payload (`[totalCount:u32][uniqueCount:u32]`) are patched,
-/// - new plain `BrtSI` records are inserted after the existing stream, before `BrtSSTEnd`.
+/// - new plain `BrtSI` records are inserted immediately after the last existing `BrtSI` record
+///   (or after `BrtSST` when there are no entries), before the first `BrtSSTEnd`.
 ///
 /// `base_si_count` is the number of existing `BrtSI` records present in the original table
 /// (i.e. the expected `uniqueCount`). Callers can compute this from the parsed shared strings
@@ -309,6 +310,13 @@ impl SharedStringsWriterStreaming {
 
         let mut seen_sst = false;
         let mut seen_sst_end = false;
+        // Buffer records that occur after the last observed BrtSI and before BrtSSTEnd.
+        //
+        // When we reach BrtSSTEnd we need to insert new BrtSI entries *after* the final existing
+        // BrtSI record, but *before* any trailing records. We cannot know which BrtSI is the final
+        // one until we hit BrtSSTEnd, so we opportunistically buffer records until another BrtSI
+        // proves they're not in the suffix.
+        let mut tail: Vec<u8> = Vec::new();
 
         while let Some(header) = read_record_header(&mut input)? {
             match header.id {
@@ -335,17 +343,39 @@ impl SharedStringsWriterStreaming {
                     output.write_all(&prefix).map_err(map_io_error)?;
                     copy_exact(&mut input, &mut output, len.saturating_sub(prefix.len()))?;
                 }
-                biff12::SST_END => {
-                    // Insert new `BrtSI` records immediately before `BrtSSTEnd`.
-                    if !seen_sst_end {
-                        write_appended_si_records(&mut output, new_plain_strings)?;
+                biff12::SI if seen_sst && !seen_sst_end => {
+                    // We just encountered another BrtSI, so any buffered records must belong
+                    // before it (they're not part of the suffix after the final BrtSI).
+                    if !tail.is_empty() {
+                        output.write_all(&tail).map_err(map_io_error)?;
+                        tail.clear();
                     }
-                    seen_sst_end = true;
-
                     write_raw_header(&mut output, &header)?;
                     copy_exact(&mut input, &mut output, header.len as usize)?;
                 }
+                biff12::SST_END if seen_sst && !seen_sst_end => {
+                    // We reached the end of the table. Insert new BrtSI records after the last
+                    // existing BrtSI and before any trailing records and BrtSSTEnd.
+                    write_appended_si_records(&mut output, new_plain_strings)?;
+                    if !tail.is_empty() {
+                        output.write_all(&tail).map_err(map_io_error)?;
+                        tail.clear();
+                    }
+
+                    seen_sst_end = true;
+                    write_raw_header(&mut output, &header)?;
+                    copy_exact(&mut input, &mut output, header.len as usize)?;
+                }
+                _ if seen_sst && !seen_sst_end => {
+                    // Defer writing the record until we know whether it belongs after the final
+                    // BrtSI. If we see another BrtSI later, we'll flush this buffer before that
+                    // record. Otherwise, we'll flush it after inserting appended BrtSI entries.
+                    tail.extend_from_slice(header.id_raw.as_slice());
+                    tail.extend_from_slice(header.len_raw.as_slice());
+                    copy_exact(&mut input, &mut tail, header.len as usize)?;
+                }
                 _ => {
+                    // Outside the shared string table, we can copy records verbatim.
                     write_raw_header(&mut output, &header)?;
                     copy_exact(&mut input, &mut output, header.len as usize)?;
                 }
