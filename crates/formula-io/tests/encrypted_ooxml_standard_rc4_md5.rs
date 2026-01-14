@@ -66,8 +66,8 @@ fn derive_rc4_key_md5(h: &[u8], block: u32, key_len: usize) -> Vec<u8> {
     hasher.update(block.to_le_bytes());
     let digest = hasher.finalize();
 
-    // MS-OFFCRYPTO Standard RC4 uses `keyLen = keySize/8` bytes directly (40-bit => 5 bytes),
-    // *without* padding to 16 bytes.
+    // MS-OFFCRYPTO Standard RC4 uses `keyLen = keySize/8` bytes directly (keySize=0 means 40-bit =>
+    // 5 bytes). Do **not** zero-pad 40-bit keys to 16 bytes.
     digest[..key_len].to_vec()
 }
 
