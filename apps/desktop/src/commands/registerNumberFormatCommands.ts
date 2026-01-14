@@ -28,8 +28,10 @@ function stepDecimalPlacesInNumberFormat(
   const raw = (format ?? "").trim();
   const section = (raw.split(";")[0] ?? "").trim();
   const lower = section.toLowerCase();
+  const compact = lower.replace(/\s+/g, "");
   // Avoid trying to manipulate date/time format codes.
-  if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return null;
+  if (compact.includes("m/d/yyyy") || compact.includes("yyyy-mm-dd")) return null;
+  if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return null;
 
   const currencyMatch = /[$€£¥]/.exec(section);
   const prefix = currencyMatch?.[0] ?? "";

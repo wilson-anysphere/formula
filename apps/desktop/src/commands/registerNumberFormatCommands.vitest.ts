@@ -73,4 +73,35 @@ describe("registerNumberFormatCommands", () => {
       { label: "Number format" },
     );
   });
+
+  it("treats time-only formats as non-adjustable for decimal stepping commands", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const doc = {
+      setRangeFormat: vi.fn(() => true),
+    };
+
+    const sheetId = "Sheet1";
+    const ranges = [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }];
+
+    const applyFormattingToSelection = (
+      _label: string,
+      fn: (doc: any, sheetId: string, ranges: any[]) => void | boolean,
+    ) => {
+      fn(doc as any, sheetId, ranges);
+    };
+
+    registerNumberFormatCommands({
+      commandRegistry,
+      applyFormattingToSelection,
+      getActiveCellNumberFormat: () => "h:mm:ss",
+      t: (key) => key,
+      category: "Format",
+    });
+
+    await commandRegistry.executeCommand("format.numberFormat.increaseDecimal");
+    await commandRegistry.executeCommand("format.numberFormat.decreaseDecimal");
+
+    expect(doc.setRangeFormat).not.toHaveBeenCalled();
+  });
 });
