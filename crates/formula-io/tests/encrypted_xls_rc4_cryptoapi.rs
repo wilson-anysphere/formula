@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use formula_io::{
     detect_workbook_encryption, open_workbook, open_workbook_model, open_workbook_model_with_password,
-    open_workbook_with_password, Error, Workbook, WorkbookEncryption,
+    open_workbook_with_password, Error, LegacyXlsFilePassScheme, Workbook, WorkbookEncryption,
 };
 use formula_model::CellValue;
 
@@ -32,9 +32,12 @@ fn encrypted_xls_unicode_emoji_fixture_path() -> PathBuf {
 fn detects_rc4_cryptoapi_xls_filepass_encryption() {
     let path = encrypted_xls_fixture_path();
     let info = detect_workbook_encryption(&path).expect("detect encryption");
-    assert!(
-        matches!(info, WorkbookEncryption::LegacyXlsFilePass { .. }),
-        "expected LegacyXlsFilePass, got {info:?}"
+    assert_eq!(
+        info,
+        WorkbookEncryption::LegacyXlsFilePass {
+            scheme: Some(LegacyXlsFilePassScheme::Rc4CryptoApi)
+        },
+        "expected RC4 CryptoAPI FILEPASS, got {info:?}"
     );
 }
 

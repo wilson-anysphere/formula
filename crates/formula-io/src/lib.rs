@@ -239,7 +239,8 @@ pub enum WorkbookEncryption {
     /// Legacy BIFF `.xls` workbook encryption indicated by a `FILEPASS` record in the workbook
     /// stream.
     LegacyXlsFilePass {
-        /// Optional scheme details once `FILEPASS` parsing is implemented for this helper.
+        /// Optional scheme details (best-effort) derived from the `FILEPASS` record payload when
+        /// available.
         scheme: Option<LegacyXlsFilePassScheme>,
     },
 }
@@ -255,10 +256,15 @@ pub enum OoxmlEncryptedPackageScheme {
 
 /// Legacy `.xls` `FILEPASS` encryption scheme.
 ///
-/// This is currently a placeholder until `FILEPASS` parsing is implemented for
-/// [`detect_workbook_encryption`].
+/// This is best-effort and is derived from the BIFF8 `FILEPASS` header when available:
+/// - `wEncryptionType = 0x0000` => XOR
+/// - `wEncryptionType = 0x0001, wEncryptionSubType = 0x0001` => RC4 ("standard")
+/// - `wEncryptionType = 0x0001, wEncryptionSubType = 0x0002` => RC4 CryptoAPI
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum LegacyXlsFilePassScheme {
+    Xor,
+    Rc4,
+    Rc4CryptoApi,
     Unknown,
 }
 
@@ -670,8 +676,8 @@ pub fn detect_workbook_encryption(path: impl AsRef<Path>) -> Result<WorkbookEncr
         return Ok(WorkbookEncryption::OoxmlEncryptedPackage { scheme: None });
     }
 
-    if ole_workbook_has_biff_filepass_record(&mut ole) {
-        return Ok(WorkbookEncryption::LegacyXlsFilePass { scheme: None });
+    if let Some(scheme) = ole_workbook_filepass_scheme(&mut ole) {
+        return Ok(WorkbookEncryption::LegacyXlsFilePass { scheme });
     }
 
     Ok(WorkbookEncryption::None)
@@ -3385,6 +3391,123 @@ fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std
     }
 
     false
+}
+
+/// Best-effort parse of a legacy `.xls` BIFF `FILEPASS` record inside the workbook globals stream.
+///
+/// Returns:
+/// - `None`       => no `FILEPASS` record found (or the workbook stream isn't a BIFF stream)
+/// - `Some(None)` => `FILEPASS` record found, but the payload was missing/truncated or couldn't be
+///   interpreted
+/// - `Some(Some(scheme))` => `FILEPASS` record found and scheme was classified
+fn ole_workbook_filepass_scheme<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+) -> Option<Option<LegacyXlsFilePassScheme>> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    let mut stream = None;
+    for candidate in ["Workbook", "/Workbook", "Book", "/Book"] {
+        if let Ok(s) = ole.open_stream(candidate) {
+            stream = Some(s);
+            break;
+        }
+    }
+    let mut stream = stream?;
+
+    // Best-effort scan over BIFF records in the workbook globals substream.
+    //
+    // Mirrors `ole_workbook_has_biff_filepass_record`, but reads and interprets the FILEPASS payload
+    // when present.
+    let mut first_record = true;
+    let mut bof_record_id: u16 = 0;
+    let mut scanned: usize = 0;
+    const MAX_SCAN_BYTES: usize = 4 * 1024 * 1024; // 4MiB
+
+    loop {
+        let mut header = [0u8; 4];
+        if stream.read_exact(&mut header).is_err() {
+            return None;
+        }
+        scanned = scanned.saturating_add(4);
+
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+
+        // BIFF streams always begin with a BOF record. If the workbook stream doesn't look like
+        // BIFF, don't attempt to interpret it as record headers (avoids false positives on other
+        // OLE payloads that happen to contain a `0x002F` word early).
+        if first_record && !matches!(record_id, BIFF_RECORD_BOF_BIFF8 | BIFF_RECORD_BOF_BIFF5) {
+            return None;
+        }
+        if first_record {
+            bof_record_id = record_id;
+        }
+
+        if record_id == BIFF_RECORD_FILEPASS {
+            let mut payload = vec![0u8; len];
+            if stream.read_exact(&mut payload).is_err() {
+                return Some(None);
+            }
+
+            // BIFF5/BIFF8 distinguish their BOF record ids. BIFF5 encryption is XOR-only.
+            if bof_record_id == BIFF_RECORD_BOF_BIFF5 {
+                return Some(Some(LegacyXlsFilePassScheme::Xor));
+            }
+
+            // BIFF8 FILEPASS starts with:
+            // - wEncryptionType (u16)
+            // - wEncryptionSubType (u16) when wEncryptionType == 0x0001 (RC4)
+            if payload.len() < 2 {
+                return Some(None);
+            }
+            let encryption_type = u16::from_le_bytes([payload[0], payload[1]]);
+            let scheme = match encryption_type {
+                0x0000 => Some(LegacyXlsFilePassScheme::Xor),
+                0x0001 => {
+                    if payload.len() < 4 {
+                        Some(LegacyXlsFilePassScheme::Unknown)
+                    } else {
+                        let sub_type = u16::from_le_bytes([payload[2], payload[3]]);
+                        match sub_type {
+                            0x0001 => Some(LegacyXlsFilePassScheme::Rc4),
+                            0x0002 => Some(LegacyXlsFilePassScheme::Rc4CryptoApi),
+                            _ => Some(LegacyXlsFilePassScheme::Unknown),
+                        }
+                    }
+                }
+                _ => Some(LegacyXlsFilePassScheme::Unknown),
+            };
+            return Some(scheme);
+        }
+
+        if record_id == BIFF_RECORD_EOF {
+            break;
+        }
+        if !first_record && matches!(record_id, BIFF_RECORD_BOF_BIFF8 | BIFF_RECORD_BOF_BIFF5) {
+            break;
+        }
+        first_record = false;
+
+        // Skip record payload bytes.
+        if stream.seek(SeekFrom::Current(len as i64)).is_err() {
+            // Fallback when seeking isn't supported: read + discard.
+            let mut remaining = len;
+            let mut buf = [0u8; 4096];
+            while remaining > 0 {
+                let to_read = remaining.min(buf.len());
+                if stream.read_exact(&mut buf[..to_read]).is_err() {
+                    return None;
+                }
+                remaining -= to_read;
+            }
+        }
+        scanned = scanned.saturating_add(len);
+        if scanned >= MAX_SCAN_BYTES {
+            break;
+        }
+    }
+
+    None
 }
 
 /// Open a spreadsheet workbook based on file extension.
