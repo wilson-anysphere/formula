@@ -287,6 +287,42 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as any).store).toBeInstanceOf(IndexedDbAIAuditStore);
   });
 
+  it("wraps LocalStorageAIAuditStore fallback in BoundedAIAuditStore by default when IndexedDB open fails", async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = {
+      open() {
+        throw new Error("indexedDB.open failed");
+      }
+    };
+
+    const store = await createDefaultAIAuditStore();
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
+  it("wraps MemoryAIAuditStore fallback in BoundedAIAuditStore by default when localStorage is unavailable and IndexedDB fails", async () => {
+    const win: any = {};
+    Object.defineProperty(win, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+    Object.defineProperty(globalThis, "window", { value: win, configurable: true });
+    (globalThis as any).indexedDB = {
+      open() {
+        throw new Error("indexedDB.open failed");
+      }
+    };
+
+    const store = await createDefaultAIAuditStore();
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it("propagates bounded options to the default wrapper", async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
