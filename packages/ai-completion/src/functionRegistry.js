@@ -325,8 +325,78 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "SINH",
+    description: "Returns the hyperbolic sine of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "COSH",
+    description: "Returns the hyperbolic cosine of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "TANH",
+    description: "Returns the hyperbolic tangent of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "CSC",
+    description: "Returns the cosecant of an angle.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "SEC",
+    description: "Returns the secant of an angle.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "COT",
+    description: "Returns the cotangent of an angle.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "CSCH",
+    description: "Returns the hyperbolic cosecant of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "SECH",
+    description: "Returns the hyperbolic secant of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "COTH",
+    description: "Returns the hyperbolic cotangent of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
     name: "ASIN",
     description: "Returns the arcsine of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ASINH",
+    description: "Returns the inverse hyperbolic sine of a number.",
     args: [
       { name: "number", type: "value" },
     ],
@@ -339,8 +409,22 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ACOSH",
+    description: "Returns the inverse hyperbolic cosine of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
     name: "ATAN",
     description: "Returns the arctangent of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ATANH",
+    description: "Returns the inverse hyperbolic tangent of a number.",
     args: [
       { name: "number", type: "value" },
     ],
@@ -351,6 +435,13 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "x_num", type: "value" },
       { name: "y_num", type: "value" },
+    ],
+  },
+  {
+    name: "ACOT",
+    description: "Returns the principal value of the arccotangent of a number.",
+    args: [
+      { name: "number", type: "value" },
     ],
   },
   {

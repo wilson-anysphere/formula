@@ -80,6 +80,19 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("LOG", 0), "value", "Expected LOG number to be value-like");
   assert.ok(registry.getFunction("LOG")?.args?.[1]?.optional, "Expected LOG base to be optional");
   assert.equal(registry.getArgType("SIN", 0), "value", "Expected SIN number to be value-like");
+  assert.equal(registry.getArgType("COSH", 0), "value", "Expected COSH number to be value-like");
+  assert.equal(registry.getArgType("SINH", 0), "value", "Expected SINH number to be value-like");
+  assert.equal(registry.getArgType("TANH", 0), "value", "Expected TANH number to be value-like");
+  assert.equal(registry.getArgType("CSC", 0), "value", "Expected CSC number to be value-like");
+  assert.equal(registry.getArgType("SEC", 0), "value", "Expected SEC number to be value-like");
+  assert.equal(registry.getArgType("COT", 0), "value", "Expected COT number to be value-like");
+  assert.equal(registry.getArgType("CSCH", 0), "value", "Expected CSCH number to be value-like");
+  assert.equal(registry.getArgType("SECH", 0), "value", "Expected SECH number to be value-like");
+  assert.equal(registry.getArgType("COTH", 0), "value", "Expected COTH number to be value-like");
+  assert.equal(registry.getArgType("ASINH", 0), "value", "Expected ASINH number to be value-like");
+  assert.equal(registry.getArgType("ACOSH", 0), "value", "Expected ACOSH number to be value-like");
+  assert.equal(registry.getArgType("ATANH", 0), "value", "Expected ATANH number to be value-like");
+  assert.equal(registry.getArgType("ACOT", 0), "value", "Expected ACOT number to be value-like");
 
   // TEXTAFTER/TEXTBEFORE are curated (not present in the Rust catalog yet).
   assert.ok(registry.getFunction("TEXTAFTER"), "Expected TEXTAFTER to be present");
