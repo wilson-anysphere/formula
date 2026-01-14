@@ -22961,6 +22961,27 @@ export class SpreadsheetApp {
       let deltaRow = 0;
       let deltaCol = 0;
 
+      // When a chart is selected, treat paste as an object-level operation (Excel-like).
+      //
+      // Today we only support pasting images as floating drawings, so:
+      // - If the clipboard contains an image, paste it as a drawing (and clear chart selection).
+      // - Otherwise, no-op to avoid overwriting cell contents while the chart is selected.
+      if (this.selectedChartId != null) {
+        if (mode === "all") {
+          const handled = await this.pasteClipboardImageAsDrawing(content, {
+            sheetId: pasteSheetId,
+            baseCell: pasteBaseCell,
+          });
+          if (handled) return;
+        }
+        try {
+          showToast("Paste not supported while a chart is selected.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
+
       const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(ctx, content);
       this.clipboardCopyContext = nextContext;
 
