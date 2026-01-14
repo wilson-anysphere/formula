@@ -94,6 +94,9 @@ Notes:
   This runs the desktop binary with `--startup-bench`, which loads a minimal page and exits after reporting
   `[startup] ...` timings.
 
+  Note: in `--startup-bench` mode, `first_render_ms` is a best-effort **first frame** proxy for the minimal document
+  (not the full grid render time).
+
   Tuning knobs:
   - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
     - `cold`: each measured run uses a fresh isolated profile directory (HOME + XDG dirs) under `FORMULA_PERF_HOME`

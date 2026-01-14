@@ -166,7 +166,8 @@ These scripts are designed to be safe to run locally:
 - **Startup benchmark kinds**:
   - **Full app** (`desktop.startup.*`): end-to-end UI startup (requires `apps/desktop/dist`); includes `first_render_ms`.
   - **Shell-only** (`desktop.shell_startup.*`): minimal webview startup via `--startup-bench` (does **not** require `apps/desktop/dist`);
-    does not emit `first_render_ms`.
+    reports a best-effort `first_render_ms` **proxy** (first frame after the minimal document loads). This is not equivalent
+    to "grid visible" and is currently **not enforced** by default.
 - **Startup benchmark modes**:
   - **Cold** (`.cold.`): each run uses a fresh profile directory (true cold start), e.g.
     - `desktop.startup.cold.window_visible_ms.p95`
