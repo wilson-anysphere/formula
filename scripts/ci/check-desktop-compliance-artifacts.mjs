@@ -91,6 +91,68 @@ function validateLinuxFiles(files, mainBinaryName, kind) {
   }
 }
 
+/**
+ * @param {unknown} fileAssociations
+ * @returns {boolean}
+ */
+function hasParquetAssociation(fileAssociations) {
+  if (!Array.isArray(fileAssociations)) return false;
+  for (const assoc of fileAssociations) {
+    if (!assoc || typeof assoc !== "object" || Array.isArray(assoc)) continue;
+    // @ts-ignore - runtime inspection
+    const mimeType = assoc.mimeType;
+    if (
+      typeof mimeType === "string" &&
+      mimeType.trim().toLowerCase() === "application/vnd.apache.parquet"
+    ) {
+      return true;
+    }
+    // @ts-ignore - runtime inspection
+    const ext = assoc.ext;
+    if (Array.isArray(ext) && ext.some((v) => typeof v === "string" && v.trim().toLowerCase() === "parquet")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * @param {unknown} depends
+ * @param {string} kind
+ */
+function validateLinuxDepends(depends, kind) {
+  if (!Array.isArray(depends)) {
+    die(`bundle.linux.${kind}.depends must be an array of package dependency strings`);
+  }
+  const deps = depends.map((v) => String(v));
+  if (!deps.some((v) => v.toLowerCase().includes("shared-mime-info"))) {
+    die(`bundle.linux.${kind}.depends must include shared-mime-info (required for MIME database integration)`);
+  }
+}
+
+/**
+ * @param {unknown} files
+ * @param {string} kind
+ */
+function validateLinuxMimeFiles(files, kind) {
+  const obj = asObject(files);
+  if (!obj) {
+    die(`bundle.linux.${kind}.files must be an object mapping destination -> source`);
+  }
+  const dest = "usr/share/mime/packages/app.formula.desktop.xml";
+  if (!(dest in obj)) {
+    const keys = Object.keys(obj);
+    die(
+      `bundle.linux.${kind}.files is missing ${JSON.stringify(dest)} (required for Parquet/shared-mime-info integration). Present keys: ${JSON.stringify(keys)}`,
+    );
+  }
+  const src = obj[dest];
+  if (typeof src !== "string") {
+    die(`bundle.linux.${kind}.files[${JSON.stringify(dest)}] must be a string source path (got ${typeof src})`);
+  }
+  resolveAndAssertFileExists(src, "app.formula.desktop.xml");
+}
+
 let raw = "";
 try {
   raw = fs.readFileSync(configPath, "utf8");
@@ -126,6 +188,19 @@ validateLinuxFiles(asObject(linux.rpm)?.files, mainBinaryName, "rpm");
 
 // Tauri's config key is `appimage` (lowercase).
 validateLinuxFiles(asObject(linux.appimage)?.files, mainBinaryName, "appimage");
+
+// When the app advertises Parquet support on Linux, we also ship a shared-mime-info XML definition
+// so the MIME database can map `*.parquet` correctly even on distros whose shared-mime-info
+// package does not include a Parquet glob by default.
+if (hasParquetAssociation(bundle.fileAssociations)) {
+  validateLinuxMimeFiles(asObject(linux.deb)?.files, "deb");
+  validateLinuxMimeFiles(asObject(linux.rpm)?.files, "rpm");
+  validateLinuxMimeFiles(asObject(linux.appimage)?.files, "appimage");
+
+  // Ensure the distro-native packages pull in `update-mime-database` on install.
+  validateLinuxDepends(asObject(linux.deb)?.depends, "deb");
+  validateLinuxDepends(asObject(linux.rpm)?.depends, "rpm");
+}
 
 // Ensure the declared resources actually exist on disk as files.
 if (!Array.isArray(resources)) {

@@ -987,6 +987,8 @@ The resulting `.deb` must declare the required runtime packages so that:
 These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` under
 `bundle.linux.deb.depends`:
 
+- `shared-mime-info` – provides `update-mime-database`, required for installing our packaged
+  shared-mime-info definitions (notably Parquet) and making file associations resolve reliably.
 - `libwebkit2gtk-4.1-0` – WebKitGTK system WebView used by Tauri on Linux.
 - `libgtk-3-0t64 | libgtk-3-0` – GTK3 (windowing/event loop; also required by WebKitGTK).
   Ubuntu 24.04 uses `*t64` package names for some libraries due to the `time_t` 64-bit transition.
@@ -1056,6 +1058,8 @@ same shared libraries.
 
 Effective package names (varies by distro):
 
+- `shared-mime-info` – provides `update-mime-database`, required for installing our packaged
+  shared-mime-info definitions (notably Parquet) and making file associations resolve reliably.
 - WebKitGTK 4.1 runtime:
   - Fedora/RHEL: `webkit2gtk4.1`
   - openSUSE: `libwebkit2gtk-4_1-0`
