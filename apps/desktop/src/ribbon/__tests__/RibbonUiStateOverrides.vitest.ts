@@ -173,6 +173,14 @@ describe("Ribbon UI state overrides", () => {
     const expected = [
       "home.cells.format.rowHeight",
       "home.cells.format.columnWidth",
+      "home.cells.insert.insertCells",
+      "home.cells.insert.insertSheetRows",
+      "home.cells.insert.insertSheetColumns",
+      "home.cells.insert.insertSheet",
+      "home.cells.delete.deleteCells",
+      "home.cells.delete.deleteSheetRows",
+      "home.cells.delete.deleteSheetColumns",
+      "home.cells.delete.deleteSheet",
       "home.alignment.mergeCenter",
       "home.alignment.mergeCenter.mergeCenter",
       "home.alignment.mergeCenter.mergeAcross",
@@ -242,4 +250,3 @@ describe("Ribbon UI state overrides", () => {
     act(() => root.unmount());
   });
 });
-
