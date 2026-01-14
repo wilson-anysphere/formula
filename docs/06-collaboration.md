@@ -452,6 +452,7 @@ Useful lifecycle helpers:
 
 - `await session.whenLocalPersistenceLoaded()` — resolves when `options.persistence` has loaded any saved updates into the doc
 - `await session.flushLocalPersistence()` — best-effort: forces any pending local persistence work to be durably written (useful before app teardown)
+  - Optional: `await session.flushLocalPersistence({ compact: false })` skips compaction for a faster “durability snapshot” write (useful before a hard process exit)
 - `await session.whenSynced()` — resolves when the sync provider reports `sync=true`
 
 #### Observability APIs (sync status + local diagnostics)
@@ -493,7 +494,7 @@ Two important operational details:
 
 `CollabSession.flushLocalPersistence()` delegates to the underlying persistence `flush(docId)` when present. Desktop typically calls it during teardown (or before closing a window) to reduce the chance of losing the last few edits.
 
-Desktop note: the Tauri desktop app calls `flushLocalPersistence()` as part of the quit/restart flow (best-effort with a short timeout) to reduce the risk of losing recent offline/unsynced edits when the process hard-exits. The quit flow also waits briefly for DocumentController ↔︎ Yjs binder work to settle (including async encryption) before snapshotting.
+Desktop note: the Tauri desktop app calls `flushLocalPersistence({ compact: false })` as part of the quit/restart flow (best-effort with a short timeout) to reduce the risk of losing recent offline/unsynced edits when the process hard-exits. The quit flow also waits briefly for DocumentController ↔︎ Yjs binder work to settle (including async encryption) before snapshotting.
 
 If you use `persistence` or offline auto-connect gating, the initial WebSocket connection may be delayed until hydration completes (so offline edits are present before syncing).
 
