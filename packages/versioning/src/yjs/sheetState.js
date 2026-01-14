@@ -247,29 +247,6 @@ function findSheetEntryById(doc, sheetId) {
 }
 
 /**
- * Return true when `segment` is a canonical non-negative integer string:
- * - ASCII digits only
- * - no leading zeros unless the number is exactly "0"
- *
- * This mirrors `String(Number(segment)) === segment` for non-negative integers,
- * but avoids allocating a normalized string.
- *
- * @param {string} segment
- */
-function isCanonicalUnsignedIntSegment(segment) {
-  const len = segment.length;
-  if (len === 0) return false;
-  const first = segment.charCodeAt(0);
-  if (first < 48 || first > 57) return false;
-  if (len > 1 && first === 48) return false;
-  for (let i = 1; i < len; i++) {
-    const code = segment.charCodeAt(i);
-    if (code < 48 || code > 57) return false;
-  }
-  return true;
-}
-
-/**
  * Parse a run of ASCII digits into a number.
  *
  * Leading zeros are allowed (this is used for legacy cell key formats).
@@ -332,19 +309,37 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
       if (key.indexOf(":", secondColon + 1) !== -1) return null;
       const rawSheetId = key.slice(0, firstColon);
       const sheetId = rawSheetId || defaultSheetId;
-      const rowStr = key.slice(firstColon + 1, secondColon);
-      const colStr = key.slice(secondColon + 1);
+
+      // Fast path for the canonical encoding: row/col are almost always digit-only.
+      // Avoid allocating substrings when we can parse directly.
+      const rowStart = firstColon + 1;
+      const rowEnd = secondColon;
+      const colStart = secondColon + 1;
+      const colEnd = key.length;
+
+      const rowDigits = parseUnsignedInt(key, rowStart, rowEnd);
+      const colDigits = parseUnsignedInt(key, colStart, colEnd);
+      if (rowDigits != null && colDigits != null) {
+        if (!Number.isInteger(rowDigits) || rowDigits < 0) return null;
+        if (!Number.isInteger(colDigits) || colDigits < 0) return null;
+        // `sheetId` is canonical when it was not default-substituted. Row/col are
+        // canonical when they match the normalized integer string representation.
+        const isCanonical =
+          rawSheetId.length > 0 &&
+          (rowEnd - rowStart === 1 || key.charCodeAt(rowStart) !== 48) &&
+          (colEnd - colStart === 1 || key.charCodeAt(colStart) !== 48);
+        return { sheetId, row: rowDigits, col: colDigits, isCanonical };
+      }
+
+      // Fallback: preserve legacy acceptance semantics from `parseCellKey`, which uses
+      // `Number(segment)` (and therefore accepts things like `1e0` or whitespace).
+      const rowStr = key.slice(rowStart, rowEnd);
+      const colStr = key.slice(colStart, colEnd);
       const row = Number(rowStr);
       const col = Number(colStr);
       if (!Number.isInteger(row) || row < 0) return null;
       if (!Number.isInteger(col) || col < 0) return null;
-      // `sheetId` is canonical when it was not default-substituted. Row/col are
-      // canonical when they match the normalized integer string representation.
-      const isCanonical =
-        rawSheetId.length > 0 &&
-        isCanonicalUnsignedIntSegment(rowStr) &&
-        isCanonicalUnsignedIntSegment(colStr);
-      return { sheetId, row, col, isCanonical };
+      return { sheetId, row, col, isCanonical: false };
     }
 
     // Legacy `${sheetId}:${row},${col}` encoding.
