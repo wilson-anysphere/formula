@@ -145,12 +145,17 @@ impl Relationships {
         out.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
         out.push_str(&format!(r#"<Relationships xmlns="{PACKAGE_REL_NS}">"#));
         for rel in &self.rels {
-            out.push_str(&format!(
-                r#"<Relationship Id="{}" Type="{}" Target="{}""#,
-                xml_escape(&rel.id),
-                xml_escape(&rel.type_),
-                xml_escape(&rel.target)
-            ));
+            out.push_str(r#"<Relationship Id=""#);
+            out.push_str(&xml_escape(&rel.id));
+            out.push('"');
+            if !rel.type_.is_empty() {
+                out.push_str(r#" Type=""#);
+                out.push_str(&xml_escape(&rel.type_));
+                out.push('"');
+            }
+            out.push_str(r#" Target=""#);
+            out.push_str(&xml_escape(&rel.target));
+            out.push('"');
             if let Some(mode) = &rel.target_mode {
                 out.push_str(&format!(r#" TargetMode="{}""#, xml_escape(mode)));
             }
