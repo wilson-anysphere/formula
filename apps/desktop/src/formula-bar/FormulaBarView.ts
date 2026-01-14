@@ -2913,6 +2913,7 @@ export class FormulaBarView {
     const previewRaw = this.model.isEditing ? this.model.aiSuggestionPreview() : null;
     const previewText = ghost && previewRaw != null ? formatPreview(previewRaw) : "";
     const draft = this.model.draft;
+    const draftVersion = this.model.draftVersion;
 
     const isFormulaEditing = this.model.isEditing && draft.trimStart().startsWith("=");
     const coloredReferences = isFormulaEditing ? this.model.coloredReferences() : [];
@@ -3121,10 +3122,13 @@ export class FormulaBarView {
         }
       }
 
-      if (activeArg && typeof provider === "function" && typeof activeArg.argText === "string" && activeArg.argText.trim() !== "") {
+      if (activeArg && typeof provider === "function" && typeof activeArg.argText === "string" && activeArg.argText !== "") {
         wantsArgPreview = true;
         activeArgForPreview = activeArg;
-        argPreviewKey = `${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}|${activeArg.argText}`;
+        // Key preview state off the draft version + argument identity. `draftVersion` is bumped on any
+        // draft text change, so cursor moves within the same argument do not allocate/copy the full
+        // argument text into a key string.
+        argPreviewKey = `${draftVersion}|${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}`;
         if (this.#argumentPreviewKey !== argPreviewKey) {
           this.#argumentPreviewKey = argPreviewKey;
           this.#argumentPreviewValue = null;

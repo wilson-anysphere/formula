@@ -69,6 +69,7 @@ type HighlightSpan = {
 export class FormulaBarModel {
   #activeCell: ActiveCellInfo = { address: "A1", input: "", value: "" };
   #draft: string = "";
+  #draftVersion = 0;
   #isEditing = false;
   #cursorStart = 0;
   #cursorEnd = 0;
@@ -130,6 +131,7 @@ export class FormulaBarModel {
   setActiveCell(info: ActiveCellInfo): void {
     this.#activeCell = { ...info };
     this.#draft = info.input ?? "";
+    this.#draftVersion += 1;
     this.#isEditing = false;
     this.#cursorStart = this.#draft.length;
     this.#cursorEnd = this.#draft.length;
@@ -231,6 +233,10 @@ export class FormulaBarModel {
     return this.#draft;
   }
 
+  get draftVersion(): number {
+    return this.#draftVersion;
+  }
+
   get cursorStart(): number {
     return this.#cursorStart;
   }
@@ -256,6 +262,9 @@ export class FormulaBarModel {
 
     this.#isEditing = true;
     this.#draft = draft;
+    if (draftChanged) {
+      this.#draftVersion += 1;
+    }
     this.#cursorStart = nextCursorStart;
     this.#cursorEnd = nextCursorEnd;
     this.#rangeInsertion = null;
@@ -295,7 +304,13 @@ export class FormulaBarModel {
 
   cancel(): void {
     this.#isEditing = false;
-    this.#draft = this.#activeCell.input;
+    const nextDraft = this.#activeCell.input;
+    if (nextDraft !== this.#draft) {
+      this.#draft = nextDraft;
+      this.#draftVersion += 1;
+    } else {
+      this.#draft = nextDraft;
+    }
     this.#cursorStart = this.#draft.length;
     this.#cursorEnd = this.#draft.length;
     this.#rangeInsertion = null;
@@ -596,11 +611,13 @@ export class FormulaBarModel {
     if (looksLikeFullReplacement) {
       const ghost = this.aiGhostText();
       this.#draft = suggestionText;
+      this.#draftVersion += 1;
       const newCursor = ghost ? start + ghost.length : suggestionText.length - suffix.length;
       this.#cursorStart = newCursor;
       this.#cursorEnd = newCursor;
     } else {
       this.#draft = this.#draft.slice(0, start) + suggestionText + this.#draft.slice(end);
+      this.#draftVersion += 1;
       const newCursor = start + suggestionText.length;
       this.#cursorStart = newCursor;
       this.#cursorEnd = newCursor;
@@ -618,6 +635,7 @@ export class FormulaBarModel {
       const start = replaceSpan ? replaceSpan.start : Math.min(this.#cursorStart, this.#cursorEnd);
       const end = replaceSpan ? replaceSpan.end : Math.max(this.#cursorStart, this.#cursorEnd);
       this.#draft = this.#draft.slice(0, start) + rangeText + this.#draft.slice(end);
+      this.#draftVersion += 1;
       this.#rangeInsertion = { start, end: start + rangeText.length };
       this.#cursorStart = this.#rangeInsertion.end;
       this.#cursorEnd = this.#rangeInsertion.end;
@@ -626,6 +644,7 @@ export class FormulaBarModel {
 
     const { start, end } = this.#rangeInsertion;
     this.#draft = this.#draft.slice(0, start) + rangeText + this.#draft.slice(end);
+    this.#draftVersion += 1;
     this.#rangeInsertion = { start, end: start + rangeText.length };
     this.#cursorStart = this.#rangeInsertion.end;
     this.#cursorEnd = this.#rangeInsertion.end;
