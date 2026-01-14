@@ -511,20 +511,11 @@ fn build_export_part_overrides_from_subset_package(
 
     // Build a "subset" XLSX package containing only the parts we need to mutate. This keeps memory
     // proportional to the number of touched parts (and avoids inflating all worksheets).
-    let mut subset_parts: Vec<(String, Vec<u8>)> = Vec::new();
-    subset_parts.push((
-        "[Content_Types].xml".to_string(),
-        read_required_part(base_bytes, "[Content_Types].xml")?,
-    ));
-    subset_parts.push((
-        "xl/workbook.xml".to_string(),
-        read_required_part(base_bytes, "xl/workbook.xml")?,
-    ));
-    subset_parts.push((
-        "xl/_rels/workbook.xml.rels".to_string(),
-        read_required_part(base_bytes, "xl/_rels/workbook.xml.rels")?,
-    ));
-
+    //
+    // Note: build the subset ZIP by reading/writing each part sequentially rather than buffering
+    // all part bytes at once. This reduces peak memory when multiple large sheet parts are needed
+    // (e.g. several sheets with preserved drawings).
+    let mut needed_sheet_parts: HashSet<String> = HashSet::new();
     let wants_preserved_drawings = workbook_meta.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook_meta.preserved_pivot_parts.is_some();
     if wants_preserved_drawings || wants_preserved_pivots {
@@ -537,8 +528,6 @@ fn build_export_part_overrides_from_subset_package(
                 .find(|p| sheet_name_eq_case_insensitive(&p.name, preserved_name))
                 .or_else(|| worksheet_parts.get(preserved_index))
         };
-
-        let mut needed_sheet_parts: HashSet<String> = HashSet::new();
 
         if let Some(preserved) = workbook_meta.preserved_drawing_parts.as_ref() {
             for (sheet_name, entry) in &preserved.sheet_drawings {
@@ -579,29 +568,48 @@ fn build_export_part_overrides_from_subset_package(
             }
         }
 
-        for worksheet_part in needed_sheet_parts {
-            let xml = read_required_part(base_bytes, &worksheet_part)?;
-            subset_parts.push((worksheet_part.clone(), xml));
-
-            let rels_part = formula_xlsx::openxml::rels_part_name(&worksheet_part);
-            let rels_xml = read_required_part(base_bytes, &rels_part)?;
-            subset_parts.push((rels_part, rels_xml));
-        }
     }
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
     let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
-    for (name, bytes) in subset_parts {
-        zip.start_file(&name, options)
+
+    let mut write_part = |name: &str, bytes: &[u8]| -> anyhow::Result<()> {
+        zip.start_file(name, options)
             .with_context(|| format!("start subset zip entry {name}"))?;
-        zip.write_all(&bytes)
+        zip.write_all(bytes)
             .with_context(|| format!("write subset zip entry {name}"))?;
+        Ok(())
+    };
+
+    write_part(
+        "[Content_Types].xml",
+        &read_required_part(base_bytes, "[Content_Types].xml")?,
+    )?;
+    write_part(
+        "xl/workbook.xml",
+        &read_required_part(base_bytes, "xl/workbook.xml")?,
+    )?;
+    write_part(
+        "xl/_rels/workbook.xml.rels",
+        &read_required_part(base_bytes, "xl/_rels/workbook.xml.rels")?,
+    )?;
+
+    if !needed_sheet_parts.is_empty() {
+        let mut needed_sheet_parts: Vec<String> = needed_sheet_parts.into_iter().collect();
+        needed_sheet_parts.sort();
+
+        for worksheet_part in needed_sheet_parts {
+            let xml = read_required_part(base_bytes, &worksheet_part)?;
+            write_part(&worksheet_part, &xml)?;
+
+            let rels_part = formula_xlsx::openxml::rels_part_name(&worksheet_part);
+            let rels_xml = read_required_part(base_bytes, &rels_part)?;
+            write_part(&rels_part, &rels_xml)?;
+        }
     }
-    let subset_bytes = zip
-        .finish()
-        .context("finalize subset xlsx zip")?
-        .into_inner();
+
+    let subset_bytes = zip.finish().context("finalize subset xlsx zip")?.into_inner();
 
     let mut pkg =
         formula_xlsx::XlsxPackage::from_bytes(&subset_bytes).context("parse subset xlsx package")?;
