@@ -261,6 +261,9 @@ jobs:
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build --bundles appimage,deb,rpm
 
+      - name: Verify desktop binary is stripped (no symbols)
+        run: python scripts/verify_desktop_binary_stripped.py
+
       - name: Verify Linux package dependency metadata (deb + rpm)
         run: bash scripts/ci/verify-linux-package-deps.sh
 
