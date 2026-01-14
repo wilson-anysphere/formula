@@ -112,6 +112,39 @@ function Build-MinimalFormula {
     return "=LET(x,1,x)"
   }
 
+  # LAMBDA() is only useful when invoked; using an invocation keeps the formula
+  # syntactically valid and avoids edge-cases where Excel treats a bare LAMBDA
+  # value as an error.
+  if ($FunctionName -eq "LAMBDA") {
+    return "=LAMBDA(x,x)(1)"
+  }
+
+  # Functions that require a LAMBDA argument often reject formulas that use a
+  # scalar placeholder (e.g. BYROW(1,1)). Use a minimal lambda instead.
+  if ($FunctionName -eq "BYROW") {
+    return "=BYROW(1,LAMBDA(x,x))"
+  }
+
+  if ($FunctionName -eq "BYCOL") {
+    return "=BYCOL(1,LAMBDA(x,x))"
+  }
+
+  if ($FunctionName -eq "MAP") {
+    return "=MAP(1,LAMBDA(x,x))"
+  }
+
+  if ($FunctionName -eq "MAKEARRAY") {
+    return "=MAKEARRAY(1,1,LAMBDA(r,c,1))"
+  }
+
+  if ($FunctionName -eq "REDUCE") {
+    return "=REDUCE(0,1,LAMBDA(a,b,a+b))"
+  }
+
+  if ($FunctionName -eq "SCAN") {
+    return "=SCAN(0,1,LAMBDA(a,b,a+b))"
+  }
+
   if ($MinArgs -le 0) {
     return "=$FunctionName()"
   }
