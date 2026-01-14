@@ -411,4 +411,23 @@ fn standard_cryptoapi_rc4_md5_40bit_padding_vector() {
         hex_decode("db037cd60d38c882019b5f5d8c43382373f476da28")
     );
     assert_ne!(ciphertext_raw, ciphertext_padded);
+
+    // Ensure the production decrypt reader uses the padded 16-byte key form for 40-bit MD5.
+    let mut stream = Vec::new();
+    stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    stream.extend_from_slice(&ciphertext_padded);
+    let mut cursor = Cursor::new(stream);
+    cursor.seek(SeekFrom::Start(8)).unwrap();
+
+    let mut reader = Rc4CryptoApiDecryptReader::new_with_hash_alg(
+        cursor,
+        plaintext.len() as u64,
+        h.to_vec(),
+        5,
+        HashAlg::Md5,
+    )
+    .unwrap();
+    let mut decrypted = Vec::new();
+    reader.read_to_end(&mut decrypted).unwrap();
+    assert_eq!(decrypted, plaintext);
 }
