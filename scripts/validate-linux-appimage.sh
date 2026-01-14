@@ -51,9 +51,9 @@ Environment:
     tauri.conf.json mainBinaryName when available).
   FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK=1
     Additionally run a lightweight "can execute" check by invoking the extracted
-    AppRun with `--startup-bench` (headless-friendly, exits quickly).
+    AppRun with --startup-bench (headless-friendly, exits quickly).
   FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS
-    Timeout (seconds) for the exec check (default: 20). Requires the `timeout`
+    Timeout (seconds) for the exec check (default: 20). Requires the timeout
     command to enforce.
   FORMULA_VALIDATE_ALL_APPIMAGES=1
     When auto-discovering, validate all matching AppImages instead of selecting
