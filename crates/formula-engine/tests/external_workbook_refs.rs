@@ -801,6 +801,53 @@ fn external_sheet_invalidation_dirties_dynamic_external_indirect_dependents_from
 }
 
 #[test]
+fn external_sheet_invalidation_updates_when_indirect_ref_text_cell_changes() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 10.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet1!A1")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)").unwrap();
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert!(!engine.is_dirty("Sheet1", "A1"));
+
+    // Dirtying the referenced sheet should dirty the dependent.
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    assert!(engine.is_dirty("Sheet1", "A1"));
+    engine.recalculate();
+    assert!(!engine.is_dirty("Sheet1", "A1"));
+
+    // Update the INDIRECT ref_text to point at a different external sheet and ensure the reverse
+    // index is refreshed on the next calculation.
+    engine
+        .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet2!A1")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(10.0)
+    );
+    assert!(!engine.is_dirty("Sheet1", "A1"));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    assert!(!engine.is_dirty("Sheet1", "A1"));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet2");
+    assert!(engine.is_dirty("Sheet1", "A1"));
+}
+
+#[test]
 fn external_workbook_invalidation_handles_workbook_ids_with_literal_brackets() {
     // Workbook names can contain literal `[` characters. Literal `]` characters are escaped as
     // `]]` in workbook ids. For a workbook name like `[Book]`, the canonical workbook id is:
