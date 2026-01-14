@@ -313,6 +313,20 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ISO.WEEKNUM",
+    description: "Returns the ISO week number for the given date.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "ISOWEEKNUM",
+    description: "Returns the ISO week number for the given date (legacy name).",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
     name: "DATEDIF",
     description: "Calculates the number of days, months, or years between two dates.",
     args: [
