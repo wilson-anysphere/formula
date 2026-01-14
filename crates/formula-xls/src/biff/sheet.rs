@@ -834,7 +834,7 @@ pub(crate) fn parse_biff_sheet_view_state(
             RECORD_SELECTION => match parse_selection_record_best_effort(data) {
                 Ok((pane, selection, summary)) => {
                     if summary.declared_refs > summary.parsed_refs {
-                        push_sheet_metadata_warning(
+                        push_sheet_metadata_warning_force(
                             &mut out.warnings,
                             format!(
                                 "SELECTION record at offset {} declares cref={} refs; parsed {} (available {}, cap={})",
@@ -854,7 +854,7 @@ pub(crate) fn parse_biff_sheet_view_state(
                     } else if selections.len() < MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE {
                         selections.push((pane, selection));
                     } else if !warned_selection_records_capped {
-                        push_sheet_metadata_warning(
+                        push_sheet_metadata_warning_force(
                             &mut out.warnings,
                             format!(
                                 "too many SELECTION records (cap={MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE}); additional selections ignored"
@@ -4816,6 +4816,118 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("too many BIFF records") && w.contains("view state")),
             "expected forced record-cap warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "suppression marker should remain last; warnings={:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_view_state_selection_cap_warning_is_emitted_even_when_other_metadata_warnings_are_suppressed(
+    ) {
+        let selection_cap = MAX_SELECTION_RANGES_PER_RECORD;
+        assert!(selection_cap >= 2, "test requires selection cap >= 2");
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill the metadata warning buffer with malformed WINDOW2 records (payload too short).
+        for _ in 0..(MAX_WARNINGS_PER_SHEET_METADATA + 10) {
+            stream.extend_from_slice(&record(RECORD_WINDOW2, &[0u8; 1]));
+        }
+
+        // Emit a SELECTION record whose cref exceeds the selection-range cap.
+        let pane: u8 = 0;
+        let active_row: u16 = 0;
+        let active_col: u16 = 0;
+        let declared = selection_cap + 10;
+        let declared_u16 = u16::try_from(declared).expect("cref should fit in u16");
+
+        let mut selection_payload = Vec::new();
+        selection_payload.push(pane);
+        selection_payload.extend_from_slice(&active_row.to_le_bytes());
+        selection_payload.extend_from_slice(&active_col.to_le_bytes());
+        selection_payload.extend_from_slice(&0u16.to_le_bytes()); // irefActive (ignored)
+        selection_payload.extend_from_slice(&declared_u16.to_le_bytes());
+        for idx in 0..declared {
+            let row = u16::try_from(idx).expect("row should fit in u16");
+            selection_payload.extend_from_slice(&row.to_le_bytes()); // rwFirst
+            selection_payload.extend_from_slice(&row.to_le_bytes()); // rwLast
+            selection_payload.push(0); // colFirst
+            selection_payload.push(0); // colLast
+        }
+        stream.extend_from_slice(&record(RECORD_SELECTION, &selection_payload));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_view_state(&stream, 0).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET_METADATA + 1,
+            "warnings should remain capped; warnings={:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("SELECTION record") && w.contains("cap=")),
+            "expected forced selection-cap warning, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(SHEET_METADATA_WARNINGS_SUPPRESSED),
+            "suppression marker should remain last; warnings={:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_view_state_selection_record_cap_warning_is_emitted_even_when_other_metadata_warnings_are_suppressed(
+    ) {
+        let selection_record_cap = MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE;
+        assert!(selection_record_cap >= 2, "test requires selection record cap >= 2");
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill the metadata warning buffer with malformed WINDOW2 records (payload too short).
+        for _ in 0..(MAX_WARNINGS_PER_SHEET_METADATA + 10) {
+            stream.extend_from_slice(&record(RECORD_WINDOW2, &[0u8; 1]));
+        }
+
+        // Emit more distinct pane selections than the retention cap.
+        let active_row: u16 = 0;
+        let active_col: u16 = 0;
+        for pane in 0u8..u8::try_from(selection_record_cap + 5).unwrap() {
+            let mut payload = Vec::new();
+            payload.push(pane);
+            payload.extend_from_slice(&active_row.to_le_bytes());
+            payload.extend_from_slice(&active_col.to_le_bytes());
+            payload.extend_from_slice(&0u16.to_le_bytes()); // irefActive
+            payload.extend_from_slice(&0u16.to_le_bytes()); // cref=0
+            stream.extend_from_slice(&record(RECORD_SELECTION, &payload));
+        }
+
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_view_state(&stream, 0).expect("parse");
+        assert_eq!(
+            parsed.warnings.len(),
+            MAX_WARNINGS_PER_SHEET_METADATA + 1,
+            "warnings should remain capped; warnings={:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many SELECTION records") && w.contains("cap=")),
+            "expected forced selection-record-cap warning, got {:?}",
             parsed.warnings
         );
         assert_eq!(
