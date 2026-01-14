@@ -4,6 +4,7 @@ import { mergeAcross, mergeCells, mergeCenter, unmergeCells } from "../document/
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import { showInputBox, showToast, type QuickPickItem } from "../extensions/ui.js";
 import type { LayoutController } from "../layout/layoutController.js";
+import { PanelIds } from "../panels/panelRegistry.js";
 import { t } from "../i18n/index.js";
 import type { ThemeController } from "../theme/themeController.js";
 
@@ -686,6 +687,38 @@ export function registerDesktopCommands(params: {
       icon: null,
       description: "Send the selected drawing backward",
       keywords: ["arrange", "drawing", "send backward", "z order", "layer"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "pageLayout.arrange.selectionPane",
+    "Selection Pane",
+    () => {
+      if (!layoutController) return;
+      const panelId = PanelIds.SELECTION_PANE;
+      const wasMinimized = Boolean((layoutController.layout as any)?.floating?.[panelId]?.minimized);
+      // Excel-style: always open (idempotent) instead of toggling closed.
+      layoutController.openPanel(panelId);
+      if (wasMinimized) layoutController.setFloatingPanelMinimized(panelId, false);
+
+      // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
+      if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const el = document.querySelector<HTMLElement>('[data-testid="selection-pane"]');
+            try {
+              el?.focus();
+            } catch {
+              // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
+            }
+          }),
+        );
+      }
+    },
+    {
+      category: commandCategoryPageLayout,
+      icon: null,
+      description: "Open the Selection Pane panel",
+      keywords: ["selection pane", "arrange", "drawing", "objects", "panel"],
     },
   );
 

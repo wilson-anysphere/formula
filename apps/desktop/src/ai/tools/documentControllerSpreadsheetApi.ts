@@ -1,5 +1,6 @@
 import { DocumentController } from "../../document/documentController.js";
 import { applyStylePatch } from "../../formatting/styleTable.js";
+import { getStyleNumberFormat } from "../../formatting/styleFieldAccess.js";
 
 import { normalizeFormulaTextOpt } from "@formula/engine/backend/formula";
 
@@ -62,7 +63,8 @@ function styleToCellFormat(style: DocumentControllerStyle | null | undefined): C
     if (color != null) out.background_color = color;
   }
 
-  if (typeof style.numberFormat === "string") out.number_format = style.numberFormat;
+  const numberFormat = getStyleNumberFormat(style);
+  if (numberFormat != null) out.number_format = numberFormat;
 
   const alignment = style.alignment;
   if (alignment && typeof alignment === "object") {
@@ -92,11 +94,6 @@ function styleToCellFormat(style: DocumentControllerStyle | null | undefined): C
   if (out.background_color === undefined) {
     if (typeof styleAny.background_color === "string") out.background_color = styleAny.background_color;
     else if (typeof styleAny.backgroundColor === "string") out.background_color = styleAny.backgroundColor;
-  }
-
-  if (out.number_format === undefined) {
-    if (typeof styleAny.number_format === "string") out.number_format = styleAny.number_format;
-    else if (typeof styleAny.numberFormat === "string") out.number_format = styleAny.numberFormat;
   }
 
   if (out.horizontal_align === undefined) {
@@ -130,7 +127,9 @@ function cellFormatToStylePatch(format: Partial<CellFormat> | null | undefined):
   }
 
   if (typeof format.number_format === "string") {
-    patch.numberFormat = format.number_format;
+    const raw = format.number_format;
+    const trimmed = raw.trim();
+    patch.numberFormat = !trimmed || trimmed.toLowerCase() === "general" ? null : raw;
   }
 
   if (format.horizontal_align === "left" || format.horizontal_align === "center" || format.horizontal_align === "right") {
@@ -214,7 +213,11 @@ function styleForWrite(baseStyle: DocumentControllerStyle, format: CellFormat | 
   }
 
   if (typeof format.number_format === "string") {
-    style.numberFormat = format.number_format;
+    const raw = format.number_format;
+    const trimmed = raw.trim();
+    if (trimmed && trimmed.toLowerCase() !== "general") {
+      style.numberFormat = raw;
+    }
   }
 
   if (format.horizontal_align === "left" || format.horizontal_align === "center" || format.horizontal_align === "right") {
