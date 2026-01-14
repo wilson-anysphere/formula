@@ -155,7 +155,7 @@ Tuning knobs:
 
 - `FORMULA_DESKTOP_MEMORY_RUNS` (default: 10)
 - `FORMULA_DESKTOP_MEMORY_SETTLE_MS` (default: 5000)
-- `FORMULA_DESKTOP_MEMORY_TIMEOUT_MS` (default: 30000)
+- `FORMULA_DESKTOP_MEMORY_TIMEOUT_MS` (default: 20000)
 - `FORMULA_DESKTOP_IDLE_RSS_TARGET_MB` (default: 100) to set a budget
 - `FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1` (or `--enforce`) to fail the command when p95 exceeds the budget
   - `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running in CI (the runner skips in CI by default)
