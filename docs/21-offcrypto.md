@@ -329,9 +329,10 @@ Encrypted workbook fixtures are stored under:
 `fixtures/encrypted/ooxml/README.md` is the **canonical** source of truth. At time of writing:
 
 - `agile.xlsx`, `standard.xlsx`, `standard-4.2.xlsx`, `standard-rc4.xlsx`, `agile-large.xlsx`,
-  `standard-large.xlsx`, `agile-basic.xlsm`, `standard-basic.xlsm`: `password`
+  `standard-large.xlsx`, `agile-basic.xlsm`, `standard-basic.xlsm`, `basic-password.xlsm`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`) (distinct from a *missing* password)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
+- `agile-unicode-excel.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
 
 These are **vendored test fixtures** used by multiple encryption-focused tests (for example under
 `crates/formula-io/tests/*encrypted_ooxml*` and `crates/formula-xlsx/tests/encrypted_ooxml_*.rs`).

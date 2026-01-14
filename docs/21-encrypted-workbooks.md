@@ -629,6 +629,7 @@ When implementing (or calling) encrypted-workbook support:
 - Encrypted/password-protected OOXML workbook fixtures live under `fixtures/encrypted/ooxml/` (for
   example `.xlsx` and `.xlsm`). The repo currently includes:
   - `fixtures/encrypted/ooxml/plaintext.xlsx` (unencrypted ZIP/OPC workbook used as the known-good plaintext)
+  - `fixtures/encrypted/ooxml/plaintext-excel.xlsx` (unencrypted ZIP/OPC workbook produced by Microsoft Excel; used to exercise additional real-world ZIP/part variations)
   - `fixtures/encrypted/ooxml/plaintext-large.xlsx` (unencrypted ZIP/OPC workbook used to exercise multi-segment decryption; intentionally > 4096 bytes)
   - `fixtures/encrypted/ooxml/agile.xlsx` (Agile encryption; `EncryptionInfo` 4.4)
   - `fixtures/encrypted/ooxml/agile-large.xlsx` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext-large.xlsx`)
@@ -638,7 +639,9 @@ When implementing (or calling) encrypted-workbook support:
   - `fixtures/encrypted/ooxml/standard-large.xlsx` (Standard encryption; `EncryptionInfo` 3.2; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/agile-empty-password.xlsx` (Agile encryption; `EncryptionInfo` 4.4; empty password `""`)
   - `fixtures/encrypted/ooxml/agile-unicode.xlsx` (Agile encryption; `EncryptionInfo` 4.4; Unicode password `pässwörd` in NFC normalization form)
+  - `fixtures/encrypted/ooxml/agile-unicode-excel.xlsx` (Agile encryption; `EncryptionInfo` 4.4; Unicode password `pässwörd🔒` in NFC form; decrypts to `plaintext-excel.xlsx`)
   - `fixtures/encrypted/ooxml/plaintext-basic.xlsm` (unencrypted ZIP/OPC macro-enabled workbook used as the known-good `.xlsm` plaintext)
+  - `fixtures/encrypted/ooxml/basic-password.xlsm` (Agile encryption; `EncryptionInfo` 4.4; password `password`; macro-enabled workbook)
   - `fixtures/encrypted/ooxml/agile-basic.xlsm` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext-basic.xlsm`)
   - `fixtures/encrypted/ooxml/standard-basic.xlsm` (Standard encryption; `EncryptionInfo` 3.2; decrypts to `plaintext-basic.xlsm`)
   See `fixtures/encrypted/ooxml/README.md` for more fixture details.
