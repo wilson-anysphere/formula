@@ -2,6 +2,8 @@ import { realpathSync } from 'node:fs';
 import { readFile, readlink, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import { sleep } from './sleep.ts';
+
 export function parseProcChildrenPids(content: string): number[] {
   const trimmed = content.trim();
   if (!trimmed) return [];
@@ -81,32 +83,6 @@ export async function collectProcessTreePidsLinux(rootPid: number): Promise<numb
   return [...seen];
 }
 
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolvePromise();
-    }, ms);
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-    };
-    const onAbort = () => {
-      cleanup();
-      rejectPromise(new Error('aborted'));
-    };
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort);
-    }
-  }).catch(() => {
-    // Ignore abort errors; callers treat abort as a best-effort early exit.
-  });
-}
-
 export async function findPidForExecutableLinux(
   rootPid: number,
   binPath: string,
@@ -130,7 +106,12 @@ export async function findPidForExecutableLinux(
       if (!exe) continue;
       if (exe === binReal || exe === binResolved) return pid;
     }
-    await sleep(50, signal);
+    try {
+      await sleep(50, signal);
+    } catch (err) {
+      // Ignore abort errors; the next loop iteration checks `signal.aborted` and returns null.
+      if ((err as Error).message !== 'aborted') throw err;
+    }
   }
   return null;
 }
@@ -161,4 +142,3 @@ export async function getProcessTreeRssBytesLinux(rootPid: number): Promise<numb
   }
   return total;
 }
-

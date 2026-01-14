@@ -50,6 +50,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
+import { sleep } from './sleep.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
@@ -70,30 +71,6 @@ import {
 //   background check/download on startup, which can add nondeterministic CPU/memory/network
 //   activity and skew startup/idle-memory benchmarks.
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
-
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolvePromise();
-    }, ms);
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-    };
-    const onAbort = () => {
-      cleanup();
-      rejectPromise(new Error('aborted'));
-    };
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort);
-    }
-  });
-}
 
 function getRssMbViaPs(pid: number): number | null {
   try {

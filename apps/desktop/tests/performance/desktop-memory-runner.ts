@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import { buildBenchmarkResultFromValues } from './benchmark.ts';
+import { sleep } from './sleep.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
@@ -102,30 +103,6 @@ function parseArgs(argv: string[]): {
   }
 
   return out;
-}
-
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolvePromise();
-    }, ms);
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-    };
-    const onAbort = () => {
-      cleanup();
-      rejectPromise(new Error('aborted'));
-    };
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort);
-    }
-  });
 }
 
 function parsePsTable(output: string): { pid: number; ppid: number; rssKb: number }[] {
