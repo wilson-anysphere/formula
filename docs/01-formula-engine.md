@@ -186,6 +186,10 @@ Implementation notes:
   engine’s internal grid storage (useful for streaming/virtualized worksheets). In that case the
   engine calls `get` with the plain local sheet name (e.g. `"Sheet1"`), not a `"[workbook]sheet"`
   key.
+  * Because provider-backed values may exist for addresses that are not present in the engine’s
+    internal cell storage, enabling an `ExternalValueProvider` can force the evaluator to use
+    **dense** iteration for local range functions (e.g. `SUM(A:A)`), which may have performance
+    implications for large ranges.
 * The engine currently resolves ranges by calling `get(sheet, addr)` **per-cell** (there is no
   bulk/range API). This is especially important for whole-row/whole-column references: for external
   sheets the engine assumes Excel’s default grid size (1,048,576 rows × 16,384 columns), so ranges

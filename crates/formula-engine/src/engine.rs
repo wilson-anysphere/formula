@@ -1408,6 +1408,10 @@ impl Engine {
     /// - **Out-of-band values** for the current workbook when a cell is not present in the engine's
     ///   internal grid storage (useful for streaming/virtualized sheets).
     ///
+    /// Performance note: when an external value provider is configured, the evaluator may
+    /// conservatively fall back to dense range iteration for local sheets (to avoid missing
+    /// provider-backed values). This can be expensive for large ranges like `A:A`.
+    ///
     /// See [`ExternalValueProvider`] for the canonical external sheet-key formats and
     /// [`ExternalValueProvider::sheet_order`] semantics used for expanding external 3D sheet spans.
     pub fn set_external_value_provider(
@@ -8693,6 +8697,11 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// bulk/range API). For external sheets, whole-row/whole-column references are resolved against
 /// Excel’s default sheet bounds (1,048,576 rows × 16,384 columns), which can result in a very large
 /// number of provider calls.
+///
+/// Because provider-backed values may exist for addresses that are not present in the engine’s
+/// internal cell storage, enabling an `ExternalValueProvider` can also force the evaluator to use
+/// dense iteration for local range functions (e.g. `SUM(A:A)`), which may have performance
+/// implications for large ranges.
 ///
 /// When multi-threaded recalculation is enabled, provider methods may also be called concurrently
 /// from multiple threads. Implementations should be thread-safe and keep lookups fast (e.g. by
