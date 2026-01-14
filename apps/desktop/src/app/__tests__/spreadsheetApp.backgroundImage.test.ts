@@ -434,4 +434,72 @@ describe("SpreadsheetApp worksheet background images", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("hydrates worksheet background images from the desktop workbook backend in shared grid mode", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
+      const fixtureBytes = readFileSync(resolveFixturePath("fixtures/xlsx/basic/background-image.xlsx"));
+      const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
+      const imageId = imageEntry.id.split("/").pop() ?? imageEntry.id;
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      createPatternSpy.mockClear();
+      createdPatterns = [];
+      patternFillRects = [];
+      const doc = app.getDocument();
+      doc.markSaved();
+      expect(doc.isDirty).toBe(false);
+
+      const workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
+      const bytesBase64 = Buffer.from(imageEntry.bytes).toString("base64");
+
+      await hydrateSheetBackgroundImagesFromBackend({
+        app,
+        workbookSheetStore,
+        backend: {
+          async listImportedSheetBackgroundImages() {
+            return [
+              {
+                sheet_name: "Sheet1",
+                worksheet_part: "xl/worksheets/sheet1.xml",
+                image_id: imageId,
+                bytes_base64: bytesBase64,
+                mime_type: imageEntry.mimeType,
+              },
+            ];
+          },
+        },
+      });
+
+      await app.whenIdle();
+
+      expect(app.getSheetBackgroundImageId(app.getCurrentSheetId())).toBe(imageId);
+      expect(doc.isDirty).toBe(false);
+      expect(createPatternSpy).toHaveBeenCalled();
+      const basePatternRects = patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base"));
+      expect(basePatternRects.length).toBeGreaterThan(0);
+
+      // With DPR=2 and CanvasPattern.setTransform available, the shared-grid renderer should bake the
+      // DPR into the offscreen tile resolution.
+      expect(basePatternRects.some((rect) => (rect.pattern.source as any)?.width === 16)).toBe(true);
+      const hiDpiPattern = createdPatterns.find((p) => (p.source as any)?.width === 16);
+      expect((hiDpiPattern as any)?.setTransform).toBeDefined();
+      expect(((hiDpiPattern as any).setTransform as any).mock?.calls?.length ?? 0).toBeGreaterThan(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
