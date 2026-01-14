@@ -70,7 +70,7 @@ pub fn xlsb_error_code_from_literal(literal: &str) -> Option<u8> {
         "#REF!" => Some(0x17),
         "#NAME?" => Some(0x1D),
         "#NUM!" => Some(0x24),
-        "#N/A" => Some(0x2A),
+        "#N/A" | "#N/A!" => Some(0x2A),
         "#GETTING_DATA" => Some(0x2B),
         "#SPILL!" => Some(0x2C),
         "#CALC!" => Some(0x2D),

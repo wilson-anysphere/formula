@@ -46,3 +46,21 @@ fn encode_decode_roundtrip_sum_over_array_constant() {
     parse_formula(&format!("={text}"), ParseOptions::default())
         .expect("formula-engine parses decoded formula");
 }
+
+#[test]
+fn encode_accepts_na_bang_error_literal() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("=#N/A!", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+    let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(text, "#N/A");
+}
+
+#[test]
+fn encode_accepts_na_bang_error_literal_in_array_constant() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("={#N/A!}", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(!encoded.rgcb.is_empty());
+    let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(text, "{#N/A}");
+}
