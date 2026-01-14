@@ -1242,6 +1242,8 @@ export class SpreadsheetApp {
   private splitViewDrawingHitTestIndexRowsVersion: number | null = null;
   private splitViewDrawingHitTestIndexColsVersion: number | null = null;
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly chartCursorScratchRect = { left: 0, top: 0, width: 0, height: 0 };
+  private readonly chartCursorScratchBounds = { x: 0, y: 0, width: 0, height: 0 };
   private readonly drawingSelectionHandleCentersScratch: ResizeHandleCenter[] = [];
   private selectedDrawingId: DrawingObjectId | null = null;
   private selectedDrawingIndex: number | null = null;
@@ -11770,27 +11772,15 @@ export class SpreadsheetApp {
     if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
     if (px < 0 || py < 0) return null;
 
-    const intersect = (
-      a: { left: number; top: number; width: number; height: number },
-      b: { left: number; top: number; width: number; height: number },
-    ): { left: number; top: number; width: number; height: number } | null => {
-      const left = Math.max(a.left, b.left);
-      const top = Math.max(a.top, b.top);
-      const right = Math.min(a.left + a.width, b.left + b.width);
-      const bottom = Math.min(a.top + a.height, b.top + b.height);
-      const width = right - left;
-      const height = bottom - top;
-      if (width <= 0 || height <= 0) return null;
-      return { left, top, width, height };
-    };
-
     const { frozenRows, frozenCols } = this.getFrozen();
     const selectedId = this.selectedChartId;
+    const rectScratch = this.chartCursorScratchRect;
+    const boundsScratch = this.chartCursorScratchBounds;
 
     for (let i = charts.length - 1; i >= 0; i -= 1) {
       const chart = charts[i]!;
       if (chart.sheetId !== sheetId) continue;
-      const rect = this.chartAnchorToViewportRect(chart.anchor);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
       if (!rect) continue;
 
       const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
@@ -11806,17 +11796,20 @@ export class SpreadsheetApp {
               ? "bottomLeft"
               : "bottomRight";
       const paneRect = layout.paneRects[paneKey];
-      const visible = intersect(rect, { left: paneRect.x, top: paneRect.y, width: paneRect.width, height: paneRect.height });
-      if (!visible) continue;
-      if (px < visible.left || px > visible.left + visible.width) continue;
-      if (py < visible.top || py > visible.top + visible.height) continue;
+      const leftVisible = Math.max(rect.left, paneRect.x);
+      const topVisible = Math.max(rect.top, paneRect.y);
+      const rightVisible = Math.min(rect.left + rect.width, paneRect.x + paneRect.width);
+      const bottomVisible = Math.min(rect.top + rect.height, paneRect.y + paneRect.height);
+      if (rightVisible <= leftVisible || bottomVisible <= topVisible) continue;
+      if (px < leftVisible || px > rightVisible) continue;
+      if (py < topVisible || py > bottomVisible) continue;
 
       if (selectedId === chart.id) {
-        const handle = hitTestResizeHandle(
-          { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-          px,
-          py,
-        );
+        boundsScratch.x = rect.left;
+        boundsScratch.y = rect.top;
+        boundsScratch.width = rect.width;
+        boundsScratch.height = rect.height;
+        const handle = hitTestResizeHandle(boundsScratch, px, py);
         if (handle) return cursorForResizeHandle(handle);
       }
 
@@ -13489,7 +13482,10 @@ export class SpreadsheetApp {
     if (direct !== undefined) return direct;
     return this.lowerBound(this.colIndexByVisual, col);
   }
-  private chartAnchorToViewportRect(anchor: ChartRecord["anchor"]): { left: number; top: number; width: number; height: number } | null {
+  private chartAnchorToViewportRect(
+    anchor: ChartRecord["anchor"],
+    out?: { left: number; top: number; width: number; height: number },
+  ): { left: number; top: number; width: number; height: number } | null {
     if (!anchor || !("kind" in anchor)) return null;
 
     const z = (() => {
@@ -13586,12 +13582,12 @@ export class SpreadsheetApp {
     const scrollX = anchor.kind === "absolute" ? this.scrollX : (anchor.fromCol < frozenCols ? 0 : this.scrollX);
     const scrollY = anchor.kind === "absolute" ? this.scrollY : (anchor.fromRow < frozenRows ? 0 : this.scrollY);
 
-    return {
-      left: left - scrollX,
-      top: top - scrollY,
-      width,
-      height
-    };
+    const target = out ?? { left: 0, top: 0, width: 0, height: 0 };
+    target.left = left - scrollX;
+    target.top = top - scrollY;
+    target.width = width;
+    target.height = height;
+    return target;
   }
 
   private chartCellOriginPx(cell: { row: number; col: number }): { x: number; y: number } {
