@@ -370,6 +370,10 @@ Desktop encryption commands (Command Palette):
 
 Notes:
 
+- Desktop `CollabSession` wiring (`apps/desktop/src/app/spreadsheetApp.ts`) resolves encryption keys with this precedence:
+  1) If the cell already has a valid `enc` payload and the referenced key is available locally, use `enc.keyId`.
+  2) Otherwise, fall back to the shared encrypted-range policy (`metadata.encryptedRanges`) `keyIdForCell`.
+  - This allows clients to keep decrypting existing encrypted cells even if the policy metadata is missing/out-of-sync, while still supporting key rotation/overwrite flows when the old ciphertext key is unavailable.
 - Plaintext is JSON `{ value, formula, format? }` and is bound to `{ docId, sheetId, row, col }` via AES-GCM Additional Authenticated Data (AAD) to prevent replay across docs/cells.
   - The encryption codec supports an optional `format` field.
   - By default (`encryption.encryptFormat` unset/false), `@formula/collab-session` + the desktop binder only encrypt `value`/`formula` and leave per-cell formatting stored separately under the shared plaintext `format` key (legacy behavior).
