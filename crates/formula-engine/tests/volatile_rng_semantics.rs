@@ -233,7 +233,12 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
             changed_array = true;
         }
 
-        if changed_a1 && changed_a2 && changed_a3 && changed_array {
+        if changed_a1
+            && changed_a2
+            && changed_a3
+            && changed_array
+            && observed_distinct_draws_in_cell
+        {
             break;
         }
     }

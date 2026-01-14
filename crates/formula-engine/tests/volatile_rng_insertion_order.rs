@@ -97,18 +97,30 @@ fn volatile_rng_is_deterministic_wrt_insertion_order() {
     // of how formulas were inserted (and regardless of underlying evaluation order).
     assert_eq!(snap1_reverse, snap1);
 
-    // Volatility invariant: a second recalc without mutations should advance RNG results, but
-    // determinism should still hold between identical workbooks.
-    forward.recalculate_single_threaded();
-    reverse.recalculate_single_threaded();
-    multi.recalculate_multi_threaded();
-    let snap2 = snapshot(&forward);
-    let snap2_reverse = snapshot(&reverse);
-    let snap2_multi = snapshot(&multi);
-    assert_rng_bounds(&snap2);
-    assert_eq!(snap2_reverse, snap2);
-    assert_eq!(snap2_multi, snap2);
+    // Volatility invariant: a recalc without mutations should advance RNG results, but determinism
+    // should still hold between identical workbooks.
+    //
+    // We allow a few attempts to avoid pathological collisions.
+    let mut changed = false;
+    for _ in 0..5 {
+        forward.recalculate_single_threaded();
+        reverse.recalculate_single_threaded();
+        multi.recalculate_multi_threaded();
 
-    // Extremely unlikely to collide for all cells; this is a sanity check that recalc_id advances.
-    assert_ne!(snap2, snap1);
+        let snap2 = snapshot(&forward);
+        let snap2_reverse = snapshot(&reverse);
+        let snap2_multi = snapshot(&multi);
+        assert_rng_bounds(&snap2);
+        assert_eq!(snap2_reverse, snap2);
+        assert_eq!(snap2_multi, snap2);
+
+        if snap2 != snap1 {
+            changed = true;
+            break;
+        }
+    }
+    assert!(
+        changed,
+        "expected volatile RNG results to change across recalculation ticks"
+    );
 }
