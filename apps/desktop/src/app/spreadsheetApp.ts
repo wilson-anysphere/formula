@@ -26304,9 +26304,19 @@ function coerceNumber(value: unknown): number | null {
   return null;
 }
 
+// Cache column-name conversions (0 -> A, 25 -> Z, 26 -> AA...). These are used in
+// hot render paths (legacy grid header labels, name box formatting) and the
+// domain is naturally bounded by Excel's max column count.
+const COL_NAME_CACHE: string[] = [];
+
 function colToName(col: number): string {
   if (!Number.isFinite(col) || col < 0) return "";
-  return colToNameA1(col);
+  const idx = Math.trunc(col);
+  const cached = COL_NAME_CACHE[idx];
+  if (cached !== undefined) return cached;
+  const name = colToNameA1(idx);
+  COL_NAME_CACHE[idx] = name;
+  return name;
 }
 
 function parseA1(a1: string): CellCoord {
