@@ -75,6 +75,38 @@ test("validate-windows-bundles.ps1 uses token-bounded x-scheme-handler markers (
   );
 });
 
+test("validate-windows-bundles.ps1 best-effort URL protocol scan requires scheme-specific markers (not just 'URL Protocol')", () => {
+  const match = text.match(/function\s+Find-ExeUrlProtocolMarker[\s\S]*?\n\s*}\s*\n/s);
+  assert.ok(match, "Expected Find-ExeUrlProtocolMarker function to exist");
+  const body = match[0];
+  // This scan is heuristic, but it should be anchored to scheme-specific registry paths to avoid
+  // prefix false positives (e.g. avoid treating formula-extra as satisfying formula).
+  assert.ok(
+    body.includes("shell\\open\\command"),
+    "Expected Find-ExeUrlProtocolMarker to scan for <scheme>\\\\shell\\\\open\\\\command markers.",
+  );
+  assert.doesNotMatch(
+    body,
+    /\"URL Protocol\"/,
+    "Expected Find-ExeUrlProtocolMarker to avoid using generic 'URL Protocol' markers without the scheme name.",
+  );
+});
+
+test("validate-windows-bundles.ps1 MSI URL protocol fallback scan is scheme-specific (no prefix matches)", () => {
+  const match = text.match(/\$schemeNeedles\s*=\s*@\([\s\S]*?\)\s*\n\s*\$schemeMarker\s*=\s*Find-BinaryMarkerInFile/s);
+  assert.ok(match, "Expected MSI URL protocol fallback to define $schemeNeedles for marker scanning.");
+  const block = match[0];
+  assert.ok(
+    block.includes("shell\\open\\command"),
+    "Expected MSI URL protocol fallback needles to include shell\\\\open\\\\command markers.",
+  );
+  assert.doesNotMatch(
+    block,
+    /\"URL Protocol\"/,
+    "Expected MSI URL protocol fallback needles to avoid generic 'URL Protocol' markers without the scheme name.",
+  );
+});
+
 test("validate-windows-bundles.ps1 validates all configured file association extensions (not just .xlsx) via MSI", () => {
   assert.match(
     text,
