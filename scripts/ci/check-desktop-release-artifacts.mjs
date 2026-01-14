@@ -202,7 +202,22 @@ function candidateTargetDirs() {
   if (candidates.length > 0) return dedupeRealpaths(candidates);
 
   // Fallback: search for src-tauri directories with tauri.conf.json (skip huge dirs).
-  const skipDirNames = new Set(["node_modules", ".git", ".cargo", ".pnpm-store", "dist", "build"]);
+  const skipDirNames = new Set([
+    ".git",
+    "node_modules",
+    ".pnpm-store",
+    ".turbo",
+    ".cache",
+    ".vite",
+    "dist",
+    "build",
+    "coverage",
+    "target",
+    "security-report",
+    "test-results",
+    "playwright-report",
+    ".cargo",
+  ]);
 
   /** @type {string[]} */
   const stack = [repoRoot];
