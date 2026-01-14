@@ -140,6 +140,13 @@ CI/tests also provide guard rails:
   for Spanish financial function spellings (including `NPV`/`IRR`), since missing entries otherwise
   silently fall back to English.
 
+From repo root you can run (optional but recommended when editing locale data):
+
+```bash
+bash scripts/cargo_agent.sh test -p formula-engine --test locale_function_tsv_completeness
+bash scripts/cargo_agent.sh test -p formula-engine --test locale_es_es_function_sentinels
+```
+
 ### Error translations (`<locale>.errors.tsv`)
 
 Locale-specific error literal spellings are tracked in TSV files in this directory
