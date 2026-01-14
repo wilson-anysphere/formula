@@ -516,6 +516,127 @@ describe("SpreadsheetApp chart selection + drag", () => {
     app.destroy();
     root.remove();
   });
+
+  it("canvas charts mode: dragging a chart updates its anchor", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Canvas Chart Drag",
+        position: "A1",
+      });
+
+      const before = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(before).toBeTruthy();
+      expect(before!.anchor.kind).toBe("twoCell");
+      const beforeAnchor = before!.anchor as any;
+
+      const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+      expect(rect).not.toBeNull();
+
+      const viewport = app.getDrawingInteractionViewport();
+      const originX = (viewport.headerOffsetX ?? 0) as number;
+      const originY = (viewport.headerOffsetY ?? 0) as number;
+
+      const startX = originX + rect.left + 10;
+      const startY = originY + rect.top + 10;
+      const endX = startX + 100; // move by one column (default col width)
+      const endY = startY;
+
+      dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 201 });
+      dispatchPointerEvent(root, "pointermove", { clientX: endX, clientY: endY, pointerId: 201 });
+      dispatchPointerEvent(root, "pointerup", { clientX: endX, clientY: endY, pointerId: 201 });
+
+      const after = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(after).toBeTruthy();
+      expect(after!.anchor.kind).toBe("twoCell");
+      const afterAnchor = after!.anchor as any;
+
+      expect(afterAnchor.fromCol).toBe(beforeAnchor.fromCol + 1);
+      expect(afterAnchor.toCol).toBe(beforeAnchor.toCol + 1);
+      expect(afterAnchor.fromRow).toBe(beforeAnchor.fromRow);
+      expect(afterAnchor.toRow).toBe(beforeAnchor.toRow);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
+
+  it("canvas charts mode: resizing a chart updates its twoCell anchor", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Canvas Chart Resize",
+        position: "A1",
+      });
+
+      const before = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(before).toBeTruthy();
+      expect(before!.anchor.kind).toBe("twoCell");
+      const beforeAnchor = before!.anchor as any;
+
+      const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+      expect(rect).not.toBeNull();
+
+      const viewport = app.getDrawingInteractionViewport();
+      const originX = (viewport.headerOffsetX ?? 0) as number;
+      const originY = (viewport.headerOffsetY ?? 0) as number;
+
+      // Start the resize drag by grabbing the SE handle.
+      const handleX = originX + rect.left + rect.width;
+      const handleY = originY + rect.top + rect.height;
+      const endX = handleX + 110; // increase width by ~1 column (default col width = 100)
+      const endY = handleY;
+
+      dispatchPointerEvent(root, "pointerdown", { clientX: handleX, clientY: handleY, pointerId: 202 });
+      dispatchPointerEvent(root, "pointermove", { clientX: endX, clientY: endY, pointerId: 202 });
+      dispatchPointerEvent(root, "pointerup", { clientX: endX, clientY: endY, pointerId: 202 });
+
+      const after = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(after).toBeTruthy();
+      expect(after!.anchor.kind).toBe("twoCell");
+      const afterAnchor = after!.anchor as any;
+
+      expect(afterAnchor.fromCol).toBe(beforeAnchor.fromCol);
+      expect(afterAnchor.fromRow).toBe(beforeAnchor.fromRow);
+      expect(afterAnchor.toCol).toBe(beforeAnchor.toCol + 1);
+      expect(afterAnchor.toRow).toBe(beforeAnchor.toRow);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
 });
 
 describe("SpreadsheetApp chart selection + drag (legacy grid)", () => {
