@@ -137,6 +137,9 @@ These scripts are designed to be safe to run locally:
 #### What the metrics mean
 
 - **`window_visible_ms`**: time from native process start until the main window is shown.
+- **`webview_loaded_ms`**: time from native process start until the WebView reports the initial page load finished
+  (native callback; useful for separating “shell/webview” cost from frontend JS work).
+- **`first_render_ms`**: time from native process start until the grid becomes visible (first meaningful render).
 - **`tti_ms`**: time-to-interactive (first input accepted); includes webview + frontend init.
 - **Startup benchmark kinds**:
   - **Full app** (`desktop.startup.*`): end-to-end UI startup (requires `apps/desktop/dist`); includes `first_render_ms`.
