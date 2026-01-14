@@ -279,6 +279,11 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
       }
     }
 
+    // Packages without an `exports` map (like `@formula/marketplace-shared`) still allow deep
+    // imports via `@scope/pkg/<path>`. When TS/TSX execution is unavailable, treat those
+    // subpaths as the effective entrypoint for skip decisions.
+    if (!exportsMap && exportKey !== ".") return exportKey;
+
     if (!target && exportKey === "." && typeof main === "string") target = main;
     return target;
   }
@@ -623,6 +628,11 @@ async function filterExternalDependencyTests(files, opts) {
         }
       }
     }
+
+    // Packages without an `exports` map (like `@formula/marketplace-shared`) still allow deep
+    // imports via `@scope/pkg/<path>`. When analyzing dependencies (including in environments
+    // without `node_modules`), treat those subpaths as resolvable workspace files.
+    if (!exportsMap && exportKey !== ".") return exportKey;
 
     if (!target && exportKey === "." && typeof main === "string") target = main;
     return target;
@@ -1012,6 +1022,11 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
         }
       }
     }
+
+    // Packages without an `exports` map (like `@formula/marketplace-shared`) still allow deep
+    // imports via `@scope/pkg/<path>`. When a workspace link is missing from `node_modules`,
+    // fall back to resolving those subpaths directly from the package root directory.
+    if (!exportsMap && exportKey !== ".") return exportKey;
 
     if (!target && exportKey === "." && typeof main === "string") target = main;
     return target;

@@ -34,20 +34,42 @@ test("resolve-ts-imports-loader resolves @formula/* workspace packages when defa
     throw miss;
   };
 
-  const resolved = await resolveTsImportsLoader("@formula/collab-session?raw", { parentURL: import.meta.url }, failingResolve);
-  assert.equal(resolved.shortCircuit, true);
-  assert.ok(typeof resolved.url === "string" && resolved.url.includes("?raw"));
+  const resolvedCollab = await resolveTsImportsLoader("@formula/collab-session?raw", { parentURL: import.meta.url }, failingResolve);
+  assert.equal(resolvedCollab.shortCircuit, true);
+  assert.ok(typeof resolvedCollab.url === "string" && resolvedCollab.url.includes("?raw"));
 
-  const url = new URL(resolved.url);
-  url.search = "";
-  url.hash = "";
-  const resolvedPath = fileURLToPath(url);
-  assert.ok(resolvedPath.startsWith(repoRoot), "expected resolved file to be within the repo");
+  const collabUrl = new URL(resolvedCollab.url);
+  collabUrl.search = "";
+  collabUrl.hash = "";
+  const collabPath = fileURLToPath(collabUrl);
+  assert.ok(collabPath.startsWith(repoRoot), "expected resolved file to be within the repo");
   assert.ok(
-    resolvedPath.includes(path.join("packages", "collab", "session")),
+    collabPath.includes(path.join("packages", "collab", "session")),
     "expected resolved file to be under packages/collab/session",
   );
-  assert.ok(statSync(resolvedPath).isFile(), "expected resolved workspace entrypoint to exist");
+  assert.ok(statSync(collabPath).isFile(), "expected resolved workspace entrypoint to exist");
+
+  // `@formula/marketplace-shared` is a workspace package backed by the repo `shared/` directory and
+  // does not use an `exports` map. Ensure we can still resolve deep imports (e.g. `.mjs` entrypoints)
+  // when the workspace link is missing from `node_modules`.
+  const resolvedShared = await resolveTsImportsLoader(
+    "@formula/marketplace-shared/extension-package/v2-browser.mjs#test",
+    { parentURL: import.meta.url },
+    failingResolve,
+  );
+  assert.equal(resolvedShared.shortCircuit, true);
+  assert.ok(typeof resolvedShared.url === "string" && resolvedShared.url.includes("#test"));
+
+  const sharedUrl = new URL(resolvedShared.url);
+  sharedUrl.search = "";
+  sharedUrl.hash = "";
+  const sharedPath = fileURLToPath(sharedUrl);
+  assert.ok(sharedPath.startsWith(repoRoot), "expected resolved file to be within the repo");
+  assert.ok(
+    sharedPath.includes(path.join("shared", "extension-package", "v2-browser.mjs")),
+    "expected resolved file to be under shared/extension-package",
+  );
+  assert.ok(statSync(sharedPath).isFile(), "expected resolved workspace deep import to exist");
 });
 
 function getBuiltInTypeScriptSupport() {
