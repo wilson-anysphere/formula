@@ -64,9 +64,9 @@ const XLSX_CONTENT_TYPES_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const XLSX_WORKBOOK_XML_MAX_BYTES: u64 = 16 * 1024 * 1024;
 const XLSX_WORKSHEET_XML_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const XLSX_THEME_XML_MAX_BYTES: u64 = 8 * 1024 * 1024;
-const XLSX_POWER_QUERY_XML_MAX_BYTES: u64 = 32 * 1024 * 1024;
+const XLSX_POWER_QUERY_XML_MAX_BYTES: u64 = MAX_OPTIONAL_PRESERVE_PART_BYTES;
 const XLSX_VBA_PROJECT_MAX_BYTES: u64 = 128 * 1024 * 1024;
-const XLSX_VBA_SIGNATURE_MAX_BYTES: u64 = 32 * 1024 * 1024;
+const XLSX_VBA_SIGNATURE_MAX_BYTES: u64 = MAX_OPTIONAL_PRESERVE_PART_BYTES;
 
 #[derive(Clone, Debug)]
 pub struct Sheet {
@@ -752,7 +752,7 @@ where
     //
     // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
     let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
-    let mut read_optional_part = |part: &str, max_bytes: u64| -> Option<Vec<u8>> {
+    let read_optional_part = |part: &str, max_bytes: u64| -> Option<Vec<u8>> {
         let reader = open_reader().ok()?;
         match formula_xlsx::read_part_from_reader_limited(reader, part, max_bytes) {
             Ok(bytes) => bytes,
