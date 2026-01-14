@@ -1773,9 +1773,9 @@ fn pivot_planned_row_group_by(
         return Ok(None);
     }
 
+    let base_table_key = normalize_ident(base_table);
     let (table_ref, group_key_accessors) =
         build_group_key_accessors(model, base_table, group_by, filter)?;
-    let base_table_key = normalize_ident(base_table);
 
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
@@ -1921,7 +1921,6 @@ fn pivot_planned_row_group_by(
     }
 
     let state_template: Vec<AggState> = agg_specs.iter().map(AggState::new).collect();
-    let base_table_key = normalize_ident(base_table);
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
