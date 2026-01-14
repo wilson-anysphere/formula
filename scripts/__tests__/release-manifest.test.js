@@ -362,6 +362,32 @@ test("validate-updater-manifest: validatePlatformEntries enforces per-OS artifac
   assert.match(errors.join("\n"), /(dmg|\\.deb)/i);
 });
 
+test("validate-updater-manifest: validatePlatformEntries enforces Windows arch tokens in updater asset names", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  manifest.platforms["windows-x86_64"].url =
+    "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_en-US.msi";
+
+  const assetNames = new Set(getAssetNamesFromPlatforms(manifest.platforms));
+  const { errors } = validatePlatformEntries({ platforms: manifest.platforms, assetNames });
+
+  assert.ok(errors.length > 0, "expected validation errors");
+  assert.match(errors.join("\n"), /windows-x86_64/i);
+  assert.match(errors.join("\n"), /arch token/i);
+});
+
+test("validate-updater-manifest: validatePlatformEntries enforces Linux arch tokens in updater asset names", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  manifest.platforms["linux-aarch64"].url =
+    "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0.AppImage";
+
+  const assetNames = new Set(getAssetNamesFromPlatforms(manifest.platforms));
+  const { errors } = validatePlatformEntries({ platforms: manifest.platforms, assetNames });
+
+  assert.ok(errors.length > 0, "expected validation errors");
+  assert.match(errors.join("\n"), /linux-aarch64/i);
+  assert.match(errors.join("\n"), /arch token/i);
+});
+
 test("tauri-minisign: verifies latest.json.sig with a test Ed25519 keypair", async () => {
   const manifestText = await readTextFixture("latest.multi-platform.json");
   const manifestBytes = Buffer.from(manifestText, "utf8");
