@@ -144,12 +144,19 @@ describe("SpreadsheetApp clipboard wrappers respect unified edit mode", () => {
     await app.copyToClipboard();
     expect(provider.write).toHaveBeenCalledTimes(1);
 
+    app.copy();
+    await app.whenIdle();
+    expect(provider.write).toHaveBeenCalledTimes(2);
+
     (globalThis as any).__formulaSpreadsheetIsEditing = true;
     await app.copyToClipboard();
-    expect(provider.write).toHaveBeenCalledTimes(1);
+    expect(provider.write).toHaveBeenCalledTimes(2);
+
+    app.copy();
+    await app.whenIdle();
+    expect(provider.write).toHaveBeenCalledTimes(2);
 
     app.destroy();
     root.remove();
   });
 });
-

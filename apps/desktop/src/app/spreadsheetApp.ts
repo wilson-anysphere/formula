@@ -5395,7 +5395,7 @@ export class SpreadsheetApp {
    */
   copy(): void {
     if (this.inlineEditController.isOpen()) return;
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     const target = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (target) {
       const tag = target.tagName;
@@ -5413,7 +5413,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     const sheetId = this.sheetId;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
@@ -5446,7 +5446,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     const sheetId = this.sheetId;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
@@ -5479,7 +5479,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.clearSelectionContentsInternal();
     this.refresh();
   }
