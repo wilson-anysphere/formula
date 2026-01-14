@@ -102,6 +102,7 @@ fn force_link_inventory_modules() {
         builtins_statistical::__force_link,
         builtins_statistical_distributions::__force_link,
         builtins_text::__force_link,
+        builtins_text_dbcs::__force_link,
         financial::__force_link,
     ];
 
