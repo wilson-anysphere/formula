@@ -1042,16 +1042,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Reorder a sheet in the workbook tab list.
-    ///
-    /// Note: sheet ids are stable; reordering only affects the user-facing workbook tab order.
-    pub fn reorder_sheet(&mut self, sheet: &str, new_index: usize) -> bool {
-        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
-            return false;
-        };
-        self.workbook.reorder_sheet(sheet_id, new_index)
-    }
-
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
     ///
     /// When unset, sheets default to Excel-compatible dimensions

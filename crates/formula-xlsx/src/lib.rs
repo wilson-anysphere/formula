@@ -159,7 +159,7 @@ pub use writer::{
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, Comment, Workbook, WorksheetId};
+use formula_model::{CellRef, CellValue, Comment, ErrorValue, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
