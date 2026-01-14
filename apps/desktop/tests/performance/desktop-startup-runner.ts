@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   defaultDesktopBinPath,
   percentile,
+  repoRoot,
   runOnce,
   type StartupMetrics,
 } from "./desktopStartupUtil.ts";
@@ -28,9 +28,6 @@ type Summary = {
   enforce: boolean;
   webviewLoaded?: { p50: number; p95: number; targetMs: number };
 };
-
-// Ensure paths are rooted at repo root even when invoked from elsewhere.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 function usage(): string {
   return [

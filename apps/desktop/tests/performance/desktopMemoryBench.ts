@@ -20,9 +20,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { readFile, readlink, readdir } from 'node:fs/promises';
-import { dirname, parse, resolve } from 'node:path';
+import { parse, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 
 import { type BenchmarkResult } from './benchmark.ts';
 import {
@@ -31,13 +30,11 @@ import {
   median,
   percentile,
   parseStartupLine as parseStartupMetricsLine,
+  repoRoot,
   shouldUseXvfb,
   terminateProcessTree,
   stdDev,
 } from './desktopStartupUtil.ts';
-
-// Ensure paths are rooted at repo root even when invoked from elsewhere.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 function resolvePerfHome(): string {
   const fromEnv = process.env.FORMULA_PERF_HOME;

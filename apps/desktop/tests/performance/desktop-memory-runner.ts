@@ -2,12 +2,12 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, parse, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
-import { fileURLToPath } from "node:url";
 
 import {
   defaultDesktopBinPath,
   parseStartupLine,
   percentile,
+  repoRoot,
   shouldUseXvfb,
   terminateProcessTree,
   type StartupMetrics,
@@ -19,9 +19,6 @@ type Summary = {
   rssMb: { p50: number; p95: number; targetMb: number };
   enforce: boolean;
 };
-
-// Ensure paths are rooted at repo root even when invoked from elsewhere.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 function resolvePerfHome(): string {
   const fromEnv = process.env.FORMULA_PERF_HOME;
