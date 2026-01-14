@@ -64,6 +64,13 @@ FORMULA_RUN_COLLAB_SESSION_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_T
 
 Tip: set `PERF_JSON=1` to emit structured JSON metrics per scenario (useful for CI parsing), and optionally set `PERF_MAX_TOTAL_MS_*` / `PERF_MAX_PEAK_*` env vars to enforce budgets.
 
+Common knobs:
+
+- `PERF_CELL_UPDATES`, `PERF_BATCH_SIZE`, `PERF_COLS` (workload sizing)
+- `PERF_SCENARIO=yjs-to-dc|dc-to-yjs|all` (run one direction only)
+- `PERF_KEY_ENCODING=canonical|legacy|rxc` (Yjs→DC runs; benchmark key normalization)
+- `PERF_INCLUDE_FORMAT=1` / `PERF_FORMAT_VARIANTS` (exercise formatting paths)
+
 There is also a manual GitHub Actions workflow to run these in CI: [`.github/workflows/collab-perf.yml`](../.github/workflows/collab-perf.yml).
 
 ## Yjs workbook schema (roots + conventions)
