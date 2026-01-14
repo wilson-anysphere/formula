@@ -1002,17 +1002,17 @@ fn canonicalize_and_localize_all_cube_function_names() {
     assert_roundtrip(
         &locale::DE_DE,
         "=CUBEMEMBER(\"conn\",\"member\",\"caption\")",
-        "=CUBEMITGLIED(\"conn\";\"member\";\"caption\")",
+        "=CUBEELEMENT(\"conn\";\"member\";\"caption\")",
     );
     assert_roundtrip(
         &locale::DE_DE,
         "=CUBEMEMBERPROPERTY(\"conn\",\"member\",\"prop\")",
-        "=CUBEMITGLIEDSEIGENSCHAFT(\"conn\";\"member\";\"prop\")",
+        "=CUBEELEMENTEIGENSCHAFT(\"conn\";\"member\";\"prop\")",
     );
     assert_roundtrip(
         &locale::DE_DE,
         "=CUBERANKEDMEMBER(\"conn\",\"set\",3,\"caption\")",
-        "=CUBERANGMITGLIED(\"conn\";\"set\";3;\"caption\")",
+        "=CUBERANGELEMENT(\"conn\";\"set\";3;\"caption\")",
     );
     assert_roundtrip(
         &locale::DE_DE,
@@ -1027,7 +1027,7 @@ fn canonicalize_and_localize_all_cube_function_names() {
     assert_roundtrip(
         &locale::DE_DE,
         "=CUBEKPIMEMBER(\"conn\",\"kpi\",\"property\",\"caption\")",
-        "=CUBEKPIMITGLIED(\"conn\";\"kpi\";\"property\";\"caption\")",
+        "=CUBEKPIELEMENT(\"conn\";\"kpi\";\"property\";\"caption\")",
     );
 
     // fr-FR
