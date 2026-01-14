@@ -626,6 +626,9 @@ install WebView2 automatically if it is missing by using Tauri's WebView2 instal
   - Built-artifact inspection: `python scripts/ci/check-windows-webview2-installer.py` (asserts the produced installers
     contain a WebView2 bootstrapper/runtime reference), failing the release build if this regresses.
     - Note: this inspection also supports the `fixedRuntime` mode (it will look for fixed runtime payload files).
+    - Note: for `downloadBootstrapper` mode, installers may reference the bootstrapper via a download URL (e.g.
+      `go.microsoft.com/fwlink/?LinkId=2124703`) instead of embedding `MicrosoftEdgeWebView2Setup.exe`; the checker treats
+      those URL markers as valid evidence too.
 
 To verify locally after a Windows build, run:
 
