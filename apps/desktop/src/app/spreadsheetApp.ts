@@ -10719,7 +10719,10 @@ export class SpreadsheetApp {
       if (!rawAnchor || typeof rawAnchor !== "object") return uiAnchor;
       if (!uiAnchor || typeof uiAnchor !== "object") return uiAnchor;
 
-      const normalizeTag = (tag: string): string => tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+      const normalizeTag = (tag: string): string => {
+        const normalized = tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+        return normalized.endsWith("anchor") ? normalized.slice(0, -"anchor".length) : normalized;
+      };
       const normalizeEmu = (n: unknown): number => {
         const num = typeof n === "number" ? n : typeof n === "bigint" ? Number(n) : Number(n);
         // EMU values are typically integers in the underlying DrawingML schema, but UI operations

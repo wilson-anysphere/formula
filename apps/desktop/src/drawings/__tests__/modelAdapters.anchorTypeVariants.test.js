@@ -55,6 +55,31 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects accepts OneCell anchor type
   });
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects accepts OneCellAnchor type variants (OneCellAnchor)", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "OneCellAnchor",
+        from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+        ext: { cx: 789, cy: 321 },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.equal(ui[0]?.kind?.type, "shape");
+  assert.equal(ui[0]?.kind?.label, "Box");
+  assert.deepEqual(ui[0]?.anchor, {
+    type: "oneCell",
+    from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+    size: { cx: 789, cy: 321 },
+  });
+});
+
 test("convertDocumentSheetDrawingsToUiDrawingObjects accepts TwoCell anchor type variants (TwoCell)", () => {
   const drawings = [
     {

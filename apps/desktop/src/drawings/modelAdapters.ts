@@ -742,28 +742,12 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
     // ignore; fall back to treating `anchorJson` as a plain DocumentController anchor object.
   }
 
-  const anchorType = normalizeEnumTag(tag);
+  let anchorType = normalizeEnumTag(tag);
+  // Some persistence layers may include the DrawingML element name in the tag
+  // (e.g. `OneCellAnchor`, `absolute_anchor`). Treat those as equivalent to the
+  // core variants (`oneCell`, `twoCell`, `absolute`).
+  if (anchorType.endsWith("anchor")) anchorType = anchorType.slice(0, -"anchor".length);
 
-  const resolveOffsetEmuFrom = (record: JsonRecord, axis: "x" | "y"): number => {
-    const emuKeys =
-      axis === "x"
-        ? ["xEmu", "x_emu", "dxEmu", "offsetXEmu", "offset_x_emu"]
-        : ["yEmu", "y_emu", "dyEmu", "offsetYEmu", "offset_y_emu"];
-    const pxKeys = axis === "x" ? ["x", "dx", "offsetX", "offsetXPx", "offset_x"] : ["y", "dy", "offsetY", "offsetYPx", "offset_y"];
-
-    const readFirstNumeric = (keys: string[]): number | undefined => {
-      for (const key of keys) {
-        const candidate = readOptionalNumber((record as any)[key]);
-        if (candidate != null) return candidate;
-      }
-      return undefined;
-    };
-
-    const directEmu = readFirstNumeric(emuKeys);
-    if (directEmu != null) return directEmu;
-    const px = readFirstNumeric(pxKeys);
-    return px != null ? pxToEmu(px) : 0;
-  };
   const resolveOffsetEmuMaybeFrom = (record: JsonRecord, axis: "x" | "y"): number | undefined => {
     const emuKeys =
       axis === "x"
