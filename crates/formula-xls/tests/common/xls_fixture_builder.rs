@@ -443,6 +443,27 @@ pub fn build_shared_formula_shrfmla_only_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula where the `SHRFMLA` record is split
+/// across a `CONTINUE` boundary inside a `PtgStr` token.
+///
+/// This exercises fragment-aware `rgce` parsing for SHRFMLA-only shared formulas. The sheet is
+/// named `ShrfmlaContinue` and defines a shared formula over `B1:B2` with no base-cell `FORMULA`
+/// record:
+/// - `B1`: `A1&\"ABCDE\"` (recovered from SHRFMLA)
+/// - `B2`: `A2&\"ABCDE\"` (PtgExp to B1)
+pub fn build_shared_formula_shrfmla_only_continued_ptgstr_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_shrfmla_only_continued_ptgstr_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2`:
 /// - `B1`: `SUM(A1,1)`
 /// - `B2`: `SUM(A2,1)` via `PtgExp` referencing `B1`
@@ -7153,6 +7174,95 @@ fn build_shared_formula_ptgexp_u32_row_u16_col_sheet_stream(xf_cell: u16) -> Vec
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell(2, 1, xf_cell, 0.0, &follower_ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_shrfmla_only_continued_ptgstr_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_shrfmla_only_continued_ptgstr_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ShrfmlaContinue", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_shrfmla_only_continued_ptgstr_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0,2) cols [0,2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Provide value cells in column A so the shared formula has something to reference.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0)); // A2
+
+    // Shared formula rgce: `A(row)&"ABCDE"` for B1:B2, with the PtgStr payload split across a
+    // CONTINUE boundary.
+    let shared_rgce: Vec<u8> = vec![
+        // PtgRefN(row_off=0,col_off=-1).
+        0x2C,
+        0x00, 0x00, // row_off = 0
+        0xFF, 0xFF, // col_off = -1 with relative bits
+        // PtgStr("ABCDE") [ptg=0x17][cch=5][flags=0][chars...]
+        0x17,
+        5,
+        0,
+        b'A',
+        b'B',
+        b'C',
+        b'D',
+        b'E',
+        // PtgConcat
+        0x08,
+    ];
+
+    // Build the full SHRFMLA payload then split it into SHRFMLA + CONTINUE fragments that cut the
+    // PtgStr token after the first two characters ("AB"). Excel inserts a 1-byte continuation flags
+    // byte at the start of the continued fragment; include that so fragment-aware rgce parsing can
+    // reconstruct the canonical token stream.
+    let mut shrfmla_full = Vec::<u8>::new();
+    shrfmla_full.extend_from_slice(&0u16.to_le_bytes()); // rwFirst = 0
+    shrfmla_full.extend_from_slice(&1u16.to_le_bytes()); // rwLast = 1
+    shrfmla_full.push(1); // colFirst = B
+    shrfmla_full.push(1); // colLast = B
+    shrfmla_full.extend_from_slice(&0u16.to_le_bytes()); // cUse
+    shrfmla_full.extend_from_slice(&(shared_rgce.len() as u16).to_le_bytes()); // cce
+    shrfmla_full.extend_from_slice(&shared_rgce);
+
+    // Split point: header (10) + PtgRefN (5) + PtgStr header (3) + 2 chars = 20 bytes.
+    let split_at = 10usize + 5 + 3 + 2;
+    let shrfmla_frag1 = &shrfmla_full[..split_at];
+    let shrfmla_remaining = &shrfmla_full[split_at..];
+
+    let mut shrfmla_continue = Vec::<u8>::new();
+    shrfmla_continue.push(0); // continued-segment option flags (compressed)
+    shrfmla_continue.extend_from_slice(shrfmla_remaining);
+
+    push_record(&mut sheet, RECORD_SHRFMLA, shrfmla_frag1);
+    push_record(&mut sheet, RECORD_CONTINUE, &shrfmla_continue);
+
+    // B2: FORMULA record containing only `PtgExp(B1)`.
+    let ptgexp_b1: [u8; 5] = [
+        0x01, // PtgExp
+        0x00, 0x00, // rw=0 (B1)
+        0x01, 0x00, // col=1 (B)
+    ];
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp_b1),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
