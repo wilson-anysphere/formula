@@ -1,4 +1,4 @@
-use formula_model::charts::{ChartKind, PlotAreaModel};
+use formula_model::charts::{ChartKind, ComboChartEntry, PlotAreaModel};
 use formula_xlsx::drawingml::charts::parse_chart_space;
 
 #[test]
@@ -38,11 +38,24 @@ fn parse_chart_includes_series_from_all_chart_types_in_combo_plot_area() {
 
     // Combo charts keep the first chart kind as the "primary" kind.
     assert_eq!(model.chart_kind, ChartKind::Bar);
-    assert!(
-        matches!(model.plot_area, PlotAreaModel::Combo(_)),
-        "expected combo plot area, got {:?}",
-        model.plot_area
-    );
+    let PlotAreaModel::Combo(combo) = &model.plot_area else {
+        panic!("expected combo plot area, got {:?}", model.plot_area);
+    };
+    assert_eq!(combo.charts.len(), 2);
+    match &combo.charts[0] {
+        ComboChartEntry::Bar { series, .. } => {
+            assert_eq!(series.start, 0);
+            assert_eq!(series.end, 1);
+        }
+        other => panic!("expected first combo chart entry to be Bar, got {other:?}"),
+    }
+    match &combo.charts[1] {
+        ComboChartEntry::Line { series, .. } => {
+            assert_eq!(series.start, 1);
+            assert_eq!(series.end, 2);
+        }
+        other => panic!("expected second combo chart entry to be Line, got {other:?}"),
+    }
     assert_eq!(
         model.title.as_ref().map(|t| t.rich_text.text.as_str()),
         Some("Combo")
