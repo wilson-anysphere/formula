@@ -86,14 +86,16 @@ function normalizeSheetView(value) {
   const normalizeMergedRanges = (raw) => {
     if (raw == null) return [];
     let arr = raw;
-    if (!Array.isArray(arr) && typeof arr?.toArray === "function") {
+    const isYArrayLike = Boolean(arr && typeof arr === "object" && typeof arr.length === "number" && typeof arr.get === "function");
+    if (!Array.isArray(arr) && !isYArrayLike && typeof arr?.toArray === "function") {
       try {
         arr = arr.toArray();
       } catch {
         // ignore
       }
     }
-    if (!Array.isArray(arr) || arr.length === 0) return [];
+    const len = Array.isArray(arr) ? arr.length : isYArrayLike ? arr.length : 0;
+    if (len === 0) return [];
 
     const overlaps = (a, b) =>
       a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
@@ -101,7 +103,8 @@ function normalizeSheetView(value) {
     /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
     const out = [];
 
-    for (const entry of arr) {
+    for (let idx = 0; idx < len; idx += 1) {
+      const entry = Array.isArray(arr) ? arr[idx] : arr.get(idx);
       const sr = Number(entry?.startRow ?? entry?.start_row ?? entry?.sr);
       const er = Number(entry?.endRow ?? entry?.end_row ?? entry?.er);
       const sc = Number(entry?.startCol ?? entry?.start_col ?? entry?.sc);
@@ -154,19 +157,22 @@ function normalizeSheetView(value) {
   const normalizeDrawings = (raw) => {
     if (raw == null) return [];
     let arr = raw;
-    if (!Array.isArray(arr) && typeof arr?.toArray === "function") {
+    const isYArrayLike = Boolean(arr && typeof arr === "object" && typeof arr.length === "number" && typeof arr.get === "function");
+    if (!Array.isArray(arr) && !isYArrayLike && typeof arr?.toArray === "function") {
       try {
         arr = arr.toArray();
       } catch {
         // ignore
       }
     }
-    if (!Array.isArray(arr) || arr.length === 0) return [];
+    const len = Array.isArray(arr) ? arr.length : isYArrayLike ? arr.length : 0;
+    if (len === 0) return [];
 
     /** @type {any[]} */
     const out = [];
 
-    for (const entry of arr) {
+    for (let idx = 0; idx < len; idx += 1) {
+      const entry = Array.isArray(arr) ? arr[idx] : arr.get(idx);
       let json = entry;
       if (json && typeof json === "object" && typeof json.toJSON === "function") {
         try {
