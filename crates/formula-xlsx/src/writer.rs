@@ -9,8 +9,8 @@ use formula_model::{
     normalize_formula_text, Cell, CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind,
     DataValidationErrorStyle, DataValidationKind, DataValidationOperator, DateSystem,
     DefinedNameScope, Hyperlink, HyperlinkTarget, ManualPageBreaks, Outline, PageMargins,
-    PageSetup, Range, Scaling, SheetPrintSettings, SheetVisibility, Workbook, WorkbookWindowState,
-    Worksheet,
+    PageSetup, Range, Scaling, SheetPane, SheetPrintSettings, SheetSelection, SheetView,
+    SheetVisibility, Workbook, WorkbookWindowState, Worksheet,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -698,6 +698,136 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
     }
     out.push_str("/>");
     out
+}
+
+fn desired_sheet_view(sheet: &Worksheet) -> SheetView {
+    let mut view = sheet.view.clone();
+
+    // Maintain backward compatibility with callers that still set the legacy `zoom` / `frozen_*`
+    // fields instead of the full `SheetView` model.
+    if view == SheetView::default() {
+        view.zoom = sheet.zoom;
+        view.pane.frozen_rows = sheet.frozen_rows;
+        view.pane.frozen_cols = sheet.frozen_cols;
+    }
+
+    // If we're frozen, split positions are ignored.
+    if view.pane.frozen_rows > 0 || view.pane.frozen_cols > 0 {
+        view.pane.x_split = None;
+        view.pane.y_split = None;
+    }
+
+    view
+}
+
+fn zoom_scale_from_zoom(zoom: f32) -> u32 {
+    // Excel stores zoom as an integer percentage (`zoomScale="120"`).
+    let mut zoom_scale = (zoom * 100.0).round() as i64;
+    zoom_scale = zoom_scale.max(10).min(400);
+    zoom_scale as u32
+}
+
+fn sheet_views_xml(sheet: &Worksheet) -> String {
+    let view = desired_sheet_view(sheet);
+    if view == SheetView::default() {
+        return String::new();
+    }
+
+    let zoom_scale = zoom_scale_from_zoom(view.zoom);
+
+    let pane_xml = pane_xml(&view.pane);
+    let selection_xml = selection_xml(view.selection.as_ref());
+
+    let mut attrs = String::new();
+    if zoom_scale != 100 {
+        attrs.push_str(&format!(r#" zoomScale="{zoom_scale}""#));
+    }
+    if !view.show_grid_lines {
+        attrs.push_str(r#" showGridLines="0""#);
+    }
+    if !view.show_headings {
+        // SpreadsheetML attribute name for sheet headings (row/col headers).
+        attrs.push_str(r#" showRowColHeaders="0""#);
+    }
+    if !view.show_zeros {
+        attrs.push_str(r#" showZeros="0""#);
+    }
+
+    let mut out = String::new();
+    out.push_str("<sheetViews>");
+    out.push_str(&format!(r#"<sheetView workbookViewId="0"{attrs}"#));
+
+    if pane_xml.is_none() && selection_xml.is_none() {
+        out.push_str("/>");
+        out.push_str("</sheetViews>");
+        return out;
+    }
+
+    out.push('>');
+    if let Some(pane) = pane_xml {
+        out.push_str(&pane);
+    }
+    if let Some(selection) = selection_xml {
+        out.push_str(&selection);
+    }
+    out.push_str("</sheetView></sheetViews>");
+    out
+}
+
+fn pane_xml(pane: &SheetPane) -> Option<String> {
+    if pane == &SheetPane::default() {
+        return None;
+    }
+
+    let is_frozen = pane.frozen_rows > 0 || pane.frozen_cols > 0;
+
+    let mut out = String::new();
+    out.push_str("<pane");
+
+    if is_frozen {
+        if pane.frozen_cols > 0 {
+            out.push_str(&format!(r#" xSplit="{}""#, pane.frozen_cols));
+        }
+        if pane.frozen_rows > 0 {
+            out.push_str(&format!(r#" ySplit="{}""#, pane.frozen_rows));
+        }
+        let top_left = pane
+            .top_left_cell
+            .unwrap_or_else(|| CellRef::new(pane.frozen_rows, pane.frozen_cols))
+            .to_a1();
+        out.push_str(&format!(r#" topLeftCell="{}""#, escape_xml(&top_left)));
+
+        let active_pane = if pane.frozen_rows > 0 && pane.frozen_cols > 0 {
+            "bottomRight"
+        } else if pane.frozen_rows > 0 {
+            "bottomLeft"
+        } else {
+            "topRight"
+        };
+        out.push_str(&format!(r#" activePane="{active_pane}" state="frozen"/>"#));
+        return Some(out);
+    }
+
+    if let Some(x) = pane.x_split {
+        out.push_str(&format!(r#" xSplit="{x}""#));
+    }
+    if let Some(y) = pane.y_split {
+        out.push_str(&format!(r#" ySplit="{y}""#));
+    }
+    if let Some(cell) = pane.top_left_cell {
+        out.push_str(&format!(r#" topLeftCell="{}""#, escape_xml(&cell.to_a1())));
+    }
+    out.push_str("/>");
+    Some(out)
+}
+
+fn selection_xml(selection: Option<&SheetSelection>) -> Option<String> {
+    let selection = selection?;
+    Some(format!(
+        r#"<selection activeCell="{}" sqref="{}"/>"#,
+        escape_xml(&selection.active_cell.to_a1()),
+        escape_xml(&selection.sqref()),
+    ))
 }
 #[cfg(test)]
 mod sheet_format_pr_tests {
@@ -1421,6 +1551,12 @@ fn sheet_xml(
     }
     xml.push_str(&format!(r#"  <dimension ref="{dimension_ref}"/>"#));
     xml.push('\n');
+    let sheet_views = sheet_views_xml(sheet);
+    if !sheet_views.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&sheet_views);
+        xml.push('\n');
+    }
     if !sheet_format_pr.is_empty() {
         xml.push_str("  ");
         xml.push_str(&sheet_format_pr);
