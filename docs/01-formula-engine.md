@@ -146,6 +146,10 @@ The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, a
   * **Canonical external sheet key:** `"[workbook]sheet"`
     * Example: `"[Book.xlsx]Sheet1"`
     * Example (path-qualified): `"[C:\\path\\Book.xlsx]Sheet1"`
+    * The `sheet` portion is the worksheet display name with any formula quoting removed
+      (e.g. `'Sheet 1'` in a formula becomes `Sheet 1` in the key).
+    * The engine preserves the formula’s casing for single-sheet external keys; providers that want
+      Excel-compatible behavior should generally match sheet keys case-insensitively.
 
 #### External 3D sheet spans (workbook sheet order)
 
@@ -164,6 +168,8 @@ Expansion rules:
 * `workbook` is the raw string inside the brackets (e.g. `"Book.xlsx"` or `"C:\\path\\Book.xlsx"`).
 * The returned sheet names must be **plain sheet names** (no `[workbook]` prefix).
 * Endpoint matching (`Sheet1` / `Sheet3`) is **case-insensitive**.
+* The returned sheet names are used **verbatim** (including case) when constructing per-sheet keys
+  for `get` calls.
 * If `sheet_order(...)` returns `None` **or** either endpoint is missing from the returned order, the
   3D span evaluates to `#REF!`.
 * Degenerate spans where start and end are the same sheet (case-insensitive) are canonicalized to a

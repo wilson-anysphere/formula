@@ -8034,14 +8034,47 @@ fn rewrite_defined_name_constants_for_bytecode(
     rewrite_inner(expr, current_sheet, workbook, &mut lexical_scopes)
 }
 
+/// Host-provided cell values that are not stored in the engine's in-memory workbook.
+///
+/// This is used for:
+/// - **External workbook references**, e.g. `=[Book.xlsx]Sheet1!A1`.
+/// - **Out-of-band values** for the current workbook (e.g. streaming/virtualized grids). When a
+///   cell is not present in the engine's internal sheet storage, the engine will query the
+///   provider using the local sheet display name (e.g. `"Sheet1"`).
+///
+/// # External sheet key format
+///
+/// For external workbook references, the engine passes a canonical **external sheet key** as the
+/// `sheet` argument:
+///
+/// * `"[workbook]sheet"`
+///
+/// Where:
+/// - `workbook` is the workbook identifier inside `[...]` (e.g. `"Book.xlsx"`).
+/// - `sheet` is the worksheet display name, with any formula quoting removed (e.g. `'Sheet 1'`
+///   becomes `Sheet 1`).
+///
+/// Examples:
+/// - `[Book.xlsx]Sheet1!A1` → `sheet = "[Book.xlsx]Sheet1"`
+/// - `'C:\path\[Book.xlsx]Sheet1'!A1` → `sheet = "[C:\path\Book.xlsx]Sheet1"`
+///
+/// Note: Excel treats sheet names case-insensitively. The engine preserves the formula's casing in
+/// the sheet key for single-sheet external references, so providers that want Excel-compatible
+/// behavior should generally match sheet keys case-insensitively.
 pub trait ExternalValueProvider: Send + Sync {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
 
     /// Return the sheet order for an external workbook.
     ///
     /// This is required to expand external-workbook 3D spans like
-    /// `"[Book.xlsx]Sheet1:Sheet3!A1"`. Implementations should return sheet names in workbook
-    /// order (without the `[Book.xlsx]` prefix).
+    /// `"[Book.xlsx]Sheet1:Sheet3!A1"`.
+    ///
+    /// Implementations should return sheet names in workbook order (without the `[Book.xlsx]`
+    /// prefix). Endpoint matching (`Sheet1` / `Sheet3`) is case-insensitive.
+    ///
+    /// The returned sheet names are used to form per-sheet keys passed to [`ExternalValueProvider::get`]
+    /// (e.g. `"[Book.xlsx]{sheet_name}"`), so the casing/spelling in this list should correspond
+    /// to the provider's `get` keying strategy.
     ///
     /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"`).
     ///
