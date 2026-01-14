@@ -122,7 +122,7 @@ describe("DocumentCellProvider image values", () => {
     const doc = new DocumentController();
     // `setCellFormula` forces value=null, so use `setCell` to simulate an imported snapshot that
     // includes a cached rich-value image payload alongside the original formula text.
-    doc.setCell("Sheet1", 0, 0, {
+    (doc as any).model.setCell("Sheet1", 0, 0, {
       value: { type: "image", value: { imageId: "image6.png", altText: "Cached" } },
       formula: "=IMAGE(\"https://example.com\")",
       styleId: 0,
