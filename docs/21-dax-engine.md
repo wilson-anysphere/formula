@@ -713,7 +713,7 @@ Parsing is implemented in `crates/formula-dax/src/parser.rs`.
 
 Supported expression forms:
 
-- Numbers: `1`, `1.5`, `.25` (no exponent syntax)
+- Numbers: `1`, `1.5`, `.25`, `1e3`, `1E-3`
 - Strings: `"hello"` with `""` as an escape for `"`
 - Identifiers: `SUM`, `Fact`, `MyTable` (ASCII letters/`_`/`.`; may include digits after the first char)
 - Quoted identifiers: `'Table Name'` (escape `'` as `''`)
