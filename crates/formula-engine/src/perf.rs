@@ -273,6 +273,38 @@ fn setup_bytecode_array_aggregate_engine(size: usize) -> (Engine, String) {
     (engine, out_cell)
 }
 
+fn setup_filled_formula_recalc_engine(size: usize) -> (Engine, String) {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value("Sheet1", "A1", 0.0_f64)
+        .expect("seed shared precedent");
+
+    // Create a large filled-down block of formulas that share a single bytecode program via the
+    // normalized-key cache.
+    //
+    // Each formula references:
+    // - a row-relative cell (`A{row}`), which gives us a fill-down pattern (normalized to offsets),
+    // - plus a shared absolute input (`$A$1`), which lets us dirty all formulas each iteration by
+    //   editing a single cell.
+    for row in 1..=size {
+        let addr = format!("B{row}");
+        let formula = format!("=A{row}+$A$1");
+        engine
+            .set_cell_formula("Sheet1", &addr, &formula)
+            .expect("set filled formula");
+    }
+
+    // Ensure the "filled formula" block is actually benefiting from bytecode program interning;
+    // otherwise this benchmark won't catch regressions in shared-formula caching behavior.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, size);
+    assert_eq!(stats.compiled, size);
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    (engine, format!("B{size}"))
+}
+
 pub fn run_benchmarks() -> Vec<BenchmarkResult> {
     let parse_inputs: Vec<String> = (0..1000)
         .map(|i| format!("=SUM(A{}:A{})", i + 1, i + 100))
@@ -399,6 +431,27 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
                 .expect("update");
             engine_bytecode_array.recalculate_single_threaded();
             let v = engine_bytecode_array.get_cell_value("Sheet1", &out_cell);
+            std::hint::black_box(v);
+        },
+    ));
+
+    // Many filled formulas: this guards against regressions where recalculating a large block of
+    // shared-formula cells reintroduces per-cell deep clones / allocations (e.g. cloning a full AST
+    // for every dirty cell even when bytecode evaluation is used).
+    let (mut engine_filled, filled_out_cell) = setup_filled_formula_recalc_engine(50_000);
+    let mut counter_filled = 0_i64;
+    results.push(run_benchmark(
+        "calc.recalc_filled_50k_formulas_shared_program.p95",
+        8,
+        2,
+        500.0,
+        || {
+            counter_filled += 1;
+            engine_filled
+                .set_cell_value("Sheet1", "A1", counter_filled)
+                .expect("update shared precedent");
+            engine_filled.recalculate_single_threaded();
+            let v = engine_filled.get_cell_value("Sheet1", &filled_out_cell);
             std::hint::black_box(v);
         },
     ));
