@@ -56,6 +56,28 @@ fn make_ooxml_encrypted_container_with_leading_slash_paths(
     ole.into_inner().into_inner()
 }
 
+fn make_standard_encryption_header_payload(
+    header_flags: u32,
+    alg_id: u32,
+    alg_id_hash: u32,
+    key_size: u32,
+    provider_type: u32,
+) -> Vec<u8> {
+    let header_size = 8u32 * 4;
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&header_size.to_le_bytes());
+    // EncryptionHeader (first 8 DWORDs).
+    payload.extend_from_slice(&header_flags.to_le_bytes()); // flags
+    payload.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+    payload.extend_from_slice(&alg_id.to_le_bytes()); // algId
+    payload.extend_from_slice(&alg_id_hash.to_le_bytes()); // algIdHash
+    payload.extend_from_slice(&key_size.to_le_bytes()); // keySize (bits)
+    payload.extend_from_slice(&provider_type.to_le_bytes()); // providerType
+    payload.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+    payload.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+    payload
+}
+
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/encrypted/ooxml")
@@ -244,6 +266,73 @@ fn cli_prints_standard_version_major_4() {
         stdout.trim_end(),
         "Standard (4.2) flags=0xaabbccdd",
         "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn cli_prints_standard_encryption_header_in_verbose_mode() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("standard.xlsx");
+
+    let payload = make_standard_encryption_header_payload(
+        0x0000_0004 | 0x0000_0020, // fCryptoAPI | fAES
+        0x0000_660E,               // CALG_AES_128
+        0x0000_8004,               // CALG_SHA1
+        128,
+        0x0000_0018, // PROV_RSA_AES
+    );
+    let bytes = make_ooxml_encrypted_container(3, 2, 0, &payload);
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg("--verbose")
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        out.status.success(),
+        "expected success exit status, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(
+        lines,
+        vec![
+            "Standard (3.2) flags=0x00000000 hdr_flags=0x00000024 fCryptoAPI=1 fAES=1 algId=0x0000660e algIdHash=0x00008004 keySize=128",
+            "EncryptionHeader.flags=0x00000024 fCryptoAPI=true fAES=true",
+            "EncryptionHeader.algId=0x0000660e",
+            "EncryptionHeader.algIdHash=0x00008004",
+            "EncryptionHeader.keySize=128",
+            "EncryptionHeader.providerType=0x00000018",
+        ],
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn cli_errors_on_truncated_standard_stream_in_verbose_mode() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("standard.xlsx");
+
+    // Standard version header but no payload after the 8-byte version info.
+    let bytes = make_ooxml_encrypted_container(3, 2, 0, b"");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg("-v")
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit status, got {:?}",
+        out.status.code()
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("truncated"),
+        "expected truncated error message, got: {stderr}"
     );
 }
 

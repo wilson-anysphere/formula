@@ -15,35 +15,34 @@ fn main() {
         .next()
         .unwrap_or_else(|| std::ffi::OsString::from("ooxml-encryption-info"));
 
+    let usage = || {
+        eprintln!("usage: {} [--verbose|-v] <path>", exe.to_string_lossy());
+        std::process::exit(2);
+    };
+
     let mut verbose = false;
     let mut path: Option<PathBuf> = None;
     for arg in args {
-        if arg == "--verbose" || arg == "-v" {
+        if arg == std::ffi::OsStr::new("--verbose") || arg == std::ffi::OsStr::new("-v") {
             verbose = true;
             continue;
         }
-        if arg == "--help" || arg == "-h" {
-            eprintln!("usage: {} [--verbose] <path>", exe.to_string_lossy());
+        if arg == std::ffi::OsStr::new("--help") || arg == std::ffi::OsStr::new("-h") {
+            eprintln!("usage: {} [--verbose|-v] <path>", exe.to_string_lossy());
             std::process::exit(0);
         }
+
         if arg.to_string_lossy().starts_with('-') {
-            eprintln!(
-                "error: unknown flag {}",
-                arg.to_string_lossy().trim_end_matches('\n')
-            );
-            eprintln!("usage: {} [--verbose] <path>", exe.to_string_lossy());
-            std::process::exit(2);
+            eprintln!("error: unknown flag {}", arg.to_string_lossy());
+            usage();
         }
+
         if path.is_some() {
-            eprintln!("usage: {} [--verbose] <path>", exe.to_string_lossy());
-            std::process::exit(2);
+            usage();
         }
         path = Some(PathBuf::from(arg));
     }
-    let Some(path) = path else {
-        eprintln!("usage: {} [--verbose] <path>", exe.to_string_lossy());
-        std::process::exit(2);
-    };
+    let Some(path) = path else { usage() };
 
     let mut file = match File::open(&path) {
         Ok(f) => f,
@@ -136,6 +135,18 @@ fn main() {
         _ => "Unknown",
     };
 
+    let standard_header = if verbose && kind == "Standard" {
+        match parse_standard_encryption_header_prefix(&encryption_info) {
+            Ok(hdr) => Some(hdr),
+            Err(err) => {
+                eprintln!("error: {err}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     let mut extra = String::new();
     if kind == "Agile" {
         if let Some(tag) = sniff_agile_xml_root_tag(&encryption_info[8..]) {
@@ -169,29 +180,89 @@ fn main() {
         return;
     }
 
-    // Verbose decoded details (multi-line).
-    println!("version.major={major}");
-    println!("version.minor={minor}");
-    println!("version.flags=0x{flags:08x}");
+    if let Some(hdr) = standard_header {
+        let f_cryptoapi = hdr.flags & 0x0000_0004 != 0;
+        let f_aes = hdr.flags & 0x0000_0020 != 0;
 
-    if kind == "Standard" {
-        match parse_standard_encryption_header_fixed_dwords(&encryption_info) {
-            Ok(hdr) => {
-                println!("headerSize={}", hdr.header_size);
-                println!("header.flags=0x{:08x}", hdr.flags_raw);
-                println!("  fCryptoAPI={}", hdr.flags.f_cryptoapi);
-                println!("  fDocProps={}", hdr.flags.f_doc_props);
-                println!("  fExternal={}", hdr.flags.f_external);
-                println!("  fAES={}", hdr.flags.f_aes);
-                println!("algId=0x{:08x}", hdr.alg_id);
-                println!("algIdHash=0x{:08x}", hdr.alg_id_hash);
-                println!("keySize={}", hdr.key_size);
-            }
-            Err(err) => {
-                println!("standard_header_error={err}");
-            }
-        }
+        println!(
+            "EncryptionHeader.flags=0x{:08x} fCryptoAPI={f_cryptoapi} fAES={f_aes}",
+            hdr.flags
+        );
+        println!("EncryptionHeader.algId=0x{:08x}", hdr.alg_id);
+        println!("EncryptionHeader.algIdHash=0x{:08x}", hdr.alg_id_hash);
+        println!("EncryptionHeader.keySize={}", hdr.key_size);
+        println!("EncryptionHeader.providerType=0x{:08x}", hdr.provider_type);
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StandardEncryptionHeaderPrefix {
+    flags: u32,
+    #[allow(dead_code)]
+    size_extra: u32,
+    alg_id: u32,
+    alg_id_hash: u32,
+    /// Key size in *bits*.
+    key_size: u32,
+    provider_type: u32,
+    #[allow(dead_code)]
+    reserved1: u32,
+    #[allow(dead_code)]
+    reserved2: u32,
+}
+
+fn parse_standard_encryption_header_prefix(
+    encryption_info: &[u8],
+) -> Result<StandardEncryptionHeaderPrefix, String> {
+    const ENCRYPTION_HEADER_FIXED_LEN: usize = 8 * 4;
+
+    let payload = encryption_info.get(8..).unwrap_or(&[]);
+    if payload.len() < 4 {
+        return Err(format!(
+            "truncated Standard EncryptionInfo stream while reading headerSize: needed 4 bytes, only {} available",
+            payload.len()
+        ));
+    }
+
+    let header_size = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let header_size_usize = usize::try_from(header_size)
+        .map_err(|_| format!("invalid Standard EncryptionInfo headerSize {header_size}: too large"))?;
+    if header_size_usize < ENCRYPTION_HEADER_FIXED_LEN {
+        return Err(format!(
+            "invalid Standard EncryptionInfo headerSize {header_size}: must be at least {ENCRYPTION_HEADER_FIXED_LEN}"
+        ));
+    }
+
+    let needed = 4usize
+        .checked_add(header_size_usize)
+        .ok_or_else(|| format!("invalid Standard EncryptionInfo headerSize {header_size}: too large"))?;
+    if payload.len() < needed {
+        return Err(format!(
+            "truncated Standard EncryptionInfo stream while reading EncryptionHeader: headerSize={header_size} bytes, only {} available",
+            payload.len().saturating_sub(4)
+        ));
+    }
+
+    let header = &payload[4..4 + ENCRYPTION_HEADER_FIXED_LEN];
+    let flags = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+    let size_extra = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+    let alg_id = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
+    let alg_id_hash = u32::from_le_bytes([header[12], header[13], header[14], header[15]]);
+    let key_size = u32::from_le_bytes([header[16], header[17], header[18], header[19]]);
+    let provider_type = u32::from_le_bytes([header[20], header[21], header[22], header[23]]);
+    let reserved1 = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
+    let reserved2 = u32::from_le_bytes([header[28], header[29], header[30], header[31]]);
+
+    Ok(StandardEncryptionHeaderPrefix {
+        flags,
+        size_extra,
+        alg_id,
+        alg_id_hash,
+        key_size,
+        provider_type,
+        reserved1,
+        reserved2,
+    })
 }
 
 fn stream_exists<R: Read + Seek + std::io::Write>(
@@ -333,7 +404,6 @@ fn xml_root_tag_name(mut xml: &str) -> Option<String> {
 
 #[derive(Debug, Clone, Copy)]
 struct StandardHeaderFixedDwords {
-    header_size: u32,
     flags_raw: u32,
     flags: StandardEncryptionHeaderFlags,
     alg_id: u32,
@@ -381,7 +451,6 @@ fn parse_standard_encryption_header_fixed_dwords(
     let key_size = u32::from_le_bytes(hdr[16..20].try_into().unwrap());
 
     Ok(StandardHeaderFixedDwords {
-        header_size,
         flags_raw,
         flags: StandardEncryptionHeaderFlags::from_raw(flags_raw),
         alg_id,
