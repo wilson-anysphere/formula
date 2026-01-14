@@ -36,8 +36,8 @@ impl PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
             // For Data Model refs, use an unquoted DAX-like form (`Table[Column]` / `[Measure]`).
-            // Quoting rules are handled by the `Display` impl; this helper is used primarily for
-            // UI labels and matching cache column names, which often omit quotes.
+            // We intentionally avoid quoting table names because pivot caches and UI layers often
+            // store/display unquoted table captions.
             PivotFieldRef::DataModelColumn { table, column } => {
                 let column = escape_dax_bracket_identifier(column);
                 Cow::Owned(format!("{table}[{column}]"))

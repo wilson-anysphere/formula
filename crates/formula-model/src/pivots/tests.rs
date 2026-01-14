@@ -443,3 +443,21 @@ fn pivot_field_ref_serializes_data_model_refs_as_structured_objects() {
         json!({ "measure": "Total Sales" })
     );
 }
+
+#[test]
+fn pivot_field_ref_cache_field_name_helpers() {
+    let cache = PivotFieldRef::CacheFieldName("X".to_string());
+    assert_eq!(cache.as_cache_field_name(), Some("X"));
+    assert_eq!(cache.cache_field_name(), Some("X"));
+
+    let col = PivotFieldRef::DataModelColumn {
+        table: "T".to_string(),
+        column: "C".to_string(),
+    };
+    assert_eq!(col.as_cache_field_name(), None);
+    assert_eq!(col.cache_field_name(), None);
+
+    let measure = PivotFieldRef::DataModelMeasure("M".to_string());
+    assert_eq!(measure.as_cache_field_name(), None);
+    assert_eq!(measure.cache_field_name(), None);
+}
