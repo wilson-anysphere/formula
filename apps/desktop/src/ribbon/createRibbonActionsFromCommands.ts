@@ -39,9 +39,9 @@ export function createRibbonActionsFromCommands(params: {
    * `false` the follow-up `onCommand` callback will be suppressed to avoid
    * double-executing toggle actions.
    *
-   * To opt into the legacy `onCommand` fallback behavior for unknown toggles
-   * (e.g. show the default toast / call `onUnknownCommand`), return `false`
-   * synchronously.
+   * To opt into the normal unknown-command fallback behavior for unknown toggles
+   * (i.e. call `onUnknownCommand`, or show the default toast when omitted), return
+   * `false` synchronously.
    */
   onUnknownToggle?: (commandId: string, pressed: boolean) => RibbonUnknownToggleResult;
 }): RibbonActions {
@@ -75,9 +75,10 @@ export function createRibbonActionsFromCommands(params: {
   };
 
   /**
-   * Some hosts historically invoked `onCommand` immediately after `onToggle` for
-   * toggle buttons. Keep a short-lived suppression set so we can ignore the
-   * follow-up `onCommand` call and avoid double execution.
+   * Some hosts historically invoked `onCommand` immediately after `onToggle` for toggle buttons.
+   *
+   * Keep a short-lived suppression set so we can ignore the follow-up `onCommand` call and avoid
+   * double execution.
    */
   const pendingToggleSuppress = new Set<string>();
   const scheduleMicrotask =
@@ -96,6 +97,18 @@ export function createRibbonActionsFromCommands(params: {
         reportError(commandId, err);
       }
     })();
+  };
+
+  const handleUnknownCommand = async (commandId: string): Promise<void> => {
+    if (onUnknownCommand) {
+      await onUnknownCommand(commandId);
+      return;
+    }
+    if (commandId.startsWith("file.")) {
+      safeShowToast(`File command not implemented: ${commandId}`);
+    } else {
+      safeShowToast(`Ribbon: ${commandId}`);
+    }
   };
 
   return {
@@ -121,16 +134,7 @@ export function createRibbonActionsFromCommands(params: {
           return;
         }
 
-        if (onUnknownCommand) {
-          await onUnknownCommand(commandId);
-          return;
-        }
-
-        if (commandId.startsWith("file.")) {
-          safeShowToast(`File command not implemented: ${commandId}`);
-        } else {
-          safeShowToast(`Ribbon: ${commandId}`);
-        }
+        await handleUnknownCommand(commandId);
       });
     },
     onToggle: (commandId: string, pressed: boolean) => {
@@ -154,11 +158,14 @@ export function createRibbonActionsFromCommands(params: {
 
         if (onUnknownToggle) {
           const handled = onUnknownToggle(commandId, pressed);
-          // Legacy: some hosts call `onCommand` immediately after `onToggle`, so we must decide
-          // whether to suppress synchronously. Returning `false` opts out of suppression.
-          if (handled !== false) {
+          if (handled === false) {
+            // Fall through to the `onUnknownCommand` behavior directly so unknown toggles are not
+            // silent in hosts that only invoke `onToggle` (no follow-up `onCommand`).
             markToggleHandled(commandId);
+            await handleUnknownCommand(commandId);
+            return;
           }
+          markToggleHandled(commandId);
           await handled;
           return;
         }
@@ -167,15 +174,7 @@ export function createRibbonActionsFromCommands(params: {
         // Mirror the unknown-command behavior here so unregistered toggle ids still surface
         // a toast (and so older hosts won't double-toast thanks to `markToggleHandled`).
         markToggleHandled(commandId);
-        if (onUnknownCommand) {
-          await onUnknownCommand(commandId);
-          return;
-        }
-        if (commandId.startsWith("file.")) {
-          safeShowToast(`File command not implemented: ${commandId}`);
-        } else {
-          safeShowToast(`Ribbon: ${commandId}`);
-        }
+        await handleUnknownCommand(commandId);
       });
     },
   };
