@@ -1193,7 +1193,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release upload "${{ needs.preflight.outputs.release_tag }}" debug-symbols/*.zip \
+          shopt -s nullglob
+          files=(debug-symbols/*.zip)
+          if ((${#files[@]} == 0)); then
+            echo "No debug symbol archives found under debug-symbols/*.zip" >&2
+            exit 1
+          fi
+          gh release upload "${{ needs.preflight.outputs.release_tag }}" "${files[@]}" \
             --repo "${{ github.repository }}" \
             --clobber
 
