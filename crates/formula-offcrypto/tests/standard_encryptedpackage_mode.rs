@@ -3,7 +3,7 @@
 //!
 //! There is long-running ambiguity across implementations/docs about whether Standard
 //! `EncryptedPackage` uses AES-ECB or AES-CBC-with-segmentation. This test locks down the on-disk
-//! mode for our committed fixtures under `fixtures/encrypted/ooxml/standard*.xlsx`.
+//! mode for our committed Standard **AES** fixtures under `fixtures/encrypted/ooxml/standard*`.
 //!
 //! This test is a canary to ensure fixture regeneration does not silently drift to a different
 //! mode.
@@ -125,11 +125,15 @@ fn assert_fixture_is_ecb(encrypted_name: &str, plaintext_name: &str, password: &
 
 #[test]
 fn standard_fixtures_encryptedpackage_is_ecb() {
-    // These are explicitly meant to be “baseline” Standard (CryptoAPI) fixtures.
-    for (encrypted, plaintext) in [
-        ("standard.xlsx", "plaintext.xlsx"),
-        ("standard-large.xlsx", "plaintext-large.xlsx"),
+    // These are explicitly meant to be “baseline” Standard (CryptoAPI) **AES** fixtures. (The RC4
+    // fixture is excluded because ECB/CBC is not applicable to RC4.)
+    for (encrypted, plaintext, password) in [
+        ("standard.xlsx", "plaintext.xlsx", "password"),
+        ("standard-large.xlsx", "plaintext-large.xlsx", "password"),
+        ("standard-4.2.xlsx", "plaintext.xlsx", "password"),
+        ("standard-unicode.xlsx", "plaintext.xlsx", "pässwörd🔒"),
+        ("standard-basic.xlsm", "plaintext-basic.xlsm", "password"),
     ] {
-        assert_fixture_is_ecb(encrypted, plaintext, "password");
+        assert_fixture_is_ecb(encrypted, plaintext, password);
     }
 }
