@@ -7,7 +7,8 @@ use crate::functions::{
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::pivot::{
-    AggregationType as PivotAggregationType, PivotKeyPart as PivotKeyPart, PivotValue as PivotEngineValue,
+    AggregationType as PivotAggregationType, PivotKeyPart as PivotKeyPart,
+    PivotValue as PivotEngineValue,
 };
 use crate::value::{Array, ErrorKind, Value};
 use chrono::Datelike;
