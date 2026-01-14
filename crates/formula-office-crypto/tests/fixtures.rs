@@ -23,6 +23,21 @@ fn decrypts_standard_fixture_matches_plaintext() {
 }
 
 #[test]
+fn decrypts_standard_rc4_fixture_matches_plaintext() {
+    let plaintext = read_fixture("plaintext.xlsx");
+    let standard_rc4 = read_fixture("standard-rc4.xlsx");
+
+    let decrypted =
+        decrypt_encrypted_package_ole(&standard_rc4, "password").expect("decrypt standard rc4");
+    assert_eq!(decrypted, plaintext);
+    assert!(decrypted.starts_with(b"PK"));
+
+    let err = decrypt_encrypted_package_ole(&standard_rc4, "wrong")
+        .expect_err("wrong password should fail");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
 fn decrypts_agile_fixture_matches_plaintext() {
     let plaintext = read_fixture("plaintext.xlsx");
     let agile = read_fixture("agile.xlsx");
