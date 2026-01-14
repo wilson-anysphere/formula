@@ -962,18 +962,17 @@ mod filepass_tests {
     }
 }
 
-struct PayloadRc4 {
-    key_material: Zeroizing<[u8; 20]>,
+struct PayloadRc4<'a> {
+    key_material: &'a [u8; 20],
     key_len: usize,
     block: u32,
     pos_in_block: usize,
     rc4: Rc4,
 }
 
-impl PayloadRc4 {
-    fn new(key_material: [u8; 20], key_len: usize) -> Self {
-        let key_material: Zeroizing<[u8; 20]> = Zeroizing::new(key_material);
-        let key: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(&key_material, 0, key_len));
+impl<'a> PayloadRc4<'a> {
+    fn new(key_material: &'a [u8; 20], key_len: usize) -> Self {
+        let key: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(key_material, 0, key_len));
         let rc4 = Rc4::new(key.as_slice());
         Self {
             key_material,
@@ -987,7 +986,7 @@ impl PayloadRc4 {
     fn rekey(&mut self) {
         self.block = self.block.wrapping_add(1);
         let key: Zeroizing<Vec<u8>> =
-            Zeroizing::new(derive_block_key(&self.key_material, self.block, self.key_len));
+            Zeroizing::new(derive_block_key(self.key_material, self.block, self.key_len));
         self.rc4 = Rc4::new(key.as_slice());
         self.pos_in_block = 0;
     }
@@ -1267,7 +1266,8 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
         // length-prefixed EncryptionInfo blob.
         ENCRYPTION_SUBTYPE_CRYPTOAPI => {
             let info = parse_filepass_record_payload(filepass_payload)?;
-            let key_material = verify_password(&info, password)?;
+            let key_material: Zeroizing<[u8; 20]> =
+                Zeroizing::new(verify_password(&info, password)?);
 
             let key_size_bits = info.header.key_size_bits;
             let key_len = (key_size_bits / 8) as usize;
@@ -1277,7 +1277,7 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
 
             // Decrypt all subsequent record payloads in-place using the record-payload-only stream
             // model.
-            let mut cipher = PayloadRc4::new(key_material, key_len);
+            let mut cipher = PayloadRc4::new(&key_material, key_len);
 
             let mut offset = filepass_data_end;
             while offset < out.len() {
