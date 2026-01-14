@@ -834,7 +834,9 @@ jobs:
         with:
           path: apps/desktop/public/pyodide/
           enableCrossOsArchive: true
-          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+          # Pyodide assets are platform-independent; use a cross-OS cache key so the
+          # release matrix only downloads them once (macOS → Linux → Windows, max-parallel=1).
+          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
           restore-keys: |
             pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-
             pyodide-v${{ steps.pyodide.outputs.version }}-
