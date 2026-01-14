@@ -1,11 +1,31 @@
 use subtle::ConstantTimeEq;
 
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
+}
+
 /// Constant-time byte slice equality.
 ///
 /// This is used for password verifier/hash comparisons during legacy `.xls` decryption to avoid
 /// timing side channels from early-exit comparisons (`==` / `!=`).
 pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    #[cfg(test)]
+    CT_EQ_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
     bool::from(a.ct_eq(b))
+}
+
+#[cfg(test)]
+pub(crate) fn reset_ct_eq_calls() {
+    CT_EQ_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn ct_eq_call_count() -> usize {
+    CT_EQ_CALLS.with(|calls| calls.get())
 }
 
 #[cfg(test)]
@@ -32,4 +52,3 @@ mod tests {
         assert!(!ct_eq(b"ab", b"abc"));
     }
 }
-

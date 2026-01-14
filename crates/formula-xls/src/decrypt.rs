@@ -1,5 +1,6 @@
 use sha1::{Digest as _, Sha1};
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 use crate::ct::ct_eq;
 
@@ -148,12 +149,12 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-fn utf16le_bytes(s: &str) -> Vec<u8> {
+fn utf16le_bytes(s: &str) -> Zeroizing<Vec<u8>> {
     let mut out = Vec::with_capacity(s.len().saturating_mul(2));
     for unit in s.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
-    out
+    Zeroizing::new(out)
 }
 
 fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
@@ -401,14 +402,14 @@ fn derive_key_material(password: &str, salt: &[u8]) -> [u8; 20] {
     //   H0 = SHA1(salt + UTF16LE(password))
     //   for i in 0..49999: H0 = SHA1(i_le32 + H0)
     let pw_bytes = utf16le_bytes(password);
-    let mut hash = sha1_bytes(&[salt, &pw_bytes]);
+    let mut hash: Zeroizing<[u8; 20]> = Zeroizing::new(sha1_bytes(&[salt, pw_bytes.as_slice()]));
 
     for i in 0..PASSWORD_HASH_ITERATIONS {
         let iter = i.to_le_bytes();
-        hash = sha1_bytes(&[&iter, &hash]);
+        *hash = sha1_bytes(&[&iter, &hash[..]]);
     }
 
-    hash
+    *hash
 }
 
 fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
@@ -467,6 +468,7 @@ fn is_never_encrypted_record(record_id: u16) -> bool {
 #[cfg(test)]
 mod filepass_tests {
     use super::*;
+    use crate::ct::{ct_eq_call_count, reset_ct_eq_calls};
     use formula_model::{CellRef, VerticalAlignment};
     use std::path::PathBuf;
 
@@ -819,6 +821,76 @@ mod filepass_tests {
             "expected A1 XF to be marked as interesting so style import retains it"
         );
     }
+
+    #[test]
+    fn verify_password_uses_constant_time_compare() {
+        // Ensure the password verifier hash check uses our constant-time equality helper.
+        let password = "password";
+        let wrong_password = "wrong password";
+        let key_size_bits: u32 = 40;
+        let salt: [u8; 16] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F, 0x10,
+        ];
+
+        // Derive key material per MS-OFFCRYPTO (SHA1).
+        let key_material = derive_key_material(password, &salt);
+
+        // Build the verifier fields (encrypted with block 0 key).
+        let verifier_plain: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+            0x0D, 0x0E, 0x0F,
+        ];
+        let verifier_hash_plain: [u8; 20] = sha1_bytes(&[&verifier_plain]);
+
+        let key0 = derive_block_key_spec(&key_material, 0, key_size_bits);
+        let mut rc4 = Rc4::new(&key0);
+        let mut encrypted_verifier = verifier_plain;
+        rc4.apply_keystream(&mut encrypted_verifier);
+        let mut encrypted_verifier_hash = verifier_hash_plain.to_vec();
+        rc4.apply_keystream(&mut encrypted_verifier_hash);
+
+        // Build CryptoAPI EncryptionInfo (minimal, SHA1 + RC4).
+        let mut enc_header = Vec::new();
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+        enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
+        enc_header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
+        enc_header.extend_from_slice(&key_size_bits.to_le_bytes()); // keySize (bits)
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // majorVersion (ignored by parser)
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minorVersion (ignored by parser)
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&(enc_header.len() as u32).to_le_bytes()); // headerSize
+        enc_info.extend_from_slice(&enc_header);
+        // EncryptionVerifier
+        enc_info.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+        enc_info.extend_from_slice(&salt);
+        enc_info.extend_from_slice(&encrypted_verifier);
+        enc_info.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize
+        enc_info.extend_from_slice(&encrypted_verifier_hash);
+
+        let mut filepass_payload = Vec::new();
+        filepass_payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        filepass_payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        filepass_payload.extend_from_slice(&enc_info);
+
+        let info =
+            parse_filepass_record_payload(&filepass_payload).expect("parse FILEPASS payload");
+
+        reset_ct_eq_calls();
+        let err = verify_password(&info, wrong_password).expect_err("expected wrong password error");
+        assert_eq!(err, DecryptError::WrongPassword);
+        assert!(
+            ct_eq_call_count() > 0,
+            "expected constant-time compare helper to be invoked"
+        );
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -869,7 +941,7 @@ impl Rc4 {
 }
 
 struct PayloadRc4 {
-    key_material: [u8; 20],
+    key_material: Zeroizing<[u8; 20]>,
     key_len: usize,
     block: u32,
     pos_in_block: usize,
@@ -878,8 +950,9 @@ struct PayloadRc4 {
 
 impl PayloadRc4 {
     fn new(key_material: [u8; 20], key_len: usize) -> Self {
-        let key = derive_block_key(&key_material, 0, key_len);
-        let rc4 = Rc4::new(&key);
+        let key_material: Zeroizing<[u8; 20]> = Zeroizing::new(key_material);
+        let key: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(&key_material, 0, key_len));
+        let rc4 = Rc4::new(key.as_slice());
         Self {
             key_material,
             key_len,
@@ -891,8 +964,9 @@ impl PayloadRc4 {
 
     fn rekey(&mut self) {
         self.block = self.block.wrapping_add(1);
-        let key = derive_block_key(&self.key_material, self.block, self.key_len);
-        self.rc4 = Rc4::new(&key);
+        let key: Zeroizing<Vec<u8>> =
+            Zeroizing::new(derive_block_key(&self.key_material, self.block, self.key_len));
+        self.rc4 = Rc4::new(key.as_slice());
         self.pos_in_block = 0;
     }
 
@@ -933,17 +1007,19 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
     }
 
     // Derive the base key material and decrypt the verifier using block 0.
-    let key_material = derive_key_material(password, &info.verifier.salt);
-    let key0 = derive_block_key(&key_material, 0, key_len);
-    let mut rc4 = Rc4::new(&key0);
+    let key_material: Zeroizing<[u8; 20]> =
+        Zeroizing::new(derive_key_material(password, &info.verifier.salt));
+    let key0: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(&key_material, 0, key_len));
+    let mut rc4 = Rc4::new(key0.as_slice());
 
-    let mut verifier = info.verifier.encrypted_verifier;
-    rc4.apply_keystream(&mut verifier);
+    let mut verifier: Zeroizing<[u8; 16]> = Zeroizing::new(info.verifier.encrypted_verifier);
+    rc4.apply_keystream(&mut verifier[..]);
 
-    let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
-    rc4.apply_keystream(&mut verifier_hash);
+    let mut verifier_hash: Zeroizing<Vec<u8>> =
+        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    rc4.apply_keystream(&mut verifier_hash[..]);
 
-    let expected = sha1_bytes(&[&verifier]);
+    let expected: Zeroizing<[u8; 20]> = Zeroizing::new(sha1_bytes(&[&verifier[..]]));
     if verifier_hash.len() < verifier_hash_size {
         return Err(DecryptError::InvalidFormat(format!(
             "EncryptedVerifierHash length {} shorter than VerifierHashSize {verifier_hash_size}",
@@ -954,7 +1030,7 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
         return Err(DecryptError::WrongPassword);
     }
 
-    Ok(key_material)
+    Ok(*key_material)
 }
 
 fn verify_password_legacy(

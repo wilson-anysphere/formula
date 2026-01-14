@@ -1752,7 +1752,6 @@ fn import_xls_path_with_biff_reader(
                                         continue;
                                     }
                                 }
-
                             // Strip NUL bytes so formula text is parseable/stable (matches the
                             // calamine formula cleanup path).
                             let formula_text_clean;
