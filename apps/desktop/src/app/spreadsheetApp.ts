@@ -4762,7 +4762,14 @@ export class SpreadsheetApp {
     }
 
     const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
-    const { frozenRows, frozenCols } = this.getFrozen();
+    // Avoid `getFrozen()` allocations on scroll/refresh paths; compute frozen counts directly.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
     const rectScratch = this.chartCursorScratchRect;
 
     let hasVisibleDirtyChart = false;
@@ -14290,7 +14297,14 @@ export class SpreadsheetApp {
       }
     }
 
-    const { frozenRows, frozenCols } = this.getFrozen();
+    // Avoid `getFrozen()` allocations; compute frozen counts directly.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
     const layout = this.chartOverlayLayout();
     const viewport: DrawingViewport = {
       scrollX: this.scrollX,
