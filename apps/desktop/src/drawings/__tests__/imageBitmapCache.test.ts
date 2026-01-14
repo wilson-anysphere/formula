@@ -288,6 +288,55 @@ describe("ImageBitmapCache", () => {
     }
   });
 
+  it("getOrRequest() honors negativeCacheMs by suppressing immediate retries after a failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const cache = new ImageBitmapCache({ negativeCacheMs: 250 });
+      const entry = makeEntry();
+
+      const err = new Error("bad bytes");
+      const bitmap = {} as ImageBitmap;
+
+      const createImageBitmapMock = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce(bitmap);
+      vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+      const onReady1 = vi.fn();
+      expect(cache.getOrRequest(entry, onReady1)).toBeNull();
+
+      // Flush internal `.then` handlers that record the failure + invoke callbacks.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onReady1).toHaveBeenCalledTimes(1);
+      expect(cache.__testOnly_failCount).toBe(1);
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+      // Within the negative cache window, we should not attempt another decode.
+      const onReady2 = vi.fn();
+      expect(cache.getOrRequest(entry, onReady2)).toBeNull();
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+      expect(onReady2).not.toHaveBeenCalled();
+
+      // After expiry, retry should be allowed.
+      vi.advanceTimersByTime(300);
+      vi.setSystemTime(300);
+
+      const onReady3 = vi.fn();
+      expect(cache.getOrRequest(entry, onReady3)).toBeNull();
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+
+      // Let the decode resolve and populate the cache.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onReady3).toHaveBeenCalledTimes(1);
+      expect(cache.getOrRequest(entry, vi.fn())).toBe(bitmap);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("getOrRequest() closes decoded bitmaps when caching is disabled (maxEntries=0)", async () => {
     const close = vi.fn();
     const bitmap = { close } as unknown as ImageBitmap;
