@@ -62,6 +62,26 @@ fn evaluates_sum_over_sheet_range_cell_ref() {
 }
 
 #[test]
+fn reorder_sheet_updates_sheet_range_expansion() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine.set_cell_value("Sheet4", "A1", 10.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+
+    // Insert Sheet4 between Sheet1 and Sheet3 so the sheet span expansion changes.
+    assert!(engine.reorder_sheet("Sheet4", 1));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(16.0));
+}
+
+#[test]
 fn evaluates_sum_over_quoted_sheet_range_with_spaces() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet 1", "A1", 1.0).unwrap();
