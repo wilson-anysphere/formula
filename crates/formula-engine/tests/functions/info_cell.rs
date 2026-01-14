@@ -245,6 +245,76 @@ fn cell_format_uses_cell_row_col_style_precedence() {
 }
 
 #[test]
+fn cell_format_uses_cell_row_col_sheet_style_precedence() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+
+    // Define one style per layer so we can validate precedence:
+    // sheet < col < row < cell.
+    let sheet_style = engine.intern_style(Style {
+        number_format: Some("0.0000".into()),
+        ..Default::default()
+    });
+    let col_style = engine.intern_style(Style {
+        number_format: Some("0.00".into()),
+        ..Default::default()
+    });
+    let row_style = engine.intern_style(Style {
+        number_format: Some("0.000".into()),
+        ..Default::default()
+    });
+    let cell_style = engine.intern_style(Style {
+        number_format: Some("0.0".into()),
+        ..Default::default()
+    });
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("G".to_string())
+    );
+
+    // Sheet default is the fallback when there are no row/col/cell overrides.
+    engine.set_sheet_default_style_id("Sheet1", Some(sheet_style));
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F4".to_string())
+    );
+
+    // Column overrides sheet default.
+    engine.set_col_style_id("Sheet1", 0, Some(col_style));
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F2".to_string())
+    );
+
+    // Row overrides column (and sheet).
+    engine.set_row_style_id("Sheet1", 0, Some(row_style));
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F3".to_string())
+    );
+
+    // Explicit cell style overrides row/column/sheet.
+    engine
+        .set_cell_style_id("Sheet1", "A1", cell_style)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F1".to_string())
+    );
+}
+
+#[test]
 fn cell_format_classifies_thousands_separated_numbers_as_n() {
     use formula_engine::Engine;
 
