@@ -143,6 +143,7 @@ Notes:
     - cross-OS merged artifact: `desktop-perf-platform-matrix` (`desktop-perf-platform-matrix.json`)
     - pinned runner matrix: `ubuntu-24.04`, `windows-2022`, `macos-14`
     - includes best-effort WebView runtime metadata (WebKitGTK / WKWebView / WebView2 version) to help attribute regressions to runner image updates
+    - scheduled runs on `main` also publish key p95 metrics to the benchmark-action `gh-pages` history (non-gating)
     - manual `workflow_dispatch` runs can override run counts/timeouts via inputs: `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs` (and can optionally restrict the OS via `os`)
   
   For on-demand PR runs (same-repo PRs only), maintainers can apply the `desktop-perf-matrix` / `run-desktop-perf` label to trigger:
