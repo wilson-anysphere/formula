@@ -163,7 +163,8 @@ In collaborative mode:
    - Pass an `undoService` (from `@formula/collab-undo`) into `bindYjsToDocumentController`.
 
 `bindYjsToDocumentController` prevents feedback loops between the two reactive
-systems using internal guards (not by blanket-filtering `transaction.origin`):
+systems using internal guards (and a small amount of `payload.source` filtering),
+not by blanket-filtering `transaction.origin`:
 
 - While applying a **DocumentController → Yjs** write it sets `applyingLocal`.
   The Yjs `observeDeep` handlers early-return when this flag is set, so the
@@ -171,6 +172,15 @@ systems using internal guards (not by blanket-filtering `transaction.origin`):
 - While applying a **Yjs → DocumentController** update it sets `applyingRemote`.
   The DocumentController `"change"` handler ignores events while this flag is set,
   so remote-applied deltas are not written back into Yjs.
+- In desktop, multiple binders can be attached to the same `DocumentController`
+  (e.g. a lightweight sheet-view binder for drawings/merged ranges alongside the
+  full binder). In that setup, one binder can apply a remote update into the
+  `DocumentController` while the other binder’s `applyingRemote` flag is **false**.
+  To prevent echoing those external changes back into Yjs (and polluting
+  collaborative undo), binders treat these sources as external and ignore them in
+  their `"change"` handlers:
+  - `payload.source === "collab"` (remote Yjs → DocumentController apply)
+  - `payload.source === "applyState"` (snapshot restore / version history hydration)
 
 This is intentionally not implemented as “ignore all local origins”, because the
 stack reuses local origins for programmatic operations (branch checkout/merge
