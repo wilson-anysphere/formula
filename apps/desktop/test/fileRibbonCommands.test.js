@@ -138,4 +138,8 @@ test("File tab ribbon ids are registered in CommandRegistry (no exemptions neede
       `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
     );
   }
+
+  // Ensure the panel-alias helper keeps File-tab ids hidden from the command palette.
+  // These ids are ribbon-only aliases of canonical `view.togglePanel.*` commands.
+  assert.match(commands, /\bregisterPanelAlias\b[\s\S]*?\bwhen:\s*["']false["']/m);
 });
