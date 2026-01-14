@@ -398,6 +398,47 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 
+  it("duplicateSelectedDrawing preserves raw string ids in DocumentController drawings", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(120), cy: pxToEmu(80) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    app.selectDrawing(before.id);
+
+    app.duplicateSelectedDrawing();
+
+    const drawings = doc.getSheetDrawings(sheetId);
+    expect(drawings).toHaveLength(2);
+    expect(drawings.some((d: any) => String(d?.id) === "drawing_foo")).toBe(true);
+
+    const duplicated = drawings.find((d: any) => String(d?.id) !== "drawing_foo");
+    expect(duplicated).toBeTruthy();
+    expect(typeof duplicated.id).toBe("number");
+
+    app.dispose();
+    root.remove();
+  });
+
   it("ignores drawing interaction commits when the app is read-only", () => {
     const root = createRoot();
     const status = {

@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { pxToEmu } from "../../drawings/overlay";
+import { convertDocumentSheetDrawingsToUiDrawingObjects } from "../../drawings/modelAdapters";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -197,6 +198,52 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
 
       expect(app.getActiveCell()).toEqual({ row: before.row, col: before.col + 1 });
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("preserves non-numeric string drawing ids when nudging (avoids hashing ids into the document)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument() as any;
+
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "drawing_foo",
+          kind: { type: "shape", label: "rect" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+            size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+          },
+          zOrder: 0,
+        },
+      ]);
+
+      const ui = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+      app.selectDrawing(ui.id);
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+
+      const updated = doc.getSheetDrawings(sheetId)[0];
+      expect(updated.id).toBe("drawing_foo");
+      expect(updated.anchor.type).toBe("oneCell");
+      expect(updated.anchor.from.offset.xEmu).toBe(pxToEmu(1));
 
       app.destroy();
       root.remove();

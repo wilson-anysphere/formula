@@ -8956,9 +8956,53 @@ export class SpreadsheetApp {
     const result = duplicateDrawingSelected(this.listDrawingObjectsForSheet(), selectedId);
     if (!result) return;
 
+    const sheetId = this.sheetId;
+    const docAny: any = this.document as any;
+    const insertDrawing = typeof docAny.insertDrawing === "function" ? (docAny.insertDrawing as Function) : null;
+    const getSheetDrawings = typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as Function) : null;
+    const setSheetDrawings = typeof docAny.setSheetDrawings === "function" ? (docAny.setSheetDrawings as Function) : null;
+
+    // Persist duplication in a way that preserves existing raw drawing ids (which may be non-numeric strings).
+    // Writing the full UI-level objects list back to DocumentController would replace those raw ids with hashed
+    // numeric UI ids, breaking round-tripping for imported drawings.
+    const duplicated = result.objects.find((obj) => obj.id === result.duplicatedId) ?? null;
+    if (!duplicated) return;
+
+    const maxZOrder = (() => {
+      if (!getSheetDrawings) return 0;
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (!Array.isArray(raw) || raw.length === 0) return 0;
+      let max = 0;
+      for (const entry of raw) {
+        if (!entry || typeof entry !== "object") continue;
+        const z = Number((entry as any).zOrder ?? (entry as any).z_order);
+        if (Number.isFinite(z)) max = Math.max(max, z);
+      }
+      return max;
+    })();
+
+    const rawDuplicate = { ...duplicated, zOrder: maxZOrder + 1 };
+
     this.document.beginBatch({ label: "Duplicate Drawing" });
     try {
-      this.document.setSheetDrawings(this.sheetId, result.objects, { source: "drawings" });
+      if (insertDrawing) {
+        insertDrawing.call(this.document, sheetId, rawDuplicate, { source: "drawings" });
+      } else if (getSheetDrawings && setSheetDrawings) {
+        // Fallback for older builds.
+        let existing: unknown = null;
+        try {
+          existing = getSheetDrawings.call(docAny, sheetId);
+        } catch {
+          existing = null;
+        }
+        const next = [...(Array.isArray(existing) ? existing : []), rawDuplicate];
+        setSheetDrawings.call(this.document, sheetId, next, { source: "drawings" });
+      }
       this.document.endBatch();
     } catch (err) {
       this.document.cancelBatch();
@@ -14962,18 +15006,10 @@ export class SpreadsheetApp {
     // Persist the move (and create an undo step) when the document supports sheet drawings.
     if (!setSheetDrawings) return;
 
-    this.document.beginBatch({ label: "Move Picture" });
-    try {
-      setSheetDrawings.call(this.document, this.sheetId, nextObjects, { source: "drawings" });
-      this.document.endBatch();
-    } catch (err) {
-      try {
-        this.document.cancelBatch();
-      } catch {
-        // ignore
-      }
-      throw err;
-    }
+    const after = nextObjects.find((obj) => obj.id === selectedId);
+    if (!after) return;
+    // Reuse the same commit path as pointer interactions so we preserve raw string ids and patched DrawingML.
+    this.commitDrawingInteraction({ kind: "move", id: selectedId, before: selected, after, objects: nextObjects });
   }
 
   private handleShowFormulasShortcut(e: KeyboardEvent): boolean {
