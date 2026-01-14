@@ -64,6 +64,26 @@ test("desktop UI scripts should not hardcode px values for padding/margin/gap in
         re: /\b(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\s*:\s*(?<value>[^;"'`]*)/gi,
         kind: "css-declaration",
       },
+      // React style props (e.g. `<div style={{ marginTop: "8px" }} />`).
+      // We intentionally only scan inside explicit `style={{ ... }}` props to keep this high-signal;
+      // spacing-ish keys like `marginTop` can appear in other non-CSS data objects (e.g. chart layout).
+      {
+        re: /\bstyle\s*=\s*\{\s*\{[\s\S]{0,400}?\b(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        kind: "react-style-prop",
+      },
+      {
+        re: /\bstyle\s*=\s*\{\s*\{[\s\S]{0,400}?\b(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*:\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        kind: "react-style-prop-number",
+      },
+      // Object.assign(el.style, { marginTop: "8px" })
+      {
+        re: /\bObject\.assign\(\s*[^,]+(?:\.\s*style\b|\[\s*(?:["'`])style(?:["'`])\s*])\s*,[\s\S]{0,400}?\b(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        kind: "Object.assign(style)",
+      },
+      {
+        re: /\bObject\.assign\(\s*[^,]+(?:\.\s*style\b|\[\s*(?:["'`])style(?:["'`])\s*])\s*,[\s\S]{0,400}?\b(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*:\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        kind: "Object.assign(style)-number",
+      },
       // DOM style assignment (e.g. `el.style.marginTop = "8px"`).
       {
         re: /\.\s*style\b\s*\.\s*(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
