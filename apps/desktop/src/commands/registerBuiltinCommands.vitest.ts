@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
-import { createDefaultLayout, getPanelPlacement, openPanel, closePanel, setSplitDirection as setSplitDirectionState } from "../layout/layoutState.js";
+import {
+  createDefaultLayout,
+  getPanelPlacement,
+  openPanel,
+  closePanel,
+  floatPanel,
+  setFloatingPanelMinimized,
+  setSplitDirection as setSplitDirectionState,
+} from "../layout/layoutState.js";
 import { PanelIds, panelRegistry } from "../panels/panelRegistry.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
@@ -16,6 +24,9 @@ describe("registerBuiltinCommands: panel toggles", () => {
       },
       closePanel(panelId: string) {
         this.layout = closePanel(this.layout, panelId);
+      },
+      setFloatingPanelMinimized(panelId: string, minimized: boolean) {
+        this.layout = setFloatingPanelMinimized(this.layout, panelId, minimized);
       },
     } as any;
     registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
@@ -45,6 +56,25 @@ describe("registerBuiltinCommands: panel toggles", () => {
       await commandRegistry.executeCommand(commandId);
       expect(getPanelPlacement(layoutController.layout, panelId).kind).toBe("closed");
     }
+  });
+
+  it("restores minimized floating panels when toggling a panel open", async () => {
+    const { commandRegistry, layoutController } = createHarness();
+
+    // Open the Data Queries panel once so it has a placement.
+    await commandRegistry.executeCommand("view.togglePanel.dataQueries");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).not.toBe("closed");
+
+    // Force it into floating+minimized state.
+    layoutController.layout = floatPanel(layoutController.layout, PanelIds.DATA_QUERIES, { x: 10, y: 10, width: 300, height: 200 });
+    layoutController.layout = setFloatingPanelMinimized(layoutController.layout, PanelIds.DATA_QUERIES, true);
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).toBe("floating");
+    expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(true);
+
+    // Toggling should restore (unminimize) instead of closing.
+    await commandRegistry.executeCommand("view.togglePanel.dataQueries");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).toBe("floating");
+    expect(layoutController.layout.floating?.[PanelIds.DATA_QUERIES]?.minimized).toBe(false);
   });
 
   it("toggles Version History panel open/closed", async () => {

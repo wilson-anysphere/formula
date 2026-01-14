@@ -70,8 +70,19 @@ export function registerBuiltinCommands(params: {
 
   const toggleDockPanel = (panelId: string) => {
     const placement = getPanelPlacement(layoutController.layout, panelId);
-    if (placement.kind === "closed") layoutController.openPanel(panelId);
-    else layoutController.closePanel(panelId);
+    if (placement.kind === "closed") {
+      layoutController.openPanel(panelId);
+      return;
+    }
+
+    // Floating panels can be minimized. Treat a minimized floating panel as "closed" for toggle
+    // purposes so toggle commands restore the panel instead of closing it.
+    if (placement.kind === "floating" && (layoutController.layout as any)?.floating?.[panelId]?.minimized) {
+      layoutController.setFloatingPanelMinimized(panelId, false);
+      return;
+    }
+
+    layoutController.closePanel(panelId);
   };
 
   const listVisibleSheetIds = (): string[] => {
