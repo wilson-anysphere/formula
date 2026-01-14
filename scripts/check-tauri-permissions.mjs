@@ -300,7 +300,8 @@ function main() {
       if (!validIdentifiers.has(ref.identifier)) {
         problems.push({
           ...ref,
-          error: "unknown permission identifier (not reported by `cargo tauri permission ls`)",
+          error:
+            "unknown permission identifier (not reported by `cargo tauri permission ls` and not found in `apps/desktop/src-tauri/permissions/*.json`)",
         });
       }
     }
