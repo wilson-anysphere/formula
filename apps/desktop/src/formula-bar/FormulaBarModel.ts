@@ -104,6 +104,16 @@ export class FormulaBarModel {
   #engineToolingFormula: string | null = null;
   #engineToolingLocaleId: string = "en-US";
   #errorExplanationCache: { value: unknown; result: ErrorExplanation | null } | null = null;
+  #functionHintCache:
+    | {
+        draft: string;
+        localeId: string;
+        argSeparator: string;
+        name: string;
+        argIndex: number;
+        hint: FunctionHint;
+      }
+    | null = null;
   /**
    * Full text suggestion for the current draft (not just the "ghost text" tail).
    *
@@ -133,6 +143,7 @@ export class FormulaBarModel {
     this.#activeReferenceIndex = null;
     this.#clearEditorTooling();
     this.#errorExplanationCache = null;
+    this.#functionHintCache = null;
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
   }
@@ -253,6 +264,7 @@ export class FormulaBarModel {
       this.#clearEditorTooling();
       this.#tokenCache = null;
       this.#clearActiveArgumentSpanCache();
+      this.#functionHintCache = null;
     } else if (cursorChanged) {
       // Cursor moved within the same draft; keep lex-based highlights/syntax errors but
       // clear cursor-dependent parse context so hint rendering can refresh.
@@ -333,46 +345,56 @@ export class FormulaBarModel {
       : (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
     const argSeparator = inferArgSeparator(localeId);
 
+    let ctxName: string | null = null;
+    let ctxArgIndex: number | null = null;
+
     if (hasEngineLocaleForDraft && this.#engineFunctionContext) {
       const ctx = this.#engineFunctionContext;
-      const signature = getFunctionSignature(ctx.name, { localeId });
-      if (!signature) return null;
+      ctxName = ctx.name;
+      ctxArgIndex = ctx.argIndex;
+    } else {
+      let active = this.activeArgumentSpan(this.#cursorStart);
+      ctxName = active?.fnName ?? null;
+      ctxArgIndex = active?.argIndex ?? null;
 
-      return {
-        context: { name: ctx.name, argIndex: ctx.argIndex },
-        signature,
-        parts: signatureParts(signature, ctx.argIndex, { argSeparator }),
-      };
-    }
-
-    let active = this.activeArgumentSpan(this.#cursorStart);
-    let context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
-
-    // Excel UX: keep showing the innermost function hint when the caret is just
-    // after a closing paren (e.g. "=ROUND(1,2)|"). The simple tokenizer-based
-    // parser considers the call "closed" once it consumes ')', which would
-    // otherwise clear the hint.
-    if (
-      !context &&
-      this.#cursorStart === this.#cursorEnd &&
-      this.#cursorStart > 0
-    ) {
-      let scan = this.#cursorStart - 1;
-      while (scan >= 0 && isWhitespaceChar(this.#draft[scan] ?? "")) scan -= 1;
-      if (scan >= 0 && this.#draft[scan] === ")") {
-        active = this.activeArgumentSpan(scan);
-        context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
+      // Excel UX: keep showing the innermost function hint when the caret is just
+      // after a closing paren (e.g. "=ROUND(1,2)|"). The simple tokenizer-based
+      // parser considers the call "closed" once it consumes ')', which would
+      // otherwise clear the hint.
+      if (ctxName == null && this.#cursorStart === this.#cursorEnd && this.#cursorStart > 0) {
+        let scan = this.#cursorStart - 1;
+        while (scan >= 0 && isWhitespaceChar(this.#draft[scan] ?? "")) scan -= 1;
+        if (scan >= 0 && this.#draft[scan] === ")") {
+          active = this.activeArgumentSpan(scan);
+          ctxName = active?.fnName ?? null;
+          ctxArgIndex = active?.argIndex ?? null;
+        }
       }
     }
 
-    if (!context) return null;
-    const signature = getFunctionSignature(context.name, { localeId });
+    if (ctxName == null || ctxArgIndex == null) return null;
+
+    const cache = this.#functionHintCache;
+    if (
+      cache &&
+      cache.draft === this.#draft &&
+      cache.localeId === localeId &&
+      cache.argSeparator === argSeparator &&
+      cache.name === ctxName &&
+      cache.argIndex === ctxArgIndex
+    ) {
+      return cache.hint;
+    }
+
+    const signature = getFunctionSignature(ctxName, { localeId });
     if (!signature) return null;
-    return {
-      context,
+    const hint: FunctionHint = {
+      context: { name: ctxName, argIndex: ctxArgIndex },
       signature,
-      parts: signatureParts(signature, context.argIndex, { argSeparator }),
+      parts: signatureParts(signature, ctxArgIndex, { argSeparator }),
     };
+    this.#functionHintCache = { draft: this.#draft, localeId, argSeparator, name: ctxName, argIndex: ctxArgIndex, hint };
+    return hint;
   }
 
   errorExplanation(): ErrorExplanation | null {
