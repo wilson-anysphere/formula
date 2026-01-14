@@ -879,6 +879,12 @@ jobs:
           restore-keys: |
             tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Validate Tauri capability permission identifiers
+        # Fail the release early if `apps/desktop/src-tauri/capabilities/*.json` references
+        # permissions that do not exist in the pinned toolchain (`cargo tauri permission ls`).
+        if: runner.os == 'Linux'
+        run: node scripts/check-tauri-permissions.mjs
+
       - name: Build and upload release assets (macOS universal)
         if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
