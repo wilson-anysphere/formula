@@ -5,6 +5,7 @@ use std::process::Stdio;
 use std::io::Write;
 
 const PASSWORD: &str = "password";
+const UNICODE_PASSWORD: &str = "pässwörd";
 
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -93,6 +94,98 @@ fn cli_succeeds_with_password_file() {
         stdout.contains("No differences."),
         "expected output to indicate no differences, got:\n{stdout}"
     );
+}
+
+#[test]
+fn cli_succeeds_with_empty_password_file() {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile-empty-password.xlsx");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let pw_path = tmp.path().join("password.txt");
+    // Trailing newlines are trimmed; a file containing only `\n` represents an empty password.
+    std::fs::write(&pw_path, "\n").expect("write password file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&plain)
+        .arg(&encrypted)
+        .arg("--password-file")
+        .arg(&pw_path)
+        .output()
+        .expect("run xlsx-diff");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No differences."),
+        "expected output to indicate no differences, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn cli_succeeds_with_unicode_password_file() {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile-unicode.xlsx");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let pw_path = tmp.path().join("password.txt");
+    std::fs::write(&pw_path, format!("{UNICODE_PASSWORD}\n")).expect("write password file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&plain)
+        .arg(&encrypted)
+        .arg("--password-file")
+        .arg(&pw_path)
+        .output()
+        .expect("run xlsx-diff");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No differences."),
+        "expected output to indicate no differences, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn cli_succeeds_with_encrypted_xlsm_fixtures() {
+    let plain = fixture_path("plaintext-basic.xlsm");
+    for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm", "basic-password.xlsm"] {
+        let encrypted = fixture_path(encrypted_name);
+
+        let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+            .arg(&plain)
+            .arg(&encrypted)
+            .arg("--password")
+            .arg(PASSWORD)
+            .output()
+            .unwrap_or_else(|err| panic!("run xlsx-diff ({encrypted_name}): {err}"));
+
+        assert!(
+            output.status.success(),
+            "{encrypted_name}: expected exit 0\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("No differences."),
+            "{encrypted_name}: expected output to indicate no differences, got:\n{stdout}"
+        );
+    }
 }
 
 #[test]
