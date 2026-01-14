@@ -1231,22 +1231,21 @@ pub fn open_workbook_model_with_password(
 ) -> Result<formula_model::Workbook, Error> {
     let path = path.as_ref();
 
+    // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
+    // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
+    // decryption support.
+    if password.is_some() {
+        if let Some(bytes) = maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
+        {
+            return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
+        }
+    }
+
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
     if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
         return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
-    }
-
-    // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
-    // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
-    // decryption support.
-    if password.is_some() {
-        if let Some(bytes) =
-            maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
-        {
-            return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
-        }
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
@@ -1298,22 +1297,21 @@ pub fn open_workbook_with_password(
 ) -> Result<Workbook, Error> {
     let path = path.as_ref();
 
+    // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
+    // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
+    // decryption support.
+    if password.is_some() {
+        if let Some(bytes) = maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
+        {
+            return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
+        }
+    }
+
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
     if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
         return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
-    }
-
-    // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
-    // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
-    // decryption support.
-    if password.is_some() {
-        if let Some(bytes) =
-            maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
-        {
-            return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
-        }
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
@@ -2604,35 +2602,27 @@ fn decrypt_encrypted_ooxml_package(
         return Ok(None);
     }
 
-    // Read full `EncryptionInfo` and `EncryptedPackage` streams.
-    let mut encryption_info = Vec::new();
-    {
-        let mut stream = ole
-            .open_stream("EncryptionInfo")
-            .or_else(|_| ole.open_stream("/EncryptionInfo"))
-            .map_err(|_| Error::UnsupportedOoxmlEncryption {
-                path: path.to_path_buf(),
-                version_major: 0,
-                version_minor: 0,
-            })?;
-        stream.read_to_end(&mut encryption_info).map_err(|source| Error::OpenIo {
+    // Read full `EncryptionInfo` and `EncryptedPackage` streams (best-effort + case-insensitive).
+    let encryption_info = read_ole_stream_best_effort(&mut ole, "EncryptionInfo")
+        .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
             source,
+        })?
+        .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major: 0,
+            version_minor: 0,
         })?;
-    }
-    let mut encrypted_package = Vec::new();
-    {
-        let mut stream = ole
-            .open_stream("EncryptedPackage")
-            .or_else(|_| ole.open_stream("/EncryptedPackage"))
-            .map_err(|_| Error::InvalidPassword {
-                path: path.to_path_buf(),
-            })?;
-        stream.read_to_end(&mut encrypted_package).map_err(|source| Error::OpenIo {
+    let encrypted_package = read_ole_stream_best_effort(&mut ole, "EncryptedPackage")
+        .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
             source,
+        })?
+        .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major: 0,
+            version_minor: 0,
         })?;
-    }
 
     // Some synthetic fixtures (and some pipelines) may already contain a plaintext ZIP payload in
     // `EncryptedPackage`. Support those by returning the ZIP bytes directly.
@@ -2655,8 +2645,10 @@ fn decrypt_encrypted_ooxml_package(
             u16::from_le_bytes([header[2], header[3]]),
         ),
         None => {
-            return Err(Error::InvalidPassword {
+            return Err(Error::UnsupportedOoxmlEncryption {
                 path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
             })
         }
     };
@@ -2683,25 +2675,29 @@ fn decrypt_encrypted_ooxml_package(
         // Real-world producers vary in how they encode/wrap the Agile `EncryptionInfo` XML
         // (UTF-8/UTF-16, length prefixes, padding). Normalize to a strict UTF-8 XML payload so we
         // can reuse the `formula-xlsx` offcrypto implementation.
-        let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_| {
-            Error::InvalidPassword {
+        let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_err| {
+            Error::UnsupportedOoxmlEncryption {
                 path: path.to_path_buf(),
+                version_major,
+                version_minor,
             }
         })?;
         let mut normalized_info = Vec::with_capacity(8 + xml.len());
         normalized_info.extend_from_slice(
             encryption_info
                 .get(..8)
-                .ok_or_else(|| Error::InvalidPassword {
+                .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
                     path: path.to_path_buf(),
+                    version_major,
+                    version_minor,
                 })?,
         );
         normalized_info.extend_from_slice(xml.as_bytes());
 
         formula_xlsx::decrypt_agile_encrypted_package(&normalized_info, &encrypted_package, password)
-        .map_err(|_| Error::InvalidPassword {
-            path: path.to_path_buf(),
-        })?
+            .map_err(|_err| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?
     } else {
         // Standard/CryptoAPI encryption has multiple variants in the wild.
         //

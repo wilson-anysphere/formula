@@ -150,24 +150,23 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OfficeCrypt
     let _reserved2 = read_u32_le(bytes, 28)?;
     let csp_name = decode_utf16le_nul_terminated(&bytes[32..])?;
 
-    // Validate key `EncryptionHeader.Flags` semantics. This is conservative and avoids silently
-    // treating random bytes as a supported Standard encryption header.
+    // Validate key `EncryptionHeader.Flags` semantics.
+    //
+    // Note: some real-world Standard-encrypted workbooks omit these flags (e.g. `flags_raw == 0`)
+    // even when the cipher parameters clearly indicate CryptoAPI + AES. We treat the flags as
+    // advisory and derive behavior from the algorithm identifiers instead of rejecting those
+    // files outright.
     let flags = EncryptionHeaderFlags::from_raw(flags_raw);
     if flags.f_external {
         return Err(OfficeCryptoError::UnsupportedEncryption(
             "unsupported external Standard encryption (fExternal flag set)".to_string(),
         ));
     }
-    if !flags.f_cryptoapi {
-        return Err(OfficeCryptoError::UnsupportedEncryption(
-            "unsupported Standard encryption: fCryptoAPI flag not set".to_string(),
-        ));
-    }
 
-    // Policy: treat AES flag/algId mismatches as invalid. This avoids ambiguous or inconsistent
-    // inputs when parsing untrusted streams.
+    // Be conservative when `fAES` is set: it must be consistent with the algId. When `fAES` is not
+    // set we still accept AES algIds to handle producers that omit the flag.
     let alg_is_aes = is_aes_alg_id(alg_id);
-    if flags.f_aes != alg_is_aes {
+    if flags.f_aes && !alg_is_aes {
         return Err(OfficeCryptoError::InvalidFormat(format!(
             "invalid Standard EncryptionHeader flags for algId {alg_id:#x}: flags={flags_raw:#x}"
         )));
@@ -1027,25 +1026,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn standard_encryption_header_rejects_missing_cryptoapi_flag() {
+    fn standard_encryption_header_accepts_missing_cryptoapi_flag() {
         let flags = 0u32;
         let bytes = minimal_encryption_header_bytes(flags, CALG_RC4);
-        let err = parse_encryption_header(&bytes).expect_err("expected error");
-        assert!(
-            matches!(
-                err,
-                OfficeCryptoError::UnsupportedEncryption(ref msg) if msg.contains("fCryptoAPI")
-            ),
-            "unexpected error: {err:?}"
-        );
+        let header = parse_encryption_header(&bytes).expect("parse header");
+        assert_eq!(header.alg_id, CALG_RC4);
     }
 
     #[test]
-    fn standard_encryption_header_rejects_aes_algid_without_faes_flag() {
-        let flags = EncryptionHeaderFlags::F_CRYPTOAPI;
+    fn standard_encryption_header_accepts_aes_algid_without_faes_flag() {
+        let flags = 0u32;
         let bytes = minimal_encryption_header_bytes(flags, CALG_AES_128);
-        let err = parse_encryption_header(&bytes).expect_err("expected error");
-        assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
+        let header = parse_encryption_header(&bytes).expect("parse header");
+        assert_eq!(header.alg_id, CALG_AES_128);
     }
 
     #[test]

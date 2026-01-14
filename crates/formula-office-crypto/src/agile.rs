@@ -683,8 +683,8 @@ pub(crate) fn decrypt_agile_encrypted_package(
                             )
                         })?;
                     if !ct_eq(expected_hmac, computed_hmac_header_plus_plaintext) {
-                    last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
-                    continue;
+                        last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
+                        continue;
                     }
                 }
             }
