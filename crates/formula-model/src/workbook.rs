@@ -605,6 +605,7 @@ impl Workbook {
             duplicated.id = crate::new_uuid();
             duplicated.name = generate_duplicate_pivot_table_name(&pivot.name, &mut used_names);
             id_map.insert(pivot.id, duplicated.id);
+            let pivot_had_cache_id = pivot.cache_id.is_some();
 
             // Retarget the destination to the new sheet.
             match &mut duplicated.destination {
@@ -678,7 +679,7 @@ impl Workbook {
                 PivotSource::DataModel { .. } => {}
             }
 
-            if source_changed {
+            if source_changed && pivot_had_cache_id {
                 // If the duplicated pivot's source was rewritten to point at duplicated data
                 // (range/table on the new sheet), allocate a distinct cache so the original and
                 // duplicated pivots can be refreshed independently (Excel-like). Only pivots that
