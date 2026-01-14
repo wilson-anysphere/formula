@@ -2567,7 +2567,22 @@ jobs:
       - name: Verify desktop release assets + latest.json and generate SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/verify-desktop-release-assets.mjs --tag "${{ needs.preflight.outputs.release_tag }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cmd=(node scripts/verify-desktop-release-assets.mjs --tag "${{ needs.preflight.outputs.release_tag }}")
+
+          # Enforce per-arch completeness + unambiguous naming in the upstream repo, where we ship
+          # a full multi-arch matrix (macOS universal, Windows x64/arm64, Linux x86_64/arm64).
+          #
+          # Forks can opt into the same checks by passing `--expectations` manually (or by editing
+          # the workflow), but we avoid forcing the upstream target set on all forks by default.
+          if [[ "${{ github.repository }}" == "wilson-anysphere/formula" ]]; then
+            cmd+=(--expectations scripts/release-asset-expectations.json)
+          fi
+
+          "${cmd[@]}"
 
       - name: Upload SHA256SUMS.txt to the draft release
         env:

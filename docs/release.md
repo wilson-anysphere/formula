@@ -222,6 +222,12 @@ GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --dry-run --tag vX.Y
 # (excludes `.sig` files by default; add `--include-sigs` to include them).
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt
 
+# Optional (recommended for multi-arch releases): enforce that each expected OS/arch target has at
+# least one installer asset whose filename includes BOTH the version and the arch/universal token,
+# and fail on any ambiguous arch-less assets that could be overwritten in multi-arch builds.
+GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --dry-run \
+  --expectations scripts/release-asset-expectations.json
+
 # To match CI's SHA256SUMS.txt output exactly (hashes all release assets, including `.sig`):
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt --all-assets --include-sigs
 
