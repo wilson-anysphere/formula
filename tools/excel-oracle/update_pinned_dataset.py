@@ -96,25 +96,69 @@ def _stable_path_string_from_payload(*, repo_root: Path, raw: object) -> str | N
     possible so it is not machine-specific.
     """
 
-    if not isinstance(raw, str):
+    if raw is None:
         return None
-    raw = raw.strip()
-    if not raw:
+    if isinstance(raw, Path):
+        raw_str = str(raw)
+    elif isinstance(raw, str):
+        raw_str = raw
+    else:
+        raw_str = str(raw)
+
+    raw_str = raw_str.strip()
+    if not raw_str:
         return None
 
+    # Normalize slashes so we can handle Windows paths even on non-Windows machines.
+    # This is primarily used to keep `source.patches[*].caseSet.path` privacy-safe when committing
+    # pinned datasets: a Windows path like `C:\Users\Alice\repo\cases.json` should never be
+    # recorded verbatim in git.
+    normalized = raw_str.replace("\\", "/")
+
+    def _extract_repo_relative_suffix(path_str: str) -> str | None:
+        # Best-effort: if the path contains a typical repo-relative marker, keep only that suffix.
+        # This avoids leaking usernames/mount points while keeping the path somewhat readable.
+        lowered = path_str.casefold()
+        for marker in ("/tests/", "/tools/", "/crates/", "/shared/"):
+            idx = lowered.rfind(marker)
+            if idx != -1:
+                return path_str[idx + 1 :].lstrip("/")
+        return None
+
+    # Detect Windows absolute paths (drive letter or UNC) even on non-Windows platforms.
+    is_windows_drive_abs = bool(re.match(r"^[A-Za-z]:/", normalized))
+    is_unc_abs = normalized.startswith("//")
+
     try:
-        p = Path(raw)
-        # Note: on non-Windows platforms, a Windows path like `C:\repo\cases.json` is not treated as
-        # absolute by pathlib. In that situation we just keep the raw string.
-        if p.is_absolute():
-            try:
-                rel = p.resolve().relative_to(repo_root.resolve())
-                return rel.as_posix()
-            except Exception:
-                return p.as_posix()
-        return p.as_posix()
+        p = Path(raw_str)
     except Exception:
-        return raw
+        p = None
+
+    is_posix_abs = normalized.startswith("/")
+    is_abs = is_posix_abs or is_windows_drive_abs or is_unc_abs or (p.is_absolute() if p else False)
+
+    if is_abs and p is not None and p.is_absolute():
+        try:
+            rel = p.resolve().relative_to(repo_root.resolve())
+            return rel.as_posix()
+        except Exception:
+            # Fall through to suffix/basename sanitization.
+            pass
+
+    # If this looks like a Windows absolute path, attempt to recover the repo-relative suffix
+    # (e.g. `.../tests/compatibility/...`) even when pathlib can't resolve it.
+    suffix = _extract_repo_relative_suffix(normalized)
+    if suffix:
+        return suffix
+
+    # Relative paths are already stable; normalize separators.
+    if not is_abs:
+        return normalized
+
+    # Absolute path that we couldn't map into the repo. Keep only the basename to avoid leaking
+    # user directories / network share hostnames.
+    base = Path(normalized).name
+    return base or None
 
 
 def _is_real_excel_source(source: dict[str, Any]) -> bool:

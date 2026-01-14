@@ -50,6 +50,60 @@ def _sanitize_fragment(text: str) -> str:
     return safe or "unknown"
 
 
+def _stable_case_set_path_string(*, repo_root: Path, raw: object) -> str | None:
+    """Return a portable, privacy-safe caseSet.path string.
+
+    The Excel-oracle tools often get invoked via wrapper scripts that pass absolute paths (including
+    Windows paths like `C:\\Users\\Alice\\repo\\tests\\...`). If pinned datasets (or patch metadata)
+    are committed, those machine-specific paths should never land in git.
+
+    Prefer a repo-relative suffix when possible; otherwise fall back to the basename.
+    """
+
+    if raw is None:
+        return None
+    raw_str = str(raw).strip()
+    if not raw_str:
+        return None
+
+    normalized = raw_str.replace("\\", "/")
+
+    def _extract_repo_relative_suffix(path_str: str) -> str | None:
+        lowered = path_str.casefold()
+        for marker in ("/tests/", "/tools/", "/crates/", "/shared/"):
+            idx = lowered.rfind(marker)
+            if idx != -1:
+                return path_str[idx + 1 :].lstrip("/")
+        return None
+
+    # Try the simple case first: current-platform absolute paths.
+    try:
+        p = Path(raw_str)
+    except Exception:
+        p = None
+
+    if p is not None and p.is_absolute():
+        try:
+            rel = p.resolve().relative_to(repo_root.resolve())
+            return rel.as_posix()
+        except Exception:
+            pass
+
+    # Windows absolute paths (drive letter / UNC) can show up even when running this script on a
+    # non-Windows machine (e.g. patching a pinned dataset on Linux using a results file generated
+    # on a Windows Excel runner).
+    suffix = _extract_repo_relative_suffix(normalized)
+    if suffix:
+        return suffix
+
+    # Already-relative path: just normalize slashes.
+    if not (normalized.startswith("/") or re.match(r"^[A-Za-z]:/", normalized) or normalized.startswith("//")):
+        return normalized
+
+    # Absolute path we can't map into the repo: keep only the basename.
+    return Path(normalized).name
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:
@@ -80,6 +134,8 @@ def main() -> int:
     dataset_path = Path(args.dataset)
     pinned_path = Path(args.pinned)
     versioned_dir = Path(args.versioned_dir) if args.versioned_dir else None
+
+    repo_root = Path(__file__).resolve().parents[2]
 
     payload = _load_json(dataset_path)
     source = payload.get("source", {})
@@ -129,6 +185,11 @@ def main() -> int:
     excel_build = _sanitize_fragment(str(source.get("build", "unknown")))
     cases_sha = _sanitize_fragment(str(case_set.get("sha256", "unknown")))
 
+    if isinstance(case_set, dict) and "path" in case_set:
+        stable_path = _stable_case_set_path_string(repo_root=repo_root, raw=case_set.get("path"))
+        if stable_path:
+            case_set["path"] = stable_path
+
     versioned_name = f"excel-{excel_version}-build-{excel_build}-cases-{cases_sha[:8]}.json"
     versioned_path = (versioned_dir / versioned_name) if versioned_dir is not None else None
 
@@ -142,11 +203,7 @@ def main() -> int:
             print("versioned: <skipped>")
         return 0
 
-    if source_kind == "excel":
-        pinned_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(dataset_path, pinned_path)
-    else:
-        _write_json(pinned_path, payload)
+    _write_json(pinned_path, payload)
     print(f"Pinned dataset -> {pinned_path.as_posix()}")
 
     if versioned_dir is not None:
