@@ -2866,18 +2866,20 @@ jobs:
   upload-sbom:
     name: Upload SBOM to the draft release
     needs: [sbom, preflight]
-    if: needs.preflight.outputs.upload == 'true' && needs.sbom.outputs.generated == 'true'
+    if: needs.preflight.outputs.upload == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - name: Download SBOM artifact
+        if: needs.sbom.outputs.generated == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sbom-${{ needs.preflight.outputs.artifact_label }}
           path: .
 
       - name: Upload SBOM to the draft release
+        if: needs.sbom.outputs.generated == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -2887,12 +2889,17 @@ jobs:
             --repo "${{ github.repository }}" \
             --clobber
 
+      - name: Skip SBOM upload (SBOM generation failed)
+        if: needs.sbom.outputs.generated != 'true'
+        run: echo "::warning::SBOM generation failed; skipping sbom.spdx.json upload to the draft release."
+
   checksums:
     name: Generate SHA256SUMS.txt
     needs:
       - build
       - preflight
       - sbom
+      - upload-sbom
       - verify-updater-manifest
       - verify-release-assets
     if: needs.preflight.outputs.upload == 'true'
