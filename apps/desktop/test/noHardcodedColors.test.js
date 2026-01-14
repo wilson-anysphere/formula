@@ -75,6 +75,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   // `hsl()` in comments, regex literals, or `hsl(var(--foo))`. Include an optional sign so
   // hardcoded hues like `hsl(-30deg ...)` can't slip through.
   const hslColor = /\bhsl(a)?\s*\(\s*(?:[+-]?(?:\d|\.\d))/gi;
+  // Catch other CSS color functions (less common but still hardcoded colors). Require a numeric
+  // channel for the same "high signal" reason as rgb/hsl.
+  const modernColorFn = /\b(?<fn>hwb|lab|lch|oklab|oklch)\s*\(\s*(?:[+-]?(?:\d|\.\d))/gi;
 
   // CSS also supports named colors (`crimson`, `red`, etc). These are disallowed in core UI;
   // use tokens instead (e.g. `var(--error)`), except for a few safe keywords.
@@ -178,6 +181,8 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     const hex = stripped.match(hexColor);
     const rgb = stripped.match(rgbColor);
     const hsl = stripped.match(hslColor);
+    const modern = modernColorFn.exec(stripped);
+    modernColorFn.lastIndex = 0;
     /** @type {string | null} */
     let named = null;
     if (ext === ".css") {
@@ -216,6 +221,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     if (hex) violations.push({ file, match: hex[0] });
     if (rgb) violations.push({ file, match: "rgb(...)" });
     if (hsl) violations.push({ file, match: "hsl(...)" });
+    if (modern) violations.push({ file, match: `${modern.groups?.fn ?? "color"}(...)` });
   }
 
   assert.deepEqual(
