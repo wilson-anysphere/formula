@@ -7880,6 +7880,56 @@ mod tests {
     use tokio::net::TcpListener;
 
     #[test]
+    fn ipc_pivot_field_ref_deserializes_and_converts_data_model_refs() {
+        let field: IpcPivotFieldRef = serde_json::from_value(serde_json::json!("Region")).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::CacheFieldName("Region".to_string())
+        );
+
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!("Sales[Amount]")).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelColumn {
+                table: "Sales".to_string(),
+                column: "Amount".to_string(),
+            }
+        );
+
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!("[Total Sales]")).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!({"table":"Sales","column":"Amount"})).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelColumn {
+                table: "Sales".to_string(),
+                column: "Amount".to_string(),
+            }
+        );
+
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!({"measure":"Total Sales"})).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+
+        let field: IpcPivotFieldRef =
+            serde_json::from_value(serde_json::json!({"name":"Total Sales"})).unwrap();
+        assert_eq!(
+            PivotFieldRef::from(field),
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+    }
+
+    #[test]
     fn imported_sheet_background_images_falls_back_to_preserved_parts_when_origin_bytes_missing() {
         use std::collections::BTreeMap;
 
