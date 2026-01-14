@@ -164,6 +164,22 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "addColumn", name: "Ok", formula: "[Region]" }]);
   });
 
+  it("drops splitColumn suggestions with empty delimiter", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "splitColumn", column: "Region", delimiter: "" },
+          { type: "splitColumn", column: "Region", delimiter: "," },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("split", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "splitColumn", column: "Region", delimiter: "," }]);
+  });
+
   it("drops renameColumn suggestions that would collide with an existing column name", async () => {
     chatMock.mockResolvedValue({
       message: {

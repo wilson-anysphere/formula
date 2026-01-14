@@ -281,7 +281,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       const column = (value as { column?: unknown }).column;
       const delimiter = (value as { delimiter?: unknown }).delimiter;
       if (!validateColumn(column, allowedColumns)) return null;
-      if (typeof delimiter !== "string") return null;
+      if (typeof delimiter !== "string" || delimiter.length === 0) return null;
       return { type: "splitColumn", column, delimiter };
     }
     case "fillDown": {
