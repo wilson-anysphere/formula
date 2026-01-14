@@ -5839,16 +5839,6 @@ impl Engine {
         );
         let expr_to_lower = rewritten_names.as_ref().unwrap_or(expr_after_structured);
 
-        // Expand whole-row / whole-column references against the workbook's current sheet
-        // dimensions so bytecode lowering uses the correct resolved bounds on very large sheets.
-        //
-        // Note: the bytecode backend still uses runtime `#REF!` semantics when a range falls
-        // outside the configured sheet bounds, so this is primarily a correctness fix for `A:A`,
-        // `1:1`, and mixed range endpoints like `A1:B`.
-        let expanded_whole_refs =
-            self.expand_whole_row_col_refs_for_bytecode(expr_to_lower, key.sheet);
-        let expr_to_lower = &expanded_whole_refs;
-
         // External workbook references and invalid sheet prefixes can be introduced via defined
         // name inlining (or eliminated by it). Run the prefix check on the final expression shape
         // that will be lowered so bytecode eligibility and diagnostics reflect the actual lowered
@@ -5861,12 +5851,19 @@ impl Engine {
             return Err(BytecodeCompileReason::LowerError(lower_error));
         }
 
+        let mut sheet_dimensions = |sheet_id: SheetId| {
+            workbook
+                .sheets
+                .get(sheet_id)
+                .map(|s| (s.row_count, s.col_count))
+        };
         let expr = bytecode::lower_canonical_expr_with_sheet_span(
             expr_to_lower,
             origin_ast,
             key.sheet,
             &mut resolve_sheet_id,
             &mut expand_sheet_span,
+            &mut sheet_dimensions,
         )
         .map_err(|e| match e {
             // The lowering layer uses `Unsupported` as a catch-all for expression shapes the
@@ -5895,310 +5892,6 @@ impl Engine {
             .unwrap_or((0, 0));
         bytecode_expr_within_grid_limits(&expr, origin, (sheet_rows, sheet_cols))?;
         Ok(self.bytecode_cache.get_or_compile(&expr))
-    }
-
-    /// Expand whole-row / whole-column references (e.g. `A:A`, `1:1`, and mixed endpoints like
-    /// `A1:B`) into explicit rectangular ranges using the workbook's current sheet dimensions.
-    ///
-    /// The bytecode AST does not currently have a "sheet end" sentinel like the engine's main eval
-    /// IR, so we rewrite these references before lowering so the bytecode compiler/runtime sees
-    /// the correct resolved bounds on very large sheets.
-    fn expand_whole_row_col_refs_for_bytecode(
-        &self,
-        expr: &crate::Expr,
-        current_sheet: SheetId,
-    ) -> crate::Expr {
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        struct RefPrefix {
-            workbook: Option<String>,
-            sheet: Option<crate::SheetRef>,
-        }
-
-        impl RefPrefix {
-            fn is_unprefixed(&self) -> bool {
-                self.workbook.is_none() && self.sheet.is_none()
-            }
-        }
-
-        fn prefix_for_rect(expr: &crate::Expr) -> Option<RefPrefix> {
-            match expr {
-                crate::Expr::CellRef(r) => Some(RefPrefix {
-                    workbook: r.workbook.clone(),
-                    sheet: r.sheet.clone(),
-                }),
-                crate::Expr::ColRef(r) => Some(RefPrefix {
-                    workbook: r.workbook.clone(),
-                    sheet: r.sheet.clone(),
-                }),
-                crate::Expr::RowRef(r) => Some(RefPrefix {
-                    workbook: r.workbook.clone(),
-                    sheet: r.sheet.clone(),
-                }),
-                _ => None,
-            }
-        }
-
-        fn merge_prefix(left: &RefPrefix, right: &RefPrefix) -> Option<RefPrefix> {
-            if left == right {
-                return Some(left.clone());
-            }
-            if left.is_unprefixed() && !right.is_unprefixed() {
-                return Some(right.clone());
-            }
-            if right.is_unprefixed() && !left.is_unprefixed() {
-                return Some(left.clone());
-            }
-            None
-        }
-
-        let sheet_dims_for_prefix = |prefix: &RefPrefix| -> (u32, u32) {
-            let sheet_id = match prefix.sheet.as_ref() {
-                None => Some(current_sheet),
-                Some(crate::SheetRef::Sheet(name)) => self.workbook.sheet_id(name),
-                Some(crate::SheetRef::SheetRange { start, .. }) => self.workbook.sheet_id(start),
-            };
-            sheet_id
-                .and_then(|id| {
-                    self.workbook
-                        .sheets
-                        .get(id)
-                        .map(|s| (s.row_count, s.col_count))
-                })
-                .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS))
-        };
-
-        fn absolute_coord(index: u32) -> crate::Coord {
-            crate::Coord::A1 { index, abs: true }
-        }
-
-        fn cell_ref_from_parts(
-            prefix: &RefPrefix,
-            row: crate::Coord,
-            col: crate::Coord,
-        ) -> crate::Expr {
-            crate::Expr::CellRef(crate::CellRef {
-                workbook: prefix.workbook.clone(),
-                sheet: prefix.sheet.clone(),
-                row,
-                col,
-            })
-        }
-
-        fn range_expr(left: crate::Expr, right: crate::Expr) -> crate::Expr {
-            crate::Expr::Binary(crate::BinaryExpr {
-                op: crate::BinaryOp::Range,
-                left: Box::new(left),
-                right: Box::new(right),
-            })
-        }
-
-        fn spans_full_rows(expr: &crate::Expr) -> bool {
-            matches!(expr, crate::Expr::ColRef(_))
-        }
-
-        fn spans_full_cols(expr: &crate::Expr) -> bool {
-            matches!(expr, crate::Expr::RowRef(_))
-        }
-
-        fn row_coord(expr: &crate::Expr) -> Option<crate::Coord> {
-            match expr {
-                crate::Expr::CellRef(r) => Some(r.row.clone()),
-                crate::Expr::RowRef(r) => Some(r.row.clone()),
-                _ => None,
-            }
-        }
-
-        fn col_coord(expr: &crate::Expr) -> Option<crate::Coord> {
-            match expr {
-                crate::Expr::CellRef(r) => Some(r.col.clone()),
-                crate::Expr::ColRef(r) => Some(r.col.clone()),
-                _ => None,
-            }
-        }
-
-        fn rewrite_inner(
-            expr: &crate::Expr,
-            current_sheet: SheetId,
-            sheet_dims_for_prefix: &impl Fn(&RefPrefix) -> (u32, u32),
-        ) -> crate::Expr {
-            match expr {
-                crate::Expr::ColRef(r) => {
-                    let prefix = RefPrefix {
-                        workbook: r.workbook.clone(),
-                        sheet: r.sheet.clone(),
-                    };
-                    let (rows, _cols) = sheet_dims_for_prefix(&prefix);
-                    let end_row = rows.saturating_sub(1);
-                    range_expr(
-                        cell_ref_from_parts(&prefix, absolute_coord(0), r.col.clone()),
-                        cell_ref_from_parts(&prefix, absolute_coord(end_row), r.col.clone()),
-                    )
-                }
-                crate::Expr::RowRef(r) => {
-                    let prefix = RefPrefix {
-                        workbook: r.workbook.clone(),
-                        sheet: r.sheet.clone(),
-                    };
-                    let (_rows, cols) = sheet_dims_for_prefix(&prefix);
-                    let end_col = cols.saturating_sub(1);
-                    range_expr(
-                        cell_ref_from_parts(&prefix, r.row.clone(), absolute_coord(0)),
-                        cell_ref_from_parts(&prefix, r.row.clone(), absolute_coord(end_col)),
-                    )
-                }
-                crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
-                    // Only rewrite range expressions when at least one endpoint is a whole-row /
-                    // whole-column reference. Otherwise, preserve the original shape to avoid
-                    // altering relative semantics.
-                    if !matches!(
-                        b.left.as_ref(),
-                        crate::Expr::ColRef(_) | crate::Expr::RowRef(_)
-                    ) && !matches!(
-                        b.right.as_ref(),
-                        crate::Expr::ColRef(_) | crate::Expr::RowRef(_)
-                    ) {
-                        return crate::Expr::Binary(crate::BinaryExpr {
-                            op: b.op,
-                            left: Box::new(rewrite_inner(
-                                b.left.as_ref(),
-                                current_sheet,
-                                sheet_dims_for_prefix,
-                            )),
-                            right: Box::new(rewrite_inner(
-                                b.right.as_ref(),
-                                current_sheet,
-                                sheet_dims_for_prefix,
-                            )),
-                        });
-                    }
-
-                    let Some(left_prefix) = prefix_for_rect(b.left.as_ref()) else {
-                        return expr.clone();
-                    };
-                    let Some(right_prefix) = prefix_for_rect(b.right.as_ref()) else {
-                        return expr.clone();
-                    };
-                    let Some(prefix) = merge_prefix(&left_prefix, &right_prefix) else {
-                        return expr.clone();
-                    };
-
-                    let (rows, cols) = sheet_dims_for_prefix(&prefix);
-                    let end_row = rows.saturating_sub(1);
-                    let end_col = cols.saturating_sub(1);
-
-                    let full_rows =
-                        spans_full_rows(b.left.as_ref()) || spans_full_rows(b.right.as_ref());
-                    let full_cols =
-                        spans_full_cols(b.left.as_ref()) || spans_full_cols(b.right.as_ref());
-
-                    let start_row = if full_rows {
-                        absolute_coord(0)
-                    } else {
-                        row_coord(b.left.as_ref()).unwrap_or_else(|| absolute_coord(0))
-                    };
-                    let end_row_coord = if full_rows {
-                        absolute_coord(end_row)
-                    } else {
-                        row_coord(b.right.as_ref()).unwrap_or_else(|| absolute_coord(end_row))
-                    };
-                    let start_col = if full_cols {
-                        absolute_coord(0)
-                    } else {
-                        col_coord(b.left.as_ref()).unwrap_or_else(|| absolute_coord(0))
-                    };
-                    let end_col_coord = if full_cols {
-                        absolute_coord(end_col)
-                    } else {
-                        col_coord(b.right.as_ref()).unwrap_or_else(|| absolute_coord(end_col))
-                    };
-
-                    range_expr(
-                        cell_ref_from_parts(&prefix, start_row, start_col),
-                        cell_ref_from_parts(&prefix, end_row_coord, end_col_coord),
-                    )
-                }
-                crate::Expr::FieldAccess(access) => {
-                    crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                        base: Box::new(rewrite_inner(
-                            access.base.as_ref(),
-                            current_sheet,
-                            sheet_dims_for_prefix,
-                        )),
-                        field: access.field.clone(),
-                    })
-                }
-                crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
-                    rows: arr
-                        .rows
-                        .iter()
-                        .map(|row| {
-                            row.iter()
-                                .map(|e| rewrite_inner(e, current_sheet, sheet_dims_for_prefix))
-                                .collect()
-                        })
-                        .collect(),
-                }),
-                crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
-                    name: call.name.clone(),
-                    args: call
-                        .args
-                        .iter()
-                        .map(|arg| rewrite_inner(arg, current_sheet, sheet_dims_for_prefix))
-                        .collect(),
-                }),
-                crate::Expr::Call(call) => crate::Expr::Call(crate::CallExpr {
-                    callee: Box::new(rewrite_inner(
-                        call.callee.as_ref(),
-                        current_sheet,
-                        sheet_dims_for_prefix,
-                    )),
-                    args: call
-                        .args
-                        .iter()
-                        .map(|arg| rewrite_inner(arg, current_sheet, sheet_dims_for_prefix))
-                        .collect(),
-                }),
-                crate::Expr::Unary(u) => crate::Expr::Unary(crate::UnaryExpr {
-                    op: u.op,
-                    expr: Box::new(rewrite_inner(
-                        u.expr.as_ref(),
-                        current_sheet,
-                        sheet_dims_for_prefix,
-                    )),
-                }),
-                crate::Expr::Postfix(p) => crate::Expr::Postfix(crate::PostfixExpr {
-                    op: p.op,
-                    expr: Box::new(rewrite_inner(
-                        p.expr.as_ref(),
-                        current_sheet,
-                        sheet_dims_for_prefix,
-                    )),
-                }),
-                crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
-                    op: b.op,
-                    left: Box::new(rewrite_inner(
-                        b.left.as_ref(),
-                        current_sheet,
-                        sheet_dims_for_prefix,
-                    )),
-                    right: Box::new(rewrite_inner(
-                        b.right.as_ref(),
-                        current_sheet,
-                        sheet_dims_for_prefix,
-                    )),
-                }),
-                crate::Expr::Number(_)
-                | crate::Expr::String(_)
-                | crate::Expr::Boolean(_)
-                | crate::Expr::Error(_)
-                | crate::Expr::NameRef(_)
-                | crate::Expr::CellRef(_)
-                | crate::Expr::StructuredRef(_)
-                | crate::Expr::Missing => expr.clone(),
-            }
-        }
-
-        rewrite_inner(expr, current_sheet, &sheet_dims_for_prefix)
     }
 
     fn inline_static_defined_names_for_bytecode(
@@ -11489,12 +11182,9 @@ impl<'a> EngineBytecodeGrid<'a> {
         row_end: i32,
         slice_mode: ColumnSliceMode,
     ) -> Option<&'a [f64]> {
-        if col < 0
-            || col >= EXCEL_MAX_COLS_I32
-            || row_start < 0
-            || row_end < 0
-            || row_start > row_end
-        {
+        // Bounds checking (sheet dimensions, col range) must be done by the caller since this
+        // helper is used for both the current sheet and sheet-qualified references.
+        if col < 0 || row_start < 0 || row_end < 0 || row_start > row_end {
             return None;
         }
         let data = cols.get(&col)?;
@@ -11675,6 +11365,16 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+        let (rows, cols) = self.bounds();
+        if col < 0
+            || col >= cols
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= rows
+        {
+            return None;
+        }
         self.column_slice_impl(self.cols, col, row_start, row_end, self.slice_mode)
     }
 
@@ -11684,6 +11384,16 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         row_start: i32,
         row_end: i32,
     ) -> Option<&[f64]> {
+        let (rows, cols) = self.bounds();
+        if col < 0
+            || col >= cols
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= rows
+        {
+            return None;
+        }
         self.column_slice_impl(
             self.cols,
             col,
@@ -11760,6 +11470,16 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         if !self.snapshot.sheets.contains(&sheet_id) {
             return None;
         }
+        let (rows, cols) = self.bounds_on_sheet(sheet);
+        if col < 0
+            || col >= cols
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= rows
+        {
+            return None;
+        }
         let sheet_cols = self.cols_by_sheet.get(sheet_id)?;
         self.column_slice_impl(sheet_cols, col, row_start, row_end, self.slice_mode)
     }
@@ -11776,6 +11496,16 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             bytecode::SheetId::External(_) => return None,
         };
         if !self.snapshot.sheets.contains(&sheet_id) {
+            return None;
+        }
+        let (rows, cols) = self.bounds_on_sheet(sheet);
+        if col < 0
+            || col >= cols
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= rows
+        {
             return None;
         }
         let sheet_cols = self.cols_by_sheet.get(sheet_id)?;
@@ -11955,191 +11685,295 @@ fn bytecode_expr_within_grid_limits(
     origin: bytecode::CellCoord,
     origin_sheet_bounds: (i32, i32),
 ) -> Result<(), BytecodeCompileReason> {
-    fn resolve_ref_checked(
-        r: bytecode::Ref,
-        origin: bytecode::CellCoord,
-    ) -> Result<bytecode::CellCoord, BytecodeCompileReason> {
-        let row = if r.row_abs {
-            r.row
-        } else {
-            origin
-                .row
-                .checked_add(r.row)
-                .ok_or(BytecodeCompileReason::ExceedsGridLimits)?
-        };
-        let col = if r.col_abs {
-            r.col
-        } else {
-            origin
-                .col
-                .checked_add(r.col)
-                .ok_or(BytecodeCompileReason::ExceedsGridLimits)?
-        };
-        Ok(bytecode::CellCoord { row, col })
-    }
+    bytecode_expr_within_grid_limits_inner(
+        expr,
+        origin,
+        origin_sheet_bounds,
+        BYTECODE_MAX_RANGE_CELLS,
+    )
+}
 
-    fn resolve_range_checked(
-        r: bytecode::RangeRef,
-        origin: bytecode::CellCoord,
-    ) -> Result<bytecode::ResolvedRange, BytecodeCompileReason> {
-        let a = resolve_ref_checked(r.start, origin)?;
-        let b = resolve_ref_checked(r.end, origin)?;
-        Ok(bytecode::ResolvedRange::from_coords(a, b))
-    }
-
-    fn resolved_coord_within_bytecode_limits(coord: bytecode::CellCoord) -> bool {
-        coord.row >= 0 && coord.col >= 0 && coord.row < i32::MAX && coord.col < EXCEL_MAX_COLS_I32
-    }
-
-    fn resolved_range_within_bytecode_limits(range: bytecode::ResolvedRange) -> bool {
-        range.row_start >= 0
-            && range.col_start >= 0
-            && range.row_end >= 0
-            && range.col_end >= 0
-            && range.row_start < i32::MAX
-            && range.row_end < i32::MAX
-            && range.col_start < EXCEL_MAX_COLS_I32
-            && range.col_end < EXCEL_MAX_COLS_I32
-    }
-
+fn bytecode_expr_within_grid_limits_inner(
+    expr: &bytecode::Expr,
+    origin: bytecode::CellCoord,
+    origin_sheet_bounds: (i32, i32),
+    max_range_cells: i64,
+) -> Result<(), BytecodeCompileReason> {
+    // Bytecode coordinate math uses signed 32-bit indices. For now we enforce the engine's
+    // hard bounds:
+    // - rows are limited to `i32::MAX` (so max row index is `i32::MAX - 1`)
+    // - cols are limited to Excel's 16,384-column maximum (`EXCEL_MAX_COLS`)
+    //
+    // Note: We intentionally do *not* validate against per-sheet configured dimensions here.
+    // References that are out-of-bounds for a particular sheet are still valid formulas that
+    // evaluate to `#REF!`; the bytecode VM handles those cases at runtime.
+    let max_rows = i32::MAX;
+    let max_cols = EXCEL_MAX_COLS_I32;
     match expr {
         bytecode::Expr::Literal(_) => Ok(()),
         bytecode::Expr::CellRef(r) => {
-            let coord = resolve_ref_checked(*r, origin)?;
-            if resolved_coord_within_bytecode_limits(coord) {
+            let coord = r.resolve(origin);
+            if coord.row >= 0
+                && coord.col >= 0
+                && coord.row < max_rows
+                && coord.col < max_cols
+            {
                 Ok(())
             } else {
                 Err(BytecodeCompileReason::ExceedsGridLimits)
             }
         }
         bytecode::Expr::RangeRef(r) => {
-            let resolved = resolve_range_checked(*r, origin)?;
-            if resolved_range_within_bytecode_limits(resolved) {
+            let resolved = r.resolve(origin);
+            if resolved.row_start < 0
+                || resolved.col_start < 0
+                || resolved.row_end >= max_rows
+                || resolved.col_end >= max_cols
+            {
+                return Err(BytecodeCompileReason::ExceedsGridLimits);
+            }
+            let cells = (resolved.rows() as i64) * (resolved.cols() as i64);
+            if cells <= max_range_cells {
                 Ok(())
             } else {
-                Err(BytecodeCompileReason::ExceedsGridLimits)
+                Err(BytecodeCompileReason::ExceedsRangeCellLimit)
             }
         }
         bytecode::Expr::MultiRangeRef(r) => {
+            let mut total: i64 = 0;
             for area in r.areas.iter() {
-                let resolved = resolve_range_checked(area.range, origin)?;
-                if !resolved_range_within_bytecode_limits(resolved) {
+                let resolved = area.range.resolve(origin);
+                if resolved.row_start < 0
+                    || resolved.col_start < 0
+                    || resolved.row_end >= max_rows
+                    || resolved.col_end >= max_cols
+                {
                     return Err(BytecodeCompileReason::ExceedsGridLimits);
+                }
+                let cells = (resolved.rows() as i64) * (resolved.cols() as i64);
+                total = total.saturating_add(cells);
+                if total > max_range_cells {
+                    return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
                 }
             }
             Ok(())
         }
         bytecode::Expr::SpillRange(inner) => {
-            bytecode_expr_within_grid_limits(inner, origin, origin_sheet_bounds)
+            bytecode_expr_within_grid_limits_inner(inner, origin, origin_sheet_bounds, max_range_cells)
         }
         bytecode::Expr::NameRef(_) => Ok(()),
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
-                bytecode_expr_within_grid_limits(expr, origin, origin_sheet_bounds)
+                bytecode_expr_within_grid_limits_inner(
+                    expr,
+                    origin,
+                    origin_sheet_bounds,
+                    max_range_cells,
+                )
             }
-            bytecode::ast::UnaryOp::ImplicitIntersection => {
-                bytecode_expr_within_grid_limits(expr, origin, origin_sheet_bounds)
-            }
+            bytecode::ast::UnaryOp::ImplicitIntersection => match expr.as_ref() {
+                // Implicit intersection only dereferences at most one cell from a range, so it
+                // doesn't require allocating columnar buffers proportional to the range size.
+                // Skip the range-cell-count limit here while still validating grid bounds.
+                bytecode::Expr::RangeRef(r) => {
+                    let resolved = r.resolve(origin);
+                    if resolved.row_start < 0
+                        || resolved.col_start < 0
+                        || resolved.row_end >= max_rows
+                        || resolved.col_end >= max_cols
+                    {
+                        Err(BytecodeCompileReason::ExceedsGridLimits)
+                    } else {
+                        Ok(())
+                    }
+                }
+                bytecode::Expr::MultiRangeRef(r) => {
+                    for area in r.areas.iter() {
+                        let resolved = area.range.resolve(origin);
+                        if resolved.row_start < 0
+                            || resolved.col_start < 0
+                            || resolved.row_end >= max_rows
+                            || resolved.col_end >= max_cols
+                        {
+                            return Err(BytecodeCompileReason::ExceedsGridLimits);
+                        }
+                    }
+                    Ok(())
+                }
+                _ => bytecode_expr_within_grid_limits_inner(
+                    expr,
+                    origin,
+                    origin_sheet_bounds,
+                    max_range_cells,
+                ),
+            },
         },
         bytecode::Expr::Binary { left, right, .. } => {
-            bytecode_expr_within_grid_limits(left, origin, origin_sheet_bounds)?;
-            bytecode_expr_within_grid_limits(right, origin, origin_sheet_bounds)?;
+            bytecode_expr_within_grid_limits_inner(left, origin, origin_sheet_bounds, max_range_cells)?;
+            bytecode_expr_within_grid_limits_inner(right, origin, origin_sheet_bounds, max_range_cells)?;
             Ok(())
         }
         bytecode::Expr::FuncCall { func, args } => {
             use bytecode::ast::Function;
-
-            // Most functions treat range arguments as dense rectangular cell sets. The bytecode
-            // backend currently enforces a conservative cell-count limit to avoid allocating huge
-            // per-range buffers.
-            //
-            // A small set of reference-introspection functions do *not* need to materialize values
-            // for whole-row / whole-column ranges (e.g. `ROW(1:1000)`), so apply a more accurate
-            // limit based on their actual output shape.
             match func {
+                // ROW/COLUMN treat whole-row/whole-column references as 1-D arrays. Use the real
+                // sheet bounds to apply an accurate cell-count limit for these special cases.
                 Function::Row | Function::Column => {
                     for (idx, arg) in args.iter().enumerate() {
                         if idx == 0 {
-                            match arg {
-                                bytecode::Expr::RangeRef(r) => {
-                                    let resolved = resolve_range_checked(*r, origin)?;
-                                    if !resolved_range_within_bytecode_limits(resolved) {
-                                        return Err(BytecodeCompileReason::ExceedsGridLimits);
-                                    }
-
-                                    let (sheet_rows, sheet_cols) = origin_sheet_bounds;
-                                    let spans_all_cols = resolved.col_start == 0
-                                        && resolved.col_end == sheet_cols.saturating_sub(1);
-                                    let spans_all_rows = resolved.row_start == 0
-                                        && resolved.row_end == sheet_rows.saturating_sub(1);
-
-                                    // ROW/COLUMN treat full-row/full-column references as 1-D
-                                    // arrays (see `functions::builtins_reference::{row_fn,column_fn}`
-                                    // and the corresponding bytecode runtime implementations).
-                                    let cells = if spans_all_cols || spans_all_rows {
-                                        match func {
-                                            Function::Row => i64::from(resolved.rows()),
-                                            Function::Column => i64::from(resolved.cols()),
-                                            _ => unreachable!("matched above"),
-                                        }
-                                    } else {
-                                        (i64::from(resolved.rows())) * (i64::from(resolved.cols()))
-                                    };
-
-                                    if cells > BYTECODE_MAX_RANGE_CELLS {
-                                        return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
-                                    }
-                                    continue;
+                            if let bytecode::Expr::RangeRef(r) = arg {
+                                let resolved = r.resolve(origin);
+                                if resolved.row_start < 0
+                                    || resolved.col_start < 0
+                                    || resolved.row_end >= max_rows
+                                    || resolved.col_end >= max_cols
+                                {
+                                    return Err(BytecodeCompileReason::ExceedsGridLimits);
                                 }
-                                _ => {}
+
+                                let (sheet_rows, sheet_cols) = origin_sheet_bounds;
+                                let spans_all_cols = resolved.col_start == 0
+                                    && resolved.col_end == sheet_cols.saturating_sub(1);
+                                let spans_all_rows = resolved.row_start == 0
+                                    && resolved.row_end == sheet_rows.saturating_sub(1);
+
+                                let cells = if spans_all_cols || spans_all_rows {
+                                    match func {
+                                        Function::Row => i64::from(resolved.rows()),
+                                        Function::Column => i64::from(resolved.cols()),
+                                        _ => unreachable!("matched above"),
+                                    }
+                                } else {
+                                    (i64::from(resolved.rows())) * (i64::from(resolved.cols()))
+                                };
+                                if cells > BYTECODE_MAX_RANGE_CELLS {
+                                    return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+                                }
+                                continue;
                             }
                         }
 
-                        bytecode_expr_within_grid_limits(arg, origin, origin_sheet_bounds)?;
+                        bytecode_expr_within_grid_limits_inner(
+                            arg,
+                            origin,
+                            origin_sheet_bounds,
+                            max_range_cells,
+                        )?;
                     }
                     Ok(())
                 }
+                // ROWS/COLUMNS only need reference bounds; they do not allocate buffers
+                // proportional to the range size.
                 Function::Rows | Function::Columns => {
                     for arg in args {
                         match arg {
-                            // ROWS/COLUMNS only need the reference bounds; they don't allocate
-                            // buffers proportional to the cell count.
                             bytecode::Expr::RangeRef(r) => {
-                                let resolved = resolve_range_checked(*r, origin)?;
-                                if !resolved_range_within_bytecode_limits(resolved) {
+                                let resolved = r.resolve(origin);
+                                if resolved.row_start < 0
+                                    || resolved.col_start < 0
+                                    || resolved.row_end >= max_rows
+                                    || resolved.col_end >= max_cols
+                                {
                                     return Err(BytecodeCompileReason::ExceedsGridLimits);
                                 }
                             }
                             bytecode::Expr::MultiRangeRef(r) => {
                                 for area in r.areas.iter() {
-                                    let resolved = resolve_range_checked(area.range, origin)?;
-                                    if !resolved_range_within_bytecode_limits(resolved) {
+                                    let resolved = area.range.resolve(origin);
+                                    if resolved.row_start < 0
+                                        || resolved.col_start < 0
+                                        || resolved.row_end >= max_rows
+                                        || resolved.col_end >= max_cols
+                                    {
                                         return Err(BytecodeCompileReason::ExceedsGridLimits);
                                     }
                                 }
                             }
                             _ => {
-                                bytecode_expr_within_grid_limits(arg, origin, origin_sheet_bounds)?;
+                                bytecode_expr_within_grid_limits_inner(
+                                    arg,
+                                    origin,
+                                    origin_sheet_bounds,
+                                    max_range_cells,
+                                )?;
                             }
                         }
                     }
                     Ok(())
                 }
                 _ => {
-                    for arg in args {
-                        bytecode_expr_within_grid_limits(arg, origin, origin_sheet_bounds)?;
+                    for (arg_idx, arg) in args.iter().enumerate() {
+                        let arg_limit = match func {
+                            // Aggregates can iterate ranges without forcing dense materialization,
+                            // so skip the range cell-count limit for reference-like arguments.
+                            Function::Sum
+                            | Function::SumIf
+                            | Function::SumIfs
+                            | Function::Average
+                            | Function::AverageIf
+                            | Function::AverageIfs
+                            | Function::Min
+                            | Function::MinIfs
+                            | Function::Max
+                            | Function::MaxIfs
+                            | Function::Count
+                            | Function::CountA
+                            | Function::CountBlank
+                            | Function::CountIf
+                            | Function::CountIfs
+                            | Function::SumProduct
+                            | Function::And
+                            | Function::Or
+                            | Function::Xor => {
+                                // Criteria arguments are scalar, so keep the default limit there.
+                                match (func, arg_idx) {
+                                    (Function::SumIf | Function::AverageIf, 1) => max_range_cells,
+                                    (Function::CountIf, 1) => max_range_cells,
+                                    (
+                                        Function::SumIfs
+                                        | Function::AverageIfs
+                                        | Function::MinIfs
+                                        | Function::MaxIfs,
+                                        idx,
+                                    ) if idx > 0 && idx % 2 == 0 => max_range_cells,
+                                    (Function::CountIfs, idx) if idx % 2 == 1 => max_range_cells,
+                                    _ => i64::MAX,
+                                }
+                            }
+                            _ => max_range_cells,
+                        };
+
+                        bytecode_expr_within_grid_limits_inner(
+                            arg,
+                            origin,
+                            origin_sheet_bounds,
+                            arg_limit,
+                        )?;
                     }
                     Ok(())
                 }
             }
         }
-        bytecode::Expr::Lambda { body, .. } => {
-            bytecode_expr_within_grid_limits(body, origin, origin_sheet_bounds)
-        }
+        bytecode::Expr::Lambda { body, .. } => bytecode_expr_within_grid_limits_inner(
+            body,
+            origin,
+            origin_sheet_bounds,
+            max_range_cells,
+        ),
         bytecode::Expr::Call { callee, args } => {
-            bytecode_expr_within_grid_limits(callee, origin, origin_sheet_bounds)?;
+            bytecode_expr_within_grid_limits_inner(
+                callee,
+                origin,
+                origin_sheet_bounds,
+                max_range_cells,
+            )?;
             for arg in args {
-                bytecode_expr_within_grid_limits(arg, origin, origin_sheet_bounds)?;
+                bytecode_expr_within_grid_limits_inner(
+                    arg,
+                    origin,
+                    origin_sheet_bounds,
+                    max_range_cells,
+                )?;
             }
             Ok(())
         }
@@ -17472,6 +17306,7 @@ mod tests {
             report.is_empty(),
             "expected formula to compile to bytecode on non-default sheet dimensions; report: {report:?}"
         );
+        assert_eq!(engine.bytecode_program_count(), 1);
     }
 
     #[test]

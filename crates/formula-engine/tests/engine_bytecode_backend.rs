@@ -4569,7 +4569,15 @@ fn bytecode_lower_flattens_concat_operator_chains() {
     .expect("parse canonical formula");
 
     let mut resolve_sheet = |_name: &str| Some(0usize);
-    let expr = bytecode::lower_canonical_expr(&ast.expr, origin, 0, &mut resolve_sheet)
+    let mut sheet_dimensions =
+        |_sheet_id: usize| Some((formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS));
+    let expr = bytecode::lower_canonical_expr(
+        &ast.expr,
+        origin,
+        0,
+        &mut resolve_sheet,
+        &mut sheet_dimensions,
+    )
         .expect("lower to bytecode expr");
 
     let bytecode::Expr::FuncCall { func, args } = expr else {
@@ -4835,9 +4843,16 @@ fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
     .expect("parse canonical formula");
 
     let mut resolve_sheet = |_name: &str| Some(0usize);
+    let mut sheet_dimensions = |_sheet_id: usize| Some((10u32, 10u32));
     let bc_expr =
-        formula_engine::bytecode::lower_canonical_expr(&ast.expr, origin, 0, &mut resolve_sheet)
-            .expect("lower to bytecode expr");
+        formula_engine::bytecode::lower_canonical_expr(
+            &ast.expr,
+            origin,
+            0,
+            &mut resolve_sheet,
+            &mut sheet_dimensions,
+        )
+        .expect("lower to bytecode expr");
 
     let cache = formula_engine::bytecode::BytecodeCache::new();
     let program = cache.get_or_compile(&bc_expr);

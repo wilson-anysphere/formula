@@ -34,18 +34,6 @@ fn expr_contains_external_workbook_ref(expr: &crate::Expr) -> bool {
         _ => false,
     }
 }
-
-/// Excel's maximum row index (0-indexed).
-///
-/// The engine expands whole-row/whole-column references (`A:A`, `1:1`, etc.) against the current
-/// sheet dimensions before bytecode lowering (see
-/// `Engine::expand_whole_row_col_refs_for_bytecode`). This constant is therefore only used as a
-/// conservative fallback if such references reach the lowerer directly.
-const EXCEL_MAX_ROW_IDX: i32 = (EXCEL_MAX_ROWS as i32) - 1;
-
-/// Excel's maximum column index (0-indexed).
-const EXCEL_MAX_COL_IDX: i32 = (EXCEL_MAX_COLS as i32) - 1;
-
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LowerError {
     #[error("unsupported expression")]
@@ -89,8 +77,10 @@ enum RectKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RectRef {
     kind: RectKind,
-    start: Ref,
-    end: Ref,
+    row: i32,
+    col: i32,
+    row_abs: bool,
+    col_abs: bool,
 }
 
 impl RectRef {
@@ -101,6 +91,37 @@ impl RectRef {
     fn spans_full_cols(&self) -> bool {
         matches!(self.kind, RectKind::Row)
     }
+
+    fn start_on_sheet(&self, _max_row: i32, _max_col: i32) -> Ref {
+        match self.kind {
+            RectKind::Cell => Ref::new(self.row, self.col, self.row_abs, self.col_abs),
+            RectKind::Col => Ref::new(0, self.col, true, self.col_abs),
+            RectKind::Row => Ref::new(self.row, 0, self.row_abs, true),
+        }
+    }
+
+    fn end_on_sheet(&self, max_row: i32, max_col: i32) -> Ref {
+        match self.kind {
+            RectKind::Cell => Ref::new(self.row, self.col, self.row_abs, self.col_abs),
+            RectKind::Col => Ref::new(max_row, self.col, true, self.col_abs),
+            RectKind::Row => Ref::new(self.row, max_col, self.row_abs, true),
+        }
+    }
+}
+
+fn sheet_max_indices(
+    sheet: &SheetId,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
+) -> Result<(i32, i32), LowerError> {
+    let (rows, cols) = match sheet {
+        SheetId::Local(id) => sheet_dimensions(*id).unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS)),
+        SheetId::External(_) => (EXCEL_MAX_ROWS, EXCEL_MAX_COLS),
+    };
+    let rows = i32::try_from(rows).map_err(|_| LowerError::Unsupported)?;
+    let cols = i32::try_from(cols).map_err(|_| LowerError::Unsupported)?;
+    let max_row = rows.checked_sub(1).ok_or(LowerError::Unsupported)?;
+    let max_col = cols.checked_sub(1).ok_or(LowerError::Unsupported)?;
+    Ok((max_row, max_col))
 }
 
 fn validate_prefix(
@@ -280,8 +301,10 @@ fn lower_rect_ref(
                 prefix,
                 RectRef {
                     kind: RectKind::Cell,
-                    start: r,
-                    end: r,
+                    row: r.row,
+                    col: r.col,
+                    row_abs: r.row_abs,
+                    col_abs: r.col_abs,
                 },
             ))
         }
@@ -290,14 +313,14 @@ fn lower_rect_ref(
             validate_prefix(&prefix, current_sheet, resolve_sheet_id)?;
 
             let (col, col_abs) = lower_coord(&r.col, origin.col)?;
-            let start = Ref::new(0, col, true, col_abs);
-            let end = Ref::new(EXCEL_MAX_ROW_IDX, col, true, col_abs);
             Ok((
                 prefix,
                 RectRef {
                     kind: RectKind::Col,
-                    start,
-                    end,
+                    row: 0,
+                    col,
+                    row_abs: true,
+                    col_abs,
                 },
             ))
         }
@@ -306,14 +329,14 @@ fn lower_rect_ref(
             validate_prefix(&prefix, current_sheet, resolve_sheet_id)?;
 
             let (row, row_abs) = lower_coord(&r.row, origin.row)?;
-            let start = Ref::new(row, 0, row_abs, true);
-            let end = Ref::new(row, EXCEL_MAX_COL_IDX, row_abs, true);
             Ok((
                 prefix,
                 RectRef {
                     kind: RectKind::Row,
-                    start,
-                    end,
+                    row,
+                    col: 0,
+                    row_abs,
+                    col_abs: true,
                 },
             ))
         }
@@ -341,6 +364,7 @@ fn lower_range_ref(
     current_sheet: usize,
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
 ) -> Result<BytecodeExpr, LowerError> {
     let (left_prefix, left_rect) = lower_rect_ref(left, origin, current_sheet, resolve_sheet_id)?;
     let (right_prefix, right_rect) =
@@ -351,34 +375,41 @@ fn lower_range_ref(
     let full_rows = left_rect.spans_full_rows() || right_rect.spans_full_rows();
     let full_cols = left_rect.spans_full_cols() || right_rect.spans_full_cols();
 
-    let (start_row, start_row_abs) = if full_rows {
-        (0, true)
-    } else {
-        (left_rect.start.row, left_rect.start.row_abs)
-    };
-    let (end_row, end_row_abs) = if full_rows {
-        (EXCEL_MAX_ROW_IDX, true)
-    } else {
-        (right_rect.end.row, right_rect.end.row_abs)
-    };
-    let (start_col, start_col_abs) = if full_cols {
-        (0, true)
-    } else {
-        (left_rect.start.col, left_rect.start.col_abs)
-    };
-    let (end_col, end_col_abs) = if full_cols {
-        (EXCEL_MAX_COL_IDX, true)
-    } else {
-        (right_rect.end.col, right_rect.end.col_abs)
-    };
+    let mut build_range = |sheet: SheetId| -> Result<RangeRef, LowerError> {
+        let (max_row, max_col) = sheet_max_indices(&sheet, sheet_dimensions)?;
+        let start_ref = left_rect.start_on_sheet(max_row, max_col);
+        let end_ref = right_rect.end_on_sheet(max_row, max_col);
 
-    let range = RangeRef::new(
-        Ref::new(start_row, start_col, start_row_abs, start_col_abs),
-        Ref::new(end_row, end_col, end_row_abs, end_col_abs),
-    );
+        let (start_row, start_row_abs) = if full_rows {
+            (0, true)
+        } else {
+            (start_ref.row, start_ref.row_abs)
+        };
+        let (end_row, end_row_abs) = if full_rows {
+            (max_row, true)
+        } else {
+            (end_ref.row, end_ref.row_abs)
+        };
+        let (start_col, start_col_abs) = if full_cols {
+            (0, true)
+        } else {
+            (start_ref.col, start_ref.col_abs)
+        };
+        let (end_col, end_col_abs) = if full_cols {
+            (max_col, true)
+        } else {
+            (end_ref.col, end_ref.col_abs)
+        };
+
+        Ok(RangeRef::new(
+            Ref::new(start_row, start_col, start_row_abs, start_col_abs),
+            Ref::new(end_row, end_col, end_row_abs, end_col_abs),
+        ))
+    };
 
     if merged_prefix.workbook.is_some() {
         let sheet = external_sheet_id(&merged_prefix)?;
+        let range = build_range(sheet.clone())?;
         return Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
             vec![SheetRangeRef::new(sheet, range)].into(),
         )));
@@ -389,10 +420,12 @@ fn lower_range_ref(
             let Some(sheet_id) = resolve_sheet_id(name) else {
                 return Err(LowerError::UnknownSheet);
             };
+            let sheet = SheetId::Local(sheet_id);
+            let range = build_range(sheet.clone())?;
             if sheet_id == current_sheet {
                 Ok(BytecodeExpr::RangeRef(range))
             } else {
-                let areas = vec![SheetRangeRef::new(SheetId::Local(sheet_id), range)];
+                let areas = vec![SheetRangeRef::new(sheet, range)];
                 Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                     areas.into(),
                 )))
@@ -400,15 +433,20 @@ fn lower_range_ref(
         }
         Some(crate::SheetRef::SheetRange { start, end }) => {
             let sheets = expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
-            let areas: Vec<SheetRangeRef> = sheets
-                .into_iter()
-                .map(|sheet| SheetRangeRef::new(SheetId::Local(sheet), range))
-                .collect();
+            let mut areas: Vec<SheetRangeRef> = Vec::with_capacity(sheets.len());
+            for sheet_id in sheets {
+                let sheet = SheetId::Local(sheet_id);
+                let range = build_range(sheet.clone())?;
+                areas.push(SheetRangeRef::new(sheet, range));
+            }
             Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                 areas.into(),
             )))
         }
-        _ => Ok(BytecodeExpr::RangeRef(range)),
+        _ => {
+            let range = build_range(SheetId::Local(current_sheet))?;
+            Ok(BytecodeExpr::RangeRef(range))
+        }
     }
 }
 
@@ -528,6 +566,7 @@ fn lower_canonical_reference_expr(
     current_sheet: usize,
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -559,6 +598,7 @@ fn lower_canonical_reference_expr(
             current_sheet,
             resolve_sheet_id,
             expand_sheet_span_ids,
+            sheet_dimensions,
         ),
         crate::Expr::Binary(b)
             if matches!(b.op, crate::BinaryOp::Union | crate::BinaryOp::Intersect) =>
@@ -576,6 +616,7 @@ fn lower_canonical_reference_expr(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -585,6 +626,7 @@ fn lower_canonical_reference_expr(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -597,6 +639,7 @@ fn lower_canonical_reference_expr(
                 current_sheet,
                 resolve_sheet_id,
                 expand_sheet_span_ids,
+                sheet_dimensions,
                 scopes,
                 lambda_self_name,
             )?)),
@@ -608,6 +651,7 @@ fn lower_canonical_reference_expr(
             current_sheet,
             resolve_sheet_id,
             expand_sheet_span_ids,
+            sheet_dimensions,
             scopes,
             lambda_self_name,
         ),
@@ -620,6 +664,7 @@ pub fn lower_canonical_expr_with_sheet_span(
     current_sheet: usize,
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
 ) -> Result<BytecodeExpr, LowerError> {
     let mut scopes = LexicalScopes::default();
     lower_canonical_expr_inner(
@@ -628,6 +673,7 @@ pub fn lower_canonical_expr_with_sheet_span(
         current_sheet,
         resolve_sheet_id,
         expand_sheet_span_ids,
+        sheet_dimensions,
         &mut scopes,
         None,
     )
@@ -638,6 +684,7 @@ pub fn lower_canonical_expr(
     origin: crate::CellAddr,
     current_sheet: usize,
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
 ) -> Result<BytecodeExpr, LowerError> {
     let mut expand_numeric = |a: usize, b: usize| {
         let (start, end) = if a <= b { (a, b) } else { (b, a) };
@@ -649,6 +696,7 @@ pub fn lower_canonical_expr(
         current_sheet,
         resolve_sheet_id,
         &mut expand_numeric,
+        sheet_dimensions,
     )
 }
 
@@ -658,6 +706,7 @@ fn lower_canonical_expr_inner(
     current_sheet: usize,
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -677,9 +726,16 @@ fn lower_canonical_expr_inner(
         ),
         crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => {
             let (prefix, rect) = lower_rect_ref(expr, origin, current_sheet, resolve_sheet_id)?;
-            let range = RangeRef::new(rect.start, rect.end);
+            let mut build_range = |sheet: SheetId| -> Result<RangeRef, LowerError> {
+                let (max_row, max_col) = sheet_max_indices(&sheet, sheet_dimensions)?;
+                let start = rect.start_on_sheet(max_row, max_col);
+                let end = rect.end_on_sheet(max_row, max_col);
+                Ok(RangeRef::new(start, end))
+            };
+
             if prefix.workbook.is_some() {
                 let sheet = external_sheet_id(&prefix)?;
+                let range = build_range(sheet.clone())?;
                 return Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                     vec![SheetRangeRef::new(sheet, range)].into(),
                 )));
@@ -689,10 +745,12 @@ fn lower_canonical_expr_inner(
                     let Some(sheet_id) = resolve_sheet_id(name) else {
                         return Err(LowerError::UnknownSheet);
                     };
+                    let sheet = SheetId::Local(sheet_id);
+                    let range = build_range(sheet.clone())?;
                     if sheet_id == current_sheet {
                         Ok(BytecodeExpr::RangeRef(range))
                     } else {
-                        let areas = vec![SheetRangeRef::new(SheetId::Local(sheet_id), range)];
+                        let areas = vec![SheetRangeRef::new(sheet, range)];
                         Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                             areas.into(),
                         )))
@@ -701,15 +759,20 @@ fn lower_canonical_expr_inner(
                 Some(crate::SheetRef::SheetRange { start, end }) => {
                     let sheets =
                         expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
-                    let areas: Vec<SheetRangeRef> = sheets
-                        .into_iter()
-                        .map(|sheet| SheetRangeRef::new(SheetId::Local(sheet), range))
-                        .collect();
+                    let mut areas: Vec<SheetRangeRef> = Vec::with_capacity(sheets.len());
+                    for sheet_id in sheets {
+                        let sheet = SheetId::Local(sheet_id);
+                        let range = build_range(sheet.clone())?;
+                        areas.push(SheetRangeRef::new(sheet, range));
+                    }
                     Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                         areas.into(),
                     )))
                 }
-                _ => Ok(BytecodeExpr::RangeRef(range)),
+                _ => {
+                    let range = build_range(SheetId::Local(current_sheet))?;
+                    Ok(BytecodeExpr::RangeRef(range))
+                }
             }
         }
         crate::Expr::Binary(b) => match b.op {
@@ -720,6 +783,7 @@ fn lower_canonical_expr_inner(
                 current_sheet,
                 resolve_sheet_id,
                 expand_sheet_span_ids,
+                sheet_dimensions,
             ),
             crate::BinaryOp::Concat => {
                 // Flatten `a&b&c` into a single CONCAT_OP call so we avoid intermediate allocations
@@ -735,6 +799,7 @@ fn lower_canonical_expr_inner(
                         current_sheet,
                         resolve_sheet_id,
                         expand_sheet_span_ids,
+                        sheet_dimensions,
                         scopes,
                         lambda_self_name,
                     )?);
@@ -777,6 +842,7 @@ fn lower_canonical_expr_inner(
                         current_sheet,
                         resolve_sheet_id,
                         expand_sheet_span_ids,
+                        sheet_dimensions,
                         scopes,
                         lambda_self_name,
                     )?),
@@ -786,6 +852,7 @@ fn lower_canonical_expr_inner(
                         current_sheet,
                         resolve_sheet_id,
                         expand_sheet_span_ids,
+                        sheet_dimensions,
                         scopes,
                         lambda_self_name,
                     )?),
@@ -800,6 +867,7 @@ fn lower_canonical_expr_inner(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )
@@ -814,6 +882,7 @@ fn lower_canonical_expr_inner(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -826,6 +895,7 @@ fn lower_canonical_expr_inner(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -838,6 +908,7 @@ fn lower_canonical_expr_inner(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -850,6 +921,7 @@ fn lower_canonical_expr_inner(
                 current_sheet,
                 resolve_sheet_id,
                 expand_sheet_span_ids,
+                sheet_dimensions,
                 scopes,
                 lambda_self_name,
             )?;
@@ -863,6 +935,7 @@ fn lower_canonical_expr_inner(
                         current_sheet,
                         resolve_sheet_id,
                         expand_sheet_span_ids,
+                        sheet_dimensions,
                         scopes,
                         lambda_self_name,
                     )
@@ -880,6 +953,7 @@ fn lower_canonical_expr_inner(
                 current_sheet,
                 resolve_sheet_id,
                 expand_sheet_span_ids,
+                sheet_dimensions,
                 scopes,
             ),
             "LAMBDA" => lower_lambda(
@@ -888,6 +962,7 @@ fn lower_canonical_expr_inner(
                 current_sheet,
                 resolve_sheet_id,
                 expand_sheet_span_ids,
+                sheet_dimensions,
                 scopes,
                 lambda_self_name,
             ),
@@ -928,6 +1003,7 @@ fn lower_canonical_expr_inner(
                                     current_sheet,
                                     resolve_sheet_id,
                                     expand_sheet_span_ids,
+                                    sheet_dimensions,
                                     scopes,
                                     lambda_self_name,
                                 )
@@ -976,6 +1052,7 @@ fn lower_canonical_expr_inner(
                                     current_sheet,
                                     resolve_sheet_id,
                                     expand_sheet_span_ids,
+                                    sheet_dimensions,
                                     scopes,
                                     lambda_self_name,
                                 )
@@ -1010,6 +1087,7 @@ fn lower_canonical_expr_inner(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -1022,6 +1100,7 @@ fn lower_canonical_expr_inner(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?,
@@ -1036,6 +1115,7 @@ fn lower_canonical_expr_inner(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     lambda_self_name,
                 )?,
@@ -1052,6 +1132,7 @@ fn lower_let(
     current_sheet: usize,
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
     scopes: &mut LexicalScopes,
 ) -> Result<BytecodeExpr, LowerError> {
     scopes.push_scope();
@@ -1076,6 +1157,7 @@ fn lower_let(
                     current_sheet,
                     resolve_sheet_id,
                     expand_sheet_span_ids,
+                    sheet_dimensions,
                     scopes,
                     None,
                 )?);
@@ -1106,6 +1188,7 @@ fn lower_let(
                 current_sheet,
                 resolve_sheet_id,
                 expand_sheet_span_ids,
+                sheet_dimensions,
                 scopes,
                 Some(&key),
             )?;
@@ -1119,6 +1202,7 @@ fn lower_let(
             current_sheet,
             resolve_sheet_id,
             expand_sheet_span_ids,
+            sheet_dimensions,
             scopes,
             None,
         )?;
@@ -1139,6 +1223,7 @@ fn lower_lambda(
     current_sheet: usize,
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
     expand_sheet_span_ids: &mut impl FnMut(usize, usize) -> Option<Vec<usize>>,
+    sheet_dimensions: &mut impl FnMut(usize) -> Option<(u32, u32)>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -1177,6 +1262,7 @@ fn lower_lambda(
             current_sheet,
             resolve_sheet_id,
             expand_sheet_span_ids,
+            sheet_dimensions,
             scopes,
             None,
         )?;

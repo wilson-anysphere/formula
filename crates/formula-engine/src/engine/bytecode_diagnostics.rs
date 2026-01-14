@@ -42,8 +42,9 @@ pub enum BytecodeCompileReason {
     ExceedsRangeCellLimit,
     /// The workbook has custom sheet dimensions that don't match Excel's fixed worksheet bounds.
     ///
-    /// The bytecode backend currently assumes Excel's default 1,048,576 x 16,384 grid when
-    /// lowering whole-row / whole-column references and validating range sizes.
+    /// Note: This reason is no longer emitted by the engine now that the bytecode lowering and
+    /// grid-limit checks are sheet-dimension-aware, but is kept for backward compatibility with
+    /// earlier coverage-reporting tooling.
     NonDefaultSheetDimensions,
 }
 
