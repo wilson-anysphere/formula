@@ -359,7 +359,7 @@ model.add_measure("Total Sales", "SUM(Fact[Amount])")?;
 
 Measure name normalization notes:
 
-- Measure names are stored/lookuped case-insensitively via `normalize_ident`.
+- Measure names are stored/looked up case-insensitively via `normalize_ident`.
 - `DataModel::add_measure` / `DataModel::evaluate_measure` normalize names by stripping a single outer
   bracket pair and trimming whitespace (`[Total]` and `Total` refer to the same measure).
 
