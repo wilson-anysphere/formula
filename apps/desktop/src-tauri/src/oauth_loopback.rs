@@ -58,6 +58,16 @@ pub fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirec
         ));
     }
 
+    // Loopback redirect URIs should not contain username/password components. Some URL parsers treat
+    // these as HTTP Basic Auth credentials, which is not relevant for OAuth redirect capture and can
+    // be used to construct confusing `http://user:pass@localhost:...` URLs. Reject them to keep
+    // redirect handling predictable.
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(format!(
+            "Invalid loopback OAuth redirect URI {raw:?}: must not include a username/password"
+        ));
+    }
+
     // OAuth 2.0 requires redirect URIs to not contain URL fragments, and browsers never send
     // fragments to loopback HTTP servers. Reject them early to avoid confusing, non-functional
     // redirect URIs.
@@ -287,6 +297,15 @@ mod tests {
         let err =
             parse_loopback_redirect_uri("http://127.0.0.1:4242/callback#access_token=abc").unwrap_err();
         assert!(err.to_ascii_lowercase().contains("fragment"));
+    }
+
+    #[test]
+    fn rejects_userinfo() {
+        let err = parse_loopback_redirect_uri("http://user@127.0.0.1:4242/callback").unwrap_err();
+        assert!(err.to_ascii_lowercase().contains("username"));
+
+        let err = parse_loopback_redirect_uri("http://user:pass@localhost:4242/callback").unwrap_err();
+        assert!(err.to_ascii_lowercase().contains("username"));
     }
 
     #[test]

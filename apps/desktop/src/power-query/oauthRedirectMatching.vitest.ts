@@ -42,4 +42,9 @@ describe("isLoopbackRedirectUrl", () => {
     expect(isLoopbackRedirectUrl(new URL("http://127.0.0.1:4242/callback#access_token=abc"))).toBe(false);
     expect(isLoopbackRedirectUrl(new URL("http://[::1]:4242/callback#access_token=abc"))).toBe(false);
   });
+
+  it("rejects loopback URLs with userinfo", () => {
+    expect(isLoopbackRedirectUrl(new URL("http://user@127.0.0.1:4242/callback"))).toBe(false);
+    expect(isLoopbackRedirectUrl(new URL("http://user:pass@localhost:4242/callback"))).toBe(false);
+  });
 });

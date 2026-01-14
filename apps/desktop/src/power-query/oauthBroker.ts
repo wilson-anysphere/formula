@@ -60,6 +60,10 @@ export function isLoopbackRedirectUrl(url: URL): boolean {
   return (
     url.protocol === "http:" &&
     LOOPBACK_REDIRECT_HOSTS.has(url.hostname) &&
+    // Reject userinfo (`http://user:pass@localhost:...`) since loopback redirect capture does not
+    // rely on HTTP auth and it can be used to construct confusing URLs.
+    url.username === "" &&
+    url.password === "" &&
     url.port !== "" &&
     Number.isInteger(port) &&
     port > 0 &&
