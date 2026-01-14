@@ -2490,3 +2490,36 @@ fn from_encrypted_xlsx_bytes_decrypts_and_loads_workbook() {
     let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
     assert_json_number(&b1.value, 42.0);
 }
+
+#[wasm_bindgen_test]
+fn from_xlsx_bytes_reports_password_required_for_encrypted_inputs() {
+    let plaintext: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsx/tests/fixtures/rt_simple.xlsx"
+    ));
+    let password = "secret-password";
+
+    let encrypted = formula_office_crypto::encrypt_package_to_ole(
+        plaintext,
+        password,
+        formula_office_crypto::EncryptOptions {
+            key_bits: 128,
+            hash_algorithm: formula_office_crypto::HashAlgorithm::Sha256,
+            spin_count: 1_000,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+
+    let err = match WasmWorkbook::from_xlsx_bytes(&encrypted) {
+        Ok(_) => panic!("expected from_xlsx_bytes to fail for encrypted workbook"),
+        Err(err) => err,
+    };
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert!(
+        message.contains("fromEncryptedXlsxBytes") || message.to_lowercase().contains("password"),
+        "expected encrypted workbook error to mention fromEncryptedXlsxBytes/password, got {message:?}"
+    );
+}

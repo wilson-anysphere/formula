@@ -3930,6 +3930,12 @@ impl WasmWorkbook {
         // Ensure the function registry is populated before parsing any workbook formulas.
         ensure_rust_constructors_run();
 
+        if formula_office_crypto::is_encrypted_ooxml_ole(bytes) {
+            return Err(js_err(
+                "workbook is encrypted/password-protected; use `fromEncryptedXlsxBytes(bytes, password)`",
+            ));
+        }
+
         let model = formula_xlsx::read_workbook_model_from_bytes(bytes)
             .map_err(|err| js_err(err.to_string()))?;
         Self::from_workbook_model(model)
