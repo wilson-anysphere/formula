@@ -82,6 +82,25 @@ def _make_xlsx_with_custom_content_type() -> bytes:
     return buf.getvalue()
 
 
+def _make_xlsx_with_custom_functions() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>SUM(1,2)</f></c>
+      <c r="A2"><f>CORP.ADDIN.FOO(1)</f></c>
+    </row>
+  </sheetData>
+</worksheet>
+""",
+        )
+    return buf.getvalue()
+
+
 class TriagePrivacyModeTests(unittest.TestCase):
     def test_triage_workbook_private_mode_anonymizes_display_name_and_hashes_custom_uris(self) -> None:
         import tools.corpus.triage as triage_mod
@@ -276,6 +295,39 @@ class TriagePrivacyModeTests(unittest.TestCase):
         self.assertIsInstance(ct, str)
         self.assertTrue(ct.startswith("sha256="))
         self.assertNotIn("corp.example", ct)
+
+    def test_private_mode_hashes_non_standard_function_names(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            data = _make_xlsx_with_custom_functions()
+            report = triage_workbook(
+                WorkbookInput(display_name="book.xlsx", data=data),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+                privacy_mode="private",
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        functions = report.get("functions") or {}
+        self.assertIsInstance(functions, dict)
+        # Built-in Excel functions should remain readable.
+        self.assertEqual(functions.get("SUM"), 1)
+
+        custom = "CORP.ADDIN.FOO"
+        expected_hash = hashlib.sha256(custom.encode("utf-8")).hexdigest()
+        self.assertEqual(functions.get(f"sha256={expected_hash}"), 1)
+        self.assertFalse(any(custom in k for k in functions.keys()))
 
 
 if __name__ == "__main__":

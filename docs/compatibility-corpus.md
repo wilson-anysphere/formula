@@ -187,6 +187,8 @@ In `privacy-mode=private`:
 - custom URI-like strings (relationship types, namespaces, etc.) are replaced with `sha256=<digest>` unless
   they use standard OpenXML/Microsoft schema hosts (this also redacts expanded XML namespaces embedded in
   diff paths like `{http://example.com/ns}attr`)
+- non-standard/custom formula function names (e.g. add-in/UDF prefixes) in `functions` are replaced with
+  `sha256=<digest>`
 - `run_url` is hashed when it points at a non-`github.com` host (e.g. GitHub Enterprise Server domains)
 - `index.json` hashes local filesystem paths (`corpus_dir`, `input_dir`) to avoid leaking usernames/mount points
 - expectation comparison (when `--expectations` is provided) uses the anonymized `display_name` keys

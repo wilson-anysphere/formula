@@ -380,6 +380,50 @@ _SAFE_RUN_URL_HOST_SUFFIXES = {
     "github.com",
 }
 
+# Function fingerprints can include custom add-in / UDF names (e.g. `CORP.ADDIN.FOO`). In private
+# corpus artifacts, hash any non-standard function names to avoid leaking internal product/company
+# identifiers while keeping built-in Excel functions readable.
+_KNOWN_FUNCTION_NAMES: set[str] | None = None
+
+
+def _load_known_function_names() -> set[str]:
+    global _KNOWN_FUNCTION_NAMES
+    if _KNOWN_FUNCTION_NAMES is not None:
+        return _KNOWN_FUNCTION_NAMES
+
+    names: set[str] = set()
+    try:
+        catalog_path = _repo_root() / "shared" / "functionCatalog.json"
+        data = json.loads(catalog_path.read_text(encoding="utf-8"))
+        funcs = data.get("functions") if isinstance(data, dict) else None
+        if isinstance(funcs, list):
+            for entry in funcs:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name.upper())
+    except Exception:  # noqa: BLE001 (best-effort; privacy mode still works without allowlist)
+        names = set()
+
+    _KNOWN_FUNCTION_NAMES = names
+    return names
+
+
+def _redact_function_counts(counts: Counter[str], *, privacy_mode: str) -> dict[str, int]:
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return dict(counts)
+
+    known = _load_known_function_names()
+    out: Counter[str] = Counter()
+    for fn, cnt in counts.items():
+        # `counts` should already be normalized (uppercase) by `_extract_function_counts`.
+        if fn in known:
+            out[fn] += cnt
+        else:
+            out[f"sha256={_sha256_text(fn)}"] += cnt
+    return dict(out)
+
 # OpenXML content types are not URIs, but custom producers sometimes embed corporate domains or
 # internal product names (e.g. `application/vnd.corp.example+xml`). In privacy mode we keep only
 # well-known standard prefixes and hash everything else.
@@ -1159,7 +1203,9 @@ def triage_workbook(
                                 for v in rels_types
                             ]
                     report["cell_images"] = cell_images
-            report["functions"] = dict(_extract_function_counts(z))
+            report["functions"] = _redact_function_counts(
+                _extract_function_counts(z), privacy_mode=privacy_mode
+            )
             style_stats, style_err = _extract_style_stats(z, zip_names)
             if style_stats is not None:
                 report["style_stats"] = style_stats
@@ -1616,7 +1662,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Control redaction of triage reports. "
             "`public` preserves filenames/URIs; `private` anonymizes display_name and hashes "
-            "custom URI-like strings (including expanded XML namespaces in diff paths). "
+            "custom URI-like strings (including expanded XML namespaces in diff paths) and "
+            "non-standard/custom formula function names. "
             "In private mode, CI metadata like run_url and local paths in index.json are also hashed."
         ),
     )

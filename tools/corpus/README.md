@@ -45,6 +45,7 @@ When triage outputs are uploaded as artifacts (e.g. scheduled CI runs), use `--p
 
 - original filenames (`display_name` is anonymized to `workbook-<sha256[:16]>.{xlsx,xlsm,xlsb}`)
 - custom URI domains in relationship/content types (hashed as `sha256=<digest>`)
+- non-standard/custom formula function names (e.g. add-in/UDF prefixes) in `functions` (hashed as `sha256=<digest>`)
 - GitHub Enterprise `run_url` hostnames and local filesystem paths in `index.json`
 
 For private dashboards, run `tools.corpus.dashboard` with `--privacy-mode private` as well. The diff minimizer
