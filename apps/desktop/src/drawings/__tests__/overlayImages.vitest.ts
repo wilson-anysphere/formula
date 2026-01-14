@@ -67,6 +67,81 @@ describe("DrawingOverlay images", () => {
     vi.restoreAllMocks();
   });
 
+  it("swallows async requestRender rejections (prevents unhandled promise rejections)", async () => {
+    const { ctx } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const entry: ImageEntry = {
+      id: "img_async_requestRender",
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png",
+    };
+    const images: ImageStore = {
+      get: (id) => (id === entry.id ? entry : undefined),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+
+    let resolveBitmap!: (bitmap: ImageBitmap) => void;
+    const bitmapPromise = new Promise<ImageBitmap>((resolve) => {
+      resolveBitmap = resolve;
+    });
+    vi.stubGlobal("createImageBitmap", vi.fn(() => bitmapPromise));
+
+    const requestRender = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const overlay = new DrawingOverlay(canvas, images, geom, undefined, requestRender);
+
+    overlay.render([createImageObject(entry.id)], viewport);
+
+    resolveBitmap({ close: () => {} } as unknown as ImageBitmap);
+    await flushMicrotasks();
+
+    expect(requestRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows async render rejections when image hydration triggers a rerender without requestRender", async () => {
+    const { ctx } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const entry: ImageEntry = {
+      id: "img_async_render",
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png",
+    };
+    const images: ImageStore = {
+      get: (id) => (id === entry.id ? entry : undefined),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+
+    let resolveBitmap!: (bitmap: ImageBitmap) => void;
+    const bitmapPromise = new Promise<ImageBitmap>((resolve) => {
+      resolveBitmap = resolve;
+    });
+    vi.stubGlobal("createImageBitmap", vi.fn(() => bitmapPromise));
+
+    // No requestRender callback => scheduleHydrationRerender falls back to calling `render()` itself.
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    overlay.render([createImageObject(entry.id)], viewport);
+
+    // Simulate a unit test mocking `render()` as async after the initial paint has captured the
+    // last render args (so the hydration rerender will call our stub).
+    const asyncRender = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    (overlay as any).render = asyncRender;
+
+    resolveBitmap({ close: () => {} } as unknown as ImageBitmap);
+    await flushMicrotasks();
+
+    expect(asyncRender).toHaveBeenCalledTimes(1);
+  });
+
   it("renders synchronously and draws the image after decode + requestRender", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
