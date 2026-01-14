@@ -52,6 +52,16 @@ const RECORD_WSBOOL: u16 = 0x0081;
 /// MERGEDCELLS [MS-XLS 2.4.139]
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
 
+/// Maximum merged ranges to parse from a single sheet BIFF substream.
+///
+/// Malformed `.xls` files can contain a huge number of `MERGEDCELLS` records (or very large
+/// `cAreas` counts), which would otherwise cause unbounded growth of the merged-range vector.
+#[cfg(not(test))]
+const MAX_MERGED_RANGES_PER_SHEET: usize = 100_000;
+// Keep unit tests fast by using a smaller cap.
+#[cfg(test)]
+const MAX_MERGED_RANGES_PER_SHEET: usize = 1_000;
+
 const RECORD_FORMULA: u16 = 0x0006;
 const RECORD_BLANK: u16 = 0x0201;
 const RECORD_NUMBER: u16 = 0x0203;
@@ -1857,6 +1867,12 @@ pub(crate) fn parse_biff_sheet_merged_cells(
                         continue;
                     }
 
+                    if out.len() >= MAX_MERGED_RANGES_PER_SHEET {
+                        return Err(format!(
+                            "too many merged ranges (cap={MAX_MERGED_RANGES_PER_SHEET}); stopping after {} ranges",
+                            out.len()
+                        ));
+                    }
                     out.push(Range::new(
                         CellRef::new(rw_first, col_first),
                         CellRef::new(rw_last, col_last),
@@ -2876,6 +2892,38 @@ mod tests {
                 Range::from_a1("A1:B1").unwrap(),
                 Range::from_a1("C2:D3").unwrap(),
             ]
+        );
+    }
+
+    #[test]
+    fn mergedcells_records_error_when_exceeding_cap() {
+        // Construct a single MERGEDCELLS record with (cap + 1) valid Ref8 entries.
+        let total = MAX_MERGED_RANGES_PER_SHEET + 1;
+        assert!(
+            total <= u16::MAX as usize,
+            "test cap must fit in a single MERGEDCELLS record"
+        );
+
+        let mut merged = Vec::new();
+        merged.extend_from_slice(&(total as u16).to_le_bytes()); // cAreas
+        for idx in 0..total {
+            let row = idx as u16;
+            merged.extend_from_slice(&row.to_le_bytes()); // rwFirst
+            merged.extend_from_slice(&row.to_le_bytes()); // rwLast
+            merged.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            merged.extend_from_slice(&0u16.to_le_bytes()); // colLast
+        }
+
+        let stream = [
+            record(RECORD_MERGEDCELLS, &merged),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let err = parse_biff_sheet_merged_cells(&stream, 0).expect_err("expected cap error");
+        assert!(
+            err.contains("too many merged ranges"),
+            "unexpected error: {err}"
         );
     }
 
