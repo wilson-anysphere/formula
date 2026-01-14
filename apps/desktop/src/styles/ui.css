@@ -391,8 +391,8 @@ a:visited {
 
 .formula-bar-highlight span.formula-bar-reference--active {
   text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 2px;
+  text-decoration-thickness: var(--space-1);
+  text-underline-offset: var(--space-1);
   text-decoration-color: currentColor;
 }
 
@@ -420,8 +420,8 @@ a:visited {
 .formula-bar-highlight span.formula-bar-token--error {
   background: var(--error-bg);
   text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 2px;
+  text-decoration-thickness: var(--space-1);
+  text-underline-offset: var(--space-1);
   text-decoration-color: var(--error);
   border-radius: var(--radius-xs);
 }
