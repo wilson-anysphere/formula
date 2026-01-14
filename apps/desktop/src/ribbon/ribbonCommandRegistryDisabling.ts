@@ -88,8 +88,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.alignment.mergeCenter.unmergeCells",
   "home.number.moreFormats.custom",
   "home.cells.format.formatCells",
-  "home.cells.format.rowHeight",
-  "home.cells.format.columnWidth",
   "home.cells.format.organizeSheets",
   // Insert/delete cells (not whole sheets). Handled directly by `main.ts` via a dialog-style quick pick.
   "home.cells.insert.insertCells",

@@ -118,8 +118,8 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   ariaLabel: "Format Cells",
                   kind: "dropdown",
                   menuItems: [
-                    { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
-                    { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
+                    { id: "home.cells.format.formatCells", label: "Format Cells…", ariaLabel: "Format Cells" },
+                    { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets" },
                   ],
                 },
                 { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z" },
@@ -169,12 +169,12 @@ describe("CommandRegistry-backed ribbon disabling", () => {
       trigger?.click();
     });
 
-    const rowHeight = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.rowHeight"]');
-    const colWidth = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.columnWidth"]');
-    expect(rowHeight).toBeInstanceOf(HTMLButtonElement);
-    expect(colWidth).toBeInstanceOf(HTMLButtonElement);
-    expect(rowHeight?.disabled).toBe(false);
-    expect(colWidth?.disabled).toBe(false);
+    const formatCells = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.formatCells"]');
+    const organizeSheets = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.organizeSheets"]');
+    expect(formatCells).toBeInstanceOf(HTMLButtonElement);
+    expect(organizeSheets).toBeInstanceOf(HTMLButtonElement);
+    expect(formatCells?.disabled).toBe(false);
+    expect(organizeSheets?.disabled).toBe(false);
 
     act(() => root.unmount());
   });
