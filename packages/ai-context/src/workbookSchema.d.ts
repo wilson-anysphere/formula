@@ -12,17 +12,19 @@ export type WorkbookSchemaRectInput =
   | { startRow: number; startCol: number; endRow: number; endCol: number }
   | { start: { row: number; col: number }; end: { row: number; col: number } };
 
-export type WorkbookSchemaCollection<T> =
-  | ReadonlyArray<T>
-  | Map<any, T>
-  | Set<T>
-  | Record<string, T>;
-
 export interface WorkbookSchemaSheet {
   name: string;
 }
 
 export interface WorkbookSchemaSheetObjectInput {
+  name: string;
+  cells?: unknown;
+  values?: unknown[][];
+  origin?: { row: number; col: number };
+  getCell?: (row: number, col: number) => unknown;
+}
+
+export interface WorkbookSchemaKeyedSheetObjectInput {
   /**
    * Sheet name. Optional when the sheet is provided via `Map`/`Record` keyed by name.
    */
@@ -37,7 +39,20 @@ export interface WorkbookSchemaCellMapLike {
   get(key: string): unknown;
 }
 
-export type WorkbookSchemaSheetInput = WorkbookSchemaSheetObjectInput | unknown[][] | WorkbookSchemaCellMapLike | string;
+export type WorkbookSchemaSheetInput = WorkbookSchemaKeyedSheetObjectInput | unknown[][] | WorkbookSchemaCellMapLike | string;
+
+/**
+ * Supported shapes for `workbook.sheets`.
+ *
+ * Note: When sheets are provided as a `Map` or plain object keyed by name, the value can
+ * be either a full sheet object, a matrix, or a sparse cell map. For array/set forms, a
+ * sheet object must include `name` (or you can provide the sheet name directly as a string).
+ */
+export type WorkbookSchemaSheets =
+  | ReadonlyArray<WorkbookSchemaSheetObjectInput | string>
+  | Set<WorkbookSchemaSheetObjectInput | string>
+  | Map<any, WorkbookSchemaSheetInput>
+  | Record<string, WorkbookSchemaSheetInput>;
 
 export interface WorkbookSchemaTable {
   name: string;
@@ -65,30 +80,48 @@ export interface WorkbookSchemaSummary {
   namedRanges: WorkbookSchemaNamedRange[];
 }
 
-export interface WorkbookSchemaTableInput {
-  /**
-   * Table name. Optional when the table is provided via `Map`/`Record` keyed by name.
-   */
+export interface WorkbookSchemaTableObjectInput {
+  name: string;
+  sheetName: string;
+  rect: WorkbookSchemaRectInput;
+}
+
+export interface WorkbookSchemaKeyedTableObjectInput {
   name?: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
 }
 
-export interface WorkbookSchemaNamedRangeInput {
-  /**
-   * Named range name. Optional when the named range is provided via `Map`/`Record` keyed by name.
-   */
+export type WorkbookSchemaTables =
+  | ReadonlyArray<WorkbookSchemaTableObjectInput>
+  | Set<WorkbookSchemaTableObjectInput>
+  | Map<any, WorkbookSchemaKeyedTableObjectInput>
+  | Record<string, WorkbookSchemaKeyedTableObjectInput>;
+
+export interface WorkbookSchemaNamedRangeObjectInput {
+  name: string;
+  sheetName: string;
+  rect: WorkbookSchemaRectInput;
+}
+
+export interface WorkbookSchemaKeyedNamedRangeObjectInput {
   name?: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
 }
+
+export type WorkbookSchemaNamedRanges =
+  | ReadonlyArray<WorkbookSchemaNamedRangeObjectInput>
+  | Set<WorkbookSchemaNamedRangeObjectInput>
+  | Map<any, WorkbookSchemaKeyedNamedRangeObjectInput>
+  | Record<string, WorkbookSchemaKeyedNamedRangeObjectInput>;
 
 export function extractWorkbookSchema(
   workbook: {
     id: string;
-    sheets: WorkbookSchemaCollection<WorkbookSchemaSheetInput>;
-    tables?: WorkbookSchemaCollection<WorkbookSchemaTableInput>;
-    namedRanges?: WorkbookSchemaCollection<WorkbookSchemaNamedRangeInput>;
+    sheets: WorkbookSchemaSheets;
+    tables?: WorkbookSchemaTables;
+    namedRanges?: WorkbookSchemaNamedRanges;
   },
   options?: { maxAnalyzeRows?: number; maxAnalyzeCols?: number; signal?: AbortSignal },
 ): WorkbookSchemaSummary;
