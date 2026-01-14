@@ -640,7 +640,9 @@ Supported expression forms:
     **table** valued.
 - Table constructors (limited one-column literals): `{ 1, 2, 3 }`  
   Separators may be `,` or `;`. Nested table constructors are not supported. Currently these table
-  constructors are only supported on the RHS of the `IN` operator.
+  constructors are only supported:
+  - on the RHS of the `IN` operator (`expr IN { ... }`), and
+  - as the first argument to `CONTAINSROW({ ... }, value)`.
 
 Unsupported (not parsed):
 
@@ -683,12 +685,16 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `MAXX(tableExpr, valueExpr)`
 - `MINX(tableExpr, valueExpr)`
 - `COUNTX(tableExpr, valueExpr)`
+- `CONCATENATEX(tableExpr, textExpr, [delimiter], [orderByExpr], [order])`  
+  (limited: `order` must be `ASC` or `DESC`; `orderByExpr` must produce consistently numeric or text values)
 - `HASONEVALUE(Table[Column])`
 - `SELECTEDVALUE(Table[Column], [alternateResult])`
 - `LOOKUPVALUE(ResultTable[ResultCol], SearchTable[SearchCol1], SearchValue1, ..., [alternateResult])`  
   (current MVP restriction: all search columns must be in the same table as the result column)
 - `CALCULATE(expr, filter1, filter2, ...)`
 - `RELATED(Table[Column])` (requires row context)
+- `CONTAINSROW(tableExpr, value)`  
+  (limited: currently only supports one-column tables, e.g. `CONTAINSROW({1,2,3}, 2)` or `CONTAINSROW(VALUES(Table[Col]), v)`)
 - `EARLIER(Table[Column], [level])` (requires nested row context)
 - `EARLIEST(Table[Column])` (requires row context)
 
@@ -801,11 +807,12 @@ This is not an exhaustive list, but the most common contributor-facing constrain
   - DAX APIs that need a unique “one-side” lookup (`RELATED`, pivot grouping by related columns, etc.)
     will error when a relationship key matches multiple rows.
   - Only single-column relationships are supported.
- - **DAX language coverage**
-  - Variables (`VAR`/`RETURN`) are supported.
-  - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),
-    and are currently only supported on the RHS of the `IN` operator.
-  - Most scalar/table functions are unimplemented (anything not listed above).
+- **DAX language coverage**
+   - Variables (`VAR`/`RETURN`) are supported.
+   - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),
+     and are currently only supported on the RHS of the `IN` operator and as the first argument to
+     `CONTAINSROW`.
+   - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
   - Only `Blank`, `Number(f64)`, `Boolean`, and `Text` exist at the DAX layer.
 - **Calculated columns**
