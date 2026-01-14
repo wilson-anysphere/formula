@@ -309,7 +309,7 @@ This `H_block` is the per-block hash input from which the actual symmetric key b
 
 ### 5.2) Deriving the symmetric key bytes (AES vs RC4)
 
-#### 5.2.1) RC4 (`CALG_RC4`): key material = truncate(`H_block`) (+ 40-bit padding quirk)
+#### 5.2.1) RC4 (`CALG_RC4`): key material = truncate(`H_block`)
 
 For Standard **RC4** encryption, the per-block RC4 key is derived by truncating the hash:
 
@@ -319,20 +319,14 @@ if keySizeBits == 0:
   keySizeBits = 40                           // MS-OFFCRYPTO: RC4 KeySize=0 means 40-bit
 keyLen = keySizeBits / 8
 
-key_material(block) = H_block[0 : keyLen]
-
-if keySizeBits == 40:
-  rc4_key(block) = key_material(block) || 0x00 * 11   // 16 bytes total
-else:
-  rc4_key(block) = key_material(block)                // 7 bytes (56-bit) or 16 bytes (128-bit)
+rc4_key(block) = H_block[0 : keyLen]   // keyLen = KeySize/8 (40→5 bytes, 56→7 bytes, 128→16 bytes)
 ```
 
 This matches the common Standard RC4 “re-key per 0x200-byte block” scheme (see §7.2.2).
 
-Important: the **40-bit** padding behavior (`KeySize == 0` or `KeySize == 40`) is a
-**CryptoAPI/Office interoperability quirk**.
-RC4’s KSA depends on *both the key bytes and the key length*, so `key_material` (5 bytes) and
-`key_material || 0x00*11` (16 bytes) yield different keystreams.
+Important: for Standard RC4, do **not** zero-pad 40-bit keys to 16 bytes. The RC4 key length is
+`keyLen = KeySize/8`, so 40-bit keys use **5 bytes**. Some legacy CryptoAPI RC4 implementations
+zero-pad 40-bit keys to 16 bytes, but that changes RC4 KSA and yields a different keystream.
 
 #### 5.2.2) AES (`CALG_AES_*`): CryptoAPI `CryptDeriveKey` (ipad/opad expansion)
 
@@ -418,11 +412,7 @@ if AlgID == CALG_RC4 and keySizeBits == 0:
 keyLen   = keySizeBits / 8
 
 if AlgID == CALG_RC4:
-  key_material = H_block0[0:keyLen]
-  if keySizeBits == 40:
-    key = key_material || 0x00 * 11                               // §5.2.1
-  else:
-    key = key_material                                            // §5.2.1
+  key = H_block0[0:keyLen]                                        // §5.2.1
 else:
   key = CryptDeriveKey(Hash, H_block0, keyLen=keyLen)             // §5.2.2
 ```
@@ -628,8 +618,9 @@ Derived values:
 H_final  = 1b5972284eab6481eb6565a0985b334b3e65e041
 H_block0 = 6ad7dedf2da3514b1d85eabee069d47dd058967f
 
-// If using CryptoAPI RC4 with KeySize=0/40 (40-bit), the per-block RC4 key for block=0 would be:
-rc4_key_block0_40bit = 6ad7dedf2d0000000000000000000000
+// If using Standard/CryptoAPI RC4 with KeySize=0/40 (40-bit), the per-block RC4 key for block=0
+// would be the first 5 bytes of H_block0:
+rc4_key_block0_40bit = 6ad7dedf2d
 
 key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3
@@ -823,11 +814,7 @@ function decrypt_standard_ooxml(ole, password):
   // ---------- derive file/verifier key (block = 0) ----------
   H_block0 = Hash( H_final || LE32(0) )
   if algId == CALG_RC4:
-    keyMaterial = H_block0[0:keyLen]
-    if keySizeBits == 40:
-      fileKey = keyMaterial || 0x00 * 11  // 16 bytes total
-    else:
-      fileKey = keyMaterial
+    fileKey = H_block0[0:keyLen]
   else:
     fileKey = CryptDeriveKey(Hash, H_block0, keyLen)
 
@@ -867,11 +854,7 @@ function decrypt_standard_ooxml(ole, password):
     out = ciphertext[0:origSize]
     for blockIndex, block in enumerate(chunks(out, 0x200)):
       H_block = Hash(H_final || LE32(blockIndex))
-      keyMaterial = H_block[0:keyLen]
-      if keySizeBits == 40:
-        rc4Key = keyMaterial || 0x00 * 11  // 16 bytes total
-      else:
-        rc4Key = keyMaterial
+      rc4Key = H_block[0:keyLen]
       block   = RC4_Decrypt_Block(rc4Key, block)
     return out
 ```

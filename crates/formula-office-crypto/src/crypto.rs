@@ -573,8 +573,7 @@ impl StandardKeyDeriver {
         // and that a key size of 0 must be interpreted as 40-bit RC4.
         //
         // We normalize this here so callers don't have to special-case it when deriving per-block
-        // keys, but note that callers may still need to special-case `key_bits == 0` when deciding
-        // whether to pad the RC4 key bytes to 16 bytes for the RC4 KSA.
+        // keys.
         let key_bits = match derivation {
             StandardKeyDerivation::Rc4 if key_bits == 0 => 40,
             _ => key_bits,
@@ -888,10 +887,11 @@ mod tests {
     }
 
     #[test]
-    fn standard_cryptoapi_rc4_sha1_40bit_padding_ciphertext_vector() {
-        // Deterministic 40-bit RC4 key padding vectors from `docs/offcrypto-standard-cryptoapi-rc4.md`.
+    fn standard_cryptoapi_rc4_sha1_40bit_padding_changes_ciphertext_vector() {
+        // Deterministic 40-bit RC4 vectors from `docs/offcrypto-standard-cryptoapi-rc4.md`.
         //
-        // CryptoAPI/Office pad 40-bit keys to a 16-byte RC4 key by appending 11 zero bytes.
+        // Standard/CryptoAPI RC4 uses a 5-byte key (`keyLen = keySize/8`). Zero-padding that key to
+        // 16 bytes changes RC4 KSA and yields a different ciphertext.
         let password = "password";
         let salt: Vec<u8> = (0u8..=0x0F).collect();
 
@@ -907,7 +907,7 @@ mod tests {
 
         let plaintext = b"Hello, RC4 CryptoAPI!";
 
-        // Raw 5-byte key (NOT CryptoAPI-compatible).
+        // Spec-correct 5-byte key.
         let mut ciphertext_raw = plaintext.to_vec();
         rc4_xor_in_place(&key0, &mut ciphertext_raw).expect("rc4 encrypt raw");
         assert_eq!(
@@ -915,7 +915,7 @@ mod tests {
             hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf")
         );
 
-        // CryptoAPI padded 16-byte key (correct behavior).
+        // Zero-padded 16-byte key (incorrect for MS-OFFCRYPTO Standard RC4; regression guard).
         let mut padded_key = [0u8; 16];
         padded_key[..5].copy_from_slice(&key0);
         let mut ciphertext_padded = plaintext.to_vec();
@@ -1001,8 +1001,8 @@ mod tests {
     }
 
     #[test]
-    fn standard_cryptoapi_rc4_md5_40bit_padding_ciphertext_vector() {
-        // Deterministic 40-bit RC4 key padding vectors from `docs/offcrypto-standard-cryptoapi-rc4.md`.
+    fn standard_cryptoapi_rc4_md5_40bit_padding_changes_ciphertext_vector() {
+        // Deterministic 40-bit RC4 vectors from `docs/offcrypto-standard-cryptoapi-rc4.md`.
         //
         // MS-OFFCRYPTO Standard RC4 uses the raw 5-byte key material (`keyLen = keySize/8`), but
         // zero-padding those 5 bytes to 16 changes RC4 KSA and yields a different keystream (a common

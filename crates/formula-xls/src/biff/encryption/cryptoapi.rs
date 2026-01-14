@@ -47,6 +47,8 @@ fn cryptoapi_hash2(
 /// workbooks (Excel 2002/2003), which uses SHA-1 + a spin count to harden password derivation.
 ///
 /// `key_len` is `KeySize / 8` from the CryptoAPI header (e.g. 16 for 128-bit RC4, 5 for 40-bit).
+/// Note: for 40-bit CryptoAPI RC4, the 5-byte key material is padded with 11 zero bytes before
+/// running RC4 KSA (so the effective RC4 key length is 16 bytes).
 pub(crate) fn derive_biff8_cryptoapi_key(
     alg_id_hash: u32,
     password: &str,
@@ -83,7 +85,12 @@ pub(crate) fn derive_biff8_cryptoapi_key(
     let block_hash = cryptoapi_hash2(alg_id_hash, &hash[..], &block_bytes)?;
     drop(hash);
 
-    let key = block_hash[..key_len.min(block_hash.len())].to_vec();
+    let mut key = block_hash[..key_len.min(block_hash.len())].to_vec();
+    // CryptoAPI "40-bit" RC4 keys are represented as a 16-byte RC4 key where the remaining bytes
+    // are zero (the effective key strength is still 40 bits).
+    if key_len == 5 {
+        key.resize(16, 0);
+    }
     drop(block_hash);
     Ok(Zeroizing::new(key))
 }
@@ -276,10 +283,13 @@ mod tests {
             assert_eq!(key.as_slice(), expected_key, "block={block}");
         }
 
-        // 40-bit CryptoAPI RC4 keys are 5 bytes (`keySize/8`), not padded to 16 bytes.
+        // 40-bit CryptoAPI RC4 keys are represented as a 16-byte RC4 key with the high 88 bits
+        // zero.
         let key_40 = derive_biff8_cryptoapi_key(CALG_MD5, password, &salt, spin_count, 0, 5)
             .expect("derive 40-bit");
-        assert_eq!(key_40.as_slice(), vec![0x69, 0xBA, 0xDC, 0xAE, 0x24].as_slice());
-        assert_eq!(key_40.len(), 5);
+        let mut expected_40 = vec![0x69, 0xBA, 0xDC, 0xAE, 0x24];
+        expected_40.resize(16, 0);
+        assert_eq!(key_40.as_slice(), expected_40.as_slice());
+        assert_eq!(key_40.len(), 16);
     }
 }

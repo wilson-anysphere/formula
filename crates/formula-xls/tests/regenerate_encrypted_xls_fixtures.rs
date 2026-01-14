@@ -415,7 +415,7 @@ fn derive_cryptoapi_block_key_md5(key_material: &[u8; 16], block: u32, key_len: 
     let block_bytes = block.to_le_bytes();
     let digest = md5_bytes(&[key_material, &block_bytes]);
     if key_len == 5 {
-        // CryptoAPI 40-bit RC4 keys are expressed as a 128-bit key where the high 88 bits are zero.
+        // CryptoAPI "40-bit" RC4 uses a 16-byte RC4 key with the high 88 bits set to zero.
         let mut key = digest[..5].to_vec();
         key.resize(16, 0);
         return key;

@@ -102,8 +102,9 @@ fn rc4_apply(key: &[u8], data: &[u8]) -> Vec<u8> {
 }
 
 fn rc4_key_40bit_from_digest(digest: &[u8; 20]) -> [u8; 5] {
-    // MS-OFFCRYPTO Standard/CryptoAPI RC4 uses an **unpadded** `keyLen = keySize/8` RC4 key.
-    // For 40-bit, this is 5 bytes (and `keySize=0` means 40-bit).
+    // MS-OFFCRYPTO Standard/CryptoAPI RC4 uses an unpadded key (`keyLen = keySize/8` bytes). For
+    // 40-bit keys (including the `keySize == 0` sentinel), this is a 5-byte RC4 key (do not pad to
+    // 16 bytes).
     let mut key = [0u8; 5];
     key.copy_from_slice(&digest[..5]);
     key

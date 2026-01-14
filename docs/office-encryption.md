@@ -125,8 +125,9 @@ Currently supported in `formula-xls` (see also the fixture inventory in
     layout.
   - `KeySizeBits` values: `0/40`, `56`, `128`
     - `KeySizeBits==0` is treated as 40-bit RC4.
-    - Key bytes are the first `KeySizeBits/8` bytes of the per-block digest (5/7/16 bytes; no 40-bit
-      padding-to-16 quirk for BIFF CryptoAPI).
+    - Note (40-bit nuance): the derived 5-byte key material is **padded to 16 bytes** with 11 zero
+      bytes before running RC4 KSA (CryptoAPI interoperability quirk). 56-bit uses 7 bytes; 128-bit
+      uses 16 bytes.
 - (best-effort) **BIFF5-era XOR obfuscation** (Excel 5/95)
 
 Not implemented:
@@ -378,7 +379,7 @@ Implementation nuance:
 - `crates/formula-office-crypto` implements end-to-end Standard decryption and is intentionally more
   permissive about Standard parameter variants for compatibility.
 
-### Standard (CryptoAPI): RC4 `EncryptedPackage` decryption (0x200 blocks, CryptoAPI 40-bit padding)
+### Standard (CryptoAPI): RC4 `EncryptedPackage` decryption (0x200 blocks)
 
 MS-OFFCRYPTO Standard encryption can also use `CALG_RC4` (instead of AES).
 
@@ -389,9 +390,9 @@ reader (`formula-xlsb`) in both native `formula-io` and the WASM loader (`formul
 decryptor lives in `crates/formula-io/src/rc4_cryptoapi.rs` and is exercised by
 `crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`.
 
-Critical nuance: for **40-bit** RC4 (`KeySize == 0` or `KeySize == 40`), CryptoAPI represents the
-key as a **16-byte**
-RC4 key where the low 40 bits come from the derived key material and the remaining 88 bits are zero.
+Key size nuance: MS-OFFCRYPTO specifies `KeySize == 0` MUST be interpreted as **40-bit** RC4. For
+Standard RC4, the RC4 key length is always `keyLen = KeySizeBits/8` bytes, so 40-bit keys use a
+**5-byte** RC4 key (do **not** zero-pad to 16 bytes).
 
 High-level shape (SHA-1; per MS-OFFCRYPTO Standard RC4):
 
@@ -407,15 +408,12 @@ for blockIndex = 0, 1, 2, ...:              // 0x200-byte blocks
   if keySizeBits == 0:
     keySizeBits = 40                        // MS-OFFCRYPTO: RC4 KeySize=0 means 40-bit
   key_material = Hb[0..keySizeBits/8]
-  if keySizeBits == 40:
-    rc4_key = key_material || 0x00 * 11     // 16 bytes total (CryptoAPI quirk)
-  else:
-    rc4_key = key_material                  // 7 bytes (56-bit) or 16 bytes (128-bit)
+  rc4_key = key_material
   plaintext_block = RC4(rc4_key, ciphertext_block)
 ```
 
-See `docs/offcrypto-standard-cryptoapi-rc4.md` for a full writeup and an example that shows raw
-5-byte vs padded-16-byte keys produce different ciphertext.
+See `docs/offcrypto-standard-cryptoapi-rc4.md` for a full writeup and an example that shows 5-byte
+vs zero-padded-16-byte keys produce different ciphertext (padding is incorrect for Standard RC4).
 
 ## Interop notes / fixture generation
 
@@ -580,8 +578,17 @@ for i in 0..50000:
   H = Hash(LE32(i) || H)
 
 // KeySizeBits can be 0 (meaning 40-bit), 40, 56, or 128.
+keyBits = KeySizeBits
+if keyBits == 0:
+  keyBits = 40
+keyLen = keyBits/8
+
 H_block = Hash(H || LE32(blockIndex))
-K_block = H_block[0..keyLen]             // keyLen = (KeySizeBits==0 ? 40 : KeySizeBits)/8
+key_material = H_block[0..keyLen]
+if keyLen == 5:                 // 40-bit key material
+  K_block = key_material || 0x00 * 11   // CryptoAPI "40-bit" RC4 uses a 16-byte key with high 88 bits zero
+else:
+  K_block = key_material
 ```
 
 Decrypt model:
