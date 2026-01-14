@@ -96,6 +96,74 @@ fn can_convert_existing_value_cell_to_formula_preserving_style_in_both_patchers(
 }
 
 #[test]
+fn can_convert_value_cell_to_formula_with_array_constants_and_rgcb_in_both_patchers() {
+    let fixture_path = fixture_styles_date_path();
+    let wb = XlsbWorkbook::open(&fixture_path).expect("open xlsb fixture");
+
+    // In fixtures_styles/date.xlsb, A1 is a date-serialized number with a non-zero style.
+    let original_sheet = wb.read_sheet(0).expect("read sheet");
+    let original = original_sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 missing");
+    let original_style = original.style;
+    assert_ne!(original_style, 0, "fixture should use a non-zero style");
+
+    // Ensure we can patch formulas that include BIFF12 array constants, which require `rgcb`.
+    // We intentionally include *two* array constants to validate that we preserve the full rgcb
+    // stream when patch-writing.
+    let encoded = encode_rgce_with_context(
+        "=SUM({1,2},{3,4})",
+        wb.workbook_context(),
+        CellCoord::new(0, 0),
+    )
+    .expect("encode rgce");
+    assert!(!encoded.rgcb.is_empty(), "expected array formula to include rgcb");
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(10.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(encoded.rgce.clone()),
+        new_rgcb: Some(encoded.rgcb.clone()),
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let tmpdir = tempfile::tempdir().expect("create tempdir");
+    let in_memory_path = tmpdir.path().join("patched_in_memory_rgcb.xlsb");
+    let streaming_path = tmpdir.path().join("patched_streaming_rgcb.xlsb");
+
+    wb.save_with_cell_edits(&in_memory_path, 0, &edits)
+        .expect("save_with_cell_edits");
+    wb.save_with_cell_edits_streaming(&streaming_path, 0, &edits)
+        .expect("save_with_cell_edits_streaming");
+
+    let wb_in_memory = XlsbWorkbook::open(&in_memory_path).expect("open patched workbook");
+    assert_cell(
+        &wb_in_memory,
+        0,
+        0,
+        original_style,
+        CellValue::Number(10.0),
+        "SUM({1,2},{3,4})",
+    );
+
+    let wb_streaming = XlsbWorkbook::open(&streaming_path).expect("open patched workbook");
+    assert_cell(
+        &wb_streaming,
+        0,
+        0,
+        original_style,
+        CellValue::Number(10.0),
+        "SUM({1,2},{3,4})",
+    );
+}
+
+#[test]
 fn can_convert_various_value_record_types_to_formula_records() {
     // Build a worksheet that includes all supported non-formula value record types:
     // - FLOAT, NUM (RK), CELL_ST (inline string), STRING (shared string), BOOL, BOOLERR, BLANK.
