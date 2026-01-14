@@ -2869,6 +2869,7 @@ mod engine_filter_field_tests {
     use crate::pivots::PivotCacheField;
     use pretty_assertions::assert_eq;
     use std::collections::HashSet;
+    use formula_engine::pivot::PivotFieldRef;
     use std::io::{Cursor, Write};
 
     use zip::write::FileOptions;

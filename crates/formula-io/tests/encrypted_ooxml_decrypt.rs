@@ -237,9 +237,11 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
     let encrypted_path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&encrypted_path, &encrypted_cfb).expect("write encrypted file");
 
-    let workbook = open_workbook_model_with_password(&encrypted_path, Some(password))
+    let model = open_workbook_model_with_password(&encrypted_path, Some(password))
         .expect("open encrypted xlsb as model");
-    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(model.sheets.len(), 1);
+    assert_eq!(model.sheets[0].name, "Sheet1");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
     assert_eq!(
         sheet.value(CellRef::from_a1("A1").unwrap()),
         CellValue::String("Hello".to_string())

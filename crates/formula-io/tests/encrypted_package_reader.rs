@@ -15,6 +15,57 @@ use formula_io::StandardAesEncryptedPackageReader;
 
 const SEGMENT_LEN: usize = 0x1000;
 
+/// A `Read + Seek` wrapper that allows us to simulate a truncated underlying stream while still
+/// reporting a larger "file size" via `SeekFrom::End(0)`.
+///
+/// This is useful for exercising `StandardAesEncryptedPackageReader`'s "partial read, then surface
+/// error on next call" behavior without tripping its size-based guardrails at construction time.
+#[derive(Debug)]
+struct FakeLenCursor {
+    inner: Cursor<Vec<u8>>,
+    fake_end: u64,
+}
+
+impl FakeLenCursor {
+    fn new(buf: Vec<u8>, fake_end: u64) -> Self {
+        Self {
+            inner: Cursor::new(buf),
+            fake_end,
+        }
+    }
+}
+
+impl Read for FakeLenCursor {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl Seek for FakeLenCursor {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        match pos {
+            SeekFrom::End(off) => {
+                let end = self.fake_end as i128;
+                let next = end
+                    .checked_add(off as i128)
+                    .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidInput, "seek overflow"))?;
+                if next < 0 {
+                    return Err(std::io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "invalid seek to a negative position",
+                    ));
+                }
+                let next_u64: u64 = next.try_into().map_err(|_| {
+                    std::io::Error::new(ErrorKind::InvalidInput, "seek position overflow")
+                })?;
+                self.inner.set_position(next_u64);
+                Ok(next_u64)
+            }
+            other => self.inner.seek(other),
+        }
+    }
+}
+
 fn derive_iv(salt: &[u8], segment_index: u32) -> [u8; 16] {
     let mut hasher = Sha1::new();
     hasher.update(salt);
@@ -401,10 +452,26 @@ fn errors_when_orig_size_requires_a_missing_final_ciphertext_segment() {
     // The `orig_size` prefix is attacker-controlled; the reader should reject inputs where the
     // declared plaintext length is implausible for the available ciphertext bytes.
     encrypted.truncate(8 + SEGMENT_LEN);
+    // The reader's constructor validates that the ciphertext length is plausible for the declared
+    // `orig_size`. Use a cursor that lies about its "file size" so we can still exercise the
+    // mid-stream error behavior.
+    let orig_size = plaintext.len() as u64;
+    let expected_min_ciphertext_len = ((orig_size + 15) / 16) * 16;
+    let fake_end = 8 + expected_min_ciphertext_len;
+    assert!(
+        fake_end > encrypted.len() as u64,
+        "fake end must exceed actual length to simulate truncation"
+    );
+    let cursor = FakeLenCursor::new(encrypted, fake_end);
+    let mut reader =
+        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
 
-    let cursor = Cursor::new(encrypted);
-    let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
-        .expect_err("expected missing final ciphertext segment to error");
+    let mut buf = vec![0u8; SEGMENT_LEN + 100];
+    let n = reader.read(&mut buf).expect("read");
+    assert_eq!(n, SEGMENT_LEN);
+    assert_eq!(&buf[..n], &plaintext[..SEGMENT_LEN]);
+
+    let err = reader.read(&mut buf).expect_err("expected error on follow-up read");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
 
     // Simulate a stream that reports the full ciphertext length via `Seek` but returns EOF when

@@ -1450,9 +1450,11 @@ pub fn open_workbook_model_with_password(
 
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
     // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
-    // decryption support, and it must run *before* attempting decryption so we don't misclassify a
-    // plaintext payload as an "invalid password" error (or fail early on malformed placeholder
-    // EncryptionInfo bytes).
+    // decryption support.
+    //
+    // This must run *before* attempting cryptographic decryption so we don't misclassify a
+    // plaintext payload as an "invalid password" error (even when `EncryptionInfo` metadata is
+    // partial/malformed).
     if password.is_some() {
         if let Some(bytes) = maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
         {
@@ -1531,8 +1533,11 @@ pub fn open_workbook_with_password(
 
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
     // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
-    // decryption support, and it must run *before* attempting decryption so we don't misclassify a
-    // plaintext payload as an "invalid password" error (see `open_workbook_model_with_password`).
+    // decryption support.
+    //
+    // This must run *before* attempting cryptographic decryption so we don't misclassify a
+    // plaintext payload as an "invalid password" error (even when `EncryptionInfo` metadata is
+    // partial/malformed).
     if password.is_some() {
         if let Some(bytes) = maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
         {

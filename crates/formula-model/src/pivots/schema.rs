@@ -240,6 +240,10 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
     let is_keyword = raw.eq_ignore_ascii_case("VAR")
         || raw.eq_ignore_ascii_case("RETURN")
         || raw.eq_ignore_ascii_case("IN");
+    if is_keyword {
+        return true;
+    }
+
     if first != '_' && !first.is_alphabetic() {
         return true;
     }
@@ -249,13 +253,13 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
         }
         return true;
     }
-    is_keyword
+    false
 }
 
 fn quote_dax_identifier(raw: &str) -> String {
     // DAX uses single quotes for quoting table identifiers. Single quotes inside the identifier
     // are escaped by doubling them (`''`).
-    let escaped = raw.replace("'", "''");
+    let escaped = raw.replace('\'', "''");
     format!("'{escaped}'")
 }
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
