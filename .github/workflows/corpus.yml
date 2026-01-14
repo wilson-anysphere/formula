@@ -182,7 +182,7 @@ jobs:
       - name: Prepare private corpus output directory
         run: mkdir -p tools/corpus/out/private
       - name: Restore private corpus trend (time series)
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: tools/corpus/out/private/trend.json
           key: corpus-private-trend-${{ github.run_id }}
@@ -306,7 +306,7 @@ jobs:
         # appended a new trend entry). This avoids filling the cache with identical copies when
         # the private corpus is unavailable (e.g. missing secrets).
         if: always() && hashFiles('tools/corpus/out/private/summary.json') != '' && hashFiles('tools/corpus/out/private/trend.json') != ''
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: tools/corpus/out/private/trend.json
           key: corpus-private-trend-${{ github.run_id }}

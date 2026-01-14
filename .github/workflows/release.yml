@@ -745,7 +745,7 @@ jobs:
           cache-on-failure: "true"
 
       - name: Cache cargo target (release build artifacts)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: |
             target/**/release/deps
@@ -813,7 +813,7 @@ jobs:
 
       - name: Restore Pyodide asset cache
         id: pyodide-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: apps/desktop/public/pyodide/
           enableCrossOsArchive: true
@@ -836,7 +836,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: apps/desktop/public/pyodide/
           enableCrossOsArchive: true
@@ -852,7 +852,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: ~/.cargo/bin/wasm-pack*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -862,7 +862,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
@@ -875,7 +875,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: ~/Library/Caches/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-${{ hashFiles('Cargo.lock') }}
@@ -885,7 +885,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: ${{ env.LOCALAPPDATA }}/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-${{ hashFiles('Cargo.lock') }}
@@ -914,7 +914,7 @@ jobs:
 
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: ~/.cargo/bin/cargo-tauri*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -940,7 +940,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: ~/.cache/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -949,7 +949,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: ~/Library/Caches/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -958,7 +958,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           # Tauri's cache directory lives under %LOCALAPPDATA% on Windows.
           path: ${{ env.LOCALAPPDATA }}/tauri
@@ -968,7 +968,7 @@ jobs:
 
       - name: Cache Tauri permission list (cargo tauri permission ls)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: target/ci/tauri-permission-ls.txt
           key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}

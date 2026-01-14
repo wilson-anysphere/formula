@@ -215,7 +215,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: ~/.cargo/bin/wasm-pack
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -227,7 +227,7 @@ jobs:
             wasm-pack-${{ runner.os }}-${{ runner.arch }}-rust-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Cache wasm-pack tool downloads (Linux)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
@@ -301,7 +301,7 @@ jobs:
 
       - name: Restore Pyodide asset cache
         id: pyodide-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -311,7 +311,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -407,7 +407,7 @@ jobs:
       - name: Cache cargo-bloat binary
         if: always() && steps.build_desktop_binary.outcome == 'success'
         id: cargo-bloat-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: ~/.cargo/bin/cargo-bloat
           # Include the pinned Rust toolchain hash so Rust upgrades force a fresh install
@@ -471,7 +471,7 @@ jobs:
             patchelf
       - name: Cache Tauri permission list (cargo tauri permission ls)
         id: tauri-permission-list-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: target/ci/tauri-permission-ls.txt
           key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}
@@ -480,7 +480,7 @@ jobs:
         # without installing the Tauri CLI binary.
         if: steps.tauri-permission-list-cache.outputs.cache-hit != 'true'
         id: cargo-tauri-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: ~/.cargo/bin/cargo-tauri*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding cargo-tauri.
@@ -504,7 +504,7 @@ jobs:
           fi
       - name: Cache Tauri tooling downloads
         if: steps.tauri-permission-list-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: ~/.cache/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
