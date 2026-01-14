@@ -1150,6 +1150,7 @@ impl Engine {
             .sheet_name(id)
             .ok_or(SheetLifecycleError::SheetNotFound)?
             .to_string();
+        let old_sheet_key = self.workbook.sheet_key_name(id).map(|s| s.to_string());
         if old_name == new_name {
             return Ok(());
         }
@@ -1230,6 +1231,24 @@ impl Engine {
                 }
             }
         }
+
+        // If this sheet's stable key matched its display name, keep them in sync when renaming so
+        // the old sheet name is fully removed from name resolution (`Engine::sheet_id`) and does
+        // not linger as an alternate stable-key alias.
+        if old_sheet_key
+            .as_ref()
+            .is_some_and(|k| formula_model::sheet_name_eq_case_insensitive(k, &old_name))
+        {
+            let new_key = Workbook::sheet_key(new_name);
+            if let Some(old_key) = old_sheet_key.as_ref().map(|k| Workbook::sheet_key(k)) {
+                if self.workbook.sheet_key_to_id.get(&old_key) == Some(&id) {
+                    self.workbook.sheet_key_to_id.remove(&old_key);
+                }
+            }
+            self.workbook.sheet_keys[id] = Some(new_name.to_string());
+            self.workbook.sheet_key_to_id.insert(new_key, id);
+        }
+
         if !self.workbook.set_sheet_display_name(id, new_name) {
             return Err(SheetLifecycleError::Internal(format!(
                 "failed to rename sheet id {id}"
