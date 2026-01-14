@@ -87,3 +87,17 @@ fn rgce_encodes_na_bang_error_literal_in_array_literals() {
     let decoded = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
     assert_eq!(normalize("{#N/A}"), normalize(&decoded));
 }
+
+#[test]
+fn rgce_roundtrip_multiple_array_literals_in_one_formula() {
+    // BIFF12 stores array literals in `rgcb` as a sequence of blocks. Ensure we can roundtrip
+    // multiple array literals by advancing the `rgcb` cursor correctly.
+    let encoded = encode_rgce_with_rgcb("=SUM({1,2},{3,4})").expect("encode");
+    assert!(!encoded.rgcb.is_empty(), "rgcb should be non-empty for PtgArray");
+    assert!(
+        encoded.rgce.iter().filter(|&&b| b == 0x20).count() >= 2,
+        "rgce should contain multiple PtgArray (0x20) tokens"
+    );
+    let decoded = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(normalize("SUM({1,2},{3,4})"), normalize(&decoded));
+}

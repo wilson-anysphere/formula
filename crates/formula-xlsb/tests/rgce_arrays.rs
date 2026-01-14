@@ -100,3 +100,24 @@ fn encode_unary_plus_and_minus_in_array_constants() {
     let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
     assert_eq!(text, "{1,-2}");
 }
+
+#[test]
+fn encode_decode_roundtrip_multiple_array_constants_in_one_formula() {
+    // BIFF12 stores array literals in `rgcb` as a sequence of blocks. Ensure we can roundtrip
+    // multiple array literals by advancing the `rgcb` cursor correctly.
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("=SUM({1,2},{3,4})", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(!encoded.rgcb.is_empty());
+    assert!(
+        encoded
+            .rgce
+            .iter()
+            .filter(|&&b| matches!(b, 0x20 | 0x40 | 0x60))
+            .count()
+            >= 2,
+        "expected at least two PtgArray tokens in rgce"
+    );
+    let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(text, "SUM({1,2},{3,4})");
+}
