@@ -2,9 +2,19 @@
 
 use std::io::{Cursor, Read, Seek, Write};
 
+use aes::Aes128;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use cbc::cipher::block_padding::NoPadding;
+use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 use formula_xlsx::offcrypto::decrypt_agile_encrypted_package_stream;
+use formula_xlsx::offcrypto::{
+    derive_iv, derive_key, hash_password, HashAlgorithm, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
+    VERIFIER_HASH_VALUE_BLOCK,
+};
 use ms_offcrypto_writer::Ecma376AgileWriter;
 use rand::{rngs::StdRng, SeedableRng as _};
+use sha1::Digest as _;
 use zip::write::FileOptions;
 
 fn make_zip_bytes(payload_len: usize) -> Vec<u8> {
@@ -66,6 +76,162 @@ fn decrypts_agile_encrypted_package_streaming() {
 
     assert_eq!(declared_len as usize, plaintext.len());
     assert_eq!(out, plaintext);
+}
+
+fn encrypt_aes128_cbc_no_padding(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    assert_eq!(key.len(), 16);
+    assert_eq!(iv.len(), 16);
+    assert!(
+        plaintext.len() % 16 == 0,
+        "plaintext must be AES-block aligned"
+    );
+
+    let mut buf = plaintext.to_vec();
+    let len = buf.len();
+    cbc::Encryptor::<Aes128>::new_from_slices(key, iv)
+        .expect("valid key/iv")
+        .encrypt_padded_mut::<NoPadding>(&mut buf, len)
+        .expect("encrypt");
+    buf
+}
+
+fn zero_pad_to_block(mut bytes: Vec<u8>, block_size: usize) -> Vec<u8> {
+    let rem = bytes.len() % block_size;
+    if rem != 0 {
+        bytes.extend(std::iter::repeat(0u8).take(block_size - rem));
+    }
+    bytes
+}
+
+#[test]
+fn decrypts_agile_encrypted_package_streaming_with_derived_password_key_iv() {
+    // Build a synthetic Agile descriptor where the password key-encryptor blobs
+    // (`encryptedVerifierHashInput`, `encryptedVerifierHashValue`, `encryptedKeyValue`) are encrypted
+    // using per-blob derived IVs (Hash(saltValue || blockKey)[:blockSize]) instead of Excel's typical
+    // `IV = saltValue[..blockSize]`.
+    let password = "pw";
+    let plaintext = make_zip_bytes(12_345);
+
+    let hash_alg = HashAlgorithm::Sha1;
+    let hash_size = 20usize;
+    let block_size = 16usize;
+    let key_encrypt_key_len = 16usize;
+
+    let key_data_salt: Vec<u8> = (0u8..=15).collect();
+    let password_salt: Vec<u8> = (16u8..=31).collect();
+    let spin_count = 10u32;
+
+    let package_key: Vec<u8> = (32u8..=47).collect(); // AES-128 package key
+
+    // --- Build EncryptedPackage stream (segmented) ---------------------------------------------
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    for (segment_index, segment) in plaintext.chunks(0x1000).enumerate() {
+        let padded = zero_pad_to_block(segment.to_vec(), block_size);
+        let iv = derive_iv(
+            &key_data_salt,
+            &(segment_index as u32).to_le_bytes(),
+            block_size,
+            hash_alg,
+        )
+        .unwrap();
+        let ct = encrypt_aes128_cbc_no_padding(&package_key, &iv, &padded);
+        encrypted_package.extend_from_slice(&ct);
+    }
+
+    // --- Build password key encryptor fields ---------------------------------------------------
+    let password_hash = hash_password(password, &password_salt, spin_count, hash_alg).unwrap();
+    let salt_iv = &password_salt[..block_size];
+    let derived_iv = derive_iv(
+        &password_salt,
+        &VERIFIER_HASH_INPUT_BLOCK,
+        block_size,
+        hash_alg,
+    )
+    .unwrap();
+    assert_ne!(
+        derived_iv.as_slice(),
+        salt_iv,
+        "derived-IV scheme should not accidentally match Excel's saltValue IV"
+    );
+
+    let verifier_input: Vec<u8> = b"abcdefghijklmnop".to_vec();
+    let verifier_hash: Vec<u8> = sha1::Sha1::digest(&verifier_input).to_vec();
+
+    // Make verifierHashValue plaintext block-aligned by appending non-zero garbage after the digest.
+    let mut verifier_hash_value_plain = verifier_hash.clone();
+    verifier_hash_value_plain.extend_from_slice(&[0xA5u8; 12]);
+    assert_eq!(verifier_hash_value_plain.len(), 32);
+
+    let encrypt_pw_blob = |block_key: &[u8], plaintext: &[u8]| -> Vec<u8> {
+        let k = derive_key(&password_hash, block_key, key_encrypt_key_len, hash_alg).unwrap();
+        let iv = derive_iv(&password_salt, block_key, block_size, hash_alg).unwrap();
+        encrypt_aes128_cbc_no_padding(&k, &iv, plaintext)
+    };
+
+    let encrypted_verifier_hash_input = encrypt_pw_blob(&VERIFIER_HASH_INPUT_BLOCK, &verifier_input);
+    let encrypted_verifier_hash_value =
+        encrypt_pw_blob(&VERIFIER_HASH_VALUE_BLOCK, &verifier_hash_value_plain);
+    let encrypted_key_value = encrypt_pw_blob(&KEY_VALUE_BLOCK, &package_key);
+
+    // --- Build EncryptionInfo stream (no dataIntegrity) ----------------------------------------
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltSize="16" blockSize="{block_size}" keyBits="128" hashSize="{hash_size}"
+           cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+           saltValue="{key_data_salt_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey saltSize="16" blockSize="{block_size}" keyBits="128" hashSize="{hash_size}"
+                      spinCount="{spin_count}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                      saltValue="{password_salt_b64}"
+                      encryptedVerifierHashInput="{evhi_b64}"
+                      encryptedVerifierHashValue="{evhv_b64}"
+                      encryptedKeyValue="{ekv_b64}"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#,
+        key_data_salt_b64 = BASE64.encode(&key_data_salt),
+        password_salt_b64 = BASE64.encode(&password_salt),
+        evhi_b64 = BASE64.encode(&encrypted_verifier_hash_input),
+        evhv_b64 = BASE64.encode(&encrypted_verifier_hash_value),
+        ekv_b64 = BASE64.encode(&encrypted_key_value),
+    );
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes()); // major
+    encryption_info.extend_from_slice(&4u16.to_le_bytes()); // minor
+    encryption_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    let mut encrypted_package_stream = Cursor::new(encrypted_package);
+    let mut out = Vec::new();
+    let declared_len = decrypt_agile_encrypted_package_stream(
+        &encryption_info,
+        &mut encrypted_package_stream,
+        password,
+        &mut out,
+    )
+    .expect("decrypt derived-IV Agile stream");
+
+    assert_eq!(declared_len as usize, plaintext.len());
+    assert_eq!(out, plaintext);
+
+    let mut encrypted_package_stream = Cursor::new(encrypted_package_stream.into_inner());
+    let mut out = Vec::new();
+    let err = decrypt_agile_encrypted_package_stream(
+        &encryption_info,
+        &mut encrypted_package_stream,
+        "wrong-password",
+        &mut out,
+    )
+    .expect_err("wrong password should fail");
+    assert!(
+        matches!(err, formula_xlsx::offcrypto::OffCryptoError::WrongPassword),
+        "expected WrongPassword, got {err:?}"
+    );
 }
 
 #[test]
