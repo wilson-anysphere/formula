@@ -2004,8 +2004,10 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                out.warnings
-                    .push(format!("malformed BIFF record in sheet stream: {err}"));
+                push_warning_bounded(
+                    &mut out.warnings,
+                    format!("malformed BIFF record in sheet stream: {err}"),
+                );
                 break;
             }
         };
@@ -2026,11 +2028,14 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 //   [rwInpRow: u16][colInpRow: u16]
                 //   [rwInpCol: u16][colInpCol: u16]
                 if data.len() < 4 {
-                    out.warnings.push(format!(
-                        "truncated TABLE record at offset {}: expected >=4 bytes, got {}",
-                        record.offset,
-                        data.len()
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated TABLE record at offset {}: expected >=4 bytes, got {}",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
                     continue;
                 }
 
@@ -2040,11 +2045,14 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 let grbit = if data.len() >= 6 {
                     u16::from_le_bytes([data[4], data[5]])
                 } else {
-                    out.warnings.push(format!(
-                        "truncated TABLE record at offset {}: expected >=6 bytes for grbit, got {}",
-                        record.offset,
-                        data.len()
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated TABLE record at offset {}: expected >=6 bytes for grbit, got {}",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
                     0
                 };
 
@@ -2056,11 +2064,14 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 let col_present = has_col_flag || assume_both_present;
 
                 let decoded = if data.len() < 14 {
-                    out.warnings.push(format!(
-                        "truncated TABLE record at offset {}: expected >=14 bytes, got {}; rendering #REF! placeholders",
-                        record.offset,
-                        data.len()
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated TABLE record at offset {}: expected >=14 bytes, got {}; rendering #REF! placeholders",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
 
                     TableRecordDecoded {
                         row_input: if row_present {
@@ -2088,10 +2099,13 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                         let col = (col_raw & 0x3FFF) as u32;
                         let row = rw as u32;
                         if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
-                            warnings.push(format!(
+                            push_warning_bounded(
+                                warnings,
+                                format!(
                                     "TABLE record at offset {} has out-of-bounds {label} reference (row={row}, col={col}); rendering #REF!",
                                     record.offset
-                                ));
+                                ),
+                            );
                             return TableArg::RefError;
                         }
                         TableArg::Ref(CellRef::new(row, col))
@@ -2134,42 +2148,54 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 };
 
                 if tables.insert((base_row, base_col), decoded).is_some() {
-                    out.warnings.push(format!(
-                        "duplicate TABLE record for base cell row={base_row} col={base_col} at offset {}; last one wins",
-                        record.offset
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "duplicate TABLE record for base cell row={base_row} col={base_col} at offset {}; last one wins",
+                            record.offset
+                        ),
+                    );
                 }
             }
             RECORD_FORMULA => {
                 // FORMULA record payload (BIFF8) [MS-XLS 2.4.127].
                 if data.len() < 22 {
-                    out.warnings.push(format!(
-                        "truncated FORMULA record at offset {}: expected >=22 bytes, got {}",
-                        record.offset,
-                        data.len()
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated FORMULA record at offset {}: expected >=22 bytes, got {}",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
                     continue;
                 }
 
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let col = u16::from_le_bytes([data[2], data[3]]) as u32;
                 if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
-                    out.warnings.push(format!(
-                        "skipping out-of-bounds FORMULA cell ({row},{col}) at offset {}",
-                        record.offset
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "skipping out-of-bounds FORMULA cell ({row},{col}) at offset {}",
+                            record.offset
+                        ),
+                    );
                     continue;
                 }
                 let cell = CellRef::new(row, col);
 
                 let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
                 let Some(rgce) = data.get(22..22 + cce) else {
-                    out.warnings.push(format!(
-                        "truncated FORMULA rgce stream at offset {}: need {} bytes, got {}",
-                        record.offset,
-                        cce,
-                        data.len().saturating_sub(22)
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated FORMULA rgce stream at offset {}: need {} bytes, got {}",
+                            record.offset,
+                            cce,
+                            data.len().saturating_sub(22)
+                        ),
+                    );
                     continue;
                 };
 
@@ -2178,11 +2204,14 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 }
 
                 if rgce.len() < 5 {
-                    out.warnings.push(format!(
-                        "truncated PtgTbl token in FORMULA record at offset {}: expected 4-byte payload, got {} bytes",
-                        record.offset,
-                        rgce.len().saturating_sub(1)
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated PtgTbl token in FORMULA record at offset {}: expected 4-byte payload, got {} bytes",
+                            record.offset,
+                            rgce.len().saturating_sub(1)
+                        ),
+                    );
                     out.formulas.insert(cell, "TABLE(#REF!,#REF!)".to_string());
                     continue;
                 }
@@ -2207,11 +2236,14 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
         let formula = match tables.get(&(base_row, base_col)) {
             Some(def) => def.render_formula(),
             None => {
-                out.warnings.push(format!(
-                    "PtgTbl formula at offset {} (cell {}) references missing TABLE record at row={base_row} col={base_col}; rendering TABLE()",
-                    offset,
-                    cell.to_a1()
-                ));
+                push_warning_bounded(
+                    &mut out.warnings,
+                    format!(
+                        "PtgTbl formula at offset {} (cell {}) references missing TABLE record at row={base_row} col={base_col}; rendering TABLE()",
+                        offset,
+                        cell.to_a1()
+                    ),
+                );
                 "TABLE()".to_string()
             }
         };
@@ -2997,6 +3029,32 @@ mod tests {
 
         // Ensure the synthesized formula is parseable by our formula lexer/parser.
         parse_formula("TABLE(A1,B2)", ParseOptions::default()).expect("parseable");
+    }
+
+    #[test]
+    fn sheet_table_formulas_warnings_are_bounded() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Emit many malformed TABLE records (payload < 4 bytes). Without bounding this would
+        // allocate unbounded warning strings.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 100) {
+            stream.extend_from_slice(&record(RECORD_TABLE, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff8_sheet_table_formulas(&stream, 0).expect("parse");
+        assert_eq!(parsed.warnings.len(), MAX_WARNINGS_PER_SHEET + 1);
+        assert_eq!(
+            parsed
+                .warnings
+                .iter()
+                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .count(),
+            1,
+            "suppression warning should only be emitted once; warnings={:?}",
+            parsed.warnings
+        );
     }
 
     #[test]
