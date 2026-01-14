@@ -513,6 +513,41 @@ test("buildWorkbookContext: blocks when sheet names are heuristic-sensitive and 
   assert.doesNotMatch(joined, /alice@example\.com/);
 });
 
+test("buildWorkbookContext: promptContext does not leak heuristic-sensitive sheet names in schema/retrieved sections (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-retrieved-sheetname-noop-redactor",
+    sheets: [
+      {
+        name: "alice@example.com",
+        cells: [[{ v: "Hello" }], [{ v: "World" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1500,
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.doesNotMatch(out.retrieved[0]?.text ?? "", /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });

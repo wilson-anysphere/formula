@@ -1218,6 +1218,54 @@ export class ContextManager {
       return idx === -1 ? s : s.slice(0, idx);
     }
 
+    /**
+     * Redact a short metadata token (sheet name / title) under DLP redaction.
+     *
+     * This is a defense-in-depth helper so DLP flows remain safe even when the configured
+     * `ContextManager.redactor` is a no-op.
+     *
+     * @param {unknown} value
+     */
+    const redactChunkToken = (value) => {
+      const raw = String(value ?? "");
+      if (!dlp) return raw;
+      const redacted = this.redactor(raw);
+      if (!restrictedAllowed && classifyText(redacted).level === "sensitive") return "[REDACTED]";
+      return redacted;
+    };
+
+    /**
+     * @param {any} rect
+     */
+    function rectToA1WithoutSheet(rect) {
+      if (!rect || typeof rect !== "object") return "";
+      const { r0, c0, r1, c1 } = rect;
+      if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) return "";
+      if (r1 < r0 || c1 < c0) return "";
+      try {
+        return rangeToA1({ startRow: r0, startCol: c0, endRow: r1, endCol: c1 });
+      } catch {
+        return "";
+      }
+    }
+
+    /**
+     * Safe first line for persisted redacted chunks (used to avoid leaking sensitive sheet/title
+     * metadata when a chunk must be blocked/redacted).
+     *
+     * @param {any} metadata
+     */
+    const safeChunkFirstLineFromMetadata = (metadata) => {
+      const meta = metadata && typeof metadata === "object" ? metadata : {};
+      const kind = String(meta.kind ?? "chunk").toUpperCase();
+      const title = redactChunkToken(meta.title ?? "");
+      const sheetName = redactChunkToken(meta.sheetName ?? "");
+      const rectA1 = rectToA1WithoutSheet(meta.rect);
+      const sheetPart = `sheet="${sheetName}"`;
+      const rangePart = rectA1 ? `, range="${rectA1}"` : "";
+      return `${kind}: ${title} (${sheetPart}${rangePart})`;
+    };
+
     /** @type {Map<string, ReturnType<typeof classifyText>>} */
     const heuristicByChunkId = new Map();
 
@@ -1279,17 +1327,17 @@ export class ContextManager {
                     // If the policy blocks cloud AI processing for this chunk, do not send any
                     // workbook content to the embedder. Persist only a minimal placeholder so
                     // the vector store cannot contain raw restricted data.
-                    safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                    safeText = this.redactor(`${safeChunkFirstLineFromMetadata(record.metadata)}\n[REDACTED]`);
                   } else {
                     // If DLP redaction is required due to explicit document/sheet/range classification,
                     // redact the entire content; pattern-based redaction isn't sufficient in that case.
                     if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-                      safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                      safeText = this.redactor(`${safeChunkFirstLineFromMetadata(record.metadata)}\n[REDACTED]`);
                     } else {
                       safeText = this.redactor(rawText);
                     }
                     if (!restrictedAllowed && classifyText(safeText).level === "sensitive") {
-                      safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                      safeText = this.redactor(`${safeChunkFirstLineFromMetadata(record.metadata)}\n[REDACTED]`);
                     }
                   }
                 }
@@ -1489,7 +1537,9 @@ export class ContextManager {
       const meta = hit.metadata ?? {};
       const title = meta.title ?? hit.id;
       const kind = meta.kind ?? "chunk";
-      const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${meta.sheetName ?? ""} title="${title}"`;
+      const safeSheetName = dlp ? redactChunkToken(meta.sheetName ?? "") : String(meta.sheetName ?? "");
+      const safeTitle = dlp ? redactChunkToken(title) : String(title ?? "");
+      const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${safeSheetName} title="${safeTitle}"`;
       const text = meta.text ?? "";
       const raw = `${header}\n${text}`;
 
@@ -1611,6 +1661,31 @@ export class ContextManager {
       };
 
       /**
+       * Redact the sheet-name component of an A1 range string under DLP redaction.
+       *
+       * `extractWorkbookSchema()` produces absolute A1 ranges like `Sheet1!A1:B10`. If the sheet
+       * name itself is heuristic-sensitive (e.g. contains an email), a no-op redactor would
+       * otherwise leak it into the prompt.
+       *
+       * @param {unknown} a1
+       * @param {string} [blockedReason]
+       */
+      const redactRangeA1 = (a1, blockedReason = "workbook_schema") => {
+        const raw = String(a1 ?? "");
+        if (!dlp) return raw;
+        if (!raw) return raw;
+        try {
+          const parsed = parseA1Range(raw);
+          const safeSheet = parsed.sheetName ? redactSchemaToken(parsed.sheetName, blockedReason) : "";
+          return rangeToA1({ ...parsed, sheetName: safeSheet || undefined });
+        } catch {
+          const redacted = this.redactor(raw);
+          if (!restrictedAllowed && classifyText(redacted).level === "sensitive") return "[REDACTED]";
+          return redacted;
+        }
+      };
+
+      /**
        * Redact a workbook RAG `COLUMNS:` detail string while preserving inferred types.
        * @param {string} columnsLine
        */
@@ -1673,22 +1748,7 @@ export class ContextManager {
         const safeName = redactSchemaToken(name);
         const sheetName = table?.sheetName ?? "";
         const rect = table?.rect;
-        const rangeA1 = table?.rangeA1 ?? "";
-        const safeSheetName = sheetName ? redactSchemaToken(sheetName) : "";
-        let safeRangeA1 = rangeA1;
-        if (safeSheetName && rect && typeof rect === "object") {
-          try {
-            safeRangeA1 = rangeToA1({
-              sheetName: safeSheetName,
-              startRow: rect.r0,
-              startCol: rect.c0,
-              endRow: rect.r1,
-              endCol: rect.c1,
-            });
-          } catch {
-            // Fall back to the precomputed range string if formatting fails.
-          }
-        }
+        const rangeA1 = redactRangeA1(table?.rangeA1 ?? "");
         if (!name || !sheetName || !rect || typeof rect !== "object") continue;
 
         if (dlp) {
@@ -1706,7 +1766,7 @@ export class ContextManager {
               options: { includeRestrictedContent },
             });
             if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-              schemaLines.push(`- Table ${safeName} (range="${safeRangeA1}"): [REDACTED]`);
+              schemaLines.push(`- Table ${safeName} (range="${rangeA1}"): [REDACTED]`);
               continue;
             }
           }
@@ -1727,7 +1787,7 @@ export class ContextManager {
         }
 
         const colSuffix = boundedColCount < colCount ? " | …" : "";
-        schemaLines.push(`- Table ${safeName} (range="${safeRangeA1}"): ${cols.join(" | ")}${colSuffix}`);
+        schemaLines.push(`- Table ${safeName} (range="${rangeA1}"): ${cols.join(" | ")}${colSuffix}`);
       }
 
       // Named ranges can be helpful anchors even without cell samples.
@@ -1736,24 +1796,7 @@ export class ContextManager {
         const nr = schema.namedRanges[i];
         const name = nr?.name ?? "";
         const safeName = redactSchemaToken(name);
-        const sheetName = nr?.sheetName ?? "";
-        const rect = nr?.rect;
-        const rangeA1Raw = nr?.rangeA1 ?? "";
-        const safeSheetName = sheetName ? redactSchemaToken(sheetName) : "";
-        let rangeA1 = rangeA1Raw;
-        if (safeSheetName && rect && typeof rect === "object") {
-          try {
-            rangeA1 = rangeToA1({
-              sheetName: safeSheetName,
-              startRow: rect.r0,
-              startCol: rect.c0,
-              endRow: rect.r1,
-              endCol: rect.c1,
-            });
-          } catch {
-            // Use the precomputed range string on failures.
-          }
-        }
+        const rangeA1 = redactRangeA1(nr?.rangeA1 ?? "");
         if (!name) continue;
         schemaLines.push(`- Named range ${safeName} (range="${rangeA1}")`);
       }
@@ -1812,6 +1855,7 @@ export class ContextManager {
             const title = String(meta.title ?? "");
             const safeTitle = title ? redactSchemaToken(title) : "";
             const sheetName = String(meta.sheetName ?? "");
+            const safeSheetName = sheetName ? redactSchemaToken(sheetName) : "";
             const rect = meta.rect ?? {};
             const r0 = rect.r0;
             const c0 = rect.c0;
@@ -1819,8 +1863,13 @@ export class ContextManager {
             const c1 = rect.c1;
             if (!sheetName || ![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) continue;
             if (r1 < r0 || c1 < c0) continue;
-            const safeSheetName = redactSchemaToken(sheetName);
-            const rangeA1 = rangeToA1({ sheetName: safeSheetName, startRow: r0, startCol: c0, endRow: r1, endCol: c1 });
+            const rangeA1 = rangeToA1({
+              sheetName: safeSheetName || sheetName,
+              startRow: r0,
+              startCol: c0,
+              endRow: r1,
+              endCol: c1,
+            });
 
             // Structured DLP classifications: if this chunk range is disallowed due to explicit
             // document/sheet/range selectors, do not include any derived header/type strings.
@@ -1953,9 +2002,18 @@ export class ContextManager {
         chunks: chunkAudits,
       });
     }
+
+    const retrievedOut =
+      dlp && overallDecision?.decision === DLP_DECISION.REDACT
+        ? redactStructuredValue(retrievedChunks, this.redactor, {
+            signal,
+            includeRestrictedContent,
+            policyAllowsRestrictedContent,
+          })
+        : retrievedChunks;
     return {
       indexStats,
-      retrieved: retrievedChunks,
+      retrieved: retrievedOut,
       promptContext,
     };
   }
