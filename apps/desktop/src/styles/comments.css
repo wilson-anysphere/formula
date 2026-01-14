@@ -13,7 +13,7 @@
   height: 100%;
   display: none;
   flex-direction: column;
-  padding: 8px;
+  padding: var(--space-4);
   box-sizing: border-box;
   background: var(--dialog-bg);
   border-inline-start: 1px solid var(--dialog-border);
@@ -29,8 +29,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .comments-panel__title {
@@ -77,7 +77,7 @@
 .comments-panel__active-cell {
   font-size: 12px;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-3);
 }
 
 .comments-panel__threads {
@@ -86,7 +86,7 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .comments-panel__empty {
@@ -97,14 +97,14 @@
 .comments-panel__footer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border);
 }
 
 .comments-panel__footer-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .comments-panel__readonly-hint {
@@ -120,11 +120,11 @@
 }
 
 .comments-panel-view__header {
-  padding: 8px;
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .comments-panel-view__title {
@@ -140,20 +140,20 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .comments-panel-view__footer {
-  padding: 8px;
+  padding: var(--space-4);
   border-top: 1px solid var(--border);
 }
 
 .comments-panel-view__row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .comments-panel__new-comment-input {
@@ -162,7 +162,7 @@
 
 .comments-panel__new-comment-input,
 .comment-thread__reply-input {
-  padding: 5px 8px;
+  padding: calc(var(--space-3) - (var(--space-1) / 2)) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -199,7 +199,7 @@
 .comment-thread__submit-reply-button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 5px 8px;
+  padding: calc(var(--space-3) - (var(--space-1) / 2)) var(--space-4);
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
@@ -241,10 +241,10 @@
 .comment-thread {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px;
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .comment-thread[data-resolved="true"] {
@@ -255,7 +255,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .comment-thread__author,
@@ -271,17 +271,17 @@
 }
 
 .comment-thread__reply {
-  padding-inline-start: 8px;
+  padding-inline-start: var(--space-4);
   border-inline-start: 2px solid var(--border);
 }
 
 .comment-thread__reply-body {
-  margin-top: 4px;
+  margin-top: var(--space-2);
 }
 
 .comment-thread__reply-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .comment-thread__reply-input {
@@ -294,7 +294,7 @@
   left: var(--comment-tooltip-x, 0px);
   top: var(--comment-tooltip-y, 0px);
   max-width: 260px;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   background: var(--tooltip-bg);
   color: var(--tooltip-text);
   border: 1px solid var(--formula-grid-line, var(--border));
