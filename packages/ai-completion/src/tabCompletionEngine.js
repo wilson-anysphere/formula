@@ -1297,16 +1297,30 @@ export class TabCompletionEngine {
         // complete the left-cell reference even when an enum exists for this arg.
         // This keeps the default enum UX for empty prefixes, but makes it possible
         // to use cell-referenced numeric flags when desired.
-        if (cellRef.col > 0 && typedPrefix) {
-          const leftA1 = `${columnIndexToLetter(cellRef.col - 1)}${cellRef.row + 1}`;
-          if (startsWithIgnoreCase(leftA1, typedPrefix) && typedPrefix.length < leftA1.length) {
-            const completed = completeIdentifier(leftA1, typedPrefix);
-            suggestions.push({
-              text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
-              displayText: completed,
-              type: "function_arg",
-              confidence: 0.41,
-            });
+        if (typedPrefix) {
+          if (cellRef.col > 0) {
+            const leftA1 = `${columnIndexToLetter(cellRef.col - 1)}${cellRef.row + 1}`;
+            if (startsWithIgnoreCase(leftA1, typedPrefix) && typedPrefix.length < leftA1.length) {
+              const completed = completeIdentifier(leftA1, typedPrefix);
+              suggestions.push({
+                text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
+                displayText: completed,
+                type: "function_arg",
+                confidence: 0.41,
+              });
+            }
+          } else if (cellRef.row > 0) {
+            // If there is no left cell (column A), allow completing the cell above.
+            const aboveA1 = `${columnIndexToLetter(cellRef.col)}${cellRef.row}`;
+            if (startsWithIgnoreCase(aboveA1, typedPrefix) && typedPrefix.length < aboveA1.length) {
+              const completed = completeIdentifier(aboveA1, typedPrefix);
+              suggestions.push({
+                text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
+                displayText: completed,
+                type: "function_arg",
+                confidence: 0.41,
+              });
+            }
           }
         }
 
@@ -1324,6 +1338,18 @@ export class TabCompletionEngine {
         const leftA1 = `${columnIndexToLetter(cellRef.col - 1)}${cellRef.row + 1}`;
         if (!typedPrefix || (startsWithIgnoreCase(leftA1, typedPrefix) && typedPrefix.length < leftA1.length)) {
           const completed = completeIdentifier(leftA1, typedPrefix);
+          suggestions.push({
+            text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
+            displayText: completed,
+            type: "function_arg",
+            confidence: 0.41,
+          });
+        }
+      } else if (cellRef.row > 0) {
+        // If there is no left cell (column A), fall back to the cell above.
+        const aboveA1 = `${columnIndexToLetter(cellRef.col)}${cellRef.row}`;
+        if (!typedPrefix || (startsWithIgnoreCase(aboveA1, typedPrefix) && typedPrefix.length < aboveA1.length)) {
+          const completed = completeIdentifier(aboveA1, typedPrefix);
           suggestions.push({
             text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
             displayText: completed,
@@ -1369,6 +1395,18 @@ export class TabCompletionEngine {
             displayText: completed,
             type: "function_arg",
             confidence: 0.35,
+          });
+        }
+      } else if (cellRef.row > 0) {
+        // If there is no left cell (column A), fall back to the cell above.
+        const aboveA1 = `${columnIndexToLetter(cellRef.col)}${cellRef.row}`;
+        if (!typedPrefix || (startsWithIgnoreCase(aboveA1, typedPrefix) && typedPrefix.length < aboveA1.length)) {
+          const completed = completeIdentifier(aboveA1, typedPrefix);
+          suggestions.push({
+            text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
+            displayText: completed,
+            type: "function_arg",
+            confidence: 0.34,
           });
         }
       }

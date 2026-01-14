@@ -2759,6 +2759,28 @@ test("RANDBETWEEN suggests a left-cell reference for plain numeric args", async 
   );
 });
 
+test("RANDBETWEEN falls back to the above-cell reference in column A", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=RANDBETWEEN(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in A2 so there is no left-cell reference; we should fall back to A1.
+    cellRef: { row: 1, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDBETWEEN(A1"),
+    `Expected RANDBETWEEN to suggest the above cell (A1) in column A, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDBETWEEN(1"),
+    `Expected RANDBETWEEN to still suggest numeric placeholders, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Value-arg suggestions are pure insertions (ABS suggests left cell only when prefix matches)", async () => {
   const engine = new TabCompletionEngine();
 
@@ -2797,6 +2819,25 @@ test("Value-arg suggestions are pure insertions (ABS suggests left cell only whe
     surroundingCells: createMockCellContext({}),
   });
   assert.equal(vSuggestions.length, 0);
+});
+
+test("Value-arg suggestions fall back to the above-cell reference in column A", async () => {
+  const engine = new TabCompletionEngine();
+
+  // In column A there is no left cell, so for value-like args we should suggest the cell above.
+  const currentInput = "=ABS(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // A2 (0-based row 1, col 0) -> above cell is A1.
+    cellRef: { row: 1, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ABS(A1"),
+    `Expected ABS to suggest the above cell (A1) in column A, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
 });
 
 test("Function name completion works inside non-range args (=IF(VLO → =IF(VLOOKUP()", async () => {
@@ -2850,6 +2891,26 @@ test("MATCH match_type can suggest a left-cell reference when the prefix matches
   assert.ok(
     suggestions.some((s) => s.text === "=MATCH(A1:A10, A1, B1"),
     `Expected MATCH to suggest B1 for match_type, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("MATCH match_type can suggest the above-cell reference in column A when the prefix matches", async () => {
+  const engine = new TabCompletionEngine();
+
+  // match_type has enum suggestions, but should also allow completing the above-cell ref when
+  // there is no left cell (column A).
+  const currentInput = "=MATCH(A1:A10, A1, A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in A2 so the above-cell heuristic suggests A1.
+    cellRef: { row: 1, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1:A10, A1, A1"),
+    `Expected MATCH to suggest A1 for match_type in column A, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
