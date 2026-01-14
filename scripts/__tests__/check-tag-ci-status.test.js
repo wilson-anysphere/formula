@@ -246,3 +246,38 @@ test("reports when CI is still running (newest run not completed)", async () => 
     },
   );
 });
+
+test("includes a permissions hint when GitHub returns 403", async () => {
+  const sha = "ffffffffffffffffffffffffffffffffffffffff";
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/repos/acme/widgets/actions/workflows") {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "Forbidden" }));
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ message: `Unhandled path: ${url.pathname}` }));
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  assert.ok(addr && typeof addr === "object");
+  const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+  try {
+    const result = await runScript(["--repo", "acme/widgets", "--sha", sha, "--workflow", "CI"], {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_API_URL: baseUrl,
+      GITHUB_SERVER_URL: "http://example.local",
+    });
+
+    assert.notEqual(result.code, 0, "expected non-zero exit code");
+    assert.match(result.stderr, /403/i);
+    assert.match(result.stderr, /actions: read/i);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
