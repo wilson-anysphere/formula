@@ -65,6 +65,10 @@ export class WasmWorkbook {
     recordCall("setWorkbookFileMetadata", directory, filename);
   }
 
+  setInfoOriginForSheet(sheet, origin) {
+    recordCall("setInfoOriginForSheet", sheet, origin);
+  }
+
   setCellStyleId(sheet, address, styleId) {
     recordCall("setCellStyleId", sheet, address, styleId);
   }

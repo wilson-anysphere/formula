@@ -779,7 +779,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setSheetOrigin !== "function") {
                 throw new Error("setSheetOrigin: not available in this WASM build");
               }
-              (wb as any).setSheetOrigin(params.sheet, params.origin);
+              {
+                const sheet = sheetNameOrDefault(params.sheet);
+                (wb as any).setSheetOrigin(sheet, params.origin);
+              }
               result = null;
               break;
             case "setColWidthChars":
@@ -874,7 +877,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   "setInfoOriginForSheet: WasmWorkbook.setInfoOriginForSheet is not available in this WASM build"
                 );
               }
-              (wb as any).setInfoOriginForSheet(params.sheet, params.origin ?? null);
+              {
+                const sheet = sheetNameOrDefault(params.sheet);
+                (wb as any).setInfoOriginForSheet(sheet, params.origin ?? null);
+              }
               result = null;
               break;
             case "setWorkbookFileMetadata":

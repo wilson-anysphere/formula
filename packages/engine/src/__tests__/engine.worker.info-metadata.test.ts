@@ -157,7 +157,7 @@ describe("engine.worker INFO() metadata integration", () => {
         type: "request",
         id: 4,
         method: "setSheetOrigin",
-        params: { sheet: "Sheet1", origin: "B2" },
+        params: { sheet: "  Sheet1  ", origin: "B2" },
       });
 
       await sendRequest(port, { type: "request", id: 5, method: "recalculate", params: {} });
@@ -216,7 +216,7 @@ describe("engine.worker INFO() metadata integration", () => {
         type: "request",
         id: 3,
         method: "setSheetOrigin",
-        params: { sheet: "Sheet1", origin: "B2" },
+        params: { sheet: "  Sheet1  ", origin: "B2" },
       });
       await sendRequest(port, { type: "request", id: 5, method: "recalculate", params: {} });
 
@@ -236,7 +236,7 @@ describe("engine.worker INFO() metadata integration", () => {
         type: "request",
         id: 10,
         method: "setSheetOrigin",
-        params: { sheet: "Sheet1", origin: "" },
+        params: { sheet: "  Sheet1  ", origin: "" },
       });
       await sendRequest(port, { type: "request", id: 11, method: "recalculate", params: {} });
       expect(await read(12, "A3")).toBe("$A$1");
