@@ -118,6 +118,9 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
   (exercises multi-segment decryption for Agile, and larger-package coverage for Standard).
 - `crates/formula-xlsx/tests/encrypted_ooxml_empty_password.rs`:
   decrypts `agile-empty-password.xlsx` and asserts empty password `""` is distinct from a missing password.
+- `crates/xlsx-diff/tests/encrypted_ooxml_diff.rs`:
+  asserts the OPC-level diff tool can decrypt and compare encrypted `.xlsx`/`.xlsm` fixtures against the
+  corresponding plaintext packages (and also exercises an on-the-fly encrypted `.xlsb` wrapper).
 
 ## Agile encryption parameters
 
