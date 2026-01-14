@@ -126,7 +126,9 @@ const partial = await engine.parseFormulaPartial(formula, cursor, { localeId });
 - **Why it matters:** Excel-style formulas are locale-sensitive.
   - **Argument/list separators** vary (e.g. `,` vs `;`), which changes how `argIndex` is computed.
   - **Localized function names** may be accepted/shown (e.g. `SUM` vs a localized equivalent), which impacts function-name
-    completion and signature help.
+    completion and signature help. Note that `engine.parseFormulaPartial(...)` returns the function name as it appears in
+    the current formula text; completion layers that key metadata off canonical English names should translate localized
+    names back to their canonical equivalents.
 - **How the UI should use it:** call `engine.parseFormulaPartial(...)` on each keystroke (or on a small debounce) and treat
   the returned context/error as hints for completion, not as a hard validation pass.
 - **How it composes with `packages/ai-completion`:** the rule-based tab completion engine in `packages/ai-completion`
