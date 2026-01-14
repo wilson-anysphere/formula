@@ -38,6 +38,8 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
         return Ok(false);
     }
 
+    super::validate_cell_edits(edits)?;
+
     let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::with_capacity(edits.len());
     for (idx, edit) in edits.iter().enumerate() {
         if edit.clear_formula

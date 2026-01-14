@@ -19,6 +19,76 @@ fn read_sheet_bin(xlsb_bytes: Vec<u8>) -> Vec<u8> {
     sheet_bin
 }
 
+#[test]
+fn patch_sheet_bin_streaming_rejects_out_of_range_cell_edit_row() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 1_048_576,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let mut patched_stream = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect_err("expected InvalidInput for out-of-range row");
+
+    match err {
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+            let msg = io_err.to_string();
+            assert!(msg.contains("row=1048576"), "unexpected message: {msg}");
+            assert!(msg.contains("col=0"), "unexpected message: {msg}");
+            assert!(msg.contains("max row=1048575"), "unexpected message: {msg}");
+            assert!(msg.contains("max col=16383"), "unexpected message: {msg}");
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[test]
+fn patch_sheet_bin_streaming_rejects_out_of_range_cell_edit_col() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 16_384,
+        new_value: CellValue::Number(2.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let mut patched_stream = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect_err("expected InvalidInput for out-of-range col");
+
+    match err {
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+            let msg = io_err.to_string();
+            assert!(msg.contains("row=0"), "unexpected message: {msg}");
+            assert!(msg.contains("col=16384"), "unexpected message: {msg}");
+            assert!(msg.contains("max row=1048575"), "unexpected message: {msg}");
+            assert!(msg.contains("max col=16383"), "unexpected message: {msg}");
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
 fn read_dimension_bounds(sheet_bin: &[u8]) -> Option<(u32, u32, u32, u32)> {
     // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     // See `crates/formula-xlsb/src/parser.rs` (`biff12` module).

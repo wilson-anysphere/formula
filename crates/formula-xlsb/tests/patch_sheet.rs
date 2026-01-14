@@ -23,6 +23,120 @@ fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
 }
 
 #[test]
+fn patch_sheet_bin_rejects_out_of_range_cell_edit_row() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let err = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 1_048_576,
+            col: 0,
+            new_value: CellValue::Number(2.0),
+            new_style: None,
+            clear_formula: false,
+            new_formula: None,
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput for out-of-range row");
+
+    match err {
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+            let msg = io_err.to_string();
+            assert!(msg.contains("row=1048576"), "unexpected message: {msg}");
+            assert!(msg.contains("col=0"), "unexpected message: {msg}");
+            assert!(msg.contains("max row=1048575"), "unexpected message: {msg}");
+            assert!(msg.contains("max col=16383"), "unexpected message: {msg}");
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[test]
+fn patch_sheet_bin_rejects_out_of_range_cell_edit_col() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let err = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 16_384,
+            new_value: CellValue::Number(2.0),
+            new_style: None,
+            clear_formula: false,
+            new_formula: None,
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput for out-of-range col");
+
+    match err {
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+            let msg = io_err.to_string();
+            assert!(msg.contains("row=0"), "unexpected message: {msg}");
+            assert!(msg.contains("col=16384"), "unexpected message: {msg}");
+            assert!(msg.contains("max row=1048575"), "unexpected message: {msg}");
+            assert!(msg.contains("max col=16383"), "unexpected message: {msg}");
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[test]
+fn patch_sheet_bin_allows_cell_edit_at_excel_grid_limit() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 1_048_575,
+            col: 16_383,
+            new_value: CellValue::Number(2.0),
+            new_style: None,
+            clear_formula: false,
+            new_formula: None,
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("expected max row/col to be accepted");
+}
+
+#[test]
 fn patch_sheet_bin_is_byte_identical_for_noop_numeric_edit() {
     let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
     let wb = XlsbWorkbook::open(fixture).expect("open xlsb");

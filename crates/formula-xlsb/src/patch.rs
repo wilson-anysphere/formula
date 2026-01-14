@@ -65,6 +65,12 @@ fn write_record_preserving_varints<W: io::Write>(
     writer.write_raw(payload)
 }
 
+// Excel worksheet grid limits (0-based, inclusive).
+//
+// These are fixed by the XLSX/XLSB spec: 1,048,576 rows and 16,384 columns (A..XFD).
+const EXCEL_MAX_ROW: u32 = 1_048_575;
+const EXCEL_MAX_COL: u32 = 16_383;
+
 /// A single cell update to apply while patch-writing a worksheet `.bin` part.
 ///
 /// Row/col are zero-based, matching the XLSB internal representation used by the parser.
@@ -118,6 +124,21 @@ pub struct CellEdit {
     /// falls back to writing an inline string because it has no access to (or ability to update)
     /// the workbook's shared strings part.
     pub shared_string_index: Option<u32>,
+}
+
+fn validate_cell_edits(edits: &[CellEdit]) -> Result<(), Error> {
+    for edit in edits {
+        if edit.row > EXCEL_MAX_ROW || edit.col > EXCEL_MAX_COL {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "cell edit coordinate out of range: row={}, col={} (max row={}, max col={})",
+                    edit.row, edit.col, EXCEL_MAX_ROW, EXCEL_MAX_COL
+                ),
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl CellEdit {
@@ -320,6 +341,8 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     if edits.is_empty() {
         return Ok(sheet_bin.to_vec());
     }
+
+    validate_cell_edits(edits)?;
 
     // When BrtWsDim is missing from the input stream, we may need to synthesize it so the
     // worksheet used-range metadata stays consistent after inserting non-blank cells.
