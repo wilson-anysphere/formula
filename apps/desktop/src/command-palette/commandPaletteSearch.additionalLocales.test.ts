@@ -26,6 +26,44 @@ describe("command palette function search (localized function names)", () => {
     }
   });
 
+  it("returns localized function names in fr-FR (SOMME)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "fr-FR";
+
+    try {
+      const sections = buildCommandPaletteSections({
+        query: "somme",
+        commands: [],
+        limits: { maxResults: 50, maxResultsPerGroup: 50 },
+      });
+      const functions = sections.find((s) => s.title === "FUNCTIONS");
+      expect(functions).toBeTruthy();
+      const names = functions!.results.filter((r) => r.kind === "function").map((r) => r.name);
+      expect(names[0]).toBe("SOMME");
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
+  it("returns localized function names in es-ES (SUMA)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "es-ES";
+
+    try {
+      const sections = buildCommandPaletteSections({
+        query: "suma",
+        commands: [],
+        limits: { maxResults: 50, maxResultsPerGroup: 50 },
+      });
+      const functions = sections.find((s) => s.title === "FUNCTIONS");
+      expect(functions).toBeTruthy();
+      const names = functions!.results.filter((r) => r.kind === "function").map((r) => r.name);
+      expect(names[0]).toBe("SUMA");
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("supports non-ASCII queries for localized names (de-DE zähl → ZÄHLENWENN)", () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "de-DE";

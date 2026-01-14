@@ -172,6 +172,76 @@ describe("FormulaBarView fx function picker", () => {
     }
   });
 
+  it("searches + inserts localized function names for fr-FR (SOMME → SOMME())", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "fr-FR";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+      fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+      pickerInput.value = "somme";
+      pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const sommeItem = host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SOMME"]');
+      expect(sommeItem).toBeTruthy();
+
+      const desc = sommeItem!.querySelector<HTMLElement>(".command-palette__item-description");
+      expect(desc).toBeTruthy();
+      expect(desc!.textContent).toContain("SOMME(");
+      expect(desc!.textContent).toContain(";");
+
+      pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+      expect(view.textarea.value).toBe("=SOMME()");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
+  it("searches + inserts localized function names for es-ES (SUMA → SUMA())", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "es-ES";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+      fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+      pickerInput.value = "suma";
+      pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const sumaItem = host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SUMA"]');
+      expect(sumaItem).toBeTruthy();
+
+      const desc = sumaItem!.querySelector<HTMLElement>(".command-palette__item-description");
+      expect(desc).toBeTruthy();
+      expect(desc!.textContent).toContain("SUMA(");
+      expect(desc!.textContent).toContain(";");
+
+      pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+      expect(view.textarea.value).toBe("=SUMA()");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("navigates function results with arrow keys", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
