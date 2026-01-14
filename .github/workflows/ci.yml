@@ -674,6 +674,11 @@ jobs:
       - name: "Guard: locale error TSVs match generator output"
         run: node scripts/generate-locale-error-tsvs.mjs --check
 
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: 1.92.0
+          components: rustfmt
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
