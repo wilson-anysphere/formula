@@ -137,7 +137,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument() as any;
 
@@ -154,9 +154,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
         },
       ]);
 
-      (app as any).selectedDrawingId = 1;
-      (app as any).drawingOverlay.setSelectedId(1);
-      (app as any).drawingsInteraction?.setSelectedId(1);
+      app.selectDrawing(1);
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
       const updated = doc.getSheetDrawings(sheetId)[0];
@@ -167,7 +165,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect((app as any).selectedDrawingId).toBeNull();
       expect(((app as any).drawingOverlay as any).selectedId).toBe(null);
-      expect(((app as any).drawingsInteraction as any).selectedId).toBe(null);
+      expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
 
       app.destroy();
       root.remove();
@@ -188,7 +186,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       app.setZoom(2);
       const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument() as any;
@@ -202,9 +200,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
         },
       ]);
 
-      (app as any).selectedDrawingId = 1;
-      (app as any).drawingOverlay.setSelectedId(1);
-      (app as any).drawingsInteraction?.setSelectedId(1);
+      app.selectDrawing(1);
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
       const updated = doc.getSheetDrawings(sheetId)[0];
@@ -215,7 +211,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect((app as any).selectedDrawingId).toBeNull();
-      expect(((app as any).drawingsInteraction as any).selectedId).toBe(null);
+      expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
 
       app.destroy();
       root.remove();
