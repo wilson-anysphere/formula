@@ -227,7 +227,7 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/encrypted/ooxml"
     ));
-
+ 
     let common_expected = StandardEncryptionInfoParams {
         version_major: 0, // filled per fixture below
         version_minor: 2,

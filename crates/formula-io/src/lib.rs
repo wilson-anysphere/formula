@@ -2906,8 +2906,7 @@ fn open_encrypted_ooxml_model_workbook(
     path: &Path,
     password: &str,
 ) -> Result<Option<formula_model::Workbook>, Error> {
-    let Some(decrypted) = try_decrypt_ooxml_encrypted_package_from_path(path, Some(password))?
-    else {
+    let Some((_format, decrypted)) = decrypt_encrypted_ooxml_package(path, password)? else {
         return Ok(None);
     };
     open_workbook_model_from_decrypted_ooxml_zip_bytes(path, decrypted).map(Some)
@@ -2916,8 +2915,7 @@ fn open_encrypted_ooxml_model_workbook(
 #[cfg(feature = "encrypted-workbooks")]
 #[allow(dead_code)]
 fn open_encrypted_ooxml_workbook(path: &Path, password: &str) -> Result<Option<Workbook>, Error> {
-    let Some(decrypted) = try_decrypt_ooxml_encrypted_package_from_path(path, Some(password))?
-    else {
+    let Some((_format, decrypted)) = decrypt_encrypted_ooxml_package(path, password)? else {
         return Ok(None);
     };
     open_workbook_from_decrypted_ooxml_zip_bytes(path, decrypted).map(Some)
@@ -3172,6 +3170,9 @@ fn decrypt_encrypted_ooxml_package(
             .to_vec();
 
         const CALG_RC4: u32 = 0x0000_6801;
+        const CALG_AES_128: u32 = 0x0000_660E;
+        const CALG_AES_192: u32 = 0x0000_660F;
+        const CALG_AES_256: u32 = 0x0000_6610;
 
         if alg_id == CALG_RC4 {
             // --- Standard CryptoAPI RC4 ---------------------------------------------------------
@@ -3270,22 +3271,67 @@ fn decrypt_encrypted_ooxml_package(
             // --- Standard CryptoAPI AES ---------------------------------------------------------
             // Prefer the Standard decryptor in `formula-office-crypto` because it supports a wider
             // range of hash algorithms (and performs verifier validation). However, some producers
-            // omit or mis-set `EncryptionHeader.Flags` (e.g. missing `fCryptoAPI`/`fAES`), which the
-            // strict parser rejects. Fall back to `formula-xlsx`'s Standard decryptor
-            // (`formula-offcrypto`) for compatibility in those cases.
-            match formula_office_crypto::decrypt_standard_encrypted_package(
-                &encryption_info,
+            // omit or mis-set `EncryptionHeader.Flags` (e.g. missing `fCryptoAPI`/`fAES`). When we
+            // see a non-password error from the strict decryptor, patch the flags to match `algId`
+            // and retry before falling back to `formula-xlsx`'s legacy Standard decryptor.
+            let mut patched_info: Option<Vec<u8>> = None;
+            let mut enc_info = encryption_info.as_slice();
+            let mut res = formula_office_crypto::decrypt_standard_encrypted_package(
+                enc_info,
                 &encrypted_package,
                 password,
+            );
+
+            if matches!(
+                res,
+                Err(formula_office_crypto::OfficeCryptoError::InvalidPassword)
             ) {
-                Ok(bytes) => bytes,
-                Err(formula_office_crypto::OfficeCryptoError::InvalidPassword) => {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                });
+            }
+
+            if res.is_err() {
+                let flags_raw = u32::from_le_bytes(header_bytes[0..4].try_into().unwrap());
+                let f_cryptoapi = flags_raw & 0x0000_0004 != 0;
+                let alg_is_aes = matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256);
+                let f_aes = flags_raw & 0x0000_0020 != 0;
+
+                if !f_cryptoapi || f_aes != alg_is_aes {
+                    let mut buf = encryption_info.clone();
+                    if buf.len() >= header_start + 4 {
+                        let mut new_flags = flags_raw | 0x0000_0004; // fCryptoAPI
+                        if alg_is_aes {
+                            new_flags |= 0x0000_0020; // fAES
+                        } else {
+                            new_flags &= !0x0000_0020;
+                        }
+                        buf[header_start..header_start + 4]
+                            .copy_from_slice(&new_flags.to_le_bytes());
+                        patched_info = Some(buf);
+                        enc_info = patched_info.as_ref().unwrap().as_slice();
+                        res = formula_office_crypto::decrypt_standard_encrypted_package(
+                            enc_info,
+                            &encrypted_package,
+                            password,
+                        );
+                    }
+                }
+
+                if matches!(
+                    res,
+                    Err(formula_office_crypto::OfficeCryptoError::InvalidPassword)
+                ) {
                     return Err(Error::InvalidPassword {
                         path: path.to_path_buf(),
                     });
                 }
-                Err(_) => match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
-                    &encryption_info,
+            }
+
+            match res {
+                Ok(bytes) => bytes,
+                Err(_err) => match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                    enc_info,
                     &encrypted_package,
                     password,
                 ) {

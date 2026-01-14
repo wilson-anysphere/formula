@@ -406,4 +406,48 @@ fn errors_when_orig_size_requires_a_missing_final_ciphertext_segment() {
     let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
         .expect_err("expected missing final ciphertext segment to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
+
+    // Simulate a stream that reports the full ciphertext length via `Seek` but returns EOF when
+    // reading the second segment. This exercises the reader's "return partial bytes, surface the
+    // error on the next call" behavior (common for `Read` adapters).
+    #[derive(Debug)]
+    struct TruncatedRead<R> {
+        inner: R,
+        truncate_at: u64,
+    }
+
+    impl<R: Read + Seek> Read for TruncatedRead<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let pos = self.inner.seek(SeekFrom::Current(0))?;
+            if pos >= self.truncate_at || buf.is_empty() {
+                return Ok(0);
+            }
+            let remaining = (self.truncate_at - pos) as usize;
+            let n = remaining.min(buf.len());
+            self.inner.read(&mut buf[..n])
+        }
+    }
+
+    impl<R: Read + Seek> Seek for TruncatedRead<R> {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    let encrypted = make_encrypted_package(&plaintext, &key, &salt);
+    let cursor = Cursor::new(encrypted);
+    let cursor = TruncatedRead {
+        inner: cursor,
+        truncate_at: (8 + SEGMENT_LEN) as u64,
+    };
+    let mut reader = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
+        .expect("new reader");
+
+    let mut buf = vec![0u8; SEGMENT_LEN + 100];
+    let n = reader.read(&mut buf).expect("read");
+    assert_eq!(n, SEGMENT_LEN);
+    assert_eq!(&buf[..n], &plaintext[..SEGMENT_LEN]);
+
+    let err = reader.read(&mut buf).expect_err("expected error on follow-up read");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
