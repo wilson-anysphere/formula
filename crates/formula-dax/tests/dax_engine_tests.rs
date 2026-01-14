@@ -2891,6 +2891,12 @@ fn userelationship_activates_inactive_relationship_and_overrides_active() {
             "CALCULATE([Sales], VAR x = 1 RETURN USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey]))",
         )
         .unwrap();
+    model
+        .add_measure(
+            "Sales (nested ship date CALCULATE)",
+            "CALCULATE([Sales], Sales[Amount] > CALCULATE(0, USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey])))",
+        )
+        .unwrap();
 
     let date2_filter = FilterContext::empty().with_column_equals("Date", "DateKey", 2.into());
     assert_eq!(
@@ -2908,6 +2914,14 @@ fn userelationship_activates_inactive_relationship_and_overrides_active() {
             .evaluate_measure("Sales by ShipDate (wrapped)", &date2_filter)
             .unwrap(),
         17.0.into()
+    );
+    // Relationship modifiers inside nested CALCULATE calls should not leak out to the outer
+    // CALCULATE filter arguments.
+    assert_eq!(
+        model
+            .evaluate_measure("Sales (nested ship date CALCULATE)", &date2_filter)
+            .unwrap(),
+        12.0.into()
     );
 }
 
