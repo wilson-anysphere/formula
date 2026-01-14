@@ -3037,6 +3037,143 @@ mod tests {
     }
 
     #[test]
+    fn pivot_columnar_star_schema_group_by_respects_userelationship_overrides() {
+        let options = TableOptions {
+            page_size_rows: 64,
+            cache: PageCacheConfig { max_entries: 4 },
+        };
+        let customers_schema = vec![
+            ColumnSchema {
+                name: "CustomerId".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Region".to_string(),
+                column_type: ColumnType::String,
+            },
+        ];
+        let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+        customers.append_row(&[
+            formula_columnar::Value::Number(1.0),
+            formula_columnar::Value::String(Arc::<str>::from("East")),
+        ]);
+        customers.append_row(&[
+            formula_columnar::Value::Number(2.0),
+            formula_columnar::Value::String(Arc::<str>::from("West")),
+        ]);
+
+        let sales_schema = vec![
+            ColumnSchema {
+                name: "CustomerId1".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "CustomerId2".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Amount".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+        sales.append_row(&[
+            formula_columnar::Value::Number(1.0),
+            formula_columnar::Value::Number(2.0),
+            formula_columnar::Value::Number(10.0),
+        ]);
+        sales.append_row(&[
+            formula_columnar::Value::Number(1.0),
+            formula_columnar::Value::Number(2.0),
+            formula_columnar::Value::Number(5.0),
+        ]);
+        sales.append_row(&[
+            formula_columnar::Value::Number(2.0),
+            formula_columnar::Value::Number(1.0),
+            formula_columnar::Value::Number(7.0),
+        ]);
+
+        let mut model = DataModel::new();
+        model
+            .add_table(crate::Table::from_columnar("Customers", customers.finalize()))
+            .unwrap();
+        model
+            .add_table(crate::Table::from_columnar("Sales", sales.finalize()))
+            .unwrap();
+        model
+            .add_relationship(crate::Relationship {
+                name: "Sales_Customers_1".into(),
+                from_table: "Sales".into(),
+                from_column: "CustomerId1".into(),
+                to_table: "Customers".into(),
+                to_column: "CustomerId".into(),
+                cardinality: crate::Cardinality::OneToMany,
+                cross_filter_direction: crate::CrossFilterDirection::Single,
+                is_active: true,
+                enforce_referential_integrity: true,
+            })
+            .unwrap();
+        model
+            .add_relationship(crate::Relationship {
+                name: "Sales_Customers_2".into(),
+                from_table: "Sales".into(),
+                from_column: "CustomerId2".into(),
+                to_table: "Customers".into(),
+                to_column: "CustomerId".into(),
+                cardinality: crate::Cardinality::OneToMany,
+                cross_filter_direction: crate::CrossFilterDirection::Single,
+                is_active: false,
+                enforce_referential_integrity: true,
+            })
+            .unwrap();
+        model
+            .add_measure("Total Sales", "SUM(Sales[Amount])")
+            .unwrap();
+
+        let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+        let group_by = vec![GroupByColumn::new("Customers", "Region")];
+
+        let Some(result) = pivot_columnar_star_schema_group_by(
+            &model,
+            "Sales",
+            &group_by,
+            &measures,
+            &FilterContext::empty(),
+        )
+        .unwrap() else {
+            panic!("expected star-schema fast path to run");
+        };
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Value::from("East"), 15.0.into()],
+                vec![Value::from("West"), 7.0.into()],
+            ]
+        );
+
+        let filter = DaxEngine::new()
+            .apply_calculate_filters(
+                &model,
+                &FilterContext::empty(),
+                &["USERELATIONSHIP(Sales[CustomerId2], Customers[CustomerId])"],
+            )
+            .unwrap();
+        let Some(result) = pivot_columnar_star_schema_group_by(
+            &model, "Sales", &group_by, &measures, &filter,
+        )
+        .unwrap() else {
+            panic!("expected star-schema fast path to run");
+        };
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Value::from("East"), 7.0.into()],
+                vec![Value::from("West"), 15.0.into()],
+            ]
+        );
+    }
+
+    #[test]
     fn pivot_columnar_group_by_plans_if_and_comparisons() {
         let rows = 10_000usize;
         let schema = vec![
