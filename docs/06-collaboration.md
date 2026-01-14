@@ -380,6 +380,7 @@ The desktop binder can enforce permissions and masking at the UI projection laye
 - Unreadable cells are masked in `DocumentController` (default mask is `"###"`).
 - Optionally, per-cell formatting for masked cells can also be suppressed with `maskCellFormat: true` (defaults to `false`; clears the per-cell `styleId` to `0` when a cell is masked due to permissions or missing encryption keys).
 - Disallowed edits are rejected and reverted (optionally surfaced via `onEditRejected`).
+- Shared-state writes (sheet view + sheet-level formatting defaults) can be gated via `canWriteSharedState` (used by `bindCollabSessionToDocumentController` to suppress these writes for read-only roles).
 
 The binder accepts permission info either as:
 
