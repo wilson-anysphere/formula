@@ -95,6 +95,34 @@ pub static ZH_CN: NumberLocale = NumberLocale {
     thousands_separator: Some(crate::Locale::en_us().thousands_sep),
 };
 
+/// Chinese (Taiwan) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static ZH_TW: NumberLocale = NumberLocale {
+    id: "zh-TW",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
+/// Chinese (Hong Kong) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static ZH_HK: NumberLocale = NumberLocale {
+    id: "zh-HK",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
+/// Chinese (Singapore) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static ZH_SG: NumberLocale = NumberLocale {
+    id: "zh-SG",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
+/// Chinese (Macau) commonly uses `.` for decimals and `,` for thousands grouping.
+pub static ZH_MO: NumberLocale = NumberLocale {
+    id: "zh-MO",
+    decimal_separator: crate::Locale::en_us().decimal_sep,
+    thousands_separator: Some(crate::Locale::en_us().thousands_sep),
+};
+
 /// Korean (Korea) commonly uses `.` for decimals and `,` for thousands grouping.
 pub static KO_KR: NumberLocale = NumberLocale {
     id: "ko-KR",
@@ -246,7 +274,13 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
             _ => Some("nl-NL"),
         },
         "ja" => Some("ja-JP"),
-        "zh" => Some("zh-CN"),
+        "zh" => match region {
+            Some("tw") => Some("zh-TW"),
+            Some("hk") => Some("zh-HK"),
+            Some("sg") => Some("zh-SG"),
+            Some("mo") => Some("zh-MO"),
+            _ => Some("zh-CN"),
+        },
         "ko" => Some("ko-KR"),
         "ru" => Some("ru-RU"),
         "pl" => Some("pl-PL"),
@@ -274,6 +308,10 @@ pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
         "nl-BE" => Some(&NL_BE),
         "ja-JP" => Some(&JA_JP),
         "zh-CN" => Some(&ZH_CN),
+        "zh-TW" => Some(&ZH_TW),
+        "zh-HK" => Some(&ZH_HK),
+        "zh-SG" => Some(&ZH_SG),
+        "zh-MO" => Some(&ZH_MO),
         "ko-KR" => Some(&KO_KR),
         "ru-RU" => Some(&RU_RU),
         "pl-PL" => Some(&PL_PL),
@@ -432,7 +470,10 @@ mod tests {
         assert_eq!(normalize_locale_id("it-CH"), Some("it-CH"));
         assert_eq!(normalize_locale_id("ja-JP"), Some("ja-JP"));
         assert_eq!(normalize_locale_id("zh-CN"), Some("zh-CN"));
-        assert_eq!(normalize_locale_id("zh-Hant-TW"), Some("zh-CN"));
+        assert_eq!(normalize_locale_id("zh-Hant-TW"), Some("zh-TW"));
+        assert_eq!(normalize_locale_id("zh-HK"), Some("zh-HK"));
+        assert_eq!(normalize_locale_id("zh-SG"), Some("zh-SG"));
+        assert_eq!(normalize_locale_id("zh-MO"), Some("zh-MO"));
         assert_eq!(normalize_locale_id("ko-KR"), Some("ko-KR"));
         assert_eq!(normalize_locale_id("ru-RU"), Some("ru-RU"));
         assert_eq!(normalize_locale_id("pl-PL"), Some("pl-PL"));
@@ -466,6 +507,14 @@ mod tests {
         assert_eq!(JA_JP.thousands_separator, Some(en.thousands_sep));
         assert_eq!(ZH_CN.decimal_separator, en.decimal_sep);
         assert_eq!(ZH_CN.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(ZH_TW.decimal_separator, en.decimal_sep);
+        assert_eq!(ZH_TW.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(ZH_HK.decimal_separator, en.decimal_sep);
+        assert_eq!(ZH_HK.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(ZH_SG.decimal_separator, en.decimal_sep);
+        assert_eq!(ZH_SG.thousands_separator, Some(en.thousands_sep));
+        assert_eq!(ZH_MO.decimal_separator, en.decimal_sep);
+        assert_eq!(ZH_MO.thousands_separator, Some(en.thousands_sep));
         assert_eq!(KO_KR.decimal_separator, en.decimal_sep);
         assert_eq!(KO_KR.thousands_separator, Some(en.thousands_sep));
 

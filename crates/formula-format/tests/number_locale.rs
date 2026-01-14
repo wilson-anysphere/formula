@@ -19,6 +19,10 @@ fn formats_thousands_grouping_for_each_locale() {
         "1,234,567.5"
     );
     assert_eq!(
+        locale::format_number(value, locale::get_locale("zh-TW").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
         locale::format_number(value, locale::get_locale("ko-KR").unwrap()),
         "1,234,567.5"
     );
@@ -163,7 +167,10 @@ fn get_locale_normalizes_common_locale_id_spellings() {
     assert_eq!(locale::get_locale("nl").unwrap().id, "nl-NL");
     assert_eq!(locale::get_locale("nl_BE").unwrap().id, "nl-BE");
     assert_eq!(locale::get_locale("ja").unwrap().id, "ja-JP");
-    assert_eq!(locale::get_locale("zh-Hant-TW").unwrap().id, "zh-CN");
+    assert_eq!(locale::get_locale("zh-Hant-TW").unwrap().id, "zh-TW");
+    assert_eq!(locale::get_locale("zh-HK").unwrap().id, "zh-HK");
+    assert_eq!(locale::get_locale("zh-SG").unwrap().id, "zh-SG");
+    assert_eq!(locale::get_locale("zh-MO").unwrap().id, "zh-MO");
     assert_eq!(locale::get_locale("ko").unwrap().id, "ko-KR");
     assert_eq!(locale::get_locale("ru").unwrap().id, "ru-RU");
     assert_eq!(locale::get_locale("pl-PL").unwrap().id, "pl-PL");
