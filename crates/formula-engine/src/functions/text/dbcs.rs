@@ -10,9 +10,14 @@
 //! equivalents.
 //!
 //! `ASC` / `DBCS` perform half-width / full-width conversions in Japanese locales.
-//! We implement these conversions only when the active workbook text codepage is
-//! 932 (Shift_JIS / Japanese). In other locales/codepages, they behave as
-//! identity transforms.
+//! We implement these conversions when the active workbook text codepage is a
+//! DBCS codepage:
+//! - 932 (Shift_JIS / Japanese): fullwidth/halfwidth ASCII + symbols + katakana
+//!   conversions.
+//! - 936/949/950 (Chinese/Korean): fullwidth/halfwidth ASCII + symbols
+//!   conversions.
+//!
+//! In non-DBCS codepages, they behave as identity transforms.
 //!
 //! `PHONETIC` depends on per-cell phonetic guide metadata (furigana).
 //! When phonetic metadata is present for a referenced cell, `PHONETIC(reference)`
@@ -212,25 +217,37 @@ fn is_dbcs_codepage(codepage: u16) -> bool {
 
 pub(crate) fn asc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
-    let cp932 = ctx.text_codepage() == 932;
+    let codepage = ctx.text_codepage();
+    let dbcs_codepage = matches!(codepage, 932 | 936 | 949 | 950);
+    let cp932 = codepage == 932;
     array_lift::lift1(text, |text| {
         let s = text.coerce_to_string_with_ctx(ctx)?;
-        if !cp932 {
+        if !dbcs_codepage {
             return Ok(Value::Text(s));
         }
-        Ok(Value::Text(asc_cp932(&s)))
+        if cp932 {
+            Ok(Value::Text(asc_cp932(&s)))
+        } else {
+            Ok(Value::Text(asc_dbcs_basic(&s)))
+        }
     })
 }
 
 pub(crate) fn dbcs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
-    let cp932 = ctx.text_codepage() == 932;
+    let codepage = ctx.text_codepage();
+    let dbcs_codepage = matches!(codepage, 932 | 936 | 949 | 950);
+    let cp932 = codepage == 932;
     array_lift::lift1(text, |text| {
         let s = text.coerce_to_string_with_ctx(ctx)?;
-        if !cp932 {
+        if !dbcs_codepage {
             return Ok(Value::Text(s));
         }
-        Ok(Value::Text(dbcs_cp932(&s)))
+        if cp932 {
+            Ok(Value::Text(dbcs_cp932(&s)))
+        } else {
+            Ok(Value::Text(dbcs_dbcs_basic(&s)))
+        }
     })
 }
 
@@ -361,6 +378,34 @@ fn asc_cp932(input: &str) -> String {
     out
 }
 
+fn asc_dbcs_basic(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+
+    for ch in input.chars() {
+        if ch == FULLWIDTH_SPACE {
+            out.push(' ');
+            continue;
+        }
+
+        // Fullwidth ASCII variants: U+FF01..U+FF5E -> U+0021..U+007E.
+        if ('\u{FF01}'..='\u{FF5E}').contains(&ch) {
+            let ascii = char::from_u32((ch as u32).saturating_sub(0xFEE0))
+                .expect("FF01..FF5E - 0xFEE0 must remain in Unicode scalar range");
+            out.push(ascii);
+            continue;
+        }
+
+        if let Some(mapped) = fullwidth_symbol_to_halfwidth(ch) {
+            out.push(mapped);
+            continue;
+        }
+
+        out.push(ch);
+    }
+
+    out
+}
+
 fn dbcs_cp932(input: &str) -> String {
     // Output can grow (e.g. ASCII -> fullwidth), but input length is a reasonable lower bound.
     let mut out = String::with_capacity(input.len());
@@ -403,6 +448,35 @@ fn dbcs_cp932(input: &str) -> String {
                 // Should not happen, but keep behavior deterministic.
                 out.push(ch);
             }
+            continue;
+        }
+
+        out.push(ch);
+    }
+
+    out
+}
+
+fn dbcs_dbcs_basic(input: &str) -> String {
+    // Output can grow (e.g. ASCII -> fullwidth), but input length is a reasonable lower bound.
+    let mut out = String::with_capacity(input.len());
+
+    for ch in input.chars() {
+        if ch == ' ' {
+            out.push(FULLWIDTH_SPACE);
+            continue;
+        }
+
+        // ASCII -> fullwidth ASCII.
+        if ('!'..='~').contains(&ch) {
+            let full = char::from_u32((ch as u32).saturating_add(0xFEE0))
+                .expect("ASCII + 0xFEE0 must remain in Unicode scalar range");
+            out.push(full);
+            continue;
+        }
+
+        if let Some(mapped) = halfwidth_symbol_to_fullwidth(ch) {
+            out.push(mapped);
             continue;
         }
 

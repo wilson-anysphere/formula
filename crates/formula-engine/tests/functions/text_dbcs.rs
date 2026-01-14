@@ -225,6 +225,26 @@ fn lenb_counts_bytes_for_chinese_korean_and_big5_dbcs_codepages() {
 }
 
 #[test]
+fn asc_and_dbcs_convert_ascii_under_other_dbcs_codepages() {
+    let mut sheet = TestSheet::new();
+
+    for cp in [936u16, 949, 950] {
+        sheet.set_text_codepage(cp);
+
+        assert_eq!(
+            sheet.eval(r#"=DBCS("ABC 123")"#),
+            Value::Text("ＡＢＣ　１２３".to_string()),
+            "DBCS should convert ASCII to fullwidth under DBCS codepages (cp={cp})"
+        );
+        assert_eq!(
+            sheet.eval(r#"=ASC("ＡＢＣ　１２３")"#),
+            Value::Text("ABC 123".to_string()),
+            "ASC should convert fullwidth ASCII to ASCII under DBCS codepages (cp={cp})"
+        );
+    }
+}
+
+#[test]
 fn byte_count_text_functions_use_dbcs_semantics_for_other_dbcs_codepages() {
     let mut sheet = TestSheet::new();
 
