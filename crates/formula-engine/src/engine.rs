@@ -781,8 +781,12 @@ impl Engine {
             return true;
         }
         let before_order = self.workbook.sheet_order.clone();
-        let moved = self.workbook.sheet_order.remove(current);
-        self.workbook.sheet_order.insert(new_index, moved);
+        if !self.workbook.reorder_sheet(sheet_id, new_index) {
+            return false;
+        }
+        if self.workbook.sheet_order == before_order {
+            return true;
+        }
 
         if self.rebuild_graph().is_err() {
             // Reordering should not introduce new parse errors (formulas are unchanged), but if
@@ -1164,6 +1168,7 @@ impl Engine {
         }
         Ok(())
     }
+
     /// Returns an immutable view of the tables defined on `sheet`.
     ///
     /// Tables are needed to resolve structured references like `Table1[Col]` and `[@Col]`.
@@ -1277,6 +1282,7 @@ impl Engine {
 
         true
     }
+
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
     ///
     /// When unset, sheets default to Excel-compatible dimensions
