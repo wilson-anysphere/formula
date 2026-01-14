@@ -1168,6 +1168,15 @@ impl Engine {
         }
     }
 
+    /// Configure an [`ExternalValueProvider`].
+    ///
+    /// This provider is used both for:
+    /// - **External workbook references** like `=[Book.xlsx]Sheet1!A1`.
+    /// - **Out-of-band values** for the current workbook when a cell is not present in the engine's
+    ///   internal grid storage (useful for streaming/virtualized sheets).
+    ///
+    /// See [`ExternalValueProvider`] for the canonical external sheet-key formats and
+    /// [`ExternalValueProvider::sheet_order`] semantics used for expanding external 3D sheet spans.
     pub fn set_external_value_provider(
         &mut self,
         provider: Option<Arc<dyn ExternalValueProvider>>,

@@ -224,9 +224,10 @@ the external sheet key:
 #### Minimal provider sketch (including `sheet_order`)
 
 ```rust
-use formula_engine::{ExternalValueProvider, Value};
 use formula_engine::eval::CellAddr;
+use formula_engine::{Engine, ExternalValueProvider, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 struct Provider {
     // Keyed by the engine's canonical sheet key + cell address.
@@ -244,6 +245,27 @@ impl ExternalValueProvider for Provider {
         self.orders.get(workbook).cloned()
     }
 }
+
+let mut provider = Provider {
+    cells: HashMap::new(),
+    orders: HashMap::new(),
+};
+provider.cells.insert(
+    ("[Book.xlsx]Sheet1".to_string(), CellAddr { row: 0, col: 0 }),
+    Value::Number(42.0),
+);
+provider.orders.insert(
+    "Book.xlsx".to_string(),
+    vec!["Sheet1".to_string(), "Sheet2".to_string(), "Sheet3".to_string()],
+);
+
+let mut engine = Engine::new();
+engine.set_external_value_provider(Some(Arc::new(provider)));
+engine
+    .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
+    .unwrap();
+engine.recalculate();
+assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
 ```
 
 ### Operator Precedence
