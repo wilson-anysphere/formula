@@ -60,5 +60,40 @@ describe("DocumentCellProvider cache sizing", () => {
     expect(stats.sheetRunResolvedFormatCache.max).toBe(10_000);
     expect(stats.sheetCellResolvedFormatCache.max).toBe(10_000);
   });
-});
 
+  it("dispose clears caches and unsubscribes from document changes", () => {
+    const unsubscribe = vi.fn();
+    const doc = {
+      getCell: vi.fn(() => ({ value: "x", formula: null })),
+      on: vi.fn(() => unsubscribe),
+    };
+
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => "sheet-1",
+      headerRows: 0,
+      headerCols: 0,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      sheetCacheMaxSize: 10,
+    });
+
+    // Populate cache and attach a doc subscription via provider.subscribe.
+    provider.getCell(0, 0);
+    const off = provider.subscribe(() => {});
+    expect(doc.on).toHaveBeenCalledTimes(1);
+
+    provider.dispose();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+
+    // Should not repopulate caches after dispose.
+    expect(provider.getCell(0, 0)).toBeNull();
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+    expect(provider.getCacheStats().sheetCache.size).toBe(0);
+
+    // Unsubscribing after dispose should be a no-op.
+    expect(() => off()).not.toThrow();
+  });
+});

@@ -57,6 +57,7 @@ export class SecondaryGridView {
 
   private disposed = false;
   private uiReady = false;
+  private readonly ownsProvider: boolean;
   private readonly document: DocumentController;
   private readonly getSheetId: () => string;
   private readonly getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
@@ -270,6 +271,7 @@ export class SecondaryGridView {
     this.editor.element.addEventListener("blur", onEditorBlur);
     this.disposeFns.push(() => this.editor.element.removeEventListener("blur", onEditorBlur));
 
+    this.ownsProvider = options.provider == null;
     this.provider =
       options.provider ??
       new DocumentCellProvider({
@@ -539,6 +541,13 @@ export class SecondaryGridView {
     this.editingCell = null;
     this.editor.close();
     this.grid.destroy();
+    if (this.ownsProvider) {
+      try {
+        this.provider.dispose();
+      } catch {
+        // ignore
+      }
+    }
     // Release canvas backing stores even if the SecondaryGridView instance is still referenced
     // after destroy (tests, hot reload, split-pane toggling). Detached canvases can otherwise
     // retain multi-megabyte buffers.

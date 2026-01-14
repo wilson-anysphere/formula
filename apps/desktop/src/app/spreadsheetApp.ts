@@ -4049,6 +4049,11 @@ export class SpreadsheetApp {
     this.formulaRangePreviewTooltipLastKey = null;
     this.sharedGrid?.destroy();
     this.sharedGrid = null;
+    try {
+      this.sharedProvider?.dispose();
+    } catch {
+      // ignore
+    }
     this.sharedProvider = null;
     this.wasmUnsubscribe?.();
     this.wasmUnsubscribe = null;

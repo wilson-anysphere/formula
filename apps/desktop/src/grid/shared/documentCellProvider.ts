@@ -160,6 +160,7 @@ export class DocumentCellProvider implements CellProvider {
     string,
     { epoch: number; ranges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> }
   >();
+  private disposed = false;
 
   constructor(options: {
     document: DocumentController;
@@ -793,6 +794,7 @@ export class DocumentCellProvider implements CellProvider {
   }
 
   invalidateAll(): void {
+    if (this.disposed) return;
     this.sheetCaches.clear();
     this.lastSheetId = null;
     this.lastSheetCache = null;
@@ -814,6 +816,7 @@ export class DocumentCellProvider implements CellProvider {
   }
 
   invalidateDocCells(range: { startRow: number; endRow: number; startCol: number; endCol: number }): boolean {
+    if (this.disposed) return false;
     const { headerRows, headerCols } = this.options;
     const gridRange: CellRange = {
       startRow: range.startRow + headerRows,
@@ -880,6 +883,7 @@ export class DocumentCellProvider implements CellProvider {
   }
 
   prefetch(_range: CellRange): void {
+    if (this.disposed) return;
     // NOTE: `prefetch` is primarily a hint for *async* providers to begin fetching
     // cell contents ahead of time.
     //
@@ -894,6 +898,7 @@ export class DocumentCellProvider implements CellProvider {
   }
 
   getCell(row: number, col: number): CellData | null {
+    if (this.disposed) return null;
     const { rowCount, colCount, headerRows, headerCols } = this.options;
     if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
 
@@ -1194,6 +1199,7 @@ export class DocumentCellProvider implements CellProvider {
   }
 
   subscribe(listener: (update: CellProviderUpdate) => void): () => void {
+    if (this.disposed) return () => {};
     this.listeners.add(listener);
 
     if (!this.unsubscribeDoc) {
@@ -1560,5 +1566,38 @@ export class DocumentCellProvider implements CellProvider {
         this.unsubscribeDoc = null;
       }
     };
+  }
+
+  /**
+   * Best-effort teardown for tests/hot-reload.
+   *
+   * Clears per-sheet caches and unsubscribes from DocumentController change events so a destroyed
+   * grid view does not retain large formatting/value caches if the provider instance remains
+   * referenced.
+   */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    try {
+      this.unsubscribeDoc?.();
+    } catch {
+      // ignore
+    }
+    this.unsubscribeDoc = null;
+    this.listeners.clear();
+    this.sheetCaches.clear();
+    this.lastSheetId = null;
+    this.lastSheetCache = null;
+    this.styleCache.clear();
+    this.sheetDefaultResolvedFormatCache.clear();
+    this.sheetColResolvedFormatCache.clear();
+    this.sheetRowResolvedFormatCache.clear();
+    this.sheetRunResolvedFormatCache.clear();
+    this.sheetCellResolvedFormatCache.clear();
+    this.resolvedFormatCache.clear();
+    this.resolvedDefaultHyperlinkStyle = null;
+    this.resolvedLinkColor = null;
+    this.mergedRangesBySheet.clear();
+    this.mergedEpochBySheet.clear();
   }
 }
