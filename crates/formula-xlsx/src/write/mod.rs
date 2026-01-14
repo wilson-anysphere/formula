@@ -7001,7 +7001,30 @@ fn effective_value_kind(
                     return kind;
                 }
             } else if value_kind_compatible(&kind, &cell.value) {
-                return kind;
+                if cell.phonetic.is_some() && matches!(&cell.value, CellValue::String(_)) {
+                    // If the cell has phonetic guide metadata, we generally need an inline string
+                    // so we can emit SpreadsheetML `<rPh>` runs in the `<is>` payload.
+                    //
+                    // However, when round-tripping an existing workbook we may already have a
+                    // specific shared string index (`t="s"`, `<v>idx</v>`) whose corresponding
+                    // `<si>` entry (including phonetic subtrees) we can preserve byte-for-byte. In
+                    // that case, keep the shared-string representation to avoid switching between
+                    // duplicate `<si>` entries that differ only in phonetic metadata.
+                    if let CellValueKind::SharedString { index } = &kind {
+                        let raw_matches = meta
+                            .raw_value
+                            .as_deref()
+                            .and_then(|raw| raw.trim().parse::<u32>().ok())
+                            .is_some_and(|raw| raw == *index);
+                        if raw_matches {
+                            return kind;
+                        }
+                    } else {
+                        return kind;
+                    }
+                } else {
+                    return kind;
+                }
             }
         }
     }

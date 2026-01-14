@@ -86,6 +86,12 @@ describe("SpreadsheetApp edit rejection toasts", () => {
   });
 
   beforeEach(() => {
+    // `showCollabEditRejectedToast` throttles identical messages for 1s using module-level state.
+    // Tests run fast enough that the throttle can span multiple `it(...)` blocks, so we advance
+    // `Date.now()` between tests to ensure each toast can be asserted independently.
+    mockedNow += 2_000;
+    vi.spyOn(Date, "now").mockReturnValue(mockedNow);
+
     priorGridMode = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
 

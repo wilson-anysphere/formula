@@ -44,8 +44,8 @@
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  border-radius: var(--radius);
+  color: var(--text-primary);
   cursor: pointer;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
@@ -70,7 +70,7 @@
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:focus-visible {
   outline: var(--space-1) solid var(--selection-border);
-  outline-offset: var(--space-1);
+  outline-offset: calc(var(--space-1) / 2);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:disabled {
@@ -177,7 +177,7 @@
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:focus-visible {
   outline: var(--space-1) solid var(--selection-border);
-  outline-offset: var(--space-1);
+  outline-offset: calc(var(--space-1) / 2);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:disabled {
