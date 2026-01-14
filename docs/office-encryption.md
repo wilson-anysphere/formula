@@ -104,8 +104,8 @@ Both Standard and Agile `EncryptionInfo` start with:
 u16 versionMajor
 u16 versionMinor
 u32 flags
-u32 headerSize   // Standard: byte length of `EncryptionHeader`; Agile: byte length of the XML descriptor
-... scheme-specific payload
+[Standard only] u32 headerSize
+... scheme-specific payload (Standard: binary header/verifier; Agile: XML descriptor)
 ```
 
 The version pair is used to dispatch:

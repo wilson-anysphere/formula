@@ -34,6 +34,8 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   `crates/formula-xlsx/src/offcrypto/*`
 - **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
   `crates/formula-office-crypto`
+  - Note: `formula-office-crypto` also validates `dataIntegrity` (HMAC) and returns
+    `OfficeCryptoError::IntegrityCheckFailed` on mismatch.
 - **MS-OFFCRYPTO parsing + low-level building blocks:** `crates/formula-offcrypto`
   - `parse_encryption_info`, `inspect_encryption_info` (`crates/formula-offcrypto/src/lib.rs`)
   - Agile password verifier + secret key (`crates/formula-offcrypto/src/agile.rs`)
@@ -54,7 +56,7 @@ uses today: **Agile Encryption (version 4.4) with password-based key encryption*
 | Package key sizes | 128/192/256-bit (`keyBits` 128/192/256) |
 | Hash algorithms | `SHA1`, `SHA256`, `SHA384`, `SHA512` (case-insensitive) |
 | Key encryptor | **Password** key-encryptor only (`uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password"`) |
-| Integrity | `dataIntegrity` HMAC verification (implemented in `crates/formula-xlsx::offcrypto`; algorithm documented below) |
+| Integrity | `dataIntegrity` HMAC verification (implemented in `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto`; algorithm documented below) |
 
 ### Explicitly unsupported (hard errors)
 
@@ -286,6 +288,7 @@ The Agile decryption errors are designed to be actionable. The most important di
 | `formula_io::Error::PasswordRequired` | Encrypted OOXML detected, but no password provided | Prompt for password |
 | `formula_io::Error::InvalidPassword` / `formula_offcrypto::OffcryptoError::InvalidPassword` / `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` | Password verifier mismatch | Retry password |
 | `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
+| `formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
 | `formula_io::Error::UnsupportedOoxmlEncryption` / `formula_offcrypto::OffcryptoError::UnsupportedVersion` | `EncryptionInfo` version not recognized | Re-save without encryption; or add support |
 | `formula_offcrypto::OffcryptoError::UnsupportedEncryption { encryption_type: ... }` | Encryption type known but not supported by selected decrypt mode | Use correct decrypt mode / add support |
 | `formula_xlsx::offcrypto::OffCryptoError::UnsupportedKeyEncryptor { .. }` | File is encrypted, but only a non-password key-encryptor (e.g. certificate) is present | Re-save using password encryption; or add key-encryptor support |
@@ -297,6 +300,7 @@ For the exact user-facing strings, see:
 - `crates/formula-io/src/lib.rs` (`formula_io::Error`)
 - `crates/formula-offcrypto/src/lib.rs` (`formula_offcrypto::OffcryptoError`)
 - `crates/formula-xlsx/src/offcrypto/error.rs` (`formula_xlsx::offcrypto::OffCryptoError`)
+- `crates/formula-office-crypto/src/error.rs` (`formula_office_crypto::OfficeCryptoError`)
 
 ### Example message strings (today)
 
