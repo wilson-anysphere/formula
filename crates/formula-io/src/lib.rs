@@ -1496,14 +1496,6 @@ fn read_stream_bytes_case_insensitive<R: std::io::Read + std::io::Write + std::i
 }
 
 #[cfg(feature = "encrypted-workbooks")]
-fn zip_contains_workbook_bin(package_bytes: &[u8]) -> bool {
-    matches!(
-        sniff_ooxml_zip_workbook_kind(package_bytes),
-        Some(WorkbookFormat::Xlsb)
-    )
-}
-
-#[cfg(feature = "encrypted-workbooks")]
 fn try_decrypt_ooxml_encrypted_package_from_path(
     path: &Path,
     password: Option<&str>,
@@ -1565,10 +1557,7 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                 path: path.to_path_buf(),
             });
         }
-        if matches!(
-            sniff_ooxml_zip_workbook_kind(package_bytes),
-            Some(WorkbookFormat::Xlsb)
-        ) {
+        if zip_contains_workbook_bin(package_bytes) {
             return Err(Error::UnsupportedEncryptedWorkbookKind {
                 path: path.to_path_buf(),
                 kind: "xlsb",
