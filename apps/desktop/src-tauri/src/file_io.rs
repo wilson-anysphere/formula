@@ -62,7 +62,6 @@ pub(crate) fn encrypt_package_to_ole_bytes(
     zip_bytes: &[u8],
     password: &str,
 ) -> anyhow::Result<Vec<u8>> {
-    let password = password.trim();
     if password.is_empty() {
         anyhow::bail!("{INVALID_PASSWORD_PREFIX} password must not be empty");
     }
@@ -4535,6 +4534,34 @@ mod tests {
         assert!(
             err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
             "expected invalid-password prefix, got: {err}"
+        );
+    }
+
+    #[test]
+    fn encrypt_package_to_ole_bytes_preserves_unicode_and_whitespace_password() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        );
+        let plain_path = std::path::Path::new(fixture);
+        let plain = std::fs::read(plain_path).expect("read basic.xlsx fixture bytes");
+
+        // Trailing whitespace is significant and must not be trimmed away.
+        // (This also exercises non-BMP UTF-16 surrogate pair encoding via the emoji.)
+        let password = "pässwörd🔒 ";
+
+        let ole_bytes =
+            encrypt_package_to_ole_bytes(&plain, password).expect("encrypt package to ole");
+        let decrypted = formula_office_crypto::decrypt_encrypted_package(&ole_bytes, password)
+            .expect("decrypt with exact password");
+        assert_eq!(decrypted, plain, "expected decrypt(encrypt(plain)) == plain");
+
+        let trimmed_password = password.trim();
+        let err = formula_office_crypto::decrypt_encrypted_package(&ole_bytes, trimmed_password)
+            .expect_err("expected trimmed password to fail");
+        assert!(
+            matches!(err, OfficeCryptoError::InvalidPassword),
+            "expected InvalidPassword for trimmed password, got: {err:?}"
         );
     }
 
