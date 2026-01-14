@@ -76,7 +76,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
@@ -86,6 +87,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
 
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
     expect(view.model.draft).toBe("=Vlookup(");
 
     host.remove();
@@ -95,7 +98,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
@@ -109,6 +113,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
 
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
     expect(view.model.draft).toBe("=_xlfn.VLOOKUP(");
 
     host.remove();
@@ -118,7 +124,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
@@ -128,6 +135,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
 
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
     expect(view.model.draft).toBe("=_xlfn.Vlookup(");
 
     host.remove();
@@ -283,7 +292,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
@@ -296,6 +306,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
 
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
     expect(view.model.draft).toBe("=VLOOKUP(");
     expect(view.model.aiSuggestion()).toBeNull();
 
@@ -306,7 +318,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
     view.setActiveCell({ address: "A1", input: "", value: null });
 
     view.focus({ cursor: "end" });
@@ -317,6 +330,8 @@ describe("FormulaBarView function autocomplete dropdown", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
 
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
     expect(view.model.draft).toBe("=VLOOKUP()");
     // Cursor inside the existing parens.
     expect(view.textarea.selectionStart).toBe(9);
