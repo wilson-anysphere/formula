@@ -575,27 +575,17 @@ fn derive_block_key(
     //
     //   Hash(KeyMaterial + block_le32)
     //
-    // and (for most key sizes) are the first `KeySize/8` bytes of the digest.
-    //
-    // However, for **40-bit RC4**, Office/WinCrypt uses a 16-byte key where the first 5 bytes are
-    // set and the remaining 11 bytes are zero. Using the raw 5-byte key changes the RC4 KSA and
-    // yields the wrong keystream for real-world `.xls` files.
+    // and are the first `KeySize/8` bytes of the digest.
     let key = match hash_alg {
         CryptoApiHashAlg::Sha1 => {
             let mut digest = sha1_bytes(&[key_material, &block_bytes]);
-            let mut key = digest[..key_len].to_vec();
-            if key_len == 5 {
-                key.resize(16, 0);
-            }
+            let key = digest[..key_len].to_vec();
             digest.zeroize();
             key
         }
         CryptoApiHashAlg::Md5 => {
             let mut digest = md5_bytes(&[key_material, &block_bytes]);
-            let mut key = digest[..key_len].to_vec();
-            if key_len == 5 {
-                key.resize(16, 0);
-            }
+            let key = digest[..key_len].to_vec();
             digest.zeroize();
             key
         }
@@ -610,34 +600,16 @@ fn derive_block_key_padded_40_bit(
     block: u32,
     key_len: usize,
 ) -> Zeroizing<Vec<u8>> {
-    let block_bytes = block.to_le_bytes();
     // Some real-world BIFF8 RC4 CryptoAPI writers appear to interpret 40-bit keys as a 16-byte RC4
     // key with the first 5 bytes set and the remaining bytes zero (a WinCrypt/CryptoAPI quirk).
     //
     // For compatibility, we retry password verification using this padded form when the normal
     // `KeySize/8`-byte key fails.
-    let key = match hash_alg {
-        CryptoApiHashAlg::Sha1 => {
-            let mut digest = sha1_bytes(&[key_material, &block_bytes]);
-            let mut key = digest[..key_len].to_vec();
-            if key_len == 5 {
-                key.resize(16, 0);
-            }
-            digest.zeroize();
-            key
-        }
-        CryptoApiHashAlg::Md5 => {
-            let mut digest = md5_bytes(&[key_material, &block_bytes]);
-            let mut key = digest[..key_len].to_vec();
-            if key_len == 5 {
-                key.resize(16, 0);
-            }
-            digest.zeroize();
-            key
-        }
-    };
-
-    Zeroizing::new(key)
+    let mut key = derive_block_key(hash_alg, key_material, block, key_len);
+    if key_len == 5 {
+        key.resize(16, 0);
+    }
+    key
 }
 
 fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
@@ -902,18 +874,17 @@ mod filepass_tests {
     }
 
     #[test]
-    fn derive_block_key_pads_40_bit_rc4_to_16_bytes() {
+    fn derive_block_key_truncates_40_bit_rc4_to_5_bytes() {
         let key_material = [0x11u8; 20];
         let block = 0u32;
 
         let block_bytes = block.to_le_bytes();
         let digest = sha1_bytes(&[&key_material, &block_bytes]);
-        let mut expected = Vec::from(&digest[..5]);
-        expected.resize(16, 0);
+        let expected = Vec::from(&digest[..5]);
 
         let got = derive_block_key(CryptoApiHashAlg::Sha1, &key_material, block, 5);
         assert_eq!(got.as_slice(), expected.as_slice());
-        assert_eq!(got.len(), 16);
+        assert_eq!(got.len(), 5);
     }
 
     #[test]
@@ -923,8 +894,8 @@ mod filepass_tests {
 
         let block_bytes = block.to_le_bytes();
         let digest = sha1_bytes(&[&key_material, &block_bytes]);
-        let mut expected = vec![0u8; 16];
-        expected[..5].copy_from_slice(&digest[..5]);
+        let mut expected = Vec::from(&digest[..5]);
+        expected.resize(16, 0);
 
         let got = derive_block_key_padded_40_bit(CryptoApiHashAlg::Sha1, &key_material, block, 5);
         assert_eq!(got.as_slice(), expected.as_slice());
@@ -1003,16 +974,15 @@ mod filepass_tests {
             assert_eq!(key.as_slice(), expected_key.as_slice(), "block={block}");
         }
 
-        // 40-bit CryptoAPI RC4 keys are expressed as a 16-byte key where the low 40 bits are set
-        // and the remaining 88 bits are zero.
+        // 40-bit CryptoAPI RC4 keys are derived as 5 bytes. Some writers pad to a 16-byte RC4 key;
+        // that variant is covered by `derive_block_key_padded_40_bit`.
         let key_40 = derive_block_key(CryptoApiHashAlg::Md5, key_material.as_slice(), 0, 5);
-        let mut expected_40 = vec![0x69, 0xBA, 0xDC, 0xAE, 0x24];
-        expected_40.resize(16, 0);
+        let expected_40 = vec![0x69, 0xBA, 0xDC, 0xAE, 0x24];
         assert_eq!(
             key_40.as_slice(),
             expected_40.as_slice()
         );
-        assert_eq!(key_40.len(), 16);
+        assert_eq!(key_40.len(), 5);
     }
 
     #[test]
@@ -2698,10 +2668,7 @@ fn verify_password(
         &info.verifier,
         false,
     )? {
-        // 40-bit CryptoAPI RC4 uses a 16-byte RC4 key (5 digest bytes + 11 bytes of padding).
-        // Expose that to downstream decrypt logic via `pad_40_bit_key` so legacy/modern modes share
-        // consistent semantics.
-        return Ok((hash_alg, key_material, key_len == 5));
+        return Ok((hash_alg, key_material, false));
     }
 
     if key_len == 5
@@ -2771,8 +2738,7 @@ fn verify_password_legacy(
         &info.verifier,
         false,
     )? {
-        // 40-bit CryptoAPI RC4 uses a 16-byte RC4 key (5 digest bytes + 11 bytes of padding).
-        return Ok((hash_alg, key_material, key_len == 5));
+        return Ok((hash_alg, key_material, false));
     }
 
     if key_len == 5

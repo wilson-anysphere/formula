@@ -125,9 +125,10 @@ Currently supported in `formula-xls` (see also the fixture inventory in
     layout.
   - `KeySizeBits` values: `0/40`, `56`, `128`
     - `KeySizeBits==0` is treated as 40-bit RC4.
-    - Note (40-bit nuance): the derived 5-byte key material is **padded to 16 bytes** with 11 zero
-      bytes before running RC4 KSA (CryptoAPI “effective key length” behavior). 56-bit uses 7 bytes;
-      128-bit uses 16 bytes.
+    - Note (40-bit nuance): some `.xls` CryptoAPI RC4 producers (including Excel) treat 40-bit keys
+      as a **16-byte** RC4 key: the derived 5 bytes followed by 11 zero bytes (CryptoAPI “effective
+      key length” behavior). `formula-xls` accepts both the raw 5-byte form and the padded-16-byte
+      form by trying the verifier both ways.
 - (best-effort) **BIFF5-era XOR obfuscation** (Excel 5/95)
 
 Not implemented:
@@ -591,7 +592,9 @@ keyLen = keyBits/8
 H_block = Hash(H || LE32(blockIndex))
 key_material = H_block[0..keyLen]
 if keyLen == 5:                 // 40-bit key material
-  K_block = key_material || 0x00 * 11   // CryptoAPI "40-bit" RC4 uses a 16-byte key with high 88 bits zero
+  // Some producers (including Excel) treat 40-bit RC4 as a 16-byte RC4 key with high 88 bits zero.
+  // `formula-xls` will try both padded and unpadded forms based on verifier validation.
+  K_block = key_material || 0x00 * 11
 else:
   K_block = key_material
 ```
