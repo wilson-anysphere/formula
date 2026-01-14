@@ -137,6 +137,111 @@ const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = 
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
 };
 
+type NumberLocaleConfig = {
+  decimalSeparator: "." | ",";
+  thousandsSeparator: "." | "\u00A0" | "\u202F" | null;
+};
+
+function getNumberLocaleConfig(localeId?: string): NumberLocaleConfig {
+  // Mirror `formula_engine::LocaleConfig` defaults for locales the WASM engine currently ships.
+  switch (localeId) {
+    case "de-DE":
+    case "es-ES":
+      return { decimalSeparator: ",", thousandsSeparator: "." };
+    case "fr-FR":
+      return { decimalSeparator: ",", thousandsSeparator: "\u00A0" };
+    default:
+      // en-US (canonical)
+      return { decimalSeparator: ".", thousandsSeparator: null };
+  }
+}
+
+function splitNumericExponent(raw: string): { mantissa: string; exponent: string } {
+  // Port of `formula_engine::LocaleConfig::split_numeric_exponent`.
+  if (!/[eE]/.test(raw)) return { mantissa: raw, exponent: "" };
+  for (let idx = 0; idx < raw.length; idx += 1) {
+    const ch = raw[idx];
+    if (ch !== "e" && ch !== "E") continue;
+    let rest = raw.slice(idx + 1);
+    if (rest.startsWith("+") || rest.startsWith("-")) rest = rest.slice(1);
+    if (rest.length === 0) continue;
+    if (!/^\d+$/.test(rest)) continue;
+    return { mantissa: raw.slice(0, idx), exponent: raw.slice(idx) };
+  }
+  return { mantissa: raw, exponent: "" };
+}
+
+function looksLikeThousandsGrouping(mantissa: string, sep: "."): boolean {
+  const parts = mantissa.split(sep);
+  const first = parts.shift();
+  if (!first) return false;
+  if (first.length === 0 || first.length > 3 || !/^\d+$/.test(first)) return false;
+  if (parts.length === 0) return false;
+  return parts.every((p) => p.length === 3 && /^\d+$/.test(p));
+}
+
+function parseLocaleNumber(raw: string, locale: NumberLocaleConfig): number | null {
+  // Port of `formula_engine::LocaleConfig::parse_number`.
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return null;
+
+  const { mantissa: mantissaWithSign, exponent } = splitNumericExponent(trimmed);
+  let sign = "";
+  let mantissa = mantissaWithSign;
+  if (mantissa.startsWith("+") || mantissa.startsWith("-")) {
+    sign = mantissa[0] ?? "";
+    mantissa = mantissa.slice(1);
+  }
+  if (!mantissa) return null;
+
+  let decimal: "." | "," | null = null;
+  if (mantissa.includes(locale.decimalSeparator)) decimal = locale.decimalSeparator;
+  else if (mantissa.includes(".")) decimal = ".";
+
+  // Disambiguate locales where the thousands separator collides with the canonical decimal separator,
+  // mirroring the Rust behavior (`de-DE`: '.' grouping, ',' decimal).
+  if (
+    decimal === "." &&
+    locale.decimalSeparator !== "." &&
+    locale.thousandsSeparator === "." &&
+    looksLikeThousandsGrouping(mantissa, ".")
+  ) {
+    decimal = null;
+  }
+
+  let out = sign;
+  let decimalUsed = false;
+
+  for (const ch of mantissa) {
+    if (ch >= "0" && ch <= "9") {
+      out += ch;
+      continue;
+    }
+
+    if (decimal && ch === decimal) {
+      if (decimalUsed) return null;
+      out += ".";
+      decimalUsed = true;
+      continue;
+    }
+
+    const isThousands =
+      locale.thousandsSeparator === ch ||
+      // Some spreadsheets use narrow NBSP (U+202F) instead of NBSP (U+00A0); accept both when configured.
+      (locale.thousandsSeparator === "\u00A0" && ch === "\u202F") ||
+      (locale.thousandsSeparator === "\u202F" && ch === "\u00A0");
+    if (isThousands && (!decimal || ch !== decimal)) {
+      continue;
+    }
+
+    return null;
+  }
+
+  out += exponent;
+  const n = Number(out);
+  return Number.isFinite(n) ? n : null;
+}
+
 function canonicalizeFunctionNameForLocale(name: string, localeId?: string): string {
   const raw = String(name ?? "");
   if (!raw) return raw;
@@ -220,41 +325,139 @@ type EvalToken =
   | { type: "comma"; value: "," };
 
 function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
-  return tokenizeFormula(formula)
-    .filter((token) => token.type !== "whitespace")
-    .map((token): EvalToken => {
-      switch (token.type) {
-        case "number":
-          return { type: "number", value: Number(token.text) };
-        case "string":
-          return { type: "string", value: token.text.slice(1, token.text.endsWith('"') ? -1 : token.text.length) };
-        case "error":
-          return { type: "error", value: token.text };
-        case "reference":
-          return { type: "reference", value: token.text };
-        case "function":
-          return { type: "function", value: canonicalizeFunctionNameForLocale(token.text, options.localeId) };
-        case "identifier": {
-          const upper = token.text.toUpperCase();
-          if (upper === "TRUE") return { type: "boolean", value: true };
-          if (upper === "FALSE") return { type: "boolean", value: false };
-          const resolved = options.resolveNameToReference?.(token.text);
-          if (resolved) return { type: "reference", value: resolved };
-          return { type: "error", value: "#NAME?" };
+  const locale = getNumberLocaleConfig(options.localeId);
+  const tokens = tokenizeFormula(formula).filter((token) => token.type !== "whitespace");
+  const out: EvalToken[] = [];
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+
+    // Merge locale-specific decimal-comma and thousands-separator constructs into a single number token.
+    if (token.type === "number") {
+      let raw = token.text;
+      let end = token.end;
+      let j = i;
+
+      const canThousandsMerge = () => {
+        if (locale.thousandsSeparator !== ".") return false;
+        // Avoid merging when the mantissa doesn't look like a grouping prefix (e.g. `1.2`).
+        const { mantissa, exponent } = splitNumericExponent(raw);
+        if (exponent) return false;
+        const m = mantissa.trim();
+        if (!m) return false;
+        // Accept a leading sign.
+        const normalized = m.startsWith("+") || m.startsWith("-") ? m.slice(1) : m;
+        return /^\d{1,3}(?:\.\d{3})*$/.test(normalized);
+      };
+
+      // Merge repeated thousands group separators (e.g. `1.234.567` in de-DE).
+      while (
+        canThousandsMerge() &&
+        // Tokenizer can represent the additional group as either:
+        // - punctuation "." + number "567", or
+        // - number ".567" (because numbers may start with a leading decimal point).
+        // Support both shapes so inputs like `1.234.567,89` in de-DE parse correctly.
+        ((tokens[j + 1]?.type === "punctuation" &&
+          tokens[j + 1]?.text === "." &&
+          tokens[j + 2]?.type === "number" &&
+          /^\d{3}$/.test(tokens[j + 2]!.text) &&
+          tokens[j + 1]!.start === end &&
+          tokens[j + 2]!.start === tokens[j + 1]!.end) ||
+          (tokens[j + 1]?.type === "number" &&
+            /^\.\d{3}$/.test(tokens[j + 1]!.text) &&
+            tokens[j + 1]!.start === end))
+      ) {
+        const next = tokens[j + 1]!;
+        if (next.type === "number") {
+          raw += next.text;
+          end = next.end;
+          j += 1;
+          continue;
         }
-        case "operator":
-          return { type: "operator", value: token.text };
-        case "punctuation":
-          if (token.text === "(" || token.text === ")") return { type: "paren", value: token.text };
-          // Support locale-specific argument separators (`;` in many locales) by treating them
-          // equivalently to commas. This evaluator is used in UI previews where locale-aware
-          // parsing should avoid returning misleading errors.
-          if (token.text === "," || token.text === ";") return { type: "comma", value: "," };
-          return { type: "error", value: "#VALUE!" };
-        default:
-          return { type: "error", value: "#VALUE!" };
+        raw += `.${tokens[j + 2]!.text}`;
+        end = tokens[j + 2]!.end;
+        j += 2;
       }
-    });
+
+      // Merge decimal comma (e.g. `1,5` in de-DE).
+      if (
+        locale.decimalSeparator === "," &&
+        tokens[j + 1]?.type === "punctuation" &&
+        tokens[j + 1]?.text === "," &&
+        tokens[j + 2]?.type === "number" &&
+        tokens[j + 1]!.start === end &&
+        tokens[j + 2]!.start === tokens[j + 1]!.end
+      ) {
+        raw += `,${tokens[j + 2]!.text}`;
+        end = tokens[j + 2]!.end;
+        j += 2;
+      }
+
+      const value = parseLocaleNumber(raw, locale);
+      if (value == null) {
+        out.push({ type: "error", value: "#VALUE!" });
+      } else {
+        out.push({ type: "number", value });
+      }
+      i = j;
+      continue;
+    }
+
+    switch (token.type) {
+      case "string":
+        out.push({ type: "string", value: token.text.slice(1, token.text.endsWith('"') ? -1 : token.text.length) });
+        break;
+      case "error":
+        out.push({ type: "error", value: token.text });
+        break;
+      case "reference":
+        out.push({ type: "reference", value: token.text });
+        break;
+      case "function":
+        out.push({ type: "function", value: canonicalizeFunctionNameForLocale(token.text, options.localeId) });
+        break;
+      case "identifier": {
+        const upper = token.text.toUpperCase();
+        if (upper === "TRUE") {
+          out.push({ type: "boolean", value: true });
+          break;
+        }
+        if (upper === "FALSE") {
+          out.push({ type: "boolean", value: false });
+          break;
+        }
+        const resolved = options.resolveNameToReference?.(token.text);
+        if (resolved) {
+          out.push({ type: "reference", value: resolved });
+          break;
+        }
+        out.push({ type: "error", value: "#NAME?" });
+        break;
+      }
+      case "operator":
+        out.push({ type: "operator", value: token.text });
+        break;
+      case "punctuation":
+        if (token.text === "(" || token.text === ")") {
+          out.push({ type: "paren", value: token.text });
+          break;
+        }
+        // Support locale-specific argument separators (`;` in many locales) by treating them
+        // equivalently to commas. This evaluator is used in UI previews where locale-aware
+        // parsing should avoid returning misleading errors.
+        if (token.text === "," || token.text === ";") {
+          out.push({ type: "comma", value: "," });
+          break;
+        }
+        out.push({ type: "error", value: "#VALUE!" });
+        break;
+      default:
+        out.push({ type: "error", value: "#VALUE!" });
+        break;
+    }
+  }
+
+  return out;
 }
 
 class Parser {

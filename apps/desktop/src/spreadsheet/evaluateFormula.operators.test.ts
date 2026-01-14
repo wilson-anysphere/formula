@@ -47,4 +47,20 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=SUMA(1;2)", () => null, { localeId: "es-ES" })).toBe(3);
     expect(evaluateFormula("=PROMEDIO(1;2;3)", () => null, { localeId: "es-ES" })).toBe(2);
   });
+
+  it("parses decimal commas and thousands separators when a comma-decimal localeId is provided", () => {
+    // de-DE uses `,` decimals + `.` thousands separators.
+    expect(evaluateFormula("=1,5+2,5", () => null, { localeId: "de-DE" })).toBe(4);
+    expect(evaluateFormula("=SUMME(1,5;2,5)", () => null, { localeId: "de-DE" })).toBe(4);
+    expect(evaluateFormula("=1.234,5+0,5", () => null, { localeId: "de-DE" })).toBe(1235);
+    expect(evaluateFormula("=1.234.567,5+0,5", () => null, { localeId: "de-DE" })).toBe(1234568);
+
+    // fr-FR uses `,` decimals (thousands grouping is NBSP; we don't require it here).
+    expect(evaluateFormula("=1,5+2,5", () => null, { localeId: "fr-FR" })).toBe(4);
+    expect(evaluateFormula("=SOMME(1,5;2,5)", () => null, { localeId: "fr-FR" })).toBe(4);
+
+    // es-ES uses `,` decimals.
+    expect(evaluateFormula("=1,5+2,5", () => null, { localeId: "es-ES" })).toBe(4);
+    expect(evaluateFormula("=SUMA(1,5;2,5)", () => null, { localeId: "es-ES" })).toBe(4);
+  });
 });
