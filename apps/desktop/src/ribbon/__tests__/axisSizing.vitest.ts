@@ -106,7 +106,7 @@ describe("ribbon/axisSizing", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("no-ops in read-only mode before prompting", async () => {
+  it("allows axis sizing in read-only mode (local-only view mutation)", async () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
 
@@ -125,8 +125,13 @@ describe("ribbon/axisSizing", () => {
 
     await promptAndApplyAxisSizing(app, "rowHeight");
 
-    expect(showInputBox).not.toHaveBeenCalled();
-    expect(setRowHeightSpy).not.toHaveBeenCalled();
-    expect(focus).not.toHaveBeenCalled();
+    expect(showInputBox).toHaveBeenCalledTimes(1);
+    expect(setRowHeightSpy).toHaveBeenCalledTimes(1);
+    expect(setRowHeightSpy.mock.calls[0]?.[1]).toBe(0);
+    expect(setRowHeightSpy.mock.calls[0]?.[2]).toBe(42);
+
+    const view = doc.getSheetView(sheetId);
+    expect(view.rowHeights).toEqual({ "0": 42 });
+    expect(focus).toHaveBeenCalledTimes(1);
   });
 });
