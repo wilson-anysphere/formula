@@ -18,6 +18,7 @@ import argparse
 import configparser
 import json
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable
 
@@ -138,6 +139,59 @@ def verify_compliance_artifacts(package_root: Path, package_name: str) -> None:
             "Hint: ensure apps/desktop/src-tauri/tauri.conf.json includes bundle.resources and "
             "bundle.linux.(deb|rpm).files mappings for /usr/share/doc/<package>/."
         )
+
+
+def verify_parquet_mime_definition(package_root: Path) -> None:
+    """
+    Parquet is not consistently defined in shared-mime-info across distros.
+
+    If we advertise a Parquet MIME type in `MimeType=` we should also ship a
+    shared-mime-info definition so `*.parquet` resolves to that MIME type after
+    install (via update-mime-database triggers).
+    """
+
+    mime_packages_dir = package_root / "usr" / "share" / "mime" / "packages"
+    if not mime_packages_dir.is_dir():
+        raise SystemExit(
+            "[linux] ERROR: Parquet file association configured but no shared-mime-info packages dir found.\n"
+            f"Expected: {mime_packages_dir}\n"
+            "Hint: install a MIME definition under usr/share/mime/packages (e.g. apps/desktop/src-tauri/mime/...) "
+            "and map it into Linux packages via bundle.linux.(deb|rpm|appimage).files in tauri.conf.json."
+        )
+
+    expected_mime = "application/vnd.apache.parquet"
+    expected_glob = "*.parquet"
+    candidates = sorted(mime_packages_dir.glob("*.xml"))
+    if not candidates:
+        raise SystemExit(
+            "[linux] ERROR: Parquet file association configured but no shared-mime-info XML files were packaged.\n"
+            f"Expected at least one *.xml under: {mime_packages_dir}\n"
+            "Hint: add a MIME definition file and map it into the Linux bundles via tauri.conf.json."
+        )
+
+    for xml_path in candidates:
+        try:
+            tree = ET.parse(xml_path)
+        except ET.ParseError:
+            # Ignore unrelated/invalid XML files; we'll fail if none match.
+            continue
+        root = tree.getroot()
+        for mime_type in root.findall(".//{http://www.freedesktop.org/standards/shared-mime-info}mime-type"):
+            if mime_type.get("type") != expected_mime:
+                continue
+            for glob in mime_type.findall("{http://www.freedesktop.org/standards/shared-mime-info}glob"):
+                if glob.get("pattern") == expected_glob:
+                    print(
+                        f"[linux] Parquet MIME definition OK: {xml_path} defines {expected_mime} ({expected_glob})"
+                    )
+                    return
+
+    raise SystemExit(
+        "[linux] ERROR: Parquet file association configured but no packaged shared-mime-info definition was found.\n"
+        f"Expected a *.xml under {mime_packages_dir} defining:\n"
+        f"  - {expected_mime} with glob {expected_glob}\n"
+        "Hint: keep apps/desktop/src-tauri/mime/app.formula.desktop.xml packaged via tauri.conf.json bundle.linux.*.files."
+    )
 
 
 def find_desktop_files(package_root: Path) -> list[Path]:
@@ -305,6 +359,10 @@ def main() -> int:
 
     # Finally, validate that the built package ships OSS/compliance artifacts.
     verify_compliance_artifacts(args.package_root, expected_doc_pkg)
+
+    # Parquet file association requires a shared-mime-info definition on many distros.
+    if "application/vnd.apache.parquet" in expected_mime_types:
+        verify_parquet_mime_definition(args.package_root)
 
     return 0
 

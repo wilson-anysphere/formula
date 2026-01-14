@@ -1477,6 +1477,10 @@ integration metadata made it into the final bundles (not just `tauri.conf.json`)
 - Linux: the installed `.desktop` file advertises the expected `MimeType=` list
   (including `x-scheme-handler/formula` for deep links) and has an `Exec=`
   placeholder so double-click open passes a path/URL.
+  - Note: Parquet (`.parquet`) is not consistently defined in distros’ shared-mime-info
+    databases. Formula ships a shared-mime-info definition file in Linux bundles so
+    `*.parquet` resolves to `application/vnd.apache.parquet` and the `.desktop` association
+    actually matches in file managers.
 
 You can run the same checks locally after building:
 

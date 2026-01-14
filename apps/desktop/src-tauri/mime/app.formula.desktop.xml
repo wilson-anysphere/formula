@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <!--
+    Ensure Linux desktop environments can map `*.parquet` to a stable MIME type.
+
+    Many distros' shared-mime-info database does not include a Parquet glob by
+    default, which means a `.desktop` file advertising `MimeType=...parquet`
+    would never match when the file manager resolves the file type.
+
+    By shipping this definition inside our .deb/.rpm (and AppImage), package
+    install triggers (`update-mime-database`) will register the mapping and make
+    Parquet double-click open work reliably.
+  -->
+  <mime-type type="application/vnd.apache.parquet">
+    <comment>Apache Parquet file</comment>
+    <glob pattern="*.parquet" />
+  </mime-type>
+</mime-info>

@@ -111,6 +111,7 @@
     "linux": {
       "deb": {
         "depends": [
+          "shared-mime-info",
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0t64 | libgtk-3-0",
           "libayatana-appindicator3-1 | libappindicator3-1",
@@ -118,12 +119,14 @@
           "libssl3t64 | libssl3"
         ],
         "files": {
+          "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
           "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
           "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE"
         }
       },
       "rpm": {
         "depends": [
+          "shared-mime-info",
           "(webkit2gtk4.1 or libwebkit2gtk-4_1-0)",
           "(gtk3 or libgtk-3-0)",
           "((libayatana-appindicator-gtk3 or libappindicator-gtk3) or (libayatana-appindicator3-1 or libappindicator3-1))",
@@ -131,12 +134,14 @@
           "(openssl-libs or libopenssl3)"
         ],
         "files": {
+          "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
           "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
           "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE"
         }
       },
       "appimage": {
         "files": {
+          "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
           "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
           "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE"
         }
