@@ -1,5 +1,5 @@
 /**
- * Minimal runtime helpers for safely accessing `__TAURI__.core.invoke` without a hard
+ * Minimal runtime helpers for safely accessing Tauri's `core.invoke` without a hard
  * dependency on `@tauri-apps/api`.
  *
  * This module is intentionally JavaScript so it can be consumed by other `.js` sources
@@ -59,4 +59,3 @@ export function getTauriInvokeOrThrow() {
 export function hasTauriInvoke() {
   return getTauriInvokeOrNull() != null;
 }
-
