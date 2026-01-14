@@ -2287,6 +2287,8 @@ impl DaxEngine {
             }
         }
 
+        let mut crossfilter_overrides: HashMap<usize, RelationshipOverride> = HashMap::new();
+
         for arg in filter_args {
             let arg = unwrap_filter_arg_for_modifiers(arg)?;
             if let Expr::Call { name, args } = arg {
@@ -2294,8 +2296,24 @@ impl DaxEngine {
                     self.apply_userelationship(model, filter, args)?;
                     self.apply_userelationship(model, &mut eval_filter, args)?;
                 } else if name.eq_ignore_ascii_case("CROSSFILTER") {
-                    self.apply_crossfilter(model, filter, args)?;
-                    self.apply_crossfilter(model, &mut eval_filter, args)?;
+                    let (rel_idx, override_dir) = self.apply_crossfilter(model, filter, args)?;
+                    if let Some(existing) = crossfilter_overrides.get(&rel_idx) {
+                        if *existing != override_dir {
+                            let relationship = model
+                                .relationships()
+                                .get(rel_idx)
+                                .expect("relationship index from find_relationship_index");
+                            return Err(DaxError::Eval(format!(
+                                "CALCULATE contains multiple conflicting CROSSFILTER modifiers for relationship {}",
+                                relationship.rel.name
+                            )));
+                        }
+                    } else {
+                        crossfilter_overrides.insert(rel_idx, override_dir);
+                    }
+                    eval_filter
+                        .cross_filter_overrides
+                        .insert(rel_idx, override_dir);
                 }
             }
         }
@@ -2884,7 +2902,7 @@ impl DaxEngine {
         model: &DataModel,
         filter: &mut FilterContext,
         args: &[Expr],
-    ) -> DaxResult<()> {
+    ) -> DaxResult<(usize, RelationshipOverride)> {
         let [left, right, direction] = args else {
             return Err(DaxError::Eval("CROSSFILTER expects 3 arguments".into()));
         };
@@ -2989,7 +3007,7 @@ impl DaxEngine {
         };
 
         filter.cross_filter_overrides.insert(rel_idx, override_dir);
-        Ok(())
+        Ok((rel_idx, override_dir))
     }
 
     fn eval_related(

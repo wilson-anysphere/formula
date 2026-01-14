@@ -307,3 +307,23 @@ fn crossfilter_both_works_with_userelationship_on_inactive_relationship() {
         1.into()
     );
 }
+
+#[test]
+fn crossfilter_conflicting_modifiers_in_one_calculate_error() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let err = engine
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(Orders), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], NONE))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap_err();
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("crossfilter") && msg.contains("conflict"),
+        "unexpected error: {err}"
+    );
+}
