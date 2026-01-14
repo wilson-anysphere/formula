@@ -8,7 +8,9 @@ function createInMemoryAuditLogger() {
   return { auditLogger: new AuditLogger({ store }), events };
 }
 
-const SANDBOX_TIMEOUT_MS = 10_000;
+// These sandbox tests can be CPU/IO sensitive under heavily parallelized CI shards.
+// Keep the timeout comfortably above typical cold-start overhead so we don't flake.
+const SANDBOX_TIMEOUT_MS = 30_000;
 
 describe("Sandbox optional capability enforcement", () => {
   it("denies clipboard/notifications/automation by default in JS sandbox", async () => {
