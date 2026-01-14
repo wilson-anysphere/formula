@@ -24,6 +24,9 @@ env:
   # Keep dry-run desktop bundles on the same Node.js major as CI/release workflows
   # to avoid subtle differences in generated assets.
   NODE_VERSION: 22
+  # Pin the Tauri CLI (`cargo tauri`) version so this workflow can't drift from the
+  # repo's pinned Tauri crates (see `.github/workflows/release.yml`).
+  TAURI_CLI_VERSION: "2.9.5"
 
 jobs:
   conflict-marker-guard:
@@ -59,6 +62,9 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check pinned Tauri CLI version matches Tauri crates
+        run: node scripts/ci/check-tauri-cli-version.mjs
 
       # Optional: only runs when a tag-like ref is explicitly requested.
       # This keeps dry runs usable from branches while still allowing "build this tag" validation.
@@ -135,6 +141,12 @@ jobs:
       - name: Install wasm-pack (required for @formula/engine WASM build)
         run: cargo install wasm-pack --locked
 
+      - name: Install pinned Tauri CLI (cargo tauri)
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
+
+      - name: Print Tauri CLI version
+        run: cargo tauri --version
+
       - name: Build desktop bundles (dry run, signing disabled)
         if: ${{ !inputs.enableSigning }}
         uses: tauri-apps/tauri-action@79c624843491f12ae9d63592534ed49df3bc4adb # v0
@@ -142,6 +154,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
+          tauriScript: cargo tauri
 
       - name: Build desktop bundles (dry run, signing enabled)
         if: ${{ inputs.enableSigning }}
@@ -165,6 +178,7 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: apps/desktop
+          tauriScript: cargo tauri
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
         if: matrix.platform == 'ubuntu-24.04'
