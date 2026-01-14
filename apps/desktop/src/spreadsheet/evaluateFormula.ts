@@ -676,9 +676,13 @@ function evalFunction(
     if (typeText !== "directory") return "#VALUE!";
 
     const meta = options.workbookFileMetadata ?? null;
+    const filename = typeof meta?.filename === "string" ? meta.filename.trim() : "";
     const dirRaw = typeof meta?.directory === "string" ? meta.directory : null;
     const dir = dirRaw != null && dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
-    if (!dir) return "";
+    // Match the Rust engine's Excel semantics: `INFO("directory")` returns `#N/A` until the workbook
+    // has a known directory (typically after first save). Filename-only metadata (web) also yields
+    // `#N/A`.
+    if (!filename || !dir) return "#N/A";
 
     if (!context.preserveReferenceProvenance) return dir;
     const refs = args.flatMap((arg) => provenanceRefs(arg));

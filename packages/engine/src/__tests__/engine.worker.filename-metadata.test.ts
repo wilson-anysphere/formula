@@ -138,7 +138,7 @@ describe("engine.worker workbook file metadata integration", () => {
 
       resp = await sendRequest(port, { type: "request", id: 4, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
       expect(resp.ok).toBe(true);
-      expect(resp.result.value).toBe("");
+      expect(resp.result.value).toBe("#N/A");
 
       resp = await sendRequest(port, { type: "request", id: 5, method: "getCell", params: { address: "A1", sheet: "Sheet2" } });
       expect(resp.ok).toBe(true);
@@ -190,7 +190,7 @@ describe("engine.worker workbook file metadata integration", () => {
 
       resp = await sendRequest(port, { type: "request", id: 16, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
       expect(resp.ok).toBe(true);
-      expect(resp.result.value).toBe("");
+      expect(resp.result.value).toBe("#N/A");
 
       resp = await sendRequest(port, { type: "request", id: 17, method: "getCell", params: { address: "A1", sheet: "Sheet2" } });
       expect(resp.ok).toBe(true);

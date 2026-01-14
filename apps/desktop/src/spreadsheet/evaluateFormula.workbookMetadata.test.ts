@@ -18,6 +18,20 @@ describe("evaluateFormula workbook metadata functions", () => {
     expect(value).toBe("/tmp/");
   });
 
+  it('returns #N/A for INFO("directory") when workbook is unsaved', () => {
+    const value = evaluateFormula('=INFO("directory")', () => null, {
+      workbookFileMetadata: { directory: null, filename: null },
+    });
+    expect(value).toBe("#N/A");
+  });
+
+  it('returns #N/A for INFO("directory") when only filename is known (web-style metadata)', () => {
+    const value = evaluateFormula('=INFO("directory")', () => null, {
+      workbookFileMetadata: { directory: null, filename: "book.xlsx" },
+    });
+    expect(value).toBe("#N/A");
+  });
+
   it('formats CELL("filename") as dir + [filename] + sheet', () => {
     const value = evaluateFormula('=CELL("filename")', () => null, {
       workbookFileMetadata: { directory: "/tmp/", filename: "book.xlsx" },

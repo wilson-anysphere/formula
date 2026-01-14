@@ -132,7 +132,8 @@ export class WasmWorkbook {
               computed = `${this.directory ?? ""}[${this.filename}]${refSheetName ?? sheetName}`;
             }
           } else if (matchesInfoDirectory(input)) {
-            computed = this.filename ? this.directory ?? "" : "";
+            const dir = typeof this.directory === "string" && this.directory.trim() !== "" ? this.directory : "";
+            computed = this.filename && dir ? dir : "#N/A";
           }
         } else {
           computed = input;
