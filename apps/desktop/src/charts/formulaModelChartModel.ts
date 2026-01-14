@@ -294,7 +294,7 @@ function extractCacheAndRef<T>(
   const cache = Array.isArray(rawCache) ? rawCache.map(opts.coerce) : null;
 
   const formula = typeof obj.formula === "string" ? obj.formula : null;
-  const ref = formula && formula.trim() ? formula : null;
+  const ref = formula && formula.trim() ? formula.trim() : null;
 
   return { cache, ref };
 }

@@ -181,4 +181,32 @@ describe("formulaModelChartModelToUiChartModel", () => {
       },
     ]);
   });
+
+  it("trims whitespace around series formula refs", () => {
+    const input = {
+      chartKind: { kind: "line" },
+      title: null,
+      legend: null,
+      plotArea: { kind: "line", grouping: null, axIds: [] },
+      axes: [],
+      series: [
+        {
+          name: null,
+          categories: { formula: "  Sheet1!A1:A3  " },
+          values: { formula: "  Sheet1!B1:B3  ", formatCode: null },
+          xValues: null,
+          yValues: null,
+        },
+      ],
+      diagnostics: [],
+    };
+
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.series).toEqual([
+      {
+        categories: { ref: "Sheet1!A1:A3" },
+        values: { ref: "Sheet1!B1:B3" },
+      },
+    ]);
+  });
 });
