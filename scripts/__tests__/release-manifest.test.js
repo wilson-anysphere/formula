@@ -23,6 +23,7 @@ import {
   isPrimaryBundleAssetName,
   normalizeVersion as normalizeVersionForVerify,
   validateLatestJson,
+  verifyUpdaterManifestSignature,
 } from "../verify-desktop-release-assets.mjs";
 import { validatePlatformEntries } from "../ci/validate-updater-manifest.mjs";
 import {
@@ -460,6 +461,85 @@ test("tauri-minisign: verifies latest.json.sig with a test Ed25519 keypair", asy
   // Wrong public key should fail.
   const wrongPub = ed25519PublicKeyFromRaw(Buffer.alloc(32));
   assert.equal(crypto.verify(null, manifestBytes, wrongPub, parsedSig.signatureBytes), false);
+});
+
+test("verify-desktop-release-assets: verifyUpdaterManifestSignature accepts a valid latest.json + latest.json.sig", async () => {
+  const manifestText = await readTextFixture("latest.multi-platform.json");
+  const manifestBytes = Buffer.from(manifestText, "utf8");
+  const signatureText = await readTextFixture("latest.multi-platform.json.sig");
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  assert.doesNotThrow(() =>
+    verifyUpdaterManifestSignature(manifestBytes, signatureText, keypair.publicKeyBase64),
+  );
+});
+
+test("verify-desktop-release-assets: verifyUpdaterManifestSignature rejects signature mismatches", async () => {
+  const manifestText = await readTextFixture("latest.multi-platform.json");
+  const manifestBytes = Buffer.from(manifestText, "utf8");
+  const signatureText = (await readTextFixture("latest.multi-platform.json.sig")).trim();
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  const signatureBytes = Buffer.from(signatureText, "base64");
+  signatureBytes[0] ^= 0xff;
+
+  assert.throws(
+    () =>
+      verifyUpdaterManifestSignature(
+        manifestBytes,
+        signatureBytes.toString("base64"),
+        keypair.publicKeyBase64,
+      ),
+    /signature mismatch/i,
+  );
+});
+
+test("verify-desktop-release-assets: verifyUpdaterManifestSignature accepts minisign pubkey/signature formats", async () => {
+  const manifestText = await readTextFixture("latest.multi-platform.json");
+  const manifestBytes = Buffer.from(manifestText, "utf8");
+  const signatureText = (await readTextFixture("latest.multi-platform.json.sig")).trim();
+  const signatureBytes = Buffer.from(signatureText, "base64");
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  const rawPubkey = Buffer.from(keypair.publicKeyBase64, "base64");
+
+  const keyIdLe = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  const keyIdHex = Buffer.from(keyIdLe).reverse().toString("hex").toUpperCase();
+
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, rawPubkey]);
+  const pubkeyText = `untrusted comment: minisign public key: ${keyIdHex}\n${pubPayload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+
+  const sigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, signatureBytes]);
+
+  assert.doesNotThrow(() =>
+    verifyUpdaterManifestSignature(manifestBytes, sigPayload.toString("base64"), pubkeyBase64),
+  );
+});
+
+test("verify-desktop-release-assets: verifyUpdaterManifestSignature rejects minisign key id mismatches", async () => {
+  const manifestText = await readTextFixture("latest.multi-platform.json");
+  const manifestBytes = Buffer.from(manifestText, "utf8");
+  const signatureText = (await readTextFixture("latest.multi-platform.json.sig")).trim();
+  const signatureBytes = Buffer.from(signatureText, "base64");
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  const rawPubkey = Buffer.from(keypair.publicKeyBase64, "base64");
+
+  const pubKeyIdLe = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  const pubKeyIdHex = Buffer.from(pubKeyIdLe).reverse().toString("hex").toUpperCase();
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), pubKeyIdLe, rawPubkey]);
+  const pubkeyText = `untrusted comment: minisign public key: ${pubKeyIdHex}\n${pubPayload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+
+  // Signature uses a different key id.
+  const sigKeyIdLe = Buffer.from([9, 9, 9, 9, 9, 9, 9, 9]);
+  const sigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), sigKeyIdLe, signatureBytes]);
+
+  assert.throws(
+    () => verifyUpdaterManifestSignature(manifestBytes, sigPayload.toString("base64"), pubkeyBase64),
+    /key id mismatch/i,
+  );
 });
 
 test("tauri-updater-manifest: verifyTauriManifestSignature supports minisign key/signature formats", async () => {
