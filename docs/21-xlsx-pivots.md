@@ -203,11 +203,13 @@ intentionally ignore fidelity-sensitive options:
 
 1) **`sharedItems` decoding for `<x>` cache record values (partial)**
    - We parse `<x v="..."/>` as `PivotCacheValue::Index(u32)` and parse
-     `pivotCacheDefinition*.xml` `cacheField/sharedItems` tables into `PivotCacheField.shared_items`.
+      `pivotCacheDefinition*.xml` `cacheField/sharedItems` tables into `PivotCacheField.shared_items`.
    - Callers can resolve indices → actual values via `PivotCacheDefinition::resolve_record_value`
      (the pivot → engine bridge does this when building the source table).
-   - Remaining work: plumb shared-item resolution through slicer/timeline selection logic where
-     slicer cache items reference shared item indices.
+   - We also expose `PivotCacheDefinition::resolve_shared_item(field_idx, index) -> ScalarValue`
+     for resolving slicer/timeline item identifiers stored as shared-item indices.
+   - The pivot → engine bridge includes helpers to translate slicer selections that use `x` indices
+     into typed pivot-engine filters (see `pivots::engine_bridge::*pivot_slicer_parts*`).
 
 2) **Mapping slicers/timelines to specific cache fields**
    - We discover slicers/timelines and the pivot tables they are connected to, but we do not yet
@@ -238,7 +240,7 @@ This is the rough sequencing we expect to follow for pivot-related fidelity work
 1) **Pivot cache value decoding**
    - Parse `cacheField/sharedItems` from `pivotCacheDefinition*.xml`. (done)
    - Decode `<x>` indices in `pivotCacheRecords*.xml` into typed values. (done for pivot-engine
-     source conversion; still needs plumbing into slicer selection resolution)
+     source conversion; slicer/timeline selection resolution is supported via `resolve_shared_item`)
 
 2) **Slicers/timelines → cache field mapping**
    - Join `pivot_graph()` results with slicer/timeline cache metadata (`baseField`, `sourceName`,
