@@ -1533,8 +1533,9 @@ export class SpreadsheetApp {
     // root keydown handler. Only intercept it here for the split-view secondary pane.
     if (isEscape && !inSecondaryGrid) return;
 
-    // Do not handle while editing text (cell editor, formula bar, inline edit).
-    if (this.isEditing()) return;
+    // Do not handle while editing text (cell editor, formula bar, inline edit), including when
+    // split-view secondary pane owns the active edit surface.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     let handled = false;
 
@@ -6749,23 +6750,23 @@ export class SpreadsheetApp {
   }
 
   freezePanes(): void {
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     const active = this.selection.active;
     this.document.setFrozen(this.sheetId, active.row, active.col, { label: t("command.view.freezePanes") });
   }
 
   freezeTopRow(): void {
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.document.setFrozen(this.sheetId, 1, 0, { label: t("command.view.freezeTopRow") });
   }
 
   freezeFirstColumn(): void {
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.document.setFrozen(this.sheetId, 0, 1, { label: t("command.view.freezeFirstColumn") });
   }
 
   unfreezePanes(): void {
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.document.setFrozen(this.sheetId, 0, 0, { label: t("command.view.unfreezePanes") });
   }
 
@@ -6897,7 +6898,7 @@ export class SpreadsheetApp {
     if (this.isReadOnly()) {
       throw new Error("Workbook is read-only.");
     }
-    if (this.isEditing()) {
+    if (this.isSpreadsheetEditingIncludingSecondary()) {
       throw new Error("Finish editing before inserting a picture.");
     }
 
@@ -7359,7 +7360,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const canvasChartId = this.getCanvasChartIdForDrawingId(selectedId, sheetId);
     if (canvasChartId) {
@@ -8582,7 +8583,7 @@ export class SpreadsheetApp {
       }
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const prevSelected = this.getSelectedDrawingId();
     const sheetId = this.sheetId;
@@ -9652,7 +9653,7 @@ export class SpreadsheetApp {
    * Hide or unhide rows (0-based indices).
    */
   setRowsHidden(rows: number[] | null | undefined, hidden: boolean): void {
-    if (this.isEditing() || this.isReadOnly()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary() || this.isReadOnly()) return;
     if (!Array.isArray(rows) || rows.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
@@ -9676,7 +9677,7 @@ export class SpreadsheetApp {
    * Hide or unhide columns (0-based indices).
    */
   setColsHidden(cols: number[] | null | undefined, hidden: boolean): void {
-    if (this.isEditing() || this.isReadOnly()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary() || this.isReadOnly()) return;
     if (!Array.isArray(cols) || cols.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
@@ -10465,7 +10466,7 @@ export class SpreadsheetApp {
     // Interactions should never mutate the document while editing text (cell editor / formula bar /
     // inline edit) or while in read-only mode.
     const isReadOnly = this.isReadOnly();
-    if (isReadOnly || this.isEditing()) {
+    if (isReadOnly || this.isSpreadsheetEditingIncludingSecondary()) {
       if (isReadOnly) {
         try {
           showToast("Read-only: you don't have permission to edit drawings.", "warning");
@@ -11093,7 +11094,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const sheetId = this.sheetId;
     const selected = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === drawingId) ?? null;
@@ -11206,7 +11207,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const result = duplicateDrawingSelected(this.listDrawingObjectsForSheet(), selectedId);
     if (!result) return;
@@ -11283,7 +11284,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const chart = this.getChartRecordById(chartId);
     if (!chart) return;
@@ -11328,7 +11329,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.applyFillShortcut("down", "formulas");
   }
 
@@ -11340,7 +11341,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.applyFillShortcut("up", "formulas");
   }
 
@@ -11352,7 +11353,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.applyFillShortcut("right", "formulas");
   }
 
@@ -11364,7 +11365,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.applyFillShortcut("left", "formulas");
   }
 
@@ -11376,7 +11377,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.applyFillShortcut(direction, "series");
   }
 
@@ -11388,7 +11389,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const sheetId = this.sheetId;
     const row0 = Math.trunc(row);
@@ -11435,7 +11436,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const sheetId = this.sheetId;
     const row0 = Math.trunc(row);
@@ -11481,7 +11482,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const sheetId = this.sheetId;
     const col0 = Math.trunc(col);
@@ -11527,7 +11528,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     const sheetId = this.sheetId;
     const col0 = Math.trunc(col);
@@ -11573,7 +11574,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     const sheetId = this.sheetId;
     const a1 = rangeToA1(range);
 
@@ -11612,7 +11613,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     const sheetId = this.sheetId;
     const a1 = rangeToA1(range);
 
@@ -11744,7 +11745,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.insertCurrentDateTimeIntoSelection("date");
     this.refresh();
     this.focus();
@@ -11758,7 +11759,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.insertCurrentDateTimeIntoSelection("time");
     this.refresh();
     this.focus();
@@ -11772,7 +11773,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.autoSumSelection("AVERAGE");
     this.refresh();
     this.focus();
@@ -11786,7 +11787,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.autoSumSelection("COUNT");
     this.refresh();
     this.focus();
@@ -11800,7 +11801,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.autoSumSelection("MAX");
     this.refresh();
     this.focus();
@@ -11814,7 +11815,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.autoSumSelection("MIN");
     this.refresh();
     this.focus();
@@ -11828,7 +11829,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     if (typeof document === "undefined") return;
 
     // Desktop/Tauri: prefer native dialog + backend reads (avoids `<input type=file>` sandbox quirks).
@@ -11921,7 +11922,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.autoSumSelection("SUM");
     this.refresh();
     this.focus();
@@ -12576,7 +12577,7 @@ export class SpreadsheetApp {
     //
     // Note: DesktopSharedGrid updates the renderer sizes interactively during the drag, so when we
     // no-op the document mutation we must also restore the renderer to its previous size.
-    if (this.isEditing()) {
+    if (this.isSpreadsheetEditingIncludingSecondary()) {
       const renderer = this.sharedGrid.renderer;
       const EPS = 1e-6;
       if (change.kind === "col") {
@@ -17717,7 +17718,7 @@ export class SpreadsheetApp {
   private handleDrawingKeyDown(e: KeyboardEvent): boolean {
     if (this.selectedDrawingId == null) return false;
     // Never hijack keys while editing text (cell editor, formula bar, inline edit).
-    if (this.isEditing()) return false;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
 
     const primary = e.ctrlKey || e.metaKey;
     const key = e.key;
@@ -17822,7 +17823,7 @@ export class SpreadsheetApp {
   private handleSelectedChartKeyDown(e: KeyboardEvent): boolean {
     if (this.selectedChartId == null) return false;
     // Never hijack keys while editing text (cell editor, formula bar, inline edit).
-    if (this.isEditing()) return false;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
 
     const primary = e.ctrlKey || e.metaKey;
     const key = e.key;
@@ -18797,7 +18798,7 @@ export class SpreadsheetApp {
       return /\.(png|jpe?g|gif|bmp|webp|svg)$/.test(name);
     };
 
-    const canInsertContext = !this.isReadOnly() && !this.isEditing();
+    const canInsertContext = !this.isReadOnly() && !this.isSpreadsheetEditingIncludingSecondary();
     let hasImage = false;
     if (canInsertContext) {
       const files = Array.from(dt.files ?? []);
@@ -18886,7 +18887,7 @@ export class SpreadsheetApp {
 
     const placeAt = this.pickCellAtClientPoint(e.clientX, e.clientY) ?? this.getActiveCell();
 
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
 
     if (this.isReadOnly()) {
       showCollabEditRejectedToast([
@@ -20847,7 +20848,7 @@ export class SpreadsheetApp {
       ]);
       return false;
     }
-    if (this.isEditing()) return false;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
     const sheetId = this.sheetId;
     const toFillRange = (range: Range): FillEngineRange => ({
       startRow: range.startRow,
@@ -25861,7 +25862,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    if (this.isEditing()) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     this.clearSelectionContentsInternal();
     this.refresh();
   }
