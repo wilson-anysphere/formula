@@ -55,6 +55,8 @@ Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` fi
 - **RC4 “standard” truncation:** only the first **15 UTF-16 code units** of the password are
   significant; extra characters are ignored (so a 16-character password and its first 15 characters
   are treated as equivalent).
+  - Note: truncation is by **UTF-16 code unit**, so it can split surrogate pairs for non-BMP
+    characters (e.g. emoji). In that case, the low surrogate is ignored.
 - **RC4 CryptoAPI:** uses the full password string (no 15-character truncation).
 - **Empty passwords:** third-party writers can emit a `FILEPASS` workbook with an empty password;
   this is supported by the underlying key derivation. Excel UI flows may refuse to create such a
@@ -70,6 +72,7 @@ Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` fi
 | `biff8_rc4_standard_pw_open.xls` | RC4 “standard” | BIFF8 | same as above | `password` |
 | `biff8_rc4_standard_unicode_pw_open.xls` | RC4 “standard” | BIFF8 | same as above | `pässwörd` |
 | `biff8_rc4_standard_unicode_emoji_pw_open.xls` | RC4 “standard” | BIFF8 | same as above | `pässwörd🔒` |
+| `biff8_rc4_standard_surrogate_truncation_pw_open.xls` | RC4 “standard” | BIFF8 | same as above | `0123456789ABCD🔒` (also decrypts with `0123456789ABCD😀`; truncation splits surrogate pair) |
 | `biff8_rc4_standard_pw_open_long_password.xls` | RC4 “standard” | BIFF8 | generated from `basic.xls` (this repo) | `0123456789abcdef` (effective: `0123456789abcde`) |
 | `biff8_rc4_standard_pw_open_empty_password.xls` | RC4 “standard” | BIFF8 | generated from `basic.xls` (this repo) | `""` |
 | `biff8_rc4_cryptoapi_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above; additionally used by `tests/import_encrypted_rc4_cryptoapi.rs` to validate `import_xls_path_with_password` | `correct horse battery staple` |

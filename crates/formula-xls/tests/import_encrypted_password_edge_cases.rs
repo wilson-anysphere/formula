@@ -94,6 +94,41 @@ fn decrypts_rc4_standard_with_unicode_password() {
 }
 
 #[test]
+fn decrypts_rc4_standard_with_surrogate_pair_truncation_split() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_rc4_standard_surrogate_truncation_pw_open.xls");
+
+    // RC4 Standard truncates to 15 UTF-16 code units. With 14 ASCII chars + a non-BMP emoji,
+    // truncation splits the emoji's surrogate pair and drops the low surrogate. This means two
+    // different emojis that share the same high surrogate can decrypt equivalently.
+    let password = "0123456789ABCD🔒"; // U+1F512 => high surrogate D83D, low surrogate DD12
+    let same_truncation = "0123456789ABCD😀"; // U+1F600 => high surrogate D83D, low surrogate DE00
+    let different_truncation = "0123456789ABCD🦀"; // U+1F980 => high surrogate D83E (differs)
+
+    for pw in [password, same_truncation] {
+        let result = formula_xls::import_xls_path_with_password(&fixture_path, Some(pw))
+            .expect("decrypt and import");
+        let sheet1 = result
+            .workbook
+            .sheet_by_name("Sheet1")
+            .expect("Sheet1 missing");
+        assert_eq!(sheet1.value_a1("A1").unwrap(), CellValue::Number(42.0));
+    }
+
+    for pw in [different_truncation, "1123456789ABCD🔒"] {
+        let err = formula_xls::import_xls_path_with_password(&fixture_path, Some(pw))
+            .expect_err("expected wrong password to fail");
+        assert!(
+            matches!(&err, formula_xls::ImportError::InvalidPassword),
+            "expected ImportError::InvalidPassword, got {err:?}"
+        );
+    }
+}
+
+#[test]
 fn rc4_cryptoapi_does_not_truncate_password_to_15_chars() {
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")

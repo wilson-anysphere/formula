@@ -1561,6 +1561,23 @@ fn regenerate_encrypted_xls_fixtures() {
             panic!("write encrypted fixture {rc4_standard_unicode_emoji_path:?} failed: {err}");
         });
 
+    // Surrogate-pair truncation edge case: RC4 Standard only uses the first 15 UTF-16 code units of
+    // the password. With 14 ASCII chars + a non-BMP emoji, the truncation boundary falls *inside*
+    // the emoji's surrogate pair (high surrogate retained, low surrogate ignored).
+    let rc4_standard_surrogate_truncation_path =
+        fixtures_dir.join("biff8_rc4_standard_surrogate_truncation_pw_open.xls");
+    let rc4_standard_surrogate_truncation_bytes =
+        build_rc4_standard_encrypted_xls_bytes("0123456789ABCD🔒");
+    std::fs::write(
+        &rc4_standard_surrogate_truncation_path,
+        rc4_standard_surrogate_truncation_bytes,
+    )
+    .unwrap_or_else(|err| {
+        panic!(
+            "write encrypted fixture {rc4_standard_surrogate_truncation_path:?} failed: {err}"
+        );
+    });
+
     // RC4 Standard edge-case fixtures derived from `basic.xls`.
     let rc4_standard_long_path = fixtures_dir.join("biff8_rc4_standard_pw_open_long_password.xls");
     let rc4_standard_long_bytes =
