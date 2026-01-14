@@ -27,6 +27,32 @@
 
 const WORKER_URL = new URL("./sandbox-worker.browser.js", import.meta.url);
 
+function safeGetProp(obj, prop) {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
+function getTauriGlobalOrNull() {
+  try {
+    return globalThis.__TAURI__ ?? null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so we fall back to standard browser UI primitives.
+    return null;
+  }
+}
+
+function getTauriDialogNamespaceOrNull() {
+  const tauri = getTauriGlobalOrNull();
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  return safeGetProp(tauri, "dialog") ?? safeGetProp(plugin, "dialog") ?? safeGetProp(plugins, "dialog") ?? null;
+}
+
 function defaultPermissionSnapshot() {
   return {
     filesystem: { read: [], readwrite: [] },
@@ -244,16 +270,11 @@ export class ScriptRuntime {
         const message = params?.message ?? "";
         /** @type {any} */
         let tauriMessage = null;
-        try {
-          const tauri = globalThis.__TAURI__;
-          const dialog = tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
-          tauriMessage = dialog?.message ?? dialog?.alert ?? null;
-        } catch {
-          tauriMessage = null;
-        }
+        const dialog = getTauriDialogNamespaceOrNull();
+        tauriMessage = safeGetProp(dialog, "message") ?? safeGetProp(dialog, "alert") ?? null;
         if (typeof tauriMessage === "function") {
           try {
-            await tauriMessage(String(message));
+            await tauriMessage.call(dialog, String(message));
             return null;
           } catch {
             // Fall back to `globalThis.alert` below.
@@ -270,16 +291,11 @@ export class ScriptRuntime {
         const message = params?.message ?? "";
         /** @type {any} */
         let tauriConfirm = null;
-        try {
-          const tauri = globalThis.__TAURI__;
-          const dialog = tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
-          tauriConfirm = dialog?.confirm ?? null;
-        } catch {
-          tauriConfirm = null;
-        }
+        const dialog = getTauriDialogNamespaceOrNull();
+        tauriConfirm = safeGetProp(dialog, "confirm") ?? null;
         if (typeof tauriConfirm === "function") {
           try {
-            return Boolean(await tauriConfirm(String(message)));
+            return Boolean(await tauriConfirm.call(dialog, String(message)));
           } catch {
             // Fall back to `globalThis.confirm` below.
           }

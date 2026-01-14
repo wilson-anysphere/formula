@@ -225,6 +225,15 @@ function safeParseUrl(url) {
   }
 }
 
+function safeGetProp(obj, prop) {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 function isUrlAllowedByHosts(urlString, hosts) {
   const parsed = safeParseUrl(urlString);
   if (!parsed) return false;
@@ -2228,16 +2237,25 @@ class BrowserExtensionHost {
         // mechanism here.
         /** @type {any} */
         let tauriInvoke = null;
-        try {
-          const tauri = globalThis?.__TAURI__;
-          tauriInvoke = tauri?.core?.invoke ?? tauri?.invoke ?? null;
-        } catch {
-          tauriInvoke = null;
+        /** @type {any} */
+        let tauriInvokeOwner = null;
+        const tauri = safeGetProp(globalThis, "__TAURI__") ?? null;
+        const core = safeGetProp(tauri, "core");
+        const coreInvoke = safeGetProp(core, "invoke");
+        if (typeof coreInvoke === "function") {
+          tauriInvoke = coreInvoke;
+          tauriInvokeOwner = core;
+        } else {
+          const legacyInvoke = safeGetProp(tauri, "invoke");
+          if (typeof legacyInvoke === "function") {
+            tauriInvoke = legacyInvoke;
+            tauriInvokeOwner = tauri;
+          }
         }
         if (typeof tauriInvoke === "function") {
           const resolved = safeParseUrl(rawUrl);
           const url = resolved ? resolved.toString() : rawUrl;
-          return tauriInvoke("network_fetch", { url, init: init ?? null });
+          return tauriInvoke.call(tauriInvokeOwner, "network_fetch", { url, init: init ?? null });
         }
 
         if (typeof fetch !== "function") {

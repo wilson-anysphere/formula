@@ -166,12 +166,26 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 type TauriInvoke = (cmd: string, args?: Record<string, any>) => Promise<any>;
 
+function safeGetProp(obj: any, prop: string): any | undefined {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 function getTauriInvoke(): TauriInvoke | null {
   try {
     const tauri = (globalThis as any).__TAURI__ ?? null;
-    const invoke: unknown = tauri?.core?.invoke ?? tauri?.invoke;
+    const core = safeGetProp(tauri, "core");
+    const coreInvoke: unknown = safeGetProp(core, "invoke");
+    if (typeof coreInvoke === "function") {
+      return (coreInvoke as any).bind(core);
+    }
+    const invoke: unknown = safeGetProp(tauri, "invoke");
     if (typeof invoke !== "function") return null;
-    return invoke.bind(tauri?.core ?? tauri);
+    return (invoke as any).bind(tauri);
   } catch {
     // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
     // Treat that as "unavailable" so marketplace requests can fall back to `fetch`.

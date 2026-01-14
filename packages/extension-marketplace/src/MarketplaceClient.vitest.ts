@@ -95,6 +95,33 @@ describe("MarketplaceClient Tauri IPC integration", () => {
     });
   });
 
+  it("falls back to legacy __TAURI__.invoke when __TAURI__.core is blocked (throwing getter)", async () => {
+    const tauri: any = {};
+    const invoke = vi.fn(async function () {
+      // Ensure method binding is preserved.
+      expect(this).toBe(tauri);
+      return { total: 0, results: [], nextCursor: null };
+    });
+    tauri.invoke = invoke;
+    Object.defineProperty(tauri, "core", {
+      configurable: true,
+      get() {
+        throw new Error("Blocked core access");
+      },
+    });
+    (globalThis as any).__TAURI__ = tauri;
+
+    const fetch = vi.fn();
+    (globalThis as any).fetch = fetch;
+
+    const client = new MarketplaceClient({ baseUrl: "https://example.com/api" });
+    await client.search({ q: "test", limit: 10 });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("marketplace_search", expect.any(Object));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("does not use invoke for relative base URLs (falls back to fetch)", async () => {
     const invoke = vi.fn();
     (globalThis as any).__TAURI__ = { core: { invoke } };
