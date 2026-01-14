@@ -138,10 +138,19 @@ def _find_windows_installers(target_dir: Path) -> list[Path]:
     """
 
     installers: list[Path] = []
+    # Avoid recursive `**/release/bundle/**` globs here: Cargo target directories can be very large
+    # (especially on CI runners with caching enabled), and recursive globbing can be surprisingly slow.
+    #
+    # Tauri bundle outputs are always emitted at:
+    # - <target_dir>/release/bundle/...
+    # - <target_dir>/<triple>/release/bundle/...
     patterns = [
-        "**/release/bundle/nsis/*.exe",
-        "**/release/bundle/nsis-web/*.exe",
-        "**/release/bundle/msi/*.msi",
+        "release/bundle/nsis/*.exe",
+        "*/release/bundle/nsis/*.exe",
+        "release/bundle/nsis-web/*.exe",
+        "*/release/bundle/nsis-web/*.exe",
+        "release/bundle/msi/*.msi",
+        "*/release/bundle/msi/*.msi",
     ]
     for pattern in patterns:
         installers.extend([p for p in target_dir.glob(pattern) if p.is_file()])
