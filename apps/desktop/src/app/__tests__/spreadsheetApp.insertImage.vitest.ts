@@ -5,6 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { pxToEmu } from "../../drawings/overlay";
+import { MAX_INSERT_IMAGE_BYTES } from "../../drawings/insertImageLimits.js";
+import * as ui from "../../extensions/ui.js";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -176,6 +178,48 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
 
     // Insert should also select the new drawing (used by overlay handles + split view).
     expect(String(app.getSelectedDrawingId())).toBe(String(obj.id));
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows a toast and skips oversized files when inserting an image from the local file picker", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    app.activateCell({ row: 3, col: 4 }, { scrollIntoView: false, focus: false });
+    app.insertImageFromLocalFile();
+
+    const input = root.querySelector<HTMLInputElement>('input[data-testid="insert-image-input"]');
+    expect(input).not.toBeNull();
+
+    const arrayBuffer = vi.fn(async () => {
+      throw new Error("should not read oversized files");
+    });
+    const oversizedFile = {
+      name: "big.png",
+      type: "image/png",
+      size: MAX_INSERT_IMAGE_BYTES + 1,
+      arrayBuffer,
+    } as any as File;
+
+    Object.defineProperty(input!, "files", { configurable: true, value: [oversizedFile] });
+    input!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(toastSpy).toHaveBeenCalledWith("Image too large (>10MB). Choose a smaller file.", "warning");
+
+    const doc: any = app.getDocument();
+    expect(doc.getSheetDrawings(sheetId)).toHaveLength(0);
 
     app.destroy();
     root.remove();
