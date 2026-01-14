@@ -456,6 +456,16 @@ const workbookCtx = await cm.buildWorkbookContextFromSpreadsheetApi({
   workbookId,
   query,
 
+  // Formula handling (SpreadsheetApi-backed indexing):
+  // By default, formula cells are indexed by their formula text only (e.g. `=SUM(A1:A10)`).
+  // Set this to true to also include cached computed values from `cell.value` when present.
+  //
+  // This is opt-in because many SpreadsheetApi backends do not evaluate formulas and because
+  // cached formula results can be an inference channel when dependencies are not traced.
+  includeFormulaValues: false,
+  // Snake_case alias for hosts that prefer it:
+  // include_formula_values: false,
+
   // Retrieval:
   topK: 8,
 
