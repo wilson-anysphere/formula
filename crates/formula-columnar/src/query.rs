@@ -631,6 +631,26 @@ fn eval_filter_string(
     }
 
     let dict = table.dictionary(col).ok_or(QueryError::MissingDictionary { col })?;
+    if let Some(stats) = table.stats(col) {
+        let rows = table.row_count();
+        let nulls = stats.null_count as usize;
+        if nulls == rows {
+            // Comparisons treat NULL as false, so this is always false when the column is entirely null.
+            return Ok(BitVec::with_len_all_false(rows));
+        }
+
+        // Quick reject using lexicographic min/max. If rhs is outside the observed range, it cannot
+        // be present in the dictionary.
+        if let (Some(Value::String(min)), Some(Value::String(max))) = (&stats.min, &stats.max) {
+            if rhs < min.as_ref() || rhs > max.as_ref() {
+                return Ok(match op {
+                    CmpOp::Eq => BitVec::with_len_all_false(rows),
+                    CmpOp::Ne => eval_filter_is_null(table, col, false)?,
+                    _ => BitVec::with_len_all_false(rows),
+                });
+            }
+        }
+    }
     let target = dict
         .iter()
         .enumerate()
