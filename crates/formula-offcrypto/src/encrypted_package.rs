@@ -197,6 +197,21 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     #[test]
+    fn encrypted_package_shorter_than_header_returns_truncated() {
+        let bytes = [0u8; 7];
+        let err = decrypt_encrypted_package(&bytes, |_idx, _ct, _pt| {
+            panic!("decryptor should not be invoked for truncated header");
+        })
+        .expect_err("expected truncated header");
+        assert_eq!(
+            err,
+            OffcryptoError::Truncated {
+                context: "EncryptedPackageHeader.original_size"
+            }
+        );
+    }
+
+    #[test]
     fn ciphertext_length_not_multiple_of_16_errors_before_invoking_decryptor() {
         // total_size=0, but provide a non-block-aligned ciphertext tail (15 bytes).
         let mut bytes = Vec::new();
