@@ -126,14 +126,41 @@ fn subtract_resolved_range(a: ResolvedRange, b: ResolvedRange) -> Vec<ResolvedRa
 ///
 /// Excel reference unions behave like set union: overlapping cells should only be visited once.
 /// The bytecode runtime represents unions as multi-range values, so we normalize them here by
-/// subtracting overlaps in input order.
-fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSheetRange> {
+/// subtracting overlaps in a deterministic order that matches the AST evaluator.
+fn multirange_unique_areas(r: &MultiRangeRef, grid: &dyn Grid, base: CellCoord) -> Vec<ResolvedSheetRange> {
     let mut out = Vec::new();
     let mut seen_by_sheet: HashMap<SheetId, Vec<ResolvedRange>> = HashMap::new();
 
-    for (area_idx, area) in r.areas.iter().enumerate() {
+    // Match `Evaluator::eval_arg`: ensure a stable ordering for deterministic behavior (and to
+    // align error precedence with the AST backend).
+    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = r
+        .areas
+        .iter()
+        .cloned()
+        .map(|area| {
+            let resolved = area.range.resolve(base);
+            (area, resolved)
+        })
+        .collect();
+    areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
+        match (&a_area.sheet, &b_area.sheet) {
+            (SheetId::Local(a_id), SheetId::Local(b_id)) => {
+                let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
+                let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
+                a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
+            }
+            (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
+            (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
+            (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
+        }
+            .then_with(|| a_range.row_start.cmp(&b_range.row_start))
+            .then_with(|| a_range.col_start.cmp(&b_range.col_start))
+            .then_with(|| a_range.row_end.cmp(&b_range.row_end))
+            .then_with(|| a_range.col_end.cmp(&b_range.col_end))
+    });
+
+    for (area_idx, (area, resolved)) in areas.into_iter().enumerate() {
         let sheet = area.sheet.clone();
-        let resolved = area.range.resolve(base);
 
         let seen = seen_by_sheet.entry(sheet.clone()).or_default();
 
@@ -4118,10 +4145,34 @@ fn and_multi_range(
     all_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
-    for area in range.areas.iter() {
-        if let Some(e) =
-            and_range_on_sheet(grid, &area.sheet, area.range.resolve(base), all_true, any)
-        {
+    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = range
+        .areas
+        .iter()
+        .cloned()
+        .map(|area| {
+            let resolved = area.range.resolve(base);
+            (area, resolved)
+        })
+        .collect();
+    areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
+        match (&a_area.sheet, &b_area.sheet) {
+            (SheetId::Local(a_id), SheetId::Local(b_id)) => {
+                let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
+                let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
+                a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
+            }
+            (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
+            (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
+            (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
+        }
+            .then_with(|| a_range.row_start.cmp(&b_range.row_start))
+            .then_with(|| a_range.col_start.cmp(&b_range.col_start))
+            .then_with(|| a_range.row_end.cmp(&b_range.row_end))
+            .then_with(|| a_range.col_end.cmp(&b_range.col_end))
+    });
+
+    for (area, resolved) in areas {
+        if let Some(e) = and_range_on_sheet(grid, &area.sheet, resolved, all_true, any) {
             return Some(e);
         }
     }
@@ -4232,10 +4283,34 @@ fn or_multi_range(
     any_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
-    for area in range.areas.iter() {
-        if let Some(e) =
-            or_range_on_sheet(grid, &area.sheet, area.range.resolve(base), any_true, any)
-        {
+    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = range
+        .areas
+        .iter()
+        .cloned()
+        .map(|area| {
+            let resolved = area.range.resolve(base);
+            (area, resolved)
+        })
+        .collect();
+    areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
+        match (&a_area.sheet, &b_area.sheet) {
+            (SheetId::Local(a_id), SheetId::Local(b_id)) => {
+                let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
+                let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
+                a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
+            }
+            (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
+            (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
+            (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
+        }
+            .then_with(|| a_range.row_start.cmp(&b_range.row_start))
+            .then_with(|| a_range.col_start.cmp(&b_range.col_start))
+            .then_with(|| a_range.row_end.cmp(&b_range.row_end))
+            .then_with(|| a_range.col_end.cmp(&b_range.col_end))
+    });
+
+    for (area, resolved) in areas {
+        if let Some(e) = or_range_on_sheet(grid, &area.sheet, resolved, any_true, any) {
             return Some(e);
         }
     }
@@ -5386,7 +5461,7 @@ fn xor_multi_range(
     let mut current_area_idx: Option<usize> = None;
     let mut best_error_in_area: Option<(i32, i32, ErrorKind)> = None;
 
-    for area in multirange_unique_areas(range, base) {
+    for area in multirange_unique_areas(range, grid, base) {
         if current_area_idx != Some(area.area_idx) {
             if let Some((_, _, err)) = best_error_in_area {
                 return Some(err);
@@ -5846,7 +5921,7 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match sum_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(v) => sum += v,
                         Err(e) => return Value::Error(e),
@@ -5969,7 +6044,7 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match sum_count_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok((s, c)) => {
                             if !saw_nan {
@@ -6104,7 +6179,7 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match min_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
                         Ok(None) => {}
@@ -6230,7 +6305,7 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match max_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.max(m))),
                         Ok(None) => {}
@@ -6297,7 +6372,7 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match count_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(c) => count += c,
                         Err(e) => return Value::Error(e),
@@ -6342,7 +6417,7 @@ fn fn_counta(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match counta_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(c) => total += c,
                         Err(e) => return Value::Error(e),
@@ -6381,7 +6456,7 @@ fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match countblank_range_on_sheet(grid, &area.sheet, area.range) {
                         Ok(c) => total += c,
                         Err(e) => return Value::Error(e),
@@ -6429,7 +6504,7 @@ fn fn_countif(
             },
             RangeArg::MultiRange(r) => {
                 let mut count = 0usize;
-                for area in multirange_unique_areas(r, base) {
+                for area in multirange_unique_areas(r, grid, base) {
                     match count_if_range_on_sheet(grid, &area.sheet, area.range, numeric) {
                         Ok(c) => count += c,
                         Err(e) => return Value::Error(e),
@@ -6449,7 +6524,7 @@ fn fn_countif(
         },
         RangeArg::MultiRange(r) => {
             let mut count = 0usize;
-            for area in multirange_unique_areas(r, base) {
+            for area in multirange_unique_areas(r, grid, base) {
                 match count_if_range_criteria_on_sheet(grid, &area.sheet, area.range, &criteria) {
                     Ok(c) => count += c,
                     Err(e) => return Value::Error(e),
