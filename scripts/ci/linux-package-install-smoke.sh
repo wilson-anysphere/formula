@@ -45,7 +45,7 @@ require_docker() {
   echo "::group::Docker version"
   docker version
   if [[ -n "${DOCKER_PLATFORM:-}" ]]; then
-    echo "Docker platform override: ${DOCKER_PLATFORM}"
+    echo "Docker platform: ${DOCKER_PLATFORM}"
   fi
   echo "::endgroup::"
 }
