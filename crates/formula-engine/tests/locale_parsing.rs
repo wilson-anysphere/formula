@@ -128,7 +128,9 @@ fn de_de_function_translation_table_covers_all_registered_functions() {
         let mut parts = raw_line.split('\t');
         let canon_name = parts.next().unwrap_or("");
         let loc_name = parts.next().unwrap_or_else(|| {
-            panic!("invalid function translation line (expected TSV) at line {line_no}: {raw_line:?}")
+            panic!(
+                "invalid function translation line (expected TSV) at line {line_no}: {raw_line:?}"
+            )
         });
         if parts.next().is_some() {
             panic!(
@@ -681,7 +683,9 @@ fn de_de_translation_table_covers_function_catalog() {
             panic!("invalid TSV line in de-DE.tsv (expected Canonical<TAB>Localized) at line {line_no}: {raw_line:?}")
         });
         if parts.next().is_some() {
-            panic!("invalid TSV line in de-DE.tsv (too many columns) at line {line_no}: {raw_line:?}");
+            panic!(
+                "invalid TSV line in de-DE.tsv (too many columns) at line {line_no}: {raw_line:?}"
+            );
         }
         let canon = canon.trim();
         assert!(
@@ -726,7 +730,9 @@ fn fr_fr_translation_table_covers_function_catalog() {
             panic!("invalid TSV line in fr-FR.tsv (expected Canonical<TAB>Localized) at line {line_no}: {raw_line:?}")
         });
         if parts.next().is_some() {
-            panic!("invalid TSV line in fr-FR.tsv (too many columns) at line {line_no}: {raw_line:?}");
+            panic!(
+                "invalid TSV line in fr-FR.tsv (too many columns) at line {line_no}: {raw_line:?}"
+            );
         }
         let canon = canon.trim();
         assert!(
@@ -771,7 +777,9 @@ fn es_es_translation_table_covers_function_catalog() {
             panic!("invalid TSV line in es-ES.tsv (expected Canonical<TAB>Localized) at line {line_no}: {raw_line:?}")
         });
         if parts.next().is_some() {
-            panic!("invalid TSV line in es-ES.tsv (too many columns) at line {line_no}: {raw_line:?}");
+            panic!(
+                "invalid TSV line in es-ES.tsv (too many columns) at line {line_no}: {raw_line:?}"
+            );
         }
         let canon = canon.trim();
         assert!(

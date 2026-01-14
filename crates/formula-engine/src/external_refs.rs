@@ -98,8 +98,7 @@ mod tests {
     #[test]
     fn parse_external_key_uses_last_closing_bracket_for_workbook_id() {
         // Workbook ids can contain `[` / `]` in a path prefix, so we must locate the *last* `]`.
-        let (workbook, sheet) =
-            parse_external_key("[C:\\[foo]\\Book.xlsx]Sheet1").expect("parse");
+        let (workbook, sheet) = parse_external_key("[C:\\[foo]\\Book.xlsx]Sheet1").expect("parse");
         assert_eq!(workbook, "C:\\[foo]\\Book.xlsx");
         assert_eq!(sheet, "Sheet1");
     }

@@ -19159,7 +19159,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine
@@ -19192,7 +19195,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine
@@ -19225,7 +19231,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine
@@ -19258,7 +19267,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine
