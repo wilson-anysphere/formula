@@ -117,6 +117,7 @@ describe("engine.worker pivot RPC normalization", () => {
   });
 
   it("normalizes calculatePivot writes by converting undefined values to null", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookPivot.mjs", import.meta.url).href;
     const { port, dispose } = await setupWorker({ wasmModuleUrl });
 
@@ -142,8 +143,39 @@ describe("engine.worker pivot RPC normalization", () => {
       const d1 = (payload.writes as any[]).find((c) => c.sheet === "Sheet1" && c.address === "D1");
       expect(d1).toBeTruthy();
       expect(d1.value).toBeNull();
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([["calculatePivot", "Sheet1"]]);
     } finally {
       dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
+  it("trims sheet names for pivot RPCs", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookPivot.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "calculatePivot",
+        params: {
+          sheet: "  Sheet1  ",
+          sourceRangeA1: "A1:B2",
+          destinationTopLeftA1: "D1",
+          config: {},
+        },
+      });
+
+      expect(resp.ok).toBe(true);
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([["calculatePivot", "Sheet1"]]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
     }
   });
 });

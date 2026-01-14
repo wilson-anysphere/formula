@@ -7,6 +7,13 @@ export default async function init() {
   // No-op.
 }
 
+function recordCall(name, ...args) {
+  const calls = globalThis.__ENGINE_WORKER_TEST_CALLS__;
+  if (Array.isArray(calls)) {
+    calls.push([name, ...args]);
+  }
+}
+
 export class WasmWorkbook {
   constructor() {}
 
@@ -29,7 +36,8 @@ export class WasmWorkbook {
     return [];
   }
 
-  calculatePivot(_sheet, _sourceRangeA1, _destinationTopLeftA1, _config) {
+  calculatePivot(sheet, _sourceRangeA1, _destinationTopLeftA1, _config) {
+    recordCall("calculatePivot", sheet);
     return {
       writes: [
         // Simulate wasm-bindgen `Option<T>` -> `undefined` mapping for blanks.
@@ -39,4 +47,3 @@ export class WasmWorkbook {
     };
   }
 }
-

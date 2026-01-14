@@ -105,6 +105,10 @@ export class WasmWorkbook {
     recordCall("setColHidden", sheet, col, hidden);
   }
 
+  setColFormatRuns(sheet, col, runs) {
+    recordCall("setColFormatRuns", sheet, col, runs);
+  }
+
   internStyle(style) {
     recordCall("internStyle", style);
     return 42;

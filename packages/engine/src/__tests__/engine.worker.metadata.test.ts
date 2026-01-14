@@ -529,6 +529,40 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("trims sheet names for setColFormatRuns", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setColFormatRuns",
+        params: { sheet: "  Sheet2  ", col: 2, runs: [{ startRow: 0, endRowExclusive: 1, styleId: 7 }] }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setColFormatRuns",
+        params: { sheet: "   ", col: 3, runs: [] }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setColFormatRuns", "Sheet2", 2, [{ startRow: 0, endRowExclusive: 1, styleId: 7 }]],
+        ["setColFormatRuns", "Sheet1", 3, []]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("treats blank sheet names as missing for sheet-optional cell edit RPCs", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
