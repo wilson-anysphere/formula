@@ -19,11 +19,19 @@ test("findMatchingBracketEnd handles escaped closing brackets inside external wo
   assert.equal(end, src.indexOf("]Sheet1") + 1);
 });
 
+test("findMatchingBracketEnd treats external workbook name refs as valid workbook prefixes", () => {
+  // Workbook-scoped external defined names do not use `!`, but the workbook prefix should still be
+  // treated as a complete bracket segment so callers can skip it while scanning.
+  const src = "[A1[Name.xlsx]MyName";
+  const end = findMatchingBracketEnd(src, 0, src.length);
+  assert.equal(end, src.indexOf("]MyName") + 1);
+});
+
 test("findMatchingBracketEnd does not misclassify incomplete structured references as workbook prefixes", () => {
-  // `[[A]B` has a `[` that would require a second closing bracket in structured-ref syntax, but
-  // the prefix ends before that. The matcher should return null rather than matching the internal
-  // `]` as if it were a workbook prefix.
-  const src = "[[A]B";
+  // `[[A],B` has a nested `[` that would require another closing bracket in structured-ref syntax,
+  // but the segment ends before that. The matcher should return null rather than matching the
+  // internal `]` as if it were a workbook prefix.
+  const src = "[[A],B";
   const end = findMatchingBracketEnd(src, 0, src.length);
   assert.equal(end, null);
 });
