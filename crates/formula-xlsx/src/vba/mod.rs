@@ -476,9 +476,13 @@ fn get_part<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a 
     parts
         .get(name)
         .map(Vec::as_slice)
-        .or_else(|| name.strip_prefix('/').and_then(|name| parts.get(name).map(Vec::as_slice)))
         .or_else(|| {
-            if name.starts_with('/') {
+            name.strip_prefix('/')
+                .or_else(|| name.strip_prefix('\\'))
+                .and_then(|name| parts.get(name).map(Vec::as_slice))
+        })
+        .or_else(|| {
+            if name.starts_with('/') || name.starts_with('\\') {
                 return None;
             }
             // Some producers incorrectly store OPC part names with a leading `/` in the ZIP.
@@ -488,4 +492,24 @@ fn get_part<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a 
             with_slash.push_str(name);
             parts.get(with_slash.as_str()).map(Vec::as_slice)
         })
+        .or_else(|| {
+            parts
+                .iter()
+                .find(|(key, _)| crate::zip_util::zip_part_names_equivalent(key.as_str(), name))
+                .map(|(_, bytes)| bytes.as_slice())
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_part_tolerates_noncanonical_zip_entries() {
+        let mut parts = BTreeMap::new();
+        parts.insert("XL\\VBAPROJECT.BIN".to_string(), b"dummy".to_vec());
+
+        let found = get_part(&parts, "xl/vbaProject.bin").expect("part should be found");
+        assert_eq!(found, b"dummy");
+    }
 }

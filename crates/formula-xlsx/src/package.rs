@@ -1030,8 +1030,9 @@ impl XlsxPackage {
     }
 
     pub fn write_to<W: Write>(&self, mut w: W) -> Result<(), XlsxError> {
+        let has_vba_project = self.vba_project_bin().is_some();
         let mut parts = self.parts.clone();
-        if parts.contains_key("xl/vbaProject.bin") || parts.contains_key("/xl/vbaProject.bin") {
+        if has_vba_project {
             crate::macro_repair::ensure_xlsm_content_types(&mut parts)?;
             crate::macro_repair::ensure_workbook_rels_has_vba(&mut parts)?;
             crate::macro_repair::ensure_vba_project_rels_has_signature(&mut parts)?;

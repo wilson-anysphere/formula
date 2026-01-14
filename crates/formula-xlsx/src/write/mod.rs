@@ -353,7 +353,10 @@ pub fn write_to_vec_with_recalc_policy(
         apply_recalc_policy_to_parts(&mut parts, recalc_policy)?;
     }
 
-    if parts.contains_key("xl/vbaProject.bin") || parts.contains_key("/xl/vbaProject.bin") {
+    if parts
+        .keys()
+        .any(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), "xl/vbaProject.bin"))
+    {
         crate::macro_repair::ensure_xlsm_content_types(&mut parts)?;
         crate::macro_repair::ensure_workbook_rels_has_vba(&mut parts)?;
         crate::macro_repair::ensure_vba_project_rels_has_signature(&mut parts)?;

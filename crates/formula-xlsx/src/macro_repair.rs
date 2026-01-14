@@ -10,17 +10,24 @@ fn select_part_key(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<Stri
     if parts.contains_key(name) {
         return Some(name.to_string());
     }
-    if let Some(stripped) = name.strip_prefix('/') {
+
+    if let Some(stripped) = name.strip_prefix('/').or_else(|| name.strip_prefix('\\')) {
         if parts.contains_key(stripped) {
             return Some(stripped.to_string());
         }
     } else {
+        // Some producers incorrectly store OPC part names with a leading `/` in the ZIP.
+        // Preserve exact names for round-trip, but make lookups resilient.
         let with_slash = format!("/{name}");
         if parts.contains_key(&with_slash) {
             return Some(with_slash);
         }
     }
-    None
+
+    parts
+        .keys()
+        .find(|key| crate::zip_util::zip_part_names_equivalent(key.as_str(), name))
+        .cloned()
 }
 
 fn part_exists(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> bool {
@@ -129,9 +136,7 @@ pub(crate) fn ensure_xlsm_content_types(
     }
 
     fn part_name_matches(candidate: &str, expected: &str) -> bool {
-        let candidate = candidate.trim().strip_prefix('/').unwrap_or(candidate.trim());
-        let expected = expected.trim().strip_prefix('/').unwrap_or(expected.trim());
-        candidate == expected
+        crate::zip_util::zip_part_names_equivalent(candidate.trim(), expected.trim())
     }
 
     fn handle_override(
@@ -440,7 +445,10 @@ pub(crate) fn ensure_workbook_rels_has_vba(
             .as_deref()
             .is_some_and(|t| t.trim() == VBA_REL_TYPE);
         if is_vba {
-            if target.as_deref().is_some_and(|t| t.trim() == VBA_TARGET) {
+            if target
+                .as_deref()
+                .is_some_and(|t| crate::zip_util::zip_part_names_equivalent(t.trim(), VBA_TARGET))
+            {
                 *has_vba_rel = true;
                 if is_start {
                     writer.write_event(Event::Start(e))?;
@@ -581,7 +589,10 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
 
     let rels_key = select_part_key(parts, rels_name).unwrap_or_else(|| {
         // Prefer matching the leading-`/` style used by `vbaProject.bin` when synthesizing.
-        if parts.contains_key("/xl/vbaProject.bin") && !parts.contains_key("xl/vbaProject.bin") {
+        if select_part_key(parts, "xl/vbaProject.bin")
+            .as_deref()
+            .is_some_and(|key| key.starts_with('/') || key.starts_with('\\'))
+        {
             format!("/{rels_name}")
         } else {
             rels_name.to_string()
@@ -632,7 +643,10 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
                     .as_deref()
                     .is_some_and(|t| t.trim() == REL_TYPE);
                 if is_signature {
-                    if target.as_deref().is_some_and(|t| t.trim() == TARGET) {
+                    if target
+                        .as_deref()
+                        .is_some_and(|t| crate::zip_util::zip_part_names_equivalent(t.trim(), TARGET))
+                    {
                         *has_signature_rel = true;
                         if is_start {
                             writer.write_event(Event::Start(e))?;
