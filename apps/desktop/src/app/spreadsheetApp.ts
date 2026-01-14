@@ -1160,6 +1160,8 @@ export class SpreadsheetApp {
   private readOnlyRole: string | null = null;
   private collabPermissionsUnsubscribe: (() => void) | null = null;
   private collabBinder: { destroy: () => void; rehydrate?: () => void; whenIdle?: () => Promise<void> } | null = null;
+  private collabBinderInitPromise: Promise<{ destroy: () => void; rehydrate?: () => void; whenIdle?: () => Promise<void> }> | null =
+    null;
   private collabSelectionUnsubscribe: (() => void) | null = null;
   private collabPresenceUnsubscribe: (() => void) | null = null;
   private conflictUi: ConflictUiController | null = null;
@@ -1600,7 +1602,7 @@ export class SpreadsheetApp {
         },
       });
 
-      void (async () => {
+      const binderPromise = (async () => {
         // Ensure any previously-imported encryption keys are loaded into the in-memory
         // cache before the binder reads encrypted cells.
         await encryptionKeyStoreHydrated;
@@ -1617,9 +1619,13 @@ export class SpreadsheetApp {
           // Opt into binder write semantics required for reliable causal conflict detection.
           // (E.g. represent clears as explicit `formula=null` markers so FormulaConflictMonitor
           // can reason about delete-vs-overwrite concurrency deterministically.)
-          formulaConflictsMode: "formula+value",
-        });
-      })()
+           formulaConflictsMode: "formula+value",
+         });
+      })();
+
+      this.collabBinderInitPromise = binderPromise;
+
+      void binderPromise
         .then((binder: any) => {
           if (this.disposed) {
             binder.destroy();
@@ -1629,6 +1635,11 @@ export class SpreadsheetApp {
         })
         .catch((err: any) => {
           console.error("Failed to bind collab session to DocumentController", err);
+        })
+        .finally(() => {
+          if (this.collabBinderInitPromise === binderPromise) {
+            this.collabBinderInitPromise = null;
+          }
         });
     } else {
       this.commentsDoc = new Y.Doc();
@@ -3349,6 +3360,7 @@ export class SpreadsheetApp {
     this.collabPresenceUnsubscribe = null;
     this.collabBinder?.destroy();
     this.collabBinder = null;
+    this.collabBinderInitPromise = null;
     // Tests sometimes inject a minimal collab session stub (e.g. `{ presence }`)
     // to exercise presence behavior without spinning up a provider. Use optional
     // method calls so teardown remains resilient.
@@ -4393,6 +4405,19 @@ export class SpreadsheetApp {
    * the shared Yjs document (encryption can make binder writes async).
    */
   async whenCollabBinderIdle(): Promise<void> {
+    // If the binder is still being initialized (async import, encryption key store hydration),
+    // wait for it so we don't flush local persistence before DocumentController edits have
+    // started propagating into Yjs at all.
+    const pending = this.collabBinderInitPromise;
+    if (pending) {
+      try {
+        await pending;
+      } catch {
+        // ignore
+      }
+      // Allow the binder promise `.then(...)` to install `this.collabBinder`.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+    }
     const binder = this.collabBinder;
     if (!binder || typeof binder.whenIdle !== "function") return;
     try {
