@@ -586,6 +586,34 @@ impl UnmatchedFactRows {
             }
         }
     }
+
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(usize) -> bool) {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => rows.retain(|row| keep(*row)),
+            UnmatchedFactRows::Dense { bits, len, count } => {
+                let mut new_count = 0usize;
+                for (word_idx, word) in bits.iter_mut().enumerate() {
+                    let mut w = *word;
+                    while w != 0 {
+                        let tz = w.trailing_zeros() as usize;
+                        let row = word_idx * 64 + tz;
+                        if row >= *len {
+                            break;
+                        }
+
+                        if keep(row) {
+                            new_count += 1;
+                        } else {
+                            *word &= !(1u64 << tz);
+                        }
+
+                        w &= w - 1;
+                    }
+                }
+                *count = new_count;
+            }
+        }
+    }
 }
 
 struct UnmatchedFactRowsBuilder {
@@ -956,19 +984,19 @@ impl DataModel {
             // matches the inserted key so they no longer belong to the virtual blank member.
             if !key_for_updates.is_blank() {
                 let from_table = self.relationships[rel_idx].rel.from_table.clone();
-                let from_idx = self.relationships[rel_idx].from_idx;
-                if let Some(unmatched) = self.relationships[rel_idx].unmatched_fact_rows.as_mut() {
-                    if let Some(from_table_ref) = self.tables.get(&from_table) {
-                        unmatched.retain(|&row| {
-                            let v = from_table_ref
-                                .value_by_idx(row, from_idx)
-                                .unwrap_or(Value::Blank);
-                            v.is_blank() || v != key_for_updates
-                        });
+                    let from_idx = self.relationships[rel_idx].from_idx;
+                    if let Some(unmatched) = self.relationships[rel_idx].unmatched_fact_rows.as_mut() {
+                        if let Some(from_table_ref) = self.tables.get(&from_table) {
+                            unmatched.retain(|row| {
+                                let v = from_table_ref
+                                    .value_by_idx(row, from_idx)
+                                    .unwrap_or(Value::Blank);
+                                v.is_blank() || v != key_for_updates
+                            });
+                        }
                     }
                 }
             }
-        }
 
         for rel_info in &mut self.relationships {
             let rel = &rel_info.rel;
