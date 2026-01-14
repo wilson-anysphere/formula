@@ -29,7 +29,7 @@ jobs:
         run: bash scripts/ci/check-rust-toolchain-pins.sh
       - name: "Guard: release workflow runner images are pinned (no *-latest)"
         run: bash scripts/ci/check-gha-runner-pins.sh
-      - name: "Guard: workflow step names with ':' must be quoted"
+      - name: "Guard: workflow name fields with ':' must be quoted"
         run: bash scripts/ci/check-workflow-step-name-colons.sh
       - name: "Guard: Node version pins match release workflow"
         run: bash scripts/ci/check-node-version-pins.sh

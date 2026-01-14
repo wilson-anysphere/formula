@@ -20,12 +20,15 @@ cd "$repo_root"
 
 fail=0
 
-# Find `- name:` step titles that contain a colon and are not quoted.
+# Find workflow `name:` fields (workflow name, job name, step name) that contain an unquoted colon.
 #
-# Matches:
+# Matches (BAD):
+#   name: Guard: Foo
 #   - name: Guard: Foo
 #
 # Does not match (good):
+#   name: "Guard: Foo"
+#   name: 'Guard: Foo'
 #   - name: "Guard: Foo"
 #   - name: 'Guard: Foo'
 #
@@ -34,7 +37,7 @@ fail=0
 #
 # Only flag colons that would break YAML parsing for plain scalars: `:` followed by whitespace (or end-of-line).
 # Colons that are part of a token (e.g. `node:test`) are valid YAML and should not be flagged.
-pattern='^[[:space:]]*-[[:space:]]+name:[[:space:]]+[^"'"'"'].*:([[:space:]]|$)'
+pattern='^[[:space:]]*(-[[:space:]]+)?name:[[:space:]]+[^"'"'"'].*:([[:space:]]|$)'
 
 # Use `git grep` so we don't depend on ripgrep being installed in CI images.
 # `git grep` exits:
