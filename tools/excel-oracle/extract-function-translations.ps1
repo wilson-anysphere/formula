@@ -150,9 +150,11 @@ function Build-MinimalFormula {
   }
 
   # ISOMITTED() is intended to be used inside LAMBDA to test whether an optional
-  # argument was omitted; `ISOMITTED(1)` may be rejected by Excel.
+  # argument was omitted. Some inputs (e.g. `ISOMITTED(1)`) may be rejected by
+  # Excel, but using an identifier-like name token keeps the formula valid for
+  # parsing/translation even outside LAMBDA.
   if ($FunctionName -eq "ISOMITTED") {
-    return "=LAMBDA([y],ISOMITTED(y))()"
+    return "=ISOMITTED(y)"
   }
 
   if ($MinArgs -le 0) {
