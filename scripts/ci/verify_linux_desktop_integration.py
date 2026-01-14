@@ -442,12 +442,21 @@ def main() -> int:
         required=True,
         help="Path to extracted Linux package root (dpkg-deb -x output directory or rpm2cpio output directory)",
     )
-    default_tauri_config = os.environ.get("FORMULA_TAURI_CONF_PATH") or "apps/desktop/src-tauri/tauri.conf.json"
+
+    # Resolve the default tauri.conf.json path relative to the repo root (based on this script's
+    # location) so callers can run the verifier from arbitrary working directories.
+    # If FORMULA_TAURI_CONF_PATH is absolute, keep it as-is.
+    repo_root = Path(__file__).resolve().parents[2]
+    default_tauri_config_raw = os.environ.get("FORMULA_TAURI_CONF_PATH") or "apps/desktop/src-tauri/tauri.conf.json"
+    default_tauri_config_path = Path(default_tauri_config_raw)
+    if not default_tauri_config_path.is_absolute():
+        default_tauri_config_path = repo_root / default_tauri_config_path
+
     parser.add_argument(
         "--tauri-config",
-        default=Path(default_tauri_config),
+        default=default_tauri_config_path,
         type=Path,
-        help="Path to tauri.conf.json (source of truth for expected file associations)",
+        help="Path to tauri.conf.json (source of truth for expected file associations; default respects FORMULA_TAURI_CONF_PATH)",
     )
     parser.add_argument(
         "--expected-main-binary",
