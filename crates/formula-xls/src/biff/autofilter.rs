@@ -150,8 +150,7 @@ pub(crate) fn parse_biff_filter_database_ranges(
 
         match record.record_id {
             RECORD_SUPBOOK => {
-                if internal_supbook_index.is_none()
-                    && supbook_record_is_internal(record.data.as_ref(), codepage)
+                if internal_supbook_index.is_none() && supbook_record_is_internal(&record, codepage)
                 {
                     internal_supbook_index = Some(supbook_count);
                 }
@@ -168,7 +167,7 @@ pub(crate) fn parse_biff_filter_database_ranges(
                 }
             }
             RECORD_NAME => {
-                match parse_name_record_best_effort(record.data.as_ref(), biff, codepage) {
+                match parse_name_record_best_effort(&record, biff, codepage) {
                     Ok(Some(parsed)) => {
                         if is_filter_database_name(&parsed.name) {
                             filter_database_names.push(FilterDatabaseName {
@@ -247,7 +246,8 @@ fn is_filter_database_name(name: &str) -> bool {
         || name.eq_ignore_ascii_case(FILTER_DATABASE_NAME_ALIAS_TRUNCATED)
 }
 
-fn supbook_record_is_internal(data: &[u8], codepage: u16) -> bool {
+fn supbook_record_is_internal(record: &records::LogicalBiffRecord<'_>, codepage: u16) -> bool {
+    let data = record.data.as_ref();
     // [MS-XLS 2.4.271] describes a special "internal references" SUPBOOK record.
     //
     // Different producers appear to encode the "internal workbook" marker differently. Prefer
@@ -265,7 +265,16 @@ fn supbook_record_is_internal(data: &[u8], codepage: u16) -> bool {
 
     // Best-effort: detect the internal tag in `virtPath` (an XLUnicodeString after `ctab`).
     if data.len() >= 5 {
-        if let Ok((s, _)) = strings::parse_biff8_unicode_string(&data[2..], codepage) {
+        let parsed = if record.is_continued() {
+            let fragments: Vec<&[u8]> = record.fragments().collect();
+            strings::parse_biff8_unicode_string_continued(&fragments, 2, codepage).ok()
+        } else {
+            strings::parse_biff8_unicode_string(&data[2..], codepage)
+                .ok()
+                .map(|(s, _)| s)
+        };
+
+        if let Some(s) = parsed {
             if matches!(s.as_str(), "\u{1}" | "\0" | "\u{1}\u{4}") {
                 return true;
             }
@@ -283,35 +292,34 @@ struct ParsedNameRecord {
 }
 
 fn parse_name_record_best_effort(
-    data: &[u8],
+    record: &records::LogicalBiffRecord<'_>,
     biff: BiffVersion,
     codepage: u16,
 ) -> Result<Option<ParsedNameRecord>, String> {
+    let fragments: Vec<&[u8]> = record.fragments().collect();
+    let mut cursor = FragmentCursor::new(&fragments, 0, 0);
+
     // NAME [MS-XLS 2.4.150]
-    if data.len() < 14 {
-        return Err("NAME record too short".to_string());
-    }
+    let grbit = cursor.read_u16_le()?;
+    let _ch_key = cursor.read_u8()?;
+    let cch = cursor.read_u8()? as usize;
+    let cce = cursor.read_u16_le()? as usize;
+    let _ixals = cursor.read_u16_le()?;
+    let itab = cursor.read_u16_le()?;
 
-    let grbit = u16::from_le_bytes([data[0], data[1]]);
-    let cch = data[3] as usize;
-    let cce = u16::from_le_bytes([data[4], data[5]]) as usize;
-    let itab = u16::from_le_bytes([data[8], data[9]]);
-
-    let cch_cust_menu = data[10] as usize;
-    let cch_description = data[11] as usize;
-    let cch_help_topic = data[12] as usize;
-    let cch_status_text = data[13] as usize;
-
-    let mut pos = 14usize;
+    let cch_cust_menu = cursor.read_u8()? as usize;
+    let cch_description = cursor.read_u8()? as usize;
+    let cch_help_topic = cursor.read_u8()? as usize;
+    let cch_status_text = cursor.read_u8()? as usize;
 
     let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
 
     let mut name = if is_builtin {
         // Built-in name: `cch` is usually 1 and the name field is a 1-byte built-in id.
-        let code = *data
-            .get(pos)
-            .ok_or_else(|| "truncated built-in NAME".to_string())?;
-        pos += 1;
+        let code = cursor.read_u8()?;
+        if cch > 1 {
+            cursor.skip_bytes(cch - 1)?;
+        }
         match code {
             BUILTIN_NAME_FILTER_DATABASE => XLNM_FILTER_DATABASE.to_string(),
             _ => {
@@ -322,19 +330,10 @@ fn parse_name_record_best_effort(
     } else {
         match biff {
             BiffVersion::Biff5 => {
-                let bytes = data
-                    .get(pos..pos + cch)
-                    .ok_or_else(|| "truncated NAME string".to_string())?;
-                pos += cch;
-                strings::decode_ansi(codepage, bytes)
+                let bytes = cursor.read_bytes(cch)?;
+                strings::decode_ansi(codepage, &bytes)
             }
-            BiffVersion::Biff8 => {
-                let (s, consumed) = parse_biff8_unicode_string_no_cch(&data[pos..], cch, codepage)?;
-                pos = pos
-                    .checked_add(consumed)
-                    .ok_or_else(|| "NAME offset overflow".to_string())?;
-                s
-            }
+            BiffVersion::Biff8 => cursor.read_biff8_unicode_string_no_cch(cch, codepage)?,
         }
     };
 
@@ -344,18 +343,16 @@ fn parse_name_record_best_effort(
         name.retain(|ch| ch != '\0');
     }
 
-    let rest = data.get(pos..).unwrap_or_default();
-
     // The on-disk NAME record layout has evolved, and different producers appear to place the
     // optional strings either before or after the formula token stream. For our purposes (built-in
     // FilterDatabase), those strings are typically empty; still, be defensive and accept both
     // layouts.
     let try_layout = |strings_first: bool| -> Result<Option<Vec<u8>>, String> {
-        let mut cursor = rest;
+        let mut cursor = cursor.clone();
 
         if strings_first {
-            cursor = skip_name_optional_strings(
-                cursor,
+            skip_name_optional_strings(
+                &mut cursor,
                 biff,
                 codepage,
                 cch_cust_menu,
@@ -365,15 +362,14 @@ fn parse_name_record_best_effort(
             )?;
         }
 
-        if cursor.len() < cce {
+        if cursor.remaining_in_record() < cce {
             return Ok(None);
         }
-        let rgce = cursor[..cce].to_vec();
-        cursor = &cursor[cce..];
+        let rgce = cursor.read_bytes(cce)?;
 
         if !strings_first {
             let _ = skip_name_optional_strings(
-                cursor,
+                &mut cursor,
                 biff,
                 codepage,
                 cch_cust_menu,
@@ -393,15 +389,15 @@ fn parse_name_record_best_effort(
     Ok(Some(ParsedNameRecord { name, itab, rgce }))
 }
 
-fn skip_name_optional_strings<'a>(
-    mut input: &'a [u8],
+fn skip_name_optional_strings(
+    cursor: &mut FragmentCursor<'_>,
     biff: BiffVersion,
     codepage: u16,
     cch_cust_menu: usize,
     cch_description: usize,
     cch_help_topic: usize,
     cch_status_text: usize,
-) -> Result<&'a [u8], String> {
+) -> Result<(), String> {
     for &cch in &[
         cch_cust_menu,
         cch_description,
@@ -413,92 +409,248 @@ fn skip_name_optional_strings<'a>(
         }
         match biff {
             BiffVersion::Biff5 => {
-                input = input
-                    .get(cch..)
-                    .ok_or_else(|| "truncated NAME optional string".to_string())?;
+                cursor.skip_bytes(cch)?;
             }
             BiffVersion::Biff8 => {
-                let (_, consumed) = parse_biff8_unicode_string_no_cch(input, cch, codepage)?;
-                input = input
-                    .get(consumed..)
-                    .ok_or_else(|| "truncated NAME optional string".to_string())?;
+                let _ = cursor.read_biff8_unicode_string_no_cch(cch, codepage)?;
             }
         }
     }
-    Ok(input)
+    Ok(())
 }
 
-fn parse_biff8_unicode_string_no_cch(
-    input: &[u8],
-    cch: usize,
-    codepage: u16,
-) -> Result<(String, usize), String> {
-    if input.is_empty() {
-        return Err("unexpected end of string".to_string());
+#[derive(Debug, Clone)]
+struct FragmentCursor<'a> {
+    fragments: &'a [&'a [u8]],
+    frag_idx: usize,
+    offset: usize,
+}
+
+impl<'a> FragmentCursor<'a> {
+    fn new(fragments: &'a [&'a [u8]], frag_idx: usize, offset: usize) -> Self {
+        Self {
+            fragments,
+            frag_idx,
+            offset,
+        }
     }
-    let flags = input[0];
-    let mut offset = 1usize;
 
-    let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
-        if input.len() < offset + 2 {
-            return Err("unexpected end of string".to_string());
-        }
-        let runs = u16::from_le_bytes([input[offset], input[offset + 1]]) as usize;
-        offset += 2;
-        runs
-    } else {
-        0
-    };
-
-    let ext_size = if flags & STR_FLAG_EXT != 0 {
-        if input.len() < offset + 4 {
-            return Err("unexpected end of string".to_string());
-        }
-        let size = u32::from_le_bytes([
-            input[offset],
-            input[offset + 1],
-            input[offset + 2],
-            input[offset + 3],
-        ]) as usize;
-        offset += 4;
-        size
-    } else {
-        0
-    };
-
-    let is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
-    let char_bytes = if is_unicode {
-        cch.checked_mul(2)
-            .ok_or_else(|| "string length overflow".to_string())?
-    } else {
-        cch
-    };
-
-    let chars = input
-        .get(offset..offset + char_bytes)
-        .ok_or_else(|| "unexpected end of string".to_string())?;
-    offset += char_bytes;
-
-    let value = if is_unicode {
-        let mut u16s = Vec::with_capacity(cch);
-        for chunk in chars.chunks_exact(2) {
-            u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-        }
-        String::from_utf16_lossy(&u16s)
-    } else {
-        strings::decode_ansi(codepage, chars)
-    };
-
-    let richtext_bytes = richtext_runs
-        .checked_mul(4)
-        .ok_or_else(|| "rich text run count overflow".to_string())?;
-
-    if input.len() < offset + richtext_bytes + ext_size {
-        return Err("unexpected end of string".to_string());
+    fn remaining_in_fragment(&self) -> usize {
+        self.fragments
+            .get(self.frag_idx)
+            .map(|f| f.len().saturating_sub(self.offset))
+            .unwrap_or(0)
     }
-    offset += richtext_bytes + ext_size;
 
-    Ok((value, offset))
+    fn remaining_in_record(&self) -> usize {
+        let mut remaining = self.remaining_in_fragment();
+        for frag in self.fragments.iter().skip(self.frag_idx.saturating_add(1)) {
+            remaining = remaining.saturating_add(frag.len());
+        }
+        remaining
+    }
+
+    fn advance_fragment(&mut self) -> Result<(), String> {
+        self.frag_idx = self
+            .frag_idx
+            .checked_add(1)
+            .ok_or_else(|| "fragment index overflow".to_string())?;
+        self.offset = 0;
+        if self.frag_idx >= self.fragments.len() {
+            return Err("unexpected end of record".to_string());
+        }
+        Ok(())
+    }
+
+    fn read_u8(&mut self) -> Result<u8, String> {
+        loop {
+            let frag = self
+                .fragments
+                .get(self.frag_idx)
+                .ok_or_else(|| "unexpected end of record".to_string())?;
+            if self.offset < frag.len() {
+                let b = frag[self.offset];
+                self.offset += 1;
+                return Ok(b);
+            }
+            self.advance_fragment()?;
+        }
+    }
+
+    fn read_u16_le(&mut self) -> Result<u16, String> {
+        let lo = self.read_u8()?;
+        let hi = self.read_u8()?;
+        Ok(u16::from_le_bytes([lo, hi]))
+    }
+
+    fn read_exact_from_current(&mut self, n: usize) -> Result<&'a [u8], String> {
+        let frag = self
+            .fragments
+            .get(self.frag_idx)
+            .ok_or_else(|| "unexpected end of record".to_string())?;
+        let end = self
+            .offset
+            .checked_add(n)
+            .ok_or_else(|| "offset overflow".to_string())?;
+        let out = frag
+            .get(self.offset..end)
+            .ok_or_else(|| "unexpected end of record".to_string())?;
+        self.offset = end;
+        Ok(out)
+    }
+
+    fn read_bytes(&mut self, n: usize) -> Result<Vec<u8>, String> {
+        let mut out = Vec::with_capacity(n);
+        let mut remaining = n;
+        while remaining > 0 {
+            let available = self.remaining_in_fragment();
+            if available == 0 {
+                self.advance_fragment()?;
+                continue;
+            }
+            let take = remaining.min(available);
+            let bytes = self.read_exact_from_current(take)?;
+            out.extend_from_slice(bytes);
+            remaining -= take;
+        }
+        Ok(out)
+    }
+
+    fn skip_bytes(&mut self, mut n: usize) -> Result<(), String> {
+        while n > 0 {
+            let available = self.remaining_in_fragment();
+            if available == 0 {
+                self.advance_fragment()?;
+                continue;
+            }
+            let take = n.min(available);
+            self.offset += take;
+            n -= take;
+        }
+        Ok(())
+    }
+
+    fn advance_fragment_in_biff8_string(&mut self, is_unicode: &mut bool) -> Result<(), String> {
+        self.advance_fragment()?;
+        // When a BIFF8 string spans a CONTINUE boundary, Excel inserts a 1-byte option flags prefix
+        // at the start of the continued fragment. The only relevant bit is `fHighByte` (unicode vs
+        // compressed).
+        let cont_flags = self.read_u8()?;
+        *is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+        Ok(())
+    }
+
+    fn read_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<Vec<u8>, String> {
+        // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
+        // continuation flags prefix that appears at the start of each continued fragment.
+        let mut out = Vec::with_capacity(n);
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            let bytes = self.read_exact_from_current(take)?;
+            out.extend_from_slice(bytes);
+            n -= take;
+        }
+        Ok(out)
+    }
+
+    fn skip_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<(), String> {
+        // Skip `n` canonical bytes from a BIFF8 continued string payload, consuming any inserted
+        // continuation flags bytes at fragment boundaries.
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            self.offset += take;
+            n -= take;
+        }
+        Ok(())
+    }
+
+    fn read_biff8_unicode_string_no_cch(
+        &mut self,
+        cch: usize,
+        codepage: u16,
+    ) -> Result<String, String> {
+        // XLUnicodeStringNoCch [MS-XLS 2.5.277]
+        let flags = self.read_u8()?;
+
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
+        let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
+            let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+            u16::from_le_bytes([bytes[0], bytes[1]]) as usize
+        } else {
+            0
+        };
+
+        let ext_size = if flags & STR_FLAG_EXT != 0 {
+            let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
+        } else {
+            0
+        };
+
+        let mut remaining_chars = cch;
+        let mut out = String::new();
+
+        while remaining_chars > 0 {
+            if self.remaining_in_fragment() == 0 {
+                // Continuing character bytes into a new CONTINUE fragment: first byte is option
+                // flags for the continued segment (fHighByte).
+                self.advance_fragment_in_biff8_string(&mut is_unicode)?;
+                continue;
+            }
+
+            let bytes_per_char = if is_unicode { 2 } else { 1 };
+            let available_bytes = self.remaining_in_fragment();
+            let available_chars = available_bytes / bytes_per_char;
+            if available_chars == 0 {
+                return Err("string continuation split mid-character".to_string());
+            }
+
+            let take_chars = remaining_chars.min(available_chars);
+            let take_bytes = take_chars * bytes_per_char;
+            let bytes = self.read_exact_from_current(take_bytes)?;
+
+            if is_unicode {
+                let mut u16s = Vec::with_capacity(take_chars);
+                for chunk in bytes.chunks_exact(2) {
+                    u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                }
+                out.push_str(&String::from_utf16_lossy(&u16s));
+            } else {
+                out.push_str(&strings::decode_ansi(codepage, bytes));
+            }
+
+            remaining_chars -= take_chars;
+        }
+
+        let richtext_bytes = richtext_runs
+            .checked_mul(4)
+            .ok_or_else(|| "rich text run count overflow".to_string())?;
+        let extra_len = richtext_bytes
+            .checked_add(ext_size)
+            .ok_or_else(|| "string ext payload length overflow".to_string())?;
+        self.skip_biff8_string_bytes(extra_len, &mut is_unicode)?;
+
+        Ok(out)
+    }
 }
 
 fn decode_filter_database_rgce(
@@ -1138,6 +1290,66 @@ mod tests {
     }
 
     #[test]
+    fn decodes_filter_database_from_continued_name_string_across_continue_records() {
+        // Some producers may split a NAME record across CONTINUE records even when the name string
+        // itself is continued. When the XLUnicodeStringNoCch crosses a boundary, Excel inserts an
+        // extra 1-byte continuation option flags prefix at the start of the CONTINUE payload; the
+        // parser must skip it to keep the subsequent rgce aligned.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+        let name_str = FILTER_DATABASE_NAME_ALIAS;
+        let cch = name_str.len() as u8;
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit (not builtin)
+        header.push(0); // chKey
+        header.push(cch); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+
+        let mut name_bytes = Vec::new();
+        name_bytes.push(0); // flags (compressed XLUnicodeStringNoCch)
+        name_bytes.extend_from_slice(name_str.as_bytes());
+
+        // Split after the first 5 characters so the string crosses the NAME/CONTINUE boundary.
+        let split = 1 + 5;
+        let name_part1 = &name_bytes[..split];
+        let name_part2 = &name_bytes[split..];
+
+        let mut name_payload1 = Vec::new();
+        name_payload1.extend_from_slice(&header);
+        name_payload1.extend_from_slice(name_part1);
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(name_part2);
+        continue_payload.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_payload1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
     fn strips_embedded_nuls_from_filter_database_name_string() {
         // BIFF string payloads can contain embedded NUL bytes in the wild (and calamine can surface
         // them). Strip them so `_FilterDatabase` name matching works.
@@ -1373,6 +1585,95 @@ mod tests {
         .concat();
 
         let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn decodes_workbook_scope_filter_database_via_externsheet_when_internal_supbook_marker_is_continued(
+    ) {
+        // Similar to `decodes_workbook_scope_filter_database_via_externsheet_ptgarea3d`, but the
+        // internal-workbook SUPBOOK marker string is split across a CONTINUE record. The continued
+        // fragment begins with a 1-byte continuation option flags prefix, which must be skipped
+        // when decoding the XLUnicodeString.
+        let supbook_external = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // ctab
+            data.extend_from_slice(&3u16.to_le_bytes()); // cch
+            data.push(0); // flags (compressed)
+            data.extend_from_slice(b"ext"); // virtPath
+            record(RECORD_SUPBOOK, &data)
+        };
+
+        // Internal SUPBOOK marker stored as a 2-char Unicode XLUnicodeString: "\u{1}\u{4}".
+        // Split after the first UTF-16 code unit so the second code unit is continued.
+        let supbook_internal_first = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // ctab
+            data.extend_from_slice(&2u16.to_le_bytes()); // cch
+            data.push(STR_FLAG_HIGH_BYTE); // flags (unicode)
+            data.extend_from_slice(&[0x01, 0x00]); // first code unit (U+0001)
+            record(RECORD_SUPBOOK, &data)
+        };
+        let supbook_internal_continue = {
+            let mut data = Vec::new();
+            data.push(STR_FLAG_HIGH_BYTE); // continued segment option flags (fHighByte=1)
+            data.extend_from_slice(&[0x04, 0x00]); // second code unit (U+0004)
+            record(records::RECORD_CONTINUE, &data)
+        };
+
+        let externsheet_full = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // cXTI
+            data.extend_from_slice(&1u16.to_le_bytes()); // iSupBook (internal SUPBOOK index)
+            data.extend_from_slice(&0u16.to_le_bytes()); // itabFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // itabLast
+            data
+        };
+        let externsheet_first = record(RECORD_EXTERNSHEET, &externsheet_full[..3]);
+        let externsheet_continue = record(records::RECORD_CONTINUE, &externsheet_full[3..]);
+
+        let name = {
+            let mut rgce = Vec::new();
+            rgce.push(0x3B); // PtgArea3d
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+            rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+            let mut data = Vec::new();
+            data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+            data.push(0); // chKey
+            data.push(1); // cch (builtin id length)
+            data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+            data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+            data.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook-scope)
+            data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+            data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+            data.extend_from_slice(&rgce);
+            record(RECORD_NAME, &data)
+        };
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            supbook_external,
+            supbook_internal_first,
+            supbook_internal_continue,
+            externsheet_first,
+            externsheet_continue,
+            name,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        // Use a sheet count > 1 so workbook-scope FilterDatabase names *must* resolve a sheet from
+        // the 3D reference; otherwise we'd fall back to sheet 0 and not test SUPBOOK resolution.
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(2))
             .expect("parse");
 
         assert_eq!(
