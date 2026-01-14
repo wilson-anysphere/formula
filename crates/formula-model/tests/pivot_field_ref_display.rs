@@ -20,3 +20,24 @@ fn pivot_field_ref_display_quotes_table_names_exactly_once() {
     };
     assert_eq!(escaped.to_string(), "'O''Reilly'[Name]");
 }
+
+#[test]
+fn pivot_field_ref_display_quotes_dax_keywords() {
+    let var_kw = PivotFieldRef::DataModelColumn {
+        table: "VAR".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(var_kw.to_string(), "'VAR'[Amount]");
+
+    let return_kw = PivotFieldRef::DataModelColumn {
+        table: "Return".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(return_kw.to_string(), "'Return'[Amount]");
+
+    let in_kw = PivotFieldRef::DataModelColumn {
+        table: "in".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(in_kw.to_string(), "'in'[Amount]");
+}
