@@ -2649,7 +2649,7 @@ impl DaxEngine {
                 .table(&rel_info.rel.from_table)
                 .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.from_table.clone()))?;
             let key = from_table
-                .value_by_idx(row, rel_info.from_column_idx)
+                .value_by_idx(row, rel_info.from_idx)
                 .unwrap_or(Value::Blank);
             if key.is_blank() {
                 return Ok(Value::Blank);
@@ -3674,7 +3674,7 @@ impl DaxEngine {
                             .table(current_table)
                             .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
                         let key = to_table_ref
-                            .value_by_idx(current_row, rel.to_column_idx)
+                            .value_by_idx(current_row, rel.to_idx)
                             .unwrap_or(Value::Blank);
 
                         let sets = resolve_row_sets(model, filter)?;
@@ -3711,7 +3711,7 @@ impl DaxEngine {
                                         continue;
                                     }
                                     let v = from_table_ref
-                                        .value_by_idx(row, rel.from_column_idx)
+                                        .value_by_idx(row, rel.from_idx)
                                         .unwrap_or(Value::Blank);
                                     if v.is_blank() || !rel.to_index.contains_key(&v) {
                                         rows.push(row);
@@ -3731,7 +3731,7 @@ impl DaxEngine {
                                 .table(target_table)
                                 .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
                             if let Some(candidates) =
-                                from_table_ref.filter_eq(rel.from_column_idx, &key)
+                                from_table_ref.filter_eq(rel.from_idx, &key)
                             {
                                 for row in candidates {
                                     if allowed.get(row).copied().unwrap_or(false) {
@@ -3745,7 +3745,7 @@ impl DaxEngine {
                                         continue;
                                     }
                                     let v = from_table_ref
-                                        .value_by_idx(row, rel.from_column_idx)
+                                        .value_by_idx(row, rel.from_idx)
                                         .unwrap_or(Value::Blank);
                                     if v == key {
                                         rows.push(row);
@@ -3783,7 +3783,7 @@ impl DaxEngine {
                         let mut include_blank = false;
                         for &to_row in &current_rows {
                             let key = to_table_ref
-                                .value_by_idx(to_row, rel_info.to_column_idx)
+                                .value_by_idx(to_row, rel_info.to_idx)
                                 .unwrap_or(Value::Blank);
                             if key.is_blank() {
                                 include_blank = true;
@@ -3838,7 +3838,7 @@ impl DaxEngine {
 
                             if !keys.is_empty() {
                                 if let Some(rows) =
-                                    from_table_ref.filter_in(rel_info.from_column_idx, &keys)
+                                    from_table_ref.filter_in(rel_info.from_idx, &keys)
                                 {
                                     next_rows.extend(rows);
                                 } else {
@@ -3846,7 +3846,7 @@ impl DaxEngine {
                                     let key_set: HashSet<Value> = keys.iter().cloned().collect();
                                     for row in 0..from_table_ref.row_count() {
                                         let v = from_table_ref
-                                            .value_by_idx(row, rel_info.from_column_idx)
+                                            .value_by_idx(row, rel_info.from_idx)
                                             .unwrap_or(Value::Blank);
                                         if key_set.contains(&v) {
                                             next_rows.push(row);
@@ -3861,7 +3861,7 @@ impl DaxEngine {
                                 } else {
                                     for row in 0..from_table_ref.row_count() {
                                         let v = from_table_ref
-                                            .value_by_idx(row, rel_info.from_column_idx)
+                                            .value_by_idx(row, rel_info.from_idx)
                                             .unwrap_or(Value::Blank);
                                         if v.is_blank() || !rel_info.to_index.contains_key(&v) {
                                             next_rows.push(row);
@@ -4190,7 +4190,7 @@ fn propagate_filter(
 
                 if !allowed_keys.is_empty() {
                     if let Some(rows) =
-                        from_table.filter_in(relationship.from_column_idx, &allowed_keys)
+                        from_table.filter_in(relationship.from_idx, &allowed_keys)
                     {
                         for row in rows {
                             if from_set.get(row).copied().unwrap_or(false) {
@@ -4205,7 +4205,7 @@ fn propagate_filter(
                                 continue;
                             }
                             let v = from_table
-                                .value_by_idx(row, relationship.from_column_idx)
+                                .value_by_idx(row, relationship.from_idx)
                                 .unwrap_or(Value::Blank);
                             if allowed_set.contains(&v) {
                                 next[row] = true;
@@ -4229,7 +4229,7 @@ fn propagate_filter(
                                 continue;
                             }
                             let v = from_table
-                                .value_by_idx(row, relationship.from_column_idx)
+                                .value_by_idx(row, relationship.from_idx)
                                 .unwrap_or(Value::Blank);
                             if v.is_blank() || !relationship.to_index.contains_key(&v) {
                                 next[row] = true;
@@ -4303,13 +4303,13 @@ fn propagate_filter(
                     .collect();
 
                 let keys = from_table
-                    .distinct_values_filtered(relationship.from_column_idx, Some(rows.as_slice()))
+                    .distinct_values_filtered(relationship.from_idx, Some(rows.as_slice()))
                     .unwrap_or_else(|| {
                         let mut seen = HashSet::new();
                         let mut out = Vec::new();
                         for &row in &rows {
                             let v = from_table
-                                .value_by_idx(row, relationship.from_column_idx)
+                                .value_by_idx(row, relationship.from_idx)
                                 .unwrap_or(Value::Blank);
                             if seen.insert(v.clone()) {
                                 out.push(v);

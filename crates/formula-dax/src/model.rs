@@ -492,11 +492,6 @@ pub(crate) struct RelationshipInfo {
     /// [`TableBackend::distinct_values_filtered`].
     pub(crate) from_index: Option<HashMap<Value, Vec<usize>>>,
 
-    /// Resolved column index of `rel.from_column` on `rel.from_table`.
-    pub(crate) from_column_idx: usize,
-    /// Resolved column index of `rel.to_column` on `rel.to_table`.
-    pub(crate) to_column_idx: usize,
-
     /// Fact-side row indices whose foreign key is BLANK or does not map to any key in
     /// [`Self::to_index`]. These rows belong to the "virtual blank" member on the dimension side.
     ///
@@ -674,7 +669,7 @@ impl DataModel {
             let rel = &rel_info.rel;
             if rel.to_table == table {
                 let key = full_row
-                    .get(rel_info.to_column_idx)
+                    .get(rel_info.to_idx)
                     .cloned()
                     .unwrap_or(Value::Blank);
                 // Keys on the "to" side must be unique for 1:* and 1:1 relationships.
@@ -696,7 +691,7 @@ impl DataModel {
 
             if rel.from_table == table {
                 let key = full_row
-                    .get(rel_info.from_column_idx)
+                    .get(rel_info.from_idx)
                     .cloned()
                     .unwrap_or(Value::Blank);
 
@@ -763,12 +758,9 @@ impl DataModel {
             let rel = &rel_info.rel;
             if rel.from_table == table {
                 if let Some(from_index) = rel_info.from_index.as_mut() {
-                    let table_ref = self
-                        .tables
-                        .get(table)
-                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
-                    let key = table_ref
-                        .value_by_idx(row_index, rel_info.from_column_idx)
+                    let key = full_row
+                        .get(rel_info.from_idx)
+                        .cloned()
                         .unwrap_or(Value::Blank);
                     from_index.entry(key).or_default().push(row_index);
                 }
@@ -930,8 +922,6 @@ impl DataModel {
             from_idx,
             to_index,
             from_index,
-            from_column_idx: from_idx,
-            to_column_idx: to_idx,
             unmatched_fact_rows,
         });
         Ok(())
