@@ -101,7 +101,8 @@ fn padded_aes_len(len: usize) -> usize {
 }
 
 fn derive_standard_cryptoapi_iv_sha1(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_LEN] {
-    // See docs/offcrypto-standard-encryptedpackage.md ("Variant B").
+    // IV derivation used by the non-standard segmented fallback mode:
+    // IV = SHA1(salt || LE32(segment_index))[0..16].
     let mut hasher = Sha1::new();
     hasher.update(salt);
     hasher.update(segment_index.to_le_bytes());

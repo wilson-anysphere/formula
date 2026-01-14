@@ -407,8 +407,12 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
         //
         // Decryption framing note (MS-OFFCRYPTO): `EncryptedPackage` begins with an 8-byte
         // little-endian plaintext size prefix, followed by block-aligned ciphertext that can include
-        // padding beyond the declared size. The exact cipher mode differs by scheme and producer;
-        // see `docs/offcrypto-standard-encryptedpackage.md` (Standard) and `docs/22-ooxml-encryption.md`
+        // padding beyond the declared size.
+        //
+        // Cipher mode differs by scheme:
+        // - Standard/CryptoAPI AES: AES-ECB (no IV)
+        // - Agile (4.4): AES-CBC with per-segment IV derivation
+        // See `docs/offcrypto-standard-encryptedpackage.md` (Standard) and `docs/22-ooxml-encryption.md`
         // (Agile).
         file.rewind().map_err(|source| Error::DetectIo {
             path: path.to_path_buf(),
