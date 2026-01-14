@@ -202,6 +202,38 @@ describe("DrawingOverlay destroy()", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("does not cache hydrated image bytes after destroy()", async () => {
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    let resolveHydration!: (value: ImageEntry | undefined) => void;
+    const hydrationPromise = new Promise<ImageEntry | undefined>((resolve) => {
+      resolveHydration = resolve;
+    });
+
+    const set = vi.fn();
+    const getAsync = vi.fn(() => hydrationPromise);
+    const images: ImageStore = {
+      get: () => undefined,
+      set,
+      getAsync,
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    await overlay.render([createImageObject("img_hydrate")], viewport);
+    // `hydrateImage` calls `getAsync` in a microtask.
+    await Promise.resolve();
+    expect(getAsync).toHaveBeenCalledTimes(1);
+
+    overlay.destroy();
+
+    resolveHydration({ id: "img_hydrate", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" });
+    await Promise.resolve();
+
+    expect(set).not.toHaveBeenCalled();
+  });
+
   it("prunes cached shape text layouts when objects are removed", async () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);

@@ -444,6 +444,10 @@ export class DrawingOverlay {
 
     void promise.then((entry) => {
       this.pendingImageHydrations.delete(id);
+      // The overlay can be torn down (sheet close, split pane destruction, tests/hot reload)
+      // while an async hydration is still in-flight. Avoid mutating shared image stores after
+      // teardown so the decoded bytes can be released promptly.
+      if (this.destroyed) return;
       if (!entry) return;
 
       // Ensure subsequent sync `get()` calls can resolve without awaiting `getAsync`.
