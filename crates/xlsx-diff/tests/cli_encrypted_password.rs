@@ -73,7 +73,8 @@ fn cli_succeeds_with_password_file() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let pw_path = tmp.path().join("password.txt");
-    std::fs::write(&pw_path, format!("{PASSWORD}\n")).expect("write password file");
+    // Ensure we tolerate Windows-style line endings in password files.
+    std::fs::write(&pw_path, format!("{PASSWORD}\r\n")).expect("write password file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
         .arg(&plain)
@@ -105,7 +106,7 @@ fn cli_succeeds_with_empty_password_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let pw_path = tmp.path().join("password.txt");
     // Trailing newlines are trimmed; a file containing only `\n` represents an empty password.
-    std::fs::write(&pw_path, "\n").expect("write password file");
+    std::fs::write(&pw_path, "\r\n").expect("write password file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
         .arg(&plain)
@@ -136,7 +137,7 @@ fn cli_succeeds_with_unicode_password_file() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let pw_path = tmp.path().join("password.txt");
-    std::fs::write(&pw_path, format!("{UNICODE_PASSWORD}\n")).expect("write password file");
+    std::fs::write(&pw_path, format!("{UNICODE_PASSWORD}\r\n")).expect("write password file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
         .arg(&plain)
@@ -164,7 +165,8 @@ fn cli_succeeds_with_unicode_password_file() {
 fn cli_succeeds_with_unicode_emoji_password_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let pw_path = tmp.path().join("password.txt");
-    std::fs::write(&pw_path, format!("{UNICODE_PASSWORD_WITH_EMOJI}\n")).expect("write password file");
+    std::fs::write(&pw_path, format!("{UNICODE_PASSWORD_WITH_EMOJI}\r\n"))
+        .expect("write password file");
 
     for (plain_name, encrypted_name) in [
         ("plaintext.xlsx", "standard-unicode.xlsx"),
@@ -245,7 +247,7 @@ fn cli_succeeds_with_password_file_stdin() {
         .stdin
         .as_mut()
         .expect("stdin should be piped")
-        .write_all(format!("{PASSWORD}\n").as_bytes())
+        .write_all(format!("{PASSWORD}\r\n").as_bytes())
         .expect("write password to stdin");
 
     let output = child.wait_with_output().expect("wait for xlsx-diff");
