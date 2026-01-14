@@ -9,27 +9,51 @@ import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js"
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
 
+function getLineNumber(text, index) {
+  return text.slice(0, Math.max(0, index)).split("\n").length;
+}
+
 test("what-if styles keep spacing on the shared --space-* scale", () => {
   const cssPath = path.join(desktopRoot, "src", "styles", "what-if.css");
-  const css = stripCssNonSemanticText(fs.readFileSync(cssPath, "utf8"));
+  const css = fs.readFileSync(cssPath, "utf8");
+  const stripped = stripCssNonSemanticText(css);
 
-  const declRe = /(?:^|[;{])\s*(gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?)\s*:\s*([^;}]+)/g;
+  const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
+  const spacingProp = /^(?:gap|row-gap|column-gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?)$/i;
+  const unitRegex = /([+-]?(?:\d+(?:\.\d+)?|\.\d+))px(?![A-Za-z0-9_])/gi;
 
-  /** @type {{ prop: string; value: string }[]} */
-  const offenders = [];
+  /** @type {Set<string>} */
+  const violations = new Set();
 
-  let match;
-  while ((match = declRe.exec(css))) {
-    const prop = match[1];
-    const value = match[2].trim();
-    if (/\b\d+(?:\.\d+)?px\b/.test(value)) {
-      offenders.push({ prop, value });
+  let decl;
+  while ((decl = cssDeclaration.exec(stripped))) {
+    const prop = decl?.groups?.prop ?? "";
+    if (!spacingProp.test(prop)) continue;
+
+    const value = decl?.groups?.value ?? "";
+    const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
+
+    let unitMatch;
+    while ((unitMatch = unitRegex.exec(value))) {
+      const numeric = unitMatch[1];
+      const n = Number(numeric);
+      if (!Number.isFinite(n)) continue;
+      if (n === 0) continue;
+
+      const absIndex = valueStart + unitMatch.index;
+      const line = getLineNumber(stripped, absIndex);
+      const rel = path.relative(desktopRoot, cssPath).replace(/\\\\/g, "/");
+      violations.add(`${rel}:L${line}: ${prop}: ${value.trim()}`);
     }
+
+    unitRegex.lastIndex = 0;
   }
 
-  assert.equal(
-    offenders.length,
-    0,
-    `Found pixel-based spacing declarations in what-if.css:\n${offenders.map((o) => `- ${o.prop}: ${o.value}`).join("\n")}`,
+  assert.deepEqual(
+    [...violations],
+    [],
+    `Found pixel-based spacing declarations in what-if.css (use --space-* tokens for padding/margin/gap):\n${[...violations]
+      .map((violation) => `- ${violation}`)
+      .join("\n")}`,
   );
 });
