@@ -149,6 +149,18 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("sort");
   });
 
+  it("shows a merge cells toast for rejected merge actions", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "mergeCells",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("merge cells");
+  });
+
   it("shows a drawing toast for rejected drawing edits", () => {
     showCollabEditRejectedToast([
       {

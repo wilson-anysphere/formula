@@ -9,6 +9,7 @@ type RejectionKind =
   | "insertPictures"
   | "backgroundImage"
   | "sort"
+  | "mergeCells"
   | "rangeRun"
   | "drawing"
   | "chart"
@@ -65,6 +66,7 @@ function inferRejectionKind(rejected: any[]): RejectionKind {
       kind === "insertPictures" ||
       kind === "backgroundImage" ||
       kind === "sort" ||
+      kind === "mergeCells" ||
       kind === "rangeRun" ||
       kind === "drawing" ||
       kind === "chart" ||
@@ -110,6 +112,7 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
     kind === "insertPictures" ||
     kind === "backgroundImage" ||
     kind === "sort" ||
+    kind === "mergeCells" ||
     kind === "drawing" ||
     kind === "chart" ||
     kind === "undoRedo" ||
@@ -207,6 +210,10 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
 
     if (kind === "sort") {
       return "Read-only: you don't have permission to sort.";
+    }
+
+    if (kind === "mergeCells") {
+      return "Read-only: cannot merge cells.";
     }
 
     if (kind === "drawing") {

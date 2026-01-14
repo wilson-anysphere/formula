@@ -766,11 +766,7 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
 
       // These commands mutate sheet-level merge metadata and must not run in collab read-only roles.
       if (typeof (ctx.app as any)?.isReadOnly === "function" && (ctx.app as any).isReadOnly() === true) {
-        try {
-          ctx.showToast?.("Read-only: cannot merge cells.", "warning");
-        } catch {
-          // ignore
-        }
+        showCollabEditRejectedToast([{ rejectionKind: "mergeCells", rejectionReason: "permission" }]);
         ctx.app.focus();
         return true;
       }
@@ -857,11 +853,7 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       if (ctx.isEditing?.()) return true;
 
       if (typeof (ctx.app as any)?.isReadOnly === "function" && (ctx.app as any).isReadOnly() === true) {
-        try {
-          ctx.showToast?.("Read-only: cannot merge cells.", "warning");
-        } catch {
-          // ignore
-        }
+        showCollabEditRejectedToast([{ rejectionKind: "mergeCells", rejectionReason: "permission" }]);
         ctx.app.focus();
         return true;
       }

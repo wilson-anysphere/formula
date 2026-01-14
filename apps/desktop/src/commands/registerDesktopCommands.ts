@@ -346,7 +346,7 @@ export function registerDesktopCommands(params: {
         if (isEditingFn()) return;
 
         if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true) {
-          safeShowToast("Read-only: cannot merge cells.", "warning");
+          showCollabEditRejectedToast([{ rejectionKind: "mergeCells", rejectionReason: "permission" }]);
           focusGrid();
           return;
         }
