@@ -114,6 +114,17 @@ fn hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>, Dec
         .map_err(|_| DecryptError::InvalidFixture("failed to compute HMAC"))
 }
 
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 #[derive(Debug)]
 struct AgileEncryptionInfo {
     key_data_salt: Vec<u8>,
@@ -366,7 +377,7 @@ fn decrypt_agile_ooxml(path: &Path, password: Option<&str>) -> Result<Vec<u8>, D
     let expected = digest(hash_alg, &verifier_hash_input);
     let expected = &expected[..info.key_data_hash_size.min(expected.len())];
     let actual = &verifier_hash_value[..info.key_data_hash_size.min(verifier_hash_value.len())];
-    if expected != actual {
+    if !ct_eq(expected, actual) {
         return Err(DecryptError::WrongPassword);
     }
 
@@ -442,7 +453,7 @@ fn decrypt_agile_ooxml(path: &Path, password: Option<&str>) -> Result<Vec<u8>, D
     // 7) Verify HMAC (computed over decrypted plaintext bytes).
     let expected_hmac = hmac(hash_alg, hmac_key, &decrypted)?;
     let expected_hmac = &expected_hmac[..info.key_data_hash_size.min(expected_hmac.len())];
-    if expected_hmac != hmac_value {
+    if !ct_eq(expected_hmac, hmac_value) {
         return Err(DecryptError::InvalidFixture("HMAC mismatch"));
     }
 
