@@ -334,6 +334,20 @@ test("fails when .xlsx association is missing a mimeType entry", () => {
   assert.match(proc.stderr, /xlsx/i);
 });
 
+test("fails when bundle.fileAssociations contains duplicate extensions", () => {
+  const fileAssociations = cloneJson(defaultFileAssociations);
+  // Duplicate the .xlsx entry (even with the same mimeType); the preflight should reject it.
+  fileAssociations.push({
+    ext: ["xlsx"],
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const config = baseConfig({ fileAssociations });
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Duplicate file association extensions/i);
+  assert.match(proc.stderr, /xlsx/i);
+});
+
 test("fails when Parquet association uses an unexpected mimeType", () => {
   const fileAssociations = cloneJson(defaultFileAssociations);
   const parquet = fileAssociations.find((assoc) => Array.isArray(assoc?.ext) && assoc.ext.includes("parquet"));

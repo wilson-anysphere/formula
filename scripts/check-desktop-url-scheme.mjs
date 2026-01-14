@@ -543,6 +543,55 @@ function collectMimeTypesByExtension(fileAssociations) {
   return out;
 }
 
+/**
+ * Ensure `bundle.fileAssociations` is structurally sane: every entry has an `ext` list,
+ * and extensions are unique across entries (so platform bundlers don't silently ignore
+ * duplicates or behave inconsistently).
+ *
+ * @param {any[]} fileAssociations
+ */
+function validateFileAssociationsShape(fileAssociations) {
+  /** @type {Set<string>} */
+  const seen = new Set();
+  /** @type {Set<string>} */
+  const duplicates = new Set();
+  /** @type {number[]} */
+  const missingExtIndices = [];
+
+  for (let i = 0; i < fileAssociations.length; i += 1) {
+    const assoc = fileAssociations[i];
+    const rawExt = /** @type {any} */ (assoc)?.ext;
+    const exts = Array.isArray(rawExt) ? rawExt : typeof rawExt === "string" ? [rawExt] : [];
+    if (exts.length === 0) {
+      missingExtIndices.push(i);
+      continue;
+    }
+    for (const e of exts) {
+      const normalized = String(e).trim().toLowerCase().replace(/^\./, "");
+      if (!normalized) continue;
+      if (seen.has(normalized)) {
+        duplicates.add(normalized);
+      } else {
+        seen.add(normalized);
+      }
+    }
+  }
+
+  if (missingExtIndices.length > 0) {
+    errBlock("Invalid file association entry (tauri.conf.json)", [
+      "Expected every bundle.fileAssociations[] entry to include a non-empty `ext` list.",
+      `Missing ext in fileAssociations indices: ${missingExtIndices.join(", ")}`,
+      "Fix: add ext: [\"...\"] for each file association entry.",
+    ]);
+  }
+  if (duplicates.size > 0) {
+    errBlock("Duplicate file association extensions (tauri.conf.json)", [
+      `Duplicate extension(s) found: ${Array.from(duplicates).sort().join(", ")}`,
+      "Fix: ensure each extension appears in exactly one bundle.fileAssociations entry.",
+    ]);
+  }
+}
+
 function main() {
   /** @type {any} */
   let config;
@@ -638,6 +687,7 @@ function main() {
       "Expected apps/desktop/src-tauri/tauri.conf.json to include bundle.fileAssociations so Linux .desktop metadata can include file MIME types.",
     ]);
   } else {
+    validateFileAssociationsShape(fileAssociations);
     const configuredExts = new Set(collectFileAssociationExtensions(config));
     const missingRequiredExts = REQUIRED_FILE_EXTS.filter((ext) => !configuredExts.has(ext));
 
