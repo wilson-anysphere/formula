@@ -18,20 +18,25 @@ function makePolicy({ maxAllowed = "Internal", redactDisallowed = true } = {}) {
   };
 }
 
-function instrumentIterationPasses(records) {
+function instrumentRecordList(records) {
   let passes = 0;
+  let elementGets = 0;
   const proxy = new Proxy(records, {
     get(target, prop, receiver) {
       if (prop === Symbol.iterator) {
         return function () {
           passes += 1;
-          return target[Symbol.iterator]();
+          // Bind the iterator to the proxy so element reads go through this trap.
+          return Array.prototype[Symbol.iterator].call(receiver);
         };
+      }
+      if (typeof prop === "string" && /^[0-9]+$/.test(prop)) {
+        elementGets += 1;
       }
       return Reflect.get(target, prop, receiver);
     },
   });
-  return { proxy, getPasses: () => passes };
+  return { proxy, getPasses: () => passes, getElementGets: () => elementGets };
 }
 
 test("ContextManager.buildContext: avoids scanning classification records per cell under REDACT decisions", async () => {
@@ -75,7 +80,7 @@ test("ContextManager.buildContext: avoids scanning classification records per ce
       classification: { level: "Confidential", labels: [] },
     },
   ];
-  const { proxy: recordsProxy, getPasses } = instrumentIterationPasses(records);
+  const { proxy: recordsProxy, getPasses, getElementGets } = instrumentRecordList(records);
 
   const out = await cm.buildContext({
     sheet: { name: sheetId, values },
@@ -95,4 +100,6 @@ test("ContextManager.buildContext: avoids scanning classification records per ce
   // Expect only a handful of linear passes (sheet/doc scan + range scan + index build).
   // Any per-cell scanning regression would exceed this by orders of magnitude.
   assert.ok(getPasses() < 50, `expected < 50 record iteration passes, got ${getPasses()}`);
+  // Defense-in-depth: catch per-cell scans even if implemented without `for..of` / Symbol.iterator.
+  assert.ok(getElementGets() < 200, `expected < 200 record element reads, got ${getElementGets()}`);
 });

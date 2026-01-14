@@ -4,20 +4,25 @@ import test from "node:test";
 import { ContextManager } from "../src/contextManager.js";
 import { extractSheetSchema } from "../src/schema.js";
 
-function instrumentIterationPasses(records) {
+function instrumentArrayReads(records) {
   let passes = 0;
+  let elementGets = 0;
   const proxy = new Proxy(records, {
     get(target, prop, receiver) {
       if (prop === Symbol.iterator) {
         return function () {
           passes += 1;
-          return target[Symbol.iterator]();
+          // Bind the iterator to the proxy so element reads go through this trap.
+          return Array.prototype[Symbol.iterator].call(receiver);
         };
+      }
+      if (typeof prop === "string" && /^[0-9]+$/.test(prop)) {
+        elementGets += 1;
       }
       return Reflect.get(target, prop, receiver);
     },
   });
-  return { proxy, getPasses: () => passes };
+  return { proxy, getPasses: () => passes, getElementGets: () => elementGets };
 }
 
 test("ContextManager.buildContext: extracts sheet schema only once per call (no duplicate extractSheetSchema pass)", async () => {
@@ -42,7 +47,7 @@ test("ContextManager.buildContext: extracts sheet schema only once per call (no 
 
   // Include explicit table metadata so `extractSheetSchema` will iterate `sheet.tables`.
   const tables = [{ name: "Table1", range: "A1:B3" }];
-  const { proxy: tablesProxy, getPasses } = instrumentIterationPasses(tables);
+  const { proxy: tablesProxy, getElementGets } = instrumentArrayReads(tables);
 
   const sheet = {
     name: "Sheet1",
@@ -56,8 +61,7 @@ test("ContextManager.buildContext: extracts sheet schema only once per call (no 
 
   await cm.buildContext({ sheet, query: "revenue" });
 
-  // `extractSheetSchema` iterates `sheet.tables` once per invocation. If `buildContext` regresses to
-  // extracting schema separately from indexing, this pass count would increase to 2.
-  assert.equal(getPasses(), 1, `expected 1 iteration pass over sheet.tables, got ${getPasses()}`);
+  // `extractSheetSchema` reads `sheet.tables[0]` once per invocation. If `buildContext` regresses to
+  // extracting schema separately from indexing, this element-read count would increase to 2.
+  assert.equal(getElementGets(), 1, `expected 1 element read from sheet.tables, got ${getElementGets()}`);
 });
-

@@ -19,20 +19,25 @@ function makePolicy({ maxAllowed = "Internal", redactDisallowed = true } = {}) {
   };
 }
 
-function instrumentIterationPasses(records) {
+function instrumentRecordList(records) {
   let passes = 0;
+  let elementGets = 0;
   const proxy = new Proxy(records, {
     get(target, prop, receiver) {
       if (prop === Symbol.iterator) {
         return function () {
           passes += 1;
-          return target[Symbol.iterator]();
+          // Bind the iterator to the proxy so element reads go through this trap.
+          return Array.prototype[Symbol.iterator].call(receiver);
         };
+      }
+      if (typeof prop === "string" && /^[0-9]+$/.test(prop)) {
+        elementGets += 1;
       }
       return Reflect.get(target, prop, receiver);
     },
   });
-  return { proxy, getPasses: () => passes };
+  return { proxy, getPasses: () => passes, getElementGets: () => elementGets };
 }
 
 class ZeroEmbedder {
@@ -80,7 +85,7 @@ test("ContextManager.buildWorkbookContext: avoids scanning classification record
       classification: { level: "Public", labels: [] },
     },
   ];
-  const { proxy: recordsProxy, getPasses } = instrumentIterationPasses(classificationRecords);
+  const { proxy: recordsProxy, getPasses, getElementGets } = instrumentRecordList(classificationRecords);
 
   const cm = new ContextManager({
     tokenBudgetTokens: 500,
@@ -109,5 +114,6 @@ test("ContextManager.buildWorkbookContext: avoids scanning classification record
   // the classification record list (for overall classification + index build). If the code
   // falls back to scanning `classificationRecords` for each hit, this would jump above 40.
   assert.ok(getPasses() < 20, `expected < 20 record iteration passes, got ${getPasses()}`);
+  // Defense-in-depth: catch per-hit scans even if implemented without Symbol.iterator.
+  assert.ok(getElementGets() < 20, `expected < 20 record element reads, got ${getElementGets()}`);
 });
-
