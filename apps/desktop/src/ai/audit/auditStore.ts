@@ -66,7 +66,16 @@ function coerceViteUrlToNodeFileUrl(href: string): string {
     let absPath = href.slice("/@fs".length); // `/path` (posix) or `/C:/path` (win)
     // Windows absolute paths in Vite `/@fs` URLs can include an extra leading slash.
     if (/^\/[A-Za-z]:[\\/]/.test(absPath)) absPath = absPath.slice(1);
-    absPath = absPath.replaceAll("\\\\", "/");
+    absPath = absPath.replaceAll("\\", "/");
+    if (/^[A-Za-z]:\//.test(absPath)) return `file:///${absPath}`;
+    return `file://${absPath}`;
+  }
+
+  // Some environments may omit the leading `/` (e.g. `@fs/...`).
+  if (href.startsWith("@fs/")) {
+    let absPath = href.slice("@fs".length); // `/path` (posix) or `/C:/path` (win)
+    if (/^\/[A-Za-z]:[\\/]/.test(absPath)) absPath = absPath.slice(1);
+    absPath = absPath.replaceAll("\\", "/");
     if (/^[A-Za-z]:\//.test(absPath)) return `file:///${absPath}`;
     return `file://${absPath}`;
   }
