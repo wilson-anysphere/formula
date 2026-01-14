@@ -830,6 +830,55 @@ mod tests {
     }
 
     #[test]
+    fn md5_sequential_reads_and_seek_work_with_40_bit_key() {
+        let h = b"0123456789ABCDEF".to_vec(); // 16 bytes
+        let key_len = 5; // 40-bit (must be padded to 16 bytes for RC4)
+
+        let mut plaintext = vec![0u8; RC4_BLOCK_SIZE * 2 + 64];
+        for (i, b) in plaintext.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Md5);
+
+        // Simulate EncryptedPackage stream layout: [u64 package_size] + ciphertext.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+        stream.extend_from_slice(&ciphertext);
+
+        // Exercise `keySize=0` (=> 40-bit) + CALG_MD5 parsing/validation path.
+        let cursor = Cursor::new(stream);
+        let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            cursor,
+            h.clone(),
+            0, // keySize (bits) => 40-bit per MS-OFFCRYPTO
+            CALG_MD5,
+        )
+        .unwrap();
+
+        // Sequential read in small chunks to cross a 0x200 boundary.
+        let mut out = vec![0u8; plaintext.len()];
+        let out_len = out.len();
+        let mut read = 0usize;
+        while read < out_len {
+            let end = read + 33.min(out_len - read);
+            let n = reader.read(&mut out[read..end]).unwrap();
+            assert!(n > 0, "unexpected EOF while reading");
+            read += n;
+        }
+        assert_eq!(out, plaintext);
+
+        // Seek into the middle of a block and read.
+        let seek_pos = (RC4_BLOCK_SIZE as u64) + 0x10;
+        reader.seek(SeekFrom::Start(seek_pos)).unwrap();
+        let mut buf = [0u8; 64];
+        reader.read_exact(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..],
+            &plaintext[seek_pos as usize..seek_pos as usize + buf.len()]
+        );
+    }
+
+    #[test]
     fn encrypted_package_errors_on_too_short_stream() {
         let stream = Cursor::new(vec![0u8; 7]);
         let err = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
