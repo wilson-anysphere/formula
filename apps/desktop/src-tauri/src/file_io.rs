@@ -512,20 +512,6 @@ fn open_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek>(
     ole.open_stream(&found_path).ok()
 }
 
-fn cfb_open_stream<R: std::io::Read + std::io::Write + std::io::Seek>(
-    ole: &mut cfb::CompoundFile<R>,
-    name: &str,
-) -> std::io::Result<cfb::Stream<R>> {
-    match ole.open_stream(name) {
-        Ok(stream) => Ok(stream),
-        Err(err1) => {
-            let with_leading_slash = format!("/{name}");
-            ole.open_stream(&with_leading_slash)
-                .map_err(|err2| std::io::Error::new(err1.kind(), format!("{err1}; {err2}")))
-        }
-    }
-}
-
 fn is_encrypted_ooxml_workbook(path: &Path) -> std::io::Result<bool> {
     use std::io::{Read, Seek, SeekFrom};
 

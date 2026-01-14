@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
+#[cfg(any(feature = "desktop", test))]
 use url::Url;
 
 use crate::macro_trust::MacroTrustDecision;
@@ -7103,6 +7104,7 @@ pub async fn write_clipboard(
 // behavior consistent across WebViews), the WebView prefers routing outbound HTTP(S) through these
 // Tauri commands so the Rust backend performs the network request.
 
+#[cfg(any(feature = "desktop", test))]
 pub(crate) fn is_local_http_allowed(url: &Url) -> bool {
     if url.scheme() != "http" {
         return false;
@@ -7119,6 +7121,7 @@ pub(crate) fn is_local_http_allowed(url: &Url) -> bool {
     }
 }
 
+#[cfg(any(feature = "desktop", test))]
 pub(crate) fn ensure_ipc_network_url_allowed(
     url: &Url,
     context: &str,
