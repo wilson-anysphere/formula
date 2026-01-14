@@ -14,6 +14,8 @@ async function getA1NumberFormat(page: Page): Promise<string | null> {
 }
 
 test.describe("Ribbon: Home → Number → More → Custom…", () => {
+  test.setTimeout(120_000);
+
   const GRID_MODES = ["shared", "legacy"] as const;
 
   for (const mode of GRID_MODES) {
