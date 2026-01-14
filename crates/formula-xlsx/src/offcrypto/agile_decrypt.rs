@@ -2265,6 +2265,7 @@ mod fuzz_tests {
     fn keydata_block_size_zero_is_rejected_without_panicking() {
         use cfb::CompoundFile;
         use ms_offcrypto_writer::Ecma376AgileWriter;
+        use rand::{rngs::StdRng, SeedableRng as _};
         use std::io::{Cursor, Read, Write};
         use zip::write::FileOptions;
 
@@ -2280,8 +2281,9 @@ mod fuzz_tests {
 
         fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
             let mut cursor = Cursor::new(Vec::new());
-            let mut agile =
-                Ecma376AgileWriter::create(&mut rand::rng(), password, &mut cursor).expect("create agile");
+            let mut rng = StdRng::from_seed([0u8; 32]);
+            let mut agile = Ecma376AgileWriter::create(&mut rng, password, &mut cursor)
+                .expect("create agile");
             agile
                 .write_all(plain_zip)
                 .expect("write plaintext zip to agile writer");
