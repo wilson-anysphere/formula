@@ -9,6 +9,8 @@ describe("desktop updater listener consolidation", () => {
     const source = stripComments(readFileSync(mainUrl, "utf8"));
 
     const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // `main.ts` wraps listen() calls in `listenBestEffort(...)` so they can't throw during
+    // startup. Count either form to ensure we don't regress and add extra updater listeners.
     const listenCallRe = (eventName: string) =>
       new RegExp(String.raw`\b(?:listen|listenBestEffort)\(\s*['"]${escapeRegExp(eventName)}['"]`, "g");
     const listenCallCount = (eventName: string) => (source.match(listenCallRe(eventName)) ?? []).length;
