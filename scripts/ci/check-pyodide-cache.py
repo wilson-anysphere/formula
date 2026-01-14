@@ -99,17 +99,33 @@ def check_job(
                 )
 
     # Ensure the cache key includes OS + version + ensure script hash.
-    if "key: pyodide-" not in text:
+    pyodide_key_lines: list[tuple[int, str]] = []
+    for ln, line in job_lines:
+        if is_comment(line):
+            continue
+        stripped = line.lstrip()
+        if not stripped.startswith("key:"):
+            continue
+        raw_value = stripped[len("key:") :].strip()
+        # Strip trailing inline comments.
+        raw_value = raw_value.split("#", 1)[0].strip()
+        if raw_value.startswith("pyodide"):
+            pyodide_key_lines.append((ln, raw_value))
+
+    if not pyodide_key_lines:
         errors.append("- Missing `key: pyodide-...` in cache configuration")
     else:
-        if "runner.os" not in text:
-            errors.append("- Pyodide cache key is missing runner.os")
-        if "hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs')" not in text:
-            errors.append("- Pyodide cache key is missing hashFiles(ensure-pyodide-assets.mjs)")
-        if "steps.pyodide.outputs.version" not in text and pyodide_version not in text:
-            errors.append(
-                f"- Pyodide cache key/path is missing version reference (expected steps.pyodide.outputs.version or {pyodide_version})"
-            )
+        for ln, value in pyodide_key_lines:
+            if "runner.os" not in value:
+                errors.append(f"- Pyodide cache key (line {ln}) is missing runner.os")
+            if "hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs')" not in value:
+                errors.append(
+                    f"- Pyodide cache key (line {ln}) is missing hashFiles(ensure-pyodide-assets.mjs)"
+                )
+            if "steps.pyodide.outputs.version" not in value and pyodide_version not in value:
+                errors.append(
+                    f"- Pyodide cache key (line {ln}) is missing version reference (expected steps.pyodide.outputs.version or {pyodide_version})"
+                )
 
     # Ensure we cache the expected directory.
     if "apps/desktop/public/pyodide/" not in text:
