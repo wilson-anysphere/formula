@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};

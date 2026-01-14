@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Encryptor;
 use cbc::cipher::{

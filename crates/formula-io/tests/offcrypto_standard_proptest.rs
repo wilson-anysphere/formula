@@ -1,4 +1,4 @@
-#![cfg(feature = "offcrypto")]
+#![cfg(all(not(target_arch = "wasm32"), feature = "offcrypto"))]
 
 use formula_io::offcrypto::standard::{parse_encryption_info_standard, verify_password_standard};
 use proptest::prelude::*;

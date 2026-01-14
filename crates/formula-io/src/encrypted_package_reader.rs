@@ -365,7 +365,7 @@ fn hash_bytes(alg: formula_xlsx::offcrypto::HashAlgorithm, data: &[u8]) -> Vec<u
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
