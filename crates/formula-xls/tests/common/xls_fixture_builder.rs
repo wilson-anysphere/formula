@@ -213,6 +213,26 @@ pub fn build_calamine_formula_error_biff_fallback_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2`:
+/// - `B1`: `SUM(A1,1)`
+/// - `B2`: `SUM(A2,1)` via `PtgExp` referencing `B1`
+///
+/// The shared formula body is stored in a `SHRFMLA` record and contains a `PtgFuncVar` token
+/// (variable-arity function) to exercise decoding of its payload (argc + function id).
+pub fn build_shared_formula_ptgfuncvar_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgfuncvar_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -4944,6 +4964,83 @@ fn build_shared_formula_ptgexp_missing_shrfmla_sheet_stream(xf_cell: u16) -> Vec
     // Intentionally omit SHRFMLA/ARRAY definition records.
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_ptgfuncvar_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_ptgfuncvar_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedFormula", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_ptgfuncvar_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in A1/A2 so the references are within the sheet's used range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Anchor cell B1: PtgExp(B1). The shared formula definition that follows contains the actual
+    // rgce token stream.
+    let ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &ptgexp),
+    );
+
+    // Shared formula rgce stored in SHRFMLA:
+    //   PtgRefN(row_off=0,col_off=-1) + PtgInt(1) + PtgFuncVar(argc=2,iftab=SUM)
+    let shared_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+
+        // PtgRefN: [ptg=0x2C][rw:u16][col:u16]
+        // - rw stores row offset when ROW_RELATIVE bit is set.
+        // - col stores 14-bit signed col offset when COL_RELATIVE bit is set.
+        // Use row_off=0, col_off=-1 relative to the formula cell.
+        v.push(0x2C);
+        v.extend_from_slice(&0u16.to_le_bytes()); // row_off = 0
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off = -1 (14-bit), row+col relative
+
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+
+        v.push(0x22); // PtgFuncVar
+        v.push(2); // argc
+        v.extend_from_slice(&0x0004u16.to_le_bytes()); // SUM
+        v
+    };
+
+    // SHRFMLA record defining shared rgce for the range B1:B2.
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &shared_rgce),
+    );
+
+    // Follower cell B2: PtgExp(B1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
 }
 
