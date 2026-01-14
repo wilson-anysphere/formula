@@ -162,7 +162,8 @@ jobs:
             patchelf \
             squashfs-tools \
             fakeroot \
-            rpm
+            rpm \
+            rpm2cpio
 
           # AppImage-based tooling (including `appimagetool`) supports "extract and run" mode.
           # Prefer it in CI to reduce reliance on a working FUSE setup.
