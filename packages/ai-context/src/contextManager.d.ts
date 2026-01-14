@@ -21,7 +21,7 @@ export interface ContextSheet {
   /**
    * Optional explicit table definitions (used by schema extraction).
    */
-  tables?: Array<{ name: string; range: string }>;
+  tables?: Array<{ name: string; range: string; [key: string]: unknown }>;
   /**
    * Allow host-specific sheet fields without tripping TS excess-property checks
    * (e.g. internal ids, metadata, etc).
@@ -46,6 +46,14 @@ export interface WorkbookRagVectorStore {
     topK: number,
     opts?: { filter?: (metadata: unknown, id: string) => boolean; workbookId?: string; signal?: AbortSignal },
   ): Promise<Array<{ id: string; score: number; metadata: unknown }>>;
+
+  /**
+   * Optional fast-path listing used by `packages/ai-rag` for incremental indexing.
+   */
+  listContentHashes?: (opts?: {
+    workbookId?: string;
+    signal?: AbortSignal;
+  }) => Promise<Array<{ id: string; contentHash: string | null; metadataHash: string | null }>>;
 
   // Indexing/persistence methods (required when `skipIndexing` is false).
   list?: (opts?: {
@@ -216,7 +224,7 @@ export interface DlpOptions {
   /**
    * Optional audit sink. Return type is intentionally flexible to allow both sync and async loggers.
    */
-  auditLogger?: { log(event: unknown): unknown; [key: string]: unknown };
+  auditLogger?: { log(event: unknown): unknown; [key: string]: unknown } | null;
   /**
    * Optional sheet name <-> id resolver used for structured DLP enforcement.
    */

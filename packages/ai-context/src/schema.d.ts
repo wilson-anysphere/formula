@@ -52,7 +52,7 @@ export function extractSheetSchema(sheet: {
    */
   origin?: { row: number; col: number };
   namedRanges?: NamedRangeSchema[];
-  tables?: { name: string; range: string }[];
+  tables?: Array<{ name: string; range: string; [key: string]: unknown }>;
 }, options?: {
   signal?: AbortSignal;
   /**

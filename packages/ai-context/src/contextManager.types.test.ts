@@ -84,11 +84,11 @@ type _ClearCacheOptionsNotAny = Assert<
    },
  });
 
- const result = await cm.buildContext({
-   sheet: { name: "Sheet1", values: [[1]] },
-   query: "hi",
+const result = await cm.buildContext({
+  sheet: { name: "Sheet1", values: [[1]], tables: [{ name: "T", range: "A1:B2", id: "tbl-1" }] },
+  query: "hi",
    limits: { maxContextCols: 10 },
- });
+});
 
 // If \`schema\` were \`any\`, this assignment would still typecheck. The \`IsAny\`
 // assertions above ensure it is not \`any\`.
@@ -113,6 +113,8 @@ const _dlpAsyncLogger: DlpOptionsInput = {
   auditLogger: { log: async () => {} },
 };
 void _dlpAsyncLogger;
+const _dlpNullLogger: DlpOptionsInput = { documentId: "doc-1", policy: {}, auditLogger: null };
+void _dlpNullLogger;
 
 // Workbook RAG types are also checked (retrieval-only path).
 await cm.buildWorkbookContext({
