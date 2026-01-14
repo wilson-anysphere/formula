@@ -502,16 +502,34 @@ impl XlsbWorkbook {
         }
 
         let mut zip = self.open_zip()?;
-        let mut sheet = zip.by_name(&meta.part_path)?;
+        let sheet = zip.by_name(&meta.part_path)?;
+        let max = max_xlsb_zip_part_bytes();
+        let size = sheet.size();
+        if size > max {
+            return Err(ParseError::PartTooLarge {
+                part: meta.part_path.clone(),
+                size,
+                max,
+            });
+        }
+        let mut sheet = sheet.take(max.saturating_add(1));
 
-        parse_sheet(
+        let parsed = parse_sheet(
             &mut sheet,
             &self.shared_strings,
             Some(&self.shared_strings_table),
             &self.workbook_context,
             self.preserve_parsed_parts,
             self.decode_formulas,
-        )
+        );
+        if sheet.limit() == 0 {
+            return Err(ParseError::PartTooLarge {
+                part: meta.part_path.clone(),
+                size: max.saturating_add(1),
+                max,
+            });
+        }
+        parsed
     }
 
     /// Read the raw worksheet `.bin` part bytes for the given sheet index.
@@ -582,9 +600,19 @@ impl XlsbWorkbook {
         }
 
         let mut zip = self.open_zip()?;
-        let mut sheet = zip.by_name(&meta.part_path)?;
+        let sheet = zip.by_name(&meta.part_path)?;
+        let max = max_xlsb_zip_part_bytes();
+        let size = sheet.size();
+        if size > max {
+            return Err(ParseError::PartTooLarge {
+                part: meta.part_path.clone(),
+                size,
+                max,
+            });
+        }
+        let mut sheet = sheet.take(max.saturating_add(1));
 
-        parse_sheet_stream(
+        let parsed = parse_sheet_stream(
             &mut sheet,
             &self.shared_strings,
             Some(&self.shared_strings_table),
@@ -592,7 +620,15 @@ impl XlsbWorkbook {
             self.preserve_parsed_parts,
             self.decode_formulas,
             |cell| f(cell),
-        )?;
+        );
+        if sheet.limit() == 0 {
+            return Err(ParseError::PartTooLarge {
+                part: meta.part_path.clone(),
+                size: max.saturating_add(1),
+                max,
+            });
+        }
+        parsed?;
         Ok(())
     }
 
@@ -1159,6 +1195,8 @@ impl XlsbWorkbook {
             return self.save_with_cell_edits_streaming(dest, sheet_index, edits);
         };
 
+        let max_part = max_xlsb_zip_part_bytes();
+
         let targets: HashSet<(u32, u32)> = edits.iter().map(|e| (e.row, e.col)).collect();
         let cell_records = if targets.is_empty() {
             HashMap::new()
@@ -1166,8 +1204,25 @@ impl XlsbWorkbook {
             sheet_cell_records(sheet_bytes, &targets)?
         } else {
             let mut zip = self.open_zip()?;
-            let mut entry = zip.by_name(&sheet_part)?;
-            sheet_cell_records_streaming(&mut entry, &targets)?
+            let entry = zip.by_name(&sheet_part)?;
+            let size = entry.size();
+            if size > max_part {
+                return Err(ParseError::PartTooLarge {
+                    part: sheet_part.clone(),
+                    size,
+                    max: max_part,
+                });
+            }
+            let mut limited = entry.take(max_part.saturating_add(1));
+            let parsed = sheet_cell_records_streaming(&mut limited, &targets);
+            if limited.limit() == 0 {
+                return Err(ParseError::PartTooLarge {
+                    part: sheet_part.clone(),
+                    size: max_part.saturating_add(1),
+                    max: max_part,
+                });
+            }
+            parsed?
         };
 
         // Build a mapping of *plain* shared strings to their indices.
@@ -1406,6 +1461,7 @@ impl XlsbWorkbook {
         // intern against the parsed table and patch the binary part as a stream during the output
         // ZIP write.
         let mut zip = self.open_zip()?;
+        let max_part = max_xlsb_zip_part_bytes();
 
         let base_si_count = u32::try_from(self.shared_strings_table.len())
             .map_err(|_| ParseError::UnexpectedEof)?;
@@ -1452,8 +1508,25 @@ impl XlsbWorkbook {
             } else if let Some(sheet_bytes) = self.preserved_parts.get(&sheet_part) {
                 sheet_cell_records(sheet_bytes, &targets)?
             } else {
-                let mut entry = zip.by_name(&sheet_part)?;
-                sheet_cell_records_streaming(&mut entry, &targets)?
+                let entry = zip.by_name(&sheet_part)?;
+                let size = entry.size();
+                if size > max_part {
+                    return Err(ParseError::PartTooLarge {
+                        part: sheet_part.clone(),
+                        size,
+                        max: max_part,
+                    });
+                }
+                let mut limited = entry.take(max_part.saturating_add(1));
+                let parsed = sheet_cell_records_streaming(&mut limited, &targets);
+                if limited.limit() == 0 {
+                    return Err(ParseError::PartTooLarge {
+                        part: sheet_part.clone(),
+                        size: max_part.saturating_add(1),
+                        max: max_part,
+                    });
+                }
+                parsed?
             };
 
             let mut updated_edits = edits.clone();
@@ -1690,6 +1763,7 @@ impl XlsbWorkbook {
         overrides: &HashMap<String, Vec<u8>>,
     ) -> Result<(), ParseError> {
         let mut zip = self.open_zip()?;
+        let max_part = max_xlsb_zip_part_bytes();
 
         let edited = worksheets_edited(&mut zip, &self.sheets, overrides)?;
 
@@ -1751,7 +1825,7 @@ impl XlsbWorkbook {
         let mut used_overrides: HashSet<String> = HashSet::new();
 
         for i in 0..zip.len() {
-            let mut entry = zip.by_index(i)?;
+            let entry = zip.by_index(i)?;
             let name = entry.name().to_string();
 
             if entry.is_dir() {
@@ -1807,7 +1881,23 @@ impl XlsbWorkbook {
             } else if let Some(bytes) = self.preserved_parts.get(&name) {
                 zip_writer.write_all(bytes)?;
             } else {
-                io::copy(&mut entry, &mut zip_writer)?;
+                let size = entry.size();
+                if size > max_part {
+                    return Err(ParseError::PartTooLarge {
+                        part: name,
+                        size,
+                        max: max_part,
+                    });
+                }
+                let mut limited = entry.take(max_part.saturating_add(1));
+                let copied = io::copy(&mut limited, &mut zip_writer)?;
+                if copied > max_part {
+                    return Err(ParseError::PartTooLarge {
+                        part: name,
+                        size: copied,
+                        max: max_part,
+                    });
+                }
             }
         }
 
@@ -1858,6 +1948,7 @@ impl XlsbWorkbook {
         let dest = dest.as_ref();
         atomic_write_with_path(dest, |tmp_path| {
             let mut zip = self.open_zip()?;
+            let max_part = max_xlsb_zip_part_bytes();
 
             let edited_by_bytes = worksheets_edited(&mut zip, &self.sheets, overrides)?;
 
@@ -1875,8 +1966,25 @@ impl XlsbWorkbook {
                     let mut cursor = Cursor::new(bytes);
                     stream_override(stream_part, &mut cursor, &mut sink)?
                 } else {
-                    let mut entry = zip.by_name(stream_part)?;
-                    stream_override(stream_part, &mut entry, &mut sink)?
+                    let entry = zip.by_name(stream_part)?;
+                    let size = entry.size();
+                    if size > max_part {
+                        return Err(ParseError::PartTooLarge {
+                            part: stream_part.clone(),
+                            size,
+                            max: max_part,
+                        });
+                    }
+                    let mut limited = entry.take(max_part.saturating_add(1));
+                    let result = stream_override(stream_part, &mut limited, &mut sink);
+                    if limited.limit() == 0 {
+                        return Err(ParseError::PartTooLarge {
+                            part: stream_part.clone(),
+                            size: max_part.saturating_add(1),
+                            max: max_part,
+                        });
+                    }
+                    result?
                 };
                 edited_by_stream = edited_by_stream || edited;
             }
@@ -1946,7 +2054,7 @@ impl XlsbWorkbook {
             let mut used_stream_overrides: HashSet<String> = HashSet::new();
 
             for i in 0..zip.len() {
-                let mut entry = zip.by_index(i)?;
+                let entry = zip.by_index(i)?;
                 let name = entry.name().to_string();
 
                 if entry.is_dir() {
@@ -2000,7 +2108,24 @@ impl XlsbWorkbook {
                         let mut cursor = Cursor::new(bytes);
                         stream_override(&name, &mut cursor, &mut writer)?;
                     } else {
-                        stream_override(&name, &mut entry, &mut writer)?;
+                        let size = entry.size();
+                        if size > max_part {
+                            return Err(ParseError::PartTooLarge {
+                                part: name,
+                                size,
+                                max: max_part,
+                            });
+                        }
+                        let mut limited = entry.take(max_part.saturating_add(1));
+                        let result = stream_override(&name, &mut limited, &mut writer);
+                        if limited.limit() == 0 {
+                            return Err(ParseError::PartTooLarge {
+                                part: name,
+                                size: max_part.saturating_add(1),
+                                max: max_part,
+                            });
+                        }
+                        result?;
                     }
                     continue;
                 }
@@ -2011,7 +2136,23 @@ impl XlsbWorkbook {
                 } else if let Some(bytes) = self.preserved_parts.get(&name) {
                     writer.write_all(bytes)?;
                 } else {
-                    io::copy(&mut entry, &mut writer)?;
+                    let size = entry.size();
+                    if size > max_part {
+                        return Err(ParseError::PartTooLarge {
+                            part: name,
+                            size,
+                            max: max_part,
+                        });
+                    }
+                    let mut limited = entry.take(max_part.saturating_add(1));
+                    let copied = io::copy(&mut limited, &mut writer)?;
+                    if copied > max_part {
+                        return Err(ParseError::PartTooLarge {
+                            part: name,
+                            size: copied,
+                            max: max_part,
+                        });
+                    }
                 }
             }
 
@@ -2483,6 +2624,56 @@ mod zip_guardrail_tests {
         writer.finish().unwrap().into_inner()
     }
 
+    fn build_xlsb_zip_with_workbook_parts(
+        workbook_bin: &[u8],
+        workbook_rels_bin: &[u8],
+        extra_parts: &[(&str, &[u8])],
+    ) -> Vec<u8> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+
+        writer
+            .start_file(DEFAULT_WORKBOOK_PART, options.clone())
+            .unwrap();
+        writer.write_all(workbook_bin).unwrap();
+
+        writer
+            .start_file(DEFAULT_WORKBOOK_RELS_PART, options.clone())
+            .unwrap();
+        writer.write_all(workbook_rels_bin).unwrap();
+
+        for (name, bytes) in extra_parts {
+            writer.start_file(*name, options.clone()).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn encode_utf16_string_payload(text: &str) -> Vec<u8> {
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let mut out = Vec::with_capacity(4 + units.len() * 2);
+        out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+        for unit in units {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
+    fn build_workbook_bin_single_sheet(rel_id: &str, sheet_name: &str) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u32.to_le_bytes()); // state_flags (visible)
+        payload.extend_from_slice(&1u32.to_le_bytes()); // sheet_id
+        payload.extend_from_slice(&encode_utf16_string_payload(rel_id));
+        payload.extend_from_slice(&encode_utf16_string_payload(sheet_name));
+
+        let mut out = Vec::new();
+        biff12_varint::write_record_id(&mut out, biff12::SHEET).unwrap();
+        biff12_varint::write_record_len(&mut out, payload.len() as u32).unwrap();
+        out.extend_from_slice(&payload);
+        out
+    }
+
     #[test]
     fn rejects_oversized_unknown_zip_part() {
         let _lock = ENV_LOCK.lock().unwrap();
@@ -2508,6 +2699,111 @@ mod zip_guardrail_tests {
                 assert_eq!(part, "xl/unknown.bin");
                 assert_eq!(size, 11);
                 assert_eq!(max, 10);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn save_as_rejects_oversized_part_when_stream_copying() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "10");
+
+        let oversized = [0u8; 11];
+        let bytes = build_minimal_xlsb_zip(&[("xl/unknown.bin", &oversized)]);
+
+        let options = OpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+
+        let wb = XlsbWorkbook::open_from_vec_with_options(bytes, options).expect("open workbook");
+        let err = wb
+            .save_as_to_bytes()
+            .err()
+            .expect("expected oversized part error during save");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/unknown.bin");
+                assert_eq!(size, 11);
+                assert_eq!(max, 10);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn read_sheet_rejects_oversized_worksheet_part() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "80");
+
+        let workbook_bin = build_workbook_bin_single_sheet("rId1", "Sheet1");
+        let workbook_rels = r#"<Relationship Id="rId1" Target="worksheets/sheet1.bin"/>"#;
+        let oversized_sheet = vec![0u8; 81];
+        let bytes = build_xlsb_zip_with_workbook_parts(
+            &workbook_bin,
+            workbook_rels.as_bytes(),
+            &[("xl/worksheets/sheet1.bin", oversized_sheet.as_slice())],
+        );
+
+        let options = OpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+
+        let wb = XlsbWorkbook::open_from_vec_with_options(bytes, options).expect("open workbook");
+        let err = wb
+            .read_sheet(0)
+            .err()
+            .expect("expected oversized worksheet part error");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/worksheets/sheet1.bin");
+                assert_eq!(size, 81);
+                assert_eq!(max, 80);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn for_each_cell_rejects_oversized_worksheet_part() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "80");
+
+        let workbook_bin = build_workbook_bin_single_sheet("rId1", "Sheet1");
+        let workbook_rels = r#"<Relationship Id="rId1" Target="worksheets/sheet1.bin"/>"#;
+        let oversized_sheet = vec![0u8; 81];
+        let bytes = build_xlsb_zip_with_workbook_parts(
+            &workbook_bin,
+            workbook_rels.as_bytes(),
+            &[("xl/worksheets/sheet1.bin", oversized_sheet.as_slice())],
+        );
+
+        let options = OpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+
+        let wb = XlsbWorkbook::open_from_vec_with_options(bytes, options).expect("open workbook");
+        let err = wb
+            .for_each_cell_control_flow(0, |_cell| ControlFlow::Continue(()))
+            .err()
+            .expect("expected oversized worksheet part error");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/worksheets/sheet1.bin");
+                assert_eq!(size, 81);
+                assert_eq!(max, 80);
             }
             other => panic!("unexpected error: {other}"),
         }
