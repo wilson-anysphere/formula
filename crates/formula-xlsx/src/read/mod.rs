@@ -1006,6 +1006,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
     let mut rich_value_cells = std::collections::HashMap::new();
+    let mut conditional_formatting = std::collections::HashMap::new();
     let mut comment_part_names: std::collections::HashMap<
         formula_model::WorksheetId,
         WorksheetCommentPartNames,
@@ -1128,8 +1129,12 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             // full worksheet XML.
             let parsed_cf =
                 parse_worksheet_conditional_formatting_streaming(sheet_xml_str).unwrap_or_default();
-            if !parsed_cf.rules.is_empty() {
-                ws.conditional_formatting_rules = parsed_cf.rules;
+            let crate::ParsedConditionalFormatting { rules, raw_blocks } = parsed_cf;
+            if !raw_blocks.is_empty() {
+                conditional_formatting.insert(ws_id, raw_blocks);
+            }
+            if !rules.is_empty() {
+                ws.conditional_formatting_rules = rules;
                 let dxfs = conditional_formatting_dxfs
                     .get_or_insert_with(|| styles_part.conditional_formatting_dxfs());
                 ws.conditional_formatting_dxfs = dxfs.clone();
@@ -1316,6 +1321,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             calc_pr,
             sheets: sheet_meta,
             cell_meta,
+            conditional_formatting,
             rich_value_cells,
             comment_part_names,
             comment_snapshot,

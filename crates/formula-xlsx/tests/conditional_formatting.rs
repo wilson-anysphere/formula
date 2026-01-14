@@ -2,7 +2,7 @@ use formula_model::{
     format_render_plan, parse_range_a1, CellRef, CellValue, CellValueProvider, DataBarDirection,
     ConditionalFormattingEngine,
 };
-use formula_xlsx::{parse_worksheet_conditional_formatting, DxfProvider, Styles, XlsxPackage};
+use formula_xlsx::{load_from_bytes, parse_worksheet_conditional_formatting, DxfProvider, Styles, XlsxPackage};
 use roxmltree::Document;
 use std::collections::HashMap;
 
@@ -98,6 +98,30 @@ fn parses_x14_and_merges_extensions() {
         .raw_blocks
         .iter()
         .any(|b| matches!(b.schema, formula_model::CfRuleSchema::X14)));
+}
+
+#[test]
+fn xlsx_meta_captures_raw_conditional_formatting_blocks() {
+    let bytes = std::fs::read(fixture("conditional_formatting_x14.xlsx")).expect("fixture exists");
+    let doc = load_from_bytes(&bytes).expect("load xlsx document");
+    let sheet_id = doc.workbook.sheets[0].id;
+    let blocks = doc
+        .xlsx_meta()
+        .conditional_formatting
+        .get(&sheet_id)
+        .expect("conditional formatting blocks should be captured for worksheet");
+    assert!(
+        blocks
+            .iter()
+            .any(|b| matches!(b.schema, formula_model::CfRuleSchema::Office2007)),
+        "expected Office2007 conditionalFormatting block in baseline metadata"
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|b| matches!(b.schema, formula_model::CfRuleSchema::X14)),
+        "expected x14 conditionalFormattings block in baseline metadata"
+    );
 }
 
 #[test]

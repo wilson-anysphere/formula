@@ -267,6 +267,17 @@ pub struct XlsxMeta {
     pub calc_pr: CalcPr,
     pub sheets: Vec<SheetMeta>,
     pub cell_meta: HashMap<(WorksheetId, CellRef), CellMeta>,
+    /// Baseline conditional formatting blocks extracted from each worksheet XML payload.
+    ///
+    /// This stores the original SpreadsheetML/x14 `<conditionalFormatting>` XML fragments so
+    /// fidelity diagnostics can detect when conditional formatting has been rewritten during
+    /// round-trip operations.
+    ///
+    /// Notes:
+    /// - Only the extracted conditional formatting blocks are stored (not the full worksheet XML)
+    ///   to keep memory usage reasonable.
+    /// - A worksheet key is present only when conditional formatting blocks were detected.
+    pub conditional_formatting: HashMap<WorksheetId, Vec<RawConditionalFormattingBlock>>,
     /// Mapping from worksheet cells to rich value record indices (e.g. images-in-cell backed by
     /// `xl/richData/richValue.xml`).
     pub rich_value_cells: HashMap<(WorksheetId, CellRef), u32>,
