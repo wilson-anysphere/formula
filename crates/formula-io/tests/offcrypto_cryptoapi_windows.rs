@@ -4,7 +4,8 @@ use formula_io::offcrypto::cryptoapi::{crypt_derive_key, HashAlg};
 use windows_sys::Win32::Foundation::GetLastError;
 use windows_sys::Win32::Security::Cryptography::{
     CryptAcquireContextW, CryptCreateHash, CryptDeriveKey, CryptDestroyHash, CryptDestroyKey,
-    CryptGetHashParam, CryptGetKeyParam, CryptHashData, CryptReleaseContext, CALG_AES_128,
+    CryptExportKey, CryptGetHashParam, CryptGetKeyParam, CryptHashData, CryptReleaseContext,
+    CALG_AES_128,
     CALG_AES_192, CALG_AES_256, CALG_SHA1, CRYPT_EXPORTABLE, CRYPT_VERIFYCONTEXT, HP_HASHVAL,
     KP_KEYVAL, PROV_RSA_AES,
 };
@@ -118,20 +119,74 @@ impl CryptoKey {
     }
 
     fn get_key_value(&self) -> Vec<u8> {
+        match self.get_key_value_kp_keyval() {
+            Ok(buf) => buf,
+            Err(kp_err) => {
+                // Some CryptoAPI providers reject KP_KEYVAL even for exportable session keys.
+                // Fall back to exporting a PLAINTEXTKEYBLOB.
+                self.export_key_plaintext_blob().unwrap_or_else(|export_err| {
+                    panic!(
+                        "failed to extract key bytes: KP_KEYVAL error={kp_err} CryptExportKey error={export_err}"
+                    )
+                })
+            }
+        }
+    }
+
+    fn get_key_value_kp_keyval(&self) -> Result<Vec<u8>, u32> {
         let mut len: u32 = 0;
         // SAFETY: FFI call.
         let ok = unsafe { CryptGetKeyParam(self.0, KP_KEYVAL, std::ptr::null_mut(), &mut len, 0) };
-        assert_ne!(
-            ok, 0,
-            "CryptGetKeyParam(KP_KEYVAL, size query) failed: {}",
-            last_err()
-        );
+        if ok == 0 {
+            return Err(last_err());
+        }
         let mut buf = vec![0u8; len as usize];
         // SAFETY: FFI call.
         let ok = unsafe { CryptGetKeyParam(self.0, KP_KEYVAL, buf.as_mut_ptr(), &mut len, 0) };
-        assert_ne!(ok, 0, "CryptGetKeyParam(KP_KEYVAL) failed: {}", last_err());
+        if ok == 0 {
+            return Err(last_err());
+        }
         buf.truncate(len as usize);
-        buf
+        Ok(buf)
+    }
+
+    fn export_key_plaintext_blob(&self) -> Result<Vec<u8>, u32> {
+        // `PLAINTEXTKEYBLOB` is not exported by windows-sys, so define the WinCrypt constant here.
+        const PLAINTEXTKEYBLOB: u32 = 0x8;
+
+        let mut len: u32 = 0;
+        // SAFETY: FFI call.
+        let ok = unsafe {
+            CryptExportKey(
+                self.0,
+                0, // no exchange key needed for PLAINTEXTKEYBLOB
+                PLAINTEXTKEYBLOB,
+                0,
+                std::ptr::null_mut(),
+                &mut len,
+            )
+        };
+        if ok == 0 {
+            return Err(last_err());
+        }
+
+        let mut buf = vec![0u8; len as usize];
+        // SAFETY: FFI call.
+        let ok = unsafe {
+            CryptExportKey(
+                self.0,
+                0,
+                PLAINTEXTKEYBLOB,
+                0,
+                buf.as_mut_ptr(),
+                &mut len,
+            )
+        };
+        if ok == 0 {
+            return Err(last_err());
+        }
+        buf.truncate(len as usize);
+        Ok(buf)
     }
 }
 
