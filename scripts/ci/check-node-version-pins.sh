@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure CI and release workflows use the same pinned Node.js major version.
+# Ensure all Node-consuming workflows (and local tooling pins) use the same
+# pinned Node.js major version.
 #
 # Rationale:
-# - We run different kinds of builds (web/desktop, tagged desktop releases).
-# - A Node major mismatch between CI and release can cause "CI green, release red"
-#   failures (or worse, subtly different bundles).
+# - We run different kinds of builds (web/desktop, tagged desktop releases, perf,
+#   security scans, etc).
+# - A Node major mismatch between workflows can cause "CI green, release red"
+#   failures (or worse, subtly different artifacts).
 # - This script fails fast when the Node major pin diverges, so version bumps are
-#   an explicit PR with CI signal.
+#   an explicit, coordinated PR with CI signal.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
