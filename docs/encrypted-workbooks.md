@@ -117,8 +117,13 @@ let decrypted_zip = formula_xlsx::offcrypto::decrypt_ooxml_from_ole_bytes(&encry
 assert!(decrypted_zip.starts_with(b"PK"));
 ```
 
-Once decrypted, you can open the ZIP bytes using normal XLSX readers (e.g.
-`formula_xlsx::XlsxPackage::from_bytes(&decrypted_zip)`).
+Once decrypted, you can open the ZIP bytes using normal XLSX readers. For
+streaming/round-trip preservation, prefer:
+
+- `formula_xlsx::XlsxLazyPackage::from_vec(decrypted_zip)`
+
+If you need full in-memory access to all parts, you can instead materialize the
+package via `formula_xlsx::XlsxPackage::from_bytes(&decrypted_zip)`.
 
 Note: encrypted `.xlsb` files also decrypt to a ZIP/OPC package, but the payload contains
 `xl/workbook.bin` instead of `xl/workbook.xml`. In that case, open the decrypted bytes via
