@@ -6,11 +6,28 @@
 //! References:
 //! - MS-OFFCRYPTO: https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
 //! - `EncryptionInfo` stream (Standard): `EncryptionInfo` → `EncryptionHeader` → `EncryptionVerifier`
+//!
+//! ## `EncryptionHeader.sizeExtra`
+//!
+//! For Standard encryption (`EncryptionVersionInfo` major=3, minor=2), the `EncryptionInfo` stream
+//! contains a length-prefixed `EncryptionHeader` blob. The header begins with 8 DWORD fields
+//! (32 bytes) and ends with:
+//! - a UTF-16LE `CSPName` field (variable length), followed by
+//! - `sizeExtra` algorithm-specific bytes (also variable length).
+//!
+//! `headerSize` is the total byte length of the `EncryptionHeader` blob, so the number of bytes
+//! that belong to `CSPName` must be computed as:
+//!
+//! `csp_name_bytes_len = headerSize - 32 - sizeExtra`
+//!
+//! The trailing `sizeExtra` bytes must be skipped (or stored) before parsing the subsequent
+//! `EncryptionVerifier` fields.
 
 // This module is intentionally not wired into the main `formula-io` open path yet; keep it
 // compiling for future work without spamming downstream builds with dead-code warnings.
 #![allow(dead_code)]
 
+use encoding_rs::UTF_16LE;
 use thiserror::Error;
 
 /// MS-OFFCRYPTO "Standard" encryption version (CryptoAPI).
@@ -43,8 +60,8 @@ pub(crate) enum EncryptionInfoError {
     UnsupportedVersion { major: u16, minor: u16 },
     #[error("invalid EncryptionHeaderSize: {0}")]
     InvalidEncryptionHeaderSize(u32),
-    #[error("invalid EncryptionHeader CSPName (missing NUL terminator)")]
-    InvalidCspName,
+    #[error("invalid CSPName byte length: {len} (must be even for UTF-16LE)")]
+    InvalidCspNameLength { len: usize },
     #[error("unsupported external Standard encryption (fExternal flag set)")]
     UnsupportedExternalEncryption,
     #[error("unsupported Standard encryption: fCryptoAPI flag not set")]
@@ -108,29 +125,54 @@ impl EncryptionHeaderFlags {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StandardEncryptionHeader {
     pub(crate) flags: EncryptionHeaderFlags,
+    pub(crate) size_extra: u32,
     pub(crate) alg_id: u32,
+    pub(crate) alg_id_hash: u32,
+    pub(crate) key_size: u32,
+    pub(crate) provider_type: u32,
+    pub(crate) reserved1: u32,
+    pub(crate) reserved2: u32,
+    pub(crate) csp_name: String,
+    pub(crate) header_extra: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EncryptionVerifier {
+    pub(crate) salt_size: u32,
+    pub(crate) salt: Vec<u8>,
+    pub(crate) encrypted_verifier: Vec<u8>,
+    pub(crate) verifier_hash_size: u32,
+    pub(crate) encrypted_verifier_hash: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StandardEncryptionInfo {
+    pub(crate) header_size: u32,
+    pub(crate) header: StandardEncryptionHeader,
+    pub(crate) verifier: EncryptionVerifier,
 }
 
 /// Parse a Standard `EncryptionHeader` and validate key flags.
 fn parse_standard_encryption_header(
     buf: &[u8],
 ) -> Result<StandardEncryptionHeader, EncryptionInfoError> {
-    // `EncryptionHeader` fixed-size fields are 8 DWORDs, then a variable-length UTF-16LE CSPName.
+    // `EncryptionHeader` fixed-size fields are 8 DWORDs, followed by variable-length
+    // CSPName bytes and trailing sizeExtra bytes.
     const FIXED_LEN: usize = 8 * 4;
-    if buf.len() < FIXED_LEN + 2 {
+    if buf.len() < FIXED_LEN {
         return Err(EncryptionInfoError::Truncated);
     }
 
     let mut offset = 0usize;
     let flags_raw = read_u32_le(buf, &mut offset)?;
     let flags = EncryptionHeaderFlags::from_raw(flags_raw);
-    let _size_extra = read_u32_le(buf, &mut offset)?;
+    let size_extra = read_u32_le(buf, &mut offset)?;
     let alg_id = read_u32_le(buf, &mut offset)?;
-    let _alg_id_hash = read_u32_le(buf, &mut offset)?;
-    let _key_size = read_u32_le(buf, &mut offset)?;
-    let _provider_type = read_u32_le(buf, &mut offset)?;
-    let _reserved1 = read_u32_le(buf, &mut offset)?;
-    let _reserved2 = read_u32_le(buf, &mut offset)?;
+    let alg_id_hash = read_u32_le(buf, &mut offset)?;
+    let key_size = read_u32_le(buf, &mut offset)?;
+    let provider_type = read_u32_le(buf, &mut offset)?;
+    let reserved1 = read_u32_le(buf, &mut offset)?;
+    let reserved2 = read_u32_le(buf, &mut offset)?;
 
     // Validate flag semantics.
     if flags.f_external {
@@ -150,29 +192,46 @@ fn parse_standard_encryption_header(
         });
     }
 
-    // Validate CSPName (must be UTF-16LE NUL-terminated within the declared header size).
-    let csp_bytes = buf.get(offset..).ok_or(EncryptionInfoError::Truncated)?;
-    if csp_bytes.len() % 2 != 0 {
-        return Err(EncryptionInfoError::InvalidCspName);
-    }
-    let mut has_nul = false;
-    for pair in csp_bytes.chunks_exact(2) {
-        if pair == [0, 0] {
-            has_nul = true;
-            break;
-        }
-    }
-    if !has_nul {
-        return Err(EncryptionInfoError::InvalidCspName);
+    let header_size_usize = buf.len();
+    let size_extra_usize = size_extra as usize;
+    if header_size_usize < FIXED_LEN + size_extra_usize {
+        return Err(EncryptionInfoError::InvalidEncryptionHeaderSize(
+            header_size_usize as u32,
+        ));
     }
 
-    Ok(StandardEncryptionHeader { flags, alg_id })
+    let csp_name_bytes_len = header_size_usize - FIXED_LEN - size_extra_usize;
+    if csp_name_bytes_len % 2 != 0 {
+        return Err(EncryptionInfoError::InvalidCspNameLength {
+            len: csp_name_bytes_len,
+        });
+    }
+
+    let csp_name_bytes = &buf[offset..offset + csp_name_bytes_len];
+    let (cow, _) = UTF_16LE.decode_without_bom_handling(csp_name_bytes);
+    let csp_name = cow.into_owned();
+
+    let header_extra = buf[offset + csp_name_bytes_len..].to_vec();
+    debug_assert_eq!(header_extra.len(), size_extra_usize);
+
+    Ok(StandardEncryptionHeader {
+        flags,
+        size_extra,
+        alg_id,
+        alg_id_hash,
+        key_size,
+        provider_type,
+        reserved1,
+        reserved2,
+        csp_name,
+        header_extra,
+    })
 }
 
 /// Parse an MS-OFFCRYPTO `EncryptionInfo` stream as Standard encryption.
 pub(crate) fn parse_standard_encryption_info(
     bytes: &[u8],
-) -> Result<StandardEncryptionHeader, EncryptionInfoError> {
+) -> Result<StandardEncryptionInfo, EncryptionInfoError> {
     let mut offset = 0usize;
     let major = read_u16_le(bytes, &mut offset)?;
     let minor = read_u16_le(bytes, &mut offset)?;
@@ -191,16 +250,9 @@ pub(crate) fn parse_standard_encryption_info(
         EncryptionInfoError::InvalidEncryptionHeaderSize(header_size)
     })?;
 
-    // The header contains at least the fixed fields plus a UTF-16 NUL terminator.
-    if header_size_usize < 8 * 4 + 2 {
-        return Err(EncryptionInfoError::InvalidEncryptionHeaderSize(
-            header_size,
-        ));
-    }
-    if header_size_usize % 2 != 0 {
-        return Err(EncryptionInfoError::InvalidEncryptionHeaderSize(
-            header_size,
-        ));
+    // The header must contain at least the fixed 8 DWORD fields.
+    if header_size_usize < 8 * 4 {
+        return Err(EncryptionInfoError::InvalidEncryptionHeaderSize(header_size));
     }
 
     let header_end = offset
@@ -213,58 +265,63 @@ pub(crate) fn parse_standard_encryption_info(
 
     let parsed_header = parse_standard_encryption_header(header)?;
 
-    // Best-effort parse of the following `EncryptionVerifier` header fields to ensure the stream is
-    // not trivially truncated. We don't currently surface these values, but checking lengths makes
-    // the overall parser more conservative.
-    //
     // `EncryptionVerifier` begins with:
     //   DWORD SaltSize;
     //   BYTE  Salt[SaltSize];
     //   BYTE  EncryptedVerifier[16];
     //   DWORD VerifierHashSize;
     //   BYTE  EncryptedVerifierHash[...]
-    //
-    // The `EncryptedVerifierHash` length depends on the encryption algorithm: for AES it's padded
-    // to a 16-byte block.
-    let verifier_salt_size = read_u32_le(bytes, &mut offset)? as usize;
-    let verifier_salt_end = offset
-        .checked_add(verifier_salt_size)
+    let salt_size = read_u32_le(bytes, &mut offset)?;
+    let salt_size_usize = salt_size as usize;
+    let salt_end = offset
+        .checked_add(salt_size_usize)
         .ok_or(EncryptionInfoError::Truncated)?;
-    let verifier_salt = bytes
-        .get(offset..verifier_salt_end)
-        .ok_or(EncryptionInfoError::Truncated)?;
-    let _ = verifier_salt;
-    offset += verifier_salt_size;
+    let salt = bytes
+        .get(offset..salt_end)
+        .ok_or(EncryptionInfoError::Truncated)?
+        .to_vec();
+    offset += salt_size_usize;
 
     let encrypted_verifier_end = offset
         .checked_add(16)
         .ok_or(EncryptionInfoError::Truncated)?;
-    let _encrypted_verifier = bytes
+    let encrypted_verifier = bytes
         .get(offset..encrypted_verifier_end)
-        .ok_or(EncryptionInfoError::Truncated)?;
+        .ok_or(EncryptionInfoError::Truncated)?
+        .to_vec();
     offset += 16;
 
-    let verifier_hash_size = read_u32_le(bytes, &mut offset)? as usize;
+    let verifier_hash_size = read_u32_le(bytes, &mut offset)?;
+    let verifier_hash_size_usize = verifier_hash_size as usize;
     let expected_hash_len = if is_aes_alg_id(parsed_header.alg_id) {
         // AES is a block cipher (16-byte blocks).
-        verifier_hash_size
+        verifier_hash_size_usize
             .checked_add(15)
             .map(|v| (v / 16) * 16)
             .ok_or(EncryptionInfoError::Truncated)?
     } else {
         // RC4 is stream-based (no padding).
-        verifier_hash_size
+        verifier_hash_size_usize
     };
     let verifier_hash_end = offset
         .checked_add(expected_hash_len)
         .ok_or(EncryptionInfoError::Truncated)?;
-    let _encrypted_verifier_hash = bytes
+    let encrypted_verifier_hash = bytes
         .get(offset..verifier_hash_end)
-        .ok_or(EncryptionInfoError::Truncated)?;
-    // We intentionally do not require that the verifier hash consumes the rest of the stream;
-    // producers may append additional data.
+        .ok_or(EncryptionInfoError::Truncated)?
+        .to_vec();
 
-    Ok(parsed_header)
+    Ok(StandardEncryptionInfo {
+        header_size,
+        header: parsed_header,
+        verifier: EncryptionVerifier {
+            salt_size,
+            salt,
+            encrypted_verifier,
+            verifier_hash_size,
+            encrypted_verifier_hash,
+        },
+    })
 }
 
 #[cfg(test)]
@@ -276,7 +333,7 @@ mod tests {
         // - Version (3.2)
         // - Info flags (0)
         // - Header size
-        // - EncryptionHeader (fixed fields + empty CSPName)
+        // - EncryptionHeader (fixed fields + empty CSPName bytes)
         // - EncryptionVerifier (minimal lengths)
 
         let mut out = Vec::new();
@@ -284,7 +341,7 @@ mod tests {
         out.extend_from_slice(&STANDARD_VERSION_MINOR.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags (ignored)
 
-        // Header: 8 DWORDs + UTF-16LE NUL terminator.
+        // Header: 8 DWORDs + 2 bytes of empty UTF-16LE (one NUL code unit).
         let header_size = (8 * 4 + 2) as u32;
         out.extend_from_slice(&header_size.to_le_bytes());
 
@@ -297,7 +354,7 @@ mod tests {
         out.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
         out.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
         out.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
-        out.extend_from_slice(&0u16.to_le_bytes()); // CSPName (empty string terminator)
+        out.extend_from_slice(&0u16.to_le_bytes()); // CSPName (empty string / terminator)
 
         // EncryptionVerifier.
         out.extend_from_slice(&16u32.to_le_bytes()); // SaltSize
@@ -308,6 +365,69 @@ mod tests {
         out.extend_from_slice(&vec![0u8; hash_len]); // EncryptedVerifierHash (padded for AES)
 
         out
+    }
+
+    fn utf16le_bytes(s: &str) -> Vec<u8> {
+        s.encode_utf16().flat_map(|cu| cu.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn standard_parses_csp_name_and_skips_size_extra_bytes() {
+        // Build a synthetic Standard EncryptionInfo buffer with a non-zero sizeExtra and confirm:
+        // - CSPName is derived from headerSize - 32 - sizeExtra bytes
+        // - verifier fields are parsed starting *after* the extra bytes
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI;
+        let alg_id = CALG_RC4;
+
+        let csp_name = "Test CSP\0";
+        let csp_name_bytes = utf16le_bytes(csp_name);
+        let header_extra = vec![0xAA, 0xBB, 0xCC, 0xDD];
+        let size_extra = header_extra.len() as u32;
+
+        let header_size = (8 * 4 + csp_name_bytes.len() + header_extra.len()) as u32;
+
+        let salt_size = 16u32;
+        let salt: Vec<u8> = (0u8..16).collect();
+        let encrypted_verifier: Vec<u8> = (0x10u8..0x20).collect();
+        let verifier_hash_size = 20u32;
+        let encrypted_verifier_hash = vec![0xEE; 20];
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&STANDARD_VERSION_MAJOR.to_le_bytes());
+        out.extend_from_slice(&STANDARD_VERSION_MINOR.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags
+        out.extend_from_slice(&header_size.to_le_bytes());
+
+        // EncryptionHeader fixed fields.
+        out.extend_from_slice(&flags.to_le_bytes()); // Flags
+        out.extend_from_slice(&size_extra.to_le_bytes()); // SizeExtra
+        out.extend_from_slice(&alg_id.to_le_bytes()); // AlgId
+        out.extend_from_slice(&0u32.to_le_bytes()); // AlgIdHash
+        out.extend_from_slice(&128u32.to_le_bytes()); // KeySize
+        out.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+        out.extend_from_slice(&csp_name_bytes);
+        out.extend_from_slice(&header_extra);
+
+        // EncryptionVerifier.
+        out.extend_from_slice(&salt_size.to_le_bytes());
+        out.extend_from_slice(&salt);
+        out.extend_from_slice(&encrypted_verifier);
+        out.extend_from_slice(&verifier_hash_size.to_le_bytes());
+        out.extend_from_slice(&encrypted_verifier_hash);
+
+        let parsed = parse_standard_encryption_info(&out).expect("should parse");
+        assert_eq!(parsed.header_size, header_size);
+        assert_eq!(parsed.header.size_extra, size_extra);
+        assert_eq!(parsed.header.csp_name, csp_name);
+        assert_eq!(parsed.header.header_extra, header_extra);
+
+        assert_eq!(parsed.verifier.salt_size, salt_size);
+        assert_eq!(parsed.verifier.salt, salt);
+        assert_eq!(parsed.verifier.encrypted_verifier, encrypted_verifier);
+        assert_eq!(parsed.verifier.verifier_hash_size, verifier_hash_size);
+        assert_eq!(parsed.verifier.encrypted_verifier_hash, encrypted_verifier_hash);
     }
 
     #[test]
@@ -352,22 +472,52 @@ mod tests {
     fn standard_accepts_cryptoapi_rc4_flags() {
         let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_DOCPROPS;
         let bytes = build_standard_encryption_info(flags, CALG_RC4);
-        let header = parse_standard_encryption_info(&bytes).expect("should parse");
-        assert_eq!(header.flags.f_cryptoapi, true);
-        assert_eq!(header.flags.f_doc_props, true);
-        assert_eq!(header.flags.f_external, false);
-        assert_eq!(header.flags.f_aes, false);
-        assert_eq!(header.alg_id, CALG_RC4);
+        let info = parse_standard_encryption_info(&bytes).expect("should parse");
+        assert_eq!(info.header.flags.f_cryptoapi, true);
+        assert_eq!(info.header.flags.f_doc_props, true);
+        assert_eq!(info.header.flags.f_external, false);
+        assert_eq!(info.header.flags.f_aes, false);
+        assert_eq!(info.header.alg_id, CALG_RC4);
     }
 
     #[test]
     fn standard_accepts_cryptoapi_aes_flags() {
         let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
         let bytes = build_standard_encryption_info(flags, CALG_AES_128);
-        let header = parse_standard_encryption_info(&bytes).expect("should parse");
-        assert_eq!(header.flags.f_cryptoapi, true);
-        assert_eq!(header.flags.f_aes, true);
-        assert_eq!(header.alg_id, CALG_AES_128);
+        let info = parse_standard_encryption_info(&bytes).expect("should parse");
+        assert_eq!(info.header.flags.f_cryptoapi, true);
+        assert_eq!(info.header.flags.f_aes, true);
+        assert_eq!(info.header.alg_id, CALG_AES_128);
+    }
+
+    #[test]
+    fn standard_rejects_odd_csp_name_byte_length() {
+        // headerSize=35 => CSPName byte length = 3 (odd) when sizeExtra=0.
+        let header_size = 35u32;
+        let mut out = Vec::new();
+        out.extend_from_slice(&STANDARD_VERSION_MAJOR.to_le_bytes());
+        out.extend_from_slice(&STANDARD_VERSION_MINOR.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags
+        out.extend_from_slice(&header_size.to_le_bytes());
+
+        // EncryptionHeader fixed fields.
+        out.extend_from_slice(&EncryptionHeaderFlags::F_CRYPTOAPI.to_le_bytes()); // Flags
+        out.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+        out.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgId
+        out.extend_from_slice(&0u32.to_le_bytes()); // AlgIdHash
+        out.extend_from_slice(&128u32.to_le_bytes()); // KeySize
+        out.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+
+        // 3 bytes of CSPName (invalid UTF-16LE length).
+        out.extend_from_slice(&[0x41, 0x00, 0x42]);
+
+        let err = parse_standard_encryption_info(&out).expect_err("expected error");
+        assert!(
+            matches!(err, EncryptionInfoError::InvalidCspNameLength { len: 3 }),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
@@ -378,10 +528,10 @@ mod tests {
         for major in [2u16, 4u16] {
             let mut patched = bytes.clone();
             patched[..2].copy_from_slice(&major.to_le_bytes());
-            let header = parse_standard_encryption_info(&patched).expect("should parse");
-            assert_eq!(header.flags.f_cryptoapi, true);
-            assert_eq!(header.flags.f_aes, true);
-            assert_eq!(header.alg_id, CALG_AES_128);
+            let info = parse_standard_encryption_info(&patched).expect("should parse");
+            assert_eq!(info.header.flags.f_cryptoapi, true);
+            assert_eq!(info.header.flags.f_aes, true);
+            assert_eq!(info.header.alg_id, CALG_AES_128);
         }
     }
 }
