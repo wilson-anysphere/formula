@@ -12,6 +12,7 @@ use formula_model::{
 use formula_model::{Orientation, PageSetup, Scaling};
 
 use super::records;
+use super::rgce;
 use super::strings;
 
 /// Hard cap on the number of per-cell XF indices tracked per worksheet.
@@ -2050,6 +2051,112 @@ fn parse_biff_sheet_cell_xf_indices_filtered_with_cap(
                 }
             }
             // EOF terminates the sheet substream.
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    Ok(out)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SheetFormulas {
+    pub(crate) formulas: HashMap<CellRef, String>,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Best-effort decode of BIFF8 worksheet formulas (`FORMULA` records).
+///
+/// This scans the worksheet substream for `FORMULA` records and decodes their BIFF8 `rgce` token
+/// streams into formula text (without a leading `=`).
+///
+/// Notes:
+/// - This parser is intentionally best-effort: malformed records are skipped and surfaced as
+///   warnings. Unsupported tokens are rendered as placeholders by the rgce decoder.
+/// - Only BIFF8 `rgce` decoding is supported; callers should guard on BIFF version.
+pub(crate) fn parse_biff8_sheet_formulas(
+    workbook_stream: &[u8],
+    start: usize,
+    ctx: &rgce::RgceDecodeContext<'_>,
+) -> Result<SheetFormulas, String> {
+    let mut out = SheetFormulas::default();
+
+    // FORMULA records can be split across one or more CONTINUE records when the formula payload is
+    // large. Use the logical iterator so we can decode long formulas (and stay aligned) even when
+    // the token stream crosses physical record boundaries.
+    let allows_continuation = |record_id: u16| record_id == RECORD_FORMULA;
+    let iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+
+    for record in iter {
+        let record = match record {
+            Ok(r) => r,
+            Err(err) => {
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
+
+        // BOF indicates the start of a new substream; stop before consuming the next section so we
+        // don't attribute later formulas to this worksheet.
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        match record.record_id {
+            RECORD_FORMULA => {
+                // FORMULA record payload [MS-XLS 2.4.127] (BIFF8):
+                //   [rw:u16][col:u16][ixfe:u16]
+                //   [value:8 bytes cached result]
+                //   [grbit:u16][chn:u32]
+                //   [cce:u16][rgce: cce bytes][... optional extra bytes ...]
+                let data = record.data.as_ref();
+                if data.len() < 22 {
+                    out.warnings.push(format!(
+                        "truncated FORMULA record at offset {} (len={})",
+                        record.offset,
+                        data.len()
+                    ));
+                    continue;
+                }
+
+                let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+                let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+                if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+                    out.warnings.push(format!(
+                        "skipping out-of-bounds FORMULA cell ({row},{col}) at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+
+                let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
+                let end = 22usize.saturating_add(cce);
+                let Some(rgce_bytes) = data.get(22..end) else {
+                    out.warnings.push(format!(
+                        "truncated FORMULA rgce payload at offset {} (cce={cce}, len={})",
+                        record.offset,
+                        data.len()
+                    ));
+                    continue;
+                };
+
+                let cell_ref = CellRef::new(row, col);
+                let decoded = rgce::decode_biff8_rgce_with_base(
+                    rgce_bytes,
+                    ctx,
+                    Some(rgce::CellCoord::new(row, col)),
+                );
+
+                for warning in decoded.warnings {
+                    out.warnings
+                        .push(format!("cell {}: {warning}", cell_ref.to_a1()));
+                }
+
+                if !decoded.text.trim().is_empty() {
+                    out.formulas.insert(cell_ref, decoded.text);
+                }
+            }
             records::RECORD_EOF => break,
             _ => {}
         }

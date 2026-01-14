@@ -681,17 +681,26 @@ fn import_xls_path_with_biff_reader(
             || sheet_has_out_of_range_xf
             || sheet_xf_parse_failed;
 
+        // Best-effort: calamine can panic on malformed `.xls` records. Treat panics as warnings
+        // and continue importing other sheets/metadata.
         let value_range = match catch_calamine_panic_with_context(
             &format!("reading cell values for sheet `{source_sheet_name}`"),
             || workbook.worksheet_range(&source_sheet_name),
-        )? {
-            Ok(range) => Some(range),
-            Err(err) => {
+        ) {
+            Ok(Ok(range)) => Some(range),
+            Ok(Err(err)) => {
                 warnings.push(ImportWarning::new(format!(
                     "failed to read cell values for sheet `{source_sheet_name}`: {err}"
                 )));
                 None
             }
+            Err(ImportError::CalaminePanic(message)) => {
+                warnings.push(ImportWarning::new(format!(
+                    "failed to read cell values for sheet `{source_sheet_name}`: calamine panicked: {message}"
+                )));
+                None
+            }
+            Err(other) => return Err(other),
         };
 
         if sheet_needs_datetime_fallback && date_time_styles.is_none() {
@@ -1253,11 +1262,16 @@ fn import_xls_path_with_biff_reader(
             }
         }
 
+        let mut calamine_formula_failed = false;
+
+        // Best-effort: calamine's `.xls` formula decoding can error or panic on token streams it
+        // doesn't understand. Treat both errors and panics as non-fatal and fall back to BIFF
+        // parsing when possible.
         match catch_calamine_panic_with_context(
             &format!("reading formulas for sheet `{source_sheet_name}`"),
             || workbook.worksheet_formula(&source_sheet_name),
-        )? {
-            Ok(formula_range) => {
+        ) {
+            Ok(Ok(formula_range)) => {
                 let formula_start = formula_range.start().unwrap_or((0, 0));
                 for (row, col, formula) in formula_range.used_cells() {
                     let Some(cell_ref) = to_cell_ref(formula_start, row, col) else {
@@ -1292,9 +1306,104 @@ fn import_xls_path_with_biff_reader(
                     }
                 }
             }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to read formulas for sheet `{sheet_name}`: {err}"
-            ))),
+            Ok(Err(err)) => {
+                calamine_formula_failed = true;
+                warnings.push(ImportWarning::new(format!(
+                    "failed to read formulas for sheet `{sheet_name}`: {err}"
+                )));
+            }
+            Err(ImportError::CalaminePanic(message)) => {
+                calamine_formula_failed = true;
+                warnings.push(ImportWarning::new(format!(
+                    "failed to read formulas for sheet `{sheet_name}`: calamine panicked: {message}"
+                )));
+            }
+            Err(other) => return Err(other),
+        }
+
+        // BIFF8 fallback/merge: calamine's `.xls` formula decoding can fail for token streams it
+        // doesn't understand. When the raw workbook stream is available, decode formulas directly
+        // from BIFF8 `FORMULA` records and merge results so a calamine failure doesn't drop all
+        // formulas for the sheet.
+        if let (Some(workbook_stream), Some(biff_version), Some(codepage), Some(biff_idx)) = (
+            workbook_stream.as_deref(),
+            biff_version,
+            biff_codepage,
+            biff_idx,
+        ) {
+            if biff_version == biff::BiffVersion::Biff8 {
+                if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
+                    if sheet_info.offset >= workbook_stream.len() {
+                        // Only surface this warning if we need BIFF formula import due to a calamine
+                        // failure; otherwise keep `.xls` import warning behavior stable.
+                        if calamine_formula_failed {
+                            warnings.push(ImportWarning::new(format!(
+                                "failed to import `.xls` formulas for sheet `{sheet_name}` via BIFF fallback: out-of-bounds stream offset {}",
+                                sheet_info.offset
+                            )));
+                        }
+                    } else {
+                        // Provide a minimal rgce decode context: structured references and most
+                        // intra-sheet formulas don't require workbook-global metadata. Tokens that
+                        // require extra context (EXTERNSHEET/SUPBOOK/NAME table) are rendered
+                        // best-effort by the decoder.
+                        let empty_sheet_names: &[String] = &[];
+                        let empty_externsheet: &[biff::externsheet::ExternSheetEntry] = &[];
+                        let empty_supbooks: &[biff::supbook::SupBookInfo] = &[];
+                        let empty_defined_names: &[biff::rgce::DefinedNameMeta] = &[];
+                        let ctx = biff::rgce::RgceDecodeContext {
+                            codepage,
+                            sheet_names: empty_sheet_names,
+                            externsheet: empty_externsheet,
+                            supbooks: empty_supbooks,
+                            defined_names: empty_defined_names,
+                        };
+
+                        match biff::parse_biff8_sheet_formulas(workbook_stream, sheet_info.offset, &ctx) {
+                            Ok(parsed) => {
+                                for (cell_ref, formula) in parsed.formulas {
+                                    let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                                    if !calamine_formula_failed
+                                        && sheet.formula(anchor).is_some()
+                                    {
+                                        // Prefer calamine's string representation when it is
+                                        // available, but fill any gaps (or entire sheets) from BIFF.
+                                        continue;
+                                    }
+
+                                    let Some(normalized) = normalize_formula_text(&formula) else {
+                                        continue;
+                                    };
+                                    sheet.set_formula(anchor, Some(normalized));
+
+                                    if let Some(resolved) = style_id_for_cell_xf(
+                                        xf_style_ids.as_deref(),
+                                        sheet_cell_xfs,
+                                        anchor,
+                                    ) {
+                                        sheet.set_style_id(anchor, resolved);
+                                    }
+                                }
+
+                                if calamine_formula_failed {
+                                    warnings.extend(parsed.warnings.into_iter().map(|w| {
+                                        ImportWarning::new(format!(
+                                            "failed to import `.xls` formula in sheet `{sheet_name}` via BIFF fallback: {w}"
+                                        ))
+                                    }));
+                                }
+                            }
+                            Err(err) => {
+                                if calamine_formula_failed {
+                                    warnings.push(ImportWarning::new(format!(
+                                        "failed to import `.xls` formulas for sheet `{sheet_name}` via BIFF fallback: {err}"
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // BIFF8 shared-formula fallback: recover follower-cell formulas whose `FORMULA.rgce` is

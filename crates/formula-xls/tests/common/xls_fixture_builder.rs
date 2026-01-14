@@ -180,6 +180,27 @@ pub fn build_formula_sheet_name_truncation_fixture_xls() -> Vec<u8> {
 /// cell's `FORMULA.rgce`.
 pub fn build_shared_formula_ptgexp_missing_shrfmla_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_ptgexp_missing_shrfmla_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a worksheet formula that calamine drops from
+/// `worksheet_formula()` output (due to unresolved shared-formula state), but can be decoded by our
+/// BIFF `rgce` parser.
+///
+/// Our importer should fall back to decoding BIFF8 `FORMULA` records directly so formulas are still
+/// imported.
+pub fn build_calamine_formula_error_biff_fallback_fixture_xls() -> Vec<u8> {
+    let xf_general = 16u16;
+    let sheet_stream = build_spill_operator_formula_sheet_stream(xf_general);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -7383,6 +7404,42 @@ fn build_shared_ref3d_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
     sheet
 }
 
+fn build_spill_operator_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 2) (A..B)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: NUMBER record so the shared-formula reference points at an existing cell.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // B1: FORMULA record containing a shared-formula token (`PtgExp`) without an accompanying
+    // `SHRFMLA` record. Calamine may drop such formulas (returning an empty formula range), while
+    // our BIFF rgce decoder renders a parseable placeholder (`#UNKNOWN!`).
+    //
+    // PtgExp payload: [rwFirst: u16][colFirst: u16] (shared-formula reference).
+    let rgce = [0x01u8, 0x00, 0x00, 0x00, 0x00].to_vec();
+    let cached_numeric: [u8; 8] = 0.0f64.to_le_bytes();
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_raw_value(0, 1, xf_cell, cached_numeric, &rgce),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
 fn build_calc_settings_sheet_stream(xf: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -10278,7 +10335,13 @@ fn formula_cell(row: u16, col: u16, xf: u16, cached_result: f64, rgce: &[u8]) ->
     out
 }
 
-fn shrfmla_record(rw_first: u16, rw_last: u16, col_first: u8, col_last: u8, rgce: &[u8]) -> Vec<u8> {
+fn shrfmla_record(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u8,
+    col_last: u8,
+    rgce: &[u8],
+) -> Vec<u8> {
     // SHRFMLA record payload (BIFF8) [MS-XLS 2.4.277].
     //
     // Minimal layout (RefU + cce + rgce):
@@ -10289,6 +10352,29 @@ fn shrfmla_record(rw_first: u16, rw_last: u16, col_first: u8, col_last: u8, rgce
     out.push(col_first);
     out.push(col_last);
     out.extend_from_slice(&(rgce.len() as u16).to_le_bytes());
+    out.extend_from_slice(rgce);
+    out
+}
+
+fn formula_cell_with_raw_value(
+    row: u16,
+    col: u16,
+    xf: u16,
+    value: [u8; 8],
+    rgce: &[u8],
+) -> Vec<u8> {
+    // FORMULA record payload (BIFF8) [MS-XLS 2.4.127].
+    //
+    // This is a variant of `formula_cell` that allows injecting non-numeric cached result
+    // encodings (e.g. a string result marker).
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&xf.to_le_bytes());
+    out.extend_from_slice(&value);
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbit
+    out.extend_from_slice(&0u32.to_le_bytes()); // chn
+    out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
     out.extend_from_slice(rgce);
     out
 }
