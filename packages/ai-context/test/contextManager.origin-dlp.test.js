@@ -217,6 +217,38 @@ test("buildContext: heuristic DLP also considers sheet name and redacts it when 
   assert.equal(auditEvents[0]?.decision?.decision, "redact");
 });
 
+test("buildContext: heuristic DLP also considers sheet metadata (namedRanges/tables) when policy requires", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const auditEvents = [];
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Header"], ["Value"]],
+      namedRanges: [{ name: "alice@example.com", range: "Sheet1!A1:A2" }],
+    },
+    query: "value",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+      auditLogger: { log: (e) => auditEvents.push(e) },
+    },
+  });
+
+  assert.match(out.promptContext, /## dlp/i);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(JSON.stringify(out.schema), /alice@example\.com/);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]?.decision?.decision, "redact");
+});
+
 test("buildContext: heuristic DLP sheet-name findings can block when policy requires", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
