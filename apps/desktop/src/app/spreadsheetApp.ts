@@ -6557,7 +6557,6 @@ export class SpreadsheetApp {
     })();
 
     // Allocate drawing ids ahead-of-time so we guarantee uniqueness within this insertion batch.
-    const existingObjects = this.listDrawingObjectsForSheet(sheetId);
     const usedDrawingIds = new Set<number>();
     let maxDrawingId = 0;
     for (const obj of existingObjects) {
