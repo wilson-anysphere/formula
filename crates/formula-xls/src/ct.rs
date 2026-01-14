@@ -42,7 +42,7 @@ pub(crate) fn ct_eq_call_count() -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::ct_eq;
+    use super::{ct_eq, ct_eq_call_count, reset_ct_eq_calls};
 
     #[test]
     fn ct_eq_true_for_equal_slices() {
@@ -62,5 +62,17 @@ mod tests {
     fn ct_eq_false_for_different_lengths() {
         assert!(!ct_eq(b"a", b""));
         assert!(!ct_eq(b"ab", b"abc"));
+    }
+
+    #[test]
+    fn ct_eq_call_count_increments() {
+        reset_ct_eq_calls();
+        assert_eq!(ct_eq_call_count(), 0);
+
+        ct_eq(b"abc", b"abc");
+        assert_eq!(ct_eq_call_count(), 1);
+
+        ct_eq(b"abc", b"abd");
+        assert_eq!(ct_eq_call_count(), 2);
     }
 }
