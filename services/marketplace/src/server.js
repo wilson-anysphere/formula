@@ -1092,9 +1092,9 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         statusCode = 200;
         return sendJson(res, 200, {
           scans: await store.listPackageScans({
-            status: status && status.trim() ? status : null,
-            publisher: publisher && publisher.trim() ? publisher : null,
-            extensionId: extensionId && extensionId.trim() ? extensionId : null,
+            status: typeof status === "string" && status.trim() ? status.trim() : null,
+            publisher: typeof publisher === "string" && publisher.trim() ? publisher.trim() : null,
+            extensionId: typeof extensionId === "string" && extensionId.trim() ? extensionId.trim() : null,
             limit,
             offset,
           }),
