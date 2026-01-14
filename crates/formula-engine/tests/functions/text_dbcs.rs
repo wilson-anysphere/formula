@@ -115,6 +115,28 @@ fn asc_and_dbcs_convert_under_cp932() {
     assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ｶﾞ".to_string()));
     assert_eq!(sheet.eval(r#"=ASC("パ")"#), Value::Text("ﾊﾟ".to_string()));
     assert_eq!(sheet.eval(r#"=DBCS("ｳﾞ")"#), Value::Text("ヴ".to_string()));
+
+    // Katakana punctuation + small kana should round-trip.
+    assert_eq!(
+        sheet.eval(r#"=ASC("。「」、・")"#),
+        Value::Text("｡｢｣､･".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=DBCS("｡｢｣､･")"#),
+        Value::Text("。「」、・".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=ASC("ァィゥェォャュョッー")"#),
+        Value::Text("ｧｨｩｪｫｬｭｮｯｰ".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=DBCS("ｧｨｩｪｫｬｭｮｯｰ")"#),
+        Value::Text("ァィゥェォャュョッー".to_string())
+    );
+
+    // Less common voiced katakana.
+    assert_eq!(sheet.eval(r#"=ASC("ヷ")"#), Value::Text("ﾜﾞ".to_string()));
+    assert_eq!(sheet.eval(r#"=DBCS("ﾜﾞ")"#), Value::Text("ヷ".to_string()));
 }
 
 #[test]
