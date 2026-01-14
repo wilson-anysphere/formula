@@ -166,7 +166,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       expect(app.getActiveCell()).toEqual(activeBefore);
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-      expect((app as any).selectedDrawingId).toBeNull();
+      expect(app.getSelectedDrawingId()).toBeNull();
       expect(((app as any).drawingOverlay as any).selectedId).toBe(null);
       expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
       expect(app.getActiveCell()).toEqual(activeBefore);
@@ -244,7 +244,7 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       expect(app.getActiveCell()).toEqual(activeBefore);
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-      expect((app as any).selectedDrawingId).toBeNull();
+      expect(app.getSelectedDrawingId()).toBeNull();
       expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
       expect(app.getActiveCell()).toEqual(activeBefore);
 
@@ -310,12 +310,12 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       );
 
       // Drag should have moved the in-memory drawing state.
-      expect(((app as any).drawingObjectsCache as any)?.objects?.[0]?.anchor?.pos?.xEmu).not.toBe(0);
+      expect(app.getDrawingObjects(sheetId)[0]?.anchor?.pos?.xEmu).not.toBe(0);
 
       // Escape should reach the controller's window-level handler and cancel the drag.
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 
-      expect(((app as any).drawingObjectsCache as any)?.objects?.[0]?.anchor?.pos?.xEmu).toBe(0);
+      expect(app.getDrawingObjects(sheetId)[0]?.anchor?.pos?.xEmu).toBe(0);
 
       // Releasing the pointer after cancel should not re-commit the drag.
       selectionCanvas.dispatchEvent(

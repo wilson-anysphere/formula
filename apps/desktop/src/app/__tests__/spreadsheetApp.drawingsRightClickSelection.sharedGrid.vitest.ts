@@ -174,12 +174,12 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     // Ensure `listDrawingObjectsForSheet()` reflects the newly inserted object (it caches results).
     (app as any).drawingObjectsCache = null;
 
-    // Right-click within the picture bounds. With our drawing interaction controller attached to the
-    // shared-grid selection canvas, this should select the drawing but *not* move the active cell.
+    // Right-click within the picture bounds. This should select the drawing but *not* move the active
+    // cell (Excel-like behavior in shared-grid mode).
     const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
     selectionCanvas.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: 60, clientY: 30, button: 2 }));
 
-    expect((app as any).selectedDrawingId).toBe(1);
+    expect(app.getSelectedDrawingId()).toBe(1);
     expect(app.getActiveCell()).toEqual(beforeActive);
 
     app.destroy();

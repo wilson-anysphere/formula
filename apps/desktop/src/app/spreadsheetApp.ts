@@ -11446,7 +11446,30 @@ export class SpreadsheetApp {
 
   private onDrawingPointerDownCapture(e: PointerEvent): void {
     if (this.disposed) return;
-    if (e.button !== 0) return;
+    const pointerType = e.pointerType ?? "";
+    const button = typeof e.button === "number" ? e.button : 0;
+    const isMouse = pointerType === "mouse";
+    const isMacPlatform = (() => {
+      try {
+        const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+        return /Mac|iPhone|iPad|iPod/.test(platform);
+      } catch {
+        return false;
+      }
+    })();
+    // On macOS, Ctrl+click is commonly treated as a right click and fires the `contextmenu` event.
+    const isMacContextClick = isMouse && isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey;
+    const isContextClick = isMouse && (button === 2 || isMacContextClick);
+    const isPrimaryClick = !isMouse || button === 0;
+
+    // In legacy mode, bubble-phase pointer handlers already handle right-click selection semantics
+    // (including drawing hit testing), so only intercept primary clicks here.
+    //
+    // In shared-grid mode, right-clicks land on the full-size selection canvas and would otherwise
+    // move the active cell underneath a drawing. We handle drawing context-click selection here and
+    // tag the event so the shared-grid selection canvas can ignore it (Excel-like behavior).
+    if (!this.sharedGrid && !isPrimaryClick) return;
+    if (this.sharedGrid && !(isPrimaryClick || isContextClick)) return;
     // When the dedicated DrawingInteractionController is enabled, it owns selection/dragging.
     // Avoid competing with its pointer listeners (especially in legacy mode where it uses
     // bubbling listeners and relies on pointer events not being cancelled in capture phase).
@@ -11517,7 +11540,7 @@ export class SpreadsheetApp {
     //
     // In legacy mode, allow the bubbling `onPointerDown` handler to run so it can start the
     // existing drag/resize gesture state machine for drawings.
-    if (this.sharedGrid) {
+    if (this.sharedGrid && !isContextClick) {
       e.preventDefault();
       e.stopPropagation();
     }
@@ -11532,6 +11555,13 @@ export class SpreadsheetApp {
     if (this.selectedDrawingId !== prevSelected) {
       this.dispatchDrawingSelectionChanged();
       this.renderDrawings(sharedViewport);
+    }
+
+    if (isContextClick) {
+      // Tag the pointer event so the shared-grid selection canvas can avoid moving the active cell
+      // underneath the drawing. This allows context menus to appear without breaking selection.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (e as any).__formulaDrawingContextClick = true;
     }
     this.focus();
   }
