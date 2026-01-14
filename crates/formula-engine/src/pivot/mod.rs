@@ -3246,7 +3246,7 @@ impl FieldIndices {
             let label = field.to_string();
             source
                 .field_index(&label)
-                .ok_or_else(|| PivotError::MissingField(label))
+                .ok_or_else(|| PivotError::MissingField(field_name.to_string()))
         };
 
         let mut row_indices = Vec::new();
