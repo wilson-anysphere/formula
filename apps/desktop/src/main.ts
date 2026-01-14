@@ -8391,8 +8391,7 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
 
     if (typeof raw === "number" && Number.isFinite(raw)) {
       const fmt = doc.getCellFormat(sheetId, cell) as any;
-      const rawNumberFormat = fmt?.numberFormat ?? fmt?.number_format;
-      const numberFormat = typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "" ? rawNumberFormat : null;
+      const numberFormat = getStyleNumberFormat(fmt);
       if (numberFormat) return formatValueWithNumberFormat(raw, numberFormat);
     }
 

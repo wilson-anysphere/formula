@@ -97,6 +97,7 @@ import {
   normalizeSelectionRange,
 } from "../formatting/selectionSizeGuard.js";
 import { formatValueWithNumberFormat } from "../formatting/numberFormat.ts";
+import { getStyleNumberFormat } from "../formatting/styleFieldAccess.js";
 import { dateToExcelSerial } from "../shared/valueParsing.js";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
@@ -18316,8 +18317,7 @@ export class SpreadsheetApp {
     if (value == null) return "";
     if (typeof value === "number" && Number.isFinite(value)) {
       const docStyle: any = this.document.getCellFormat(this.sheetId, cell);
-      const rawNumberFormat = docStyle?.numberFormat ?? docStyle?.number_format;
-      const numberFormat = typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "" ? rawNumberFormat : null;
+      const numberFormat = getStyleNumberFormat(docStyle);
       if (numberFormat) return formatValueWithNumberFormat(value, numberFormat);
     }
     return String(value);
