@@ -5,6 +5,8 @@ use formula_xlsx::offcrypto::{decrypt_aes_cbc_no_padding_in_place, AesCbcDecrypt
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const AES_BLOCK_LEN: usize = 16;
+const ENCRYPTED_PACKAGE_RC4_BLOCK_LEN: usize = 0x200;
+const CRYPTOAPI_SPIN_COUNT: u32 = 50_000;
 
 /// Errors returned by [`decrypt_standard_encrypted_package_stream`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -14,7 +16,9 @@ pub enum EncryptedPackageError {
     )]
     StreamTooShort { len: usize },
 
-    #[error("`EncryptedPackage` orig_size {orig_size} does not fit into the current platform `usize`")]
+    #[error(
+        "`EncryptedPackage` orig_size {orig_size} does not fit into the current platform `usize`"
+    )]
     OrigSizeTooLargeForPlatform { orig_size: u64 },
 
     #[error(
@@ -42,7 +46,15 @@ pub enum EncryptedPackageError {
     #[error(
         "decrypted plaintext is shorter than expected: got {decrypted_len} bytes, expected at least {orig_size}"
     )]
-    DecryptedTooShort { decrypted_len: usize, orig_size: u64 },
+    DecryptedTooShort {
+        decrypted_len: usize,
+        orig_size: u64,
+    },
+
+    #[error(
+        "`EncryptedPackage` RC4 key length must be between 1 and 20 bytes for SHA-1, got {key_len}"
+    )]
+    Rc4InvalidKeyLength { key_len: usize },
 }
 
 fn derive_segment_iv(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_LEN] {
@@ -154,9 +166,9 @@ pub fn decrypt_standard_encrypted_package_stream(
             AesCbcDecryptError::UnsupportedKeyLength(key_len) => {
                 EncryptedPackageError::InvalidAesKeyLength { key_len }
             }
-            AesCbcDecryptError::InvalidIvLength(_) => EncryptedPackageError::SegmentDecryptFailed {
-                segment_index,
-            },
+            AesCbcDecryptError::InvalidIvLength(_) => {
+                EncryptedPackageError::SegmentDecryptFailed { segment_index }
+            }
             AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
                 EncryptedPackageError::CiphertextLenNotBlockAligned { ciphertext_len }
             }
@@ -187,6 +199,145 @@ pub fn decrypt_standard_encrypted_package_stream(
     Ok(out)
 }
 
+struct Rc4 {
+    s: [u8; 256],
+    i: u8,
+    j: u8,
+}
+
+impl Rc4 {
+    fn new(key: &[u8]) -> Self {
+        debug_assert!(!key.is_empty(), "RC4 key must be non-empty");
+        let mut s = [0u8; 256];
+        for (i, v) in s.iter_mut().enumerate() {
+            *v = i as u8;
+        }
+        let mut j: u8 = 0;
+        for i in 0..256usize {
+            j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+            s.swap(i, j as usize);
+        }
+        Self { s, i: 0, j: 0 }
+    }
+
+    fn apply_keystream(&mut self, data: &mut [u8]) {
+        for b in data {
+            self.i = self.i.wrapping_add(1);
+            self.j = self.j.wrapping_add(self.s[self.i as usize]);
+            self.s.swap(self.i as usize, self.j as usize);
+            let t = self.s[self.i as usize].wrapping_add(self.s[self.j as usize]);
+            let k = self.s[t as usize];
+            *b ^= k;
+        }
+    }
+}
+
+fn password_utf16le_bytes(password: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+    for cu in password.encode_utf16() {
+        out.extend_from_slice(&cu.to_le_bytes());
+    }
+    out
+}
+
+fn cryptoapi_password_hash_sha1(password: &str, salt: &[u8]) -> [u8; 20] {
+    // H = SHA1(salt || password_utf16le)
+    let pw = password_utf16le_bytes(password);
+    let mut hasher = Sha1::new();
+    hasher.update(salt);
+    hasher.update(&pw);
+    let mut h: [u8; 20] = hasher.finalize().into();
+
+    // for i in 0..CRYPTOAPI_SPIN_COUNT: H = SHA1(u32le(i) || H)
+    let mut buf = [0u8; 4 + 20];
+    for i in 0..CRYPTOAPI_SPIN_COUNT {
+        buf[..4].copy_from_slice(&i.to_le_bytes());
+        buf[4..].copy_from_slice(&h);
+        h = Sha1::digest(&buf).into();
+    }
+    h
+}
+
+fn cryptoapi_block_key_sha1(password_hash: &[u8; 20], block_index: u32) -> [u8; 20] {
+    let mut hasher = Sha1::new();
+    hasher.update(password_hash);
+    hasher.update(block_index.to_le_bytes());
+    hasher.finalize().into()
+}
+
+struct CryptoapiRc4EncryptedPackageDecryptor {
+    password_hash: [u8; 20],
+    key_len: usize,
+}
+
+impl CryptoapiRc4EncryptedPackageDecryptor {
+    fn new(password: &str, salt: &[u8], key_len: usize) -> Result<Self, EncryptedPackageError> {
+        if !(1..=20).contains(&key_len) {
+            return Err(EncryptedPackageError::Rc4InvalidKeyLength { key_len });
+        }
+        Ok(Self {
+            password_hash: cryptoapi_password_hash_sha1(password, salt),
+            key_len,
+        })
+    }
+
+    fn decrypt_encrypted_package_stream(
+        &self,
+        encrypted_package_stream: &[u8],
+    ) -> Result<Vec<u8>, EncryptedPackageError> {
+        if encrypted_package_stream.len() < ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN {
+            return Err(EncryptedPackageError::StreamTooShort {
+                len: encrypted_package_stream.len(),
+            });
+        }
+
+        let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
+        size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
+        let orig_size = u64::from_le_bytes(size_bytes);
+        let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
+
+        if ciphertext.is_empty() && orig_size == 0 {
+            return Ok(Vec::new());
+        }
+
+        let orig_size_usize = usize::try_from(orig_size)
+            .map_err(|_| EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size })?;
+
+        // RC4 has no block padding requirements, so ciphertext must contain at least `orig_size` bytes.
+        if orig_size > ciphertext.len() as u64 {
+            return Err(EncryptedPackageError::ImplausibleOrigSize {
+                orig_size,
+                ciphertext_len: ciphertext.len(),
+            });
+        }
+
+        let mut out = ciphertext[..orig_size_usize].to_vec();
+        for (block_index, chunk) in out.chunks_mut(ENCRYPTED_PACKAGE_RC4_BLOCK_LEN).enumerate() {
+            let digest = cryptoapi_block_key_sha1(&self.password_hash, block_index as u32);
+            let mut rc4 = Rc4::new(&digest[..self.key_len]);
+            rc4.apply_keystream(chunk);
+        }
+
+        Ok(out)
+    }
+}
+
+/// Decrypt an MS-OFFCRYPTO "Standard" (CryptoAPI) RC4 `EncryptedPackage` stream.
+///
+/// Unlike AES-based `EncryptedPackage` encryption (0x1000-byte segments), the RC4 variant uses
+/// **0x200-byte blocks** and derives a fresh RC4 key for each block:
+/// - `key_i = SHA1(password_hash || LE32(i))[0..key_len]`
+/// - RC4 is **reset** per block (do not carry keystream state across blocks).
+pub fn decrypt_standard_cryptoapi_rc4_encrypted_package_stream(
+    encrypted_package_stream: &[u8],
+    password: &str,
+    salt: &[u8],
+    key_len: usize,
+) -> Result<Vec<u8>, EncryptedPackageError> {
+    CryptoapiRc4EncryptedPackageDecryptor::new(password, salt, key_len)?
+        .decrypt_encrypted_package_stream(encrypted_package_stream)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,7 +366,11 @@ mod tests {
         out
     }
 
-    fn encrypt_segment_aes_cbc_no_padding(key: &[u8], iv: &[u8; AES_BLOCK_LEN], plaintext: &[u8]) -> Vec<u8> {
+    fn encrypt_segment_aes_cbc_no_padding(
+        key: &[u8],
+        iv: &[u8; AES_BLOCK_LEN],
+        plaintext: &[u8],
+    ) -> Vec<u8> {
         assert!(plaintext.len() % AES_BLOCK_LEN == 0);
 
         // Encrypt in-place to avoid needing the higher-level padding helpers.
@@ -359,5 +514,142 @@ mod tests {
                 ciphertext_len: 16
             }
         );
+
+    struct TestRc4 {
+        s: [u8; 256],
+        i: u8,
+        j: u8,
+    }
+
+    impl TestRc4 {
+        fn new(key: &[u8]) -> Self {
+            let mut s = [0u8; 256];
+            for (i, v) in s.iter_mut().enumerate() {
+                *v = i as u8;
+            }
+            let mut j: u8 = 0;
+            for i in 0..256usize {
+                j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+                s.swap(i, j as usize);
+            }
+            Self { s, i: 0, j: 0 }
+        }
+
+        fn apply_keystream(&mut self, data: &mut [u8]) {
+            for b in data {
+                self.i = self.i.wrapping_add(1);
+                self.j = self.j.wrapping_add(self.s[self.i as usize]);
+                self.s.swap(self.i as usize, self.j as usize);
+                let t = self.s[self.i as usize].wrapping_add(self.s[self.j as usize]);
+                let k = self.s[t as usize];
+                *b ^= k;
+            }
+        }
+    }
+
+    fn test_password_utf16le(password: &str) -> Vec<u8> {
+        password
+            .encode_utf16()
+            .flat_map(|cu| cu.to_le_bytes())
+            .collect()
+    }
+
+    fn test_cryptoapi_password_hash_sha1(password: &str, salt: &[u8]) -> [u8; 20] {
+        const SPIN_COUNT: u32 = 50_000;
+        let pw = test_password_utf16le(password);
+
+        let mut hasher = Sha1::new();
+        hasher.update(salt);
+        hasher.update(&pw);
+        let mut h: [u8; 20] = hasher.finalize().into();
+
+        let mut buf = [0u8; 4 + 20];
+        for i in 0..SPIN_COUNT {
+            buf[..4].copy_from_slice(&i.to_le_bytes());
+            buf[4..].copy_from_slice(&h);
+            h = Sha1::digest(&buf).into();
+        }
+        h
+    }
+
+    fn test_cryptoapi_block_key_sha1(
+        password_hash: &[u8; 20],
+        block_index: u32,
+        key_len: usize,
+    ) -> Vec<u8> {
+        let mut hasher = Sha1::new();
+        hasher.update(password_hash);
+        hasher.update(block_index.to_le_bytes());
+        let digest: [u8; 20] = hasher.finalize().into();
+        digest[..key_len].to_vec()
+    }
+
+    struct TestCryptoapiRc4Encryptor {
+        password_hash: [u8; 20],
+        key_len: usize,
+    }
+
+    impl TestCryptoapiRc4Encryptor {
+        fn new(password: &str, salt: &[u8], key_len: usize) -> Self {
+            assert!(key_len <= 20);
+            let password_hash = test_cryptoapi_password_hash_sha1(password, salt);
+            Self {
+                password_hash,
+                key_len,
+            }
+        }
+
+        fn encrypt_encrypted_package_stream(&self, plaintext: &[u8]) -> Vec<u8> {
+            const BLOCK_LEN: usize = 0x200;
+
+            let mut ciphertext = plaintext.to_vec();
+            for (block_index, chunk) in ciphertext.chunks_mut(BLOCK_LEN).enumerate() {
+                let key =
+                    test_cryptoapi_block_key_sha1(&self.password_hash, block_index as u32, self.key_len);
+                let mut rc4 = TestRc4::new(&key);
+                rc4.apply_keystream(chunk);
+            }
+
+            let mut out = Vec::with_capacity(8 + ciphertext.len());
+            out.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+            out.extend_from_slice(&ciphertext);
+            out
+        }
+    }
+
+    fn make_plaintext_pattern(len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|i| {
+                let i = i as u32;
+                let x = i
+                    .wrapping_mul(31)
+                    .wrapping_add(i.rotate_left(13))
+                    .wrapping_add(0x9E37_79B9);
+                (x ^ (x >> 8) ^ (x >> 16) ^ (x >> 24)) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rc4_cryptoapi_encryptedpackage_block_boundary_regression() {
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+            0xDC, 0xFE,
+        ];
+        let key_len = 16;
+
+        let encryptor = TestCryptoapiRc4Encryptor::new(password, &salt, key_len);
+        let decryptor =
+            CryptoapiRc4EncryptedPackageDecryptor::new(password, &salt, key_len).expect("decryptor");
+
+        for len in [0usize, 1, 511, 512, 513, 1023, 1024, 1025, 10_000] {
+            let plaintext = make_plaintext_pattern(len);
+            let encrypted = encryptor.encrypt_encrypted_package_stream(&plaintext);
+            let decrypted = decryptor
+                .decrypt_encrypted_package_stream(&encrypted)
+                .expect("decrypt");
+            assert_eq!(decrypted, plaintext, "failed for len={len}");
+        }
     }
 }

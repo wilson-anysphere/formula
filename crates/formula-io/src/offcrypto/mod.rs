@@ -10,4 +10,7 @@
 
 pub mod encrypted_package;
 
-pub use encrypted_package::{decrypt_standard_encrypted_package_stream, EncryptedPackageError};
+pub use encrypted_package::{
+    decrypt_standard_cryptoapi_rc4_encrypted_package_stream,
+    decrypt_standard_encrypted_package_stream, EncryptedPackageError,
+};
