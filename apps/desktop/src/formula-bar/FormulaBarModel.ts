@@ -28,7 +28,7 @@ type ActiveCellInfo = {
   value: unknown;
 };
 
-export type FormulaBarAiSuggestion = {
+type FormulaBarAiSuggestion = {
   text: string;
   preview?: unknown;
 };

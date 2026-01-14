@@ -1,4 +1,4 @@
-import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
+import { FormulaBarModel } from "./FormulaBarModel.js";
 import { type ErrorExplanation } from "./errors.js";
 import { type RangeAddress } from "../spreadsheet/a1.js";
 import {
@@ -1071,7 +1071,7 @@ export class FormulaBarView {
     }
   }
 
-  setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {
+  setAiSuggestion(suggestion: string | { text: string; preview?: unknown } | null): void {
     this.model.setAiSuggestion(suggestion);
     this.#render({ preserveTextareaValue: true });
   }
