@@ -408,6 +408,16 @@ class DocumentImageStore implements ImageStore {
   async setAsync(entry: ImageEntry): Promise<void> {
     await this.persisted.setAsync(entry);
   }
+
+  async garbageCollectAsync(keep: Iterable<string>): Promise<void> {
+    const keepSet = new Set(Array.from(keep, (id) => String(id)));
+    // Remove unused records from the persistent store.
+    await this.persisted.garbageCollectAsync(keepSet);
+    // Also drop any now-unreferenced in-memory cached entries.
+    for (const id of Array.from(this.fallback.keys())) {
+      if (!keepSet.has(id)) this.fallback.delete(id);
+    }
+  }
 }
 
 /**
@@ -5457,6 +5467,65 @@ export class SpreadsheetApp {
    */
   getDrawingImages(): ImageStore {
     return this.drawingImages;
+  }
+
+  /**
+   * Best-effort cleanup for the persistent drawings image store (IndexedDB).
+   *
+   * This scans the current workbook drawings for referenced `imageId`s and deletes any
+   * unreferenced records from IndexedDB. This helps keep local persistence bounded after
+   * users delete/reinsert pictures.
+   */
+  async garbageCollectDrawingImages(): Promise<void> {
+    const gc = (this.drawingImages as any)?.garbageCollectAsync as ((keep: Iterable<string>) => Promise<void>) | undefined;
+    if (typeof gc !== "function") return;
+
+    const keep = new Set<string>();
+
+    const docAny = this.document as any;
+    const sheetIds: string[] = (() => {
+      if (typeof docAny.getSheetIds === "function") {
+        try {
+          const ids = docAny.getSheetIds();
+          return Array.isArray(ids) ? ids.map((id: any) => String(id ?? "")).filter(Boolean) : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    })();
+
+    const scanDrawings = (drawings: unknown) => {
+      if (!Array.isArray(drawings)) return;
+      for (const raw of drawings) {
+        const kind = (raw as any)?.kind;
+        const type = typeof kind?.type === "string" ? kind.type : "";
+        if (type !== "image") continue;
+        const id = typeof kind?.imageId === "string" ? kind.imageId : typeof kind?.image_id === "string" ? kind.image_id : "";
+        if (id) keep.add(id);
+      }
+    };
+
+    for (const sheetId of sheetIds.length > 0 ? sheetIds : [this.sheetId]) {
+      try {
+        scanDrawings(docAny.getSheetDrawings?.(sheetId));
+      } catch {
+        // ignore
+      }
+    }
+
+    // Include any locally-overridden drawing objects (e.g. interactive editing).
+    for (const objects of this.drawingObjectsBySheetId.values()) {
+      for (const obj of objects) {
+        if (obj.kind.type === "image") keep.add(obj.kind.imageId);
+      }
+    }
+
+    try {
+      await gc.call(this.drawingImages, keep);
+    } catch {
+      // Best-effort: ignore persistence failures.
+    }
   }
 
   /**

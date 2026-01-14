@@ -29,5 +29,31 @@ describe("IndexedDbImageStore", () => {
     expect(loaded?.mimeType).toBe("image/png");
     expect(Array.from(loaded!.bytes)).toEqual(Array.from(entry.bytes));
   });
-});
 
+  it("garbageCollectAsync deletes unreferenced images", async () => {
+    const workbookId = `wb_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const store = new IndexedDbImageStore(workbookId);
+
+    const keep = {
+      id: "keep",
+      mimeType: "image/png",
+      bytes: new Uint8Array([1, 2, 3]),
+    };
+    const drop = {
+      id: "drop",
+      mimeType: "image/png",
+      bytes: new Uint8Array([9, 8, 7]),
+    };
+
+    await store.setAsync(keep);
+    await store.setAsync(drop);
+
+    await store.garbageCollectAsync([keep.id]);
+
+    store.clearMemory();
+    expect(await store.getAsync(keep.id)).toBeTruthy();
+
+    store.clearMemory();
+    expect(await store.getAsync(drop.id)).toBeUndefined();
+  });
+});
