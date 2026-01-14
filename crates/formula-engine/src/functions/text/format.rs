@@ -42,7 +42,8 @@ pub fn dollar(
         date_system: DateSystem::Excel1900,
     };
 
-    Ok(formula_format::format_value(FmtValue::Number(signed), Some(&format_code), &options).text)
+    let fmt_value = FmtValue::Number(signed);
+    Ok(formula_format::format_value(fmt_value, Some(&format_code), &options).text)
 }
 
 fn round_to_decimals(value: f64, decimals: i32) -> f64 {
