@@ -70,6 +70,15 @@ Supported subset (CryptoAPI AES):
 
 Other combinations (RC4, mismatched key sizes, etc.) are treated as unsupported by the current code.
 
+Note on version gating in helper APIs:
+
+- Most parsers in this repo treat Standard as **`versionMinor == 2`** with `versionMajor ∈ {2,3,4}`.
+- Some convenience APIs are intentionally stricter:
+  - `formula_offcrypto::decrypt_standard_ooxml_from_bytes` currently requires **exactly `3.2`**
+    (it is a thin wrapper over the upstream `office_crypto` crate).
+  - For best compatibility across Standard variants, prefer `crates/formula-office-crypto`’s
+    decryptor.
+
 ### Legacy `.xls`: BIFF8 `FILEPASS` RC4 CryptoAPI
 Currently supported in `formula-xls`:
 
