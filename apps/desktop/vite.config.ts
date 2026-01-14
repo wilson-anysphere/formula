@@ -234,6 +234,11 @@ export default defineConfig({
     ],
     include: [
       "src/**/*.vitest.ts",
+      // Formula bar tests use the `.test.ts` suffix and rely on per-file `@vitest-environment`
+      // directives (jsdom). Include them explicitly so:
+      // - `pnpm -C apps/desktop test` runs formula-bar coverage
+      // - `pnpm -C apps/desktop exec vitest run apps/desktop/src/formula-bar/…` works reliably
+      "src/formula-bar/**/*.test.ts",
       "src/ai/tools/**/*.test.ts",
       "src/ai/dlp/__tests__/**/*.test.ts",
       "src/editor/cellEditorOverlay.f4.test.ts",
