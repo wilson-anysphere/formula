@@ -121,8 +121,11 @@ pnpm dev:sync
 
 | Env Var | Purpose |
 |---------|---------|
+| `SYNC_SERVER_AUTH_MODE` | Auth mode: `opaque` (shared token), `jwt-hs256` (HS256 JWT), or `introspect` (token introspection via API) |
 | `SYNC_SERVER_AUTH_TOKEN` | Shared auth token |
 | `SYNC_SERVER_JWT_SECRET` | JWT secret (HS256) |
+| `SYNC_SERVER_INTROSPECT_URL` | Required when `SYNC_SERVER_AUTH_MODE=introspect` (base API URL for `/internal/sync/introspect`) |
+| `SYNC_SERVER_INTROSPECT_TOKEN` | Required when `SYNC_SERVER_AUTH_MODE=introspect` (shared secret for API internal endpoints; sent as `x-internal-admin-token`) |
 | `SYNC_SERVER_PERSISTENCE_BACKEND` | `leveldb` or `file` |
 | `SYNC_SERVER_PERSISTENCE_ENCRYPTION` | `keyring` for encryption at rest |
 | `SYNC_SERVER_MAX_MESSAGE_BYTES` | Max websocket message size (defaults to 2MB; see close code `1009`) |
