@@ -1115,6 +1115,7 @@ export class DrawingOverlay {
    * underlying bytes for an existing image id change (undo/redo, overwrite, etc).
    */
   invalidateImage(imageId: string): void {
+    if (this.destroyed) return;
     // If the bitmap bytes change while we are mid-render or mid-preload, the old decode result can
     // arrive after the cache entry has been invalidated. Abort any in-flight consumers first so the
     // stale ImageBitmap is closed when the decode eventually resolves.

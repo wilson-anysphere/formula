@@ -232,6 +232,49 @@ describe("DrawingOverlay destroy()", () => {
     expect(createImageBitmapMock).not.toHaveBeenCalled();
   });
 
+  it("does not recreate the preload abort controller when invalidating after destroy()", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+    let resolveDecode!: (value: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const createImageBitmapMock = vi.fn(() => inflightDecode);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const imageEntry: ImageEntry = {
+      id: "img_destroyed_invalidate",
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png",
+    };
+    const entries = new Map<string, ImageEntry>([[imageEntry.id, imageEntry]]);
+    const images: ImageStore = {
+      get: (id: string) => entries.get(id),
+      set: (entry: ImageEntry) => entries.set(entry.id, entry),
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    // Start a preload decode, tear down the overlay, and then ensure post-destroy invalidations
+    // do not recreate abort controller state (which would retain resources for an overlay that
+    // should be inert).
+    const preload = overlay.preloadImage(imageEntry).catch(() => {});
+    overlay.destroy();
+
+    overlay.invalidateImage(imageEntry.id);
+    expect((overlay as any).preloadAbort).toBeNull();
+
+    resolveDecode(bitmap);
+    await preload;
+    await Promise.resolve();
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("does not cache hydrated image bytes after destroy()", async () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
