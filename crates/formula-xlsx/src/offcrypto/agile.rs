@@ -1023,6 +1023,25 @@ mod tests {
     }
 
     #[test]
+    fn parses_agile_encryption_info_with_utf16le_xml_and_leading_bytes() {
+        let xml = minimal_encryption_info_xml();
+        let expected = parse_stream_payload(xml.as_bytes());
+
+        let mut utf16 = Vec::new();
+        for unit in xml.encode_utf16() {
+            utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        utf16.extend_from_slice(&[0x00, 0x00]);
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(b"JUNK!");
+        payload.extend_from_slice(&utf16);
+
+        let parsed = parse_stream_payload(&payload);
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
     fn parses_agile_encryption_info_with_length_prefix_and_trailing_garbage() {
         let xml = minimal_encryption_info_xml();
         let expected = parse_stream_payload(xml.as_bytes());

@@ -183,6 +183,44 @@ fn scan_to_encryption_tag(payload: &[u8]) -> Option<&[u8]> {
     Some(&payload[idx..])
 }
 
+fn scan_to_encryption_tag_utf16le(payload: &[u8]) -> Option<&[u8]> {
+    // UTF-16LE encoding of the ASCII root tag `<encryption` has each ASCII byte followed by a NUL
+    // byte. Scan for that pattern (case-insensitive for the ASCII letters) so we can recover when
+    // producers prefix the XML with junk bytes.
+    const NEEDLE: &[u8] = b"encryption";
+
+    // Do not scan if the payload already looks like UTF-16LE XML.
+    if payload.starts_with(&[0xFF, 0xFE]) || payload.get(0..2) == Some(&[b'<', 0]) {
+        return None;
+    }
+
+    let required = 2 + NEEDLE.len() * 2;
+    if payload.len() < required {
+        return None;
+    }
+
+    for i in 0..=payload.len() - required {
+        if payload[i] != b'<' || payload[i + 1] != 0 {
+            continue;
+        }
+
+        let mut ok = true;
+        for (j, &c) in NEEDLE.iter().enumerate() {
+            let idx = i + 2 + j * 2;
+            if payload[idx + 1] != 0 || !payload[idx].eq_ignore_ascii_case(&c) {
+                ok = false;
+                break;
+            }
+        }
+
+        if ok {
+            return Some(&payload[i..]);
+        }
+    }
+
+    None
+}
+
 /// Decode the XML payload bytes of an Agile `EncryptionInfo` stream into UTF-8 text.
 ///
 /// Real-world Office producers vary in how the XML is wrapped/encoded. This helper supports:
@@ -191,10 +229,14 @@ fn scan_to_encryption_tag(payload: &[u8]) -> Option<&[u8]> {
 /// - a 4-byte little-endian length prefix before the XML
 /// - leading junk before the `<encryption ...>` root tag (scan forward)
 pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<Cow<'a, str>> {
+    let nul_heavy = is_nul_heavy(payload);
+
     // Optional: a 4-byte little-endian length prefix before the XML.
     let candidate = length_prefixed_slice(payload)
         // Fallback: scan forward to the `<encryption` tag when the payload has leading bytes.
         .or_else(|| scan_to_encryption_tag(payload))
+        // UTF-16LE variant: scan forward to `<\0e\0n\0c\0...` when the payload is NUL-heavy.
+        .or_else(|| if nul_heavy { scan_to_encryption_tag_utf16le(payload) } else { None })
         .unwrap_or(payload);
 
     // UTF-16LE fallback heuristic (NUL-heavy buffers, or explicit BOM / `<\0` prefix).
