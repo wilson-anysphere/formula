@@ -25,7 +25,14 @@ const collabWorkbookEntry = resolve(repoRoot, "packages/collab/workbook/src/inde
 const collabEncryptionEntry = resolve(repoRoot, "packages/collab/encryption/src/index.ts");
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
 const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
-const spreadsheetFrontendTokenizerEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts");
+const spreadsheetFrontendEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/index.ts");
+const spreadsheetFrontendA1Entry = resolve(repoRoot, "packages/spreadsheet-frontend/src/a1.ts");
+const spreadsheetFrontendCacheEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/cache.ts");
+const spreadsheetFrontendGridEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/grid-provider.ts");
+const spreadsheetFrontendTokenizerEntry = resolve(
+  repoRoot,
+  "packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts"
+);
 const engineEntry = resolve(repoRoot, "packages/engine/src/index.ts");
 const engineBackendFormulaEntry = resolve(repoRoot, "packages/engine/src/backend/formula.ts");
 
@@ -70,6 +77,13 @@ export default defineConfig({
       { find: /^@formula\/engine$/, replacement: engineEntry },
       // Also alias the `backend/formula` subpath export which is used by some desktop tooling.
       { find: /^@formula\/engine\/backend\/formula$/, replacement: engineBackendFormulaEntry },
+      // `@formula/spreadsheet-frontend` is imported by many desktop modules (A1 helpers, formula ref parsing).
+      // Alias it directly so Vitest stays resilient in cached/stale `node_modules` environments.
+      { find: /^@formula\/spreadsheet-frontend$/, replacement: spreadsheetFrontendEntry },
+      { find: /^@formula\/spreadsheet-frontend\/a1$/, replacement: spreadsheetFrontendA1Entry },
+      { find: /^@formula\/spreadsheet-frontend\/cache$/, replacement: spreadsheetFrontendCacheEntry },
+      { find: /^@formula\/spreadsheet-frontend\/grid$/, replacement: spreadsheetFrontendGridEntry },
+      { find: /^@formula\/spreadsheet-frontend\/formula\/tokenizeFormula$/, replacement: spreadsheetFrontendTokenizerEntry },
       { find: "@formula/extension-marketplace", replacement: extensionMarketplaceEntry },
       { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
@@ -86,6 +100,8 @@ export default defineConfig({
       // `@formula/spreadsheet-frontend/formula/tokenizeFormula` is a subpath export used by the
       // desktop formula bar highlight code. Alias it directly so Vitest stays resilient in
       // cached/stale `node_modules` environments that may not include the latest package exports.
+      // (Note: prefer the regex alias above, but keep this explicit mapping for compatibility with
+      // any older call sites that might include query params.)
       { find: "@formula/spreadsheet-frontend/formula/tokenizeFormula", replacement: spreadsheetFrontendTokenizerEntry },
       // `@formula/marketplace-shared` lives under the repo `shared/` directory. Like the collab
       // workspace aliases above, we keep an explicit mapping here so Vitest stays resilient in
