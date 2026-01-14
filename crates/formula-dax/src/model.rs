@@ -528,7 +528,12 @@ pub(crate) enum ToIndex {
     /// Full mapping from key -> row set(s).
     RowSets {
         map: HashMap<Value, RowSet>,
-        /// Whether any key maps to more than one row.
+        /// Whether any **non-blank** key maps to more than one row.
+        ///
+        /// Physical BLANK keys do not participate in relationship joins (fact-side BLANK foreign
+        /// keys map to the relationship-generated virtual blank member). We therefore ignore
+        /// duplicate BLANK keys when deciding whether relationship traversal requires a
+        /// many-to-many expansion algorithm.
         has_duplicates: bool,
     },
     /// Scalable representation for columnar many-to-many `to_table` lookups.
@@ -1170,20 +1175,25 @@ impl DataModel {
                     Cardinality::OneToMany | Cardinality::OneToOne => {
                         map.insert(key, RowSet::One(row_index));
                     }
-                    Cardinality::ManyToMany => match map.entry(key) {
-                        Entry::Vacant(v) => {
-                            v.insert(RowSet::One(row_index));
-                        }
-                        Entry::Occupied(mut o) => {
-                            // Physical BLANK keys do not participate in relationship joins, so
-                            // ignore duplicate BLANK keys when deciding if the relationship can be
-                            // treated as "unique" for navigation/grouping purposes.
-                            if !o.key().is_blank() {
-                                *has_duplicates = true;
+                    Cardinality::ManyToMany => {
+                        // Physical BLANK keys do not participate in relationship joins (fact-side BLANK
+                        // foreign keys map to the relationship-generated virtual blank member). Skip
+                        // materializing row lists for BLANK to avoid a potentially huge, never-used
+                        // vector when the dimension contains many BLANK keys.
+                        if key.is_blank() {
+                            // no-op
+                        } else {
+                            match map.entry(key) {
+                                Entry::Vacant(v) => {
+                                    v.insert(RowSet::One(row_index));
+                                }
+                                Entry::Occupied(mut o) => {
+                                    *has_duplicates = true;
+                                    o.get_mut().push(row_index);
+                                }
                             }
-                            o.get_mut().push(row_index);
                         }
-                    },
+                    }
                 },
                 ToIndex::KeySet {
                     keys,
@@ -1427,20 +1437,25 @@ impl DataModel {
                                 });
                             }
                         }
-                        Cardinality::ManyToMany => match map.entry(value) {
-                            Entry::Vacant(v) => {
-                                v.insert(RowSet::One(row));
+                        Cardinality::ManyToMany => {
+                            // Physical BLANK keys do not participate in relationship joins (fact-side BLANK
+                            // foreign keys map to the relationship-generated virtual blank member). Skip
+                            // materializing row lists for BLANK to avoid a potentially huge, never-used
+                            // vector when the dimension contains many BLANK keys.
+                            if value.is_blank() {
+                                continue;
                             }
-                            Entry::Occupied(mut o) => {
-                                // Physical BLANK keys do not participate in relationship joins, so
-                                // ignore duplicate BLANK keys when deciding if the relationship can
-                                // be treated as "unique" for navigation/grouping purposes.
-                                if !o.key().is_blank() {
-                                    has_duplicates = true;
+
+                            match map.entry(value) {
+                                Entry::Vacant(v) => {
+                                    v.insert(RowSet::One(row));
                                 }
-                                o.get_mut().push(row);
+                                Entry::Occupied(mut o) => {
+                                    has_duplicates = true;
+                                    o.get_mut().push(row);
+                                }
                             }
-                        },
+                        }
                     }
                 }
                 ToIndex::RowSets { map, has_duplicates }
