@@ -1514,7 +1514,6 @@ export class FormulaBarView {
               return;
             }
 
-            const prevNameBoxValue = this.#nameBoxValue;
             let ok = false;
             try {
               ok = handler(ref) === true;
@@ -1539,9 +1538,7 @@ export class FormulaBarView {
             // while the input is still focused), also apply the latest `#nameBoxValue` so the Name Box
             // reflects the new selection immediately after focus leaves the input.
             address.blur();
-            if (this.#nameBoxValue !== prevNameBoxValue) {
-              address.value = this.#nameBoxValue;
-            }
+            address.value = this.#nameBoxValue;
             return;
           }
           if (e.key === "Escape") {
@@ -1592,7 +1589,6 @@ export class FormulaBarView {
           return;
         }
 
-        const prevNameBoxValue = this.#nameBoxValue;
         let ok = false;
         try {
           ok = handler(ref) === true;
@@ -1615,9 +1611,7 @@ export class FormulaBarView {
         this.#clearNameBoxError();
         // Blur after navigating so follow-up renders can update the value.
         address.blur();
-        if (this.#nameBoxValue !== prevNameBoxValue) {
-          address.value = this.#nameBoxValue;
-        }
+        address.value = this.#nameBoxValue;
         return;
       }
 
@@ -3799,7 +3793,6 @@ export class FormulaBarView {
       return;
     }
 
-    const prevNameBoxValue = this.#nameBoxValue;
     let ok = false;
     try {
       ok = handler(ref) === true;
@@ -3825,9 +3818,7 @@ export class FormulaBarView {
     // `onGoTo` implementations (e.g. SpreadsheetApp) update the Name Box value via `setActiveCell`
     // synchronously while the input is still focused. Explicitly apply the updated `#nameBoxValue`
     // after blurring so the rendered text reflects the new selection immediately.
-    if (this.#nameBoxValue !== prevNameBoxValue) {
-      this.#addressEl.value = this.#nameBoxValue;
-    }
+    this.#addressEl.value = this.#nameBoxValue;
   }
 
   #nameBoxDropdownOptionId(item: NameBoxDropdownItem): string {
