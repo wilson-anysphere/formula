@@ -137,6 +137,30 @@ test("applyState trims mimeType strings when loading images", () => {
   assert.equal(doc.getImage("img1")?.mimeType, "image/png");
 });
 
+test("applyState accepts singleton-wrapped mimeType strings (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [],
+        },
+      ],
+      images: [{ id: "img1", mimeType: { 0: " image/png " }, bytesBase64: "AQID" }],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+  assert.equal(doc.getImage("img1")?.mimeType, "image/png");
+});
+
 test("applyState ignores images with oversized declared byte lengths (defensive)", () => {
   const snapshot = new TextEncoder().encode(
     JSON.stringify({

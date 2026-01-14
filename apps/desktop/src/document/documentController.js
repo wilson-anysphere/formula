@@ -6525,8 +6525,9 @@ export class DocumentController {
 
     const parseMimeType = (raw) => {
       if (raw === null) return null;
-      if (typeof raw === "string") {
-        const trimmed = raw.trim();
+      const unwrapped = unwrapSingletonId(raw);
+      if (typeof unwrapped === "string") {
+        const trimmed = unwrapped.trim();
         return trimmed ? trimmed : null;
       }
       return null;
@@ -7142,8 +7143,9 @@ export class DocumentController {
 
     const normalizeMimeType = (raw) => {
       if (raw === null) return null;
-      if (typeof raw === "string") {
-        const trimmed = raw.trim();
+      const unwrapped = unwrapSingletonId(raw);
+      if (typeof unwrapped === "string") {
+        const trimmed = unwrapped.trim();
         return trimmed.length > 0 ? trimmed : null;
       }
       return null;
@@ -7220,8 +7222,9 @@ export class DocumentController {
 
     const normalizeMimeType = (raw) => {
       if (raw === null) return null;
-      if (typeof raw === "string") {
-        const trimmed = raw.trim();
+      const unwrapped = unwrapSingletonId(raw);
+      if (typeof unwrapped === "string") {
+        const trimmed = unwrapped.trim();
         return trimmed.length > 0 ? trimmed : null;
       }
       return null;

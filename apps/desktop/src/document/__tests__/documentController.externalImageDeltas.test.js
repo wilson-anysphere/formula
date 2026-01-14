@@ -38,6 +38,16 @@ test("applyExternalImageDeltas updates image store, emits change.imageDeltas, an
   assert.deepEqual(lastChange.imageDeltas, [{ imageId: "img1", before: null, after: { mimeType: "image/png", byteLength: 3 } }]);
 });
 
+test("applyExternalImageDeltas accepts singleton-wrapped mimeType strings (interop)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalImageDeltas([{ imageId: "img1", before: null, after: { bytes: new Uint8Array([1]), mimeType: { 0: " image/png " } } }]);
+
+  const image = doc.getImage("img1");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+});
+
 test("applyExternalImageDeltas respects markDirty=false", () => {
   const doc = new DocumentController();
   doc.markSaved();
