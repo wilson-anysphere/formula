@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 
 use formula_xlsx::{
     openxml::parse_relationships, patch_xlsx_streaming_workbook_cell_patches_with_part_overrides,
     PartOverride, WorkbookCellPatches, XlsxPackage,
 };
 use zip::write::FileOptions;
-use zip::ZipWriter;
+use zip::{ZipArchive, ZipWriter};
 
 fn build_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
@@ -186,6 +186,82 @@ fn streaming_write_repairs_vba_signature_rels_and_content_types(
         })
         .expect("expected vbaProject.bin.rels to contain a vbaProjectSignature relationship");
     assert_eq!(sig_rel.target, "vbaProjectSignature.bin");
+
+    Ok(())
+}
+
+#[test]
+fn streaming_write_repairs_macro_with_backslash_rels_entry_without_appending_duplicate(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Some producers incorrectly use `\` separators in the underlying ZIP entry names.
+    // Ensure the streaming repair path patches the existing entry (instead of appending a second
+    // canonical `xl/_rels/workbook.xml.rels` entry).
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets/>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let bytes = build_zip(&[
+        ("[Content_Types].xml", content_types),
+        ("xl/workbook.xml", workbook_xml),
+        // Non-canonical ZIP entry name:
+        ("xl\\_rels\\workbook.xml.rels", workbook_rels),
+        ("xl/vbaProject.bin", b"fake-vba-project"),
+    ]);
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut out,
+        &WorkbookCellPatches::default(),
+        &HashMap::<String, PartOverride>::new(),
+    )?;
+    let out_bytes = out.into_inner();
+
+    // Verify the output ZIP does not contain a duplicate canonical relationships part.
+    let mut zip = ZipArchive::new(Cursor::new(&out_bytes))?;
+    let mut names = Vec::new();
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        names.push(file.name().to_string());
+    }
+    assert!(
+        names.iter().any(|n| n == "xl\\_rels\\workbook.xml.rels"),
+        "expected output to preserve the original backslash entry name, got: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n == "xl/_rels/workbook.xml.rels"),
+        "expected output to avoid appending a canonical duplicate rels part, got: {names:?}"
+    );
+
+    // And the repaired relationships should contain the VBA relationship.
+    let mut rels_bytes = Vec::new();
+    zip.by_name("xl\\_rels\\workbook.xml.rels")?
+        .read_to_end(&mut rels_bytes)?;
+    let rels = parse_relationships(&rels_bytes)?;
+    assert!(
+        rels.iter().any(|rel| {
+            rel.type_uri == "http://schemas.microsoft.com/office/2006/relationships/vbaProject"
+                && rel.target == "vbaProject.bin"
+        }),
+        "expected workbook rels to contain vbaProject relationship, got: {rels:?}"
+    );
 
     Ok(())
 }
