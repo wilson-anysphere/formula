@@ -2332,7 +2332,7 @@ mod tests {
 
     fn stable_sort_order(values: &[Value]) -> Vec<usize> {
         let ctx = DummyContext;
-        let keys: Vec<_> = values.iter().map(|value| sort_key(&ctx, value)).collect();
+        let keys: Vec<_> = values.iter().map(|v| sort_key(&ctx, v)).collect();
         let mut order: Vec<usize> = (0..values.len()).collect();
         order.sort_by(|&a, &b| {
             let ord = compare_sort_keys(&keys[a], &keys[b], false);

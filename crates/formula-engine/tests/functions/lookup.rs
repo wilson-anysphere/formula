@@ -1522,3 +1522,120 @@ fn getpivotdata_supports_column_fields_and_multiple_value_fields() {
         Value::Number(4.0)
     );
 }
+
+#[test]
+fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
+        SubtotalPosition, ValueField,
+    };
+    use formula_model::{CellRef, Range};
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    let source = vec![
+        pv_row(&[
+            "Region".into(),
+            "Product".into(),
+            "Sales".into(),
+            "Units".into(),
+        ]),
+        pv_row(&["East".into(), "A".into(), 100.into(), 1.into()]),
+        pv_row(&["East".into(), "B".into(), 150.into(), 2.into()]),
+        pv_row(&["West".into(), "A".into(), 200.into(), 3.into()]),
+        pv_row(&["West".into(), "B".into(), 250.into(), 4.into()]),
+    ];
+
+    let cfg = PivotConfig {
+        row_fields: vec![PivotField::new("Region")],
+        column_fields: vec![PivotField::new("Product")],
+        value_fields: vec![
+            ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            },
+            ValueField {
+                source_field: "Units".to_string(),
+                name: "Sum of Units".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            },
+        ],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: Layout::Tabular,
+        subtotals: SubtotalPosition::None,
+        grand_totals: GrandTotals {
+            rows: true,
+            columns: true,
+        },
+    };
+
+    let pivot = PivotTable::new("PivotTable1", &source, cfg).expect("create pivot");
+    let result = pivot.calculate().expect("calculate pivot");
+
+    // Register this pivot as if it were rendered starting at A1.
+    let start = CellRef::new(0, 0);
+    let end = CellRef::new(
+        start.row + result.data.len() as u32 - 1,
+        start.col + result.data[0].len() as u32 - 1,
+    );
+    let destination = Range::new(start, end);
+
+    let mut sheet = TestSheet::new();
+    sheet.register_pivot_table(destination, pivot);
+
+    // Column field + value field.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\", \"Product\", \"A\")"),
+        Value::Number(100.0)
+    );
+    // Multiple value fields.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Units\", A1, \"Region\", \"West\", \"Product\", \"B\")"),
+        Value::Number(4.0)
+    );
+    // Partial criteria should return the corresponding subtotal (sum across columns).
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\")"),
+        Value::Number(250.0)
+    );
+    // Grand total.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1)"),
+        Value::Number(700.0)
+    );
+}
+
+#[test]
+fn getpivotdata_falls_back_to_scan_when_pivot_not_registered() {
+    let mut sheet = TestSheet::new();
+
+    // Simulated pivot output (tabular layout, 1 row field, 1 value field).
+    sheet.set("A1", "Region");
+    sheet.set("B1", "Sum of Sales");
+    sheet.set("A2", "East");
+    sheet.set("B2", 250.0);
+    sheet.set("A3", "West");
+    sheet.set("B3", 450.0);
+    sheet.set("A4", "Grand Total");
+    sheet.set("B4", 700.0);
+
+    // No pivot registry entry was registered for this range, so GETPIVOTDATA should fall back to
+    // the legacy grid-scanning heuristics.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", B2, \"Region\", \"East\")"),
+        Value::Number(250.0)
+    );
+}

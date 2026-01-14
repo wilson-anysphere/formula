@@ -261,6 +261,10 @@ pub trait ValueResolver {
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
     }
+    /// Returns the in-memory pivot registry (if available) for resolving `GETPIVOTDATA`.
+    fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
+        None
+    }
     /// Resolve a worksheet name to an internal sheet id.
     ///
     /// This is used by volatile reference functions like `INDIRECT` that parse sheet names
@@ -1835,6 +1839,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn workbook_filename(&self) -> Option<&str> {
         self.resolver.workbook_filename()
+    }
+
+    fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
+        self.resolver.pivot_registry()
     }
 
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {

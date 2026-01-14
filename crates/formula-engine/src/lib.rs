@@ -28,6 +28,7 @@ pub mod graph;
 pub mod iterative;
 pub mod locale;
 pub mod pivot;
+pub mod pivot_registry;
 pub mod simd;
 pub mod solver;
 pub mod sort_filter;

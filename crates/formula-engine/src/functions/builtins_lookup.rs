@@ -6,7 +6,9 @@ use crate::functions::{
     eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
+use crate::pivot::{AggregationType as PivotAggregationType, PivotKeyPart as PivotKeyPart, PivotValue as PivotEngineValue};
 use crate::value::{Array, ErrorKind, Value};
+use chrono::Datelike;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -1239,13 +1241,7 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let layout = match find_pivot_layout(ctx, &pivot_ref, &data_field) {
-        Ok(l) => l,
-        Err(e) => return Value::Error(e),
-    };
-
-    let mut row_criteria = Vec::new();
-    let mut col_criteria = Vec::new();
+    let mut criteria = Vec::new();
     for pair_idx in (2..args.len()).step_by(2) {
         let field_value = eval_scalar_arg(ctx, &args[pair_idx]);
         if let Value::Error(e) = field_value {
@@ -1262,7 +1258,37 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if field.is_empty() {
             return Value::Error(ErrorKind::Value);
         }
+        criteria.push((field, item_value));
+    }
 
+    // Prefer the pivot registry (engine-driven metadata) when available.
+    if let Some(registry) = ctx.pivot_registry() {
+        if let SheetId::Local(sheet_id) = pivot_ref.sheet_id.clone() {
+            if let Some(entry) = registry.find_by_cell(sheet_id, pivot_ref.start) {
+                // Record a dynamic dependency on the full rendered pivot destination so recalculation
+                // can observe pivot refreshes even when the pivot_table argument is a single cell.
+                ctx.record_reference(&Reference {
+                    sheet_id: SheetId::Local(entry.sheet_id),
+                    start: entry.destination.start,
+                    end: entry.destination.end,
+                });
+                return match getpivotdata_from_registry(ctx, entry, &data_field, &criteria) {
+                    Ok(v) => v,
+                    Err(e) => Value::Error(e),
+                };
+            }
+        }
+    }
+
+    // Fallback: heuristic scan of the rendered pivot grid (best-effort).
+    let layout = match find_pivot_layout(ctx, &pivot_ref, &data_field) {
+        Ok(l) => l,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut row_criteria = Vec::new();
+    let mut col_criteria = Vec::new();
+    for (field, item_value) in criteria {
         if let Some(col) = layout.row_fields.get(&field.to_ascii_uppercase()) {
             row_criteria.push((*col, item_value));
             continue;
@@ -1298,6 +1324,261 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
         Err(e) => Value::Error(e),
     }
+}
+
+#[derive(Debug, Clone)]
+struct PivotAccumulator {
+    count: u64,
+    count_numbers: u64,
+    sum: f64,
+    product: f64,
+    min: f64,
+    max: f64,
+    mean: f64,
+    m2: f64,
+}
+
+impl PivotAccumulator {
+    fn new() -> Self {
+        Self {
+            count: 0,
+            count_numbers: 0,
+            sum: 0.0,
+            product: 1.0,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+            mean: 0.0,
+            m2: 0.0,
+        }
+    }
+
+    fn update(&mut self, value: &PivotEngineValue) {
+        if !matches!(value, PivotEngineValue::Blank) {
+            self.count += 1;
+        }
+
+        let PivotEngineValue::Number(x) = value else {
+            return;
+        };
+        self.count_numbers += 1;
+        self.sum += x;
+        self.product *= x;
+        if *x < self.min {
+            self.min = *x;
+        }
+        if *x > self.max {
+            self.max = *x;
+        }
+
+        // Welford variance
+        let n = self.count_numbers as f64;
+        let delta = x - self.mean;
+        self.mean += delta / n;
+        let delta2 = x - self.mean;
+        self.m2 += delta * delta2;
+    }
+
+    fn finalize(&self, agg: PivotAggregationType) -> PivotEngineValue {
+        match agg {
+            PivotAggregationType::Count => PivotEngineValue::Number(self.count as f64),
+            PivotAggregationType::CountNumbers => PivotEngineValue::Number(self.count_numbers as f64),
+            PivotAggregationType::Sum => PivotEngineValue::Number(self.sum),
+            PivotAggregationType::Product => {
+                if self.count_numbers == 0 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number(self.product)
+                }
+            }
+            PivotAggregationType::Average => {
+                if self.count_numbers == 0 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number(self.sum / self.count_numbers as f64)
+                }
+            }
+            PivotAggregationType::Min => {
+                if self.count_numbers == 0 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number(self.min)
+                }
+            }
+            PivotAggregationType::Max => {
+                if self.count_numbers == 0 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number(self.max)
+                }
+            }
+            PivotAggregationType::Var => {
+                if self.count_numbers < 2 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number(self.m2 / (self.count_numbers as f64 - 1.0))
+                }
+            }
+            PivotAggregationType::VarP => {
+                if self.count_numbers == 0 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number(self.m2 / (self.count_numbers as f64))
+                }
+            }
+            PivotAggregationType::StdDev => {
+                if self.count_numbers < 2 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number((self.m2 / (self.count_numbers as f64 - 1.0)).sqrt())
+                }
+            }
+            PivotAggregationType::StdDevP => {
+                if self.count_numbers == 0 {
+                    PivotEngineValue::Blank
+                } else {
+                    PivotEngineValue::Number((self.m2 / (self.count_numbers as f64)).sqrt())
+                }
+            }
+        }
+    }
+}
+
+fn pivot_engine_value_to_key_part(value: &PivotEngineValue) -> PivotKeyPart {
+    match value {
+        PivotEngineValue::Blank => PivotKeyPart::Blank,
+        PivotEngineValue::Number(n) => {
+            // Match pivot engine's canonicalization: treat 0.0 and -0.0 as the same item.
+            let bits = if *n == 0.0 {
+                0.0_f64.to_bits()
+            } else if n.is_nan() {
+                f64::NAN.to_bits()
+            } else {
+                n.to_bits()
+            };
+            PivotKeyPart::Number(bits)
+        }
+        PivotEngineValue::Date(d) => PivotKeyPart::Date(*d),
+        PivotEngineValue::Text(s) => PivotKeyPart::Text(s.clone()),
+        PivotEngineValue::Bool(b) => PivotKeyPart::Bool(*b),
+    }
+}
+
+fn pivot_engine_value_as_value(
+    ctx: &dyn FunctionContext,
+    value: &PivotEngineValue,
+) -> Result<Value, ErrorKind> {
+    Ok(match value {
+        PivotEngineValue::Blank => Value::Blank,
+        PivotEngineValue::Number(n) => Value::Number(*n),
+        PivotEngineValue::Text(s) => Value::Text(s.clone()),
+        PivotEngineValue::Bool(b) => Value::Bool(*b),
+        PivotEngineValue::Date(d) => {
+            let date = crate::date::ExcelDate::new(d.year(), d.month() as u8, d.day() as u8);
+            let serial =
+                crate::date::ymd_to_serial(date, ctx.date_system()).map_err(|_| ErrorKind::Num)?;
+            Value::Number(serial as f64)
+        }
+    })
+}
+
+fn getpivotdata_from_registry(
+    ctx: &dyn FunctionContext,
+    entry: &crate::pivot_registry::PivotRegistryEntry,
+    data_field: &str,
+    criteria: &[(String, Value)],
+) -> Result<Value, ErrorKind> {
+    let pivot = entry.pivot.as_ref();
+    let data_field_key = crate::value::casefold(data_field.trim());
+    let value_field_idx = entry
+        .value_field_indices
+        .get(&data_field_key)
+        .copied()
+        .ok_or(ErrorKind::Ref)?;
+    let value_field = pivot
+        .config
+        .value_fields
+        .get(value_field_idx)
+        .ok_or(ErrorKind::Ref)?;
+    let value_src_idx = entry
+        .value_field_source_indices
+        .get(value_field_idx)
+        .copied()
+        .ok_or(ErrorKind::Ref)?;
+
+    let mut criteria_indices: Vec<(usize, Value)> = Vec::with_capacity(criteria.len());
+    for (field, item) in criteria {
+        let field_trimmed = field.trim();
+        if field_trimmed.is_empty() {
+            return Err(ErrorKind::Value);
+        }
+        let field_key = crate::value::casefold(field_trimmed);
+        let idx = entry
+            .field_indices
+            .get(&field_key)
+            .copied()
+            .ok_or(ErrorKind::Ref)?;
+
+        // Validate the requested item exists for this field so we can return `#N/A` for unknown
+        // items (Excel-compatible; matches the legacy scan behavior).
+        let cache_name = entry
+            .cache_field_names
+            .get(&field_key)
+            .ok_or(ErrorKind::Ref)?;
+        let uniques = pivot
+            .cache
+            .unique_values
+            .get(cache_name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let mut item_exists = false;
+        for pv in uniques {
+            let cell = pivot_engine_value_as_value(ctx, pv)?;
+            if pivot_item_matches(ctx, &cell, item)? {
+                item_exists = true;
+                break;
+            }
+        }
+        if !item_exists {
+            return Err(ErrorKind::NA);
+        }
+
+        criteria_indices.push((idx, item.clone()));
+    }
+
+    let mut acc = PivotAccumulator::new();
+
+    'records: for record in &pivot.cache.records {
+        // Apply pivot-config filter fields (report filters / slicers).
+        for filter in &pivot.config.filter_fields {
+            let Some(allowed) = &filter.allowed else {
+                continue;
+            };
+            let key = crate::value::casefold(&filter.source_field);
+            let Some(idx) = entry.field_indices.get(&key).copied() else {
+                continue;
+            };
+            let pv = record.get(idx).unwrap_or(&PivotEngineValue::Blank);
+            if !allowed.contains(&pivot_engine_value_to_key_part(pv)) {
+                continue 'records;
+            }
+        }
+
+        for (idx, item) in &criteria_indices {
+            let pv = record.get(*idx).unwrap_or(&PivotEngineValue::Blank);
+            let cell = pivot_engine_value_as_value(ctx, pv)?;
+            if !pivot_item_matches(ctx, &cell, item)? {
+                continue 'records;
+            }
+        }
+
+        let pv = record.get(value_src_idx).unwrap_or(&PivotEngineValue::Blank);
+        acc.update(pv);
+    }
+
+    // NOTE: `GETPIVOTDATA` returns the value field aggregation, not any formatting.
+    // `show_as` transformations (percent of total, running total, etc) are not applied here yet.
+    let out_pivot_value = acc.finalize(value_field.aggregation);
+    pivot_engine_value_as_value(ctx, &out_pivot_value)
 }
 
 fn find_pivot_layout(

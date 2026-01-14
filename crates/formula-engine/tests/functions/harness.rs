@@ -2,7 +2,9 @@
 
 use formula_engine::date::ExcelDateSystem;
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::pivot::PivotTable;
 use formula_engine::{Engine, Value};
+use formula_model::Range;
 
 pub struct TestSheet {
     engine: Engine,
@@ -49,6 +51,12 @@ impl TestSheet {
         self.engine
             .set_cell_formula(sheet, addr, formula)
             .expect("set cell formula");
+    }
+
+    pub fn register_pivot_table(&mut self, destination: Range, pivot: PivotTable) {
+        self.engine
+            .register_pivot_table(self.sheet, destination, pivot)
+            .expect("register pivot table");
     }
 
     pub fn recalc(&mut self) {

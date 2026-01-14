@@ -298,11 +298,7 @@ pub trait FunctionContext {
     }
 
     /// Return per-column properties (width/hidden/default style), if present.
-    fn col_properties(
-        &self,
-        _sheet_id: &SheetId,
-        _col: u32,
-    ) -> Option<formula_model::ColProperties> {
+    fn col_properties(&self, _sheet_id: &SheetId, _col: u32) -> Option<formula_model::ColProperties> {
         None
     }
 
@@ -313,6 +309,13 @@ pub trait FunctionContext {
 
     /// Optional workbook filename metadata (e.g. `Book1.xlsx`).
     fn workbook_filename(&self) -> Option<&str> {
+        None
+    }
+
+    /// Returns the in-memory pivot registry (if available) for resolving `GETPIVOTDATA`.
+    ///
+    /// Implementations that do not support pivots can return `None`.
+    fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
         None
     }
 

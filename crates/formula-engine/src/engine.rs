@@ -501,6 +501,7 @@ pub struct Engine {
     bytecode_enabled: bool,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
+    pivot_registry: crate::pivot_registry::PivotRegistry,
     name_dependents: HashMap<String, HashSet<CellKey>>,
     cell_name_refs: HashMap<CellKey, HashSet<String>>,
     /// Optimized dependency graph used for incremental recalculation ordering.
@@ -585,6 +586,7 @@ impl Engine {
             bytecode_enabled: true,
             external_value_provider: None,
             external_data_provider: None,
+            pivot_registry: crate::pivot_registry::PivotRegistry::default(),
             name_dependents: HashMap::new(),
             cell_name_refs: HashMap::new(),
             calc_graph: CalcGraph::new(),
@@ -1534,6 +1536,37 @@ impl Engine {
             self.recalculate();
         }
         Ok(())
+    }
+
+    /// Register a pivot table's metadata for use by `GETPIVOTDATA`.
+    ///
+    /// The pivot must already have been rendered/applied into `destination` on `sheet`.
+    /// `GETPIVOTDATA` will resolve any reference within `destination` back to this pivot.
+    pub fn register_pivot_table(
+        &mut self,
+        sheet: &str,
+        destination: Range,
+        pivot: crate::pivot::PivotTable,
+    ) -> Result<(), crate::pivot_registry::PivotRegistryError> {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let destination = crate::pivot_registry::PivotDestination {
+            start: CellAddr {
+                row: destination.start.row,
+                col: destination.start.col,
+            },
+            end: CellAddr {
+                row: destination.end.row,
+                col: destination.end.col,
+            },
+        };
+        let entry = crate::pivot_registry::PivotRegistryEntry::new(sheet_id, destination, pivot)?;
+        self.pivot_registry.register(entry);
+        Ok(())
+    }
+
+    /// Clears all registered pivots.
+    pub fn clear_pivot_registry(&mut self) {
+        self.pivot_registry.clear();
     }
 
     /// Replace the set of tables for a given worksheet.
@@ -2821,6 +2854,7 @@ impl Engine {
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
             self.info.clone(),
+            self.pivot_registry.clone(),
         );
         let bytecode_default_bounds = snapshot
             .sheet_dimensions
@@ -3361,6 +3395,7 @@ impl Engine {
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
             self.info.clone(),
+            self.pivot_registry.clone(),
         );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let date_system = self.date_system;
@@ -5558,6 +5593,7 @@ impl Engine {
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
             self.info.clone(),
+            self.pivot_registry.clone(),
         );
         let ctx = crate::eval::EvalContext {
             current_sheet: sheet_id,
@@ -7410,6 +7446,7 @@ struct Snapshot {
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
     info: EngineInfo,
+    pivot_registry: crate::pivot_registry::PivotRegistry,
 }
 
 impl Snapshot {
@@ -7419,6 +7456,7 @@ impl Snapshot {
         external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
         external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
         info: EngineInfo,
+        pivot_registry: crate::pivot_registry::PivotRegistry,
     ) -> Self {
         let sheet_order = workbook.sheet_ids_in_order().to_vec();
         let sheets: HashSet<SheetId> = sheet_order.iter().copied().collect();
@@ -7571,6 +7609,7 @@ impl Snapshot {
             external_value_provider,
             external_data_provider,
             info,
+            pivot_registry,
         }
     }
 
@@ -7713,6 +7752,10 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn external_data_provider(&self) -> Option<&dyn ExternalDataProvider> {
         self.external_data_provider.as_deref()
+    }
+
+    fn pivot_registry(&self) -> Option<&crate::pivot_registry::PivotRegistry> {
+        Some(&self.pivot_registry)
     }
 
     fn get_external_value(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
@@ -12103,6 +12146,7 @@ mod tests {
             None,
             None,
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
 
         assert_eq!(snapshot.get_cell_value(sheet_id, addr), Value::Blank);
@@ -12851,6 +12895,7 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
             bytecode_engine.info.clone(),
+            bytecode_engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
@@ -12980,6 +13025,7 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
             bytecode_engine.info.clone(),
+            bytecode_engine.pivot_registry.clone(),
         );
         let key_b1 = CellKey {
             sheet: sheet_id,
@@ -13054,6 +13100,7 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
             bytecode_engine.info.clone(),
+            bytecode_engine.pivot_registry.clone(),
         );
         let key_c1 = CellKey {
             sheet: sheet_id,
@@ -13135,6 +13182,7 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
             bytecode_engine.info.clone(),
+            bytecode_engine.pivot_registry.clone(),
         );
         let key_b1 = CellKey {
             sheet: sheet1_id,
@@ -13268,6 +13316,7 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
             bytecode_engine.info.clone(),
+            bytecode_engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
@@ -13433,6 +13482,7 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
             bytecode_engine.info.clone(),
+            bytecode_engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
@@ -13878,6 +13928,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -13915,6 +13966,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -13954,6 +14006,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -13999,6 +14052,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -14068,6 +14122,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -14124,6 +14179,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -14164,6 +14220,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -14932,6 +14989,7 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
             engine.info.clone(),
+            engine.pivot_registry.clone(),
         );
         let sheet_cols = i32::try_from(snapshot.sheet_dimensions[0].1).unwrap_or(i32::MAX);
 
