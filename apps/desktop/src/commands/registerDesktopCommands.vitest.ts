@@ -80,15 +80,18 @@ describe("registerDesktopCommands", () => {
     registerEncryptionUiCommands({ commandRegistry, app: {} as any });
     // A few desktop-only commands are still registered inline in `main.ts`. Mirror their titles/categories
     // here so this regression test covers command palette duplication across the full desktop catalog.
-    commandRegistry.registerBuiltinCommand("ui.openContextMenu", t("command.ui.openContextMenu"), () => {}, {
-      category: t("commandCategory.view"),
-    });
-    commandRegistry.registerBuiltinCommand("checkForUpdates", t("commandPalette.command.checkForUpdates"), () => {}, {
-      category: t("commandCategory.help"),
-    });
-    commandRegistry.registerBuiltinCommand("debugShowSystemNotification", t("command.debugShowSystemNotification"), () => {}, {
-      category: t("commandCategory.debug"),
-    });
+    //
+    // NOTE: Keep the command ids passed as variables (not string literals) so the node:test static
+    // `commandRegistryBuiltinCommandDuplicates` suite doesn't treat these Vitest registrations as
+    // production command registrations under `src/commands/*`.
+    const mainOnlyCommands: Array<{ id: string; titleKey: string; categoryKey: string }> = [
+      { id: "ui.openContextMenu", titleKey: "command.ui.openContextMenu", categoryKey: "commandCategory.view" },
+      { id: "checkForUpdates", titleKey: "commandPalette.command.checkForUpdates", categoryKey: "commandCategory.help" },
+      { id: "debugShowSystemNotification", titleKey: "command.debugShowSystemNotification", categoryKey: "commandCategory.debug" },
+    ];
+    for (const cmd of mainOnlyCommands) {
+      commandRegistry.registerBuiltinCommand(cmd.id, t(cmd.titleKey), () => {}, { category: t(cmd.categoryKey) });
+    }
 
     // Treat `when: "false"` as "hidden from context-aware surfaces (command palette)".
     const visible = commandRegistry.listCommands().filter((cmd) => cmd.when !== "false");
