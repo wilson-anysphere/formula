@@ -411,11 +411,19 @@ from pathlib import Path
 
 root = Path(".")
 
+SKIP_DIRNAMES = {".git", "node_modules", "target", "security-report"}
+
+def _walk():
+    # Avoid recursive globbing (Path.rglob) over Cargo `target/` trees and Node `node_modules/`.
+    # Those directories can be huge in CI (this script runs Rust clippy before Node policy checks).
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRNAMES]
+        yield Path(dirpath), filenames
+
 def find_files(name: str):
-    for p in root.rglob(name):
-        if ".git" in p.parts or "node_modules" in p.parts or "target" in p.parts:
-            continue
-        yield p
+    for dirpath, filenames in _walk():
+        if name in filenames:
+            yield dirpath / name
 
 def read_json(path: Path):
     try:
@@ -426,10 +434,11 @@ def read_json(path: Path):
 issues = []
 
 # TypeScript strict mode: if any TS/TSX exists, require *some* tsconfig.json to enable strict mode.
-has_ts = any(
-    p.suffix in {".ts", ".tsx"} and "node_modules" not in p.parts and ".git" not in p.parts
-    for p in root.rglob("*")
-)
+has_ts = False
+for _dir, filenames in _walk():
+    if any(name.endswith((".ts", ".tsx")) for name in filenames):
+        has_ts = True
+        break
 if has_ts:
     tsconfigs = list(find_files("tsconfig.json"))
     strict_enabled = False
