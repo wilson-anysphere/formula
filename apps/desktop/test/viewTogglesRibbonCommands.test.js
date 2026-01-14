@@ -82,6 +82,21 @@ test("View toggle ribbon commands are registered in CommandRegistry (no exemptio
     );
   }
 
+  // Pressed state should be computed by main.ts (not in the router). Verify the ribbon
+  // toggle ids are present in the pressed-state mapping so the UI stays in sync.
+  const pressedByIdStart = main.indexOf("const pressedById");
+  assert.ok(pressedByIdStart !== -1, "Expected main.ts to define a pressedById mapping for ribbon toggles");
+  const pressedByIdEnd = main.indexOf("const numberFormatLabel", pressedByIdStart);
+  assert.ok(pressedByIdEnd !== -1, "Expected to find end of pressedById mapping in main.ts");
+  const pressedByIdBlock = main.slice(pressedByIdStart, pressedByIdEnd);
+  for (const id of ids) {
+    assert.match(
+      pressedByIdBlock,
+      new RegExp(`["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected main.ts pressedById mapping to include ${id}`,
+    );
+  }
+
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
   assert.match(main, /\bcreateRibbonActions\(/);
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);

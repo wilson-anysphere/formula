@@ -149,4 +149,17 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   assert.match(main, /\bcreateRibbonActions\(/);
   // And the router should delegate registered commands to the CommandRegistry bridge.
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
+
+  // Toggle pressed-state should be computed in main.ts so the Filter button reflects whether
+  // any AutoFilter is active on the sheet.
+  const pressedByIdStart = main.indexOf("const pressedById");
+  assert.ok(pressedByIdStart !== -1, "Expected main.ts to define a pressedById mapping for ribbon toggles");
+  const pressedByIdEnd = main.indexOf("const numberFormatLabel", pressedByIdStart);
+  assert.ok(pressedByIdEnd !== -1, "Expected to find end of pressedById mapping in main.ts");
+  const pressedByIdBlock = main.slice(pressedByIdStart, pressedByIdEnd);
+  assert.match(
+    pressedByIdBlock,
+    /["']data\.sortFilter\.filter["']\s*:/,
+    "Expected main.ts pressedById mapping to include data.sortFilter.filter (AutoFilter pressed state)",
+  );
 });
