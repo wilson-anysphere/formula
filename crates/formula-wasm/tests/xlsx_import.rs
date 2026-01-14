@@ -88,6 +88,18 @@ fn from_xlsx_bytes_imports_styles_for_cells_rows_and_cols() {
         None,
     )
     .unwrap();
+    wb.set_cell(
+        "D9".to_string(),
+        JsValue::from_str("=CELL(\"color\",A1)"),
+        None,
+    )
+    .unwrap();
+    wb.set_cell(
+        "D10".to_string(),
+        JsValue::from_str("=CELL(\"parentheses\",A1)"),
+        None,
+    )
+    .unwrap();
 
     wb.recalculate(None).unwrap();
 
@@ -107,6 +119,10 @@ fn from_xlsx_bytes_imports_styles_for_cells_rows_and_cols() {
         .unwrap();
     let d8: CellData = serde_wasm_bindgen::from_value(wb.get_cell("D8".to_string(), None).unwrap())
         .unwrap();
+    let d9: CellData = serde_wasm_bindgen::from_value(wb.get_cell("D9".to_string(), None).unwrap())
+        .unwrap();
+    let d10: CellData =
+        serde_wasm_bindgen::from_value(wb.get_cell("D10".to_string(), None).unwrap()).unwrap();
 
     assert_eq!(d1.value, JsonValue::String("F2".to_string()));
     assert_eq!(d2.value, JsonValue::String("F2".to_string()));
@@ -116,4 +132,6 @@ fn from_xlsx_bytes_imports_styles_for_cells_rows_and_cols() {
     assert_eq!(d6.value, JsonValue::String("$C$5".to_string()));
     assert_eq!(d7.value, JsonValue::String("\"".to_string()));
     assert_json_number(&d8.value, 0.0);
+    assert_json_number(&d9.value, 1.0);
+    assert_json_number(&d10.value, 1.0);
 }
