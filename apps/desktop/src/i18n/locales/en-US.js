@@ -471,6 +471,7 @@ export const enUS = {
   "ribbon.label.custom": "Custom",
   "ribbon.label.comma": "Comma",
   "ribbon.label.moreNumberFormats": "More number formats",
+  "ribbon.aria.labelWithValue": "{label}: {value}",
   "ribbon.theme.system": "System",
   "ribbon.theme.light": "Light",
   "ribbon.theme.dark": "Dark",

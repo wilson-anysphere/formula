@@ -2586,12 +2586,14 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const moreNumberFormatsLabel = t("ribbon.label.moreNumberFormats");
     const openFormatCellsLabel = t("command.format.openFormatCells");
     const customNumberFormatLabel = t("command.home.number.moreFormats.custom");
+    const formatAriaLabelWithValue = (label: string, value: string): string =>
+      tWithVars("ribbon.aria.labelWithValue", { label, value });
 
     const labelById: Record<string, string> = {
       "home.number.numberFormat": numberFormatLabel,
       // Include the current selection value in the accessible name so screen readers can
       // announce both the control purpose and the active format (e.g. "Number format: General").
-      "home.number.numberFormat.ariaLabel": `${numberFormatAriaPrefix}: ${numberFormatLabel}`,
+      "home.number.numberFormat.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, numberFormatLabel),
       "home.number.moreFormats.ariaLabel": moreNumberFormatsLabel,
       "view.appearance.theme": themeLabel,
       // The visible label is already "Theme: X"; use the same value so screen readers can
@@ -2619,25 +2621,28 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.numberFormat.text": t("command.format.numberFormat.text"),
       // Provide additional context for screen readers: the menu item label alone ("General") is
       // ambiguous without knowing it belongs to the Number Format menu.
-      "format.numberFormat.general.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.general")}`,
-      "format.numberFormat.number.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.number")}`,
-      "format.numberFormat.currency.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.currency")}`,
-      "format.numberFormat.accounting.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.accounting")}`,
-      "format.numberFormat.shortDate.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.shortDate")}`,
-      "format.numberFormat.longDate.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.longDate")}`,
-      "format.numberFormat.time.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.time")}`,
-      "format.numberFormat.percent.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.percent")}`,
-      "format.numberFormat.commaStyle.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.commaStyle")}`,
-      "format.numberFormat.increaseDecimal.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.increaseDecimal")}`,
-      "format.numberFormat.decreaseDecimal.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.decreaseDecimal")}`,
-      "format.numberFormat.fraction.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.fraction")}`,
-      "format.numberFormat.scientific.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.scientific")}`,
-      "format.numberFormat.text.ariaLabel": `${numberFormatAriaPrefix}: ${t("command.format.numberFormat.text")}`,
+      "format.numberFormat.general.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.general")),
+      "format.numberFormat.number.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.number")),
+      "format.numberFormat.currency.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.currency")),
+      "format.numberFormat.accounting.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.accounting")),
+      "format.numberFormat.shortDate.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.shortDate")),
+      "format.numberFormat.longDate.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.longDate")),
+      "format.numberFormat.time.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.time")),
+      "format.numberFormat.percent.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.percent")),
+      "format.numberFormat.commaStyle.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.commaStyle")),
+      "format.numberFormat.increaseDecimal.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.increaseDecimal")),
+      "format.numberFormat.decreaseDecimal.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.decreaseDecimal")),
+      "format.numberFormat.fraction.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.fraction")),
+      "format.numberFormat.scientific.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.scientific")),
+      "format.numberFormat.text.ariaLabel": formatAriaLabelWithValue(numberFormatAriaPrefix, t("command.format.numberFormat.text")),
       // Number format dialog entrypoints.
       "format.openFormatCells": openFormatCellsLabel,
       "format.openFormatCells.ariaLabel": stripEllipsis(openFormatCellsLabel),
       "home.number.moreFormats.custom": customNumberFormatLabel,
-      "home.number.moreFormats.custom.ariaLabel": `${moreNumberFormatsLabel}: ${stripEllipsis(customNumberFormatLabel)}`,
+      "home.number.moreFormats.custom.ariaLabel": formatAriaLabelWithValue(
+        moreNumberFormatsLabel,
+        stripEllipsis(customNumberFormatLabel),
+      ),
       // Accounting symbol picker menu items (Home → Number → Accounting dropdown).
       "format.numberFormat.accounting.usd": stripMenuPrefix(t("command.format.numberFormat.accounting.usd")),
       "format.numberFormat.accounting.eur": stripMenuPrefix(t("command.format.numberFormat.accounting.eur")),

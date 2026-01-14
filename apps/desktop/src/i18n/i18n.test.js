@@ -141,6 +141,7 @@ test("rtl locale exposes rtl direction hook", () => {
 test("tWithVars interpolates placeholders", () => {
   setLocale("en-US");
   assert.equal(tWithVars("chat.errorWithMessage", { message: "Oops" }), "Error: Oops");
+  assert.equal(tWithVars("ribbon.aria.labelWithValue", { label: "A", value: "B" }), "A: B");
 });
 
 test("sheet position status bar string is localizable", () => {

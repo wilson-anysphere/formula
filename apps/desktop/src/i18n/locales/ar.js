@@ -66,6 +66,7 @@ export const ar = {
   "ribbon.label.custom": "مخصص",
   "ribbon.label.comma": "فاصلة",
   "ribbon.label.moreNumberFormats": "مزيد من تنسيقات الأرقام",
+  "ribbon.aria.labelWithValue": "{label}: {value}",
   "ribbon.theme.system": "النظام",
   "ribbon.theme.light": "فاتح",
   "ribbon.theme.dark": "داكن",
