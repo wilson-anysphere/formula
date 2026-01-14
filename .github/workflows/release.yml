@@ -885,6 +885,7 @@ jobs:
           set -euo pipefail
           expected="${TAURI_CLI_VERSION}"
           actual="$(cargo tauri --version | tr -d '\r' | awk '{print $2}')"
+          echo "cargo-tauri version: ${actual}"
           if [[ "${actual}" != "${expected}" ]]; then
             echo "Expected cargo-tauri ${expected}, but found ${actual}." >&2
             exit 1
