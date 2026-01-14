@@ -297,4 +297,96 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("re-renders drawings when shared-grid axis resize is rejected during editing", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const formulaBar = document.createElement("div");
+      document.body.appendChild(formulaBar);
+
+      const app = new SpreadsheetApp(root, status, { formulaBar });
+      expect(app.getGridMode()).toBe("shared");
+
+      const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+      expect(input).not.toBeNull();
+      input!.focus();
+      input!.value = "=SUM(";
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Mimic selecting ranges while the formula bar is still editing.
+      root.focus();
+      expect(app.isEditing()).toBe(true);
+
+      const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
+      expect(drawingCanvas).toBeTruthy();
+
+      const objects: DrawingObject[] = [
+        {
+          id: 1,
+          kind: { type: "image", imageId: "missing" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 1 }, offset: { xEmu: 0, yEmu: 0 } }, // B1
+            size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+          },
+          zOrder: 0,
+        },
+      ];
+      const doc = app.getDocument() as any;
+      doc.getSheetDrawings = () => objects;
+
+      const calls = ctxCallsByCanvas.get(drawingCanvas);
+      expect(calls).toBeTruthy();
+      calls!.splice(0, calls!.length);
+
+      // Baseline render.
+      (app as any).renderDrawings();
+      const firstStroke = calls!.find((call) => call.method === "strokeRect");
+      expect(firstStroke).toBeTruthy();
+      const x1 = Number(firstStroke!.args[0]);
+
+      // Mimic interactive drag that changed the renderer but should be rejected because we're editing.
+      const sharedGrid = (app as any).sharedGrid;
+      const renderer = sharedGrid.renderer;
+      const index = 1; // grid col 1 => doc col 0
+      const prevSize = renderer.getColWidth(index);
+      const nextSize = prevSize + 50;
+      renderer.setColWidth(index, nextSize);
+
+      calls!.splice(0, calls!.length);
+
+      (app as any).onSharedGridAxisSizeChange({
+        kind: "col",
+        index,
+        size: nextSize,
+        previousSize: prevSize,
+        defaultSize: renderer.scroll.cols.defaultSize,
+        zoom: renderer.getZoom(),
+        source: "resize",
+      });
+
+      const secondStroke = calls!.find((call) => call.method === "strokeRect");
+      expect(secondStroke).toBeTruthy();
+      const x2 = Number(secondStroke!.args[0]);
+      expect(x2).toBeCloseTo(x1, 6);
+
+      // Focus should be restored to the formula bar so the user can continue typing.
+      expect(document.activeElement).toBe(input);
+
+      app.destroy();
+      root.remove();
+      formulaBar.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
