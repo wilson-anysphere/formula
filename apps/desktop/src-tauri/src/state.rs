@@ -5727,6 +5727,7 @@ mod tests {
     };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
+    use formula_model::Style;
     use formula_xlsx::drawingml::{
         PreservedChartSheet, PreservedDrawingParts, PreservedSheetControls, PreservedSheetDrawingHF,
         PreservedSheetDrawings, PreservedSheetOleObjects, PreservedSheetPicture,
