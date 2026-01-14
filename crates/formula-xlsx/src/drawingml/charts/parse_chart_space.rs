@@ -76,8 +76,8 @@ pub fn parse_chart_space(
             n.children()
                 .find(|c| c.is_element() && c.tag_name().name() == "autoUpdate")
         })
-        .and_then(|n| n.attribute("val"))
-        .map(parse_ooxml_bool);
+        // `<c:autoUpdate>` is a CT_Boolean where the `@val` attribute is optional (default=true).
+        .map(|n| n.attribute("val").map_or(true, parse_ooxml_bool));
 
     if doc
         .descendants()
