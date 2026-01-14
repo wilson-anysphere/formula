@@ -194,6 +194,10 @@ fn agile_encryption_info_params_match_docs_and_ci_bounds() {
             AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
         ),
         (
+            "agile-basic.xlsm",
+            AgileEncryptionParams::new(100_000, "AES", "ChainingModeCBC", 256, "SHA512", Some(16)),
+        ),
+        (
             "agile-empty-password.xlsx",
             AgileEncryptionParams::new(1_000, "AES", "ChainingModeCBC", 128, "SHA256", Some(16)),
         ),

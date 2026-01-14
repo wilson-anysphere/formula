@@ -109,6 +109,7 @@ silent drift.
 | agile.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
 | agile-large.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
 | agile-unicode.xlsx | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
+| agile-basic.xlsm | 100000 | AES | ChainingModeCBC | 256 | SHA512 | 16 |
 | agile-empty-password.xlsx | 1000 | AES | ChainingModeCBC | 128 | SHA256 | 16 |
 
 ## Inspecting encryption headers
