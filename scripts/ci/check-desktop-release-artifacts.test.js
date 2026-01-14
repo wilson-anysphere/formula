@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-desktop-release-artifacts.mjs");
 
@@ -53,9 +55,9 @@ test("fork mode: macOS unsigned build passes without updater signatures", () => 
 });
 
 test("check-desktop-release-artifacts bounds fallback repo walk (perf guardrail)", () => {
-  const raw = fs.readFileSync(scriptPath, "utf8");
-  const idx = raw.indexOf("Fallback: search for src-tauri directories");
-  assert.ok(idx >= 0, "Expected check-desktop-release-artifacts.mjs to have a fallback target dir discovery.");
+  const raw = stripComments(fs.readFileSync(scriptPath, "utf8"));
+  const idx = raw.indexOf("const maxDepth");
+  assert.ok(idx >= 0, "Expected check-desktop-release-artifacts.mjs to bound fallback target dir discovery via maxDepth.");
   const snippet = raw.slice(idx, idx + 1200);
   assert.match(
     snippet,

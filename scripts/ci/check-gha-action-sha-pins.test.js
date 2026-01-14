@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-gha-action-sha-pins.sh");
 
@@ -13,7 +15,7 @@ const bashProbe = spawnSync("bash", ["--version"], { encoding: "utf8" });
 const hasBash = !bashProbe.error && bashProbe.status === 0;
 
 test("check-gha-action-sha-pins bounds directory scans (perf guardrail)", () => {
-  const script = readFileSync(scriptPath, "utf8");
+  const script = stripHashComments(readFileSync(scriptPath, "utf8"));
   const idx = script.indexOf('find "$path"');
   assert.ok(idx >= 0, "Expected script to enumerate workflow directories via find \"$path\".");
   const snippet = script.slice(idx, idx + 120);
