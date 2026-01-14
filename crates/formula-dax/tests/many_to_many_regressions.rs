@@ -2714,6 +2714,162 @@ fn relatedtable_errors_on_ambiguous_relationship_paths_with_m2m() {
 }
 
 #[test]
+fn relatedtable_errors_on_ambiguous_relationship_paths_with_m2m_for_columnar_dim_and_fact() {
+    // Same ambiguity regression as `relatedtable_errors_on_ambiguous_relationship_paths_with_m2m`,
+    // but with both Dim and Fact columnar-backed.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String("B".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut bridge = Table::new("Bridge", vec!["Key"]);
+    bridge.push_row(vec![1.into()]).unwrap();
+    bridge.push_row(vec![2.into()]).unwrap();
+    model.add_table(bridge).unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "BridgeKey".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(2.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Bridge_Dim".into(),
+            from_table: "Bridge".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Bridge".into(),
+            from_table: "Fact".into(),
+            from_column: "BridgeKey".into(),
+            to_table: "Bridge".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", 0);
+
+    let err = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(RELATEDTABLE(Fact))",
+            &FilterContext::empty(),
+            &ctx,
+        )
+        .unwrap_err();
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("ambiguous") && msg.contains("relationship path"),
+        "unexpected error: {err}"
+    );
+
+    // Disable the Bridge->Dim relationship: only the direct path remains.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), CROSSFILTER(Bridge[Key], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    // Disable the direct Fact->Dim relationship: only the Bridge path remains.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), CROSSFILTER(Fact[Key], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
 fn related_errors_on_ambiguous_relationship_paths_with_m2m() {
     // Similar to the RELATEDTABLE ambiguity test above, but for RELATED navigation (fact -> dim).
     // There are two active paths from Fact to Dim:
@@ -2733,6 +2889,156 @@ fn related_errors_on_ambiguous_relationship_paths_with_m2m() {
     let mut fact = Table::new("Fact", vec!["Id", "Key", "BridgeKey"]);
     fact.push_row(vec![1.into(), 1.into(), 10.into()]).unwrap();
     model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Bridge".into(),
+            from_table: "Fact".into(),
+            from_column: "BridgeKey".into(),
+            to_table: "Bridge".into(),
+            to_column: "BridgeKey".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Bridge_Dim".into(),
+            from_table: "Bridge".into(),
+            from_column: "DimKey".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let mut ctx = RowContext::default();
+    ctx.push("Fact", 0);
+
+    let err = engine
+        .evaluate(
+            &model,
+            "RELATED(Dim[Attr])",
+            &FilterContext::empty(),
+            &ctx,
+        )
+        .unwrap_err();
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("ambiguous") && msg.contains("relationship path"),
+        "unexpected error: {err}"
+    );
+
+    // Disable the Bridge->Dim hop to force the direct Fact->Dim path.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(RELATED(Dim[Attr]), CROSSFILTER(Bridge[DimKey], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        "Direct".into()
+    );
+
+    // Disable the direct Fact->Dim relationship to force the Bridge path.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(RELATED(Dim[Attr]), CROSSFILTER(Fact[Key], Dim[Key], NONE))",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        "ViaBridge".into()
+    );
+}
+
+#[test]
+fn related_errors_on_ambiguous_relationship_paths_with_m2m_for_columnar_dim_and_fact() {
+    // Same ambiguity regression as `related_errors_on_ambiguous_relationship_paths_with_m2m`, but
+    // with both Dim and Fact columnar-backed.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("Direct".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String("ViaBridge".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut bridge = Table::new("Bridge", vec!["BridgeKey", "DimKey"]);
+    bridge.push_row(vec![10.into(), 2.into()]).unwrap();
+    model.add_table(bridge).unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "BridgeKey".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
 
     model
         .add_relationship(Relationship {
