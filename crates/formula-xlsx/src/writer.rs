@@ -425,6 +425,31 @@ fn trim_float(value: f64) -> String {
     }
 }
 
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    let mut attrs = String::new();
+    if let Some(base) = sheet.base_col_width {
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        attrs.push_str(&format!(
+            r#" defaultColWidth="{}""#,
+            trim_float(f64::from(width))
+        ));
+    }
+    if let Some(height) = sheet.default_row_height {
+        attrs.push_str(&format!(
+            r#" defaultRowHeight="{}""#,
+            trim_float(f64::from(height))
+        ));
+    }
+
+    if attrs.is_empty() {
+        return String::new();
+    }
+
+    format!("<sheetFormatPr{attrs}/>")
+}
+
 fn workbook_defined_names_xml(workbook: &Workbook) -> String {
     let mut settings_by_sheet_name: HashMap<String, &SheetPrintSettings> = HashMap::new();
     for sheet_settings in &workbook.print_settings.sheets {

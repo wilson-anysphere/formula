@@ -1401,3 +1401,52 @@ fn escape_attr_value(value: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_drawing_defaults_missing_anchor_offsets_to_zero() {
+        let drawing_path = "xl/drawings/drawing1.xml";
+        let rels_path = drawing_rels_path(drawing_path);
+
+        let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing">
+  <xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>1</xdr:col>
+      <xdr:row>2</xdr:row>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>3</xdr:col>
+      <xdr:row>4</xdr:row>
+    </xdr:to>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>"#;
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;
+
+        let mut parts = BTreeMap::new();
+        parts.insert(drawing_path.to_string(), drawing_xml.as_bytes().to_vec());
+        parts.insert(rels_path, rels_xml.as_bytes().to_vec());
+
+        let mut workbook = formula_model::Workbook::new();
+        let drawing = DrawingPart::parse_from_parts(0, drawing_path, &parts, &mut workbook)
+            .expect("parse drawing");
+
+        assert_eq!(drawing.objects.len(), 1);
+        let anchor = drawing.objects[0].anchor;
+        match anchor {
+            Anchor::TwoCell { from, to } => {
+                assert_eq!(from.offset.x_emu, 0);
+                assert_eq!(from.offset.y_emu, 0);
+                assert_eq!(to.offset.x_emu, 0);
+                assert_eq!(to.offset.y_emu, 0);
+            }
+            other => panic!("expected TwoCell anchor, got {other:?}"),
+        }
+    }
+}

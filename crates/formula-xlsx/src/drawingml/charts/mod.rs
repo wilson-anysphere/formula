@@ -159,7 +159,7 @@ pub fn extract_chart_object_refs(
 
 #[cfg(test)]
 mod tests {
-    use super::extract_chart_object_refs;
+    use super::*;
 
     #[test]
     fn extract_chart_object_refs_finds_nested_graphic_frame() {
@@ -232,6 +232,50 @@ mod tests {
         let frame_xml = chart_ref.drawing_frame_xml.trim();
         assert!(frame_xml.starts_with("<xdr:graphicFrame"));
         assert!(frame_xml.ends_with("</xdr:graphicFrame>"));
+    }
+
+    #[test]
+    fn extract_chart_object_refs_defaults_missing_offsets_to_zero() {
+        let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>0</xdr:col>
+      <xdr:row>0</xdr:row>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>5</xdr:col>
+      <xdr:row>10</xdr:row>
+    </xdr:to>
+    <xdr:graphicFrame>
+      <a:graphic>
+        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart r:id="rId1"/>
+        </a:graphicData>
+      </a:graphic>
+    </xdr:graphicFrame>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>
+"#;
+
+        let refs = extract_chart_object_refs(drawing_xml.as_bytes(), "xl/drawings/drawing1.xml")
+            .expect("chart refs parsed");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].rel_id, "rId1");
+
+        match refs[0].anchor {
+            Anchor::TwoCell { from, to } => {
+                assert_eq!(from.offset.x_emu, 0);
+                assert_eq!(from.offset.y_emu, 0);
+                assert_eq!(to.offset.x_emu, 0);
+                assert_eq!(to.offset.y_emu, 0);
+            }
+            other => panic!("expected TwoCell anchor, got {other:?}"),
+        }
     }
 }
 fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
