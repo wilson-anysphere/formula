@@ -81,6 +81,16 @@ For Agile encryption this is typically `4.4` with `flags=0x00000040`, followed b
 See also: `crates/formula-io/src/bin/ooxml-encryption-info.rs` (a small helper that prints the
 version header and sniffs the XML root tag).
 
+Example:
+
+```bash
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/encrypted.xlsx
+```
+
+```text
+Agile (4.4) flags=0x00000040 xml_root=encryption
+```
+
 Note: the spec says the XML follows immediately after the 8-byte version header, but some
 non-Excel producers have been observed to include extra bytes (e.g. a 4-byte length prefix or
 UTF-16LE XML). `crates/formula-offcrypto` includes conservative heuristics to handle these cases
