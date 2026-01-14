@@ -11,6 +11,12 @@ pub enum OffCryptoWarning {
     /// Decryption is deterministic: the first password key encryptor wins.
     MultiplePasswordKeyEncryptors { count: usize },
 
+    /// The `EncryptionInfo` XML omitted the `<dataIntegrity>` element.
+    ///
+    /// Formula can still decrypt the document (after password verification), but cannot validate the
+    /// encrypted package integrity (HMAC).
+    MissingDataIntegrity,
+
     /// The document declared a `hashSize` that differs from the typical default for the selected
     /// hash algorithm (the full digest length), but is still usable for decryption.
     NonStandardHashSize {
@@ -44,4 +50,3 @@ pub enum OffCryptoWarning {
     /// An XML attribute was present on a recognized element that Formula does not recognize.
     UnrecognizedXmlAttribute { element: String, attr: String },
 }
-
