@@ -191,8 +191,11 @@ function Parse-LocalizedFunctionName {
   }
 
   # Some Excel builds use `_xludf.` for user-defined / unknown functions.
+  # If we see this prefix, Excel did not recognize the function identifier and
+  # treated it as a UDF; skip recording a translation so callers can retry with
+  # a newer Excel build / correct language pack.
   if ($s.StartsWith("_xludf.")) {
-    $s = $s.Substring(7)
+    throw "Excel treated function as user-defined (_xludf.). FormulaLocal=$FormulaLocal"
   }
 
   # Defensive: Excel occasionally emits formulas with a leading '+'.
