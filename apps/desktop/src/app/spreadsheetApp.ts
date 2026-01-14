@@ -8303,6 +8303,72 @@ export class SpreadsheetApp {
         // ignore
       }
     }
+
+    // If the user opened a workbook (or hid/unhid columns) before the WASM engine finished
+    // initializing, the worker will be hydrated from the DocumentController but *not* from the
+    // UI-only outline hidden state. Sync any outline-hidden columns now so information functions
+    // like `CELL("width")` can observe hidden state consistently.
+    try {
+      await this.syncOutlineHiddenColsToWasmEngineAfterInit();
+    } catch {
+      // ignore
+    }
+  }
+
+  private async syncOutlineHiddenColsToWasmEngineAfterInit(): Promise<void> {
+    if (!this.wasmEngine || this.wasmSyncSuspended) return;
+
+    const shouldTreatHidden =
+      this.gridMode === "legacy"
+        ? (hidden: { user: boolean; outline: boolean; filter: boolean }) => isHidden(hidden)
+        : (hidden: { user: boolean }) => Boolean(hidden?.user);
+
+    // First scan to see if there is any hidden-column metadata at all. Most workbooks have none,
+    // so avoid scheduling an extra recalc pass unless we actually need it.
+    let hasAnyHiddenCols = false;
+    for (const outline of this.outlinesBySheet.values()) {
+      for (const entry of outline.cols.entries.values()) {
+        if (shouldTreatHidden(entry.hidden as any)) {
+          hasAnyHiddenCols = true;
+          break;
+        }
+      }
+      if (hasAnyHiddenCols) break;
+    }
+    if (!hasAnyHiddenCols) return;
+
+    await this.enqueueWasmSync(async (engine) => {
+      if (typeof (engine as any).setColHidden !== "function") return;
+
+      for (const [sheetId, outline] of this.outlinesBySheet.entries()) {
+        for (const [summaryIndex, entry] of outline.cols.entries) {
+          if (!shouldTreatHidden(entry.hidden as any)) continue;
+          // Outline indices are 1-based; engine uses 0-based column indices.
+          const col = summaryIndex - 1;
+          if (col < 0 || col >= this.limits.maxCols) continue;
+          await engine.setColHidden(col, true, sheetId);
+        }
+      }
+
+      const changes = await engine.recalculate();
+      this.applyComputedChanges(changes);
+
+      // Keep the legacy outline->engine hidden cache coherent so subsequent unhide operations can
+      // diff correctly (the sync logic does not query the engine for hidden state).
+      if (this.gridMode === "legacy") {
+        const hiddenCols: number[] = [];
+        for (const [summaryIndex, entry] of this.outline.cols.entries) {
+          if (!isHidden(entry.hidden)) continue;
+          const col = summaryIndex - 1;
+          if (col < 0 || col >= this.limits.maxCols) continue;
+          hiddenCols.push(col);
+        }
+        hiddenCols.sort((a, b) => a - b);
+        this.lastSyncedHiddenColsEngine = engine;
+        this.lastSyncedHiddenCols = hiddenCols;
+        this.lastSyncedHiddenColsKey = `${this.sheetId}:${hiddenCols.join(",")}`;
+      }
+    });
   }
 
   /**
