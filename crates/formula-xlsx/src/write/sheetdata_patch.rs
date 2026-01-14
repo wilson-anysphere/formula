@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
-use formula_model::rich_text::{RichText, RichTextRunStyle, Underline};
+use formula_model::rich_text::{RichText, RichTextRun, RichTextRunStyle, Underline};
 use formula_model::{CellRef, CellValue, Color, ErrorValue, Worksheet, WorksheetId};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
@@ -604,17 +604,9 @@ fn patch_or_copy_cell<W: Write>(
                 // the original `<is>...</is>` subtree byte-for-byte so we don't drop unsupported
                 // structures like phonetic runs (`<rPh>`) or rich run formatting.
                 let original_cell_type = cell_type_from_cell_events(&cell_events)?;
-                let meta = super::lookup_cell_meta(
-                    doc,
-                    cell_meta_sheet_ids,
-                    sheet_meta.worksheet_id,
-                    cell_ref,
-                );
-                let desired_value_kind = super::effective_value_kind(meta, desired_cell);
                 let preserved_inline_is = (original_cell_type.as_deref() == Some("inlineStr")
-                    && desired_semantics.value == original.value
-                    && desired_semantics.phonetic == original.phonetic
-                    && matches!(desired_value_kind, CellValueKind::InlineString))
+                    && cell_value_semantics_eq(&desired_semantics.value, &original.value)
+                    && desired_semantics.phonetic == original.phonetic)
                 .then(|| extract_is_subtree(&cell_events))
                 .flatten();
                 write_updated_cell(
@@ -988,7 +980,13 @@ fn write_updated_cell<W: Write>(
         }
     });
     let meta_cm = meta.and_then(|m| m.cm.clone());
-    let value_kind = super::effective_value_kind(meta, cell);
+    let mut preserved_inline_is = preserved_inline_is;
+    let mut value_kind = super::effective_value_kind(meta, cell);
+    if preserved_inline_is.is_some() {
+        // We have an original `<is>...</is>` payload that we want to preserve byte-for-byte.
+        // Force `t="inlineStr"` so the output remains a valid inline string cell.
+        value_kind = CellValueKind::InlineString;
+    }
     let meta_sheet_id = cell_meta_sheet_ids
         .get(&sheet_meta.worksheet_id)
         .copied()
@@ -1134,8 +1132,6 @@ fn write_updated_cell<W: Write>(
             writer.write_event(Event::End(BytesEnd::new(f_tag)))?;
         }
     }
-
-    let mut preserved_inline_is = preserved_inline_is;
 
     if !clear_cached_value {
         match &cell.value {
@@ -1388,11 +1384,17 @@ fn write_updated_cell<W: Write>(
                 }
             }
             value @ CellValue::RichText(rich) => {
-                let idx = super::shared_string_index(doc, meta, value, shared_lookup);
-                if idx != 0 || !rich.text.is_empty() {
-                    writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-                    writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
-                    writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                if let Some(is_events) = preserved_inline_is.take() {
+                    for ev in is_events {
+                        writer.write_event(ev)?;
+                    }
+                } else {
+                    let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                    if idx != 0 || !rich.text.is_empty() {
+                        writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                        writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                        writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                    }
                 }
             }
             _ => {
@@ -1756,12 +1758,21 @@ fn cell_ref_from_cell_events(
     Ok(None)
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct CellSemantics {
     style_xf: u32,
     formula: Option<String>,
     value: CellValue,
     phonetic: Option<String>,
+}
+
+impl PartialEq for CellSemantics {
+    fn eq(&self, other: &Self) -> bool {
+        self.style_xf == other.style_xf
+            && self.formula == other.formula
+            && self.phonetic == other.phonetic
+            && cell_value_semantics_eq(&self.value, &other.value)
+    }
 }
 
 impl CellSemantics {
@@ -1806,6 +1817,54 @@ impl CellSemantics {
             && matches!(self.value, CellValue::Empty)
             && self.phonetic.is_none()
     }
+}
+
+fn cell_value_semantics_eq(a: &CellValue, b: &CellValue) -> bool {
+    match (a, b) {
+        (CellValue::RichText(a), CellValue::RichText(b)) => rich_text_semantics_eq(a, b),
+        (CellValue::String(s), CellValue::RichText(rich))
+        | (CellValue::RichText(rich), CellValue::String(s)) => {
+            &rich.text == s && rich_text_has_no_formatting(rich)
+        }
+        _ => a == b,
+    }
+}
+
+fn rich_text_has_no_formatting(rich: &RichText) -> bool {
+    rich_text_normalized_runs(rich).is_empty()
+}
+
+fn rich_text_semantics_eq(a: &RichText, b: &RichText) -> bool {
+    a.text == b.text && rich_text_normalized_runs(a) == rich_text_normalized_runs(b)
+}
+
+fn rich_text_normalized_runs(rich: &RichText) -> Vec<RichTextRun> {
+    // Normalize away representation differences that do not affect formatting semantics:
+    // - Drop empty-style runs (they carry no overrides).
+    // - Drop zero-length runs (they cannot affect any characters).
+    // - Merge adjacent runs that have identical styles.
+    //
+    // This matches the semantic equality logic used by the in-memory cell patcher so that the
+    // sheet-data patcher can avoid unnecessary rewrites (and preserve unknown OOXML tags).
+    let mut runs: Vec<RichTextRun> = rich
+        .runs
+        .iter()
+        .filter(|run| run.start < run.end && !run.style.is_empty())
+        .cloned()
+        .collect();
+    runs.sort_by_key(|run| (run.start, run.end));
+
+    let mut merged: Vec<RichTextRun> = Vec::with_capacity(runs.len());
+    for run in runs {
+        match merged.last_mut() {
+            Some(prev) if prev.style == run.style && prev.end == run.start => {
+                prev.end = run.end;
+            }
+            _ => merged.push(run),
+        }
+    }
+
+    merged
 }
 
 fn parse_cell_semantics(
