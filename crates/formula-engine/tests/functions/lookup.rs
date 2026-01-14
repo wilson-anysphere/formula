@@ -1972,3 +1972,68 @@ fn getpivotdata_registry_shifts_destination_after_move_range() {
         Value::Number(100.0)
     );
 }
+
+#[test]
+fn getpivotdata_registry_shifts_destination_after_insert_cells_shift_right() {
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
+        SubtotalPosition, ValueField,
+    };
+    use formula_engine::EditOp;
+    use formula_model::{CellRef, Range};
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    let cfg = PivotConfig {
+        row_fields: vec![PivotField::new("Region")],
+        column_fields: vec![],
+        value_fields: vec![ValueField {
+            source_field: "Sales".into(),
+            name: "Sum of Sales".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: Layout::Tabular,
+        subtotals: SubtotalPosition::None,
+        grand_totals: GrandTotals {
+            rows: true,
+            columns: true,
+        },
+    };
+
+    let source = vec![
+        pv_row(&["Region".into(), "Sales".into()]),
+        pv_row(&["East".into(), 100.into()]),
+        pv_row(&["West".into(), 200.into()]),
+    ];
+
+    let mut pivot = PivotTable::new("PivotTable1", &source, cfg).expect("create pivot");
+    pivot.id = "pivot-stable-id".to_string();
+
+    let destination = Range::new(CellRef::new(0, 0), CellRef::new(1, 1)); // A1:B2
+    let mut sheet = TestSheet::new();
+    sheet.register_pivot_table(destination, pivot);
+
+    // Insert a single column worth of cells at A1:A2, shifting the pivot output right by one column.
+    sheet.apply_operation(EditOp::InsertCellsShiftRight {
+        sheet: "Sheet1".to_string(),
+        range: Range::new(CellRef::new(0, 0), CellRef::new(1, 0)), // A1:A2
+    });
+
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\")"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", B1, \"Region\", \"East\")"),
+        Value::Number(100.0)
+    );
+}
