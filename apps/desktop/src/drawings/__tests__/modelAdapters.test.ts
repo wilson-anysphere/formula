@@ -149,6 +149,29 @@ describe("drawings/modelAdapters", () => {
     expect(ui1.id).not.toBe(parsed);
   });
 
+  it("hashes negative drawing object ids into the reserved large-magnitude namespace (avoids chart collisions)", () => {
+    const model = {
+      id: -123,
+      kind: { Image: { image_id: "image1.png" } },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 10, cy: 20 },
+        },
+      },
+      z_order: 0,
+    };
+
+    const ui1 = convertModelDrawingObjectToUiDrawingObject(model);
+    const ui2 = convertModelDrawingObjectToUiDrawingObject(model);
+
+    expect(Number.isSafeInteger(ui1.id)).toBe(true);
+    // Hashed ids are offset by 2^33 (see parseDrawingObjectId) to stay disjoint from ChartStore ids.
+    expect(ui1.id).toBeLessThanOrEqual(-(2 ** 33));
+    expect(ui1.id).toBe(ui2.id);
+    expect(ui1.id).not.toBe(-123);
+  });
+
   it("does not crash when drawing object ids are missing/undefined", () => {
     const model = {
       // Intentionally omit `id`.

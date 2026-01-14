@@ -193,7 +193,11 @@ function parseDrawingObjectId(value: unknown): number {
   // Drawing object ids must fit in JS's safe integer range since the overlay/hit-test layers treat
   // them as stable numeric keys. If an upstream snapshot stores ids as strings, guard against
   // parsing an unsafe integer (e.g. "9007199254740993") by falling back to a stable hash.
-  if (parsed != null && Number.isSafeInteger(parsed)) return parsed;
+  //
+  // Workbook drawing ids are expected to be positive; reserve negative ids for:
+  // - ChartStore canvas charts (see `chartIdToDrawingId`)
+  // - hashed ids produced below (large-magnitude negative namespace)
+  if (parsed != null && Number.isSafeInteger(parsed) && parsed > 0) return parsed;
   // Use a disjoint negative-id namespace for hashed ids so they cannot collide with:
   // - normal drawing ids (which are positive safe integers, including our random 53-bit ids)
   // - chart overlay ids (which use smaller-magnitude negative ids; see `chartIdToDrawingId`)
