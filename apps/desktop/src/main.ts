@@ -7150,6 +7150,22 @@ if (
             }
           })();
 
+          // Match ribbon edit-mode/read-only disabling: macros should not run while a cell/formula edit
+          // is active, and should be blocked for read-only collab roles. Keep this guard close to the
+          // panel wiring so any macro entrypoint (Tauri VBA or web scripts) follows the same policy.
+          const guardedBackend = {
+            ...backend,
+            runMacro: async (request: MacroRunRequest) => {
+              if (isSpreadsheetEditing()) {
+                throw new Error("Finish editing before running a macro.");
+              }
+              if (app.isReadOnly?.() === true) {
+                throw new Error(READ_ONLY_SHEET_MUTATION_MESSAGE);
+              }
+              return await backend.runMacro(request);
+            },
+          };
+
           const focusMacrosPanelElement = (el: HTMLElement | null) => {
             if (!el) return;
             try {
@@ -7160,7 +7176,7 @@ if (
           };
 
           const refreshRunner = async () => {
-            await macrosMod.renderMacroRunner(runnerPanel, backend as any, workbookId, {
+            await macrosMod.renderMacroRunner(runnerPanel, guardedBackend as any, workbookId, {
               onApplyUpdates: async (updates) => {
                 if (vbaEventMacros) {
                   await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
