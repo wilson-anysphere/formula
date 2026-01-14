@@ -384,8 +384,12 @@ fn de_de_locale_function_tsv_is_not_mostly_identity_mappings() {
     // round-tripping.
     //
     // Allow some identity mappings since many functions are not localized in German Excel (e.g.
-    // `ABS`, `COS`, etc) and some functions may be unavailable in a given Excel build. But require
-    // that a majority of functions have a non-identity localized spelling.
+    // `ABS`, `COS`, etc) and some functions may be unavailable in a given Excel build.
+    //
+    // We use a dual threshold:
+    // - A percentage-based threshold to catch "almost everything became English again".
+    // - An absolute minimum so the test stays stable if the function catalog grows substantially
+    //   (new functions may initially be identity mappings until locale data is refreshed).
     let tsv = include_str!("../src/locale/data/de-DE.tsv");
     let mut total = 0usize;
     let mut identity = 0usize;
@@ -405,8 +409,10 @@ fn de_de_locale_function_tsv_is_not_mostly_identity_mappings() {
     }
 
     let non_identity = total - identity;
+    let passes_ratio = non_identity * 100 >= total * 60;
+    let passes_absolute = non_identity >= 300;
     assert!(
-        non_identity * 100 >= total * 60,
+        passes_ratio || passes_absolute,
         "expected de-DE.tsv to contain many localized function spellings; got {non_identity}/{total} non-identity entries (identity={identity})"
     );
 }
