@@ -727,7 +727,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\\s+PYODIDE_VERSION\\s*=\\s*[\"\\x27]([^\"\\x27]+)[\"\\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
+          version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\s+PYODIDE_VERSION\s*=\s*[\"\\x27]([^\"\\x27]+)[\"\\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Restore Pyodide asset cache
