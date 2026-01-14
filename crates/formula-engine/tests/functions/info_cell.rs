@@ -289,6 +289,23 @@ fn cell_filename_is_empty_for_unsaved_workbooks() {
 }
 
 #[test]
+fn cell_filename_includes_filename_even_when_directory_is_unknown() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_workbook_file_metadata(None, Some("Book1.xlsx"));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("[Book1.xlsx]Sheet1".to_string())
+    );
+}
+
+#[test]
 fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles() {
     let mut sheet = TestSheet::new();
 

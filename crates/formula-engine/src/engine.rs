@@ -818,14 +818,31 @@ impl Engine {
 
     /// Set workbook file metadata (directory + filename).
     ///
-    /// This is primarily used by workbook information functions (`INFO("directory")`, etc).
-    pub fn set_workbook_file_metadata(
-        &mut self,
-        directory: Option<String>,
-        filename: Option<String>,
-    ) {
+    /// This is primarily used by workbook information functions like `CELL("filename")`.
+    ///
+    /// Hosts may not have access to an OS-level directory path (e.g. web environments). In those
+    /// cases, callers can supply just a filename.
+    ///
+    /// Passing `None` or `Some("")` for a field clears it.
+    pub fn set_workbook_file_metadata(&mut self, directory: Option<&str>, filename: Option<&str>) {
+        let directory = directory
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let filename = filename.filter(|s| !s.is_empty()).map(|s| s.to_string());
+
+        if self.workbook.workbook_directory == directory && self.workbook.workbook_filename == filename {
+            return;
+        }
         self.workbook.workbook_directory = directory;
         self.workbook.workbook_filename = filename;
+
+        // Workbook metadata can affect formulas (e.g. CELL("filename")) but is not represented in
+        // the dependency graph. Conservatively mark all compiled formula cells dirty so results can
+        // refresh on the next recalc.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
     }
 
     /// Delete a worksheet from the workbook and rewrite any remaining formulas/defined names that

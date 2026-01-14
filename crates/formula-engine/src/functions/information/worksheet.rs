@@ -115,7 +115,6 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         "protect" => Some(CellInfoType::Protect),
         "prefix" => Some(CellInfoType::Prefix),
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
-        // This engine does not currently track workbook file metadata, so always return "".
         "filename" => Some(CellInfoType::Filename),
         // Notes:
         // - `CELL("width")`/`CELL("protect")`/`CELL("prefix")` return best-effort defaults because
@@ -338,10 +337,29 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let _cell_ref = record_explicit_cell(ctx);
 
-             // This engine does not currently track per-cell alignment/prefix formatting, so return
-             // the empty string.
-             Value::Text(String::new())
-         }
-        CellInfoType::Filename => Value::Text(String::new()),
+            // This engine does not currently track per-cell alignment/prefix formatting, so return
+            // the empty string.
+            Value::Text(String::new())
+        }
+        CellInfoType::Filename => {
+            // Excel returns "" until the workbook has a known filename (i.e. it has been saved).
+            let Some(filename) = ctx.workbook_filename().filter(|s| !s.is_empty()) else {
+                return Value::Text(String::new());
+            };
+
+            // Use the sheet containing the referenced cell (not necessarily the current sheet).
+            let sheet_name = match &reference.sheet_id {
+                SheetId::Local(id) => ctx.sheet_name(*id).unwrap_or_default(),
+                // We don't have separate workbook file metadata for external workbooks. The
+                // canonical external sheet key already includes `[Book.xlsx]Sheet`, so return it
+                // directly (no directory prefix).
+                SheetId::External(key) => return Value::Text(key.clone()),
+            };
+
+            match ctx.workbook_directory().filter(|s| !s.is_empty()) {
+                Some(dir) => Value::Text(format!("{dir}[{filename}]{sheet_name}")),
+                None => Value::Text(format!("[{filename}]{sheet_name}")),
+            }
+        }
     }
 }
