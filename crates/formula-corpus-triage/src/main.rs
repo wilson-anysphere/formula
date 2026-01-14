@@ -10,7 +10,7 @@ use clap::{Parser, ValueEnum};
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
 use formula_model::{CellRef, CellValue, DefinedNameScope, ErrorValue};
 use formula_xlsb::XlsbWorkbook;
-use globset::Glob;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -892,6 +892,18 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         .filter(|s| !s.is_empty())
         .collect();
     let ignore_globs_sorted: Vec<String> = ignore_globs.iter().cloned().collect();
+    let ignore_globs_matcher: GlobSet = {
+        let mut builder = GlobSetBuilder::new();
+        for pattern in &ignore_globs_sorted {
+            // `xlsx-diff` ignores invalid glob patterns at runtime, but the CLI validates them
+            // up-front. Mirror that behavior here so unit tests that call `diff_workbooks` directly
+            // don't panic when given invalid patterns.
+            if let Ok(glob) = Glob::new(pattern) {
+                builder.add(glob);
+            }
+        }
+        builder.build().unwrap_or_else(|_| GlobSet::empty())
+    };
 
     let ignore_paths = build_ignore_path_rules(args)?;
     let mut ignore_paths_sorted: Vec<String> = ignore_paths
@@ -916,12 +928,12 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     let expected_parts: BTreeSet<&str> = expected_archive
         .part_names()
         .into_iter()
-        .filter(|part| !ignore.contains(*part))
+        .filter(|part| !ignore.contains(*part) && !ignore_globs_matcher.is_match(*part))
         .collect();
     let actual_parts: BTreeSet<&str> = actual_archive
         .part_names()
         .into_iter()
-        .filter(|part| !ignore.contains(*part))
+        .filter(|part| !ignore.contains(*part) && !ignore_globs_matcher.is_match(*part))
         .collect();
     let parts_total = expected_parts.union(&actual_parts).count();
 
@@ -2206,6 +2218,53 @@ mod tests {
             details.ignore_paths,
             vec!["xl/worksheets/sheet1.xml:attribute_changed:dyDescent".to_string()]
         );
+    }
+
+    #[test]
+    fn diff_workbooks_respects_ignore_glob_rules() {
+        let expected = make_zip(&[
+            ("xl/workbook.xml", "<workbook/>"),
+            ("xl/media/image1.png", "a"),
+        ]);
+        let actual = make_zip(&[
+            ("xl/workbook.xml", "<workbook/>"),
+            ("xl/media/image1.png", "b"),
+        ]);
+
+        let args = Args {
+            input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
+            password: None,
+            ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            ignore_paths_kind: Vec::new(),
+            ignore_paths_kind_in: Vec::new(),
+            ignore_presets: Vec::new(),
+            strict_calc_chain: false,
+            diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 1);
+        assert_eq!(details.part_stats.parts_total, 2);
+        assert_eq!(details.top_differences.len(), 1);
+        assert_eq!(details.top_differences[0].part, "xl/media/image1.png");
+
+        let args = Args {
+            ignore_globs: vec!["xl/media/*".to_string()],
+            ..args
+        };
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 0, "expected diffs suppressed by ignore-glob");
+        assert!(details.equal);
+        assert!(details.top_differences.is_empty());
+        assert_eq!(details.part_stats.parts_total, 1);
+        assert_eq!(details.ignore_globs, vec!["xl/media/*".to_string()]);
     }
 
     #[test]
