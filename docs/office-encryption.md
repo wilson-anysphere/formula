@@ -284,8 +284,9 @@ Implementation status:
   - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not validate
     `dataIntegrity`.
     - It is used for some compatibility fallbacks (for example Agile files that omit
-      `<dataIntegrity>`).
-    - Other encrypted-open paths still decrypt `EncryptedPackage` into an in-memory buffer first.
+      `<dataIntegrity>`). A Standard AES streaming open helper exists in `formula-io` but is not
+      currently wired into the public open APIs.
+    - Public encrypted-open paths currently decrypt `EncryptedPackage` into an in-memory buffer first.
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting Agile packages via
   `decrypt_encrypted_package` with `DecryptOptions.verify_integrity = true` (default: `false`).
   - It verifies only the spec/Excel target (the full `EncryptedPackage` stream bytes) and returns

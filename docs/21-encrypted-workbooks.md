@@ -472,7 +472,7 @@ With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
   workbooks in memory. For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world
   producers omit it.
   - Encrypted `.xlsb` workbooks are supported in native `formula-io` (decrypted payload contains
-    `xl/workbook.bin`).
+    `xl/workbook.bin`) and open as `Workbook::Xlsb`.
     - The WASM loader still rejects decrypted `.xlsb` payloads.
 
 Without that feature, encrypted OOXML containers surface as `UnsupportedEncryption` (the password-aware
@@ -547,12 +547,12 @@ Encrypted workbook handling should distinguish at least these cases:
      errors through.
    - UI action: explain limitation and suggest re-saving without encryption in Excel.
 
-4. **Unsupported decrypted workbook kind** (decryption succeeded, but the decrypted payload is not a
-   workbook type we can open in this path)
-   - Surface as: `Error::UnsupportedEncryptedWorkbookKind { kind, .. }` (rare; currently not expected
-     for `.xlsx`/`.xlsm`/`.xlsb`; indicates the decrypted payload is not a supported workbook package).
-   - UI action: ask the user to confirm the file is a spreadsheet and re-save as
-     `.xlsx`/`.xlsm`/`.xlsb` (or provide an unencrypted copy).
+4. **Decrypted payload is not a recognized workbook package** (decryption succeeded, but the decrypted
+   bytes do not appear to be a supported Excel workbook)
+   - Surface as: `Error::OpenXlsx { .. }` / `Error::OpenXlsb { .. }` / other parse errors (depending
+     on which reader it routes to).
+   - UI action: treat as “file corrupted or unsupported” (if the password is known-good, the file
+     may not be an Excel workbook or the encrypted wrapper may be malformed).
 
 5. **Corrupt encrypted wrapper** (missing streams, malformed `EncryptionInfo`, truncated payload)
    - Surface as: a dedicated “corrupt encrypted container” error (future); today this may surface
@@ -587,7 +587,6 @@ back into a generic “encrypted workbook” error:
 - `formula_io::Error::InvalidPassword { .. }` → **Invalid password**
 - `formula_io::Error::UnsupportedOoxmlEncryption { .. }` → **Unsupported encryption scheme**
 - `formula_io::Error::UnsupportedEncryption { .. }` → **Unsupported encryption scheme**
-- `formula_io::Error::UnsupportedEncryptedWorkbookKind { .. }` → **Unsupported decrypted workbook kind**
 - `formula_io::Error::EncryptedWorkbook { .. }` → **Password required (legacy `.xls` encryption / FILEPASS)**
 
 - `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` → **Invalid password**

@@ -131,6 +131,9 @@ When using the `formula-io` password APIs, decrypted `.xlsb` packages are routed
 reader and opened as `Workbook::Xlsb` (or converted to a model workbook via
 `open_workbook_model_with_password(..)`).
 
+If you already have the input bytes in memory, you can open encrypted `.xlsb` directly via
+`formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(...)`.
+
 ### Desktop app UX flow
 
 The expected UX is:
@@ -154,13 +157,10 @@ Implementation note (desktop IPC):
 
 Current desktop limitations:
 
-- Password-aware open is supported for **encrypted OOXML workbooks** that decrypt to
-  XLSX/XLSM/**XLSB** packages (via the `open_workbook` command’s `password` parameter). The desktop
-  frontend prompts for a password and retries open when it receives `PASSWORD_REQUIRED:` /
-  `INVALID_PASSWORD:` errors.
+- Password-aware open is supported for **encrypted OOXML workbooks that decrypt to XLSX/XLSM/XLSB**
+  packages (via the `open_workbook` command’s `password` parameter). The desktop frontend prompts
+  for a password and retries open when it receives `PASSWORD_REQUIRED:` / `INVALID_PASSWORD:` errors.
 - Legacy `.xls` BIFF `FILEPASS` password prompting is not yet wired through the desktop open path.
-- Encrypted `.xlsb` opens are supported, but they force “Save As” (there is no lossless `.xlsb`
-  round-trip save path when the source was an encrypted OLE container).
 - Saving **encrypted** `.xlsx`/`.xlsm` is supported when the save command is invoked with a
   `password` (the output is wrapped back into an OLE/CFB `EncryptedPackage` container).
 - Saving encrypted `.xlsb` is not supported yet (save as `.xlsx` instead).
@@ -175,8 +175,6 @@ At the `formula-io` layer, callers should branch on the error variant (not strin
 - `InvalidPassword` — password provided, but decryption failed
 - `UnsupportedOoxmlEncryption` / `UnsupportedEncryption` — encrypted workbook detected, but the
   scheme or build configuration doesn’t support decrypting it
-- `UnsupportedEncryptedWorkbookKind` — workbook decrypted successfully, but the decrypted workbook
-  type is not supported in this encrypted-open path (rare; currently not expected for `.xlsx`/`.xlsm`/`.xlsb`)
 - `EncryptedWorkbook` — legacy `.xls` encryption detected (BIFF `FILEPASS`); retry via the password
   APIs (`open_workbook_with_password` / `open_workbook_model_with_password`)
 
