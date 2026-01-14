@@ -26,7 +26,33 @@ const expectedFileAssociationMimeTypes = Array.from(
       .filter(Boolean),
   ),
 );
-const defaultDesktopMimeValue = `${expectedFileAssociationMimeTypes.join(";")};x-scheme-handler/formula;`;
+
+function collectDeepLinkSchemes(config) {
+  const deepLink = config?.plugins?.["deep-link"];
+  const desktop = deepLink?.desktop;
+  const schemes = new Set();
+  const addFromProtocol = (protocol) => {
+    if (!protocol || typeof protocol !== "object") return;
+    const raw = protocol.schemes;
+    const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+    for (const v of values) {
+      if (typeof v !== "string") continue;
+      const normalized = v.trim().replace(/[:/]+$/, "").toLowerCase();
+      if (normalized) schemes.add(normalized);
+    }
+  };
+  if (Array.isArray(desktop)) {
+    for (const protocol of desktop) addFromProtocol(protocol);
+  } else {
+    addFromProtocol(desktop);
+  }
+  if (schemes.size === 0) schemes.add("formula");
+  return Array.from(schemes).sort();
+}
+
+const expectedDeepLinkSchemes = collectDeepLinkSchemes(tauriConf);
+const expectedSchemeMimes = expectedDeepLinkSchemes.map((scheme) => `x-scheme-handler/${scheme}`);
+const defaultDesktopMimeValue = `${expectedFileAssociationMimeTypes.join(";")};${expectedSchemeMimes.join(";")};`;
 const defaultDesktopMimeValueNoScheme = `${expectedFileAssociationMimeTypes.join(";")};`;
 
 const hasBash = (() => {

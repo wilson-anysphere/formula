@@ -28,6 +28,32 @@ const expectedFileAssociationMimeTypes = Array.from(
 );
 const defaultDesktopMimeValue = `${expectedFileAssociationMimeTypes.join(";")};`;
 
+function collectDeepLinkSchemes(config) {
+  const deepLink = config?.plugins?.["deep-link"];
+  const desktop = deepLink?.desktop;
+  const schemes = new Set();
+  const addFromProtocol = (protocol) => {
+    if (!protocol || typeof protocol !== "object") return;
+    const raw = protocol.schemes;
+    const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+    for (const v of values) {
+      if (typeof v !== "string") continue;
+      const normalized = v.trim().replace(/[:/]+$/, "").toLowerCase();
+      if (normalized) schemes.add(normalized);
+    }
+  };
+  if (Array.isArray(desktop)) {
+    for (const protocol of desktop) addFromProtocol(protocol);
+  } else {
+    addFromProtocol(desktop);
+  }
+  if (schemes.size === 0) schemes.add("formula");
+  return Array.from(schemes).sort();
+}
+
+const expectedDeepLinkSchemes = collectDeepLinkSchemes(tauriConf);
+const expectedSchemeMimes = expectedDeepLinkSchemes.map((scheme) => `x-scheme-handler/${scheme}`);
+
 const hasBash = (() => {
   if (process.platform === "win32") return false;
   const probe = spawnSync("bash", ["-lc", "exit 0"], { stdio: "ignore" });
@@ -194,10 +220,16 @@ exit 0
     // desktop file lacks that MIME type, even if it is included in the default
     // fileAssociation set.
     if (!withParquetMime) removeToken("application/vnd.apache.parquet");
-    if (!withSchemeMime) removeToken("x-scheme-handler/formula");
+    if (!withSchemeMime) {
+      for (const schemeMime of expectedSchemeMimes) removeToken(schemeMime);
+    }
 
     if (withParquetMime && !hasToken("application/vnd.apache.parquet")) tokens.push("application/vnd.apache.parquet");
-    if (withSchemeMime && !hasToken("x-scheme-handler/formula")) tokens.push("x-scheme-handler/formula");
+    if (withSchemeMime) {
+      for (const schemeMime of expectedSchemeMimes) {
+        if (!hasToken(schemeMime)) tokens.push(schemeMime);
+      }
+    }
 
     effectiveMimeTypeLine = `MimeType=${tokens.join(";")};`;
   }

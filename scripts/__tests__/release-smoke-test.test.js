@@ -205,6 +205,27 @@ test("release-smoke-test: --local-bundles runs validate-linux-deb.sh with --no-c
   const debPath = path.join(bundleDir, "Formula.deb");
   fs.writeFileSync(debPath, "not-a-real-deb", { encoding: "utf8" });
 
+  const deepLinkDesktop = tauriConf?.plugins?.["deep-link"]?.desktop;
+  const deepLinkSchemes = new Set();
+  const addSchemes = (protocol) => {
+    const raw = protocol?.schemes;
+    const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+    for (const v of values) {
+      if (typeof v !== "string") continue;
+      const normalized = v.trim().replace(/[:/]+$/, "").toLowerCase();
+      if (normalized) deepLinkSchemes.add(normalized);
+    }
+  };
+  if (Array.isArray(deepLinkDesktop)) {
+    for (const protocol of deepLinkDesktop) addSchemes(protocol);
+  } else if (deepLinkDesktop != null) {
+    addSchemes(deepLinkDesktop);
+  }
+  if (deepLinkSchemes.size === 0) deepLinkSchemes.add("formula");
+  const schemeMimes = Array.from(deepLinkSchemes)
+    .sort()
+    .map((scheme) => `x-scheme-handler/${scheme}`);
+
   const mimeList = [
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
@@ -215,7 +236,7 @@ test("release-smoke-test: --local-bundles runs validate-linux-deb.sh with --no-c
     "application/vnd.ms-excel.addin.macroEnabled.12",
     "text/csv",
     "application/vnd.apache.parquet",
-    "x-scheme-handler/formula",
+    ...schemeMimes,
   ].join(";");
 
   const dpkgDebStub = `#!/usr/bin/env bash
