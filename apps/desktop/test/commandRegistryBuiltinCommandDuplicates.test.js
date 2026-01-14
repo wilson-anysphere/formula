@@ -36,6 +36,15 @@ function findDuplicates(values) {
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 }
 
+function collectRegisteredIdsFromSource(source) {
+  const registerRe = /\bregisterBuiltinCommand\s*\(\s*["']([^"']+)["']/g;
+  const ids = [];
+  for (const match of source.matchAll(registerRe)) {
+    ids.push(match[1]);
+  }
+  return ids;
+}
+
 test("command registration sources do not register the same builtin command id twice within a file", () => {
   const srcRoot = path.join(__dirname, "..", "src");
   const commandsRoot = path.join(srcRoot, "commands");
@@ -45,16 +54,12 @@ test("command registration sources do not register the same builtin command id t
   collectSourceFiles(commandsRoot, files);
   files.sort((a, b) => a.localeCompare(b));
 
-  const registerRe = /\bregisterBuiltinCommand\s*\(\s*["']([^"']+)["']/g;
   /** @type {Array<{ file: string, duplicates: Array<{ value: string, count: number }> }>} */
   const duplicatesByFile = [];
 
   for (const file of files) {
     const text = fs.readFileSync(file, "utf8");
-    const ids = [];
-    for (const match of text.matchAll(registerRe)) {
-      ids.push(match[1]);
-    }
+    const ids = collectRegisteredIdsFromSource(text);
     const duplicates = findDuplicates(ids);
     if (duplicates.length > 0) {
       duplicatesByFile.push({ file: path.relative(srcRoot, file), duplicates });
@@ -83,26 +88,35 @@ test("main.ts does not re-register builtin command ids already registered by src
   collectSourceFiles(commandsRoot, commandFiles);
   commandFiles.sort((a, b) => a.localeCompare(b));
 
-  const registerRe = /\bregisterBuiltinCommand\s*\(\s*["']([^"']+)["']/g;
   const commandIds = new Set();
   for (const file of commandFiles) {
     const text = fs.readFileSync(file, "utf8");
-    for (const match of text.matchAll(registerRe)) {
-      commandIds.add(match[1]);
+    for (const id of collectRegisteredIdsFromSource(text)) {
+      commandIds.add(id);
     }
   }
 
   const mainText = fs.readFileSync(mainPath, "utf8");
-  const overlaps = [];
-  for (const match of mainText.matchAll(registerRe)) {
-    const id = match[1];
-    if (commandIds.has(id)) overlaps.push(id);
-  }
+  const overlaps = collectRegisteredIdsFromSource(mainText).filter((id) => commandIds.has(id));
   overlaps.sort((a, b) => a.localeCompare(b));
 
   assert.deepEqual(
     overlaps,
     [],
     `Found builtin command ids registered in both src/main.ts and src/commands/*:\n${overlaps.map((id) => `- ${id}`).join("\n")}`,
+  );
+});
+
+test("main.ts does not register the same builtin command id twice", () => {
+  const srcRoot = path.join(__dirname, "..", "src");
+  const mainPath = path.join(srcRoot, "main.ts");
+  const mainText = fs.readFileSync(mainPath, "utf8");
+  const ids = collectRegisteredIdsFromSource(mainText);
+  const duplicates = findDuplicates(ids);
+
+  assert.deepEqual(
+    duplicates,
+    [],
+    `src/main.ts contains duplicate registerBuiltinCommand(...) ids:\n${duplicates.map(({ value, count }) => `- ${value} (${count}x)`).join("\n")}`,
   );
 });
