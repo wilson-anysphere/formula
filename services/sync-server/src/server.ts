@@ -2250,13 +2250,22 @@ export function createSyncServer(
           }
         }
 
-        draining = false;
         drainWaiter = null;
-        metrics.shutdownDrainingCurrent.set(0);
 
         if (errors.length > 0) {
+          // Keep draining mode enabled when shutdown fails so the instance
+          // remains non-ready and rejects new websocket upgrades. This avoids
+          // accidentally re-advertising readiness if the process keeps running
+          // (e.g. due to a cleanup error).
+          logger.error(
+            { graceMs, wsConnections: wss.clients.size, errors: errors.length },
+            "shutdown_failed_while_draining"
+          );
           throw new AggregateError(errors, "sync-server shutdown failed");
         }
+
+        draining = false;
+        metrics.shutdownDrainingCurrent.set(0);
       })();
 
       return await stopInFlight;
