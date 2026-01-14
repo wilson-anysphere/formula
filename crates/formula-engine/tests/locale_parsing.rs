@@ -858,10 +858,7 @@ fn canonicalize_and_localize_additional_function_translations_for_es_es() {
     assert_roundtrip("=IMAGEN(\"x\")", "=IMAGE(\"x\")");
     assert_roundtrip("=MINUTO(0)", "=MINUTE(0)");
     assert_roundtrip("=RESIDUO(5;2)", "=MOD(5,2)");
-    assert_roundtrip(
-        "=DISTR.NORM.ESTAND.N(0;VERDADERO)",
-        "=NORM.S.DIST(0,TRUE)",
-    );
+    assert_roundtrip("=DISTR.NORM.ESTAND.N(0;VERDADERO)", "=NORM.S.DIST(0,TRUE)");
     assert_roundtrip("=INV.NORM.ESTAND.N(0,5)", "=NORM.S.INV(0.5)");
     assert_roundtrip("=UNICOS(A1:A3)", "=UNIQUE(A1:A3)");
     assert_roundtrip("=ORDENAR(A1:A3)", "=SORT(A1:A3)");

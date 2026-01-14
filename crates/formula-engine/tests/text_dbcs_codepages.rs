@@ -77,4 +77,3 @@ fn byte_count_text_functions_use_dbcs_byte_semantics_under_cp950() {
     // Traditional Chinese (Big5). Choose a character that is representable as a 2-byte sequence.
     assert_dbcs_byte_semantics_for_codepage(950, "漢");
 }
-

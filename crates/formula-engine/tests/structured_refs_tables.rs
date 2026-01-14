@@ -166,10 +166,7 @@ fn setup_engine_with_table() -> Engine {
 fn setup_engine_with_table_and_autofilter(filter_col_ids: &[u32]) -> Engine {
     let mut engine = setup_engine_with_table();
 
-    let mut tables: Vec<Table> = engine
-        .get_sheet_tables("Sheet1")
-        .expect("tables")
-        .to_vec();
+    let mut tables: Vec<Table> = engine.get_sheet_tables("Sheet1").expect("tables").to_vec();
     assert_eq!(tables.len(), 1);
 
     let filter_columns = filter_col_ids
@@ -890,7 +887,11 @@ fn insert_cols_inside_table_updates_table_autofilter_metadata() {
 
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
     assert_eq!(auto_filter.range, Range::from_a1("A1:E1").unwrap());
-    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
+    let col_ids: Vec<u32> = auto_filter
+        .filter_columns
+        .iter()
+        .map(|c| c.col_id)
+        .collect();
     assert_eq!(col_ids, vec![0, 3]);
 }
 
@@ -944,7 +945,11 @@ fn delete_cols_overlapping_table_updates_table_autofilter_metadata() {
 
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
     assert_eq!(auto_filter.range, Range::from_a1("A1:C1").unwrap());
-    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
+    let col_ids: Vec<u32> = auto_filter
+        .filter_columns
+        .iter()
+        .map(|c| c.col_id)
+        .collect();
     assert_eq!(col_ids, vec![2]);
 }
 

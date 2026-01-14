@@ -1905,44 +1905,45 @@ impl Engine {
         // or by their stable sheet key (backward compatibility / host-provided identifiers). When
         // deleting a sheet, we must rewrite both forms so references cannot resurrect if a sheet
         // with the same name/key is later re-created.
-        let rewrite_deleted_sheet_formula = |formula: &str, origin: crate::CellAddr| -> Option<String> {
-            let (display_rewritten, display_changed) = rewrite_formula_for_sheet_delete(
-                formula,
-                origin,
-                &deleted_sheet_display_name,
-                &sheet_order_display_names,
-            );
-            let (key_rewritten, key_changed) = rewrite_formula_for_sheet_delete(
-                formula,
-                origin,
-                &deleted_sheet_key,
-                &sheet_order_keys,
-            );
+        let rewrite_deleted_sheet_formula =
+            |formula: &str, origin: crate::CellAddr| -> Option<String> {
+                let (display_rewritten, display_changed) = rewrite_formula_for_sheet_delete(
+                    formula,
+                    origin,
+                    &deleted_sheet_display_name,
+                    &sheet_order_display_names,
+                );
+                let (key_rewritten, key_changed) = rewrite_formula_for_sheet_delete(
+                    formula,
+                    origin,
+                    &deleted_sheet_key,
+                    &sheet_order_keys,
+                );
 
-            match (key_changed, display_changed) {
-                (false, false) => None,
-                // If only one naming scheme is present in the stored formula text, return that
-                // rewrite directly.
-                (true, false) => Some(key_rewritten),
-                (false, true) => Some(display_rewritten),
-                // If the formula references the deleted sheet by *both* display name and stable
-                // key, apply both rewrites so all local references are invalidated.
-                (true, true) => {
-                    // Avoid double-rewriting when the sheet key and display name are equivalent
-                    // under Excel-style normalization.
-                    if deleted_sheet_key_norm == deleted_sheet_display_key_norm {
-                        return Some(display_rewritten);
+                match (key_changed, display_changed) {
+                    (false, false) => None,
+                    // If only one naming scheme is present in the stored formula text, return that
+                    // rewrite directly.
+                    (true, false) => Some(key_rewritten),
+                    (false, true) => Some(display_rewritten),
+                    // If the formula references the deleted sheet by *both* display name and stable
+                    // key, apply both rewrites so all local references are invalidated.
+                    (true, true) => {
+                        // Avoid double-rewriting when the sheet key and display name are equivalent
+                        // under Excel-style normalization.
+                        if deleted_sheet_key_norm == deleted_sheet_display_key_norm {
+                            return Some(display_rewritten);
+                        }
+                        let (both_rewritten, _) = rewrite_formula_for_sheet_delete(
+                            &display_rewritten,
+                            origin,
+                            &deleted_sheet_key,
+                            &sheet_order_keys,
+                        );
+                        Some(both_rewritten)
                     }
-                    let (both_rewritten, _) = rewrite_formula_for_sheet_delete(
-                        &display_rewritten,
-                        origin,
-                        &deleted_sheet_key,
-                        &sheet_order_keys,
-                    );
-                    Some(both_rewritten)
                 }
-            }
-        };
+            };
         let rewrite_deleted_sheet_table_formula = |formula: &str| -> Option<String> {
             let display_rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
                 formula,
