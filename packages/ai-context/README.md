@@ -113,11 +113,16 @@ Key options:
   its in-memory RAG chunks are also removed from the underlying store to keep memory bounded.
 - `workbookRag`: enables workbook retrieval (`buildWorkbookContext*`). Requires:
   - `vectorStore` implementing the `packages/ai-rag` store interface used by indexing + retrieval:
-    - `list(...)` (to load existing chunk hashes)
-    - `upsert(...)` (to persist new/updated embeddings)
-    - `delete(...)` (to remove stale chunks)
     - `query(...)` (to retrieve top-K chunks for a query)
-    - (optionally) `close()`
+    - Indexing support (required when `skipIndexing` is `false`):
+      - `upsert(...)` (to persist new/updated embeddings)
+      - `delete(...)` (to remove stale chunks)
+      - either:
+        - `listContentHashes(...)` (preferred; avoids loading full metadata)
+        - `list(...)` (fallback; loads metadata for each chunk)
+      - (optional) `updateMetadata(...)` (lets indexing avoid re-embedding when only metadata changes)
+      - (optional) `batch(...)` (group persistence operations for atomicity/perf)
+      - (optional) `close()`
     - e.g. `InMemoryVectorStore`, `SqliteVectorStore`
   - `embedder` implementing `embedTexts([...])` (e.g. `HashEmbedder`)
   - Optional tuning:
@@ -867,7 +872,7 @@ const trimmedMessages = await trimMessagesToBudget({
 Workbook context builders (`buildWorkbookContext*`) need a `workbookRag` configuration in the `ContextManager`
 constructor:
 
-- `vectorStore` (implements `list`/`upsert`/`delete`/`query`)
+- `vectorStore` (implements `query`, plus indexing methods when `skipIndexing` is `false`)
 - `embedder` (implements `embedTexts`)
 
 See the workbook example above.
