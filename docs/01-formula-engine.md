@@ -352,8 +352,19 @@ restrictions (notably: no `]`), so this split is unambiguous.
     `#N/A` when the external workbook’s sheet order is unavailable (matching Excel).
   * `SHEETS(...)` can count sheets in an external 3D span when external workbook sheet order is
     available.
-  * Other workbook/sheet metadata functions such as `CELL(...)` and `INFO(...)` currently operate on
-    the *current workbook* and do not introspect external workbooks referenced via `[Book.xlsx]...`.
+  * `INFO(...)` always refers to host metadata for the **current workbook**; it does not introspect
+    external workbooks.
+  * `CELL(info_type, reference)` can accept external workbook references when `reference` points to
+    an external sheet:
+    * Value-backed keys like `CELL("contents")` dereference external cell values via
+      `ExternalValueProvider::get(...)`. When the external cell cannot be resolved, the underlying
+      value is `#REF!` (and `CELL("contents")` returns `#REF!`; `CELL("type")` classifies errors as
+      `"v"`).
+    * Name-backed keys like `CELL("address")` and `CELL("filename")` surface the canonical external
+      sheet key (`"[Book.xlsx]Sheet1"`) in outputs (no external workbook file metadata such as
+      directories).
+    * Formatting-backed keys currently fall back to default semantics for external refs because
+      external formatting metadata is not available via the external reference interfaces today.
 * **Volatility / invalidation:** external workbook references are treated as **volatile** by default
   (they are reevaluated on every `Engine::recalculate()` pass). This matches Excel and is
   configurable via `Engine::set_external_refs_volatile(...)`.
