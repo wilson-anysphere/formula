@@ -637,6 +637,8 @@ async function main(): Promise<void> {
     const outputPath = resolve(jsonPath);
     mkdirSync(dirname(outputPath), { recursive: true });
     const measurement = process.platform === "win32" ? "working_set" : "rss";
+    const perfHomeRel = relative(repoRoot, perfHome) || perfHome;
+    const profileRootRel = relative(repoRoot, profileRoot) || profileRoot;
     writeFileSync(
       outputPath,
       JSON.stringify(
@@ -648,7 +650,9 @@ async function main(): Promise<void> {
           measurement,
           binPath,
           perfHome,
+          perfHomeRel,
           profileRoot,
+          profileRootRel,
           // Backwards-compatible name: older consumers expect `profileDir`.
           profileDir: profileRoot,
           runs: results.length,

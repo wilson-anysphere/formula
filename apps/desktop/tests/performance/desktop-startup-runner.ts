@@ -347,6 +347,8 @@ async function main(): Promise<void> {
   if (jsonPath) {
     const outputPath = resolve(jsonPath);
     mkdirSync(dirname(outputPath), { recursive: true });
+    const perfHomeRel = relative(repoRoot, perfHome) || perfHome;
+    const profileRootRel = relative(repoRoot, profileRoot) || profileRoot;
     writeFileSync(
       outputPath,
       JSON.stringify(
@@ -355,7 +357,9 @@ async function main(): Promise<void> {
           platform: process.platform,
           binPath,
           perfHome,
+          perfHomeRel,
           profileRoot,
+          profileRootRel,
           mode,
           benchKind,
           runs: results.length,
