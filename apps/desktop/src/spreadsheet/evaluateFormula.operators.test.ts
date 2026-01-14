@@ -41,6 +41,13 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=IF(1>0; TRUE; FALSE)", () => null, { localeId: "de-DE" })).toBe(true);
   });
 
+  it("treats unsupported locales as en-US for argument separators (pt-BR)", () => {
+    // The formula engine does not currently support pt-BR, so formula punctuation falls back to en-US.
+    // That means `;` is not treated as an argument separator, while `,` is.
+    expect(evaluateFormula("=SUM(1;2)", () => null, { localeId: "pt-BR" })).toBe("#VALUE!");
+    expect(evaluateFormula("=SUM(1,2)", () => null, { localeId: "pt-BR" })).toBe(3);
+  });
+
   it("treats whitespace between function names and '(' as a function call", () => {
     expect(evaluateFormula("=SUM (1, 2)", () => null)).toBe(3);
     expect(evaluateFormula("=IF \n (1>0, TRUE, FALSE)", () => null)).toBe(true);
