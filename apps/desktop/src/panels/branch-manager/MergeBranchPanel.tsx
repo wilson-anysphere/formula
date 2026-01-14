@@ -589,9 +589,15 @@ export function MergeBranchPanel({
   return (
     <div className="branch-merge">
       <h3 className="branch-merge__title">{tWithVars("branchMerge.titleWithSource", { sourceBranch })}</h3>
-      {error && <div className="branch-merge__error">{error}</div>}
+      {error && (
+        <div role="alert" className="branch-merge__error">
+          {error}
+        </div>
+      )}
       {!preview ? (
-        <div className="branch-merge__loading">{t("branchMerge.loading")}</div>
+        <div role="status" className="branch-merge__loading">
+          {t("branchMerge.loading")}
+        </div>
       ) : (
         <>
           <div className="branch-merge__summary">
