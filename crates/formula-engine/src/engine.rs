@@ -9845,10 +9845,15 @@ fn rewrite_defined_name_constants_for_bytecode(
 ///
 /// # Volatility / invalidation
 ///
-/// Formulas that reference external workbooks are treated as **volatile**: they are reevaluated on
-/// every [`Engine::recalculate`] pass. The engine does not currently track fine-grained dependency
-/// edges from formula cells to individual external cells, so hosts should call `recalculate()` when
-/// external values may have changed.
+/// By default, formulas that reference external workbooks are treated as **volatile**: they are
+/// reevaluated on every [`Engine::recalculate`] pass (Excel-compatible behavior).
+///
+/// Hosts can disable this behavior via [`Engine::set_external_refs_volatile(false)`] and instead
+/// explicitly invalidate affected formulas via [`Engine::mark_external_sheet_dirty`] /
+/// [`Engine::mark_external_workbook_dirty`].
+///
+/// The engine does not track dependencies to individual external cells; invalidation is coarse
+/// (sheet key / workbook id), and external 3D spans are not expanded for invalidation.
 ///
 /// Note: Excel compares sheet names case-insensitively across Unicode and applies compatibility
 /// normalization (NFKC). The engine preserves the formula's casing in the sheet key for single-sheet

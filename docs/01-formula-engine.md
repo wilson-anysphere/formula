@@ -329,12 +329,17 @@ ambiguous. This can matter for uncommon paths containing bracket characters (e.g
 * **External workbook metadata functions:** workbook/sheet metadata functions such as `SHEET(...)`,
   `SHEETS(...)`, `CELL(...)`, and `INFO(...)` currently operate on the *current workbook* and do not
   introspect external workbooks referenced via `[Book.xlsx]...`.
-* **Volatility / invalidation:** external workbook references are treated as **volatile** (they are
-  reevaluated on every `Engine::recalculate()` pass). There is not yet a fine-grained “external link
-  invalidation” mechanism—hosts should call `recalculate()` when external values may have changed.
-  * Note: external references are not currently represented as nodes/edges in the internal
-    dependency graph, so the engine cannot automatically determine which formulas are affected by a
-    particular external cell changing.
+* **Volatility / invalidation:** external workbook references are treated as **volatile** by default
+  (they are reevaluated on every `Engine::recalculate()` pass). This matches Excel and is
+  configurable via `Engine::set_external_refs_volatile(...)`.
+  * If you disable external volatility (`set_external_refs_volatile(false)`), external references
+    refresh only when their formula cell is marked dirty or when the host explicitly invalidates
+    affected formulas via:
+    * `Engine::mark_external_sheet_dirty("[Book.xlsx]Sheet1")` (canonical external sheet key)
+    * `Engine::mark_external_workbook_dirty("Book.xlsx")` (workbook id inside `[...]`)
+  * The engine does not track dependencies to individual external cells; invalidation is coarse
+    (external sheet key / workbook id). External 3D spans are not expanded for invalidation, so
+    changes to a middle sheet in `Sheet1:Sheet3` may require invalidating the whole workbook.
 * **Auditing APIs:** `Engine::precedents(...)` reports external single-sheet references
   (`[Book.xlsx]Sheet1!A1`).
   * For external-workbook 3D spans (`[Book.xlsx]Sheet1:Sheet3!A1`), `precedents(...)` expands into
