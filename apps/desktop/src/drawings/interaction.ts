@@ -661,6 +661,7 @@ export class DrawingInteractionController {
         this.callbacks.setObjects(finalObjects);
       }
     }
+    const finalObj = finalObjects.find((o) => o.id === active.id);
     const rect = this.activeRect ?? this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
 
@@ -674,11 +675,10 @@ export class DrawingInteractionController {
 
     try {
       const onCommit = this.callbacks.onInteractionCommit;
-      const afterObj = finalObjects.find((obj) => obj.id === active.id);
       let committed = false;
-      if (typeof onCommit === "function" && startObj && afterObj) {
+      if (typeof onCommit === "function" && startObj && finalObj) {
         try {
-          onCommit({ kind, id: active.id, before: startObj, after: afterObj, objects: finalObjects });
+          onCommit({ kind, id: active.id, before: startObj, after: finalObj, objects: finalObjects });
           committed = true;
         } catch {
           // Best-effort: do not crash interaction cleanup if the commit hook throws.

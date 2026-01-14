@@ -1186,6 +1186,7 @@ export class SpreadsheetApp {
   private auditingUnsubscribe: (() => void) | null = null;
   private externalRepaintUnsubscribe: (() => void) | null = null;
   private drawingsUnsubscribe: (() => void) | null = null;
+  private formulaRangePreviewTooltipUpdateUnsubscribe: (() => void) | null = null;
 
   private gridCanvas: HTMLCanvasElement;
   private chartCanvas: HTMLCanvasElement;
@@ -3554,6 +3555,13 @@ export class SpreadsheetApp {
       this.formulaBar.setArgumentPreviewProvider((expr) => this.evaluateFormulaBarArgumentPreview(expr));
       this.formulaRangePreviewTooltip = this.createFormulaRangePreviewTooltip();
       opts.formulaBar.appendChild(this.formulaRangePreviewTooltip);
+      this.formulaRangePreviewTooltipUpdateUnsubscribe = this.document.on("update", () => {
+        if (this.disposed) return;
+        if (!this.formulaRangePreviewTooltipVisible) return;
+        const range = this.formulaRangePreviewTooltipLastRange;
+        if (!range) return;
+        this.updateFormulaRangePreviewTooltip(range, this.formulaRangePreviewTooltipLastRefText);
+      });
 
       this.formulaBarCompletion = new FormulaBarTabCompletionController({
         formulaBar: this.formulaBar,
@@ -4045,11 +4053,15 @@ export class SpreadsheetApp {
     this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
+    this.formulaRangePreviewTooltipUpdateUnsubscribe?.();
+    this.formulaRangePreviewTooltipUpdateUnsubscribe = null;
     this.syncFormulaRangePreviewTooltipDescribedBy(false);
     this.formulaRangePreviewTooltip?.remove();
     this.formulaRangePreviewTooltip = null;
     this.formulaRangePreviewTooltipVisible = false;
     this.formulaRangePreviewTooltipLastKey = null;
+    this.formulaRangePreviewTooltipLastRange = null;
+    this.formulaRangePreviewTooltipLastRefText = null;
     this.sharedGrid?.destroy();
     this.sharedGrid = null;
     try {
@@ -8341,7 +8353,6 @@ export class SpreadsheetApp {
           // ignore
         }
       }
-
       // Keep the extracted `size` field (when present) aligned with the anchor size.
       //
       // `convertDocumentSheetDrawingsToUiDrawingObjects` prefers the top-level `size` field when
@@ -10994,6 +11005,9 @@ export class SpreadsheetApp {
       this.hideFormulaRangePreviewTooltip();
       return;
     }
+
+    this.formulaRangePreviewTooltipLastRange = range;
+    this.formulaRangePreviewTooltipLastRefText = refText;
 
     const rawText = typeof refText === "string" ? refText.trim() : "";
     const { sheetName } = splitSheetQualifier(rawText);

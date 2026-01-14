@@ -228,6 +228,11 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     const bubbled = vi.fn();
     root.addEventListener("pointerdown", bubbled);
 
+    // jsdom returns a zero-sized client rect for canvases by default; the drawing interaction controller
+    // uses `getBoundingClientRect()` to convert clientX/Y into local coordinates. Ensure the selection
+    // canvas reports the same rect as the grid root so hit testing works deterministically.
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+
     const down = createPointerLikeMouseEvent("pointerdown", { clientX: 60, clientY: 30, button: 2 });
     selectionCanvas.dispatchEvent(down);
 

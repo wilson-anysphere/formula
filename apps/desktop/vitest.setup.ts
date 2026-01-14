@@ -114,3 +114,39 @@ if (typeof (globalThis as any).PointerEvent === "undefined" && typeof (globalThi
     }
   }
 }
+
+// JSDOM supports PointerEvent shims, but does not implement pointer capture APIs.
+// SpreadsheetApp/drawing interactions call `setPointerCapture` / `releasePointerCapture`
+// to keep drag gestures consistent across iframes/canvases. Provide no-op stubs so
+// unit tests can exercise pointer-driven flows without crashing.
+if (typeof (globalThis as any).HTMLElement === "function") {
+  const proto = (globalThis as any).HTMLElement.prototype as any;
+  if (typeof proto.setPointerCapture !== "function") {
+    try {
+      Object.defineProperty(proto, "setPointerCapture", {
+        configurable: true,
+        value: () => {
+          // no-op
+        },
+      });
+    } catch {
+      proto.setPointerCapture = () => {
+        // no-op
+      };
+    }
+  }
+  if (typeof proto.releasePointerCapture !== "function") {
+    try {
+      Object.defineProperty(proto, "releasePointerCapture", {
+        configurable: true,
+        value: () => {
+          // no-op
+        },
+      });
+    } catch {
+      proto.releasePointerCapture = () => {
+        // no-op
+      };
+    }
+  }
+}

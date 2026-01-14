@@ -720,6 +720,11 @@ export class SecondaryGridView {
     // (e.g. drawings stored in DocumentController).
     this.drawingsOverlay.invalidateSpatialIndex();
 
+    // The drawings overlay uses a spatial index memoized by object/geometry identity. The geometry
+    // functions close over the CanvasGridRenderer (whose axis sizes we just changed), so we must
+    // explicitly invalidate cached sheet-space bounds before re-rendering.
+    this.drawingsOverlay.invalidateSpatialIndex();
+
     this.grid.syncScrollbars();
     const scroll = this.grid.getScroll();
     this.container.dataset.scrollX = String(scroll.x);
