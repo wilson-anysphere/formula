@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 
 import { readFileSync } from "node:fs";
-import path from "node:path";
 import { inflateRawSync } from "node:zlib";
 
 import { gotoDesktop } from "./helpers";
@@ -120,6 +119,21 @@ function loadShapeTextFixture(): {
   };
 }
 
+function colToA1(col: number): string {
+  // Convert a 0-based column index into A1 letters (0 -> A, 25 -> Z, 26 -> AA, ...).
+  let n = Math.max(0, Math.trunc(col));
+  let out = "";
+  while (n >= 0) {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  }
+  return out || "A";
+}
+
+function cellToA1(cell: { row: number; col: number }): string {
+  return `${colToA1(cell.col)}${Math.max(1, Math.trunc(cell.row) + 1)}`;
+}
+
 test.describe("drawing shape text rendering regressions", () => {
   test("renders DrawingML txBody text from shape-textbox.xlsx via DrawingOverlay canvas pixels", async ({ page }) => {
     const fixture = loadShapeTextFixture();
@@ -160,13 +174,15 @@ test.describe("drawing shape text rendering regressions", () => {
 
       const geom = {
         cellOriginPx: (cell: { row: number; col: number }) => {
-          const rect = app.getCellRect(cell);
-          if (!rect) throw new Error(`Missing rect for cell r${cell.row}c${cell.col}`);
+          const a1 = cellToA1(cell);
+          const rect = app.getCellRectA1(a1);
+          if (!rect) throw new Error(`Missing rect for cell ${a1}`);
           return { x: rect.x, y: rect.y };
         },
         cellSizePx: (cell: { row: number; col: number }) => {
-          const rect = app.getCellRect(cell);
-          if (!rect) throw new Error(`Missing rect for cell r${cell.row}c${cell.col}`);
+          const a1 = cellToA1(cell);
+          const rect = app.getCellRectA1(a1);
+          if (!rect) throw new Error(`Missing rect for cell ${a1}`);
           return { width: rect.width, height: rect.height };
         },
       };
