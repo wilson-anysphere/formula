@@ -479,6 +479,64 @@ test("buildWorkbookContext: structured DLP REDACT also redacts non-array attachm
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT strips extra fields from rect metadata (no-op redactor)", async () => {
+  const rectSecret = "RectSecretToken";
+  const workbook = {
+    id: "wb-dlp-rect-extra-fields",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "Hello" }, { v: "World" }]],
+      },
+      {
+        name: "OtherSheet",
+        cells: [[{ v: "Ignore" }, { v: "Me" }]],
+      },
+    ],
+    tables: [
+      {
+        name: "Table1",
+        sheetName: "Sheet1",
+        rect: { r0: 0, c0: 0, r1: 0, c1: 1, note: rectSecret },
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 1 },
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    topK: 1,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Public", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "OtherSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.doesNotMatch(out.promptContext, new RegExp(rectSecret));
+  assert.doesNotMatch(JSON.stringify(out.retrieved), new RegExp(rectSecret));
+});
+
 test("buildWorkbookContext: workbook_schema redacts sensitive header strings even with a no-op redactor (DLP REDACT + empty retrieval)", async () => {
   const workbook = {
     id: "wb-dlp-schema-header-noop-redactor",

@@ -305,6 +305,48 @@ function normalizeDlpOptions(dlp) {
  */
 
 /**
+ * Normalize a workbook/table rect to the canonical `{ r0, c0, r1, c1 }` shape.
+ *
+ * Some hosts may accidentally attach extra metadata fields to rect objects (or use alternative
+ * shapes). Under DLP redaction we treat those extra fields as prompt-unsafe because they can
+ * contain arbitrary non-heuristic sensitive strings (e.g. "TopSecret") that a no-op redactor
+ * cannot detect.
+ *
+ * @param {any} rect
+ * @returns {{ r0: number, c0: number, r1: number, c1: number } | null}
+ */
+function normalizeWorkbookRect(rect) {
+  if (!rect || typeof rect !== "object") return null;
+  let r0 = rect.r0;
+  let c0 = rect.c0;
+  let r1 = rect.r1;
+  let c1 = rect.c1;
+
+  // Range-like shapes.
+  if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) {
+    r0 = rect.startRow;
+    c0 = rect.startCol;
+    r1 = rect.endRow;
+    c1 = rect.endCol;
+  }
+
+  // Nested `{ start: {row,col}, end: {row,col} }`.
+  if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) {
+    r0 = rect.start?.row;
+    c0 = rect.start?.col;
+    r1 = rect.end?.row;
+    c1 = rect.end?.col;
+  }
+
+  if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) return null;
+  const rr0 = /** @type {number} */ (r0);
+  const rr1 = /** @type {number} */ (r1);
+  const cc0 = /** @type {number} */ (c0);
+  const cc1 = /** @type {number} */ (c1);
+  return { r0: Math.min(rr0, rr1), c0: Math.min(cc0, cc1), r1: Math.max(rr0, rr1), c1: Math.max(cc0, cc1) };
+}
+
+/**
  * Prompt-sanitize attachment objects.
  *
  * Some callers (e.g. UI layers) may attach rich `data` payloads for selections or tables
@@ -2264,7 +2306,7 @@ export class ContextManager {
       const recordDecision = audit?.recordDecision ?? null;
       const rangeDisallowed = Boolean(dlp) && recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW;
       const rawSheetName = String(meta.sheetName ?? "");
-      const sheetNameTokenDisallowed = Boolean(dlp) && sheetNameDisallowed(rawSheetName);
+    const sheetNameTokenDisallowed = Boolean(dlp) && sheetNameDisallowed(rawSheetName);
       const titleTokenDisallowed =
         sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange");
       const shouldRedactSheetNameToken = Boolean(dlp) && (rangeDisallowed || sheetNameTokenDisallowed);
@@ -2343,6 +2385,13 @@ export class ContextManager {
       if (shouldRedactSheetNameToken) safeMetaOut.sheetName = "[REDACTED]";
       if (shouldRedactTitleToken) safeMetaOut.title = "[REDACTED]";
       if (workbookIdTokenDisallowed) safeMetaOut.workbookId = "[REDACTED]";
+      // Under DLP redaction, strip any extra fields from rect objects to prevent non-heuristic
+      // strings from leaking via `metadata.rect` (e.g. if a host attaches `{..., note:"TopSecret" }`).
+      if (dlp && overallDecision?.decision === DLP_DECISION.REDACT && Object.prototype.hasOwnProperty.call(safeMetaOut, "rect")) {
+        const normalizedRect = normalizeWorkbookRect(safeMetaOut.rect);
+        if (normalizedRect) safeMetaOut.rect = normalizedRect;
+        else delete safeMetaOut.rect;
+      }
 
       return {
         id: shouldRedactChunkId ? `redacted:${idx + 1}` : hit.id,
@@ -2977,10 +3026,13 @@ export class ContextManager {
                     disallowed || sheetNameDisallowed(sheetName)
                       ? "[REDACTED]"
                       : redactSchemaToken(t?.name, "workbook_summary");
+                  const shouldSanitizeRect = overallDecision?.decision === DLP_DECISION.REDACT;
+                  const safeRect = shouldSanitizeRect ? normalizeWorkbookRect(t?.rect) : t?.rect;
                   return {
                     ...t,
                     name: safeName,
                     sheetName: safeSheetName,
+                    ...(shouldSanitizeRect ? { rect: safeRect } : null),
                   };
                 }),
                 namedRanges: (summary.namedRanges ?? []).map((r) => {
@@ -2993,10 +3045,13 @@ export class ContextManager {
                     disallowed || sheetNameDisallowed(sheetName)
                       ? "[REDACTED]"
                       : redactSchemaToken(r?.name, "workbook_summary");
+                  const shouldSanitizeRect = overallDecision?.decision === DLP_DECISION.REDACT;
+                  const safeRect = shouldSanitizeRect ? normalizeWorkbookRect(r?.rect) : r?.rect;
                   return {
                     ...r,
                     name: safeName,
                     sheetName: safeSheetName,
+                    ...(shouldSanitizeRect ? { rect: safeRect } : null),
                   };
                 }),
               };
