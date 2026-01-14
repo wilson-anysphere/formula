@@ -3253,6 +3253,10 @@ export class SpreadsheetApp {
         if (!this.documentChangeAffectsDrawings(payload)) return;
         if (source === "applyState") {
           this.drawingOverlay.clearImageCache();
+          // In shared-grid mode, the grid renderer also caches decoded ImageBitmaps for in-cell images.
+          // When restoring/applying a snapshot, image bytes can change for reused ids; clear so the
+          // renderer re-resolves from the latest DocumentController state.
+          this.sharedGrid?.renderer?.clearImageCache?.();
         }
         const imageDeltas: any[] = Array.isArray(payload?.imageDeltas)
           ? payload.imageDeltas
@@ -3263,6 +3267,8 @@ export class SpreadsheetApp {
           const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
           if (!imageId) continue;
           this.drawingOverlay.invalidateImage(imageId);
+          // Ensure in-cell images (shared-grid CanvasGridRenderer) can refresh when bytes arrive.
+          this.sharedGrid?.renderer?.invalidateImage?.(imageId);
         }
         this.handleWorkbookImageDeltasForBackground(payload);
         invalidateAndRenderDrawings("document:change");

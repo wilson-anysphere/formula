@@ -262,6 +262,45 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
+  it("invalidates shared-grid in-cell image bitmaps when workbook image bytes change via imageDeltas", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sharedGrid = (app as any).sharedGrid;
+      expect(sharedGrid).toBeTruthy();
+
+      const invalidateSpy = vi.spyOn(sharedGrid.renderer, "invalidateImage");
+
+      const doc: any = app.getDocument();
+      doc.applyExternalImageCacheDeltas(
+        [
+          {
+            imageId: "img-1",
+            before: null,
+            after: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+          },
+        ],
+        { source: "collab" },
+      );
+
+      expect(invalidateSpy).toHaveBeenCalledWith("img-1");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("passes frozen pane metadata to the drawing overlay viewport so drawings pin + clip correctly", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
