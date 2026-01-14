@@ -194,4 +194,68 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("treats in-cell image payloads as non-text input while still producing a safe display string", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    const baseSheet = {
+      id: "Sheet1",
+      name: "Sheet1",
+      visibility: "visible",
+      cells: [] as any[],
+    };
+
+    const imageBytesBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=";
+
+    const { images } = mergeEmbeddedCellImagesIntoSnapshot({
+      sheets: [baseSheet],
+      embeddedCellImages: [
+        {
+          worksheet_part: "xl/worksheets/sheet1.xml",
+          sheet_name: "Sheet1",
+          row: 0,
+          col: 0,
+          image_id: "image1.png",
+          bytes_base64: imageBytesBase64,
+          mime_type: "image/png",
+          alt_text: null,
+        },
+      ],
+      resolveSheetIdByName: (name) => (name === "Sheet1" ? "Sheet1" : null),
+      sheetIdsInOrder: ["Sheet1"],
+      maxRows: 10_000,
+      maxCols: 200,
+    });
+
+    const snapshotBytes = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        sheets: [baseSheet],
+        images,
+      }),
+    );
+
+    await app.restoreDocumentState(snapshotBytes);
+
+    // The image value should render as a stable display placeholder (not "[object Object]").
+    expect(app.getCellComputedValueForSheet("Sheet1", { row: 0, col: 0 })).toBe("[Image]");
+    await expect(app.getCellDisplayTextForRenderA1("A1")).resolves.toBe("[Image]");
+
+    // Editing should start from an empty input string and committing that empty draft should be a no-op
+    // (must not clear or overwrite the image payload).
+    (app as any).applyEdit("Sheet1", { row: 0, col: 0 }, "");
+    const cell = app.getDocument().getCell("Sheet1", "A1");
+    expect(cell.value).toMatchObject({ type: "image", value: { imageId: "image1.png" } });
+
+    app.destroy();
+    root.remove();
+  });
 });

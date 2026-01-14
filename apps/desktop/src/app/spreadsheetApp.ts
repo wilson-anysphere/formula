@@ -17508,10 +17508,10 @@ export class SpreadsheetApp {
         if (state.formula != null) {
           if (this.showFormulas) return state.formula;
           const computed = this.getCellComputedValue(cell);
-          return computed == null ? "" : String(computed);
+          return computed == null ? "" : this.formatCellValueForDisplay(cell, computed);
         }
         if (isRichTextValue(state.value)) return state.value.text;
-        if (state.value != null) return String(state.value);
+        if (state.value != null) return this.formatCellValueForDisplay(cell, state.value);
         return "";
       })();
 
@@ -20872,8 +20872,14 @@ export class SpreadsheetApp {
     return this.formatCellValueForDisplay(cell, value);
   }
 
-  private formatCellValueForDisplay(cell: CellCoord, value: SpreadsheetValue): string {
+  private formatCellValueForDisplay(cell: CellCoord, value: unknown): string {
     if (value == null) return "";
+
+    const image = parseImageCellPayload(value);
+    if (image) return image.altText ?? "[Image]";
+
+    if (isRichTextValue(value)) return value.text;
+
     if (typeof value === "number" && Number.isFinite(value)) {
       const docStyle: any = this.document.getCellFormat(this.sheetId, cell);
       const numberFormat = getStyleNumberFormat(docStyle);
@@ -20888,6 +20894,7 @@ export class SpreadsheetApp {
       return state.formula;
     }
     if (isRichTextValue(state?.value)) return state.value.text;
+    if (parseImageCellPayload(state?.value)) return "";
     if (state?.value != null) return String(state.value);
     return "";
   }
@@ -22107,11 +22114,22 @@ export class SpreadsheetApp {
           const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
           if (state?.formula == null) {
             if (state?.value != null) {
-              return isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
+              if (isRichTextValue(state.value)) return state.value.text;
+              const image = parseImageCellPayload(state.value);
+              if (image) return image.altText ?? "[Image]";
+              if (typeof state.value === "string" || typeof state.value === "number" || typeof state.value === "boolean") {
+                return state.value;
+              }
+              return null;
             }
             return null;
           }
           if (flags) flags.sawFormula = true;
+          // Imported XLSX snapshots can include a cached rich-value image payload for IMAGE() formulas.
+          // Prefer exposing the cached in-cell image in UI contexts (status bar, previews) over the
+          // calc-engine's scalar result (which may be missing or an error if IMAGE() is unsupported).
+          const image = parseImageCellPayload(state.value);
+          if (image) return image.altText ?? "[Image]";
           return cached;
         }
       }
@@ -22124,10 +22142,19 @@ export class SpreadsheetApp {
     // be memoized per evaluation call. Avoid generating A1/key strings for them.
     if (state?.formula == null) {
       if (state?.value != null) {
-        return isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
+        if (isRichTextValue(state.value)) return state.value.text;
+        const image = parseImageCellPayload(state.value);
+        if (image) return image.altText ?? "[Image]";
+        if (typeof state.value === "string" || typeof state.value === "number" || typeof state.value === "boolean") {
+          return state.value;
+        }
+        return null;
       }
       return null;
     }
+
+    const image = parseImageCellPayload(state.value);
+    if (image) return image.altText ?? "[Image]";
 
     const key = cell.row * EVAL_COORD_COL_STRIDE + cell.col;
     let sheetMemo = memo.get(sheetId);
@@ -22448,6 +22475,20 @@ export class SpreadsheetApp {
 
     const label = options?.label ?? "Edit cell";
     const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+    const originalInput = (() => {
+      if (!original) return "";
+      if (original.formula != null) return original.formula;
+      if (isRichTextValue(original.value)) return original.value.text;
+      if (parseImageCellPayload(original.value)) return "";
+      if (original.value != null) return String(original.value);
+      return "";
+    })();
+    if (rawValue === originalInput) {
+      // Excel UX: committing the same text should be a no-op (and must not clear/overwrite
+      // in-cell image payloads, which intentionally have an empty input-text representation).
+      return;
+    }
+
     if (rawValue.trim() === "") {
       this.document.clearCell(sheetId, cell, { label: options?.label ?? "Clear cell" });
       return;
@@ -22821,6 +22862,35 @@ function isRichTextValue(
   if (typeof v.text !== "string") return false;
   if (v.runs == null) return true;
   return Array.isArray(v.runs);
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseImageCellPayload(value: unknown): { imageId: string; altText?: string } | null {
+  if (!isPlainObject(value)) return null;
+  const obj: any = value;
+
+  let payload: any = null;
+  // formula-model `CellValue` envelope: `{ type: "image", value: {...} }`.
+  if (typeof obj.type === "string") {
+    if (obj.type.toLowerCase() !== "image") return null;
+    payload = isPlainObject(obj.value) ? obj.value : null;
+  } else {
+    // Legacy / direct payload shapes.
+    payload = obj;
+  }
+
+  if (!payload) return null;
+
+  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+  const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
+  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : undefined;
+
+  return { imageId, altText };
 }
 
 function intersectRanges(a: Range, b: Range): Range | null {

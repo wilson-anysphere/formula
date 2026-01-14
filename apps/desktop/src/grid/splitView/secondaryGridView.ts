@@ -37,6 +37,32 @@ function isRichTextValue(value: unknown): value is RichTextValue {
   return Array.isArray(v.runs);
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseImageCellPayload(value: unknown): { imageId: string; altText?: string } | null {
+  if (!isPlainObject(value)) return null;
+  const obj: any = value;
+
+  let payload: any = null;
+  if (typeof obj.type === "string") {
+    if (obj.type.toLowerCase() !== "image") return null;
+    payload = isPlainObject(obj.value) ? obj.value : null;
+  } else {
+    payload = obj;
+  }
+  if (!payload) return null;
+
+  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+  const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
+  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : undefined;
+
+  return { imageId, altText };
+}
+
 function focusWithoutScroll(el: HTMLElement): void {
   try {
     (el as any).focus?.({ preventScroll: true });
@@ -595,6 +621,7 @@ export class SecondaryGridView {
     const state = this.document.getCell(this.getSheetId(), cell) as { value: unknown; formula: string | null };
     if (state?.formula != null) return state.formula;
     if (isRichTextValue(state?.value)) return state.value.text;
+    if (parseImageCellPayload(state?.value)) return "";
     if (state?.value != null) return String(state.value);
     return "";
   }
@@ -602,6 +629,17 @@ export class SecondaryGridView {
   private applyEdit(cell: { row: number; col: number }, rawValue: string): void {
     const sheetId = this.getSheetId();
     const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+
+    const originalInput = (() => {
+      if (!original) return "";
+      if (original.formula != null) return original.formula;
+      if (isRichTextValue(original.value)) return original.value.text;
+      if (parseImageCellPayload(original.value)) return "";
+      if (original.value != null) return String(original.value);
+      return "";
+    })();
+
+    if (rawValue === originalInput) return;
     if (rawValue.trim() === "") {
       this.document.clearCell(sheetId, cell, { label: "Clear cell" });
       return;
