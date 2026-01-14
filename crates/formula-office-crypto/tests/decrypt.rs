@@ -14,6 +14,10 @@ const AGILE_PLAINTEXT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/plaintext-large.xlsx"
 ));
+const AGILE_UNICODE_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/agile-unicode.xlsx"
+));
 const STANDARD_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/standard.xlsx"
@@ -33,6 +37,14 @@ const STANDARD_LARGE_FIXTURE: &[u8] = include_bytes!(concat!(
 const STANDARD_PLAINTEXT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/plaintext.xlsx"
+));
+const STANDARD_BASIC_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/standard-basic.xlsm"
+));
+const STANDARD_BASIC_PLAINTEXT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/plaintext-basic.xlsm"
 ));
 const STANDARD_UNICODE_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -85,6 +97,14 @@ fn decrypts_agile_empty_password_encrypted_package() {
 }
 
 #[test]
+fn decrypts_agile_unicode_fixture() {
+    let decrypted =
+        decrypt_encrypted_package(AGILE_UNICODE_FIXTURE, "pässwörd").expect("decrypt agile unicode");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
 fn decrypts_standard_encrypted_package() {
     let decrypted =
         decrypt_encrypted_package(STANDARD_FIXTURE, "password").expect("decrypt standard");
@@ -115,6 +135,14 @@ fn decrypts_standard_large_encrypted_package() {
     let decrypted =
         decrypt_encrypted_package(STANDARD_LARGE_FIXTURE, "password").expect("decrypt standard");
     assert_eq!(decrypted.as_slice(), AGILE_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_standard_basic_xlsm_fixture() {
+    let decrypted =
+        decrypt_encrypted_package(STANDARD_BASIC_FIXTURE, "password").expect("decrypt standard");
+    assert_eq!(decrypted.as_slice(), STANDARD_BASIC_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
 
@@ -386,8 +414,21 @@ fn wrong_password_returns_invalid_password() {
         "expected InvalidPassword, got {err:?}"
     );
 
+    let err = decrypt_encrypted_package(STANDARD_LARGE_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+
     let err =
-        decrypt_encrypted_package(STANDARD_LARGE_FIXTURE, "wrong").expect_err("expected error");
+        decrypt_encrypted_package(AGILE_UNICODE_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+
+    let err =
+        decrypt_encrypted_package(STANDARD_BASIC_FIXTURE, "wrong").expect_err("expected error");
     assert!(
         matches!(err, OfficeCryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
