@@ -4677,6 +4677,148 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Test/e2e-only helper: returns an observable snapshot of the active sheet's drawings (pictures, charts, shapes).
+   *
+   * This intentionally avoids leaking private overlay internals while still providing stable ids + viewport-relative
+   * geometry for Playwright assertions.
+   *
+   * NOTE: The returned `rectPx` values are in the same coordinate space as `getCellRectA1` (viewport-relative, with
+   * header offsets already applied), and use the same anchor-to-rect conversion as the drawings overlay/hit-testing.
+   */
+  getDrawingsDebugState(): {
+    sheetId: string;
+    selectedId: number | null;
+    drawings: Array<{
+      id: number;
+      kind: string;
+      zOrder: number;
+      anchor: unknown;
+      rectPx: { x: number; y: number; width: number; height: number } | null;
+    }>;
+  } {
+    // SpreadsheetApp can receive shared-grid viewport notifications before the constructor finishes
+    // initializing optional overlays. Keep this API resilient so Playwright can probe early.
+    const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+    if (!overlay) {
+      return { sheetId: this.sheetId, selectedId: null, drawings: [] };
+    }
+
+    let viewport: DrawingViewport;
+    try {
+      viewport = this.getDrawingInteractionViewport(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    } catch {
+      return { sheetId: this.sheetId, selectedId: null, drawings: [] };
+    }
+
+    const objects = this.getDrawingObjects(this.sheetId);
+    const drawings = objects.map((obj) => {
+      let rectPx: { x: number; y: number; width: number; height: number } | null = null;
+      try {
+        const rect = drawingObjectToViewportRect(obj, viewport, this.drawingGeom);
+        rectPx = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      } catch {
+        rectPx = null;
+      }
+
+      return {
+        id: obj.id,
+        kind: obj.kind.type,
+        zOrder: obj.zOrder,
+        anchor: obj.anchor as unknown,
+        rectPx,
+      };
+    });
+
+    return { sheetId: this.sheetId, selectedId: this.getSelectedDrawingId(), drawings };
+  }
+
+  /**
+   * Test/e2e-only helper: returns the viewport-relative rect for the drawing's anchor bounds.
+   *
+   * The coordinate space matches `getCellRectA1`.
+   */
+  getDrawingRectPx(id: number): { x: number; y: number; width: number; height: number } | null {
+    const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+    if (!overlay) return null;
+
+    const targetId = Number(id);
+    if (!Number.isSafeInteger(targetId)) return null;
+
+    const obj = this.getDrawingObjects(this.sheetId).find((o) => o.id === targetId) ?? null;
+    if (!obj) return null;
+
+    let viewport: DrawingViewport;
+    try {
+      viewport = this.getDrawingInteractionViewport(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    } catch {
+      return null;
+    }
+
+    try {
+      const rect = drawingObjectToViewportRect(obj, viewport, this.drawingGeom);
+      if (
+        !Number.isFinite(rect.x) ||
+        !Number.isFinite(rect.y) ||
+        !Number.isFinite(rect.width) ||
+        !Number.isFinite(rect.height) ||
+        rect.width <= 0 ||
+        rect.height <= 0
+      ) {
+        return null;
+      }
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Test/e2e-only helper: returns viewport-relative points for the 4 corner resize handles.
+   *
+   * These points are intended for Playwright to reliably target resize handles, and match the
+   * positions used by the drawings overlay's selection handle rendering.
+   */
+  getDrawingHandlePointsPx(id: number): {
+    nw: { x: number; y: number };
+    ne: { x: number; y: number };
+    se: { x: number; y: number };
+    sw: { x: number; y: number };
+  } | null {
+    const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+    if (!overlay) return null;
+
+    const targetId = Number(id);
+    if (!Number.isSafeInteger(targetId)) return null;
+
+    const obj = this.getDrawingObjects(this.sheetId).find((o) => o.id === targetId) ?? null;
+    if (!obj) return null;
+
+    let viewport: DrawingViewport;
+    try {
+      viewport = this.getDrawingInteractionViewport(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    } catch {
+      return null;
+    }
+
+    const bounds = drawingObjectToViewportRect(obj, viewport, this.drawingGeom);
+    const centers = getResizeHandleCenters(bounds, obj.transform);
+
+    const pick = (handle: "nw" | "ne" | "se" | "sw"): { x: number; y: number } | null => {
+      const found = centers.find((c) => c.handle === handle);
+      if (!found) return null;
+      return { x: found.x, y: found.y };
+    };
+
+    const nw = pick("nw");
+    const ne = pick("ne");
+    const se = pick("se");
+    const sw = pick("sw");
+    if (!nw || !ne || !se || !sw) return null;
+
+    return { nw, ne, se, sw };
+  }
+
+  /**
    * Returns grid renderer perf stats (shared grid only).
    */
   getGridPerfStats(): unknown {
