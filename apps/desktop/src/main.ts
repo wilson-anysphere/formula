@@ -3113,6 +3113,9 @@ function startPowerQueryService(): void {
         powerQueryServiceInitPromise = null;
         powerQueryServiceInitWorkbookId = null;
       }
+    })
+    .catch(() => {
+      // Best-effort: avoid unhandled rejections if the error handler or `.finally` bookkeeping throws.
     });
 
   powerQueryServiceInitPromise = initPromise;
