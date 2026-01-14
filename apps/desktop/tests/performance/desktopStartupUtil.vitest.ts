@@ -1,7 +1,10 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildDesktopStartupProfileRoot,
   parseStartupLine,
+  resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
   resolveDesktopStartupTargets,
@@ -180,5 +183,24 @@ describe('desktopStartupUtil resolveDesktopStartupBenchKind', () => {
     expect(() =>
       resolveDesktopStartupBenchKind({ env: { FORMULA_DESKTOP_STARTUP_BENCH_KIND: 'wat' }, defaultKind: 'full' }),
     ).toThrow(/FORMULA_DESKTOP_STARTUP_BENCH_KIND/);
+  });
+});
+
+describe('desktopStartupUtil resolveDesktopStartupArgv', () => {
+  it('returns --startup-bench args for shell', () => {
+    expect(resolveDesktopStartupArgv('shell')).toEqual(['--startup-bench']);
+  });
+
+  it('returns no args for full', () => {
+    expect(resolveDesktopStartupArgv('full')).toEqual([]);
+  });
+});
+
+describe('desktopStartupUtil buildDesktopStartupProfileRoot', () => {
+  it('names profile roots consistently', () => {
+    const perfHome = resolve('target', 'perf-home');
+    expect(
+      buildDesktopStartupProfileRoot({ perfHome, benchKind: 'shell', mode: 'cold', now: 123, pid: 456 }),
+    ).toBe(resolve(perfHome, 'desktop-startup-shell-cold-123-456'));
   });
 });

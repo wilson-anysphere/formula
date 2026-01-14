@@ -25,9 +25,9 @@
  *   then reused for the measured runs so persisted caches are reflected in the results.
  *
  * Benchmark kind (what we measure):
- * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (default; requires built frontend assets): launch the normal app.
- * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell`: launch `--startup-bench` (measures shell/webview startup without
- *   requiring `apps/desktop/dist`).
+ * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (default locally; requires built frontend assets): launch the normal app.
+ * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell` (default on CI): launch `--startup-bench` (measures shell/webview startup
+ *   without requiring `apps/desktop/dist`).
  *
  * Optional idle RSS metric:
  * - Metric: `desktop.memory.<mode>.rss_mb.p95` (and `desktop.memory.rss_mb.p95` alias for cold mode)
