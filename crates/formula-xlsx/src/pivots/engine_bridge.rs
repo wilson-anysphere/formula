@@ -20,7 +20,9 @@ use super::{
     PivotCacheDefinition, PivotCacheSourceType, PivotCacheValue, PivotTableDefinition,
     PivotTableFieldItem,
 };
-use crate::pivots::slicers::{PivotSlicerParts, SlicerSelectionState, TimelineSelectionState};
+use crate::pivots::slicers::{
+    infer_slicer_cache_field_index, PivotSlicerParts, SlicerSelectionState, TimelineSelectionState,
+};
 
 /// Convert a parsed pivot cache (definition + record iterator) into a pivot-engine
 /// source range.
@@ -152,8 +154,14 @@ fn slicer_cache_field_idx_best_effort(
         }
     }
 
-    // Fall back to inferring the field by matching slicer item keys against the cache's
-    // per-field unique values.
+    // If `sourceName` isn't the cache field name, try to infer the cache field index by comparing
+    // slicer cache item keys against pivot cache *definition* shared items.
+    if let Some(idx) = infer_slicer_cache_field_index(cache_def, slicer) {
+        return Some(idx);
+    }
+
+    // Last resort: infer the field by matching slicer item keys against the cache's per-field
+    // unique values.
     //
     // This is intentionally best-effort: OOXML slicer cache parts often omit a stable
     // field mapping (especially in simplified fixtures), but the item values typically
@@ -176,18 +184,9 @@ fn slicer_cache_field_idx_best_effort(
         return None;
     }
 
-    let cache_name_folded = slicer
-        .cache_name
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let slicer_name_folded = slicer
-        .name
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    let mut best: Option<(usize, usize, bool)> = None; // (field_idx, match_count, name_hint)
+    let mut best_idx: Option<usize> = None;
+    let mut best_score = 0usize;
+    let mut runner_up_score = 0usize;
     for (field_idx, field) in cache_def.cache_fields.iter().enumerate() {
         let Some(values) = cache.unique_values.get(&field.name) else {
             continue;
@@ -207,25 +206,20 @@ fn slicer_cache_field_idx_best_effort(
         if match_count == 0 {
             continue;
         }
-
-        let field_folded = field.name.to_ascii_lowercase();
-        let name_hint = !field_folded.is_empty()
-            && (cache_name_folded.contains(&field_folded)
-                || slicer_name_folded.contains(&field_folded));
-
-        let is_better = match best {
-            None => true,
-            Some((_best_idx, best_matches, best_hint)) => {
-                match_count > best_matches
-                    || (match_count == best_matches && name_hint && !best_hint)
-            }
-        };
-        if is_better {
-            best = Some((field_idx, match_count, name_hint));
+        if match_count > best_score {
+            runner_up_score = best_score;
+            best_score = match_count;
+            best_idx = Some(field_idx);
+        } else if match_count > runner_up_score {
+            runner_up_score = match_count;
         }
     }
 
-    best.map(|(idx, _, _)| idx)
+    if best_score > 0 && best_score > runner_up_score {
+        best_idx
+    } else {
+        None
+    }
 }
 
 fn timeline_cache_field_name_best_effort(
@@ -802,9 +796,8 @@ fn aggregation_display_name(agg: AggregationType) -> &'static str {
 mod tests {
     use super::*;
 
-    use crate::pivots::slicers::SlicerDefinition;
-    use crate::pivots::slicers::TimelineDefinition;
     use crate::pivots::PivotCacheField;
+    use crate::pivots::slicers::{SlicerDefinition, TimelineDefinition};
     use pretty_assertions::assert_eq;
     use std::collections::HashSet;
 
@@ -1582,5 +1575,132 @@ mod tests {
                 PivotKeyPart::Date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()),
             ]))
         );
+    }
+
+    #[test]
+    fn pivot_slicer_parts_to_engine_filters_infers_field_by_shared_item_overlap() {
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "Region".to_string(),
+                    shared_items: Some(vec![
+                        PivotCacheValue::String("East".to_string()),
+                        PivotCacheValue::String("West".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Product".to_string(),
+                    shared_items: Some(vec![
+                        PivotCacheValue::String("Apple".to_string()),
+                        PivotCacheValue::String("Banana".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let pivot_table_part = "xl/pivotTables/pivotTable1.xml";
+
+        let selection = SlicerSelectionState {
+            available_items: vec!["East".to_string(), "West".to_string()],
+            selected_items: Some(HashSet::from(["East".to_string()])),
+        };
+
+        let slicer = SlicerDefinition {
+            part_name: "xl/slicers/slicer1.xml".to_string(),
+            name: None,
+            uid: None,
+            cache_part: None,
+            cache_name: None,
+            // Not a cache field name, should be inferred from item overlap.
+            source_name: Some("PivotTable1".to_string()),
+            field_name: None,
+            connected_pivot_tables: vec![pivot_table_part.to_string()],
+            connected_tables: vec![],
+            placed_on_drawings: vec![],
+            placed_on_sheets: vec![],
+            placed_on_sheet_names: vec![],
+            selection,
+        };
+
+        assert_eq!(infer_slicer_cache_field_index(&cache_def, &slicer), Some(0));
+
+        let parts = PivotSlicerParts {
+            slicers: vec![slicer],
+            timelines: vec![],
+        };
+
+        let cache = PivotCache::from_range(&[]).expect("build pivot cache");
+        let filters =
+            pivot_slicer_parts_to_engine_filters(pivot_table_part, &cache_def, &cache, &parts);
+
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].source_field, cache_field("Region"));
+        assert_eq!(
+            filters[0].allowed.as_ref(),
+            Some(&HashSet::from([PivotKeyPart::Text("East".to_string())]))
+        );
+    }
+
+    #[test]
+    fn pivot_slicer_parts_to_engine_filters_skips_ambiguous_inference() {
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "FieldA".to_string(),
+                    shared_items: Some(vec![
+                        PivotCacheValue::String("X".to_string()),
+                        PivotCacheValue::String("Y".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "FieldB".to_string(),
+                    shared_items: Some(vec![
+                        PivotCacheValue::String("X".to_string()),
+                        PivotCacheValue::String("Y".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let pivot_table_part = "xl/pivotTables/pivotTable1.xml";
+
+        let selection = SlicerSelectionState {
+            available_items: vec!["X".to_string(), "Y".to_string()],
+            selected_items: Some(HashSet::from(["X".to_string()])),
+        };
+
+        let slicer = SlicerDefinition {
+            part_name: "xl/slicers/slicer1.xml".to_string(),
+            name: None,
+            uid: None,
+            cache_part: None,
+            cache_name: None,
+            source_name: Some("NotAField".to_string()),
+            field_name: None,
+            connected_pivot_tables: vec![pivot_table_part.to_string()],
+            connected_tables: vec![],
+            placed_on_drawings: vec![],
+            placed_on_sheets: vec![],
+            placed_on_sheet_names: vec![],
+            selection,
+        };
+
+        assert_eq!(infer_slicer_cache_field_index(&cache_def, &slicer), None);
+
+        let parts = PivotSlicerParts {
+            slicers: vec![slicer],
+            timelines: vec![],
+        };
+
+        let cache = PivotCache::from_range(&[]).expect("build pivot cache");
+        let filters =
+            pivot_slicer_parts_to_engine_filters(pivot_table_part, &cache_def, &cache, &parts);
+        assert!(filters.is_empty());
     }
 }

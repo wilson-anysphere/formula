@@ -8,6 +8,7 @@ use super::cache_records::pivot_cache_datetime_to_naive_date;
 use super::{PivotCacheDefinition, PivotCacheValue};
 use formula_engine::pivot::{FilterField, PivotFieldRef, PivotKeyPart};
 use chrono::{Datelike, NaiveDate};
+use formula_format::{FormatOptions, Value as FmtValue};
 use formula_engine::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelection};
 use formula_model::pivots::ScalarValue;
@@ -16,6 +17,8 @@ use quick_xml::Reader;
 use quick_xml::Writer;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
+
+use super::cache_records::pivot_cache_datetime_to_naive_date;
 
 /// Best-effort slicer selection state extracted from `xl/slicerCaches/slicerCache*.xml`.
 ///
@@ -406,6 +409,173 @@ pub struct TimelineDefinition {
 pub struct PivotSlicerParts {
     pub slicers: Vec<SlicerDefinition>,
     pub timelines: Vec<TimelineDefinition>,
+}
+
+/// Best-effort inference of which pivot cache field a slicer applies to.
+///
+/// Excel slicers that are connected to a pivot table are often backed by the pivot cache. When
+/// Excel persists the slicer cache definition, the `slicerCache@sourceName` attribute *usually*
+/// matches a `cacheField@name` entry in the corresponding pivot cache definition.
+///
+/// However, in the wild `sourceName` can sometimes contain an unrelated identifier (for example
+/// a pivot table name or a table name), leaving downstream code without a direct mapping from
+/// slicer selections to a pivot field.
+///
+/// This helper uses a best-effort strategy:
+/// 1. Direct name match against cache fields (case-sensitive, then case-insensitive).
+/// 2. If the slicer cache provides item keys and the pivot cache fields have `<sharedItems>`,
+///    infer the field by scoring overlap between slicer item keys and shared item values.
+///
+/// Returns `None` when no confident match can be made.
+pub(super) fn infer_slicer_cache_field_index(
+    cache_def: &PivotCacheDefinition,
+    slicer: &SlicerDefinition,
+) -> Option<usize> {
+    if let Some(field_name) = slicer.field_name.as_deref() {
+        // (1) Direct match, case-sensitive.
+        if let Some(idx) = cache_def
+            .cache_fields
+            .iter()
+            .position(|field| field.name == field_name)
+        {
+            return Some(idx);
+        }
+
+        // (1) Direct match, case-insensitive.
+        let mut folded_matches = cache_def
+            .cache_fields
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| field.name.eq_ignore_ascii_case(field_name))
+            .map(|(idx, _)| idx);
+        if let Some(idx) = folded_matches.next() {
+            // If there are multiple folded matches, avoid guessing.
+            if folded_matches.next().is_none() {
+                return Some(idx);
+            }
+        }
+    }
+
+    if let Some(source_name) = slicer.source_name.as_deref() {
+        // (1) Direct match, case-sensitive.
+        if let Some(idx) = cache_def
+            .cache_fields
+            .iter()
+            .position(|field| field.name == source_name)
+        {
+            return Some(idx);
+        }
+
+        // (1) Direct match, case-insensitive.
+        let mut folded_matches = cache_def
+            .cache_fields
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| field.name.eq_ignore_ascii_case(source_name))
+            .map(|(idx, _)| idx);
+        if let Some(idx) = folded_matches.next() {
+            // If there are multiple folded matches, avoid guessing.
+            if folded_matches.next().is_none() {
+                return Some(idx);
+            }
+        }
+    }
+
+    // (2) Overlap inference: if the slicer cache persists item keys and pivot cache fields have
+    // shared items, try to find the field whose shared items overlap the slicer keys.
+    let slicer_items: Vec<&String> = if !slicer.selection.available_items.is_empty() {
+        slicer.selection.available_items.iter().collect()
+    } else if let Some(items) = &slicer.selection.selected_items {
+        items.iter().collect()
+    } else {
+        return None;
+    };
+    if slicer_items.is_empty() {
+        return None;
+    }
+
+    let mut best_idx: Option<usize> = None;
+    let mut best_score = 0usize;
+    let mut runner_up_score = 0usize;
+
+    for (field_idx, field) in cache_def.cache_fields.iter().enumerate() {
+        let Some(shared_items) = field.shared_items.as_ref() else {
+            continue;
+        };
+        if shared_items.is_empty() {
+            continue;
+        }
+
+        let mut candidates: HashSet<String> = HashSet::with_capacity(shared_items.len());
+        for item in shared_items {
+            candidates.insert(pivot_cache_value_to_candidate_string(item));
+        }
+
+        let score = slicer_items
+            .iter()
+            .filter(|key| candidates.contains::<String>(*key))
+            .count();
+        if score == 0 {
+            continue;
+        }
+
+        if score > best_score {
+            runner_up_score = best_score;
+            best_score = score;
+            best_idx = Some(field_idx);
+        } else if score > runner_up_score {
+            runner_up_score = score;
+        }
+    }
+
+    if best_score > 0 && best_score > runner_up_score {
+        best_idx
+    } else {
+        None
+    }
+}
+
+fn pivot_cache_value_to_candidate_string(value: &PivotCacheValue) -> String {
+    match value {
+        PivotCacheValue::String(s) => s.clone(),
+        PivotCacheValue::Number(n) => {
+            formula_format::format_value(FmtValue::Number(*n), None, &FormatOptions::default()).text
+        }
+        PivotCacheValue::Bool(b) => {
+            if *b {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }
+        }
+        PivotCacheValue::Missing => String::new(),
+        PivotCacheValue::Error(s) => s.clone(),
+        PivotCacheValue::DateTime(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return String::new();
+            }
+
+            if let Some(date) = pivot_cache_datetime_to_naive_date(trimmed) {
+                return date.to_string();
+            }
+
+            // Some producers store Excel serials in `<d v="..."/>` elements. Match the
+            // `PivotCacheDefinition::resolve_shared_item` best-effort logic.
+            if let Ok(serial) = trimmed.parse::<f64>() {
+                let serial = serial.trunc() as i32;
+                if let Ok(excel_date) = serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900) {
+                    return format!(
+                        "{:04}-{:02}-{:02}",
+                        excel_date.year, excel_date.month, excel_date.day
+                    );
+                }
+            }
+
+            trimmed.to_string()
+        }
+        PivotCacheValue::Index(idx) => idx.to_string(),
+    }
 }
 
 impl XlsxPackage {

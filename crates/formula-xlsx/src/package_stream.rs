@@ -93,21 +93,12 @@ pub struct StreamingXlsxPackage<R: Read + Seek> {
     /// - strip any leading `/`
     /// - treat `\\` as `/`
     source_part_names: BTreeSet<String>,
-    /// Map canonical part name -> ZIP entry key used by the streaming rewriter.
-    ///
-    /// This is the ZIP entry name with only a leading `/` stripped (matching the streaming
-    /// patcher's `canonical_name` computation). It may still contain `\\` if the original archive
-    /// used them.
-    source_part_name_to_zip_key: HashMap<String, String>,
     /// Map canonical part name -> source zip entry index.
     source_part_name_to_index: HashMap<String, usize>,
     /// Overlay of part overrides keyed by canonical part name.
     ///
-    /// Keys are stored in the same form expected by the streaming ZIP rewriter:
-    /// - if the part exists in the source ZIP, the key is the original ZIP entry name with only a
-    ///   leading `/` stripped (i.e. it may contain `\\` path separators if the archive used them).
-    /// - if the part does not exist in the source ZIP (new part), the key is the canonical name
-    ///   (`/` separators, no leading `/`).
+    /// Keys are stored in canonical form (no leading `/`, `/` separators). This matches
+    /// `streaming::canonicalize_zip_entry_name` used by the streaming ZIP rewriter.
     part_overrides: HashMap<String, PartOverride>,
     /// Canonical part names that do not exist in the source archive but have been added via
     /// [`Self::set_part`].
@@ -145,7 +136,6 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
         reader.seek(SeekFrom::Start(0))?;
 
         let mut source_part_names: BTreeSet<String> = BTreeSet::new();
-        let mut source_part_name_to_zip_key: HashMap<String, String> = HashMap::new();
         let mut source_part_name_to_index: HashMap<String, usize> = HashMap::new();
 
         {
@@ -156,7 +146,6 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
                     continue;
                 }
                 let raw_name = file.name().to_string();
-                let zip_key = raw_name.strip_prefix('/').unwrap_or(raw_name.as_str());
                 let canonical = canonical_part_name(&raw_name);
 
                 source_part_names.insert(canonical.clone());
@@ -164,9 +153,6 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
                 // In degenerate cases where a ZIP contains duplicate names that normalize to the same
                 // canonical value (e.g. `xl/workbook.xml` and `xl\\workbook.xml`), keep the first
                 // index/key we saw. XLSX producers should not emit such archives.
-                source_part_name_to_zip_key
-                    .entry(canonical.clone())
-                    .or_insert_with(|| zip_key.to_string());
                 source_part_name_to_index.entry(canonical).or_insert(i);
             }
         }
@@ -174,7 +160,6 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
         Ok(Self {
             reader: RefCell::new(reader),
             source_part_names,
-            source_part_name_to_zip_key,
             source_part_name_to_index,
             part_overrides: HashMap::new(),
             added_part_names: BTreeSet::new(),
@@ -192,17 +177,12 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
             Some(found) => (found.to_string(), true),
             None => (canonical_input, false),
         };
-        let override_key = self
-            .source_part_name_to_zip_key
-            .get(&canonical)
-            .cloned()
-            .unwrap_or_else(|| canonical.clone());
         let op = if exists_in_source {
             PartOverride::Replace(bytes)
         } else {
             PartOverride::Add(bytes)
         };
-        self.part_overrides.insert(override_key, op);
+        self.part_overrides.insert(canonical.clone(), op);
         if !exists_in_source {
             self.added_part_names.insert(canonical);
         } else {
@@ -219,13 +199,8 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
             Some(found) => (found.to_string(), true),
             None => (canonical_input, false),
         };
-        let override_key = self
-            .source_part_name_to_zip_key
-            .get(&canonical)
-            .cloned()
-            .unwrap_or_else(|| canonical.clone());
         self.part_overrides
-            .insert(override_key, PartOverride::Remove);
+            .insert(canonical.clone(), PartOverride::Remove);
         if !exists_in_source {
             self.added_part_names.remove(&canonical);
         }
@@ -290,14 +265,7 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
         let Some(canonical) = self.resolve_source_part_name(&canonical_input) else {
             return Ok(None);
         };
-
-        let override_key = self
-            .source_part_name_to_zip_key
-            .get(canonical)
-            .map(String::as_str)
-            .unwrap_or(canonical);
-
-        if let Some(override_op) = self.part_overrides.get(override_key) {
+        if let Some(override_op) = self.part_overrides.get(canonical) {
             match override_op {
                 PartOverride::Remove => return Ok(None),
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
@@ -345,13 +313,8 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
             .resolve_source_part_name(&canonical_input)
             .unwrap_or(canonical_input.as_str())
             .to_string();
-        let override_key = self
-            .source_part_name_to_zip_key
-            .get(&canonical)
-            .cloned()
-            .unwrap_or(canonical);
         self.part_overrides
-            .insert(override_key, PartOverride::Replace(updated));
+            .insert(canonical, PartOverride::Replace(updated));
 
         Ok(())
     }
@@ -373,13 +336,8 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
     }
 
     fn is_source_part_removed(&self, canonical_name: &str) -> bool {
-        let override_key = self
-            .source_part_name_to_zip_key
-            .get(canonical_name)
-            .map(String::as_str)
-            .unwrap_or(canonical_name);
         matches!(
-            self.part_overrides.get(override_key),
+            self.part_overrides.get(canonical_name),
             Some(PartOverride::Remove)
         )
     }
