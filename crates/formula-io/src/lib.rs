@@ -1707,21 +1707,21 @@ fn try_open_encrypted_ooxml_model(
             }
         };
 
-    // Encrypted `.xlsb` (ZIP with `xl/workbook.bin`) is currently not supported.
-    //
-    // This matches the behavior of the legacy Vec-based decrypt path and keeps `.xlsb` handling
-    // explicit until we have a streaming-friendly `formula-xlsb` API for encrypted packages.
-    if sniff_ooxml_zip_workbook_kind_from_reader(&mut reader) == Some(WorkbookFormat::Xlsb) {
-        return Err(Error::UnsupportedEncryptedWorkbookKind {
-            path: path.to_path_buf(),
-            kind: "xlsb",
-        });
-    }
+    let workbook_kind = sniff_ooxml_zip_workbook_kind_from_reader(&mut reader);
     reader.seek(SeekFrom::Start(0))
         .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
             source,
         })?;
+
+    if workbook_kind == Some(WorkbookFormat::Xlsb) {
+        let mut decrypted = Vec::new();
+        reader.read_to_end(&mut decrypted).map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, decrypted).map(Some);
+    }
 
     let model = xlsx::read_workbook_from_reader(reader).map_err(|source| Error::OpenXlsx {
         path: path.to_path_buf(),
@@ -1861,12 +1861,6 @@ fn try_open_encrypted_ooxml_workbook(
             }
         };
 
-    if sniff_ooxml_zip_workbook_kind_from_reader(&mut reader) == Some(WorkbookFormat::Xlsb) {
-        return Err(Error::UnsupportedEncryptedWorkbookKind {
-            path: path.to_path_buf(),
-            kind: "xlsb",
-        });
-    }
     reader.seek(SeekFrom::Start(0))
         .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
