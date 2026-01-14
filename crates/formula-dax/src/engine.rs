@@ -5103,6 +5103,11 @@ fn propagate_filter(
 
             if let Some(from_index) = relationship.from_index.as_ref() {
                 for (key, rows) in from_index {
+                    // See `Direction::ToMany`: BLANK keys should not match a physical BLANK
+                    // dimension key; they only participate via the virtual blank member.
+                    if key.is_blank() {
+                        continue;
+                    }
                     if !rows
                         .iter()
                         .any(|row| *row < from_set.len() && from_set.get(*row))
@@ -5144,6 +5149,9 @@ fn propagate_filter(
                     });
 
                 for key in keys {
+                    if key.is_blank() {
+                        continue;
+                    }
                     let Some(to_rows) = relationship.to_index.get(&key) else {
                         continue;
                     };
