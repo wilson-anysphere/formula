@@ -29,7 +29,9 @@ fn writes_data_validations_section() -> Result<(), Box<dyn std::error::Error>> {
         let rule = DataValidation {
             kind: DataValidationKind::List,
             operator: None,
-            formula1: "\"Yes,No\"".to_string(),
+            // The model convention is to store formulas without a leading '=' but we accept it
+            // defensively and strip it when writing.
+            formula1: "=\"Yes,No\"".to_string(),
             formula2: None,
             allow_blank: true,
             show_input_message: true,
@@ -61,6 +63,42 @@ fn writes_data_validations_section() -> Result<(), Box<dyn std::error::Error>> {
     assert!(
         sheet_xml.contains("<formula1>\"Yes,No\"</formula1>"),
         "expected literal list formula1, got:\n{sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn writes_data_validation_formulas_add_xlfn_prefixes() -> Result<(), Box<dyn std::error::Error>> {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1")?;
+    let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+
+    let rule = DataValidation {
+        kind: DataValidationKind::Custom,
+        operator: None,
+        // Writer should strip the leading '=' and restore `_xlfn.` prefixes.
+        formula1: "=SEQUENCE(1)".to_string(),
+        formula2: None,
+        allow_blank: true,
+        show_input_message: false,
+        show_error_message: false,
+        show_drop_down: false,
+        input_message: None,
+        error_alert: None,
+    };
+    sheet.add_data_validation(vec![Range::from_a1("B2")?], rule);
+
+    let bytes = XlsxDocument::new(workbook).save_to_vec()?;
+    let sheet_xml = read_part(&bytes, "xl/worksheets/sheet1.xml")?;
+
+    assert!(
+        sheet_xml.contains("type=\"custom\"") && sheet_xml.contains("sqref=\"B2\""),
+        "expected custom data validation on B2, got:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<formula1>_xlfn.SEQUENCE(1)</formula1>"),
+        "expected `_xlfn.`-prefixed formula, got:\n{sheet_xml}"
     );
 
     Ok(())
