@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read as _, Seek as _, SeekFrom, Write as _};
 
-use formula_office_crypto::{decrypt_encrypted_package, OfficeCryptoError};
+use formula_office_crypto::{decrypt_encrypted_package, is_encrypted_ooxml_ole, OfficeCryptoError};
 
 const AGILE_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -211,6 +211,55 @@ fn decrypts_standard_rc4_with_case_insensitive_stream_names() {
         .write_all(&encrypted_package)
         .expect("write encryptedpackage");
     let ole_bytes = ole_out.into_inner().into_inner();
+
+    let decrypted =
+        decrypt_encrypted_package(&ole_bytes, "password").expect("decrypt standard rc4");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_standard_rc4_with_leading_slash_and_case_variation_stream_names() {
+    // Exercise combined quirks:
+    // - leading `/` in root stream names
+    // - case variation
+    //
+    // This ensures `open_stream_case_tolerant()` can find the streams via its walk()/case-insensitive
+    // fallback even when the naive `/EncryptionInfo` probe doesn't match the casing.
+    let cursor = Cursor::new(STANDARD_RC4_FIXTURE.to_vec());
+    let mut ole_in = cfb::CompoundFile::open(cursor).expect("open input cfb");
+
+    let mut encryption_info = Vec::new();
+    ole_in
+        .open_stream("EncryptionInfo")
+        .or_else(|_| ole_in.open_stream("/EncryptionInfo"))
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole_in
+        .open_stream("EncryptedPackage")
+        .or_else(|_| ole_in.open_stream("/EncryptedPackage"))
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor).expect("create output cfb");
+    ole_out
+        .create_stream("/encryptioninfo")
+        .expect("create /encryptioninfo")
+        .write_all(&encryption_info)
+        .expect("write /encryptioninfo");
+    ole_out
+        .create_stream("/encryptedpackage")
+        .expect("create /encryptedpackage")
+        .write_all(&encrypted_package)
+        .expect("write /encryptedpackage");
+    let ole_bytes = ole_out.into_inner().into_inner();
+
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
 
     let decrypted =
         decrypt_encrypted_package(&ole_bytes, "password").expect("decrypt standard rc4");
