@@ -12812,14 +12812,19 @@ export class SpreadsheetApp {
     // Only treat pointerdown events originating from the grid surface (canvases/root) as
     // drawing selection. This avoids interfering with interactive DOM overlays
     // (scrollbars, outline buttons, comments panel, etc) even when drawings extend underneath them.
-    const isGridSurface =
-      target === this.root ||
-      target === this.selectionCanvas ||
-      target === this.gridCanvas ||
-      target === this.referenceCanvas ||
-      target === this.auditingCanvas ||
-      target === this.presenceCanvas;
-    if (!isGridSurface) return;
+    //
+    // When invoked programmatically in unit tests, `e.target` may be null; treat that as
+    // "no overlay target" so tests can exercise selection logic without a full dispatch.
+    if (target) {
+      const isGridSurface =
+        target === this.root ||
+        target === this.selectionCanvas ||
+        target === this.gridCanvas ||
+        target === this.referenceCanvas ||
+        target === this.auditingCanvas ||
+        target === this.presenceCanvas;
+      if (!isGridSurface) return;
+    }
     const objects = this.listDrawingObjectsForSheet();
     const prevSelected = this.selectedDrawingId;
     const editorWasOpen = this.editor.isOpen();
