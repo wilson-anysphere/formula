@@ -3042,6 +3042,97 @@ mod zip_guardrail_tests {
     }
 
     #[test]
+    fn read_sheet_rejects_oversized_worksheet_part_when_zip_metadata_lies() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "34");
+
+        let workbook_bin = build_workbook_bin_single_sheet("r", "S");
+        let workbook_rels = r#"<Relationship Id="r" Target="s"/>"#;
+
+        // 16 empty records (2 bytes each) + one 1-byte payload record (3 bytes) = 35 bytes.
+        let mut oversized_sheet = Vec::new();
+        oversized_sheet.extend(std::iter::repeat([0u8, 0u8]).take(16).flatten());
+        oversized_sheet.extend_from_slice(&[0u8, 1u8, 0u8]);
+        assert_eq!(oversized_sheet.len(), 35);
+
+        let mut bytes = build_xlsb_zip_with_workbook_parts(
+            &workbook_bin,
+            workbook_rels.as_bytes(),
+            &[("xl/s", oversized_sheet.as_slice())],
+        );
+
+        // Corrupt ZIP metadata for the worksheet part so `ZipFile::size()` is under the limit,
+        // while the actual uncompressed payload exceeds it.
+        corrupt_zip_entry_uncompressed_size(&mut bytes, "xl/s", 1);
+
+        let options = OpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+        let wb = XlsbWorkbook::open_from_vec_with_options(bytes, options).expect("open workbook");
+
+        let err = wb
+            .read_sheet(0)
+            .err()
+            .expect("expected oversized worksheet part error");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/s");
+                assert_eq!(size, 35);
+                assert_eq!(max, 34);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn for_each_cell_rejects_oversized_worksheet_part_when_zip_metadata_lies() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "34");
+
+        let workbook_bin = build_workbook_bin_single_sheet("r", "S");
+        let workbook_rels = r#"<Relationship Id="r" Target="s"/>"#;
+
+        // 16 empty records (2 bytes each) + one 1-byte payload record (3 bytes) = 35 bytes.
+        let mut oversized_sheet = Vec::new();
+        oversized_sheet.extend(std::iter::repeat([0u8, 0u8]).take(16).flatten());
+        oversized_sheet.extend_from_slice(&[0u8, 1u8, 0u8]);
+        assert_eq!(oversized_sheet.len(), 35);
+
+        let mut bytes = build_xlsb_zip_with_workbook_parts(
+            &workbook_bin,
+            workbook_rels.as_bytes(),
+            &[("xl/s", oversized_sheet.as_slice())],
+        );
+        corrupt_zip_entry_uncompressed_size(&mut bytes, "xl/s", 1);
+
+        let options = OpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            decode_formulas: false,
+        };
+        let wb = XlsbWorkbook::open_from_vec_with_options(bytes, options).expect("open workbook");
+
+        let err = wb
+            .for_each_cell_control_flow(0, |_cell| ControlFlow::Continue(()))
+            .err()
+            .expect("expected oversized worksheet part error");
+
+        match err {
+            ParseError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/s");
+                assert_eq!(size, 35);
+                assert_eq!(max, 34);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
     fn enforces_total_preserved_parts_budget() {
         let _lock = ENV_LOCK.lock().unwrap();
         let _max_part = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_PART_BYTES, "100");
