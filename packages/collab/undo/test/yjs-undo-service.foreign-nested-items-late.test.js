@@ -1,25 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 
 import * as Y from "yjs";
+import { requireYjsCjs } from "../../yjs-utils/test/require-yjs-cjs.js";
 
 import { REMOTE_ORIGIN, createCollabUndoService } from "../index.js";
-
-function requireYjsCjs() {
-  const require = createRequire(import.meta.url);
-  const prevError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
-    prevError(...args);
-  };
-  try {
-    // eslint-disable-next-line import/no-named-as-default-member
-    return require("yjs");
-  } finally {
-    console.error = prevError;
-  }
-}
 
 test("collab undo: insert into a foreign nested Y.Map added after UndoManager construction is undoable", () => {
   const Ycjs = requireYjsCjs();
@@ -64,4 +49,3 @@ test("collab undo: insert into a foreign nested Y.Map added after UndoManager co
   doc.destroy();
   remote.destroy();
 });
-

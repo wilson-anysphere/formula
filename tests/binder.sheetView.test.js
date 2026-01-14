@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRequire } from "node:module";
 
 import * as Y from "yjs";
+import { requireYjsCjs } from "../packages/collab/yjs-utils/test/require-yjs-cjs.js";
 
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
@@ -15,21 +15,6 @@ async function waitForCondition(predicate, timeoutMs = 2_000, intervalMs = 5) {
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error("Timed out waiting for condition");
-}
-
-function requireYjsCjs() {
-  const require = createRequire(import.meta.url);
-  const prevError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
-    prevError(...args);
-  };
-  try {
-    // eslint-disable-next-line import/no-named-as-default-member
-    return require("yjs");
-  } finally {
-    console.error = prevError;
-  }
 }
 
 function findSheetEntry(ydoc, sheetId) {

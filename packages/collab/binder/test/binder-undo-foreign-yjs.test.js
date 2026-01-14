@@ -1,30 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { EventEmitter } from "node:events";
 
 import * as Y from "yjs";
+import { requireYjsCjs } from "../../yjs-utils/test/require-yjs-cjs.js";
 
 import { createUndoService } from "../../undo/index.js";
 
 import { bindYjsToDocumentController } from "../index.js";
 import { decryptCellPlaintext, encryptCellPlaintext, isEncryptedCellPayload } from "../../encryption/src/index.node.js";
 import { getWorkbookRoots } from "../../workbook/src/index.ts";
-
-function requireYjsCjs() {
-  const require = createRequire(import.meta.url);
-  const prevError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
-    prevError(...args);
-  };
-  try {
-    // eslint-disable-next-line import/no-named-as-default-member
-    return require("yjs");
-  } finally {
-    console.error = prevError;
-  }
-}
 
 async function flushAsync(times = 3) {
   for (let i = 0; i < times; i += 1) {

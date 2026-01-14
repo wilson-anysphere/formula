@@ -1,28 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 
 import * as Y from "yjs";
+import { requireYjsCjs } from "../../yjs-utils/test/require-yjs-cjs.js";
 
 import { REMOTE_ORIGIN, createCollabUndoService, createUndoService } from "@formula/collab-undo";
 
 import { createCommentManagerForDoc, createCommentManagerForSession, createYComment, getCommentsRoot } from "../../comments/src/manager.ts";
 import { createCollabSession } from "../src/index.ts";
-
-function requireYjsCjs() {
-  const require = createRequire(import.meta.url);
-  const prevError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
-    prevError(...args);
-  };
-  try {
-    // eslint-disable-next-line import/no-named-as-default-member
-    return require("yjs");
-  } finally {
-    console.error = prevError;
-  }
-}
 
 /**
  * @param {Y.Doc} docA
@@ -577,9 +562,7 @@ test("CollabSession undo captures comment edits when foreign Yjs constructors ar
 });
 
 test("CollabSession undo captures comment edits when comments root is a legacy array created by a different Yjs instance (CJS applyUpdate)", () => {
-  const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
   const comments = remote.getArray("comments");

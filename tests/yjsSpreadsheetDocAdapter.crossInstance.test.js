@@ -1,25 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 
 import * as Y from "yjs";
+import { requireYjsCjs } from "../packages/collab/yjs-utils/test/require-yjs-cjs.js";
 
 import { createYjsSpreadsheetDocAdapter } from "../packages/versioning/src/yjs/yjsSpreadsheetDocAdapter.js";
-
-function requireYjsCjs() {
-  const require = createRequire(import.meta.url);
-  const prevError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
-    prevError(...args);
-  };
-  try {
-    // eslint-disable-next-line import/no-named-as-default-member
-    return require("yjs");
-  } finally {
-    console.error = prevError;
-  }
-}
 
 test("Yjs doc adapter: works when the Y.Doc comes from a different Yjs module instance (CJS vs ESM)", () => {
   // y-websocket pulls in the CJS build of Yjs; in pnpm workspaces it's possible

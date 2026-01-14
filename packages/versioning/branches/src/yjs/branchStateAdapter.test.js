@@ -1,25 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRequire } from "node:module";
 
 import * as Y from "yjs";
+import { requireYjsCjs } from "../../../../collab/yjs-utils/test/require-yjs-cjs.js";
 
 import { applyBranchStateToYjsDoc, branchStateFromYjsDoc } from "./branchStateAdapter.js";
-
-function requireYjsCjs() {
-  const require = createRequire(import.meta.url);
-  const prevError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
-    prevError(...args);
-  };
-  try {
-    // eslint-disable-next-line import/no-named-as-default-member
-    return require("yjs");
-  } finally {
-    console.error = prevError;
-  }
-}
 
 test("branchStateFromYjsDoc: reads clobbered legacy comments array stored on a Map root", () => {
   const source = new Y.Doc();
