@@ -301,7 +301,8 @@ Implementation status:
     - It is used for some compatibility fallbacks (for example Agile files that omit
       `<dataIntegrity>`) and to open Standard/CryptoAPI AES-encrypted `.xlsx`/`.xlsm` into a model
       without materializing the decrypted ZIP bytes (`open_workbook_model_with_password` /
-      `open_workbook_model_with_options`).
+      `open_workbook_model_with_options`). Encrypted `.xlsb` currently decrypts to an in-memory ZIP
+      before opening.
     - Other encrypted-open paths (including `open_workbook_with_password` / `open_workbook_with_options`)
       decrypt `EncryptedPackage` into an in-memory buffer first.
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting Agile packages via
