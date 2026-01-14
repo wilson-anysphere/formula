@@ -1782,11 +1782,12 @@ export class SpreadsheetApp {
           typeof originalSetPermissions === "function" &&
           // Vitest/Jest-style mock functions expose a `.mock` property. Avoid wrapping them so
           // unit tests can continue to assert on call counts/args.
-          typeof (originalSetPermissions as any).mock === "object";
+          (Boolean((originalSetPermissions as any).mock) || (originalSetPermissions as any)._isMockFunction === true);
         if (typeof originalSetPermissions === "function" && !isMock) {
           (sessionForPermissions as any).setPermissions = (permissions: any) => {
-            originalSetPermissions.call(sessionForPermissions, permissions);
+            const result = originalSetPermissions.call(sessionForPermissions, permissions);
             this.syncReadOnlyState();
+            return result;
           };
         }
       }
@@ -4128,12 +4129,10 @@ export class SpreadsheetApp {
 
     // Drawings/images GC + persistence.
     this.workbookImageManager.dispose();
-    // `drawingImages` is an `ImageStore` implementation but tests sometimes stub it with a
-    // minimal shape (e.g. just `garbageCollectAsync`). Keep teardown resilient.
     try {
       (this.drawingImages as any)?.clear?.();
     } catch {
-      // ignore
+      // ignore (tests may stub `drawingImages` with a partial ImageStore implementation)
     }
 
     // Drop references to drawings state so a disposed app instance does not retain
@@ -10729,13 +10728,17 @@ export class SpreadsheetApp {
 
     const hit = hitTestDrawingsInto(index, viewport, x, y, bounds);
     if (!hit) return null;
-    const handle = hitTestResizeHandle(bounds, x, y, hit.transform);
-    if (handle) {
-      // When the drawing is not selected, allow resize cursors when hovering the outline/handle
-      // affordances, but keep the interior "move" cursor so users can drag without fighting
-      // the corner hit targets (Excel-like behavior).
-      const inside = x > bounds.x && x < bounds.x + bounds.width && y > bounds.y && y < bounds.y + bounds.height;
-      if (!inside) return cursorForResizeHandleWithTransform(handle, hit.transform);
+    // For hover feedback, show resize cursors on the object's handles even when it isn't selected
+    // (Excel-like affordance). However, keep a "move" cursor on the interior so users can drag
+    // without fighting the corner hit targets, and for very small objects prefer a move cursor
+    // everywhere because the handle hit areas overlap most/all of the object.
+    const minSizeForHandles = RESIZE_HANDLE_SIZE_PX * 2;
+    if (bounds.width >= minSizeForHandles && bounds.height >= minSizeForHandles) {
+      const handle = hitTestResizeHandle(bounds, x, y, hit.transform);
+      if (handle) {
+        const inside = x > bounds.x && x < bounds.x + bounds.width && y > bounds.y && y < bounds.y + bounds.height;
+        if (!inside) return cursorForResizeHandleWithTransform(handle, hit.transform);
+      }
     }
     return "move";
   }
@@ -16775,6 +16778,9 @@ export class SpreadsheetApp {
         if (this.selectedDrawingId !== prevSelected) {
           this.dispatchDrawingSelectionChanged();
         }
+        // Keep the drawing overlay canvas in sync with the selection state. Without an explicit
+        // render here, the overlay can retain stale selection handles until the next scroll/repaint.
+        this.renderDrawings();
         this.renderSelection();
         this.focus();
 
@@ -16844,6 +16850,8 @@ export class SpreadsheetApp {
       this.selectedDrawingId = null;
       this.selectedDrawingIndex = null;
       this.dispatchDrawingSelectionChanged();
+      // Ensure selection handles disappear immediately (rather than waiting for a scroll/refresh).
+      this.renderDrawings();
     }
 
     // Right/middle clicks should not start drag selection, but we still want right-click to
@@ -21095,6 +21103,73 @@ export class SpreadsheetApp {
       return changed ? out : null;
     };
 
+    const rewriteThisRowWholeRowReferences = (text: string): string | null => {
+      const input = String(text ?? "");
+      if (!input.includes("[") || !input.includes("@")) return null;
+
+      const isIdentifierPart = (ch: string): boolean =>
+        (ch >= "A" && ch <= "Z") ||
+        (ch >= "a" && ch <= "z") ||
+        (ch >= "0" && ch <= "9") ||
+        ch === "_" ||
+        ch === ".";
+
+      let out = "";
+      let inString = false;
+      let changed = false;
+      let i = 0;
+
+      while (i < input.length) {
+        const ch = input[i] ?? "";
+
+        if (inString) {
+          out += ch;
+          if (ch === '"') {
+            // Escaped quote inside a string literal: "" -> "
+            if (input[i + 1] === '"') {
+              out += '"';
+              i += 2;
+              continue;
+            }
+            inString = false;
+          }
+          i += 1;
+          continue;
+        }
+
+        if (ch === '"') {
+          out += ch;
+          inString = true;
+          i += 1;
+          continue;
+        }
+
+        // `tokenizeFormula` does not currently treat `Table[@]` (whole-row structured refs)
+        // as a single `reference` token, so the lightweight evaluator can't resolve it via
+        // `resolveStructuredRefToReference`. Rewrite these forms into an A1 range before
+        // evaluation so previews remain useful for calculated-column formulas.
+        const prev = i > 0 ? (input[i - 1] ?? "") : "";
+        if (!isIdentifierPart(prev)) {
+          const match = /^([A-Za-z_][A-Za-z0-9_.]*)\[\s*@\s*\]/.exec(input.slice(i));
+          if (match) {
+            const refText = match[0]!;
+            const resolved = resolveStructuredRefToReference(refText);
+            if (resolved) {
+              out += resolved;
+              changed = true;
+              i += refText.length;
+              continue;
+            }
+          }
+        }
+
+        out += ch;
+        i += 1;
+      }
+
+      return changed ? out : null;
+    };
+
     let reads = 0;
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
@@ -21183,7 +21258,8 @@ export class SpreadsheetApp {
     };
 
     try {
-      const evalExpr = rewriteImplicitThisRowReferences(trimmedExpr) ?? trimmedExpr;
+      const evalExprBase = rewriteImplicitThisRowReferences(trimmedExpr) ?? trimmedExpr;
+      const evalExpr = rewriteThisRowWholeRowReferences(evalExprBase) ?? evalExprBase;
       const value = evaluateFormula(`=${evalExpr}`, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,

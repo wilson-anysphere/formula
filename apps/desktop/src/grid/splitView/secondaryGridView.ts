@@ -754,6 +754,10 @@ export class SecondaryGridView {
       const docCol = change.index - this.headerCols;
       if (docCol < 0) return;
       const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
+      // Axis size changes affect `GridGeometry` even though its object identity is stable.
+      // Invalidate the drawings overlay spatial index *before* we emit any document events so
+      // any render triggered synchronously by those events uses updated geometry.
+      this.drawingsOverlay.invalidateSpatialIndex();
       if (isDefault) {
         this.document.resetColWidth(sheetId, docCol, { label, source });
       } else {
@@ -771,13 +775,15 @@ export class SecondaryGridView {
     const docRow = change.index - this.headerRows;
     if (docRow < 0) return;
     const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
+    // Axis size changes affect `GridGeometry` even though its object identity is stable.
+    // Invalidate the drawings overlay spatial index *before* we emit any document events so
+    // any render triggered synchronously by those events uses updated geometry.
+    this.drawingsOverlay.invalidateSpatialIndex();
     if (isDefault) {
       this.document.resetRowHeight(sheetId, docRow, { label, source });
     } else {
       this.document.setRowHeight(sheetId, docRow, baseSize, { label, source });
     }
-    // Invalidate cached drawing bounds so the overlay repositions correctly after resize.
-    this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
 

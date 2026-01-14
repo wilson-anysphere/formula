@@ -416,23 +416,18 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   let replaceEnd = cursor;
   while (replaceEnd < input.length && isIdentifierChar(input[replaceEnd]!)) replaceEnd += 1;
 
+  const fullToken = input.slice(replaceStart, replaceEnd);
+  const fullTokenUpper = fullToken.toUpperCase();
+  // Avoid showing function autocomplete when the caret is inside a likely A1 cell reference
+  // (e.g. `=A1+1` with the caret between `A` and `1`). In these cases the dropdown can
+  // unexpectedly consume Escape/Tab, making the formula bar feel "stuck".
+  if (/^[A-Za-z]{1,3}\d{1,7}$/.test(fullToken) && !FUNCTION_NAMES_UPPER.has(fullTokenUpper)) return null;
+
   const typedPrefix = input.slice(replaceStart, cursor);
   if (typedPrefix.length < 1) return null;
   // Only trigger on identifier-looking starts.
   // (We handle `_xlfn.` separately below.)
   if (!/^[_A-Za-z]/.test(typedPrefix)) return null;
-
-  // Don't trigger function autocomplete inside A1-style cell references (e.g. `=A1`).
-  //
-  // Without this guard, placing the caret between the column letters and row digits (`=A|1`)
-  // looks like the user started typing an identifier (`A`) and opens the dropdown. That then
-  // consumes Escape (closing the dropdown) before the formula bar can cancel editing.
-  //
-  // Keep this heuristic conservative by allowing known function names like `LOG10`.
-  const fullToken = input.slice(replaceStart, replaceEnd);
-  if (/^[A-Za-z]{1,3}[0-9]+$/.test(fullToken) && !FUNCTION_NAMES_UPPER.has(fullToken.toUpperCase())) {
-    return null;
-  }
 
   // Ensure we're at the start of an expression-like position:
   // `=VLO`, `=1+VLO`, `=SUM(VLO`, `=SUM(A, VLO)`

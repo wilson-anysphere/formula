@@ -97,7 +97,7 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
     try {
       // Fire-and-forget: `installStartupTimingsListeners` sets the global flag synchronously
       // once the event API is available, and it catches individual listener failures.
-      void installStartupTimingsListeners();
+      void installStartupTimingsListeners().catch(() => {});
     } catch {
       // ignore
     }
