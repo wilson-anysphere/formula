@@ -19,7 +19,6 @@ import {
   resizeAnchor,
   shiftAnchor,
   type DrawingInteractionCallbacks,
-  type DrawingInteractionCommit,
 } from "../drawings/interaction.js";
 import {
   cursorForRotationHandle,
@@ -2477,7 +2476,17 @@ export class SpreadsheetApp {
         commitObjects: (next) => {
           this.document.setSheetDrawings(this.sheetId, next, { source: "drawings" });
         },
-        beginBatch: ({ label }) => this.document.beginBatch({ label }),
+        beginBatch: ({ label }) => {
+          const mapped =
+            label === "Move Picture"
+              ? "Move Drawing"
+              : label === "Resize Picture"
+                ? "Resize Drawing"
+                : label === "Rotate Picture"
+                  ? "Rotate Drawing"
+                  : label;
+          this.document.beginBatch({ label: mapped });
+        },
         endBatch: () => this.document.endBatch(),
         cancelBatch: () => this.document.cancelBatch(),
         shouldHandlePointerDown: () => !this.formulaBar?.isFormulaEditing(),
@@ -7328,7 +7337,9 @@ export class SpreadsheetApp {
     this.renderSelection();
   }
 
-  private commitDrawingInteraction(commit: DrawingInteractionCommit): void {
+  private commitDrawingInteraction(
+    commit: Parameters<NonNullable<DrawingInteractionCallbacks["onInteractionCommit"]>>[0],
+  ): void {
     if (this.disposed) return;
     if (!commit || typeof commit !== "object") return;
     const after = (commit as any).after as DrawingObject | undefined;
@@ -7420,8 +7431,13 @@ export class SpreadsheetApp {
       else if ("transform" in next) delete next.transform;
 
       // Persist any preserved DrawingML payloads (e.g. patched `<a:xfrm>` in `xlsx.pic_xml`).
-      if (after.preserved) next.preserved = after.preserved;
-      else if ("preserved" in next) delete next.preserved;
+      //
+      // Be conservative: only overwrite when the commit payload explicitly includes `preserved`.
+      // This avoids wiping compatibility metadata if callers provide a partial `after` object.
+      if ((after as any).preserved !== undefined) {
+        if (after.preserved) next.preserved = after.preserved;
+        else if ("preserved" in next) delete next.preserved;
+      }
 
       // Only update explicit extracted `size` when present on the UI object.
       if (after.size) next.size = after.size;
@@ -7438,12 +7454,19 @@ export class SpreadsheetApp {
 
     // If multiple raw ids mapped to the same UI id (hash collision or duplicates), treat the
     // commit as one undoable operation.
+    //
+    // If we're already inside a batch (e.g. DrawingInteractionController started one on pointerdown),
+    // don't start a nested batch — nested `beginBatch` calls do not update the undo label.
+    const batchDepth = typeof docAny.batchDepth === "number" ? docAny.batchDepth : 0;
+    const shouldStartBatch = batchDepth <= 0;
     let batchStarted = false;
-    try {
-      this.document.beginBatch({ label });
-      batchStarted = true;
-    } catch {
-      batchStarted = false;
+    if (shouldStartBatch) {
+      try {
+        this.document.beginBatch({ label });
+        batchStarted = true;
+      } catch {
+        batchStarted = false;
+      }
     }
 
     if (updateDrawing) {

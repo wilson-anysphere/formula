@@ -159,7 +159,7 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     const callbacks = (app as any).drawingInteractionCallbacks;
     expect(callbacks?.onInteractionCommit).toBeTypeOf("function");
 
-    callbacks.onInteractionCommit({ kind: "rotate", id: before.id, before, after });
+    callbacks.onInteractionCommit({ kind: "rotate", id: before.id, before, after, objects: [after] });
 
     const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
     expect(updated?.id).toBe("drawing_foo");
@@ -180,4 +180,3 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 });
-
