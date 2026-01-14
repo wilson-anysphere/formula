@@ -126,6 +126,9 @@ Behavior:
 - If the reference is on the **current sheet**, the result is just `"$A$1"` (no `sheet!` prefix).
 - If the reference is on a **different sheet**, the engine prefixes the address with that sheet’s **display name**
   (tab name), as configured via `setSheetDisplayName` (or `renameSheet`).
+- For **external references**, the engine prefixes with the canonical external sheet key (e.g. `"[Book.xlsx]Sheet1"`).
+  Because that key contains `[]`, it is quoted in the output:
+  - `'[Book.xlsx]Sheet1'!$A$1`
 - The sheet prefix is quoted using Excel formula rules when required (spaces, punctuation, reserved names like
   `TRUE`/`FALSE`, names that look like cell refs, etc). Apostrophes are escaped by doubling:
   - `'Other Sheet'!$A$1`
