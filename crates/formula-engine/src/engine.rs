@@ -10935,6 +10935,12 @@ impl crate::eval::ValueResolver for Snapshot {
             .and_then(|provider| provider.sheet_order(workbook))
     }
 
+    fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
+        self.external_value_provider
+            .as_ref()
+            .and_then(|provider| provider.workbook_sheet_names(workbook))
+    }
+
     fn external_workbook_table(&self, workbook: &str, table_name: &str) -> Option<(String, Table)> {
         self.external_value_provider
             .as_ref()
@@ -11484,6 +11490,17 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// [`formula_model::sheet_name_eq_case_insensitive`]).
 pub trait ExternalValueProvider: Send + Sync {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
+
+    /// Return the sheet order for an external workbook as an `Arc` slice.
+    ///
+    /// This is equivalent to [`ExternalValueProvider::sheet_order`], but allows providers to cache
+    /// and share sheet lists efficiently (cloning an `Arc` is cheaper than cloning a `Vec` of
+    /// strings).
+    ///
+    /// The default implementation forwards to [`ExternalValueProvider::sheet_order`].
+    fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
+        self.sheet_order(workbook).map(Arc::from)
+    }
 
     /// Return the sheet order for an external workbook.
     ///

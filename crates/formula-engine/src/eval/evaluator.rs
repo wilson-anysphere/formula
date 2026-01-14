@@ -360,6 +360,15 @@ pub trait ValueResolver {
         None
     }
 
+    /// Return the sheet order for an external workbook as an `Arc` slice.
+    ///
+    /// This mirrors [`crate::ExternalValueProvider::workbook_sheet_names`] and allows resolvers to
+    /// return cached sheet lists without cloning. The default implementation forwards to
+    /// [`ValueResolver::external_sheet_order`].
+    fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
+        self.external_sheet_order(workbook).map(Arc::from)
+    }
+
     /// Return table metadata for an external workbook.
     ///
     /// This is used to resolve external workbook structured references like
@@ -525,7 +534,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 // Fall back to lexicographic ordering when workbook order is unavailable.
                 match (split_external_sheet_key(a_key), split_external_sheet_key(b_key)) {
                     (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
-                        match self.resolver.external_sheet_order(a_wb) {
+                        match self.resolver.workbook_sheet_names(a_wb) {
                             Some(order) => {
                                 let a_idx = order.iter().position(|s| {
                                     formula_model::sheet_name_eq_case_insensitive(s, a_sheet)
@@ -1405,7 +1414,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 // `"[Book.xlsx]Sheet1:Sheet3"`). Expand these into per-sheet external keys using
                 // workbook sheet order supplied by the resolver.
                 let (workbook, start, end) = split_external_sheet_span_key(key)?;
-                let order = self.resolver.external_sheet_order(workbook)?;
+                let order = self.resolver.workbook_sheet_names(workbook)?;
                 let start_idx = order
                     .iter()
                     .position(|s| formula_model::sheet_name_eq_case_insensitive(s, start))?;
@@ -2253,6 +2262,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
         self.resolver.external_sheet_order(workbook)
+    }
+
+    fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
+        self.resolver.workbook_sheet_names(workbook)
     }
 
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
