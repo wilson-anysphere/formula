@@ -321,7 +321,8 @@ Current behavior:
     - Some Excel-produced workbooks use an older FILEPASS layout where the second field is
       `wEncryptionInfo=0x0004`; this is also supported.
   - (best-effort) BIFF5-era XOR obfuscation (Excel 5/95)
-  Unsupported/unknown schemes surface as `ImportError::UnsupportedEncryption(..)`.
+  Unsupported/unknown schemes surface as `ImportError::UnsupportedEncryption(..)` (for example,
+  CryptoAPI AES algorithms are detected but not currently supported).
 
 ---
 
