@@ -536,12 +536,18 @@ pub fn pivot_table_to_engine_config_with_styles(
         .filter_map(|df| {
             let field_idx = df.fld? as usize;
             let source_field_name = cache_def.cache_fields.get(field_idx)?.name.clone();
+            let source_field = cache_field_ref(cache_def, source_field_name.clone());
             let aggregation = map_subtotal(df.subtotal.as_deref());
-            let default_name = format!(
-                "{} of {}",
-                aggregation_display_name(aggregation),
-                &source_field_name
-            );
+            let default_name = {
+                // For Data Model measures, prefer a human-friendly caption without DAX brackets
+                // (Excel displays the measure as `Total Sales`, not `[Total Sales]`, in the default
+                // "Sum of ..." label).
+                let label = match &source_field {
+                    PivotFieldRef::DataModelMeasure(measure) => measure.clone(),
+                    _ => source_field.canonical_name().into_owned(),
+                };
+                format!("{} of {}", aggregation_display_name(aggregation), label)
+            };
             let name = df
                 .name
                 .clone()
@@ -576,7 +582,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                     )))
                 });
             Some(ValueField {
-                source_field: cache_field_ref(cache_def, source_field_name.clone()),
+                source_field,
                 name,
                 aggregation,
                 number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),
@@ -931,6 +937,35 @@ mod tests {
             cfg.value_fields[0].source_field.as_cache_field_name(),
             Some("Table[Column]")
         );
+    }
+
+    #[test]
+    fn data_model_pivots_default_value_field_name_uses_measure_without_brackets() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataFields count="1">
+    <dataField fld="0"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_source_type: PivotCacheSourceType::External,
+            cache_fields: vec![PivotCacheField {
+                name: "[Total Sales]".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.value_fields.len(), 1);
+        assert_eq!(
+            cfg.value_fields[0].source_field,
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+        assert_eq!(cfg.value_fields[0].name, "Sum of Total Sales");
     }
 
     #[test]
