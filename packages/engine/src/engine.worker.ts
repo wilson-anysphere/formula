@@ -147,12 +147,22 @@ function normalizeCellData(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const cell = value as any;
   if (!("input" in cell) && !("value" in cell)) return value;
-  return { ...cell, input: normalizeCellScalar(cell.input), value: normalizeCellScalar(cell.value) };
+  // Mutate in place to avoid allocating a second object per cell.
+  if ("input" in cell) cell.input = normalizeCellScalar(cell.input);
+  if ("value" in cell) cell.value = normalizeCellScalar(cell.value);
+  return cell;
 }
 
 function normalizeRangeData(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map((row) => (Array.isArray(row) ? row.map((cell) => normalizeCellData(cell)) : row));
+  // Mutate in place to avoid allocating a second set of arrays/objects.
+  for (const row of value) {
+    if (!Array.isArray(row)) continue;
+    for (const cell of row) {
+      normalizeCellData(cell);
+    }
+  }
+  return value;
 }
 
 function normalizeCellDataCompact(value: unknown): unknown {
@@ -179,19 +189,22 @@ function normalizeRangeDataCompact(value: unknown): unknown {
 
 function normalizeCellChanges(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map((change) => {
-    if (!change || typeof change !== "object") return change;
+  for (const change of value) {
+    if (!change || typeof change !== "object") continue;
     const obj = change as any;
-    if (!("value" in obj)) return change;
-    return { ...obj, value: normalizeCellScalar(obj.value) };
-  });
+    if (!("value" in obj)) continue;
+    obj.value = normalizeCellScalar(obj.value);
+  }
+  return value;
 }
 
 function normalizePivotCalculation(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const obj = value as any;
   if (!Array.isArray(obj.writes)) return value;
-  return { ...obj, writes: normalizeCellChanges(obj.writes) };
+  // Mutate in place to avoid allocating a new wrapper object.
+  obj.writes = normalizeCellChanges(obj.writes);
+  return obj;
 }
 
 function cloneToPlainData(value: unknown): unknown {
