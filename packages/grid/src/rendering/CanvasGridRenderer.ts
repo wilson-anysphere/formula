@@ -565,6 +565,7 @@ export class CanvasGridRenderer {
   private readonly selectionDirtyRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly fullViewportRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly fullViewportRectListScratch: Rect[] = [this.fullViewportRectScratch];
+  private readonly intersectionRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
   private scheduled = false;
   private renderRafId: number | null = null;
@@ -3382,34 +3383,46 @@ export class CanvasGridRenderer {
     const dataOriginYSheet = headerRows > 0 ? this.scroll.rows.positionOf(headerRows) : 0;
 
     const backgroundTile = this.getBackgroundPatternTile();
-    const backgroundPattern = (() => {
-      if (!backgroundTile) return null;
+    let backgroundPattern: CanvasPattern | null = null;
+    if (backgroundTile) {
       const pattern = gridCtx.createPattern(backgroundTile, "repeat");
-      if (!pattern) return null;
-
-      // If the tile was generated at HiDPI resolution, scale it back down into CSS-pixel space
-      // so the pattern repeats at the expected logical size.
-      //
-      // (When supported, CanvasPattern.setTransform applies in addition to the context's current
-      // transform, so scaling by 1/DPR cancels the HiDPI upscaling that `setupHiDpiCanvas` applies.)
-      const setTransform = (pattern as any).setTransform as ((transform?: DOMMatrix2DInit) => void) | undefined;
-      const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
-      if (typeof setTransform === "function" && dpr !== 1) {
-        try {
-          setTransform.call(pattern, { a: 1 / dpr, b: 0, c: 0, d: 1 / dpr, e: 0, f: 0 });
-        } catch {
-          // Ignore pattern transform failures (best-effort; pattern will still render, just lower quality).
+      if (pattern) {
+        // If the tile was generated at HiDPI resolution, scale it back down into CSS-pixel space
+        // so the pattern repeats at the expected logical size.
+        //
+        // (When supported, CanvasPattern.setTransform applies in addition to the context's current
+        // transform, so scaling by 1/DPR cancels the HiDPI upscaling that `setupHiDpiCanvas` applies.)
+        const setTransform = (pattern as any).setTransform as ((transform?: DOMMatrix2DInit) => void) | undefined;
+        const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
+        if (typeof setTransform === "function" && dpr !== 1) {
+          try {
+            setTransform.call(pattern, { a: 1 / dpr, b: 0, c: 0, d: 1 / dpr, e: 0, f: 0 });
+          } catch {
+            // Ignore pattern transform failures (best-effort; pattern will still render, just lower quality).
+          }
         }
+        backgroundPattern = pattern;
       }
-      return pattern;
-    })();
+    }
 
     for (const quadrant of quadrants) {
       if (quadrant.rect.width <= 0 || quadrant.rect.height <= 0) continue;
       if (quadrant.maxRowExclusive <= quadrant.minRow || quadrant.maxColExclusive <= quadrant.minCol) continue;
 
-      const intersection = intersectRect(region, quadrant.rect);
-      if (!intersection) continue;
+      const intersection = this.intersectionRectScratch;
+      {
+        const x1 = Math.max(region.x, quadrant.rect.x);
+        const y1 = Math.max(region.y, quadrant.rect.y);
+        const x2 = Math.min(region.x + region.width, quadrant.rect.x + quadrant.rect.width);
+        const y2 = Math.min(region.y + region.height, quadrant.rect.y + quadrant.rect.height);
+        const width = x2 - x1;
+        const height = y2 - y1;
+        if (width <= 0 || height <= 0) continue;
+        intersection.x = x1;
+        intersection.y = y1;
+        intersection.width = width;
+        intersection.height = height;
+      }
 
       const sheetX = quadrant.scrollBaseX + (intersection.x - quadrant.originX);
       const sheetY = quadrant.scrollBaseY + (intersection.y - quadrant.originY);
@@ -3563,12 +3576,8 @@ export class CanvasGridRenderer {
     const rowCount = this.getRowCount();
     const colCount = this.getColCount();
 
-    const quadrantRange: CellRange = { startRow, endRow, startCol, endCol };
     const mergedRanges = mergedIndex.getRanges();
-    const quadrantMergedRanges =
-      mergedRanges.length === 0 ? [] : mergedRanges.filter((range) => rangesIntersect(range, quadrantRange));
-
-    const hasMerges = quadrantMergedRanges.length > 0;
+    let hasMerges = false;
 
     // Reuse a single object for merged range lookups to avoid per-cell allocations in hot paths.
     const mergedCellRef = { row: 0, col: 0 };
@@ -4827,7 +4836,10 @@ export class CanvasGridRenderer {
     const diagonalEntries: Array<{ rect: Rect; up?: unknown; down?: unknown }> = [];
 
     // Render merged regions (fill + text) first so we can skip their constituent cells below.
-    for (const range of quadrantMergedRanges) {
+    for (const range of mergedRanges) {
+      if (range.startRow >= endRow || range.endRow <= startRow) continue;
+      if (range.startCol >= endCol || range.endCol <= startCol) continue;
+      hasMerges = true;
       const anchorRow = range.startRow;
       const anchorCol = range.startCol;
       const anchorCell = getCellCached(anchorRow, anchorCol);
@@ -5439,7 +5451,9 @@ export class CanvasGridRenderer {
 
       // 2) Collect merged range borders by drawing the perimeter of the merged rect.
       if (hasMerges) {
-        for (const range of quadrantMergedRanges) {
+        for (const range of mergedRanges) {
+          if (range.startRow >= endRow || range.endRow <= startRow) continue;
+          if (range.startCol >= endCol || range.endCol <= startCol) continue;
           const anchorRow = range.startRow;
           const anchorCol = range.startCol;
           const anchorCell = getCellCached(anchorRow, anchorCol);
