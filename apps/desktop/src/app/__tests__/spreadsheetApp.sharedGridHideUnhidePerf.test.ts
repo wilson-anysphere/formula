@@ -82,9 +82,11 @@ function createRoot(): HTMLElement {
 function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls: number } {
   const originalArray = globalThis.Array;
   const originalMapSet = Map.prototype.set;
+  const originalArrayPush = originalArray.prototype.push;
 
   const MAX_ARRAY_LENGTH = 200_000;
   let mapSetCalls = 0;
+  let pushedElements = 0;
 
   const GuardedArray = new Proxy(originalArray, {
     get(target, prop, receiver) {
@@ -126,6 +128,17 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 
+  // Guard against incremental construction of huge arrays via `arr.push(...)` in a loop.
+  originalArray.prototype.push = function (...args) {
+    pushedElements += args.length;
+    if (pushedElements > MAX_ARRAY_LENGTH) {
+      throw new Error(`Unexpected large Array growth via push: pushedElements=${pushedElements}`);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalArrayPush as any).apply(this, args);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).Array = GuardedArray;
 
@@ -137,6 +150,7 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).Array = originalArray;
     Map.prototype.set = originalMapSet;
+    originalArray.prototype.push = originalArrayPush;
   }
 }
 
