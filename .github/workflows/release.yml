@@ -819,6 +819,14 @@ jobs:
             pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-
             pyodide-v${{ steps.pyodide.outputs.version }}-
 
+      - name: Restore tracked Pyodide metadata files (avoid cache overwriting repo files)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git restore --source=HEAD -- \
+            apps/desktop/public/pyodide/README.md \
+            apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/.gitignore
+
       - name: Ensure Pyodide assets are present (populate cache on miss)
         run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
 
