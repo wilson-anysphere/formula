@@ -64,7 +64,9 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
   style error (so the UI can prompt for a password).
 - The web/WASM engine can decrypt and open Office-encrypted OOXML `.xlsx`/`.xlsm`/`.xlsb` bytes in-memory:
   - WASM entrypoint: `crates/formula-wasm::WasmWorkbook::fromEncryptedXlsxBytes(bytes, password)`
+    (name is historical; decrypted `.xlsb` payloads are supported as well).
   - Worker API: `packages/engine` exposes `EngineClient.loadWorkbookFromEncryptedXlsxBytes(bytes, password)`
+    (name is historical; supports decrypted `.xlsb` payloads too).
   - Decrypted packages are routed based on the inner workbook part:
     - `xl/workbook.xml` → `.xlsx` / `.xlsm`
     - `xl/workbook.bin` → `.xlsb`
