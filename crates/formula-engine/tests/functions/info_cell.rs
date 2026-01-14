@@ -1055,7 +1055,8 @@ fn info_exposes_host_provided_metadata() {
         .unwrap();
 
     // Unset metadata returns Excel `#N/A` for supported-but-unknown keys.
-    // `INFO("origin")` is always available and defaults to the top-left cell.
+    //
+    // `INFO("origin")` is always available and defaults to the top-left cell (`$A$1`).
     engine.recalculate_single_threaded();
     assert_eq!(
         engine.get_cell_value("Sheet1", "A1"),

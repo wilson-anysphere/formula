@@ -190,25 +190,17 @@ pub(crate) fn midb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 }
 
 pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    // In non-DBCS locales, LENB matches LEN (character count).
-    //
-    // Excel's byte-count semantics depend on the workbook locale/codepage; the engine currently
-    // only models them for DBCS codepages. Keep the default (Windows-1252 / en-US) behavior
-    // identical to LEN until full locale-aware semantics are implemented.
+    // Excel's `LENB` only diverges from `LEN` in DBCS locales. For single-byte locales/codepages
+    // (including the engine default: 1252 / en-US), `LENB` behaves like `LEN`.
+    if !is_dbcs_codepage(ctx.text_codepage()) {
+        return call_function(ctx, "LEN", args);
+    }
+
     let codepage = ctx.text_codepage();
     let text = array_lift::eval_arg(ctx, &args[0]);
-    let dbcs_codepage = is_dbcs_codepage(codepage);
     array_lift::lift1(text, |text| {
         let s = text.coerce_to_string_with_ctx(ctx)?;
-        // Excel's `LENB` reports byte counts in DBCS locales/codepages.
-        // For non-DBCS (single-byte) codepages, treat the byte count as the character count so
-        // `LENB` matches `LEN` (consistent with other `*B` aliases like LEFTB/RIGHTB/MIDB today).
-        let count = if dbcs_codepage {
-            encode_bytes_len(codepage, &s)
-        } else {
-            s.chars().count()
-        };
-        Ok(Value::Number(count as f64))
+        Ok(Value::Number(encode_bytes_len(codepage, &s) as f64))
     })
 }
 

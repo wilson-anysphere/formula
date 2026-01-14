@@ -1286,6 +1286,28 @@ impl Engine {
             )));
         }
 
+        // `rename_sheet_*` implements Excel-like rename semantics. When a host does not provide a
+        // separate stable sheet key (i.e. the key matches the old display name), the key should be
+        // updated as well so the old name no longer resolves via the fallback
+        // `display_name -> key` lookup. This prevents operations like pivot refresh (which uses
+        // `ensure_sheet`) from accidentally resurrecting the pre-rename name.
+        let key_name = self
+            .workbook
+            .sheet_key_name(id)
+            .unwrap_or(&old_name)
+            .to_string();
+        if formula_model::sheet_name_eq_case_insensitive(&key_name, &old_name) {
+            let old_key = Workbook::sheet_key(&key_name);
+            let new_key = Workbook::sheet_key(new_name);
+            if let Some(slot) = self.workbook.sheet_keys.get_mut(id) {
+                *slot = Some(new_name.to_string());
+            }
+            if self.workbook.sheet_key_to_id.get(&old_key) == Some(&id) {
+                self.workbook.sheet_key_to_id.remove(&old_key);
+            }
+            self.workbook.sheet_key_to_id.insert(new_key, id);
+        }
+
         // Keep stored pivot definitions aligned with sheet renames. Pivot definitions store sheet
         // names (not stable ids) and pivot refresh uses `set_cell_value`, which would otherwise
         // recreate the *old* sheet name via `ensure_sheet`.
