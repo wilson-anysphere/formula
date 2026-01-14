@@ -6279,8 +6279,9 @@ export class SpreadsheetApp {
       }
     }
     const view = this.document.getSheetView(key) as any;
-    const id = view?.backgroundImageId;
-    return typeof id === "string" && id.trim() !== "" ? id : null;
+    const idRaw = view?.backgroundImageId ?? view?.background_image_id;
+    const id = typeof idRaw === "string" ? idRaw.trim() : "";
+    return id ? id : null;
   }
 
   /**
@@ -6750,10 +6751,13 @@ export class SpreadsheetApp {
 
   private syncActiveSheetBackgroundImage(): void {
     const doc: any = this.document as any;
-    const desiredIdRaw =
-      typeof doc.getSheetBackgroundImageId === "function"
-        ? doc.getSheetBackgroundImageId(this.sheetId)
-        : (this.document.getSheetView(this.sheetId) as any)?.backgroundImageId;
+    const desiredIdRaw = (() => {
+      if (typeof doc.getSheetBackgroundImageId === "function") {
+        return doc.getSheetBackgroundImageId(this.sheetId);
+      }
+      const view: any = this.document.getSheetView(this.sheetId) as any;
+      return view?.backgroundImageId ?? view?.background_image_id;
+    })();
     const desiredId = typeof desiredIdRaw === "string" && desiredIdRaw.trim() !== "" ? desiredIdRaw : null;
     if (desiredId === this.activeSheetBackgroundImageId && this.activeSheetBackgroundBitmap) {
       return;
