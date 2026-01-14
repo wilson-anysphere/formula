@@ -635,6 +635,48 @@ fn canonicalize_and_localize_additional_function_translations_for_es_es() {
 }
 
 #[test]
+fn true_false_functions_are_case_insensitive() {
+    for (locale, true_variants, false_variants, localized_true, localized_false) in [
+        (
+            &locale::DE_DE,
+            ["=wahr()", "=Wahr()", "=WAHR()"],
+            ["=falsch()", "=Falsch()", "=FALSCH()"],
+            "=WAHR()",
+            "=FALSCH()",
+        ),
+        (
+            &locale::FR_FR,
+            ["=vrai()", "=Vrai()", "=VRAI()"],
+            ["=faux()", "=Faux()", "=FAUX()"],
+            "=VRAI()",
+            "=FAUX()",
+        ),
+        (
+            &locale::ES_ES,
+            ["=verdadero()", "=Verdadero()", "=VERDADERO()"],
+            ["=falso()", "=Falso()", "=FALSO()"],
+            "=VERDADERO()",
+            "=FALSO()",
+        ),
+    ] {
+        for src in true_variants {
+            assert_eq!(locale::canonicalize_formula(src, locale).unwrap(), "=TRUE()");
+        }
+        for src in false_variants {
+            assert_eq!(locale::canonicalize_formula(src, locale).unwrap(), "=FALSE()");
+        }
+
+        // Localization should also accept canonical function names case-insensitively and emit the
+        // normalized spelling from the locale TSV.
+        assert_eq!(locale::localize_formula("=true()", locale).unwrap(), localized_true);
+        assert_eq!(
+            locale::localize_formula("=False()", locale).unwrap(),
+            localized_false
+        );
+    }
+}
+
+#[test]
 fn localized_boolean_keywords_are_not_translated_inside_structured_refs() {
     // `WAHR` is the de-DE TRUE keyword, but table names can still be identifiers; separators
     // inside structured refs should never be touched by translation.
