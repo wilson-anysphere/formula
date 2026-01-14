@@ -83,17 +83,6 @@ export class TauriWorkbookBackend implements WorkbookBackend {
   }
 
   /**
-   * Desktop-only: fetch chart models parsed from the opened XLSX package.
-   *
-   * These are JSON-serialized Rust `formula_model::charts::ChartModel` values keyed by a
-   * stable `chart_id` (recommended: `${sheetId}:${drawingObjectId}`).
-   */
-  async listImportedChartModels(): Promise<unknown[]> {
-    const payload = await this.invoke("list_imported_chart_models");
-    return (payload as unknown[]) ?? [];
-  }
-
-  /**
    * Desktop-only: fetch chart drawing objects parsed from the opened XLSX package.
    *
    * Each entry includes the DrawingML anchor (for positioning) and may include a parsed chart
