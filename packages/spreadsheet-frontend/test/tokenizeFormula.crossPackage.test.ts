@@ -95,6 +95,19 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(consumerRefs).toEqual(sharedRefs);
   });
 
+  it("matches between packages for multi-column structured references", () => {
+    const input = "=SUM(Table1[[#All],[Col1],[Col2]])";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["Table1[[#All],[Col1],[Col2]]"]);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
+
   it("matches between packages for structured refs followed by strings containing `]]`", () => {
     const input = '=SUM(Table1[[#All],[Amount]] & "]]", 1)';
     const sharedRefs = sharedTokenizeFormula(input)

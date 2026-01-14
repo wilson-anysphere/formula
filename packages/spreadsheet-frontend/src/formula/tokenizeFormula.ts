@@ -1,5 +1,3 @@
-import { parseStructuredReferenceText } from "./structuredReferences.ts";
-
 export type FormulaTokenType =
   | "whitespace"
   | "operator"
@@ -597,8 +595,6 @@ function tryReadStructuredReference(input: string, start: number): { text: strin
   const end = findBracketEnd(input, i);
   if (!end) return null;
   const text = input.slice(start, end);
-  // Only claim this token when it matches a supported structured ref pattern.
-  if (!parseStructuredReferenceText(text)) return null;
   return { text, end };
 }
 
@@ -622,9 +618,7 @@ function tryReadImplicitStructuredReference(input: string, start: number): { tex
   // containing `]]` (e.g. `... & "]]"`).
   const end = findBracketEnd(input, start);
   if (!end) return null;
-  const text = input.slice(start, end);
-  if (!parseStructuredReferenceText(text)) return null;
-  return { text, end };
+  return { text: input.slice(start, end), end };
 }
 
 export function tokenizeFormula(input: string): FormulaToken[] {

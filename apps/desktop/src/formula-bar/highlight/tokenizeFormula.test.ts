@@ -125,6 +125,15 @@ describe("tokenizeFormula", () => {
     });
   });
 
+  it("tokenizes multi-column structured references as a single reference token", () => {
+    const input = "=SUM(Table1[[#All],[Col1],[Col2]])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["Table1[[#All],[Col1],[Col2]]"]);
+    // Ensure `#All` is not mis-tokenized as an error literal.
+    expect(tokens.filter((t) => t.type === "error").map((t) => t.text)).toEqual([]);
+  });
+
   it("tokenizes structured references with selectors (#Headers/#Data) as single tokens", () => {
     const headers = "=SUM(Table1[[#Headers],[Amount]])";
     const headerTokens = tokenizeFormula(headers);
