@@ -585,7 +585,8 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                     }
                     b"encryptedKey" if in_password_key_encryptor => {
                         in_encrypted_key = true;
-                        tmp_password_attrs = Some(parse_password_key_encryptor_attrs(&e, &reader)?);
+                        tmp_password_attrs =
+                            Some(parse_password_key_encryptor_attrs(&e, &reader)?);
 
                         // Some producers (e.g. `ms_offcrypto_writer`) encode the verifier/key
                         // blobs as base64 attributes on the `<encryptedKey/>` element instead of
@@ -771,9 +772,9 @@ fn local_name(name: &[u8]) -> &[u8] {
     }
 }
 
-fn is_password_key_encryptor(
+fn is_password_key_encryptor<B: std::io::BufRead>(
     e: &quick_xml::events::BytesStart<'_>,
-    reader: &Reader<impl std::io::BufRead>,
+    reader: &Reader<B>,
 ) -> Result<bool, OfficeCryptoError> {
     const PASSWORD_URI: &str = "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
     for attr in e.attributes() {
@@ -791,9 +792,9 @@ fn is_password_key_encryptor(
     Ok(false)
 }
 
-fn parse_key_data_attrs(
+fn parse_key_data_attrs<B: std::io::BufRead>(
     e: &quick_xml::events::BytesStart<'_>,
-    reader: &Reader<impl std::io::BufRead>,
+    reader: &Reader<B>,
 ) -> Result<AgileKeyData, OfficeCryptoError> {
     let mut salt_value: Option<Vec<u8>> = None;
     let mut block_size: Option<usize> = None;
@@ -860,9 +861,9 @@ fn parse_key_data_attrs(
     })
 }
 
-fn parse_data_integrity_attrs(
+fn parse_data_integrity_attrs<B: std::io::BufRead>(
     e: &quick_xml::events::BytesStart<'_>,
-    reader: &Reader<impl std::io::BufRead>,
+    reader: &Reader<B>,
 ) -> Result<AgileDataIntegrity, OfficeCryptoError> {
     let mut encrypted_hmac_key: Option<Vec<u8>> = None;
     let mut encrypted_hmac_value: Option<Vec<u8>> = None;
@@ -901,9 +902,9 @@ fn parse_data_integrity_attrs(
     })
 }
 
-fn parse_encrypted_key_value_attrs(
+fn parse_encrypted_key_value_attrs<B: std::io::BufRead>(
     e: &quick_xml::events::BytesStart<'_>,
-    reader: &Reader<impl std::io::BufRead>,
+    reader: &Reader<B>,
 ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>), OfficeCryptoError> {
     let mut encrypted_verifier_hash_input: Option<Vec<u8>> = None;
     let mut encrypted_verifier_hash_value: Option<Vec<u8>> = None;
@@ -960,9 +961,9 @@ struct AgilePasswordAttrs {
     cipher_chaining: String,
 }
 
-fn parse_password_key_encryptor_attrs(
+fn parse_password_key_encryptor_attrs<B: std::io::BufRead>(
     e: &quick_xml::events::BytesStart<'_>,
-    reader: &Reader<impl std::io::BufRead>,
+    reader: &Reader<B>,
 ) -> Result<AgilePasswordAttrs, OfficeCryptoError> {
     let mut salt_value: Option<Vec<u8>> = None;
     let mut block_size: Option<usize> = None;

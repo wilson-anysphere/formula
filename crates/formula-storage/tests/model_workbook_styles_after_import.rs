@@ -20,7 +20,6 @@ fn export_model_workbook_includes_styles_added_after_import() {
                 formula: None,
                 phonetic: None,
                 style_id: existing_style_id,
-                phonetic: None,
             },
         );
     }
