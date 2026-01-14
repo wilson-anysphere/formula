@@ -108,6 +108,52 @@ fn ast_encoder_roundtrips_implicit_intersection_on_area() {
 }
 
 #[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_column_range() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context_ast("=@A:A", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // `@A:A` should encode as a value-class `PtgArea` spanning all rows.
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x45, // PtgAreaV
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0
+            0xFF, 0xFF, 0x0F, 0x00, // rowLast=1048575
+            0x00, 0x80, // colFirst=A (relative column, absolute row)
+            0x00, 0x80, // colLast=A (relative column, absolute row)
+        ]
+    );
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "@A:A");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_row_range() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context_ast("=@1:1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // `@1:1` should encode as a value-class `PtgArea` spanning all columns.
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x45, // PtgAreaV
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0 (row 1)
+            0x00, 0x00, 0x00, 0x00, // rowLast=0 (row 1)
+            0x00, 0x40, // colFirst=A (absolute column, relative row)
+            0xFF, 0x7F, // colLast=XFD (absolute column, relative row)
+        ]
+    );
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "@1:1");
+}
+
+#[test]
 fn ast_encoder_roundtrips_3d_area_ref() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
@@ -118,6 +164,172 @@ fn ast_encoder_roundtrips_3d_area_ref() {
 
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "Sheet2!A1:B2");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_sheet_qualified_column_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded =
+        encode_rgce_with_context_ast("=@Sheet2!A:A", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x5B, // PtgArea3dV
+            0x00, 0x00, // ixti=0
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0
+            0xFF, 0xFF, 0x0F, 0x00, // rowLast=1048575
+            0x00, 0x80, // colFirst=A (relative column, absolute row)
+            0x00, 0x80, // colLast=A (relative column, absolute row)
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@Sheet2!A:A");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_sheet_qualified_row_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded =
+        encode_rgce_with_context_ast("=@Sheet2!1:1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x5B, // PtgArea3dV
+            0x00, 0x00, // ixti=0
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0 (row 1)
+            0x00, 0x00, 0x00, 0x00, // rowLast=0 (row 1)
+            0x00, 0x40, // colFirst=A (absolute column, relative row)
+            0xFF, 0x7F, // colLast=XFD (absolute column, relative row)
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@Sheet2!1:1");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_sheet_range_column_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded_unquoted =
+        encode_rgce_with_context_ast("=@Sheet1:Sheet3!A:A", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded_unquoted.rgcb.is_empty());
+
+    let encoded_quoted =
+        encode_rgce_with_context_ast("=@'Sheet1:Sheet3'!A:A", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded_quoted.rgcb.is_empty());
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    assert_eq!(
+        encoded_unquoted.rgce,
+        vec![
+            0x5B, // PtgArea3dV
+            0x01, 0x00, // ixti=1
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0
+            0xFF, 0xFF, 0x0F, 0x00, // rowLast=1048575
+            0x00, 0x80, // colFirst=A (relative column, absolute row)
+            0x00, 0x80, // colLast=A (relative column, absolute row)
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'Sheet1:Sheet3'!A:A");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_sheet_range_row_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded_unquoted =
+        encode_rgce_with_context_ast("=@Sheet1:Sheet3!1:1", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded_unquoted.rgcb.is_empty());
+
+    let encoded_quoted =
+        encode_rgce_with_context_ast("=@'Sheet1:Sheet3'!1:1", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded_quoted.rgcb.is_empty());
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    assert_eq!(
+        encoded_unquoted.rgce,
+        vec![
+            0x5B, // PtgArea3dV
+            0x01, 0x00, // ixti=1
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0 (row 1)
+            0x00, 0x00, 0x00, 0x00, // rowLast=0 (row 1)
+            0x00, 0x40, // colFirst=A (absolute column, relative row)
+            0xFF, 0x7F, // colLast=XFD (absolute column, relative row)
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'Sheet1:Sheet3'!1:1");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_external_workbook_sheet_range_column_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsx", "SheetA", "SheetB", 0);
+
+    let encoded_unquoted = encode_rgce_with_context_ast(
+        "=@[Book2.xlsx]SheetA:SheetB!A:A",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert!(encoded_unquoted.rgcb.is_empty());
+
+    let encoded_quoted = encode_rgce_with_context_ast(
+        "=@'[Book2.xlsx]SheetA:SheetB'!A:A",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert!(encoded_quoted.rgcb.is_empty());
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'[Book2.xlsx]SheetA:SheetB'!A:A");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_external_workbook_sheet_range_row_range() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsx", "SheetA", "SheetB", 0);
+
+    let encoded_unquoted = encode_rgce_with_context_ast(
+        "=@[Book2.xlsx]SheetA:SheetB!1:1",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert!(encoded_unquoted.rgcb.is_empty());
+
+    let encoded_quoted = encode_rgce_with_context_ast(
+        "=@'[Book2.xlsx]SheetA:SheetB'!1:1",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert!(encoded_quoted.rgcb.is_empty());
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@'[Book2.xlsx]SheetA:SheetB'!1:1");
 }
 
 #[test]
