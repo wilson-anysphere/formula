@@ -165,4 +165,37 @@ describe("FormulaBarModel", () => {
       },
     ]);
   });
+
+  it("returns explanations for AI-related error codes", () => {
+    const model = new FormulaBarModel();
+    model.setActiveCell({ address: "A1", input: "", value: "#GETTING_DATA" });
+    expect(model.errorExplanation()?.title).toBe("Loading");
+
+    model.setActiveCell({ address: "A1", input: "", value: "#DLP!" });
+    expect(model.errorExplanation()?.title).toBe("Blocked by data loss prevention");
+
+    model.setActiveCell({ address: "A1", input: "", value: "#AI!" });
+    expect(model.errorExplanation()?.title).toBe("AI error");
+  });
+
+  it("returns explanations for newer Excel error codes", () => {
+    const model = new FormulaBarModel();
+    model.setActiveCell({ address: "A1", input: "", value: "#CALC!" });
+    expect(model.errorExplanation()?.title).toBe("Calculation error");
+
+    model.setActiveCell({ address: "A1", input: "", value: "#CONNECT!" });
+    expect(model.errorExplanation()?.title).toBe("Connection error");
+
+    model.setActiveCell({ address: "A1", input: "", value: "#FIELD!" });
+    expect(model.errorExplanation()?.title).toBe("Invalid field");
+
+    model.setActiveCell({ address: "A1", input: "", value: "#BLOCKED!" });
+    expect(model.errorExplanation()?.title).toBe("Blocked");
+
+    model.setActiveCell({ address: "A1", input: "", value: "#UNKNOWN!" });
+    expect(model.errorExplanation()?.title).toBe("Unknown error");
+
+    model.setActiveCell({ address: "A1", input: "", value: "#NULL!" });
+    expect(model.errorExplanation()?.title).toBe("Null intersection");
+  });
 });
