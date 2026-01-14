@@ -1012,6 +1012,8 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
   const rawXml = readOptionalString(pick(kindJson, ["rawXml", "raw_xml"]));
   const labelRaw = readOptionalString(pick(kindJson, ["label"]));
   const label = labelRaw && labelRaw.trim() !== "" ? labelRaw : undefined;
+  const looksLikeChartGraphicFrame =
+    typeof rawXml === "string" && rawXml.includes("drawingml/2006/chart");
 
   switch (type) {
     case "image": {
@@ -1028,13 +1030,16 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
       // Mirror `convertModelDrawingObjectKind` behavior: some graphicFrames are not charts
       // (e.g. SmartArt) and surface with `chartId/relId = "unknown"`. Treat those as unknown
       // so placeholder labels can use `graphicFramePlaceholderLabel(...)`.
-      if (!chartId || chartId.trim() === "" || chartId === "unknown") {
+      if ((!chartId || chartId.trim() === "" || chartId === "unknown") && !looksLikeChartGraphicFrame) {
         const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
         return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
       }
 
       const derived = label ?? extractDrawingObjectName(rawXml) ?? undefined;
-      return { type: "chart", chartId, ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
+      // Allow `chartId` to be missing/unknown so the UI still treats the object as a chart
+      // (disables rotation handle, uses chart placeholder style).
+      const normalizedChartId = chartId && chartId.trim() !== "" && chartId !== "unknown" ? chartId : undefined;
+      return { type: "chart", ...(normalizedChartId ? { chartId: normalizedChartId } : {}), ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
     }
     case "unknown":
       {
@@ -1043,12 +1048,13 @@ function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKin
       }
     case "chartplaceholder": {
       const chartId = readOptionalString(pick(kindJson, ["chartId", "chart_id", "relId", "rel_id"]));
-      if (!chartId || chartId.trim() === "" || chartId === "unknown") {
+      if ((!chartId || chartId.trim() === "" || chartId === "unknown") && !looksLikeChartGraphicFrame) {
         const derived = label ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined;
         return { type: "unknown", ...(rawXml ? { rawXml } : {}), ...(derived ? { label: derived } : {}) };
       }
       const derived = label ?? extractDrawingObjectName(rawXml) ?? undefined;
-      return { type: "chart", chartId, ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
+      const normalizedChartId = chartId && chartId.trim() !== "" && chartId !== "unknown" ? chartId : undefined;
+      return { type: "chart", ...(normalizedChartId ? { chartId: normalizedChartId } : {}), ...(derived ? { label: derived } : {}), ...(rawXml ? { rawXml } : {}) };
     }
     default:
       return null;
@@ -1134,10 +1140,17 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           const size = convertDocumentDrawingSizeToEmu(pick(raw, ["size"]));
           const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
           if (anchor) {
+            const patchedKind: DrawingObjectKind =
+              kind.type === "chart" &&
+              (!kind.chartId || kind.chartId.trim() === "" || kind.chartId === "unknown") &&
+              sheetId &&
+              sheetId.trim() !== ""
+                ? { ...kind, chartId: `${sheetId}:${String(id)}` }
+                : kind;
             const derivedTransform =
               transform ??
               (() => {
-                if (kind.type === "image") {
+                if (patchedKind.type === "image") {
                   const picXml = preserved?.["xlsx.pic_xml"];
                   if (typeof picXml !== "string" || picXml.length === 0) return undefined;
                   const parsed = parseDrawingTransformFromRawXml(picXml);
@@ -1145,14 +1158,14 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
                   return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
                 }
 
-                const rawXml = (kind as any).rawXml ?? (kind as any).raw_xml;
+                const rawXml = (patchedKind as any).rawXml ?? (patchedKind as any).raw_xml;
                 if (typeof rawXml !== "string" || rawXml.length === 0) return undefined;
                 const parsed = parseDrawingTransformFromRawXml(rawXml);
                 if (!parsed) return undefined;
                 return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
               })();
 
-            const obj: DrawingObject = { id, kind, anchor, zOrder, ...(size ? { size } : {}) };
+            const obj: DrawingObject = { id, kind: patchedKind, anchor, zOrder, ...(size ? { size } : {}) };
             if (preserved) obj.preserved = preserved;
             if (derivedTransform) obj.transform = derivedTransform;
             out.push(obj);
@@ -1187,11 +1200,18 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
                 !(typeof (modelKind as any).label === "string" && String((modelKind as any).label).trim() !== "")
                   ? ({ ...modelKind, label } as DrawingObjectKind)
                   : modelKind;
+              const patchedKindWithChartId: DrawingObjectKind =
+                patchedKind.type === "chart" &&
+                (!patchedKind.chartId || patchedKind.chartId.trim() === "" || patchedKind.chartId === "unknown") &&
+                sheetId &&
+                sheetId.trim() !== ""
+                  ? { ...patchedKind, chartId: `${sheetId}:${String(id)}` }
+                  : patchedKind;
 
               const derivedTransform =
                 transform ??
                 (() => {
-                  if (patchedKind.type === "image") {
+                  if (patchedKindWithChartId.type === "image") {
                     const picXml = preserved?.["xlsx.pic_xml"];
                     if (typeof picXml !== "string" || picXml.length === 0) return undefined;
                     const parsed = parseDrawingTransformFromRawXml(picXml);
@@ -1199,14 +1219,14 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
                     return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
                   }
 
-                  const rawXml = (patchedKind as any).rawXml ?? (patchedKind as any).raw_xml;
+                  const rawXml = (patchedKindWithChartId as any).rawXml ?? (patchedKindWithChartId as any).raw_xml;
                   if (typeof rawXml !== "string" || rawXml.length === 0) return undefined;
                   const parsed = parseDrawingTransformFromRawXml(rawXml);
                   if (!parsed) return undefined;
                   return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
                 })();
 
-              const obj: DrawingObject = { id, kind: patchedKind, anchor, zOrder, ...(size ? { size } : {}) };
+              const obj: DrawingObject = { id, kind: patchedKindWithChartId, anchor, zOrder, ...(size ? { size } : {}) };
               if (preserved) obj.preserved = preserved;
               if (derivedTransform) obj.transform = derivedTransform;
               out.push(obj);
