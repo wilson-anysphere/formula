@@ -339,8 +339,9 @@ This section documents the “wiring points” for hosts.
     - `null` / empty string clears string values
     - `memavail` / `totmem` must be finite numbers
 - Per-sheet origin cell (`INFO("origin")`, preferred):
-  - `EngineClient.setSheetOrigin(sheet, originA1)`
+  - `EngineClient.setSheetOrigin(sheet, originA1 | null)`
   - `originA1` should be an in-bounds A1 address (`"C5"` or `"$C$5"`); the engine returns absolute A1 with `$`.
+  - Passing `null` (or `""` via the worker RPC layer) clears the origin and restores the default `"$A$1"`.
   - Compatibility note: `INFO("origin")` also supports a legacy string-based fallback (`EngineClient.setInfoOrigin` / `EngineClient.setInfoOriginForSheet`). If the value parses as A1, it is normalized to absolute A1; otherwise it is returned verbatim.
 
 - Workbook file metadata (`CELL("filename")`, `INFO("directory")` fallback):
