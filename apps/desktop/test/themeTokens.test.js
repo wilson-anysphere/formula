@@ -161,6 +161,22 @@ test("space tokens stay consistent across themes (no accidental overrides)", () 
   }
 });
 
+test("font tokens stay consistent across themes (no accidental overrides)", () => {
+  const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
+
+  for (const token of ["font-sans", "font-mono"]) {
+    const values = collectVarAssignments(css, token);
+    assert.ok(values.length > 0, `Expected tokens.css to define --${token}`);
+    const unique = new Set(values);
+    assert.equal(
+      unique.size,
+      1,
+      `Expected --${token} to stay consistent across themes (got ${[...unique].join(" | ")})`,
+    );
+  }
+});
+
 test("core design tokens (--space-*, --radius*, --font-*) are only defined in tokens.css", () => {
   const srcRoot = path.join(__dirname, "..", "src");
   const files = walkCssFiles(srcRoot).filter((file) => {
