@@ -73,4 +73,6 @@ test("tokens.css uses tight radius tokens (4px/3px) per mockups", () => {
   const vars = parseVarsFromBlock(rootMatch[1]);
   assert.equal(vars["radius"], "4px");
   assert.equal(vars["radius-sm"], "3px");
+  assert.equal(vars["radius-xs"], "2px");
+  assert.equal(vars["radius-pill"], "999px");
 });
