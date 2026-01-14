@@ -19,12 +19,13 @@ Excel “password-to-open” OOXML workbooks (e.g. `.xlsx`, `.xlsm`, `.xlsb`) ar
 on disk. They are OLE/CFB (Compound File Binary) containers with `EncryptionInfo` and
 `EncryptedPackage` streams (MS-OFFCRYPTO). Because the round-trip corpus is collected by
 `xlsx-diff::collect_fixture_paths` and then opened as a ZIP archive, encrypted OOXML fixtures must
-live outside `fixtures/xlsx/`.
+be **excluded** from this corpus (they would fail ZIP parsing).
 
 Encrypted workbook fixtures live under:
 
 - `fixtures/encrypted/` (see `fixtures/encrypted/README.md`; includes real-world encrypted `.xlsx`/`.xlsb`/`.xls` samples used by end-to-end tests)
 - `fixtures/encrypted/ooxml/` (see `fixtures/encrypted/ooxml/README.md`; vendored encrypted `.xlsx`/`.xlsm` corpus including Agile + Standard fixtures, empty-password + Unicode-password samples, macro-enabled `.xlsm` fixtures, plus `*-large.xlsx` multi-segment variants)
+- `fixtures/xlsx/encrypted/` (optional/legacy; encrypted OOXML samples co-located with this corpus, but **intentionally skipped** by `xlsx-diff::collect_fixture_paths`)
 
 For background on how Excel encryption works (and how it differs from workbook/worksheet
 protection), see `docs/21-encrypted-workbooks.md`.
