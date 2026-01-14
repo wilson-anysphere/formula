@@ -54,6 +54,14 @@ class GenerateCasesVolatileValidationTests(unittest.TestCase):
 
         # Explicit override should allow volatile functions.
         module._validate_against_function_catalog(bad_payload_case, allow_volatile=True)
+        # But allow_volatile can be scoped to a specific set when desired.
+        with self.assertRaises(SystemExit) as ctx:
+            module._validate_against_function_catalog(
+                bad_payload_case,
+                allow_volatile=True,
+                allowed_volatile={"CELL", "INFO"},
+            )
+        self.assertIn("volatile functions outside the allowed set", str(ctx.exception))
 
         # Also reject volatile functions in input cell formulas.
         bad_payload_input = dict(payload)
@@ -73,6 +81,13 @@ class GenerateCasesVolatileValidationTests(unittest.TestCase):
         self.assertIn("RAND", msg)
 
         module._validate_against_function_catalog(bad_payload_input, allow_volatile=True)
+        with self.assertRaises(SystemExit) as ctx:
+            module._validate_against_function_catalog(
+                bad_payload_input,
+                allow_volatile=True,
+                allowed_volatile={"CELL", "INFO"},
+            )
+        self.assertIn("volatile functions outside the allowed set", str(ctx.exception))
 
 
 if __name__ == "__main__":

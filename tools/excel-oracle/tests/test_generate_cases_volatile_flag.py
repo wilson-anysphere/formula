@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -10,6 +11,25 @@ from pathlib import Path
 
 
 class GenerateCasesVolatileFlagTests(unittest.TestCase):
+    def _load_generator_module(self, *, repo_root: Path):
+        generator_path = repo_root / "tools/excel-oracle/generate_cases.py"
+        self.assertTrue(generator_path.is_file(), f"generate_cases.py not found at {generator_path}")
+
+        # `generate_cases.py` imports `case_generators` as a top-level package, so ensure the script
+        # directory is importable.
+        sys_path_before = list(sys.path)
+        sys.path.insert(0, str(generator_path.parent))
+        try:
+            spec = importlib.util.spec_from_file_location("_excel_oracle_generate_cases", generator_path)
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+        finally:
+            sys.path[:] = sys_path_before
+        return module
+
     def test_include_volatile_generates_deterministic_superset(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         gen_py = repo_root / "tools/excel-oracle/generate_cases.py"
@@ -74,7 +94,29 @@ class GenerateCasesVolatileFlagTests(unittest.TestCase):
                 f"Unexpected extra case IDs in --include-volatile mode: {sorted(list(extra_ids))[:10]}",
             )
 
+            # Ensure the corpus does not accidentally grow additional volatile functions over time
+            # without an explicit opt-in.
+            module = self._load_generator_module(repo_root=repo_root)
+            used_any: set[str] = set()
+            for case in volatile_cases:
+                if not isinstance(case, dict):
+                    continue
+                used_any.update(module._extract_function_names(case.get("formula")))
+                inputs = case.get("inputs", [])
+                if isinstance(inputs, list):
+                    for cell_input in inputs:
+                        if isinstance(cell_input, dict):
+                            used_any.update(module._extract_function_names(cell_input.get("formula")))
+
+            catalog = json.loads((repo_root / "shared" / "functionCatalog.json").read_text(encoding="utf-8"))
+            volatile = {fn.get("name", "").upper() for fn in catalog.get("functions", []) if isinstance(fn, dict) and fn.get("volatility") == "volatile"}
+            present_volatile = sorted(used_any.intersection(volatile))
+            self.assertEqual(
+                set(present_volatile),
+                {"CELL", "INFO"},
+                f"Unexpected volatile functions present in --include-volatile corpus: {present_volatile}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
-

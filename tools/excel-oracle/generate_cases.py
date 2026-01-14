@@ -211,7 +211,12 @@ def _extract_function_names(formula: str | None) -> list[str]:
     return out
 
 
-def _validate_against_function_catalog(payload: dict[str, Any], *, allow_volatile: bool = False) -> None:
+def _validate_against_function_catalog(
+    payload: dict[str, Any],
+    *,
+    allow_volatile: bool = False,
+    allowed_volatile: set[str] | None = None,
+) -> None:
     """
     Keep the oracle corpus aligned with `shared/functionCatalog.json`.
 
@@ -286,11 +291,19 @@ def _validate_against_function_catalog(payload: dict[str, Any], *, allow_volatil
         )
 
     present_volatile = sorted(catalog_volatile.intersection(used_any))
-    if present_volatile and not allow_volatile:
-        raise SystemExit(
-            "Oracle corpus must not include volatile functions (non-deterministic). "
-            f"Found: {', '.join(present_volatile)}"
-        )
+    if present_volatile:
+        if not allow_volatile:
+            raise SystemExit(
+                "Oracle corpus must not include volatile functions (non-deterministic). "
+                f"Found: {', '.join(present_volatile)}"
+            )
+        if allowed_volatile is not None:
+            disallowed = sorted(set(present_volatile).difference(allowed_volatile))
+            if disallowed:
+                raise SystemExit(
+                    "Oracle corpus includes volatile functions outside the allowed set. "
+                    f"Disallowed: {', '.join(disallowed)}"
+                )
 
 
 def generate_cases(*, include_volatile: bool = False) -> dict[str, Any]:
@@ -452,7 +465,11 @@ def main() -> int:
             )
 
     payload = generate_cases(include_volatile=args.include_volatile)
-    _validate_against_function_catalog(payload, allow_volatile=args.include_volatile)
+    _validate_against_function_catalog(
+        payload,
+        allow_volatile=args.include_volatile,
+        allowed_volatile={"CELL", "INFO"} if args.include_volatile else None,
+    )
 
     # Keep the corpus bounded so it remains runnable in real Excel (COM automation) and in CI.
     max_cases = 2000
