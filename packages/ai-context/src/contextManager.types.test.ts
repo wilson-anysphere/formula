@@ -98,6 +98,22 @@ void schema;
 const dlp: DlpOptions = { documentId: "doc-1", policy: {} };
 void dlp;
 
+// DlpOptionsInput requires a document id (camelCase or snake_case).
+// @ts-expect-error - documentId/document_id is required when using DlpOptionsInput.
+const _dlpMissingId: DlpOptionsInput = { policy: {} };
+const _dlpCamel: DlpOptionsInput = { documentId: "doc-1", policy: {} };
+const _dlpSnake: DlpOptionsInput = { document_id: "doc-1", policy: {} };
+void _dlpCamel;
+void _dlpSnake;
+
+// auditLogger can be sync or async.
+const _dlpAsyncLogger: DlpOptionsInput = {
+  documentId: "doc-1",
+  policy: {},
+  auditLogger: { log: async () => {} },
+};
+void _dlpAsyncLogger;
+
 // Workbook RAG types are also checked (retrieval-only path).
 await cm.buildWorkbookContext({
   workbook: { id: "wb-1", sheets: [] },

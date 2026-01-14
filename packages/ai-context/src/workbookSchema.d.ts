@@ -11,7 +11,6 @@ export type WorkbookSchemaRectInput =
   | WorkbookSchemaRect
   | { startRow: number; startCol: number; endRow: number; endCol: number }
   | { start: { row: number; col: number }; end: { row: number; col: number } };
-
 export interface WorkbookSchemaSheet {
   name: string;
 }
@@ -51,7 +50,7 @@ export type WorkbookSchemaSheetInput = WorkbookSchemaKeyedSheetObjectInput | unk
 export type WorkbookSchemaSheets =
   | ReadonlyArray<WorkbookSchemaSheetObjectInput | string>
   | Set<WorkbookSchemaSheetObjectInput | string>
-  | Map<any, WorkbookSchemaSheetInput>
+  | Map<unknown, WorkbookSchemaSheetInput>
   | Record<string, WorkbookSchemaSheetInput>;
 
 export interface WorkbookSchemaTable {
@@ -95,7 +94,7 @@ export interface WorkbookSchemaKeyedTableObjectInput {
 export type WorkbookSchemaTables =
   | ReadonlyArray<WorkbookSchemaTableObjectInput>
   | Set<WorkbookSchemaTableObjectInput>
-  | Map<any, WorkbookSchemaKeyedTableObjectInput>
+  | Map<unknown, WorkbookSchemaKeyedTableObjectInput>
   | Record<string, WorkbookSchemaKeyedTableObjectInput>;
 
 export interface WorkbookSchemaNamedRangeObjectInput {
@@ -113,7 +112,7 @@ export interface WorkbookSchemaKeyedNamedRangeObjectInput {
 export type WorkbookSchemaNamedRanges =
   | ReadonlyArray<WorkbookSchemaNamedRangeObjectInput>
   | Set<WorkbookSchemaNamedRangeObjectInput>
-  | Map<any, WorkbookSchemaKeyedNamedRangeObjectInput>
+  | Map<unknown, WorkbookSchemaKeyedNamedRangeObjectInput>
   | Record<string, WorkbookSchemaKeyedNamedRangeObjectInput>;
 
 export function extractWorkbookSchema(
