@@ -8,7 +8,8 @@ fn opens_fixture_from_reader_bytes() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
     let bytes = std::fs::read(path).expect("read fixture bytes");
 
-    let wb = XlsbWorkbook::open_from_reader(Cursor::new(bytes)).expect("open xlsb from reader");
+    let wb = XlsbWorkbook::open_from_reader(Cursor::new(bytes), OpenOptions::default())
+        .expect("open xlsb from reader");
     assert_eq!(wb.sheet_metas().len(), 1);
     assert!(wb.preserved_parts().contains_key("[Content_Types].xml"));
 

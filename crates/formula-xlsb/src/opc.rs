@@ -242,12 +242,7 @@ impl XlsbWorkbook {
     ///
     /// This is primarily intended for decrypted Office-encrypted XLSB files, where the decrypted
     /// OPC/ZIP package exists only in memory.
-    pub fn open_from_reader<R: Read + Seek>(reader: R) -> Result<Self, ParseError> {
-        Self::open_from_reader_with_options(reader, OpenOptions::default())
-    }
-
-    /// Open an XLSB workbook from an in-memory reader, controlling preservation options.
-    pub fn open_from_reader_with_options<R: Read + Seek>(
+    pub fn open_from_reader<R: Read + Seek>(
         mut reader: R,
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
@@ -278,6 +273,16 @@ impl XlsbWorkbook {
         }
         let bytes: Arc<[u8]> = bytes.into();
         Self::open_from_owned_bytes(bytes, options)
+    }
+
+    /// Open an XLSB workbook from an in-memory reader, controlling preservation options.
+    ///
+    /// This is an alias for [`Self::open_from_reader`].
+    pub fn open_from_reader_with_options<R: Read + Seek>(
+        reader: R,
+        options: OpenOptions,
+    ) -> Result<Self, ParseError> {
+        Self::open_from_reader(reader, options)
     }
 
     /// Open an XLSB workbook from an owned in-memory ZIP buffer.
@@ -636,8 +641,8 @@ impl XlsbWorkbook {
     ) -> Result<(), ParseError> {
         use crate::ftab::{function_id_from_name, FTAB_USER_DEFINED};
         use crate::rgce::{encode_rgce_with_context_ast_in_sheet, CellCoord, EncodeError};
-        use crate::workbook_context::{ExternName, SupBook, SupBookKind};
         use crate::workbook_bin_patch::patch_workbook_bin_intern_namex_functions;
+        use crate::workbook_context::{ExternName, SupBook, SupBookKind};
         use formula_engine as fe;
 
         if edits.is_empty() {
@@ -673,12 +678,13 @@ impl XlsbWorkbook {
         // workbook's NameX tables.
         let mut wanted: BTreeMap<String, String> = BTreeMap::new();
         for edit in edits {
-            let ast = fe::parse_formula(&edit.formula, fe::ParseOptions::default()).map_err(|e| {
-                ParseError::UnsupportedFormulaText(format!(
-                    "{} (span {}..{})",
-                    e.message, e.span.start, e.span.end
-                ))
-            })?;
+            let ast =
+                fe::parse_formula(&edit.formula, fe::ParseOptions::default()).map_err(|e| {
+                    ParseError::UnsupportedFormulaText(format!(
+                        "{} (span {}..{})",
+                        e.message, e.span.start, e.span.end
+                    ))
+                })?;
 
             fn walk(expr: &fe::Expr, wanted: &mut BTreeMap<String, String>) {
                 match expr {
@@ -773,11 +779,7 @@ impl XlsbWorkbook {
                     ctx.addin_supbook_index().is_none(),
                     "workbook.bin patch created an AddIn SupBook, but the context already had one"
                 );
-                let supbook_index = patch
-                    .inserted
-                    .first()
-                    .map(|e| e.supbook_index)
-                    .unwrap_or(0);
+                let supbook_index = patch.inserted.first().map(|e| e.supbook_index).unwrap_or(0);
 
                 // The patcher always appends the new AddIn SupBook.
                 let created = ctx.push_namex_supbook(
@@ -816,11 +818,12 @@ impl XlsbWorkbook {
         let mut binary_edits: Vec<CellEdit> = Vec::with_capacity(edits.len());
         for edit in edits {
             let base = CellCoord::new(edit.row, edit.col);
-            let encoded = encode_rgce_with_context_ast_in_sheet(&edit.formula, &ctx, &sheet_name, base)
-                .map_err(|e| match e {
-                    EncodeError::Parse(msg) => ParseError::UnsupportedFormulaText(msg),
-                    other => ParseError::UnsupportedFormulaText(other.to_string()),
-                })?;
+            let encoded =
+                encode_rgce_with_context_ast_in_sheet(&edit.formula, &ctx, &sheet_name, base)
+                    .map_err(|e| match e {
+                        EncodeError::Parse(msg) => ParseError::UnsupportedFormulaText(msg),
+                        other => ParseError::UnsupportedFormulaText(other.to_string()),
+                    })?;
 
             binary_edits.push(CellEdit {
                 row: edit.row,
@@ -1059,8 +1062,8 @@ impl XlsbWorkbook {
         // Build a mapping of *plain* shared strings to their indices. We only reuse plain
         // `BrtSI` entries (flags=0) to avoid unintentionally applying rich/phonetic formatting to
         // newly edited cells.
-        let base_si_count =
-            u32::try_from(self.shared_strings_table.len()).map_err(|_| ParseError::UnexpectedEof)?;
+        let base_si_count = u32::try_from(self.shared_strings_table.len())
+            .map_err(|_| ParseError::UnexpectedEof)?;
         let mut existing_plain_to_index: HashMap<&str, u32> = HashMap::new();
         existing_plain_to_index.reserve(self.shared_strings_table.len());
         for (idx, si) in self.shared_strings_table.iter().enumerate() {
@@ -1131,7 +1134,8 @@ impl XlsbWorkbook {
             } else {
                 let idx = base_si_count
                     .checked_add(
-                        u32::try_from(appended_plain.len()).map_err(|_| ParseError::UnexpectedEof)?,
+                        u32::try_from(appended_plain.len())
+                            .map_err(|_| ParseError::UnexpectedEof)?,
                     )
                     .ok_or(ParseError::UnexpectedEof)?;
                 appended_plain.push(text.clone());
@@ -1189,8 +1193,7 @@ impl XlsbWorkbook {
 
         // Stream both the worksheet and the shared string table to avoid materializing
         // `xl/sharedStrings.bin` in memory when only a few strings are appended.
-        let stream_parts =
-            BTreeSet::from([sheet_part.clone(), shared_strings_part.to_string()]);
+        let stream_parts = BTreeSet::from([sheet_part.clone(), shared_strings_part.to_string()]);
         self.save_with_part_overrides_streaming_multi(
             dest,
             &HashMap::new(),
@@ -1280,8 +1283,8 @@ impl XlsbWorkbook {
         // ZIP write.
         let mut zip = self.open_zip()?;
 
-        let base_si_count =
-            u32::try_from(self.shared_strings_table.len()).map_err(|_| ParseError::UnexpectedEof)?;
+        let base_si_count = u32::try_from(self.shared_strings_table.len())
+            .map_err(|_| ParseError::UnexpectedEof)?;
         let mut existing_plain_to_index: HashMap<&str, u32> = HashMap::new();
         existing_plain_to_index.reserve(self.shared_strings_table.len());
         for (idx, si) in self.shared_strings_table.iter().enumerate() {
@@ -2026,11 +2029,8 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
             // treat 0xFFFF as the literal count.
             0xFFFFu64
         } else {
-            let zip64_eocd_offset = u64::from_le_bytes(
-                tail[locator_pos + 8..locator_pos + 16]
-                    .try_into()
-                    .unwrap(),
-            );
+            let zip64_eocd_offset =
+                u64::from_le_bytes(tail[locator_pos + 8..locator_pos + 16].try_into().unwrap());
 
             // Save current position so we can restore after reading the zip64 EOCD record.
             let cur = reader.seek(SeekFrom::Current(0))?;
@@ -2726,9 +2726,7 @@ fn read_zip_entry<R: Read + Seek>(
             Vec::with_capacity((size.min(ZIP_ENTRY_READ_PREALLOC_BYTES as u64)) as usize);
 
         // Guard against ZIP metadata lies (or unknown sizes) by enforcing a hard cap on bytes read.
-        entry
-            .take(max.saturating_add(1))
-            .read_to_end(&mut bytes)?;
+        entry.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > max {
             return Err(ParseError::PartTooLarge {
                 part: entry_name.to_string(),
@@ -2755,8 +2753,7 @@ fn read_zip_entry_required<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Vec<u8>, ParseError> {
-    read_zip_entry(zip, name)?
-        .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))
+    read_zip_entry(zip, name)?.ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))
 }
 
 fn insert_preserved_part(
@@ -2794,12 +2791,7 @@ fn preserve_part<R: Read + Seek>(
     name: &str,
 ) -> Result<(), ParseError> {
     if let Some(bytes) = read_zip_entry(zip, name)? {
-        insert_preserved_part(
-            preserved,
-            preserved_total_bytes,
-            name.to_string(),
-            bytes,
-        )?;
+        insert_preserved_part(preserved, preserved_total_bytes, name.to_string(), bytes)?;
     }
     Ok(())
 }

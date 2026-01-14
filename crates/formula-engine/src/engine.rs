@@ -20,8 +20,8 @@ use crate::locale::{
     localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
 use crate::pivot::{
-    refresh_pivot, PivotRefreshContext, PivotRefreshError, PivotRefreshOutput, PivotTableDefinition,
-    PivotTableId,
+    refresh_pivot, PivotRefreshContext, PivotRefreshError, PivotRefreshOutput,
+    PivotTableDefinition, PivotTableId,
 };
 use crate::value::{Array, ErrorKind, Value};
 use formula_format::{
@@ -847,7 +847,11 @@ impl Engine {
         self.workbook
             .sheet_ids_in_order()
             .iter()
-            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| (id, name.to_string())))
+            .filter_map(|&id| {
+                self.workbook
+                    .sheet_name(id)
+                    .map(|name| (id, name.to_string()))
+            })
             .collect()
     }
 
@@ -2356,7 +2360,10 @@ impl Engine {
             ));
         }
 
-        if self.workbook.grow_sheet_dimensions(sheet_id, cell_addr_from_cell_ref(range.end)) {
+        if self
+            .workbook
+            .grow_sheet_dimensions(sheet_id, cell_addr_from_cell_ref(range.end))
+        {
             // Sheet dimensions affect out-of-bounds `#REF!` semantics for references. If the sheet
             // grows, formulas that previously evaluated to `#REF!` may now become valid, so
             // conservatively mark all compiled formulas dirty to ensure results refresh on the next
@@ -2651,8 +2658,13 @@ impl Engine {
 
         for (key, formula, ast) in formulas {
             let cell_id = cell_id_from_key(key);
-            let (names, volatile, thread_safe, dynamic_deps) =
-                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook, self.external_refs_volatile);
+            let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
+                &ast,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
+            );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
                 analyze_external_dependencies(&ast, key, &self.workbook);
@@ -2924,14 +2936,13 @@ impl Engine {
                 &mut sheet_dims,
             );
 
-            let (names, volatile, thread_safe, dynamic_deps) =
-                analyze_expr_flags(
-                    &compiled_ast,
-                    key,
-                    &tables_by_sheet,
-                    &self.workbook,
-                    self.external_refs_volatile,
-                );
+            let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
+                &compiled_ast,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
+            );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
                 analyze_external_dependencies(&compiled_ast, key, &self.workbook);
@@ -3218,14 +3229,13 @@ impl Engine {
             .iter()
             .map(|s| s.tables.clone())
             .collect();
-            let (names, volatile, thread_safe, dynamic_deps) =
-            analyze_expr_flags(
-                &compiled,
-                key,
-                &tables_by_sheet,
-                &self.workbook,
-                self.external_refs_volatile,
-            );
+        let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
+            &compiled,
+            key,
+            &tables_by_sheet,
+            &self.workbook,
+            self.external_refs_volatile,
+        );
         self.set_cell_name_refs(key, names);
         let (external_sheets, external_workbooks) =
             analyze_external_dependencies(&compiled, key, &self.workbook);
@@ -3485,7 +3495,10 @@ impl Engine {
                 for col_off in 0..in_bounds_cols {
                     let col = range.start.col + col_off as u32;
                     let addr = CellAddr { row, col };
-                    let key = CellKey { sheet: sheet_id, addr };
+                    let key = CellKey {
+                        sheet: sheet_id,
+                        addr,
+                    };
 
                     if let Some(v) = self.spilled_cell_value(key) {
                         out[row_off][col_off] = v;
@@ -3581,7 +3594,10 @@ impl Engine {
                 for col_off in 0..in_bounds_cols {
                     let col = range.start.col + col_off as u32;
                     let addr = CellAddr { row, col };
-                    let key = CellKey { sheet: sheet_id, addr };
+                    let key = CellKey {
+                        sheet: sheet_id,
+                        addr,
+                    };
 
                     if let Some(v) = self.spilled_cell_value(key) {
                         out[row_off][col_off] = v;
@@ -6572,8 +6588,13 @@ impl Engine {
                 continue;
             };
             for (name, def) in &sheet.names {
-                let Some((new_def, compiled)) =
-                    rewrite_defined_name_structural(self, def, ctx_sheet, edit, &sheet_order_indices)?
+                let Some((new_def, compiled)) = rewrite_defined_name_structural(
+                    self,
+                    def,
+                    ctx_sheet,
+                    edit,
+                    &sheet_order_indices,
+                )?
                 else {
                     continue;
                 };
@@ -6623,8 +6644,13 @@ impl Engine {
                 continue;
             };
             for (name, def) in &sheet.names {
-                let Some((new_def, compiled)) =
-                    rewrite_defined_name_range_map(self, def, ctx_sheet, edit, &sheet_order_indices)?
+                let Some((new_def, compiled)) = rewrite_defined_name_range_map(
+                    self,
+                    def,
+                    ctx_sheet,
+                    edit,
+                    &sheet_order_indices,
+                )?
                 else {
                     continue;
                 };
@@ -6728,7 +6754,10 @@ impl Engine {
             self.cell_external_sheet_refs
                 .insert(cell, sheet_keys.clone());
             for key in sheet_keys {
-                self.external_sheet_dependents.entry(key).or_default().insert(cell);
+                self.external_sheet_dependents
+                    .entry(key)
+                    .or_default()
+                    .insert(cell);
             }
         }
 
@@ -6768,8 +6797,13 @@ impl Engine {
 
             let cell_id = cell_id_from_key(key);
 
-            let (names, volatile, thread_safe, dynamic_deps) =
-                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook, self.external_refs_volatile);
+            let (names, volatile, thread_safe, dynamic_deps) = analyze_expr_flags(
+                &ast,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
+            );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
                 analyze_external_dependencies(&ast, key, &self.workbook);
@@ -9394,11 +9428,7 @@ impl crate::eval::ValueResolver for Snapshot {
             .and_then(|provider| provider.sheet_order(workbook))
     }
 
-    fn external_workbook_table(
-        &self,
-        workbook: &str,
-        table_name: &str,
-    ) -> Option<(String, Table)> {
+    fn external_workbook_table(&self, workbook: &str, table_name: &str) -> Option<(String, Table)> {
         self.external_value_provider
             .as_ref()
             .and_then(|provider| provider.workbook_table(workbook, table_name))
@@ -11357,11 +11387,7 @@ fn bytecode_expr_within_grid_limits(
                                 }
                             }
                             _ => {
-                                bytecode_expr_within_grid_limits(
-                                    arg,
-                                    origin,
-                                    origin_sheet_bounds,
-                                )?;
+                                bytecode_expr_within_grid_limits(arg, origin, origin_sheet_bounds)?;
                             }
                         }
                     }
@@ -12906,11 +12932,7 @@ fn walk_expr_flags(
                 }
             }
         }
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Bool(_)
-        | Expr::Blank
-        | Expr::Error(_) => {}
+        Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }
 }
 
@@ -14565,9 +14587,7 @@ mod tests {
             ..CalcSettings::default()
         });
 
-        engine
-            .set_cell_formula("Sheet1", "C1", "=A1+B1")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "C1", "=A1+B1").unwrap();
 
         let range = Range::from_a1("A1:B1").expect("range");
         let values = vec![vec![Value::Number(2.0), Value::Number(3.0)]];
@@ -16085,25 +16105,13 @@ mod tests {
                 .set_sheet_order(vec![sheet3_id, sheet2_id, sheet1_id]);
 
             engine
-                .set_cell_formula(
-                    "Sheet1",
-                    "B1",
-                    "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,1))",
-                )
+                .set_cell_formula("Sheet1", "B1", "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,1))")
                 .unwrap();
             engine
-                .set_cell_formula(
-                    "Sheet1",
-                    "B2",
-                    "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,2))",
-                )
+                .set_cell_formula("Sheet1", "B2", "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,2))")
                 .unwrap();
             engine
-                .set_cell_formula(
-                    "Sheet1",
-                    "B3",
-                    "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,3))",
-                )
+                .set_cell_formula("Sheet1", "B3", "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,3))")
                 .unwrap();
         }
 
@@ -16118,9 +16126,18 @@ mod tests {
         ast_engine.set_bytecode_enabled(false);
         setup(&mut ast_engine);
         ast_engine.recalculate_single_threaded();
-        assert_eq!(ast_engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
-        assert_eq!(ast_engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
-        assert_eq!(ast_engine.get_cell_value("Sheet1", "B3"), Value::Number(1.0));
+        assert_eq!(
+            ast_engine.get_cell_value("Sheet1", "B1"),
+            Value::Number(3.0)
+        );
+        assert_eq!(
+            ast_engine.get_cell_value("Sheet1", "B2"),
+            Value::Number(2.0)
+        );
+        assert_eq!(
+            ast_engine.get_cell_value("Sheet1", "B3"),
+            Value::Number(1.0)
+        );
     }
 
     #[test]
