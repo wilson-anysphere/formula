@@ -3060,8 +3060,11 @@ fn parse_worksheet_into_model(
                         }
                         b"t" => current_t = Some(attr.unescape_value()?.into_owned()),
                         b"s" => {
-                            let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
-                            current_style = styles_part.style_id_for_xf(xf_index);
+                            if let Ok(xf_index) =
+                                attr.unescape_value()?.into_owned().parse::<u32>()
+                            {
+                                current_style = styles_part.style_id_for_xf(xf_index);
+                            }
                         }
                         b"cm" => current_cm = Some(attr.unescape_value()?.into_owned()),
                         b"vm" => current_vm = Some(attr.unescape_value()?.into_owned()),
@@ -3084,8 +3087,11 @@ fn parse_worksheet_into_model(
                             );
                         }
                         b"s" => {
-                            let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
-                            style_id = styles_part.style_id_for_xf(xf_index);
+                            if let Ok(xf_index) =
+                                attr.unescape_value()?.into_owned().parse::<u32>()
+                            {
+                                style_id = styles_part.style_id_for_xf(xf_index);
+                            }
                         }
                         b"cm" => cm = Some(attr.unescape_value()?.into_owned()),
                         b"vm" => vm = Some(attr.unescape_value()?.into_owned()),

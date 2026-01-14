@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_model::Workbook;
+use formula_model::{CellRef, CellValue, Workbook};
 use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes};
 
 const STYLES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -235,4 +235,36 @@ fn later_col_entries_can_clear_a_style_override() {
     let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
     let _ = style_id_for_number_format(&workbook, "0.00");
     assert_no_row_col_style_defaults(&workbook);
+}
+
+#[test]
+fn ignores_malformed_cell_style_indices_best_effort() {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="bogus"><v>1</v></c>
+      <c r="B1" s="bogus"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML_XF0_CUSTOM);
+
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    // Sanity check: the custom numFmt exists (and is non-default).
+    let _ = style_id_for_number_format(&doc.workbook, "0.00");
+
+    let sheet = doc.workbook.sheet_by_name("Sheet1").expect("sheet exists");
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let b1 = CellRef::from_a1("B1").unwrap();
+    assert_eq!(sheet.value(a1), CellValue::Number(1.0));
+    assert_eq!(sheet.cell(a1).expect("A1 exists").style_id, 0);
+    assert!(sheet.cell(b1).is_none(), "B1 style-only cell should be ignored");
+
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    let _ = style_id_for_number_format(&workbook, "0.00");
+    let sheet = workbook.sheet_by_name("Sheet1").expect("sheet exists");
+    assert_eq!(sheet.value(a1), CellValue::Number(1.0));
+    assert_eq!(sheet.cell(a1).expect("A1 exists").style_id, 0);
+    assert!(sheet.cell(b1).is_none(), "B1 style-only cell should be ignored");
 }

@@ -624,18 +624,9 @@ fn sheet_rels_xml(table_parts: &[(String, String)]) -> String {
     )
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct ColXmlProps {
-    width: Option<f32>,
-    hidden: bool,
-    outline_level: u8,
-    collapsed: bool,
-    style_xf: Option<u32>,
-}
-
 fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
-    if sheet.default_row_height.is_none()
-        && sheet.default_col_width.is_none()
+    if sheet.default_col_width.is_none()
+        && sheet.default_row_height.is_none()
         && sheet.base_col_width.is_none()
     {
         return String::new();
@@ -655,7 +646,6 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
     }
     format!(r#"<sheetFormatPr{attrs}/>"#)
 }
-
 #[cfg(test)]
 mod sheet_format_pr_tests {
     use super::sheet_format_pr_xml;
@@ -697,6 +687,16 @@ mod sheet_format_pr_tests {
         assert_eq!(node.attribute("defaultColWidth"), Some("8.43"));
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+struct ColXmlProps {
+    width: Option<f32>,
+    hidden: bool,
+    outline_level: u8,
+    collapsed: bool,
+    style_xf: Option<u32>,
+}
+
 fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, u32>) -> String {
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
 
