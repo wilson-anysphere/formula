@@ -1924,7 +1924,7 @@ jobs:
 
       - name: Report desktop installer artifact sizes
         env:
-          # Enforce the bundle size budget on tagged releases by default.
+          # Enforce the installer artifact size budget on tagged releases by default.
           # Override via GitHub Actions "Variables":
           # - FORMULA_ENFORCE_BUNDLE_SIZE=0 (or "false") to disable enforcement
           # - FORMULA_BUNDLE_SIZE_LIMIT_MB=50 to adjust the default 50 MB budget

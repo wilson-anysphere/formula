@@ -41,7 +41,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Keep these pins aligned with CI/release so bundle size checks match what we ship.
+  # Keep these pins aligned with CI/release so installer artifact size checks match what we ship.
   NODE_VERSION: 22
   WASM_PACK_VERSION: 0.13.1
   TAURI_CLI_VERSION: "2.9.5"
