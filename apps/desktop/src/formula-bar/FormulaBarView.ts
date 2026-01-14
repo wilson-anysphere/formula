@@ -222,20 +222,16 @@ const DEFAULT_FUNCTION_NAMES: string[] = (() => {
   return out;
 })();
 
-function buildFunctionPickerItems(query: string, limit: number): FunctionPickerItem[] {
+function buildFunctionPickerItems(query: string, limit: number, localeId: string): FunctionPickerItem[] {
   const trimmed = String(query ?? "").trim();
   const cappedLimit = Math.max(0, Math.floor(limit));
   if (cappedLimit === 0) return [];
 
   if (!trimmed) {
-    return DEFAULT_FUNCTION_NAMES.slice(0, cappedLimit).map((name) => functionPickerItemFromName(name));
+    return DEFAULT_FUNCTION_NAMES.slice(0, cappedLimit).map((name) => functionPickerItemFromName(name, localeId));
   }
 
-  return searchFunctionResults(trimmed, { limit: cappedLimit }).map((res) => ({
-    name: res.name,
-    signature: res.signature,
-    summary: res.summary,
-  }));
+  return searchFunctionResults(trimmed, { limit: cappedLimit }).map((res) => functionPickerItemFromName(res.name, localeId));
 }
 
 function renderFunctionPickerList(opts: {
@@ -312,8 +308,8 @@ function renderFunctionPickerList(opts: {
   return itemEls;
 }
 
-function functionPickerItemFromName(name: string): FunctionPickerItem {
-  const sig = getFunctionSignature(name);
+function functionPickerItemFromName(name: string, localeId: string): FunctionPickerItem {
+  const sig = getFunctionSignature(name, { localeId });
   const signature = sig ? formatSignature(sig) : undefined;
   const summary = sig?.summary?.trim?.() ? sig.summary.trim() : undefined;
   return { name, signature, summary };
@@ -3061,7 +3057,8 @@ export class FormulaBarView {
   #renderFunctionPickerResults(): void {
     const limit = 50;
     const query = this.#functionPickerInputEl.value;
-    const items: FunctionPickerItem[] = buildFunctionPickerItems(query, limit);
+    const localeId = this.currentLocaleId();
+    const items: FunctionPickerItem[] = buildFunctionPickerItems(query, limit, localeId);
 
     this.#functionPickerItems = items;
     this.#functionPickerItemEls = renderFunctionPickerList({

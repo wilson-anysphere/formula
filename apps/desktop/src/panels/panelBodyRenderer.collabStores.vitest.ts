@@ -75,6 +75,9 @@ vi.mock("./branch-manager/MergeBranchPanel.js", () => ({
 const [{ createPanelBodyRenderer }, { PanelIds }] = await Promise.all([
   import("./panelBodyRenderer.js"),
   import("./panelRegistry.js"),
+  // Preload lazy panels so Vite transform time doesn't count against the per-test wait.
+  import("./version-history/CollabVersionHistoryPanel.js"),
+  import("./branch-manager/CollabBranchManagerPanel.js"),
 ]);
 
 function flushPromises() {

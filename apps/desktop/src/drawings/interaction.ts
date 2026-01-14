@@ -1231,7 +1231,16 @@ function patchDrawingInnerXml(obj: DrawingObject, patch: (xml: string) => string
     kind: { ...kindAny, rawXml: patched, raw_xml: patched },
   };
 }
- 
+
+function deltaPxToEmu(deltaPx: number, zoom: number): number {
+  if (!Number.isFinite(deltaPx) || deltaPx === 0) return 0;
+  // `Math.round` is asymmetric for negative half values (e.g. `Math.round(-0.5) === -0`).
+  // Convert using the absolute value so `deltaPx` and `-deltaPx` always negate cleanly.
+  const abs = pxToEmu(Math.abs(deltaPx), zoom);
+  if (abs === 0) return 0;
+  return deltaPx < 0 ? -abs : abs;
+}
+
 export function shiftAnchor(
   anchor: DrawingObject["anchor"],
   dxPx: number,
@@ -1256,12 +1265,10 @@ export function shiftAnchor(
       return {
         ...anchor,
         pos: {
-          // Keep floating-point EMUs so zoom-scaled moves (e.g. 1px screen move
-          // at 2x zoom => 0.5px sheet move) remain reversible without accumulating
-          // integer rounding drift. DrawingML serialization rounds to integer
-          // EMUs when writing anchors.
-          xEmu: anchor.pos.xEmu + pxToEmu(dxPx / z),
-          yEmu: anchor.pos.yEmu + pxToEmu(dyPx / z),
+          // Convert screen-pixel deltas to EMUs using symmetric rounding so opposite
+          // nudges cancel cleanly (avoids off-by-one drift at fractional zoom steps).
+          xEmu: anchor.pos.xEmu + deltaPxToEmu(dxPx, z),
+          yEmu: anchor.pos.yEmu + deltaPxToEmu(dyPx, z),
         },
       };
   }
@@ -1481,16 +1488,11 @@ export function shiftAnchorPoint(
   const z = sanitizeZoom(zoom);
   let row = Number.isFinite(point.cell.row) ? Math.max(0, Math.trunc(point.cell.row)) : 0;
   let col = Number.isFinite(point.cell.col) ? Math.max(0, Math.trunc(point.cell.col)) : 0;
-  // Work in EMUs for the offset calculations. Converting offset -> px -> offset is lossy when
-  // EMUs are stored as integers (DrawingML schema), because `emuToPx(pxToEmu(x))` is not
-  // perfectly reversible for fractional pixel deltas (e.g. 1px @ 2x zoom => 0.5px).
-  //
-  // Using EMUs avoids accumulating drift (so ArrowRight then ArrowLeft returns to the exact
-  // starting offset).
-  const dxEmu = pxToEmu(dxPx / z);
-  const dyEmu = pxToEmu(dyPx / z);
-  let xEmu = (Number.isFinite(point.offset.xEmu) ? point.offset.xEmu : 0) + dxEmu;
-  let yEmu = (Number.isFinite(point.offset.yEmu) ? point.offset.yEmu : 0) + dyEmu;
+  // Keep offsets in EMUs and apply the delta in EMUs as well. Converting EMU -> px -> EMU
+  // introduces rounding error at fractional zoom steps (e.g. 1px at 2x zoom => 0.5px),
+  // which can accumulate into off-by-one drift after repeated nudges.
+  let xEmu = (Number.isFinite(point.offset.xEmu) ? point.offset.xEmu : 0) + deltaPxToEmu(dxPx, z);
+  let yEmu = (Number.isFinite(point.offset.yEmu) ? point.offset.yEmu : 0) + deltaPxToEmu(dyPx, z);
 
   // Normalize X across column boundaries.
   for (let i = 0; i < MAX_CELL_STEPS && xEmu < 0; i++) {
@@ -1502,7 +1504,7 @@ export function shiftAnchorPoint(
     col -= 1;
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width / z);
+    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width, z);
     if (wEmu <= 0) {
       xEmu = 0;
       break;
@@ -1512,7 +1514,7 @@ export function shiftAnchorPoint(
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width / z);
+    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width, z);
     if (wEmu <= 0) {
       xEmu = 0;
       break;
@@ -1532,7 +1534,7 @@ export function shiftAnchorPoint(
     row -= 1;
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height / z);
+    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height, z);
     if (hEmu <= 0) {
       yEmu = 0;
       break;
@@ -1542,7 +1544,7 @@ export function shiftAnchorPoint(
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height / z);
+    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height, z);
     if (hEmu <= 0) {
       yEmu = 0;
       break;
@@ -1556,7 +1558,7 @@ export function shiftAnchorPoint(
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width / z);
+    const wEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).width, z);
     if (wEmu <= 0) {
       xEmu = 0;
       break;
@@ -1569,7 +1571,7 @@ export function shiftAnchorPoint(
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
     CELL_SCRATCH.row = row;
     CELL_SCRATCH.col = col;
-    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height / z);
+    const hEmu = pxToEmu(geom.cellSizePx(CELL_SCRATCH).height, z);
     if (hEmu <= 0) {
       yEmu = 0;
       break;
@@ -1579,6 +1581,10 @@ export function shiftAnchorPoint(
     yEmu -= hEmu;
     row += 1;
   }
+
+  // Normalize -0 so strict equality checks behave as expected.
+  if (xEmu === 0) xEmu = 0;
+  if (yEmu === 0) yEmu = 0;
 
   return {
     ...point,
