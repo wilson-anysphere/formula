@@ -163,6 +163,16 @@ def _redact_path_str(path: Path, *, privacy_mode: str, repo_root: Path | None) -
         # urlparse treats `C:\foo` as scheme "c" on non-Windows too; that's fine (it is a path).
         or (parsed.scheme and ":" in raw)
     )
+    if not looks_abs:
+        lowered = raw.casefold()
+        # Hash domain-like tokens and spreadsheet-ish filenames to avoid leaking internal identifiers
+        # even when values are not strict filesystem paths (defense in depth for custom runners).
+        if re.search(r"\.(com|net|org|io|ai|dev|edu|gov|local|internal|corp)\b", lowered):
+            looks_abs = True
+        elif re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", raw):
+            looks_abs = True
+        elif re.search(r"\.(xlsx|xlsm|xlsb|xltx|xltm|xls|csv|tsv)\b", lowered):
+            looks_abs = True
     return f"sha256={_sha256_text(raw)}" if looks_abs else raw
 
 class _ExpectedDatasetInfo(NamedTuple):

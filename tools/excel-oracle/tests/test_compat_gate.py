@@ -290,6 +290,15 @@ class CompatGatePathRedactionTests(unittest.TestCase):
         out = compat_gate._redact_path_str(p, privacy_mode="private", repo_root=repo_root)
         self.assertEqual(out, p.relative_to(repo_root).as_posix())
 
+    def test_private_mode_hashes_domain_like_strings(self) -> None:
+        compat_gate = self._load_compat_gate()
+        repo_root = Path(__file__).resolve().parents[3]
+
+        p = Path("corp.example.com")
+        raw = str(p)
+        out = compat_gate._redact_path_str(p, privacy_mode="private", repo_root=repo_root)
+        self.assertEqual(out, f"sha256={hashlib.sha256(raw.encode('utf-8')).hexdigest()}")
+
 
 class CompatGateDryRunTests(unittest.TestCase):
     def _load_compat_gate(self):
