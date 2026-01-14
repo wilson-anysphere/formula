@@ -103,7 +103,8 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     view.textarea.value = "=A1+1";
     // Keep the cursor within the A1 reference so reference overlays are active.
-    view.textarea.setSelectionRange(2, 2);
+    // Use the end of the reference (`=A1|+1`) so function autocomplete does not steal Escape.
+    view.textarea.setSelectionRange(3, 3);
     view.textarea.dispatchEvent(new Event("input"));
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
     expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);

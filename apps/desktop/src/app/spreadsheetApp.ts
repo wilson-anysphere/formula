@@ -4048,7 +4048,13 @@ export class SpreadsheetApp {
 
     // Drawings/images GC + persistence.
     this.workbookImageManager.dispose();
-    this.drawingImages.clear();
+    // `drawingImages` is an `ImageStore` implementation but tests sometimes stub it with a
+    // minimal shape (e.g. just `garbageCollectAsync`). Keep teardown resilient.
+    try {
+      (this.drawingImages as any)?.clear?.();
+    } catch {
+      // ignore
+    }
 
     // Drop references to drawings state so a disposed app instance does not retain
     // large drawing metadata/images if it is kept alive (e.g. tests/hot reload).

@@ -146,7 +146,8 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     calls.splice(0, calls.length);
     await (gridView as any).renderDrawings();
 
-    const firstStroke = calls.find((call) => call.method === "strokeRect");
+    const firstStrokes = calls.filter((call) => call.method === "strokeRect");
+    const firstStroke = firstStrokes[0];
     expect(firstStroke).toBeTruthy();
     const x1 = Number(firstStroke!.args[0]);
     expect(Number.isFinite(x1)).toBe(true);
@@ -176,7 +177,8 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     // Wait for the async overlay render triggered by the axis-size callback.
     await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
 
-    const secondStroke = calls.find((call) => call.method === "strokeRect");
+    const secondStrokes = calls.filter((call) => call.method === "strokeRect");
+    const secondStroke = secondStrokes[secondStrokes.length - 1];
     expect(secondStroke).toBeTruthy();
     const x2 = Number(secondStroke!.args[0]);
     expect(x2).toBeCloseTo(x1 + (nextSize - prevSize), 6);
@@ -313,7 +315,8 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     calls.splice(0, calls.length);
     await (gridView as any).renderDrawings();
 
-    const firstStroke = calls.find((call) => call.method === "strokeRect");
+    const firstStrokes = calls.filter((call) => call.method === "strokeRect");
+    const firstStroke = firstStrokes[0];
     expect(firstStroke).toBeTruthy();
     const y1 = Number(firstStroke!.args[1]);
     expect(Number.isFinite(y1)).toBe(true);
@@ -341,7 +344,8 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     expect(renderSpy).toHaveBeenCalled();
     await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
 
-    const secondStroke = calls.find((call) => call.method === "strokeRect");
+    const secondStrokes = calls.filter((call) => call.method === "strokeRect");
+    const secondStroke = secondStrokes[secondStrokes.length - 1];
     expect(secondStroke).toBeTruthy();
     const y2 = Number(secondStroke!.args[1]);
     expect(y2).toBeCloseTo(y1 + (nextSize - prevSize), 6);

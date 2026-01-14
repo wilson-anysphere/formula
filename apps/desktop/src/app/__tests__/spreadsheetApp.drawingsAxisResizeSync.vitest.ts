@@ -155,7 +155,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
           anchor: {
             type: "oneCell",
             from: { cell: { row: 0, col: 1 }, offset: { xEmu: 0, yEmu: 0 } }, // B1
-            size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+            // Ensure the object has a meaningful interior so cursor hit testing doesn't
+            // accidentally land on a resize handle when sampling points within the rect.
+            size: { cx: pxToEmu(40), cy: pxToEmu(40) },
           },
           zOrder: 0,
         },
@@ -335,10 +337,14 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       const h1 = Number(firstStroke!.args[3]);
       expect(Number.isFinite(x1)).toBe(true);
       expect(Number.isFinite(y1)).toBe(true);
- 
+      expect(Number.isFinite(w1)).toBe(true);
+      expect(Number.isFinite(h1)).toBe(true);
+
       // Cursor should detect the drawing at its current position.
       // Use the center of the rect to avoid hitting resize handles (the placeholder is only 10x10px).
-      expect((app as any).drawingCursorAtPoint(x1 + w1 / 2, y1 + h1 / 2)).toBe("move");
+      const hitX1 = x1 + w1 / 2;
+      const hitY1 = y1 + h1 / 2;
+      expect((app as any).drawingCursorAtPoint(hitX1, hitY1)).toBe("move");
 
       // Resize column A (doc col 0 => grid col 1).
       const sharedGrid = (app as any).sharedGrid;
@@ -369,10 +375,14 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       const h2 = Number(secondStroke!.args[3]);
       expect(x2).toBeCloseTo(x1 + (nextSize - prevSize), 6);
       expect(y2).toBeCloseTo(y1, 6);
+      expect(w2).toBeCloseTo(w1, 6);
+      expect(h2).toBeCloseTo(h1, 6);
 
       // Hit testing should use the updated geometry: the old location should no longer hit.
-      expect((app as any).drawingCursorAtPoint(x1 + w1 / 2, y1 + h1 / 2)).toBeNull();
-      expect((app as any).drawingCursorAtPoint(x2 + w2 / 2, y2 + h2 / 2)).toBe("move");
+      const hitX2 = x2 + w2 / 2;
+      const hitY2 = y2 + h2 / 2;
+      expect((app as any).drawingCursorAtPoint(hitX1, hitY1)).toBeNull();
+      expect((app as any).drawingCursorAtPoint(hitX2, hitY2)).toBe("move");
 
       app.destroy();
       root.remove();

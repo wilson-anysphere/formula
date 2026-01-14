@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../../extensions/commandRegistry.js";
+import { createDefaultLayout } from "../../layout/layoutState.js";
 import { PanelIds } from "../../panels/panelRegistry.js";
 import { registerBuiltinCommands } from "../registerBuiltinCommands.js";
 
@@ -13,7 +14,7 @@ describe("PivotTable ribbon alias commands", () => {
     registerBuiltinCommands({
       commandRegistry,
       app: {} as any,
-      layoutController: { openPanel } as any,
+      layoutController: { openPanel, layout: createDefaultLayout({ primarySheetId: "Sheet1" }) } as any,
     });
 
     const selectionEventListener = vi.fn();
@@ -30,4 +31,3 @@ describe("PivotTable ribbon alias commands", () => {
     expect(selectionEventListener).toHaveBeenCalledTimes(1);
   });
 });
-
