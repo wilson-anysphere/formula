@@ -436,15 +436,17 @@ export async function runOnce({
         return;
       }
 
+      // If the process exits before we initiated shutdown (e.g. an `afterCapture` hook was
+      // running), still attempt to tear down the full process group. WebView helper processes can
+      // outlive the parent process and leak across runs.
+      if (!exitDeadline) {
+        terminateProcessTree(child, 'force');
+      }
+
       if (captured) {
         settle('resolve', captured);
         return;
       }
-
-      // If the desktop process exited before we captured metrics, attempt to kill the full
-      // process tree anyway. Some WebView runtimes can keep helper processes alive even after
-      // the parent crashes/exits.
-      terminateProcessTree(child, 'force');
 
       settle(
         'reject',
