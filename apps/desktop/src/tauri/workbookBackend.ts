@@ -9,6 +9,8 @@ import type {
   WorkbookThemePalette,
 } from "@formula/workbook-backend";
 
+import type { ImportedEmbeddedCellImage as ImportedEmbeddedCellImageInfo } from "../workbook/load/embeddedCellImages.js";
+
 export type {
   CellValue,
   DefinedNameInfo,
@@ -23,6 +25,8 @@ export type {
   WorkbookInfo,
   WorkbookThemePalette,
 } from "@formula/workbook-backend";
+
+export type { ImportedEmbeddedCellImageInfo };
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -91,6 +95,16 @@ export class TauriWorkbookBackend implements WorkbookBackend {
   async listImportedChartObjects(): Promise<unknown[]> {
     const payload = await this.invoke("list_imported_chart_objects");
     return (payload as unknown[]) ?? [];
+  }
+
+  /**
+   * Desktop-only: fetch embedded-in-cell images parsed from the opened XLSX package.
+   *
+   * These correspond to Excel RichData (`vm=`) cell images ("Place in Cell" / `IMAGE()`).
+   */
+  async listImportedEmbeddedCellImages(): Promise<ImportedEmbeddedCellImageInfo[]> {
+    const payload = await this.invoke("list_imported_embedded_cell_images");
+    return (payload as ImportedEmbeddedCellImageInfo[]) ?? [];
   }
 
   async saveWorkbook(path?: string): Promise<void> {

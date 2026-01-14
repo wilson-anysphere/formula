@@ -225,6 +225,7 @@ import {
   WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY,
   WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY,
 } from "./workbook/load/clampUsedRange.js";
+import { mergeEmbeddedCellImagesIntoSnapshot } from "./workbook/load/embeddedCellImages.js";
 import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
 import {
   mergeFormattingIntoSnapshot,
@@ -9433,6 +9434,14 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     }),
   );
 
+  const embeddedCellImagesPromise = tauriBackend
+    .listImportedEmbeddedCellImages()
+    .catch((err) => {
+      // Best-effort: embedded image extraction should never prevent workbook loading.
+      console.warn("[formula][desktop] Failed to list embedded cell images:", err);
+      return [];
+    });
+
   const clampCellFormatBoundsBySheetId = new Map<string, CellFormatClampBounds | null>();
 
   for (const sheet of sheets) {
@@ -9630,11 +9639,21 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     });
   }
 
+  const embeddedCellImages = await embeddedCellImagesPromise;
+  const { images: snapshotImages } = mergeEmbeddedCellImagesIntoSnapshot({
+    sheets: snapshotSheets,
+    embeddedCellImages,
+    resolveSheetIdByName: (name) => workbookSheetStore.resolveIdByName(name) ?? null,
+    sheetIdsInOrder: sheets.map((s) => s.id),
+    maxRows: MAX_ROWS,
+    maxCols: MAX_COLS,
+  });
+
   const snapshotPayload: any = { schemaVersion: 1, sheets: snapshotSheets };
   if (Object.keys(drawingsBySheet).length > 0) {
     snapshotPayload.drawingsBySheet = drawingsBySheet;
   }
-
+  if (snapshotImages.length > 0) snapshotPayload.images = snapshotImages;
   const snapshot = encodeDocumentSnapshot(snapshotPayload);
   const workbookSignature = await workbookSignaturePromise;
   // Reset Power Query table signatures before applying the snapshot so any

@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
+import { mergeEmbeddedCellImagesIntoSnapshot } from "../../workbook/load/embeddedCellImages.js";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -114,7 +115,7 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
     };
   });
 
-  it("attempts to resolve image blobs for in-cell image values", () => {
+  it("hydrates embedded cell images from an XLSX snapshot and attempts to resolve them during render", async () => {
     const resolverSpy = vi.spyOn(DocumentController.prototype as any, "getImageBlob");
 
     const root = createRoot();
@@ -126,9 +127,69 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
 
     const app = new SpreadsheetApp(root, status);
 
+    resolverSpy.mockClear();
+
+    // Fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
+    // - Sheet1!A1: Place-in-Cell image
+    // - Sheet1!B1: IMAGE() formula that also resolves to an in-cell image via RichData `vm=`
+    //
+    // Both ultimately reference `xl/media/image1.png`, which we normalize to `image1.png`.
+    const baseSheet = {
+      id: "Sheet1",
+      name: "Sheet1",
+      visibility: "visible",
+      cells: [] as any[],
+    };
+
+    const imageBytesBase64 =
+      // 1×1 PNG (opaque black) to keep the snapshot self-contained.
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=";
+
+    const { images } = mergeEmbeddedCellImagesIntoSnapshot({
+      sheets: [baseSheet],
+      embeddedCellImages: [
+        {
+          worksheet_part: "xl/worksheets/sheet1.xml",
+          sheet_name: "Sheet1",
+          row: 0,
+          col: 0,
+          image_id: "image1.png",
+          bytes_base64: imageBytesBase64,
+          mime_type: "image/png",
+          alt_text: null,
+        },
+        {
+          worksheet_part: "xl/worksheets/sheet1.xml",
+          sheet_name: "Sheet1",
+          row: 0,
+          col: 1,
+          image_id: "image1.png",
+          bytes_base64: imageBytesBase64,
+          mime_type: "image/png",
+          alt_text: null,
+        },
+      ],
+      resolveSheetIdByName: (name) => (name === "Sheet1" ? "Sheet1" : null),
+      sheetIdsInOrder: ["Sheet1"],
+      maxRows: 10_000,
+      maxCols: 200,
+    });
+
+    const snapshotBytes = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        sheets: [baseSheet],
+        images,
+      }),
+    );
+
+    await app.restoreDocumentState(snapshotBytes);
+
+    const cellA1 = app.getDocument().getCell("Sheet1", "A1");
+    expect(cellA1.value).toMatchObject({ type: "image", value: { imageId: "image1.png" } });
+
     const calls = resolverSpy.mock.calls.map((args) => args[0]);
-    expect(calls).toContain("demo-image-red");
-    expect(calls).toContain("demo-image-blue");
+    expect(calls).toContain("image1.png");
 
     app.destroy();
     root.remove();

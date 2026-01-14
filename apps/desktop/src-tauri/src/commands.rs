@@ -241,6 +241,33 @@ pub struct ImportedChartObjectInfo {
     pub model: Option<FormulaChartModel>,
 }
 
+/// JSON payload for embedded-in-cell images imported from an XLSX package.
+///
+/// These correspond to Excel "Place in Cell" / RichData-backed cell images that are referenced via
+/// `c/@vm` and ultimately resolve into `xl/media/*` entries.
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ImportedEmbeddedCellImageInfo {
+    /// Worksheet part name (e.g. `xl/worksheets/sheet1.xml`).
+    pub worksheet_part: String,
+    /// Best-effort workbook sheet name for this worksheet part.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_name: Option<String>,
+    /// 0-based row index.
+    pub row: usize,
+    /// 0-based column index.
+    pub col: usize,
+    /// Stable image id (prefers the file name, e.g. `image1.png`).
+    pub image_id: String,
+    /// Raw image bytes base64 encoded.
+    pub bytes_base64: String,
+    /// Best-effort inferred MIME type (e.g. `image/png`).
+    pub mime_type: String,
+    /// Optional alternative text (if present in the workbook metadata).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt_text: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SheetUsedRange {
     pub start_row: usize,
@@ -2730,6 +2757,113 @@ pub async fn list_imported_chart_objects(
                 anchor: obj.anchor,
                 drawing_frame_xml: obj.drawing_frame_xml,
                 model: obj.model,
+            });
+        }
+
+        Ok::<_, String>(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Extract embedded-in-cell images from the opened XLSX package (when available).
+///
+/// These correspond to Excel "Place in Cell" images (RichData `vm=` references) and are separate
+/// from DrawingML images.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn list_imported_embedded_cell_images(
+    window: tauri::WebviewWindow,
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<ImportedEmbeddedCellImageInfo>, String> {
+    ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
+        "imported embedded cell image extraction",
+        ipc_origin::Verb::Are,
+    )?;
+
+    let origin_bytes = {
+        let state = state.inner().lock().unwrap();
+        let Ok(workbook) = state.get_workbook() else {
+            return Ok(Vec::new());
+        };
+        workbook.origin_xlsx_bytes.clone()
+    };
+
+    let Some(origin_bytes) = origin_bytes else {
+        return Ok(Vec::new());
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+        fn infer_mime_type(image_id: &str) -> String {
+            let ext = image_id
+                .rsplit('.')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            match ext.as_str() {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "bmp" => "image/bmp",
+                "webp" => "image/webp",
+                "svg" => "image/svg+xml",
+                "tif" | "tiff" => "image/tiff",
+                _ => "application/octet-stream",
+            }
+            .to_string()
+        }
+
+        // Best-effort: embedded image parsing should never prevent workbook interactions.
+        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
+            Ok(pkg) => pkg,
+            Err(_) => return Ok::<_, String>(Vec::new()),
+        };
+
+        let images = match pkg.extract_embedded_cell_images() {
+            Ok(images) => images,
+            Err(_) => return Ok::<_, String>(Vec::new()),
+        };
+
+        let sheet_name_by_part: std::collections::HashMap<String, String> = pkg
+            .worksheet_parts()
+            .ok()
+            .map(|parts| {
+                parts
+                    .into_iter()
+                    .map(|info| (info.worksheet_part, info.name))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let max_image_bytes = crate::ipc_file_limits::MAX_READ_RANGE_BYTES as usize;
+
+        let mut out = Vec::new();
+        for ((worksheet_part, cell_ref), image) in images {
+            if image.image_bytes.len() > max_image_bytes {
+                // Skip oversized payloads to keep IPC memory usage bounded.
+                continue;
+            }
+
+            let image_part = image.image_part;
+            let image_id = image_part
+                .strip_prefix("xl/media/")
+                .or_else(|| image_part.strip_prefix("/xl/media/"))
+                .unwrap_or(&image_part)
+                .to_string();
+
+            out.push(ImportedEmbeddedCellImageInfo {
+                worksheet_part: worksheet_part.clone(),
+                sheet_name: sheet_name_by_part.get(&worksheet_part).cloned(),
+                row: cell_ref.row as usize,
+                col: cell_ref.col as usize,
+                image_id: image_id.clone(),
+                bytes_base64: STANDARD.encode(&image.image_bytes),
+                mime_type: infer_mime_type(&image_id),
+                alt_text: image.alt_text,
             });
         }
 

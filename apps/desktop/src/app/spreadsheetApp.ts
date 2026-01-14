@@ -264,7 +264,6 @@ function readPngDimensions(bytes: Uint8Array): { width: number; height: number }
     return null;
   }
 }
-
 function inferMimeTypeFromId(id: string, bytes?: Uint8Array): string {
   const ext = String(id ?? "").split(".").pop()?.toLowerCase();
   switch (ext) {
@@ -1681,12 +1680,6 @@ export class SpreadsheetApp {
       this.document.setCellValue(this.sheetId, { row: 3, col: 1 }, 3);
       this.document.setCellValue(this.sheetId, { row: 4, col: 0 }, "D");
       this.document.setCellValue(this.sheetId, { row: 4, col: 1 }, 5);
-
-      // Temporary/demo: seed a couple of in-cell images for shared-grid rendering.
-      // This is a stopgap until the workbook backend exposes real workbook.images hydration.
-      if (this.gridMode === "shared") {
-        this.seedDemoInCellImages();
-      }
     }
 
     // Best-effort: keep the WASM engine worker hydrated from the DocumentController.
@@ -5345,6 +5338,10 @@ export class SpreadsheetApp {
       await this.wasmSyncPromise;
       this.clearComputedValuesByCoord();
       this.document.applyState(snapshot);
+      // The DocumentController snapshot format can include workbook-scoped image bytes
+      // (`snapshot.images`). Keep the UI-level in-cell image store aligned with the
+      // newly-restored workbook so `CellValue::Image` references can resolve.
+      this.syncInCellImageStoreFromDocument();
       // `applyState` can replace workbook-scoped image bytes. Clear decoded bitmap caches so we
       // don't show stale images for reused ids across workbooks/versions.
       this.activeSheetBackgroundAbort?.abort();
@@ -5400,25 +5397,25 @@ export class SpreadsheetApp {
     }
   }
 
-  private seedDemoInCellImages(): void {
-    // Keep demo image ids stable so tests can assert on resolution attempts.
-    const redId = "demo-image-red";
-    const blueId = "demo-image-blue";
+  private syncInCellImageStoreFromDocument(): void {
+    this.imageStore.clear();
+    const doc: any = this.document as any;
+    const images: unknown = doc?.images;
+    if (!(images instanceof Map)) return;
 
-    // 1×1 PNGs (red + blue) as base64 to avoid depending on runtime asset loading.
-    this.document.setImage(redId, {
-      mimeType: "image/png",
-      bytes: decodeBase64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQAY+l0AAAAASUVORK5CYII="),
-    });
-    this.document.setImage(blueId, {
-      mimeType: "image/png",
-      bytes: decodeBase64ToBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC"),
-    });
+    for (const [id, raw] of images.entries()) {
+      const imageId = typeof id === "string" ? id : String(id ?? "");
+      if (!imageId) continue;
+      if (!raw || typeof raw !== "object") continue;
+      const entry = raw as any;
+      const bytes: unknown = entry.bytes;
+      if (!(bytes instanceof Uint8Array)) continue;
 
-    // Place the demo images inside the existing seeded used-range (A1:D5) so we don't perturb
-    // navigation tests that assume the used range does not extend past D5.
-    this.document.setCellValue(this.sheetId, { row: 4, col: 2 }, { type: "image", value: { imageId: redId, altText: "Red" } }); // C5
-    this.document.setCellValue(this.sheetId, { row: 1, col: 3 }, { type: "image", value: { imageId: blueId, altText: "Blue" } }); // D2
+      const mimeTypeRaw: unknown = entry.mimeType;
+      const mimeType = typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== "" ? mimeTypeRaw : "application/octet-stream";
+
+      this.imageStore.set(imageId, { bytes, mimeType });
+    }
   }
 
   private async initWasmEngine(): Promise<void> {

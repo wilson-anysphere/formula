@@ -1734,6 +1734,7 @@ fn main() {
             commands::list_tables,
             commands::list_imported_chart_objects,
             commands::list_imported_chart_models,
+            commands::list_imported_embedded_cell_images,
             commands::get_precedents,
             commands::get_dependents,
             commands::set_cell,
