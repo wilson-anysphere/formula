@@ -6908,6 +6908,20 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Test-only helper: force SpreadsheetApp to refresh its cached drawing objects from the document.
+   *
+   * Some unit tests mutate `DocumentController.setSheetDrawings` directly and need a synchronous
+   * way to invalidate hit-test caches before dispatching pointer events.
+   */
+  syncSheetDrawings(): void {
+    if (this.disposed) return;
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+  }
+
+  /**
    * Returns the ImageStore used by the drawings overlay (picture bitmaps).
    *
    * This is used by the split-view secondary pane so it can render the same pictures
