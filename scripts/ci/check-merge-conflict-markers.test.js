@@ -54,13 +54,15 @@ test("passes when no conflict markers are present", { skip: !canRun }, () => {
 
 test("fails when standard conflict markers are present", { skip: !canRun }, () => {
   const proc = run({
-    "conflict.txt": `
-<<<<<<< ours
-hello
-=======
-world
->>>>>>> theirs
-`,
+    // Build the marker text dynamically so this test file itself does not contain
+    // raw conflict markers at the start of a line (the CI guard scans the repo).
+    "conflict.txt": [
+      "<<<<<<< ours",
+      "hello",
+      "=======",
+      "world",
+      ">>>>>>> theirs",
+    ].join("\n"),
   });
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /Merge conflict markers detected/i);
@@ -76,4 +78,3 @@ Not a conflict marker because it's 10 '=' characters.
   });
   assert.equal(proc.status, 0, proc.stderr);
 });
-
