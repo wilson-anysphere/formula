@@ -63,3 +63,12 @@ fn pivot_field_ref_display_quotes_non_identifier_table_names() {
     };
     assert_eq!(punct.to_string(), "'Sales-2024'[Amount]");
 }
+
+#[test]
+fn pivot_field_ref_display_allows_unicode_identifier_table_names() {
+    let unicode = PivotFieldRef::DataModelColumn {
+        table: "Straße".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(unicode.to_string(), "Straße[Amount]");
+}
