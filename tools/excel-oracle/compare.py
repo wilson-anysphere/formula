@@ -362,6 +362,9 @@ def _redact_formula(formula: str | None, *, privacy_mode: str) -> str | None:
         # Excel uses:
         # - double quotes for string literals, escaping embedded quotes by doubling (`""`).
         # - single quotes for sheet/workbook references, escaping embedded quotes by doubling (`''`).
+        # - brackets for external workbook references and structured references (`[Book.xlsx]Sheet1!A1`,
+        #   `Table1[[#All],[Column]]`). In privacy mode, hash bracketed content if it looks like a
+        #   path/URI/domain to avoid leaking filenames/domains.
         out: list[str] = []
         i = 0
         n = len(text)
@@ -418,6 +421,29 @@ def _redact_formula(formula: str | None, *, privacy_mode: str) -> str | None:
                 else:
                     out.append(text[start : j + 1])
                 i = j + 1
+                continue
+
+            if ch == "[":
+                start = i
+                depth = 1
+                j = i + 1
+                while j < n and depth > 0:
+                    if text[j] == "[":
+                        depth += 1
+                    elif text[j] == "]":
+                        depth -= 1
+                    j += 1
+                if depth != 0:
+                    out.append(text[start:])
+                    break
+                end = j - 1  # index of closing bracket
+                raw_content = text[start + 1 : end]
+                redacted = _redact_text(raw_content, privacy_mode=privacy_mode)
+                if redacted is not None and redacted != raw_content:
+                    out.append(f"[{redacted}]")
+                else:
+                    out.append(text[start:j])
+                i = j
                 continue
 
             out.append(ch)
