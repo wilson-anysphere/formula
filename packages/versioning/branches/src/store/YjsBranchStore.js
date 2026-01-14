@@ -386,13 +386,101 @@ export class YjsBranchStore {
 
   /**
    * @param {any} commitMap
+   * @param {string} expectedField
+   * @returns {number | null}
+   */
+  #getExpectedChunkCount(commitMap, expectedField) {
+    const raw = commitMap.get(expectedField);
+    if (typeof raw === "number" && Number.isFinite(raw) && Number.isSafeInteger(raw) && raw >= 0) {
+      return raw;
+    }
+    return null;
+  }
+
+  /**
+   * @param {any} commitMap
+   * @param {string} chunksField
+   * @param {string} expectedField
+   * @returns {boolean}
+   */
+  #isChunkArrayComplete(commitMap, chunksField, expectedField) {
+    const arr = getYArray(commitMap.get(chunksField));
+    if (!arr) return false;
+    const expected = this.#getExpectedChunkCount(commitMap, expectedField);
+    if (expected != null) return arr.length >= expected;
+
+    // Back-compat: older writers didn't store expected counts. Only trust chunk
+    // arrays when the commit isn't explicitly marked incomplete.
+    if (!this.#isCommitComplete(commitMap)) return false;
+    return arr.length > 0;
+  }
+
+  /**
+   * Auto-finalize a commit record if we can prove all chunk payloads are present
+   * but the writer crashed before setting `commitComplete=true`.
+   *
+   * @param {string} commitId
+   * @param {Y.Map<any>} commitMap
+   * @returns {boolean} whether the commit was finalized
+   */
+  #maybeFinalizeCommitIfComplete(commitId, commitMap) {
+    if (commitMap.get("commitComplete") !== false) return false;
+
+    const patchInline = commitMap.get("patch") !== undefined;
+    const patchChunkEncoded =
+      commitMap.get("patchEncoding") === "gzip-chunks" || commitMap.get("patchChunks") !== undefined;
+    const patchComplete = patchInline || (patchChunkEncoded && this.#isChunkArrayComplete(commitMap, "patchChunks", "patchChunkCountExpected"));
+    if (!patchComplete) return false;
+
+    const snapshotInline = commitMap.get("snapshot") !== undefined;
+    const snapshotChunkEncoded =
+      commitMap.get("snapshotEncoding") === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined;
+
+    // Snapshot payloads are optional; consider the commit finalizable if either:
+    //  - snapshot is absent (most commits), or
+    //  - snapshot is inline, or
+    //  - snapshot is chunk-encoded and all expected chunks are present.
+    const snapshotComplete = snapshotInline || (snapshotChunkEncoded && this.#isChunkArrayComplete(commitMap, "snapshotChunks", "snapshotChunkCountExpected"));
+    const snapshotAbsent = !snapshotInline && !snapshotChunkEncoded;
+    if (!snapshotAbsent && !snapshotComplete) return false;
+
+    this.#ydoc.transact(() => {
+      const live = getYMap(this.#commits.get(commitId));
+      if (!live) return;
+      if (live.get("commitComplete") !== false) return;
+
+      const patchInlineNow = live.get("patch") !== undefined;
+      const patchChunkEncodedNow =
+        live.get("patchEncoding") === "gzip-chunks" || live.get("patchChunks") !== undefined;
+      const patchCompleteNow =
+        patchInlineNow ||
+        (patchChunkEncodedNow && this.#isChunkArrayComplete(live, "patchChunks", "patchChunkCountExpected"));
+      if (!patchCompleteNow) return;
+
+      const snapshotInlineNow = live.get("snapshot") !== undefined;
+      const snapshotChunkEncodedNow =
+        live.get("snapshotEncoding") === "gzip-chunks" || live.get("snapshotChunks") !== undefined;
+      const snapshotCompleteNow =
+        snapshotInlineNow ||
+        (snapshotChunkEncodedNow && this.#isChunkArrayComplete(live, "snapshotChunks", "snapshotChunkCountExpected"));
+      const snapshotAbsentNow = !snapshotInlineNow && !snapshotChunkEncodedNow;
+      if (!snapshotAbsentNow && !snapshotCompleteNow) return;
+
+      live.set("commitComplete", true);
+      if (live.get("incompleteSinceMs") != null) live.delete("incompleteSinceMs");
+    }, "branching-store");
+
+    return commitMap.get("commitComplete") !== false;
+  }
+
+  /**
+   * @param {any} commitMap
    */
   #commitHasPatch(commitMap) {
     const patchEncoding = commitMap.get("patchEncoding");
     if (patchEncoding === "gzip-chunks" || commitMap.get("patchChunks") !== undefined) {
-      if (!this.#isCommitComplete(commitMap)) return false;
-      const arr = getYArray(commitMap.get("patchChunks"));
-      return arr !== null && arr.length > 0;
+      // Only report patch payloads that are definitely complete/readable.
+      return this.#isChunkArrayComplete(commitMap, "patchChunks", "patchChunkCountExpected");
     }
     return commitMap.get("patch") !== undefined;
   }
@@ -402,9 +490,12 @@ export class YjsBranchStore {
    */
   #commitHasSnapshot(commitMap) {
     if (commitMap.get("snapshot") !== undefined) return true;
-    if (!this.#isCommitComplete(commitMap)) return false;
-    const arr = getYArray(commitMap.get("snapshotChunks"));
-    return arr !== null && arr.length > 0;
+    const snapshotEncoding = commitMap.get("snapshotEncoding");
+    if (snapshotEncoding === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined) {
+      // Only report snapshots that are definitely complete/readable.
+      return this.#isChunkArrayComplete(commitMap, "snapshotChunks", "snapshotChunkCountExpected");
+    }
+    return false;
   }
 
   /**
@@ -417,14 +508,15 @@ export class YjsBranchStore {
    *   - not referenced by any branch head
    *   - not referenced by rootCommitId
    *   - not referenced as a parent/merge-parent by any commit
-   *   - have a `writeStartedAt` timestamp (set by this store for gzip-chunks writes)
+   *
+   * Staleness is tracked via `incompleteSinceMs`, a timestamp written by the
+   * first reader that notices a commit is incomplete. This avoids relying on
+   * writer-provided wall clock timestamps (clock skew) and reduces the risk of
+   * racing legitimate writers.
    *
    * @param {string} docId
    */
   #cleanupStaleIncompleteCommits(docId) {
-    // Avoid relying on `createdAt` because callers can pass arbitrary commit
-    // timestamps (e.g. imported history). `writeStartedAt` is written by this
-    // store at commit write time and is safe to compare to wall clock time.
     const ttlMs = 60 * 60 * 1000;
     const now = Date.now();
 
@@ -452,25 +544,59 @@ export class YjsBranchStore {
       if (typeof mergeParent === "string" && mergeParent.length > 0) referenced.add(mergeParent);
     });
 
-    /** @type {string[]} */
-    const staleUnreachable = [];
+    /** @type {Set<string>} */
+    const staleUnreachable = new Set();
+    /** @type {Set<string>} */
+    const finalizeIds = new Set();
+    /** @type {Map<string, number>} */
+    const markIncompleteSince = new Map();
     this.#commits.forEach((value, key) => {
       if (typeof key !== "string" || key.length === 0) return;
-      if (referenced.has(key)) return;
       const commitMap = getYMap(value);
       if (!commitMap) return;
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
-      if (this.#isCommitComplete(commitMap)) return;
 
-      const writeStartedAt = Number(commitMap.get("writeStartedAt") ?? 0);
-      if (!Number.isFinite(writeStartedAt) || writeStartedAt <= 0) return;
-      if (now - writeStartedAt < ttlMs) return;
+      const commitComplete = commitMap.get("commitComplete");
+      if (commitComplete !== false) return;
 
-      staleUnreachable.push(key);
+      // If all expected chunks are present but the writer crashed before flipping
+      // `commitComplete=true`, finalize the record instead of deleting it.
+      const patchInline = commitMap.get("patch") !== undefined;
+      const patchChunkEncoded =
+        commitMap.get("patchEncoding") === "gzip-chunks" || commitMap.get("patchChunks") !== undefined;
+      const patchComplete =
+        patchInline ||
+        (patchChunkEncoded && this.#isChunkArrayComplete(commitMap, "patchChunks", "patchChunkCountExpected"));
+      if (patchComplete) {
+        const snapshotInline = commitMap.get("snapshot") !== undefined;
+        const snapshotChunkEncoded =
+          commitMap.get("snapshotEncoding") === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined;
+        const snapshotComplete =
+          snapshotInline ||
+          (snapshotChunkEncoded &&
+            this.#isChunkArrayComplete(commitMap, "snapshotChunks", "snapshotChunkCountExpected"));
+        const snapshotAbsent = !snapshotInline && !snapshotChunkEncoded;
+        if (snapshotAbsent || snapshotComplete) {
+          finalizeIds.add(key);
+          return;
+        }
+      }
+
+      // Track staleness based on a reader-written timestamp rather than a
+      // writer-provided wall clock (avoids clock skew).
+      const incompleteSinceMsRaw = commitMap.get("incompleteSinceMs");
+      const incompleteSinceMsValid =
+        typeof incompleteSinceMsRaw === "number" &&
+        Number.isFinite(incompleteSinceMsRaw) &&
+        incompleteSinceMsRaw <= now;
+      const ts = incompleteSinceMsValid ? incompleteSinceMsRaw : now;
+      if (!incompleteSinceMsValid) markIncompleteSince.set(key, ts);
+
+      if (!referenced.has(key) && now - ts >= ttlMs) staleUnreachable.add(key);
     });
 
-    if (staleUnreachable.length === 0) return;
+    if (staleUnreachable.size === 0 && finalizeIds.size === 0 && markIncompleteSince.size === 0) return;
 
     this.#ydoc.transact(() => {
       /** @type {Set<string>} */
@@ -497,11 +623,49 @@ export class YjsBranchStore {
         if (typeof mergeParent === "string" && mergeParent.length > 0) stillReferenced.add(mergeParent);
       });
 
+      for (const [commitId, ts] of markIncompleteSince) {
+        if (staleUnreachable.has(commitId) || finalizeIds.has(commitId)) continue;
+        const commitMap = getYMap(this.#commits.get(commitId));
+        if (!commitMap) continue;
+        if (commitMap.get("commitComplete") !== false) continue;
+        // Don't add a staleness marker to commits that have since become referenced
+        // (keep it conservative; referenced commits are handled via head/root repair).
+        if (stillReferenced.has(commitId)) continue;
+        commitMap.set("incompleteSinceMs", ts);
+      }
+
+      for (const commitId of finalizeIds) {
+        const commitMap = getYMap(this.#commits.get(commitId));
+        if (!commitMap) continue;
+        if (commitMap.get("commitComplete") !== false) continue;
+
+        const patchInline = commitMap.get("patch") !== undefined;
+        const patchChunkEncoded =
+          commitMap.get("patchEncoding") === "gzip-chunks" || commitMap.get("patchChunks") !== undefined;
+        const patchComplete =
+          patchInline ||
+          (patchChunkEncoded && this.#isChunkArrayComplete(commitMap, "patchChunks", "patchChunkCountExpected"));
+        if (!patchComplete) continue;
+
+        const snapshotInline = commitMap.get("snapshot") !== undefined;
+        const snapshotChunkEncoded =
+          commitMap.get("snapshotEncoding") === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined;
+        const snapshotComplete =
+          snapshotInline ||
+          (snapshotChunkEncoded &&
+            this.#isChunkArrayComplete(commitMap, "snapshotChunks", "snapshotChunkCountExpected"));
+        const snapshotAbsent = !snapshotInline && !snapshotChunkEncoded;
+        if (!snapshotAbsent && !snapshotComplete) continue;
+
+        commitMap.set("commitComplete", true);
+        if (commitMap.get("incompleteSinceMs") != null) commitMap.delete("incompleteSinceMs");
+      }
+
       for (const commitId of staleUnreachable) {
         if (stillReferenced.has(commitId)) continue;
         const commitMap = getYMap(this.#commits.get(commitId));
         if (!commitMap) continue;
-        if (this.#isCommitComplete(commitMap)) continue;
+        if (commitMap.get("commitComplete") !== false) continue;
         this.#commits.delete(commitId);
       }
     }, "branching-store");
@@ -545,20 +709,43 @@ export class YjsBranchStore {
    * @returns {Promise<Patch>}
    */
   async #readCommitPatch(commitMap, commitId) {
+    const inline = commitMap.get("patch");
+
     const patchEncoding = commitMap.get("patchEncoding");
-    if (patchEncoding === "gzip-chunks" || commitMap.get("patchChunks") !== undefined) {
-      if (!this.#isCommitComplete(commitMap)) {
-        throw new Error(`Commit not fully written yet: ${commitId}`);
-      }
-      const chunksArr = getYArray(commitMap.get("patchChunks"));
-      if (!chunksArr) {
-        throw new Error(`YjsBranchStore: missing patchChunks for ${commitId}`);
-      }
-      const decoded = await this.#decodeJsonFromGzipChunks(chunksArr, `patch(${commitId})`);
-      return /** @type {Patch} */ (decoded);
+    const isChunkEncoded = patchEncoding === "gzip-chunks" || commitMap.get("patchChunks") !== undefined;
+    if (!isChunkEncoded) {
+      return structuredClone(inline ?? { schemaVersion: 1 });
     }
 
-    return structuredClone(commitMap.get("patch") ?? { schemaVersion: 1 });
+    // If a writer crashed after appending all chunks but before flipping
+    // `commitComplete=true`, opportunistically finalize so future reads don't
+    // keep tripping over the incomplete flag.
+    this.#maybeFinalizeCommitIfComplete(commitId, commitMap);
+
+    const chunksArr = getYArray(commitMap.get("patchChunks"));
+    if (!chunksArr) {
+      if (inline !== undefined) return structuredClone(inline);
+      throw new Error(`YjsBranchStore: missing patchChunks for ${commitId}`);
+    }
+
+    const expected = this.#getExpectedChunkCount(commitMap, "patchChunkCountExpected");
+    if (expected != null) {
+      if (chunksArr.length < expected) {
+        if (inline !== undefined) return structuredClone(inline);
+        throw new Error(`Commit patch not fully written yet: ${commitId}`);
+      }
+    } else if (!this.#isCommitComplete(commitMap)) {
+      // Without an expected chunk count we can't distinguish "complete but flag
+      // missing" vs "partial". Be conservative and treat this as incomplete.
+      if (inline !== undefined) return structuredClone(inline);
+      throw new Error(`Commit patch not fully written yet: ${commitId}`);
+    } else if (chunksArr.length === 0) {
+      if (inline !== undefined) return structuredClone(inline);
+      throw new Error(`YjsBranchStore: missing patchChunks for ${commitId}`);
+    }
+
+    const decoded = await this.#decodeJsonFromGzipChunks(chunksArr, `patch(${commitId})`);
+    return /** @type {Patch} */ (decoded);
   }
 
   /**
@@ -573,16 +760,28 @@ export class YjsBranchStore {
     }
 
     const snapshotEncoding = commitMap.get("snapshotEncoding");
-    if (snapshotEncoding === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined) {
-      if (!this.#isCommitComplete(commitMap)) {
-        // Snapshot payloads are an optimization; if the patch is stored inline we
-        // can still reconstruct the commit state by replaying patches even while
-        // an interrupted snapshot chunk write is being repaired.
+    const isChunkEncoded = snapshotEncoding === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined;
+    if (isChunkEncoded) {
+      // Opportunistically finalize fully-written chunk commits that are missing
+      // the `commitComplete=true` marker.
+      this.#maybeFinalizeCommitIfComplete(commitId, commitMap);
+
+      const chunksArr = getYArray(commitMap.get("snapshotChunks"));
+      if (!chunksArr) return null;
+
+      const expected = this.#getExpectedChunkCount(commitMap, "snapshotChunkCountExpected");
+      const snapshotComplete =
+        expected != null
+          ? chunksArr.length >= expected
+          : this.#isCommitComplete(commitMap) && chunksArr.length > 0;
+
+      if (!snapshotComplete) {
+        // Snapshot payloads are an optimization; if the patch is readable we can
+        // still reconstruct state by replaying patches.
         if (this.#commitHasPatch(commitMap)) return null;
         throw new Error(`Commit not fully written yet: ${commitId}`);
       }
-      const chunksArr = getYArray(commitMap.get("snapshotChunks"));
-      if (!chunksArr) return null;
+
       const decoded = await this.#decodeJsonFromGzipChunks(chunksArr, `snapshot(${commitId})`);
       return normalizeDocumentState(decoded);
     }
@@ -619,6 +818,7 @@ export class YjsBranchStore {
       // Resilience: interrupted gzip-chunks writes can leave partially-written
       // commits around (commitComplete=false). Ensure document repair doesn't
       // select those as the root commit pointer.
+      this.#maybeFinalizeCommitIfComplete(rootCommitId, rootCommitMap);
       if (!this.#isCommitComplete(rootCommitMap)) {
         // Some repairs/migrations can write chunk payloads across multiple
         // transactions (e.g. restoring a missing root snapshot). If we crashed
@@ -758,6 +958,7 @@ export class YjsBranchStore {
             snapshotArr = new arrayCtor();
             commit.set("commitComplete", false);
             commit.set("snapshotEncoding", "gzip-chunks");
+            commit.set("snapshotChunkCountExpected", snapshotChunks.length);
             commit.set("snapshotChunks", snapshotArr);
 
             const done = pushMore();
@@ -846,6 +1047,8 @@ export class YjsBranchStore {
         commit.set("message", "root");
         commit.set("patchEncoding", "gzip-chunks");
         commit.set("snapshotEncoding", "gzip-chunks");
+        commit.set("patchChunkCountExpected", patchChunks.length);
+        commit.set("snapshotChunkCountExpected", snapshotChunks.length);
         commit.set("commitComplete", false);
 
         patchArr = new arrayCtor();
@@ -948,6 +1151,7 @@ export class YjsBranchStore {
         seen.add(currentId);
         const commitMap = getYMap(this.#commits.get(currentId));
         if (!commitMap) break;
+        this.#maybeFinalizeCommitIfComplete(currentId, commitMap);
         const commitDocId = commitMap.get("docId");
         if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) break;
         const parent = commitMap.get("parentCommitId");
@@ -957,7 +1161,11 @@ export class YjsBranchStore {
           // `commitComplete=false` even though the commit still has an inline
           // patch/snapshot payload that makes it safe to use.
           const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
-          if (!this.#isCommitComplete(commitMap) && !hasPayload) break;
+          const hasInlinePayload = commitMap.get("patch") !== undefined || commitMap.get("snapshot") !== undefined;
+          // For gzip-chunks commits, `commitComplete=false` indicates the chunk
+          // payloads may be incomplete. Only consider incomplete commits when they
+          // still have an inline patch/snapshot payload that is safe to read.
+          if (!this.#isCommitComplete(commitMap) && !hasInlinePayload) break;
           if (!hasPayload) break;
           return currentId;
         }
@@ -970,15 +1178,21 @@ export class YjsBranchStore {
     this.#commits.forEach((value, key) => {
       const commitMap = getYMap(value);
       if (!commitMap) return;
+      if (typeof key === "string" && key.length > 0) {
+        this.#maybeFinalizeCommitIfComplete(key, commitMap);
+      }
       const parent = commitMap.get("parentCommitId");
       if (parent !== null && parent !== undefined) return;
+
+      const isComplete = this.#isCommitComplete(commitMap);
+      const hasInlinePayload = commitMap.get("patch") !== undefined || commitMap.get("snapshot") !== undefined;
+      if (!isComplete && !hasInlinePayload) return;
 
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
       if (!hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
-      const isComplete = this.#isCommitComplete(commitMap);
       if (typeof key === "string" && key.length > 0) {
         candidates.push({ id: key, createdAt, hasPayload, isComplete });
       }
@@ -1004,12 +1218,17 @@ export class YjsBranchStore {
     this.#commits.forEach((value, key) => {
       const commitMap = getYMap(value);
       if (!commitMap) return;
+      if (typeof key === "string" && key.length > 0) {
+        this.#maybeFinalizeCommitIfComplete(key, commitMap);
+      }
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
+      const isComplete = this.#isCommitComplete(commitMap);
+      const hasInlinePayload = commitMap.get("patch") !== undefined || commitMap.get("snapshot") !== undefined;
+      if (!isComplete && !hasInlinePayload) return;
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
       if (!hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
-      const isComplete = this.#isCommitComplete(commitMap);
       if (typeof key === "string" && key.length > 0) {
         candidates.push({ id: key, createdAt, hasPayload, isComplete });
       }
@@ -1320,6 +1539,7 @@ export class YjsBranchStore {
         commit.set("writeStartedAt", Date.now());
         commit.set("message", message ?? null);
         commit.set("patchEncoding", "gzip-chunks");
+        commit.set("patchChunkCountExpected", patchChunks.length);
         commit.set("commitComplete", false);
 
         patchArr = new arrayCtor();
@@ -1328,6 +1548,7 @@ export class YjsBranchStore {
         if (snapshotChunks) {
           snapshotArr = new arrayCtor();
           commit.set("snapshotEncoding", "gzip-chunks");
+          commit.set("snapshotChunkCountExpected", snapshotChunks.length);
           commit.set("snapshotChunks", snapshotArr);
         }
 

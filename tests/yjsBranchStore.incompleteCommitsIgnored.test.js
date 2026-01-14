@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 
 import { YjsBranchStore } from "../packages/versioning/branches/src/store/YjsBranchStore.js";
+import { diffDocumentStates } from "../packages/versioning/branches/src/patch.js";
 
 test("YjsBranchStore.ensureDocument ignores incomplete gzip-chunks commits when inferring root/head", async () => {
   const ydoc = new Y.Doc();
@@ -44,7 +45,6 @@ test("YjsBranchStore.ensureDocument ignores incomplete gzip-chunks commits when 
     incompleteRoot.set("message", "incomplete-root");
     incompleteRoot.set("patchEncoding", "gzip-chunks");
     incompleteRoot.set("commitComplete", false);
-    incompleteRoot.set("patchChunks", new Y.Array());
     commits.set(incompleteRootId, incompleteRoot);
 
     // A newer incomplete commit that would previously be selected as the latest/head.
@@ -58,7 +58,6 @@ test("YjsBranchStore.ensureDocument ignores incomplete gzip-chunks commits when 
     incompleteNewer.set("message", "incomplete-newer");
     incompleteNewer.set("patchEncoding", "gzip-chunks");
     incompleteNewer.set("commitComplete", false);
-    incompleteNewer.set("patchChunks", new Y.Array());
     commits.set(incompleteNewerId, incompleteNewer);
 
     // Corrupt metadata to force root/head inference.
@@ -74,6 +73,18 @@ test("YjsBranchStore.ensureDocument ignores incomplete gzip-chunks commits when 
   assert.ok(main instanceof Y.Map);
   assert.equal(main.get("headCommitId"), originalRoot);
   assert.equal(meta.get("currentBranchName"), "main");
+
+  const listed = await store.listBranches(docId);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].name, "main");
+  assert.equal(listed[0].headCommitId, originalRoot);
+
+  const mainBranch = await store.getBranch(docId, "main");
+  assert.ok(mainBranch);
+  assert.equal(mainBranch.headCommitId, originalRoot);
+
+  const state = await store.getDocumentStateAtCommit(mainBranch.headCommitId);
+  assert.equal(state.schemaVersion, 1);
 });
 
 test("YjsBranchStore.ensureDocument repairs meta.rootCommitId pointing at an incomplete commit", async () => {
@@ -244,7 +255,8 @@ test("YjsBranchStore.ensureDocument deletes stale unreachable incomplete gzip-ch
     commit.set("mergeParentCommitId", null);
     commit.set("createdBy", actor.userId);
     commit.set("createdAt", now);
-    commit.set("writeStartedAt", now - 2 * 60 * 60 * 1000);
+    // Simulate a commit that has been incomplete long enough to be considered stale.
+    commit.set("incompleteSinceMs", now - 2 * 60 * 60 * 1000);
     commit.set("message", "stale");
     commit.set("patchEncoding", "gzip-chunks");
     commit.set("commitComplete", false);
@@ -358,4 +370,56 @@ test("YjsBranchStore.ensureDocument does not delete stale incomplete commits ref
   assert.ok(commits.has(staleId));
   await store.ensureDocument(docId, actor, { sheets: {} });
   assert.ok(commits.has(staleId));
+});
+
+test("YjsBranchStore auto-finalizes commitComplete=false when all gzip-chunks chunks are present", async () => {
+  const ydoc = new Y.Doc();
+  const store = new YjsBranchStore({
+    ydoc,
+    payloadEncoding: "gzip-chunks",
+    maxChunksPerTransaction: 1,
+    snapshotEveryNCommits: 1,
+  });
+  const docId = "doc1";
+  const actor = { userId: "u1", role: "owner" };
+
+  await store.ensureDocument(docId, actor, { sheets: {} });
+  const main = await store.getBranch(docId, "main");
+  assert.ok(main);
+
+  const current = await store.getDocumentStateAtCommit(main.headCommitId);
+  const next = structuredClone(current);
+  next.metadata.autoFinalize = "ok";
+  const patch = diffDocumentStates(current, next);
+
+  const commit = await store.createCommit({
+    docId,
+    parentCommitId: main.headCommitId,
+    mergeParentCommitId: null,
+    createdBy: actor.userId,
+    createdAt: Date.now(),
+    message: "auto-finalize",
+    patch,
+    nextState: next,
+  });
+
+  const commits = ydoc.getMap("branching:commits");
+  const raw = commits.get(commit.id);
+  assert.ok(raw instanceof Y.Map);
+  assert.equal(raw.get("commitComplete"), true);
+
+  // Simulate a writer crash after appending all expected chunks but before
+  // flipping the `commitComplete` marker.
+  ydoc.transact(() => {
+    raw.set("commitComplete", false);
+  });
+  assert.equal(raw.get("commitComplete"), false);
+
+  const loaded = await store.getCommit(commit.id);
+  assert.ok(loaded);
+  assert.deepEqual(loaded.patch, patch);
+
+  const rawAfter = commits.get(commit.id);
+  assert.ok(rawAfter instanceof Y.Map);
+  assert.equal(rawAfter.get("commitComplete"), true);
 });
