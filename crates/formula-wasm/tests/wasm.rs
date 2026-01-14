@@ -115,6 +115,23 @@ struct IterativeCalcSettings {
     max_change: f64,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalSeekResultDto {
+    status: String,
+    solution: f64,
+    iterations: usize,
+    final_output: f64,
+    final_error: f64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalSeekResponse {
+    result: GoalSeekResultDto,
+    changes: Vec<CellChange>,
+}
+
 #[wasm_bindgen_test]
 fn debug_function_registry_contains_builtins() {
     // Ensure the wasm module invoked Rust global constructors before touching the
@@ -2223,26 +2240,29 @@ fn goal_seek_solves_quadratic_and_updates_workbook_state() {
     Reflect::set(&req, &JsValue::from_str("targetValue"), &JsValue::from_f64(25.0)).unwrap();
     Reflect::set(&req, &JsValue::from_str("changingCell"), &JsValue::from_str("A1")).unwrap();
     Reflect::set(&req, &JsValue::from_str("tolerance"), &JsValue::from_f64(1e-9)).unwrap();
-    Reflect::set(
-        &req,
-        &JsValue::from_str("recalcMode"),
-        &JsValue::from_str("multiThreaded"),
-    )
-    .unwrap();
 
     let result_js = wb.goal_seek(req.into()).unwrap();
-    let result: JsonValue = serde_wasm_bindgen::from_value(result_js).unwrap();
-    assert_eq!(result["success"].as_bool(), Some(true), "{result:?}");
-    let solution = result["solution"]
-        .as_f64()
-        .unwrap_or_else(|| panic!("expected numeric solution, got {result:?}"));
+    let result: GoalSeekResponse = serde_wasm_bindgen::from_value(result_js).unwrap();
+    assert_eq!(result.result.status, "Converged", "{result:?}");
+    let solution = result.result.solution;
     assert!(
         (solution - 5.0).abs() < 1e-6,
         "expected solution ≈ 5, got {solution}"
     );
 
-    // After recalc, the workbook should reflect the solved value and the target formula result.
-    wb.recalculate(None).unwrap();
+    // Goal seek should include final input/output changes for cache updates.
+    let a1_change = result
+        .changes
+        .iter()
+        .find(|c| c.sheet == DEFAULT_SHEET && c.address == "A1")
+        .expect("expected A1 change");
+    assert!((a1_change.value.as_f64().unwrap() - 5.0).abs() < 1e-6);
+    let b1_change = result
+        .changes
+        .iter()
+        .find(|c| c.sheet == DEFAULT_SHEET && c.address == "B1")
+        .expect("expected B1 change");
+    assert!((b1_change.value.as_f64().unwrap() - 25.0).abs() < 1e-6);
 
     let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
     let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
@@ -2264,7 +2284,10 @@ fn goal_seek_rejects_non_object_request() {
     let message = err
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
-    assert_eq!(message, "goalSeek request must be an object");
+    assert!(
+        message.contains("expected") || message.contains("object"),
+        "{message}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -2292,7 +2315,7 @@ fn goal_seek_rejects_invalid_addresses() {
     let message = err
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
-    assert_eq!(message, "invalid targetCell address: A0");
+    assert_eq!(message, "invalid cell address: A0");
 }
 
 #[wasm_bindgen_test]

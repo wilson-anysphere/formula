@@ -7,12 +7,14 @@ use formula_engine::locale::{
     ValueLocaleConfig, DE_DE, EN_US, ES_ES, FR_FR,
 };
 use formula_engine::pivot as pivot_engine;
-use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams};
-use formula_engine::what_if::EngineWhatIfModel;
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
     EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
     ParseOptions, RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+};
+use formula_engine::what_if::{
+    goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
+    CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, WhatIfError, WhatIfModel,
 };
 use formula_model::{
     display_formula_text, Alignment, CellRef, CellValue, DateSystem, DefinedNameScope, Font,
@@ -53,6 +55,42 @@ pub struct CellChange {
     pub sheet: String,
     pub address: String,
     pub value: JsonValue,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalSeekRequestDto {
+    target_cell: String,
+    target_value: f64,
+    changing_cell: String,
+    #[serde(default)]
+    sheet: Option<String>,
+    #[serde(default)]
+    max_iterations: Option<u32>,
+    #[serde(default)]
+    tolerance: Option<f64>,
+    #[serde(default)]
+    derivative_step: Option<f64>,
+    #[serde(default)]
+    min_derivative: Option<f64>,
+    #[serde(default)]
+    max_bracket_expansions: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalSeekResponseDto {
+    result: GoalSeekResult,
+    changes: Vec<CellChange>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct GoalSeekTuning {
+    max_iterations: Option<usize>,
+    tolerance: Option<f64>,
+    derivative_step: Option<f64>,
+    min_derivative: Option<f64>,
+    max_bracket_expansions: Option<usize>,
 }
 
 fn js_err(message: impl ToString) -> JsValue {
@@ -1511,6 +1549,108 @@ struct WorkbookState {
     sheets_rich: BTreeMap<String, BTreeMap<String, CellValue>>,
 }
 
+#[derive(Clone, Debug)]
+struct GoalSeekModelError(String);
+
+impl std::fmt::Display for GoalSeekModelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<JsValue> for GoalSeekModelError {
+    fn from(value: JsValue) -> Self {
+        let message = value
+            .as_string()
+            .unwrap_or_else(|| format!("unexpected JS error value: {value:?}"));
+        Self(message)
+    }
+}
+
+struct WorkbookGoalSeekModel<'a> {
+    wb: &'a mut WorkbookState,
+    sheet: String,
+    changes: BTreeMap<FormulaCellKey, JsonValue>,
+}
+
+impl<'a> WorkbookGoalSeekModel<'a> {
+    fn new(wb: &'a mut WorkbookState, sheet: String) -> Self {
+        Self {
+            wb,
+            sheet,
+            changes: BTreeMap::new(),
+        }
+    }
+
+    fn push_changes(&mut self, changes: Vec<CellChange>) {
+        for change in changes {
+            // Engine-driven changes should always have valid A1 addresses; treat parsing failures
+            // as a no-op rather than panicking.
+            let Ok(cell_ref) = CellRef::from_a1(&change.address) else {
+                continue;
+            };
+            self.changes.insert(
+                FormulaCellKey {
+                    sheet: change.sheet,
+                    row: cell_ref.row,
+                    col: cell_ref.col,
+                },
+                change.value,
+            );
+        }
+    }
+}
+
+fn engine_value_to_what_if_value(value: EngineValue) -> WhatIfCellValue {
+    match value {
+        EngineValue::Number(n) => WhatIfCellValue::Number(n),
+        EngineValue::Bool(b) => WhatIfCellValue::Bool(b),
+        EngineValue::Text(s) => WhatIfCellValue::Text(s),
+        EngineValue::Blank => WhatIfCellValue::Blank,
+        EngineValue::Error(err) => WhatIfCellValue::Text(err.as_code().to_string()),
+        EngineValue::Entity(entity) => WhatIfCellValue::Text(entity.display),
+        EngineValue::Record(record) => WhatIfCellValue::Text(record.display),
+        EngineValue::Array(arr) => engine_value_to_what_if_value(arr.top_left()),
+        other => WhatIfCellValue::Text(other.to_string()),
+    }
+}
+
+fn what_if_value_to_json(value: WhatIfCellValue) -> JsonValue {
+    match value {
+        WhatIfCellValue::Number(n) => serde_json::Number::from_f64(n)
+            .map(JsonValue::Number)
+            .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
+        WhatIfCellValue::Bool(b) => JsonValue::Bool(b),
+        WhatIfCellValue::Text(s) => JsonValue::String(encode_scalar_text_input(&s)),
+        WhatIfCellValue::Blank => JsonValue::Null,
+    }
+}
+
+impl WhatIfModel for WorkbookGoalSeekModel<'_> {
+    type Error = GoalSeekModelError;
+
+    fn get_cell_value(&self, cell: &WhatIfCellRef) -> Result<WhatIfCellValue, Self::Error> {
+        Ok(engine_value_to_what_if_value(
+            self.wb.engine.get_cell_value(&self.sheet, cell.as_str()),
+        ))
+    }
+
+    fn set_cell_value(&mut self, cell: &WhatIfCellRef, value: WhatIfCellValue) -> Result<(), Self::Error> {
+        self.wb
+            .set_cell_internal(&self.sheet, cell.as_str(), what_if_value_to_json(value))
+            .map_err(GoalSeekModelError::from)
+    }
+
+    fn recalculate(&mut self) -> Result<(), Self::Error> {
+        let changes = self
+            .wb
+            .recalculate_internal(None)
+            .map_err(GoalSeekModelError::from)?;
+        self.push_changes(changes);
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 enum EditOpDto {
@@ -2260,6 +2400,99 @@ impl WorkbookState {
             .collect();
 
         Ok(changes)
+    }
+
+    fn goal_seek_internal(
+        &mut self,
+        sheet: &str,
+        target_cell: &str,
+        target_value: f64,
+        changing_cell: &str,
+        tuning: GoalSeekTuning,
+    ) -> Result<(GoalSeekResult, Vec<CellChange>), JsValue> {
+        let sheet = self.require_sheet(sheet)?.to_string();
+        let target_cell_ref = Self::parse_address(target_cell)?;
+        let changing_cell_ref = Self::parse_address(changing_cell)?;
+        let target_cell = target_cell_ref.to_a1();
+        let changing_cell = changing_cell_ref.to_a1();
+
+        let mut params =
+            GoalSeekParams::new(target_cell.as_str(), target_value, changing_cell.as_str());
+        if let Some(max_iterations) = tuning.max_iterations {
+            params.max_iterations = max_iterations;
+        }
+        if let Some(tolerance) = tuning.tolerance {
+            params.tolerance = tolerance;
+        }
+        if tuning.derivative_step.is_some() {
+            params.derivative_step = tuning.derivative_step;
+        }
+        if let Some(min_derivative) = tuning.min_derivative {
+            params.min_derivative = min_derivative;
+        }
+        if let Some(max_bracket_expansions) = tuning.max_bracket_expansions {
+            params.max_bracket_expansions = max_bracket_expansions;
+        }
+
+        let mut model = WorkbookGoalSeekModel::new(self, sheet.clone());
+        let result = GoalSeek::solve(&mut model, params).map_err(|err| {
+            let message = match err {
+                WhatIfError::Model(err) => err.to_string(),
+                WhatIfError::NonNumericCell { cell, value } => {
+                    let value_desc = match value {
+                        WhatIfCellValue::Number(n) => n.to_string(),
+                        WhatIfCellValue::Text(s) => s,
+                        WhatIfCellValue::Bool(b) => b.to_string(),
+                        WhatIfCellValue::Blank => "blank".to_string(),
+                    };
+                    format!("cell {sheet}!{cell} is not numeric: {value_desc}")
+                }
+                WhatIfError::InvalidParams(msg) => format!("invalid goal seek parameters: {msg}"),
+                WhatIfError::NoBracketFound => "goal seek: could not bracket a solution".to_string(),
+                WhatIfError::NumericalFailure(msg) => format!("goal seek numerical failure: {msg}"),
+            };
+            js_err(message)
+        })?;
+
+        // Ensure the final workbook state matches the returned solution. Some `GoalSeek` exit paths
+        // (notably `NoBracketFound`) can leave the changing cell at the last attempted value rather
+        // than the returned `result.solution`.
+        match model.wb.engine.get_cell_value(&sheet, &changing_cell) {
+            EngineValue::Number(n) if n == result.solution => {}
+            _ => {
+                let json_solution = serde_json::Number::from_f64(result.solution)
+                    .map(JsonValue::Number)
+                    .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string()));
+                model
+                    .wb
+                    .set_cell_internal(&sheet, &changing_cell, json_solution)?;
+                model.recalculate().map_err(|err| js_err(err.to_string()))?;
+            }
+        }
+
+        // Extract accumulated changes and add an explicit delta for the changing cell's final
+        // value (since callers did not invoke `setCell` directly).
+        let mut by_cell = std::mem::take(&mut model.changes);
+        drop(model);
+
+        by_cell.insert(
+            FormulaCellKey::new(sheet.clone(), changing_cell_ref),
+            engine_value_to_json(self.engine.get_cell_value(&sheet, &changing_cell)),
+        );
+
+        let changes: Vec<CellChange> = by_cell
+            .into_iter()
+            .map(|(key, value)| {
+                let address = key.address();
+                CellChange {
+                    sheet: key.sheet,
+                    address,
+                    value,
+                }
+            })
+            .collect();
+
+        Ok((result, changes))
     }
 
     fn collect_spill_output_cells(&self) -> BTreeSet<FormulaCellKey> {
@@ -4461,179 +4694,80 @@ impl WasmWorkbook {
     }
 
     #[wasm_bindgen(js_name = "goalSeek")]
-    pub fn goal_seek(&mut self, request: JsValue) -> Result<JsValue, JsValue> {
+    pub fn goal_seek(&mut self, params: JsValue) -> Result<JsValue, JsValue> {
         ensure_rust_constructors_run();
 
-        let obj = request
-            .dyn_into::<Object>()
-            .map_err(|_| js_err("goalSeek request must be an object"))?;
+        let params: GoalSeekRequestDto =
+            serde_wasm_bindgen::from_value(params).map_err(|err| js_err(err.to_string()))?;
+        let sheet = params.sheet.as_deref().unwrap_or(DEFAULT_SHEET).trim();
+        let sheet = if sheet.is_empty() { DEFAULT_SHEET } else { sheet };
 
-        let sheet_name_raw = Reflect::get(&obj, &JsValue::from_str("sheet"))
-            .map_err(|_| js_err("failed to read sheet"))?;
-        let sheet_name = if sheet_name_raw.is_undefined() || sheet_name_raw.is_null() {
-            DEFAULT_SHEET.to_string()
-        } else {
-            let sheet = sheet_name_raw
-                .as_string()
-                .ok_or_else(|| js_err("sheet must be a string"))?;
-            let sheet = sheet.trim();
-            if sheet.is_empty() {
-                DEFAULT_SHEET.to_string()
-            } else {
-                sheet.to_string()
-            }
-        };
-        let sheet = self.inner.require_sheet(&sheet_name)?.to_string();
-
-        let target_cell_raw = Reflect::get(&obj, &JsValue::from_str("targetCell"))
-            .map_err(|_| js_err("failed to read targetCell"))?;
-        let target_cell_raw = target_cell_raw
-            .as_string()
-            .ok_or_else(|| js_err("targetCell must be a non-empty string"))?;
-        let target_cell_raw = target_cell_raw.trim();
-        if target_cell_raw.is_empty() {
+        let target_cell = params.target_cell.trim();
+        if target_cell.is_empty() {
             return Err(js_err("targetCell must be a non-empty string"));
         }
-        if target_cell_raw.contains('!') {
-            return Err(js_err(
-                "targetCell must be an A1 address without a sheet prefix",
-            ));
-        }
-        let target_cell = CellRef::from_a1(target_cell_raw)
-            .map_err(|_| js_err(format!("invalid targetCell address: {target_cell_raw}")))?
-            .to_a1();
-
-        let changing_cell_raw = Reflect::get(&obj, &JsValue::from_str("changingCell"))
-            .map_err(|_| js_err("failed to read changingCell"))?;
-        let changing_cell_raw = changing_cell_raw
-            .as_string()
-            .ok_or_else(|| js_err("changingCell must be a non-empty string"))?;
-        let changing_cell_raw = changing_cell_raw.trim();
-        if changing_cell_raw.is_empty() {
+        let changing_cell = params.changing_cell.trim();
+        if changing_cell.is_empty() {
             return Err(js_err("changingCell must be a non-empty string"));
         }
-        if changing_cell_raw.contains('!') {
-            return Err(js_err(
-                "changingCell must be an A1 address without a sheet prefix",
-            ));
-        }
-        let changing_cell_ref = CellRef::from_a1(changing_cell_raw)
-            .map_err(|_| js_err(format!("invalid changingCell address: {changing_cell_raw}")))?;
-        let changing_cell = changing_cell_ref.to_a1();
 
-        let target_value_raw = Reflect::get(&obj, &JsValue::from_str("targetValue"))
-            .map_err(|_| js_err("failed to read targetValue"))?;
-        let target_value = target_value_raw
-            .as_f64()
-            .ok_or_else(|| js_err("targetValue must be a finite number"))?;
-        if !target_value.is_finite() {
+        if !params.target_value.is_finite() {
             return Err(js_err("targetValue must be a finite number"));
         }
 
-        let mut params =
-            GoalSeekParams::new(target_cell.as_str(), target_value, changing_cell.as_str());
-
-        let tolerance_raw = Reflect::get(&obj, &JsValue::from_str("tolerance"))
-            .map_err(|_| js_err("failed to read tolerance"))?;
-        if !tolerance_raw.is_undefined() && !tolerance_raw.is_null() {
-            let tolerance = tolerance_raw
-                .as_f64()
-                .ok_or_else(|| js_err("tolerance must be a finite number"))?;
-            if !tolerance.is_finite() {
+        if let Some(tol) = params.tolerance {
+            if !tol.is_finite() {
                 return Err(js_err("tolerance must be a finite number"));
             }
-            if !(tolerance > 0.0) {
+            if !(tol > 0.0) {
                 return Err(js_err("tolerance must be > 0"));
             }
-            params.tolerance = tolerance;
         }
-
-        let max_iterations_raw = Reflect::get(&obj, &JsValue::from_str("maxIterations"))
-            .map_err(|_| js_err("failed to read maxIterations"))?;
-        if !max_iterations_raw.is_undefined() && !max_iterations_raw.is_null() {
-            let max_iterations = max_iterations_raw
-                .as_f64()
-                .ok_or_else(|| js_err("maxIterations must be > 0"))?;
-            if !max_iterations.is_finite() {
+        if let Some(step) = params.derivative_step {
+            if !step.is_finite() {
+                return Err(js_err("derivativeStep must be a finite number"));
+            }
+            if !(step > 0.0) {
+                return Err(js_err("derivativeStep must be > 0"));
+            }
+        }
+        if let Some(min) = params.min_derivative {
+            if !min.is_finite() {
+                return Err(js_err("minDerivative must be a finite number"));
+            }
+            if !(min > 0.0) {
+                return Err(js_err("minDerivative must be > 0"));
+            }
+        }
+        if let Some(max) = params.max_iterations {
+            if max == 0 {
                 return Err(js_err("maxIterations must be > 0"));
             }
-            if max_iterations.fract() != 0.0 {
-                return Err(js_err("maxIterations must be an integer"));
+        }
+        if let Some(max) = params.max_bracket_expansions {
+            if max == 0 {
+                return Err(js_err("maxBracketExpansions must be > 0"));
             }
-            if max_iterations <= 0.0 {
-                return Err(js_err("maxIterations must be > 0"));
-            }
-            if max_iterations > usize::MAX as f64 {
-                return Err(js_err("maxIterations is too large"));
-            }
-            params.max_iterations = max_iterations as usize;
         }
 
-        let recalc_mode_raw = Reflect::get(&obj, &JsValue::from_str("recalcMode"))
-            .map_err(|_| js_err("failed to read recalcMode"))?;
-        let recalc_mode = if recalc_mode_raw.is_undefined() || recalc_mode_raw.is_null() {
-            None
-        } else {
-            let mode = recalc_mode_raw.as_string().ok_or_else(|| {
-                js_err("recalcMode must be \"singleThreaded\" | \"multiThreaded\"")
-            })?;
-            match mode.as_str() {
-                "singleThreaded" => Some(RecalcMode::SingleThreaded),
-                "multiThreaded" => Some(if cfg!(target_arch = "wasm32") {
-                    // WASM builds are typically single-threaded; treat "multiThreaded" as a
-                    // best-effort hint and fall back to single-threaded recalculation.
-                    RecalcMode::SingleThreaded
-                } else {
-                    RecalcMode::MultiThreaded
-                }),
-                _ => {
-                    return Err(js_err(
-                        "recalcMode must be \"singleThreaded\" | \"multiThreaded\"",
-                    ))
-                }
-            }
+        let tuning = GoalSeekTuning {
+            max_iterations: params.max_iterations.map(|v| v as usize),
+            tolerance: params.tolerance,
+            derivative_step: params.derivative_step,
+            min_derivative: params.min_derivative,
+            max_bracket_expansions: params.max_bracket_expansions.map(|v| v as usize),
         };
 
-        let result = {
-            let mut model = EngineWhatIfModel::new(&mut self.inner.engine, sheet.clone());
-            if let Some(mode) = recalc_mode {
-                model = model.with_recalc_mode(mode);
-            }
-            GoalSeek::solve(&mut model, params).map_err(|err| js_err(err.to_string()))?
-        };
-
-        let solution_json = serde_json::Number::from_f64(result.solution)
-            .map(JsonValue::Number)
-            .ok_or_else(|| js_err("goalSeek produced a non-finite solution"))?;
-
-        // Ensure the JS-facing workbook input state matches the what-if engine updates.
-        if let Some(rich_cells) = self.inner.sheets_rich.get_mut(&sheet) {
-            rich_cells.remove(&changing_cell);
-        }
-        if let Some(sheet_cells) = self.inner.sheets.get_mut(&sheet) {
-            sheet_cells.insert(changing_cell.clone(), solution_json);
-        }
-
-        let key = FormulaCellKey::new(sheet.clone(), changing_cell_ref);
-        self.inner.pending_spill_clears.remove(&key);
-        self.inner.pending_formula_baselines.remove(&key);
-
-        let out = Object::new();
-        object_set(&out, "success", &JsValue::from_bool(result.success()))?;
-        object_set(
-            &out,
-            "status",
-            &JsValue::from_str(&format!("{:?}", result.status)),
+        let (result, changes) = self.inner.goal_seek_internal(
+            sheet,
+            target_cell,
+            params.target_value,
+            changing_cell,
+            tuning,
         )?;
-        object_set(&out, "solution", &JsValue::from_f64(result.solution))?;
-        object_set(
-            &out,
-            "iterations",
-            &JsValue::from_f64(result.iterations as f64),
-        )?;
-        object_set(&out, "finalError", &JsValue::from_f64(result.final_error))?;
-        object_set(&out, "finalOutput", &JsValue::from_f64(result.final_output))?;
-        Ok(out.into())
+
+        let out = GoalSeekResponseDto { result, changes };
+        serde_wasm_bindgen::to_value(&out).map_err(|err| js_err(err.to_string()))
     }
 
     #[wasm_bindgen(js_name = "getPivotSchema")]
@@ -6906,5 +7040,51 @@ mod tests {
                 pivot_engine::PivotValue::Number(5.0),
             ]
         );
+    }
+
+    #[test]
+    fn goal_seek_converges_and_returns_changes() {
+        use formula_engine::what_if::goal_seek::GoalSeekStatus;
+
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1*A1"))
+            .unwrap();
+
+        let (result, changes) = wb
+            .goal_seek_internal(
+                DEFAULT_SHEET,
+                "B1",
+                9.0,
+                "A1",
+                GoalSeekTuning::default(),
+            )
+            .unwrap();
+
+        assert_eq!(result.status, GoalSeekStatus::Converged);
+        assert!(
+            (result.solution - 3.0).abs() < 1e-3,
+            "expected solution near 3, got {result:?}"
+        );
+
+        let a1 = changes
+            .iter()
+            .find(|c| c.sheet == DEFAULT_SHEET && c.address == "A1")
+            .expect("expected A1 change");
+        let a1_val = a1
+            .value
+            .as_f64()
+            .unwrap_or_else(|| panic!("expected numeric A1 value, got {:?}", a1.value));
+        assert!((a1_val - 3.0).abs() < 1e-3);
+
+        let b1 = changes
+            .iter()
+            .find(|c| c.sheet == DEFAULT_SHEET && c.address == "B1")
+            .expect("expected B1 change");
+        let b1_val = b1
+            .value
+            .as_f64()
+            .unwrap_or_else(|| panic!("expected numeric B1 value, got {:?}", b1.value));
+        assert!((b1_val - 9.0).abs() < 1e-3);
     }
 }
