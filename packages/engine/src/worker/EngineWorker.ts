@@ -166,20 +166,47 @@ export class EngineWorker {
     wasmModuleUrl?: string;
     wasmBinaryUrl?: string;
     channelFactory?: () => MessageChannelLike;
+    signal?: AbortSignal;
   }): Promise<EngineWorker> {
     const channel = options.channelFactory?.() ?? new MessageChannel();
     const port = channel.port1;
     const worker = options.worker;
 
-    const ready = new Promise<void>((resolve) => {
+    const ready = new Promise<void>((resolve, reject) => {
       const onReady = (event: MessageEvent<unknown>) => {
         const msg = event.data as WorkerOutboundMessage;
         if (msg && typeof msg === "object" && (msg as any).type === "ready") {
           port.removeEventListener("message", onReady);
+          if (options.signal && onAbort) {
+            options.signal.removeEventListener("abort", onAbort);
+          }
           resolve();
         }
       };
       port.addEventListener("message", onReady);
+
+      const onAbort = () => {
+        port.removeEventListener("message", onReady);
+        try {
+          port.close?.();
+        } catch {
+          // ignore
+        }
+        try {
+          worker.terminate();
+        } catch {
+          // ignore
+        }
+        reject(new Error("EngineWorker.connect aborted"));
+      };
+
+      if (options.signal) {
+        if (options.signal.aborted) {
+          onAbort();
+          return;
+        }
+        options.signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
 
     const initMessage: InitMessage = {
@@ -188,11 +215,14 @@ export class EngineWorker {
       wasmModuleUrl: options.wasmModuleUrl ?? "",
       wasmBinaryUrl: options.wasmBinaryUrl
     };
+    port.start?.();
     worker.postMessage(initMessage, [channel.port2]);
 
-    const engine = new EngineWorker(worker, port);
     await ready;
-    return engine;
+    // EngineWorker constructor installs the general message handler and calls `port.start()` again
+    // (idempotent). We delay constructing it until after the ready handshake so aborted/failed
+    // connect attempts don't leak a never-returned EngineWorker instance.
+    return new EngineWorker(worker, port);
   }
 
   terminate(): void {

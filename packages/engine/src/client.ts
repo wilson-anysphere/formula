@@ -419,7 +419,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     const rawConnectPromise = EngineWorker.connect({
       worker: activeWorker,
       wasmModuleUrl,
-      wasmBinaryUrl
+      wasmBinaryUrl,
+      signal: abortController.signal
     });
 
     enginePromise = new Promise<EngineWorker>((resolve, reject) => {
