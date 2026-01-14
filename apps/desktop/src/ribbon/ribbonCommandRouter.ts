@@ -14,6 +14,7 @@ import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands } 
 import { executeCellsStructuralRibbonCommand } from "./cellsStructuralCommands.js";
 import { handleRibbonCommand as handleRibbonFormattingCommand, handleRibbonToggle as handleRibbonFormattingToggle } from "./commandHandlers.js";
 import { handleHomeCellsInsertDeleteCommand } from "./homeCellsCommands.js";
+import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbonEditingDisabledById.js";
 import { computeSelectionFormatState } from "./selectionFormatState.js";
 import type { RibbonActions } from "./ribbonSchema.js";
 
@@ -93,6 +94,15 @@ function unimplementedToast(deps: RibbonCommandRouterDeps, commandId: string): v
   safeFocusGrid(deps.app);
 }
 
+function shouldBlockRibbonCommandWhileEditing(commandId: string): boolean {
+  const id = String(commandId);
+  // Comments can still be opened/read while editing, but add/mutate actions should not trigger.
+  if (id === "comments.addComment") return true;
+  // Format commands can open pickers/dialogs and should not run while editing.
+  if (id.startsWith("format.")) return true;
+  return RIBBON_DISABLED_BY_ID_WHILE_EDITING[id] === true;
+}
+
 export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonActions {
   const executeCommand = (commandId: string, ...args: any[]): void => {
     void deps.commandRegistry.executeCommand(commandId, ...args).catch((err) => reportRibbonCommandError(deps, commandId, err));
@@ -164,6 +174,16 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
   };
 
   const handleRibbonCommand = (commandId: string): void => {
+    // Excel-style edit mode: do not run commands that are disabled while editing.
+    //
+    // This path is only reached for commands that are *not* registered in the CommandRegistry
+    // (e.g. startup sequencing or ribbon schema ids that are handled via legacy fallbacks).
+    // Mirror the CommandRegistry edit-mode guard here so ribbon-only handlers cannot bypass
+    // split-view secondary editor state (`deps.isSpreadsheetEditing`).
+    if (deps.isSpreadsheetEditing() && shouldBlockRibbonCommandWhileEditing(commandId)) {
+      return;
+    }
+
     if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
       return;
     }
