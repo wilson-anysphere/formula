@@ -743,19 +743,34 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
     if (!normalized) return null;
 
     const { sheetId, row, col } = normalized;
-    let sheetName: string | null = null;
+    // Cache the resolved display name for the *cell's* sheet id so we avoid
+    // repeatedly scanning the sheets metadata when a caller passes an unknown
+    // sheet id (or a sheet display name instead of the stable id).
+    let sheetName: string | null | undefined = undefined;
 
     const matchesSheet = (rangeSheetId: string): boolean => {
       // Stable sheet id match (case-insensitive for resilience to legacy/case-mismatched ids).
       if (rangeSheetId === sheetId) return true;
       if (rangeSheetId.toLowerCase() === sheetId.toLowerCase()) return true;
+
       // Legacy support: older clients stored `sheetName` instead of the stable
       // workbook sheet id. Match those entries against the current sheet name.
-      sheetName ??= resolveSheetName(sheetId);
-      if (!sheetName) return false;
+      if (sheetName === undefined) sheetName = resolveSheetName(sheetId);
+      if (sheetName) {
+        return (
+          normalizeSheetNameForCaseInsensitiveCompare(rangeSheetId) ===
+          normalizeSheetNameForCaseInsensitiveCompare(sheetName)
+        );
+      }
+
+      // Also tolerate callers passing the sheet *display name* for `cell.sheetId`
+      // when the encrypted range entry uses a stable sheet id. (This can happen
+      // in UI-driven callsites or legacy adapters.)
+      const rangeName = resolveSheetName(rangeSheetId);
+      if (!rangeName) return false;
       return (
-        normalizeSheetNameForCaseInsensitiveCompare(rangeSheetId) ===
-        normalizeSheetNameForCaseInsensitiveCompare(sheetName)
+        normalizeSheetNameForCaseInsensitiveCompare(rangeName) ===
+        normalizeSheetNameForCaseInsensitiveCompare(sheetId)
       );
     };
 

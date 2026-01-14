@@ -479,6 +479,28 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.keyIdForCell({ sheetId: "sheet-123", row: 0, col: 0 })).toBe("k1");
   });
 
+  it("policy helper matches stable sheet ids even when caller passes sheet display name", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    // Create a workbook sheet whose id differs from its display name.
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map<unknown>();
+    sheet.set("id", "sheet-123");
+    sheet.set("name", "Budget");
+    sheets.push([sheet]);
+
+    // Store the encrypted range with the stable sheet id.
+    const mgr = new EncryptedRangeManager({ doc });
+    mgr.add({ sheetId: "sheet-123", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k1" });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "Budget", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "Budget", row: 0, col: 0 })).toBe("k1");
+    // Case-insensitive.
+    expect(policy.keyIdForCell({ sheetId: "budget", row: 0, col: 0 })).toBe("k1");
+  });
+
   it("policy helper matches legacy sheet names case-insensitively", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
