@@ -441,10 +441,16 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       const colEntries: Map<number, unknown> = outline.cols.entries;
       const hadOwnRowGet = Object.prototype.hasOwnProperty.call(rowEntries, "get");
       const hadOwnColGet = Object.prototype.hasOwnProperty.call(colEntries, "get");
+      const hadOwnRowHas = Object.prototype.hasOwnProperty.call(rowEntries, "has");
+      const hadOwnColHas = Object.prototype.hasOwnProperty.call(colEntries, "has");
       const baseRowGet = rowEntries.get;
       const baseColGet = colEntries.get;
+      const baseRowHas = rowEntries.has;
+      const baseColHas = colEntries.has;
       let rowGetCalls = 0;
       let colGetCalls = 0;
+      let rowHasCalls = 0;
+      let colHasCalls = 0;
       (rowEntries as any).get = function (this: Map<number, unknown>, key: number) {
         rowGetCalls += 1;
         return baseRowGet.call(this, key);
@@ -453,12 +459,24 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
         colGetCalls += 1;
         return baseColGet.call(this, key);
       };
+      (rowEntries as any).has = function (this: Map<number, unknown>, key: number) {
+        rowHasCalls += 1;
+        return baseRowHas.call(this, key);
+      };
+      (colEntries as any).has = function (this: Map<number, unknown>, key: number) {
+        colHasCalls += 1;
+        return baseColHas.call(this, key);
+      };
 
       const restoreOutlineGetOverrides = () => {
         if (hadOwnRowGet) (rowEntries as any).get = baseRowGet;
         else delete (rowEntries as any).get;
         if (hadOwnColGet) (colEntries as any).get = baseColGet;
         else delete (colEntries as any).get;
+        if (hadOwnRowHas) (rowEntries as any).has = baseRowHas;
+        else delete (rowEntries as any).has;
+        if (hadOwnColHas) (colEntries as any).has = baseColHas;
+        else delete (colEntries as any).has;
       };
 
       try {
@@ -546,12 +564,14 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
           expect(stats.maxSheetSize).toBeLessThanOrEqual(PROVIDER_CACHE_MAX_SIZE);
         }
 
-        // Ensure the implementation remains sparse: avoid scanning all rows/cols to check hidden state.
-        // (Current implementation iterates only `outline.*.entries` plus constant-time checks.)
-        expect(rowEntrySpy.mock.calls.length).toBeLessThan(100_000);
-        expect(colEntrySpy.mock.calls.length).toBeLessThan(100_000);
-        expect(rowGetCalls).toBeLessThan(150_000);
+         // Ensure the implementation remains sparse: avoid scanning all rows/cols to check hidden state.
+         // (Current implementation iterates only `outline.*.entries` plus constant-time checks.)
+         expect(rowEntrySpy.mock.calls.length).toBeLessThan(100_000);
+         expect(colEntrySpy.mock.calls.length).toBeLessThan(100_000);
+         expect(rowGetCalls).toBeLessThan(150_000);
          expect(colGetCalls).toBeLessThan(150_000);
+         expect(rowHasCalls).toBeLessThan(150_000);
+         expect(colHasCalls).toBeLessThan(150_000);
 
          rowViewAccess.gets = 0;
          rowViewAccess.has = 0;
