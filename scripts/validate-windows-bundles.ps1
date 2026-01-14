@@ -1066,6 +1066,34 @@ try {
  
     return Find-BinaryMarkerInFile -File $Exe -MarkerStrings $markers
   }
+ 
+  function Find-ExeUrlProtocolMarker {
+    <#
+      Best-effort marker scan for URL protocol registration in NSIS installers.
+ 
+      NOTE: This validation is heuristic.
+    #>
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Exe,
+      [Parameter(Mandatory = $true)]
+      [string]$UrlScheme
+    )
+ 
+    $scheme = $UrlScheme.Trim()
+    if ([string]::IsNullOrWhiteSpace($scheme)) { $scheme = "formula" }
+    $scheme = $scheme.TrimEnd("/").TrimEnd(":")
+ 
+    $markers = @(
+      "URL Protocol",
+      "URL protocol",
+      "x-scheme-handler/$scheme",
+      "\$scheme\shell\open\command",
+      "$scheme\shell\open\command"
+    )
+ 
+    return Find-BinaryMarkerInFile -File $Exe -MarkerStrings $markers
+  }
 
   function Test-StringContainsIgnoreCase {
     param(
@@ -1276,6 +1304,18 @@ try {
         } else {
           throw "$msg Without an MSI, we cannot reliably confirm Windows file associations are present."
         }
+      }
+ 
+      $protocolMarker = Find-ExeUrlProtocolMarker -Exe $exe -UrlScheme $requiredScheme
+      if ([string]::IsNullOrWhiteSpace($protocolMarker)) {
+        $msg = "EXE installer did not contain obvious markers for '$requiredScheme://' URL protocol registration (e.g. 'URL Protocol'). This validation is heuristic for NSIS installers."
+        if ($msiInstallers.Count -gt 0) {
+          Write-Warning "$msg MSI validation passed, so this is non-fatal. If users rely on the EXE installer, investigate NSIS URL protocol wiring."
+        } else {
+          throw "$msg Without an MSI, we cannot reliably confirm Windows URL protocol registration is present."
+        }
+      } else {
+        Write-Host ("EXE protocol marker scan: found {0}" -f $protocolMarker)
       }
 
       # NSIS is a distributed installer (alongside MSI). Ensure the same compliance artifacts

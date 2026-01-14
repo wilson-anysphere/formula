@@ -726,7 +726,7 @@ jobs:
             esac
           done
 
-      - name: Validate Windows installer bundles (presence + Authenticode)
+      - name: Validate Windows installer bundles (presence + Authenticode + file associations/protocol)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
