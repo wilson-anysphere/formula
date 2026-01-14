@@ -391,7 +391,6 @@ pub struct PivotConfig {
     #[serde(default)]
     pub grand_totals: GrandTotals,
 }
-
 impl PivotConfig {
     /// Validate that this config is compatible with the given pivot source.
     ///

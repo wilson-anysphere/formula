@@ -13,6 +13,7 @@
 #[cfg(test)]
 use chrono::NaiveDate;
 use formula_columnar::{ColumnarTable, Value as ColumnarValue};
+use formula_model::pivots::{parse_dax_column_ref, parse_dax_measure_ref};
 use std::cmp::Ordering;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -45,6 +46,18 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
         // Measures are stored without brackets; surface the raw name for now.
         PivotFieldRef::DataModelMeasure(name) => Cow::Borrowed(name),
     }
+}
+
+fn pivot_field_ref_from_legacy_string(raw: String) -> PivotFieldRef {
+    // Keep behavior consistent with `PivotFieldRef`'s serde `Deserialize` implementation:
+    // DAX-looking strings become structured refs; everything else stays a cache field name.
+    if let Some(measure) = parse_dax_measure_ref(&raw) {
+        return PivotFieldRef::DataModelMeasure(measure);
+    }
+    if let Some((table, column)) = parse_dax_column_ref(&raw) {
+        return PivotFieldRef::DataModelColumn { table, column };
+    }
+    PivotFieldRef::CacheFieldName(raw)
 }
 
 #[derive(Debug, Error)]
@@ -467,11 +480,23 @@ pub struct CreatePivotTableRequest {
 impl CreatePivotTableRequest {
     pub fn into_config(self) -> PivotConfig {
         PivotConfig {
-            row_fields: self.row_fields.into_iter().map(PivotField::new).collect(),
+            row_fields: self
+                .row_fields
+                .into_iter()
+                .map(|field| PivotField {
+                    source_field: pivot_field_ref_from_legacy_string(field),
+                    sort_order: SortOrder::default(),
+                    manual_sort: None,
+                })
+                .collect(),
             column_fields: self
                 .column_fields
                 .into_iter()
-                .map(PivotField::new)
+                .map(|field| PivotField {
+                    source_field: pivot_field_ref_from_legacy_string(field),
+                    sort_order: SortOrder::default(),
+                    manual_sort: None,
+                })
                 .collect(),
             value_fields: self
                 .value_fields

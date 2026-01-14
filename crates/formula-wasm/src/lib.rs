@@ -3308,7 +3308,6 @@ impl WasmWorkbook {
         let sheet = self.inner.ensure_sheet(&sheet);
         self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
     }
-
     #[wasm_bindgen(js_name = "getCalcSettings")]
     pub fn get_calc_settings(&self) -> Result<JsValue, JsValue> {
         let settings = self.inner.engine.calc_settings();
@@ -3465,6 +3464,16 @@ impl WasmWorkbook {
             .map_err(|err| js_err(err.to_string()))?;
 
         let mut wb = WorkbookState::new_empty();
+
+        // Import workbook calculation settings before seeding any values/formulas so features like
+        // "precision as displayed" (`full_precision = false`) can affect how cached values are
+        // stored at load time.
+        //
+        // Note: The WASM worker protocol expects manual recalc (callers invoke `recalculate()`
+        // explicitly), so preserve manual calculation mode regardless of what the XLSX requests.
+        let mut calc_settings = model.calc_settings.clone();
+        calc_settings.calculation_mode = formula_engine::calc_settings::CalculationMode::Manual;
+        wb.engine.set_calc_settings(calc_settings);
 
         // Date system influences date serials for NOW/TODAY/DATE, etc.
         wb.engine.set_date_system(match model.date_system {
@@ -3631,6 +3640,37 @@ impl WasmWorkbook {
                 let has_value = !cell.value.is_empty();
                 if !has_formula && !has_value {
                     continue;
+                }
+
+                // Import number formats so cached numeric values can be rounded correctly when the
+                // workbook is in "precision as displayed" mode.
+                //
+                // Excel precedence (best-effort):
+                // - cell style (`c/@s`) if present (non-zero id in our model)
+                // - row default style (`row/@s`)
+                // - column default style (`col/@style`)
+                let number_format = if cell.style_id != 0 {
+                    model.styles
+                        .get(cell.style_id)
+                        .and_then(|s| s.number_format.clone())
+                } else {
+                    let row_style_id = sheet
+                        .row_properties
+                        .get(&cell_ref.row)
+                        .and_then(|props| props.style_id);
+                    let col_style_id = sheet
+                        .col_properties
+                        .get(&cell_ref.col)
+                        .and_then(|props| props.style_id);
+                    row_style_id
+                        .or(col_style_id)
+                        .and_then(|style_id| model.styles.get(style_id))
+                        .and_then(|s| s.number_format.clone())
+                };
+                if let Some(pattern) = number_format.filter(|s| !s.trim().is_empty()) {
+                    wb.engine
+                        .set_cell_number_format(&sheet_name, &address, Some(pattern))
+                        .map_err(|err| js_err(err.to_string()))?;
                 }
 
                 // Seed cached values first (including cached formula results).
@@ -4491,6 +4531,26 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "defaultSheetName")]
     pub fn default_sheet_name() -> String {
         DEFAULT_SHEET.to_string()
+    }
+}
+
+// Native-only helpers for integration tests and tooling.
+//
+// These are intentionally not exported to JS/WASM. The JS worker protocol uses the regular
+// `getCell`/`recalculate` APIs; native tests need direct access to the engine value surface so they
+// don't depend on `js_sys` shims.
+#[cfg(not(target_arch = "wasm32"))]
+impl WasmWorkbook {
+    #[doc(hidden)]
+    pub fn debug_get_engine_value(&self, sheet: &str, address: &str) -> EngineValue {
+        self.inner.engine.get_cell_value(sheet, address)
+    }
+
+    #[doc(hidden)]
+    pub fn debug_recalculate(&mut self) -> Vec<CellChange> {
+        self.inner
+            .recalculate_internal(None)
+            .expect("recalculate should succeed")
     }
 }
 
