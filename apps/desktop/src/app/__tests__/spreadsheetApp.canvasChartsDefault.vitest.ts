@@ -145,4 +145,25 @@ describe("SpreadsheetApp canvas charts (default)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("treats CANVAS_CHARTS=off as legacy charts mode", () => {
+    process.env.CANVAS_CHARTS = "off";
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect((app as any).useCanvasCharts).toBe(false);
+
+    // Legacy chart canvases should be mounted when canvas charts are disabled.
+    expect(root.querySelector(".grid-canvas--chart")).not.toBeNull();
+    expect(root.querySelector(".chart-selection-canvas")).not.toBeNull();
+
+    app.destroy();
+    root.remove();
+  });
 });

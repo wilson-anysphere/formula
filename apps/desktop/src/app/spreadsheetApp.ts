@@ -1052,8 +1052,8 @@ function resolveUseCanvasCharts(search: string = typeof window !== "undefined" ?
   const viteValue = metaEnv?.VITE_CANVAS_CHARTS ?? metaEnv?.VITE_USE_CANVAS_CHARTS;
   if (typeof viteValue === "string" && viteValue.trim() !== "") {
     const normalized = viteValue.trim().toLowerCase();
-    if (normalized === "1" || normalized === "true") return true;
-    if (normalized === "0" || normalized === "false") return false;
+    if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
   }
   if (typeof viteValue === "boolean") return viteValue;
 
@@ -1061,8 +1061,8 @@ function resolveUseCanvasCharts(search: string = typeof window !== "undefined" ?
   const nodeValue = nodeEnv?.CANVAS_CHARTS ?? nodeEnv?.USE_CANVAS_CHARTS;
   if (typeof nodeValue === "string" && nodeValue.trim() !== "") {
     const normalized = nodeValue.trim().toLowerCase();
-    if (normalized === "1" || normalized === "true") return true;
-    if (normalized === "0" || normalized === "false") return false;
+    if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
   }
   if (typeof nodeValue === "boolean") return nodeValue;
 
