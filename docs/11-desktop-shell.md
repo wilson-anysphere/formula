@@ -173,6 +173,7 @@ This reports:
 - `apps/desktop/dist` total size (and largest assets)
 - frontend asset download size (compressed JS/CSS/WASM) via `scripts/frontend_asset_size_report.mjs`
 - the built desktop binary size (`target/**/formula-desktop`)
+- the top Rust crates/symbols contributing to the desktop binary size via `scripts/desktop_binary_size_report.py` (cargo-bloat + llvm-size fallback)
 - if present, installer/bundle artifacts under `target/**/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
 
 Installer artifact size gating knobs (used by the release workflow; DMG/MSI/AppImage/etc):
