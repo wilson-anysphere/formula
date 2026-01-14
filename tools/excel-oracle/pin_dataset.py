@@ -25,6 +25,7 @@ import argparse
 import json
 import re
 import shutil
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,8 @@ def _stable_case_set_path_string(*, repo_root: Path, raw: object) -> str | None:
         return None
 
     normalized = raw_str.replace("\\", "/")
+    parsed = urllib.parse.urlparse(normalized)
+    is_uri_like = bool(parsed.scheme and ":" in normalized)
 
     def _extract_repo_relative_suffix(path_str: str) -> str | None:
         lowered = path_str.casefold()
@@ -97,7 +100,12 @@ def _stable_case_set_path_string(*, repo_root: Path, raw: object) -> str | None:
         return suffix
 
     # Already-relative path: just normalize slashes.
-    if not (normalized.startswith("/") or re.match(r"^[A-Za-z]:/", normalized) or normalized.startswith("//")):
+    if not (
+        normalized.startswith("/")
+        or re.match(r"^[A-Za-z]:/", normalized)
+        or normalized.startswith("//")
+        or is_uri_like
+    ):
         return normalized
 
     # Absolute path we can't map into the repo: keep only the basename.

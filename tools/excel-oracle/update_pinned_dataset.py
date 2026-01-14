@@ -56,6 +56,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -128,6 +129,8 @@ def _stable_path_string_from_payload(*, repo_root: Path, raw: object) -> str | N
     # Detect Windows absolute paths (drive letter or UNC) even on non-Windows platforms.
     is_windows_drive_abs = bool(re.match(r"^[A-Za-z]:/", normalized))
     is_unc_abs = normalized.startswith("//")
+    parsed = urllib.parse.urlparse(normalized)
+    is_uri_abs = bool(parsed.scheme and ":" in normalized)
 
     try:
         p = Path(raw_str)
@@ -135,7 +138,13 @@ def _stable_path_string_from_payload(*, repo_root: Path, raw: object) -> str | N
         p = None
 
     is_posix_abs = normalized.startswith("/")
-    is_abs = is_posix_abs or is_windows_drive_abs or is_unc_abs or (p.is_absolute() if p else False)
+    is_abs = (
+        is_posix_abs
+        or is_windows_drive_abs
+        or is_unc_abs
+        or is_uri_abs
+        or (p.is_absolute() if p else False)
+    )
 
     if is_abs and p is not None and p.is_absolute():
         try:
@@ -370,14 +379,17 @@ def _tool_env(repo_root: Path) -> dict[str, str]:
 
 
 def _stable_case_path_string(*, repo_root: Path, cases_path: Path) -> str:
-    try:
-        rel = cases_path.resolve().relative_to(repo_root.resolve())
-        return rel.as_posix()
-    except Exception:
-        stable = _stable_path_string_from_payload(repo_root=repo_root, raw=cases_path.as_posix())
-        if stable:
-            return stable
-        return cases_path.name
+    if cases_path.is_absolute():
+        try:
+            rel = cases_path.resolve().relative_to(repo_root.resolve())
+            return rel.as_posix()
+        except Exception:
+            pass
+
+    stable = _stable_path_string_from_payload(repo_root=repo_root, raw=cases_path.as_posix())
+    if stable:
+        return stable
+    return cases_path.name
 
 
 def _iter_result_entries(payload: Any) -> Iterable[dict[str, Any]]:

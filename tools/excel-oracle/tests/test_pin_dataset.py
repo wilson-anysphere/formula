@@ -221,6 +221,56 @@ class PinDatasetTests(unittest.TestCase):
             )
             self.assertNotIn("Alice", pinned_path.read_text(encoding="utf-8"))
 
+    def test_normalizes_file_scheme_case_set_path(self) -> None:
+        pin_py = Path(__file__).resolve().parents[1] / "pin_dataset.py"
+        self.assertTrue(pin_py.is_file(), f"pin_dataset.py not found at {pin_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            dataset_path = tmp / "dataset.json"
+            pinned_path = tmp / "pinned.json"
+
+            raw_cases_path = "file:///home/alice/cases.json"
+            dataset_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {
+                    "kind": "excel",
+                    "version": "16.0",
+                    "build": "12345.67890",
+                    "operatingSystem": "Windows",
+                },
+                "caseSet": {"path": raw_cases_path, "sha256": "deadbeef" * 8, "count": 0},
+                "results": [],
+            }
+            dataset_path.write_text(
+                json.dumps(dataset_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(pin_py),
+                    "--dataset",
+                    str(dataset_path),
+                    "--pinned",
+                    str(pinned_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                self.fail(
+                    f"pin_dataset.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            pinned = json.loads(pinned_path.read_text(encoding="utf-8"))
+            self.assertEqual(pinned.get("caseSet", {}).get("path"), "cases.json")
+            # Defense in depth: ensure the URI is not recorded verbatim.
+            self.assertNotIn("file://", pinned_path.read_text(encoding="utf-8"))
+
     def test_dry_run_does_not_write_files(self) -> None:
         pin_py = Path(__file__).resolve().parents[1] / "pin_dataset.py"
         self.assertTrue(pin_py.is_file(), f"pin_dataset.py not found at {pin_py}")

@@ -96,6 +96,79 @@ class UpdatePinnedDatasetTests(unittest.TestCase):
             versioned_payload = json.loads(versioned_path.read_text(encoding="utf-8"))
             self.assertEqual(versioned_payload["caseSet"]["sha256"], cases_sha)
 
+    def test_merge_real_excel_records_privacy_safe_patch_case_set_path(self) -> None:
+        update = self._load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            cases_path = tmp / "cases.json"
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [
+                    {"id": "case1", "formula": "=1+1", "outputCell": "C1", "inputs": [], "tags": []},
+                    {"id": "case2", "formula": "=2+2", "outputCell": "C1", "inputs": [], "tags": []},
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, indent=2) + "\n", encoding="utf-8", newline="\n"
+            )
+            cases_sha = hashlib.sha256(cases_path.read_bytes()).hexdigest()
+
+            pinned_path = tmp / "pinned.json"
+            pinned_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "source": {
+                    "kind": "excel",
+                    "version": "unknown",
+                    "build": "unknown",
+                    "operatingSystem": "unknown",
+                },
+                "caseSet": {"path": "cases.json", "sha256": "old", "count": 1},
+                "results": [{"caseId": "case1"}],
+            }
+            pinned_path.write_text(
+                json.dumps(pinned_payload, indent=2) + "\n", encoding="utf-8", newline="\n"
+            )
+
+            merge_path = tmp / "merge.json"
+            merge_payload = {
+                "schemaVersion": 1,
+                "source": {
+                    "kind": "excel",
+                    "version": "16.0",
+                    "build": "unit-test",
+                    "operatingSystem": "Windows",
+                },
+                # Simulate a results payload that contains a file:// URI path (should not be committed verbatim).
+                "caseSet": {"path": "file:///home/alice/cases.json", "sha256": cases_sha, "count": 2},
+                "results": [{"caseId": "case2"}],
+            }
+            merge_path.write_text(
+                json.dumps(merge_payload, indent=2) + "\n", encoding="utf-8", newline="\n"
+            )
+
+            missing_before, missing_after = update.update_pinned_dataset(
+                cases_path=cases_path,
+                pinned_path=pinned_path,
+                merge_results_paths=[merge_path],
+                engine_bin=None,
+                run_engine_for_missing=False,
+            )
+            self.assertEqual(missing_before, 1)
+            self.assertEqual(missing_after, 0)
+
+            pinned_updated = json.loads(pinned_path.read_text(encoding="utf-8"))
+            patches = pinned_updated.get("source", {}).get("patches")
+            self.assertIsInstance(patches, list)
+            self.assertEqual(len(patches), 1)
+            patch_case_set_path = patches[0].get("caseSet", {}).get("path")
+            self.assertEqual(patch_case_set_path, "cases.json")
+            self.assertNotIn("file://", json.dumps(pinned_updated))
+
     def test_cli_writes_versioned_copy_by_default(self) -> None:
         update = self._load_update_module()
 
