@@ -1235,6 +1235,7 @@ export class SpreadsheetApp {
   private selectedDrawingId: DrawingObjectId | null = null;
   private selectedDrawingIndex: number | null = null;
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
+  private splitViewSecondaryGridPointerAbort: AbortController | null = null;
   private readonly drawingsListeners = new Set<() => void>();
   private readonly drawingSelectionListeners = new Set<(id: DrawingObjectId | null) => void>();
   private readonly formulaChartModelStore = new FormulaChartModelStore();
@@ -4348,6 +4349,8 @@ export class SpreadsheetApp {
     this.drawingsListeners.clear();
     this.drawingSelectionListeners.clear();
     // Ensure we don't keep a split-view SecondaryGridView alive via hit-test caches.
+    this.splitViewSecondaryGridPointerAbort?.abort();
+    this.splitViewSecondaryGridPointerAbort = null;
     this.splitViewSecondaryGrid = null;
     this.splitViewDrawingHitTestIndex = null;
     this.splitViewDrawingHitTestIndexObjects = null;
@@ -7860,6 +7863,10 @@ export class SpreadsheetApp {
    * route client coordinates to the correct grid surface.
    */
   setSplitViewSecondaryGridView(view: { container: HTMLElement; grid: DesktopSharedGrid } | null): void {
+    // Tear down any prior event listeners tied to the previous split pane instance.
+    this.splitViewSecondaryGridPointerAbort?.abort();
+    this.splitViewSecondaryGridPointerAbort = null;
+
     this.splitViewSecondaryGrid = view;
     // Drop any cached hit-test index tied to the previous secondary grid instance.
     // This prevents keeping a destroyed SecondaryGridView alive via `index.geom` closures.
@@ -7868,6 +7875,102 @@ export class SpreadsheetApp {
     this.splitViewDrawingHitTestIndexGrid = null;
     this.splitViewDrawingHitTestIndexRowsVersion = null;
     this.splitViewDrawingHitTestIndexColsVersion = null;
+
+    if (view) {
+      // Split-view secondary pane needs its own capture listener for drawing selection behavior:
+      // SpreadsheetApp's primary `.root` listener cannot observe events from the sibling secondary
+      // grid element (`#grid-secondary`).
+      const abort = new AbortController();
+      this.splitViewSecondaryGridPointerAbort = abort;
+      view.container.addEventListener("pointerdown", (e) => this.onSplitViewSecondaryDrawingPointerDownCapture(e), {
+        capture: true,
+        passive: false,
+        signal: abort.signal,
+      });
+    }
+  }
+
+  private onSplitViewSecondaryDrawingPointerDownCapture(e: PointerEvent): void {
+    if (this.disposed) return;
+    const secondary = this.splitViewSecondaryGrid;
+    if (!secondary) return;
+
+    const pointerType = e.pointerType ?? "";
+    const button = typeof e.button === "number" ? e.button : 0;
+    const isMouse = pointerType === "mouse";
+    const isMacPlatform = (() => {
+      try {
+        const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+        return /Mac|iPhone|iPad|iPod/.test(platform);
+      } catch {
+        return false;
+      }
+    })();
+    // On macOS, Ctrl+click is commonly treated as a right click and fires the `contextmenu` event.
+    const isMacContextClick = isMouse && isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey;
+    const isContextClick = isMouse && (button === 2 || isMacContextClick);
+    const isPrimaryClick = !isMouse || button === 0;
+
+    // Mirror the primary pane behavior: only handle primary clicks and context clicks.
+    if (!(isPrimaryClick || isContextClick)) return;
+
+    // When the formula bar is in range-selection mode, drawing hits should not steal the
+    // pointerdown; let normal grid range selection continue.
+    if (this.formulaBar?.isFormulaEditing()) return;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      // Only treat pointerdown events originating from the secondary grid surface as drawing selection.
+      // This avoids interfering with interactive DOM overlays (scrollbars, editor, etc).
+      const isGridSurface = target === secondary.container || target.tagName === "CANVAS";
+      if (!isGridSurface) return;
+    }
+
+    const rect = secondary.container.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    if (!Number.isFinite(sx) || !Number.isFinite(sy)) return;
+    if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return;
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const headerWidth = headerCols > 0 ? secondary.grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+    const headerHeight = headerRows > 0 ? secondary.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+    const headerOffsetX = Math.min(headerWidth, rect.width);
+    const headerOffsetY = Math.min(headerHeight, rect.height);
+    const inCellArea = sx >= headerOffsetX && sy >= headerOffsetY;
+
+    const prevSelected = this.selectedDrawingId;
+
+    const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
+    if (!hit) {
+      // Clicking outside of any drawing clears selection, but still allows normal grid selection.
+      if (prevSelected != null && inCellArea) {
+        this.selectDrawingById(null);
+      }
+      return;
+    }
+
+    // Ensure any secondary in-cell editor commits before we stop propagation (Excel-like behavior).
+    try {
+      (secondary.container as any).focus?.({ preventScroll: true });
+    } catch {
+      secondary.container.focus?.();
+    }
+
+    this.selectDrawingById(hit.id);
+
+    if (isContextClick) {
+      // Tag the pointer event so the shared-grid selection canvas can avoid moving the active cell
+      // underneath the drawing. This allows context menus to appear without breaking selection.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (e as any).__formulaDrawingContextClick = true;
+      return;
+    }
+
+    // Prevent the secondary grid selection engine from treating the click as a cell selection.
+    e.preventDefault();
+    e.stopPropagation();
   }
 
   getGridLimits(): GridLimits {
