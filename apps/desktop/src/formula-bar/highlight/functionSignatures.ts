@@ -59,6 +59,9 @@ const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = 
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
 };
 
+const FUNCTION_SIGNATURE_CACHE = new Map<string, FunctionSignature | null>();
+const CATALOG_SIGNATURE_CACHE = new Map<string, FunctionSignature | null>();
+
 const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
   DATE: {
     name: "DATE",
@@ -373,6 +376,12 @@ export function getFunctionSignature(name: string, opts: { localeId?: string } =
     opts.localeId?.trim?.() ||
     (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() ||
     "en-US";
+
+  const cacheKey = `${localeId}\0${requested}`;
+  if (FUNCTION_SIGNATURE_CACHE.has(cacheKey)) {
+    return FUNCTION_SIGNATURE_CACHE.get(cacheKey) ?? null;
+  }
+
   const localeMap = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
   const canonical = localeMap?.get(lookup) ?? lookup;
 
@@ -381,7 +390,9 @@ export function getFunctionSignature(name: string, opts: { localeId?: string } =
 
   // Preserve any `_xlfn.` prefix *and* localized naming in the displayed name so formula-bar hints
   // match the text users see/typed.
-  return requested === canonical ? known : { ...known, name: requested };
+  const result = requested === canonical ? known : { ...known, name: requested };
+  FUNCTION_SIGNATURE_CACHE.set(cacheKey, result);
+  return result;
 }
 
 type SignaturePart = { text: string; kind: "name" | "param" | "paramActive" | "punct" };
@@ -406,14 +417,22 @@ export function signatureParts(
 }
 
 function signatureFromCatalog(name: string): FunctionSignature | null {
+  if (CATALOG_SIGNATURE_CACHE.has(name)) {
+    return CATALOG_SIGNATURE_CACHE.get(name) ?? null;
+  }
   const fn = CATALOG_BY_NAME.get(name);
-  if (!fn) return null;
+  if (!fn) {
+    CATALOG_SIGNATURE_CACHE.set(name, null);
+    return null;
+  }
 
-  return {
+  const sig: FunctionSignature = {
     name,
     params: buildParams(fn.min_args, fn.max_args, fn.arg_types),
     summary: "",
   };
+  CATALOG_SIGNATURE_CACHE.set(name, sig);
+  return sig;
 }
 
 function buildParams(minArgs: number, maxArgs: number, argTypes: string[] | undefined): FunctionParam[] {
