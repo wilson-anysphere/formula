@@ -1,7 +1,8 @@
 use formula_offcrypto::{
-    parse_encrypted_package_header, parse_encryption_info, validate_agile_segment_decrypt_inputs,
-    validate_standard_encrypted_package_stream, OffcryptoError, StandardEncryptionHeader,
-    StandardEncryptionHeaderFlags, StandardEncryptionInfo, StandardEncryptionVerifier,
+    decrypt_encrypted_package_ecb, parse_encrypted_package_header, parse_encryption_info,
+    validate_agile_segment_decrypt_inputs, validate_standard_encrypted_package_stream, OffcryptoError,
+    StandardEncryptionHeader, StandardEncryptionHeaderFlags, StandardEncryptionInfo,
+    StandardEncryptionVerifier,
 };
 
 fn minimal_standard_encryption_info_bytes() -> Vec<u8> {
@@ -149,6 +150,40 @@ fn standard_encrypted_package_ciphertext_not_multiple_of_16_errors() {
 
     let err = validate_standard_encrypted_package_stream(&encrypted_package).unwrap_err();
     assert_eq!(err, OffcryptoError::InvalidCiphertextLength { len: 15 });
+}
+
+#[test]
+fn standard_decrypt_encrypted_package_ecb_short_header_errors() {
+    let err = decrypt_encrypted_package_ecb(&[0u8; 16], &[0u8; 7]).unwrap_err();
+    assert!(
+        matches!(err, OffcryptoError::InvalidStructure(ref msg) if msg.contains("must be at least 8 bytes")),
+        "expected InvalidStructure(short EncryptedPackage), got {err:?}"
+    );
+}
+
+#[test]
+fn standard_decrypt_encrypted_package_ecb_ciphertext_not_block_aligned_errors() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 15]);
+    let err = decrypt_encrypted_package_ecb(&[0u8; 16], &bytes).unwrap_err();
+    assert!(
+        matches!(err, OffcryptoError::InvalidStructure(ref msg) if msg.contains("ciphertext length must be a multiple of 16")),
+        "expected InvalidStructure(un-aligned ciphertext), got {err:?}"
+    );
+}
+
+#[test]
+fn standard_decrypt_encrypted_package_ecb_original_size_exceeds_plaintext_errors() {
+    // 1 AES block of ciphertext => 16 bytes of plaintext after decrypt.
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&17u64.to_le_bytes()); // original_size > plaintext length
+    bytes.extend_from_slice(&[0u8; 16]);
+    let err = decrypt_encrypted_package_ecb(&[0u8; 16], &bytes).unwrap_err();
+    assert!(
+        matches!(err, OffcryptoError::InvalidStructure(ref msg) if msg.contains("exceeds plaintext length")),
+        "expected InvalidStructure(original size > plaintext len), got {err:?}"
+    );
 }
 
 #[test]

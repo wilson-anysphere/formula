@@ -186,8 +186,9 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 The encryption *mode* differs by scheme:
 
 - **Standard (CryptoAPI; `versionMinor == 2`):** baseline ECMA-376/MS-OFFCRYPTO uses **AES-ECB**
-  (no IV) for `EncryptedPackage` decryption; decrypt the ciphertext blocks and truncate to
-  `original_package_size` (see `docs/offcrypto-standard-encryptedpackage.md`).
+  (no IV) for `EncryptedPackage` decryption; ciphertext must be AES block-aligned (multiple of 16).
+  Decrypt the ciphertext blocks and truncate to `original_package_size` (see
+  `docs/offcrypto-standard-encryptedpackage.md`).
   - Compatibility note: some producers use Standard-like **AES-CBC** variants (including a
     0x1000-segmented CBC scheme with `IV = SHA1(salt || LE32(i))[0..16]`). This repo’s
     `fixtures/encrypted/ooxml/standard-large.xlsx` exercises such a variant; see
