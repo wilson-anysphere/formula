@@ -27,8 +27,10 @@ describe("cell styles: good/bad/neutral", () => {
       expect(applied).toBe(true);
 
       const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 }) as any;
-      expect(style?.fill?.fgColor).toBe(expectedFillColor);
-      expect(style?.font?.color).toBe(expectedFontColor);
+      // DocumentController stores colors as `#AARRGGBB` CSS hex strings; presets keep the
+      // OOXML-style `AARRGGBB` to avoid hardcoding `#...` colors in core UI sources.
+      expect(style?.fill?.fgColor).toBe(`#${expectedFillColor}`);
+      expect(style?.font?.color).toBe(`#${expectedFontColor}`);
 
       // Ensure we used the expected constants (guard against accidental drift).
       expect(preset.fillColor).toBe(expectedFillColor);
