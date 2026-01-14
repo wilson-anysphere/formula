@@ -2321,6 +2321,7 @@ let ribbonFormatStateUpdateRequested = false;
 let ribbonShortcutById: Record<string, string> = Object.create(null);
 let ribbonAriaKeyShortcutsById: Record<string, string> = Object.create(null);
 let ribbonCommandRegistryDisabledById: Record<string, boolean> = Object.create(null);
+let ribbonCommandRegistryDisabledByIdReady = false;
 
 const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   // Start from the "disabled while editing" set, which includes sheet structure edits and other
@@ -2444,6 +2445,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     };
 
     const hasRibbonAutoFilter = ribbonAutoFilterStore.hasAny(sheetId);
+    const hasAdvancedFilterCommand =
+      ribbonCommandRegistryDisabledByIdReady && ribbonCommandRegistryDisabledById["data.sortFilter.advanced.advancedFilter"] !== true;
 
     const pressedById = {
       "format.toggleBold": formatState.bold,
@@ -2756,9 +2759,10 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "data.outline.hideDetail": true,
             // MVP ribbon AutoFilter uses outline.hidden.filter, which isn't implemented in shared-grid mode yet.
             "data.sortFilter.filter": true,
-            "data.sortFilter.clear": true,
-            "data.sortFilter.reapply": true,
-            "data.sortFilter.advanced.clearFilter": true,
+             "data.sortFilter.clear": true,
+             "data.sortFilter.reapply": true,
+             "data.sortFilter.advanced": true,
+             "data.sortFilter.advanced.clearFilter": true,
           }
         : null),
       ...(!hasRibbonAutoFilter
@@ -2768,6 +2772,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "data.sortFilter.clear": true,
             "data.sortFilter.reapply": true,
             "data.sortFilter.advanced.clearFilter": true,
+            // Keep the Advanced dropdown disabled when it would otherwise contain only disabled items.
+            ...(hasAdvancedFilterCommand ? null : { "data.sortFilter.advanced": true }),
           }
         : null),
     };
@@ -3057,6 +3063,7 @@ const scheduleRibbonCommandRegistryDisabledRefresh = (): void => {
   schedule(() => {
     ribbonCommandRegistryRefreshScheduled = false;
     ribbonCommandRegistryDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+    ribbonCommandRegistryDisabledByIdReady = true;
     scheduleRibbonSelectionFormatStateUpdate();
   });
 };
