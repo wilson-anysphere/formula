@@ -419,6 +419,96 @@ fn lookupvalue_resolves_unicode_identifiers_case_insensitively() {
 }
 
 #[test]
+fn treatas_resolves_unicode_identifiers_case_insensitively() {
+    // Ensure TREATAS resolves both source and target identifiers case-insensitively, including
+    // Unicode-aware case folding (ß -> SS).
+    let mut model = DataModel::new();
+
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model.add_measure("Orders Total", "SUM(orders[amount])").unwrap();
+    model
+        .add_measure(
+            "Orders East (treatas)",
+            "CALCULATE([Orders Total], TREATAS(VALUES(STRASSE[STRASSENID]), Orders[straßenid]))",
+        )
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("STRASSE", "REGION", "East".into());
+    let value = model
+        .evaluate_measure("[ORDERS EAST (TREATAS)]", &east_filter)
+        .unwrap();
+    assert_eq!(value, Value::from(30.0));
+}
+
+#[test]
+fn row_constructor_in_resolves_unicode_identifiers_case_insensitively() {
+    // Ensure `(Table[Col1], Table[Col2]) IN {...}` filters resolve Unicode identifiers
+    // case-insensitively (ß -> SS), and can be used for relationship propagation.
+    let mut model = DataModel::new();
+
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders->Straße".into(),
+            from_table: "orders".into(),
+            from_column: "straßenid".into(),
+            to_table: "STRASSE".into(),
+            to_column: "STRASSENID".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Orders Total", "SUM(orders[amount])").unwrap();
+    model
+        .add_measure(
+            "Orders East (row in)",
+            "CALCULATE([Orders Total], (STRASSE[STRASSENID], STRASSE[REGION]) IN {(1, \"East\")})",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("orders east (row in)", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, Value::from(30.0));
+}
+
+#[test]
 fn related_resolves_unicode_identifiers_case_insensitively() {
     let mut model = DataModel::new();
     let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
