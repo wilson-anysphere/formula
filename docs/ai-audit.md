@@ -125,6 +125,7 @@ copy that:
 - replaces `input` with a truncated JSON string summary (with `audit_truncated` metadata)
 - truncates tool `parameters` and `audit_result_summary` similarly
 - drops full tool `result` payloads
+- when possible, preserves/backfills `workbook_id` (from legacy `input.workbook_id` / `input.workbookId` or `session_id` patterns like `"workbook-123:<uuid>"`)
 
 When compaction happens, `input`/tool payloads are replaced with a JSON-friendly summary object:
 
@@ -132,7 +133,10 @@ When compaction happens, `input`/tool payloads are replaced with a JSON-friendly
 {
   audit_truncated: true,
   audit_original_chars: number,
-  audit_json: string // truncated JSON string prefix (may not be parseable JSON)
+  // Truncated stable JSON string prefix (may not be parseable JSON).
+  // Note: stable JSON serialization coerces `bigint` values to decimal strings and replaces
+  // cycles / throwing getters with placeholders like "[Circular]" / "[Unserializable]".
+  audit_json: string
 }
 ```
 
