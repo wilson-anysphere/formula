@@ -8424,6 +8424,9 @@ export class SpreadsheetApp {
     // - For small ranges (<= MAX_FORMULA_RANGE_PREVIEW_CELLS), enumerate each cell at most once,
     //   collecting both sample display strings and numeric summary stats.
     if (tooLarge) {
+      const formatter =
+        this.selectionStatsFormatter ??
+        (this.selectionStatsFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }));
       for (let r = 0; r < sampleRows; r += 1) {
         for (let c = 0; c < sampleCols; c += 1) {
           coordScratch.row = startRow + r;
@@ -8432,7 +8435,7 @@ export class SpreadsheetApp {
           sampleValues[r]![c] = formatDisplay(computed);
         }
       }
-      summary.textContent = "(range too large)";
+      summary.textContent = `(range too large: ${formatter.format(totalCells)} cells)`;
     } else {
       let sum = 0;
       let numericCount = 0;
