@@ -76,6 +76,11 @@ public final class GenerateEncryptedXlsx {
     if (!Files.isRegularFile(inPath)) {
       throw new IllegalArgumentException("input file does not exist or is not a regular file: " + inPath);
     }
+    // Guard against accidentally overwriting the input (particularly when invoking the Java class directly
+    // rather than via `generate.sh`, which also checks this).
+    if (inPath.toAbsolutePath().normalize().equals(outPath.toAbsolutePath().normalize())) {
+      throw new IllegalArgumentException("output path must be different from input path: " + inPath);
+    }
 
     final Path parent = outPath.toAbsolutePath().getParent();
     if (parent != null) {
