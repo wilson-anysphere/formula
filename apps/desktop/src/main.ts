@@ -6455,7 +6455,7 @@ if (
             // Clipboard provider writes are best-effort, and in web contexts clipboard access
             // can still be permission-gated. Keep an execCommand fallback when not running
             // under Tauri to preserve "Copy" behavior in dev/preview browsers.
-            const isTauri = typeof (globalThis as any).__TAURI__ !== "undefined";
+            const isTauri = hasTauri();
             if (isTauri) return;
 
             let textarea: HTMLTextAreaElement | null = null;
