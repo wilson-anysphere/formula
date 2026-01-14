@@ -1,21 +1,11 @@
 import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
-import { getTauriDialogOpenOrNull } from "../tauri/api";
+import { getTauriDialogOpenOrNull, getTauriInvokeOrThrow } from "../tauri/api";
 
 export const IMAGE_FILE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"] as const;
-
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 export type PickImagesFromTauriDialogOptions = {
   multiple?: boolean;
 };
-
-function getTauriInvoke(): TauriInvoke {
-  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (typeof invoke !== "function") {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
-}
 
 function normalizeOpenPaths(payload: unknown): string[] {
   if (payload == null) return [];
@@ -116,7 +106,7 @@ export async function pickImagesFromTauriDialog(options: PickImagesFromTauriDial
  * - `read_binary_file_range` for larger payloads
  */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
-  const invoke = getTauriInvoke();
+  const invoke = getTauriInvokeOrThrow();
 
   const statPayload = await invoke("stat_file", { path });
   const fileSize = normalizeFileSize(statPayload);

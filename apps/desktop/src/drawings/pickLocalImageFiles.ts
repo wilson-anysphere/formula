@@ -1,6 +1,6 @@
 import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
 import { pickImagesFromTauriDialog, readBinaryFile } from "./pickImagesFromTauriDialog.js";
-import { getTauriDialogOpenOrNull } from "../tauri/api";
+import { getTauriDialogOpenOrNull, getTauriInvokeOrNull } from "../tauri/api";
 
 export interface PickLocalImageFilesOptions {
   /**
@@ -24,7 +24,7 @@ export interface PickLocalImageFilesOptions {
  */
 export function pickLocalImageFiles(options: PickLocalImageFilesOptions = {}): Promise<File[]> {
   const tauriDialogOpenAvailable = getTauriDialogOpenOrNull() != null;
-  const tauriInvokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  const tauriInvokeAvailable = getTauriInvokeOrNull() != null;
 
   // Desktop/Tauri: prefer the native dialog + backend file reads so we can work with
   // filesystem paths directly (avoids `<input type=file>` sandbox quirks).

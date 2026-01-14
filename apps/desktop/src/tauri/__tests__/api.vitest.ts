@@ -9,7 +9,10 @@ import {
   getTauriDialogSaveOrNull,
   getTauriEventApiOrNull,
   getTauriEventApiOrThrow,
+  getTauriInvokeOrNull,
+  getTauriInvokeOrThrow,
   hasTauri,
+  hasTauriInvoke,
   hasTauriWindowApi,
   hasTauriWindowHandleApi,
   getTauriWindowHandleOrNull,
@@ -222,6 +225,37 @@ describe("tauri/api dynamic accessors", () => {
 
       expect(getTauriEventApiOrNull()).toBeNull();
       expect(() => getTauriEventApiOrThrow()).toThrowError("Tauri event API not available");
+    });
+  });
+
+  describe("getTauriInvoke*", () => {
+    it("returns null / throws when the invoke API is missing", () => {
+      expect(getTauriInvokeOrNull()).toBeNull();
+      expect(hasTauriInvoke()).toBe(false);
+      expect(() => getTauriInvokeOrThrow()).toThrowError("Tauri invoke API not available");
+    });
+
+    it("detects core.invoke when available", () => {
+      const invoke = vi.fn(async () => null);
+      (globalThis as any).__TAURI__ = { core: { invoke } };
+      expect(getTauriInvokeOrNull()).toBe(invoke);
+      expect(getTauriInvokeOrThrow()).toBe(invoke);
+      expect(hasTauriInvoke()).toBe(true);
+    });
+
+    it("treats throwing nested properties (e.g. core getter) as unavailable", () => {
+      const tauri: any = {};
+      Object.defineProperty(tauri, "core", {
+        configurable: true,
+        get() {
+          throw new Error("Blocked core access");
+        },
+      });
+      (globalThis as any).__TAURI__ = tauri;
+
+      expect(getTauriInvokeOrNull()).toBeNull();
+      expect(hasTauriInvoke()).toBe(false);
+      expect(() => getTauriInvokeOrThrow()).toThrowError("Tauri invoke API not available");
     });
   });
 
