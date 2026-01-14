@@ -303,7 +303,7 @@ pub fn slicer_selection_to_engine_filter_with_resolver<F>(
 where
     F: FnMut(&str) -> Option<ScalarValue>,
 {
-    let field = field.into();
+    let field = PivotFieldRef::CacheFieldName(field.into());
     let allowed = match &selection.selected_items {
         None => None,
         Some(items) => {
@@ -317,7 +317,7 @@ where
     };
 
     FilterField {
-        source_field: PivotFieldRef::CacheFieldName(field),
+        source_field: field,
         allowed,
     }
 }
@@ -1322,7 +1322,7 @@ mod tests {
             &parts,
         );
         assert_eq!(filters.len(), 1);
-        assert_eq!(filters[0].source_field.as_cache_field_name(), Some("Region"));
+        assert_eq!(filters[0].source_field, cache_field("Region"));
         assert_eq!(
             filters[0].allowed.as_ref(),
             Some(&HashSet::from([PivotKeyPart::Text("East".to_string())]))
