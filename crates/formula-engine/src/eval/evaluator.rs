@@ -143,7 +143,7 @@ pub trait ValueResolver {
     /// index. Resolvers with stable sheet ids should override this to return the current tab
     /// position.
     fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
-        Some(sheet_id)
+        self.sheet_exists(sheet_id).then_some(sheet_id)
     }
     /// Workbook legacy text codepage used for DBCS (`*B`) text functions.
     ///
@@ -170,12 +170,17 @@ pub trait ValueResolver {
     /// The default implementation preserves historical behavior by expanding to the numeric
     /// `min..=max` sheet id range.
     fn expand_sheet_span(&self, start_sheet_id: usize, end_sheet_id: usize) -> Option<Vec<usize>> {
+        if !self.sheet_exists(start_sheet_id) || !self.sheet_exists(end_sheet_id) {
+            return None;
+        }
         let (start, end) = if start_sheet_id <= end_sheet_id {
             (start_sheet_id, end_sheet_id)
         } else {
             (end_sheet_id, start_sheet_id)
         };
-        Some((start..=end).collect())
+        // Historical behavior expands to the numeric id range. Filter out missing sheets so deleted
+        // ids (which are never reused) do not introduce spurious `#REF!` results.
+        Some((start..=end).filter(|id| self.sheet_exists(*id)).collect())
     }
 
     /// Host-provided system metadata used by the Excel `INFO()` worksheet function.
