@@ -1,20 +1,9 @@
 import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
+import { getTauriDialogOpenOrNull } from "../tauri/api";
 
 export const IMAGE_FILE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"] as const;
 
-type TauriDialogOpen = (options: Record<string, unknown>) => Promise<unknown>;
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function getTauriDialogOpen(): TauriDialogOpen | null {
-  const tauri = (globalThis as any).__TAURI__;
-  // Support multiple legacy shapes (kept in sync with `src/tauri/api.ts`):
-  // - `__TAURI__.dialog.*`
-  // - `__TAURI__.plugin.dialog.*`
-  // - `__TAURI__.plugins.dialog.*`
-  const dialog = (tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog) as unknown;
-  const open = (dialog as any)?.open as unknown;
-  return typeof open === "function" ? (open as TauriDialogOpen) : null;
-}
 
 function getTauriInvoke(): TauriInvoke {
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
@@ -95,7 +84,7 @@ function normalizeFileSize(payload: unknown): number {
  * Returns absolute paths on disk.
  */
 export async function pickImagesFromTauriDialog(): Promise<string[]> {
-  const open = getTauriDialogOpen();
+  const open = getTauriDialogOpenOrNull();
   if (!open) {
     throw new Error("Tauri dialog.open API not available");
   }
