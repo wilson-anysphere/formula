@@ -316,7 +316,13 @@ fn validate_parsed_standard_encryption_info(
     };
 
     // Validate key size semantics against the downstream `CryptDeriveKey` implementation.
-    let key_size_bits = header.key_size;
+    //
+    // MS-OFFCRYPTO specifies that `keySize=0` MUST be interpreted as 40-bit for RC4 CryptoAPI.
+    let key_size_bits = if header.alg_id == CALG_RC4 && header.key_size == 0 {
+        40
+    } else {
+        header.key_size
+    };
     if key_size_bits == 0 || key_size_bits % 8 != 0 {
         return Err(OffcryptoError::InvalidKeySize { key_size_bits });
     }
@@ -373,10 +379,16 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoEr
     let size_extra = r.read_u32_le("EncryptionHeader.sizeExtra")?;
     let alg_id = r.read_u32_le("EncryptionHeader.algId")?;
     let alg_id_hash = r.read_u32_le("EncryptionHeader.algIdHash")?;
-    let key_size = r.read_u32_le("EncryptionHeader.keySize")?;
+    let key_size_raw = r.read_u32_le("EncryptionHeader.keySize")?;
+    // MS-OFFCRYPTO specifies that `keySize=0` MUST be interpreted as 40-bit for RC4 CryptoAPI.
+    let key_size = if alg_id == CALG_RC4 && key_size_raw == 0 {
+        40
+    } else {
+        key_size_raw
+    };
     if key_size == 0 || key_size % 8 != 0 {
         return Err(OffcryptoError::InvalidKeySize {
-            key_size_bits: key_size,
+            key_size_bits: key_size_raw,
         });
     }
     let provider_type = r.read_u32_le("EncryptionHeader.providerType")?;
@@ -635,7 +647,12 @@ pub(crate) fn derive_key_standard_for_block(
     password: &str,
     block_index: u32,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    let key_size_bits = info.header.key_size;
+    // MS-OFFCRYPTO specifies that `keySize=0` MUST be interpreted as 40-bit for RC4 CryptoAPI.
+    let key_size_bits = if info.header.alg_id == CALG_RC4 && info.header.key_size == 0 {
+        40
+    } else {
+        info.header.key_size
+    };
     if key_size_bits == 0 || key_size_bits % 8 != 0 {
         return Err(OffcryptoError::InvalidKeySize { key_size_bits });
     }
@@ -974,6 +991,20 @@ mod tests {
             matches!(err, OffcryptoError::InvalidKeySize { key_size_bits: 7 }),
             "expected InvalidKeySize, got {err:?}"
         );
+    }
+
+    #[test]
+    fn parse_standard_keysize_zero_is_interpreted_as_40bit_for_rc4() {
+        let mut bytes = build_minimal_valid_encryption_info();
+        // keySize is the 5th DWORD of the EncryptionHeader fixed portion.
+        let key_size_offset = 12 + (4 * 4);
+        bytes[key_size_offset..key_size_offset + 4].copy_from_slice(&(0u32).to_le_bytes());
+
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let info = res.unwrap().expect("expected successful parse");
+        assert_eq!(info.header.alg_id, CALG_RC4);
+        assert_eq!(info.header.key_size, 40);
     }
 
     #[test]
