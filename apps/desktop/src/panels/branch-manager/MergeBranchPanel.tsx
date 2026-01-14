@@ -812,7 +812,7 @@ export function MergeBranchPanel({
                     const contentLocked = hasEnc && draft.encSource !== "custom";
                     const contentDisabled = mutationsDisabled || draft.deleteCell || contentLocked;
                     const formatDisabled = mutationsDisabled || draft.deleteCell;
-                    const formulaActive = draft.formulaText.trim().length > 0;
+                    const formulaActive = normalizeFormulaInput(draft.formulaText) !== null;
                     const formatErrorId = `branch-merge-format-error-${idx}`;
 
                     return (
