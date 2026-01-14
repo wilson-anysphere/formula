@@ -2813,12 +2813,17 @@ export class SpreadsheetApp {
               : undefined;
 
             const structuredOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
-            const reference =
-              range && sheetName
-                ? structuredOk
-                  ? `${name}[#All]`
-                  : `${formatSheetPrefix(sheetName)}${rangeToA1(range)}`
-                : "";
+            const reference = (() => {
+              if (!range) return "";
+              // Structured refs don't require a sheet prefix, and allow `parseGoTo` to resolve
+              // the target sheet from the workbook table metadata.
+              if (structuredOk) return `${name}[#All]`;
+              // Non-identifier table names require falling back to a sheet-qualified A1 reference.
+              // If we don't have a sheet name, leave the entry as "edit-only" rather than navigating
+              // to the wrong sheet.
+              if (!sheetName) return "";
+              return `${formatSheetPrefix(sheetName)}${rangeToA1(range)}`;
+            })();
 
             push({
               kind: "table",
@@ -2826,21 +2831,6 @@ export class SpreadsheetApp {
               label: name,
               reference,
               description,
-            });
-          }
-
-          for (const sheet of this.searchWorkbook.sheets) {
-            const id = typeof (sheet as any)?.sheetId === "string" ? String((sheet as any).sheetId) : "";
-            const name = typeof (sheet as any)?.name === "string" ? String((sheet as any).name).trim() : "";
-            if (!id || !name) continue;
-            const formatted = formatSheetNameForA1(name);
-            const prefix = formatted ? `${formatted}!` : "";
-            push({
-              kind: "sheet",
-              key: `sheet:${id}`,
-              label: name,
-              reference: `${prefix}A1`,
-              description: `${prefix}A1`,
             });
           }
 

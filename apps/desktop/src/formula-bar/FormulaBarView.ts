@@ -158,7 +158,7 @@ function computeFormulaIndentation(text: string, cursor: number): string {
   return " ".repeat(clamped * INDENT_WIDTH);
 }
 
-type NameBoxDropdownItemKind = "namedRange" | "table" | "sheet" | "recent";
+type NameBoxDropdownItemKind = "namedRange" | "table" | "recent";
 
 type FunctionPickerItem = { name: string; signature?: string; summary?: string };
 
@@ -2724,7 +2724,6 @@ export class FormulaBarView {
       recent: 0,
       namedRange: 1,
       table: 2,
-      sheet: 3,
     };
     const recentRank = new Map(this.#nameBoxDropdownRecentKeys.map((key, index) => [key, index]));
     this.#nameBoxDropdownAllItems.sort((a, b) => {
@@ -2975,7 +2974,6 @@ export class FormulaBarView {
     renderGroup("recent", "Recent");
     renderGroup("namedRange", "Named ranges");
     renderGroup("table", "Tables");
-    renderGroup("sheet", "Sheets");
 
     if (this.#nameBoxDropdownOptionEls.length === 0) {
       const empty = document.createElement("div");
