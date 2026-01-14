@@ -6,6 +6,7 @@ use cbc::cipher::{
 };
 use sha1::{Digest, Sha1};
 use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::ErrorKind;
 
 use formula_io::StandardAesEncryptedPackageReader;
 
@@ -186,4 +187,78 @@ fn final_segment_can_be_larger_than_4096_due_to_padding() {
     reader.read_to_end(&mut out).expect("read_to_end");
     assert_eq!(out.len(), plaintext.len());
     assert_eq!(out, plaintext);
+}
+
+#[test]
+fn errors_on_truncated_size_prefix() {
+    let key = [0x42u8; 16];
+    let salt = [0xA5u8; 16];
+
+    let encrypted = vec![0u8; 7]; // < 8-byte u64le prefix
+    let cursor = Cursor::new(encrypted);
+    let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
+        .expect_err("expected truncated size prefix to error");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+}
+
+#[test]
+fn errors_on_truncated_non_final_ciphertext_segment() {
+    let key = [0x11u8; 16];
+    let salt = [0x22u8; 16];
+    let plaintext = make_plaintext(SEGMENT_LEN + 1); // 2 segments
+    let mut encrypted = make_encrypted_package(&plaintext, &key, &salt);
+
+    // Truncate inside the first (non-final) ciphertext segment so it is < 4096 bytes.
+    encrypted.truncate(8 + SEGMENT_LEN - 1);
+
+    let cursor = Cursor::new(encrypted);
+    let mut reader =
+        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
+
+    let mut out = Vec::new();
+    let err = reader
+        .read_to_end(&mut out)
+        .expect_err("expected truncated ciphertext segment to error");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+}
+
+#[test]
+fn errors_on_final_segment_ciphertext_not_block_aligned() {
+    let key = [0x99u8; 16];
+    let salt = [0x77u8; 16];
+
+    let mut encrypted = Vec::new();
+    encrypted.extend_from_slice(&1u64.to_le_bytes()); // orig_size = 1
+    encrypted.extend_from_slice(&[0u8; 17]); // not a multiple of 16
+
+    let cursor = Cursor::new(encrypted);
+    let mut reader =
+        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
+
+    let mut buf = [0u8; 8];
+    let err = reader
+        .read(&mut buf)
+        .expect_err("expected non-block-aligned ciphertext to error");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+}
+
+#[test]
+fn errors_when_final_segment_ciphertext_is_block_aligned_but_too_short() {
+    let key = [0x55u8; 16];
+    let salt = [0x66u8; 16];
+
+    // orig_size = 33, but ciphertext only contains 32 bytes (block-aligned).
+    let mut encrypted = Vec::new();
+    encrypted.extend_from_slice(&33u64.to_le_bytes());
+    encrypted.extend_from_slice(&[0u8; 32]);
+
+    let cursor = Cursor::new(encrypted);
+    let mut reader =
+        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
+
+    let mut out = Vec::new();
+    let err = reader
+        .read_to_end(&mut out)
+        .expect_err("expected too-short final ciphertext segment to error");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
