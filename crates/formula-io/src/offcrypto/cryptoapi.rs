@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn crypt_derive_key_md5_truncates_when_key_len_le_hash_len() {
+    fn crypt_derive_key_md5_applies_cryptderivekey_even_when_key_len_le_hash_len() {
         // MD5("hello") = 5d41402abc4b2a76b9719d911017c592
         let hash_value: [u8; 16] = [
             0x5D, 0x41, 0x40, 0x2A, 0xBC, 0x4B, 0x2A, 0x76, 0xB9, 0x71, 0x9D, 0x91, 0x10,
@@ -245,7 +245,11 @@ mod tests {
         ];
 
         let key = crypt_derive_key(&hash_value, 16, HashAlg::Md5);
-        assert_eq!(key, hash_value);
+        let expected: [u8; 16] = [
+            0x21, 0xA4, 0xF9, 0x3F, 0x30, 0xEF, 0x88, 0x60, 0x3B, 0x66, 0x15, 0x32, 0x4E,
+            0x70, 0x90, 0x1B,
+        ];
+        assert_eq!(key, expected);
     }
 
     #[test]
