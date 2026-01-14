@@ -225,15 +225,13 @@ impl fmt::Display for PivotFieldRef {
 }
 
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
-    let Some(first) = raw.chars().next() else {
+    if raw.is_empty() {
         return Cow::Borrowed("''");
-    };
-    let is_simple = (first.is_ascii_alphabetic() || first == '_')
-        && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    if is_simple {
-        return Cow::Borrowed(raw);
     }
-    Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
+    if dax_identifier_requires_quotes(raw) {
+        return Cow::Owned(quote_dax_identifier(raw));
+    }
+    Cow::Borrowed(raw)
 }
 
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
