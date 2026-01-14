@@ -1704,7 +1704,11 @@ impl DataModel {
         match expr {
             Expr::Let { bindings, body } => {
                 for (_, binding_expr) in bindings {
-                    self.collect_same_table_column_dependencies_inner(binding_expr, current_table, out);
+                    self.collect_same_table_column_dependencies_inner(
+                        binding_expr,
+                        current_table,
+                        out,
+                    );
                 }
                 self.collect_same_table_column_dependencies_inner(body, current_table, out);
             }
@@ -1730,12 +1734,6 @@ impl DataModel {
                 for arg in args {
                     self.collect_same_table_column_dependencies_inner(arg, current_table, out);
                 }
-            }
-            Expr::Let { bindings, body } => {
-                for (_, expr) in bindings {
-                    self.collect_same_table_column_dependencies_inner(expr, current_table, out);
-                }
-                self.collect_same_table_column_dependencies_inner(body, current_table, out);
             }
             Expr::UnaryOp { expr, .. } => {
                 self.collect_same_table_column_dependencies_inner(expr, current_table, out);

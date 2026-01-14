@@ -2101,6 +2101,13 @@ impl DaxEngine {
                     }
                     collect_column_refs(body, tables, columns);
                 }
+                Expr::TableLiteral { rows } => {
+                    for row in rows {
+                        for cell in row {
+                            collect_column_refs(cell, tables, columns);
+                        }
+                    }
+                }
                 Expr::ColumnRef { table, column } => {
                     tables.insert(table.clone());
                     columns.insert((table.clone(), column.clone()));
@@ -2125,7 +2132,6 @@ impl DaxEngine {
             expr: &Expr,
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
-            env: &mut VarEnv,
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
@@ -2290,7 +2296,6 @@ impl DaxEngine {
                     arg,
                     &eval_filter,
                     row_ctx,
-                    env,
                     keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
@@ -2306,7 +2311,6 @@ impl DaxEngine {
                         arg,
                         &eval_filter,
                         row_ctx,
-                        env,
                         keep_filters,
                         &mut clear_columns,
                         &mut row_filters,
