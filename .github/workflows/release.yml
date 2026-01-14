@@ -1116,7 +1116,7 @@ jobs:
 
       - name: Verify macOS signed app entitlements (hardened runtime)
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != ''
+        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != ''
         run: |
           set -euo pipefail
           # Cargo workspaces typically emit bundle outputs under `<repo>/target/**`, but standalone
