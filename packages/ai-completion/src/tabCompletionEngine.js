@@ -1487,6 +1487,11 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     5: BOND_FREQUENCY_ENUM_1_2_4,
     // basis
     6: DAY_COUNT_BASIS_ENUM_0_TO_4,
+    // calc_method
+    7: [
+      { replacement: "FALSE", displayText: "FALSE (accrue from issue)", confidence: 0.66 },
+      { replacement: "TRUE", displayText: "TRUE (accrue from prior coupon date)", confidence: 0.65 },
+    ],
   },
   ACCRINTM: {
     // basis

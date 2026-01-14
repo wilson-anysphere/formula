@@ -2659,6 +2659,32 @@ test("ACCRINT frequency suggests 2, 1, 4", async () => {
   }
 });
 
+test("ACCRINT calc_method suggests TRUE/FALSE with meaning", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ACCRINT(A1, B1, C1, 0.05, 100, 2, 0, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  const fromIssue = suggestions.find((s) => s.text === "=ACCRINT(A1, B1, C1, 0.05, 100, 2, 0, FALSE");
+  assert.ok(fromIssue, `Expected ACCRINT to suggest FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok(
+    (fromIssue?.confidence ?? 0) > 0.5,
+    `Expected ACCRINT/FALSE to have elevated confidence, got: ${fromIssue?.confidence}`
+  );
+
+  const fromCoupon = suggestions.find((s) => s.text === "=ACCRINT(A1, B1, C1, 0.05, 100, 2, 0, TRUE");
+  assert.ok(fromCoupon, `Expected ACCRINT to suggest TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok(
+    (fromCoupon?.confidence ?? 0) > 0.5,
+    `Expected ACCRINT/TRUE to have elevated confidence, got: ${fromCoupon?.confidence}`
+  );
+});
+
 test("PRICEDISC basis suggests 0, 1, 2, 3, 4", async () => {
   const engine = new TabCompletionEngine();
 
