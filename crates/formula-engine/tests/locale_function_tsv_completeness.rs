@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use formula_engine::functions::FunctionSpec;
 use formula_engine::ErrorKind;
@@ -25,7 +26,7 @@ fn inventory_function_names() -> BTreeSet<String> {
     names
 }
 
-fn parse_locale_tsv(locale_id: &str, raw_tsv: &str) -> ParsedLocaleTsv {
+fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocaleTsv {
     let mut canonical_keys = BTreeSet::new();
     let mut localized_keys = BTreeSet::new();
 
@@ -45,14 +46,16 @@ fn parse_locale_tsv(locale_id: &str, raw_tsv: &str) -> ParsedLocaleTsv {
 
         let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
             panic!(
-                "invalid locale TSV entry in {locale_id} (expected `Canonical<TAB>Localized`) at line {line_no}: {line:?}"
+                "invalid locale TSV entry in {locale_id} ({path}) (expected `Canonical<TAB>Localized`) at line {line_no}: {line:?}",
+                path = path.display()
             )
         });
         let canon = canon.trim();
         let loc = loc.trim();
         if canon.is_empty() || loc.is_empty() {
             panic!(
-                "invalid locale TSV entry in {locale_id} (empty key/value) at line {line_no}: {line:?}"
+                "invalid locale TSV entry in {locale_id} ({path}) (empty key/value) at line {line_no}: {line:?}",
+                path = path.display()
             );
         }
 
@@ -80,8 +83,10 @@ fn parse_locale_tsv(locale_id: &str, raw_tsv: &str) -> ParsedLocaleTsv {
     }
 
     if !duplicate_canon.is_empty() || !duplicate_localized.is_empty() {
-        let mut report =
-            format!("locale TSV for {locale_id} contains duplicate entries (case-insensitive)\n");
+        let mut report = format!(
+            "locale TSV for {locale_id} ({path}) contains duplicate entries (case-insensitive)\n",
+            path = path.display()
+        );
 
         if !duplicate_canon.is_empty() {
             report.push_str("\nDuplicate canonical keys:\n");
@@ -110,7 +115,12 @@ fn casefold_unicode(s: &str) -> String {
     s.chars().flat_map(|c| c.to_uppercase()).collect()
 }
 
-fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> ParsedErrorTsv {
+fn parse_error_tsv(
+    locale_id: &str,
+    path: &Path,
+    raw_tsv: &str,
+    require_sorted: bool,
+) -> ParsedErrorTsv {
     let mut canonical_keys = BTreeSet::new();
     let mut localized_keys = BTreeSet::new();
     let mut entries: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -139,14 +149,16 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> Pars
 
         let (canon, loc) = raw_line.split_once('\t').unwrap_or_else(|| {
             panic!(
-                "invalid error TSV entry in {locale_id} (expected `Canonical<TAB>Localized`) at line {line_no}: {raw_line:?}"
+                "invalid error TSV entry in {locale_id} ({path}) (expected `Canonical<TAB>Localized`) at line {line_no}: {raw_line:?}",
+                path = path.display()
             )
         });
         let canon = canon.trim();
         let loc = loc.trim();
         if canon.is_empty() || loc.is_empty() {
             panic!(
-                "invalid error TSV entry in {locale_id} (empty key/value) at line {line_no}: {raw_line:?}"
+                "invalid error TSV entry in {locale_id} ({path}) (empty key/value) at line {line_no}: {raw_line:?}",
+                path = path.display()
             );
         }
 
@@ -154,7 +166,8 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> Pars
             if let Some(prev) = prev_canon.as_ref() {
                 if canon < prev.as_str() {
                     panic!(
-                        "error TSV for {locale_id} is not sorted by canonical key: line {line_no}: {canon:?} comes after {prev:?}"
+                        "error TSV for {locale_id} ({path}) is not sorted by canonical key: line {line_no}: {canon:?} comes after {prev:?}",
+                        path = path.display()
                     );
                 }
             }
@@ -181,8 +194,10 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> Pars
     }
 
     if !duplicate_localized.is_empty() {
-        let mut report =
-            format!("locale error TSV for {locale_id} contains duplicate entries (case-insensitive)\n");
+        let mut report = format!(
+            "locale error TSV for {locale_id} ({path}) contains duplicate entries (case-insensitive)\n",
+            path = path.display()
+        );
 
         if !duplicate_localized.is_empty() {
             report.push_str("\nDuplicate localized keys (collisions):\n");
@@ -201,20 +216,85 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> Pars
     }
 }
 
+fn locale_data_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/locale/data")
+}
+
+fn upstream_error_data_dir() -> PathBuf {
+    locale_data_dir().join("upstream/errors")
+}
+
+fn discover_tsvs_in_dir(dir: &Path) -> BTreeMap<String, PathBuf> {
+    let mut out = BTreeMap::new();
+    let read_dir = std::fs::read_dir(dir).unwrap_or_else(|err| {
+        panic!(
+            "failed to read locale data directory {}: {err}",
+            dir.display()
+        )
+    });
+
+    for entry in read_dir {
+        let entry = entry.unwrap_or_else(|err| {
+            panic!(
+                "failed to read entry in locale data directory {}: {err}",
+                dir.display()
+            )
+        });
+        let file_type = entry.file_type().unwrap_or_else(|err| {
+            panic!(
+                "failed to stat entry {}: {err}",
+                entry.path().display()
+            )
+        });
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+        let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or_else(|| {
+            panic!(
+                "locale data directory contains a non-utf8 file name: {}",
+                path.display()
+            )
+        });
+
+        if !file_name.ends_with(".tsv") {
+            continue;
+        }
+        let locale_id = file_name
+            .strip_suffix(".tsv")
+            .expect("already checked suffix");
+        out.insert(locale_id.to_string(), path);
+    }
+
+    out
+}
+
 #[test]
 fn locale_function_tsvs_are_complete_and_unique() {
     let inventory_names = inventory_function_names();
 
-    let locale_tables = [
-        ("de-DE", include_str!("../src/locale/data/de-DE.tsv")),
-        ("fr-FR", include_str!("../src/locale/data/fr-FR.tsv")),
-        ("es-ES", include_str!("../src/locale/data/es-ES.tsv")),
-    ];
+    let dir = locale_data_dir();
+    let mut locale_tsvs = discover_tsvs_in_dir(&dir);
+    // Exclude `*.errors.tsv` and anything that isn't a function translation table.
+    locale_tsvs.retain(|locale_id, _path| !locale_id.ends_with(".errors"));
+
+    for required in ["de-DE", "fr-FR", "es-ES"] {
+        assert!(
+            locale_tsvs.contains_key(required),
+            "expected locale function TSV {required}.tsv to exist in {} (discovered: {:?})",
+            dir.display(),
+            locale_tsvs.keys().collect::<Vec<_>>()
+        );
+    }
 
     let mut failures = String::new();
 
-    for (locale_id, tsv) in locale_tables {
-        let parsed = parse_locale_tsv(locale_id, tsv);
+    for (locale_id, path) in &locale_tsvs {
+        let tsv = std::fs::read_to_string(path).unwrap_or_else(|err| {
+            panic!("failed to read locale function TSV {}: {err}", path.display())
+        });
+        let parsed = parse_locale_tsv(locale_id, path, &tsv);
 
         let missing: Vec<String> = inventory_names
             .difference(&parsed.canonical_keys)
@@ -233,9 +313,7 @@ fn locale_function_tsvs_are_complete_and_unique() {
         failures.push_str(&format!(
             "\nLocale TSV {locale_id} is out of sync with formula-engine function inventory\n"
         ));
-        failures.push_str(&format!(
-            "  TSV path: crates/formula-engine/src/locale/data/{locale_id}.tsv\n"
-        ));
+        failures.push_str(&format!("  TSV path: {}\n", path.display()));
 
         if !missing.is_empty() {
             failures.push_str("\n  Missing canonical function keys:\n");
@@ -292,29 +370,44 @@ fn locale_error_tsvs_are_complete_and_unique() {
     .map(|k| k.as_code().to_string())
     .collect();
 
-    let locale_tables = [
-        (
-            "de-DE",
-            include_str!("../src/locale/data/de-DE.errors.tsv"),
-            include_str!("../src/locale/data/upstream/errors/de-DE.tsv"),
-        ),
-        (
-            "fr-FR",
-            include_str!("../src/locale/data/fr-FR.errors.tsv"),
-            include_str!("../src/locale/data/upstream/errors/fr-FR.tsv"),
-        ),
-        (
-            "es-ES",
-            include_str!("../src/locale/data/es-ES.errors.tsv"),
-            include_str!("../src/locale/data/upstream/errors/es-ES.tsv"),
-        ),
-    ];
+    let upstream_dir = upstream_error_data_dir();
+    let upstream_tsvs = discover_tsvs_in_dir(&upstream_dir);
+
+    for required in ["de-DE", "fr-FR", "es-ES"] {
+        assert!(
+            upstream_tsvs.contains_key(required),
+            "expected upstream locale error TSV {required}.tsv to exist in {} (discovered: {:?})",
+            upstream_dir.display(),
+            upstream_tsvs.keys().collect::<Vec<_>>()
+        );
+    }
 
     let mut failures = String::new();
 
-    for (locale_id, tsv, upstream_tsv) in locale_tables {
-        let parsed = parse_error_tsv(locale_id, tsv, /*require_sorted*/ true);
-        let upstream = parse_error_tsv(locale_id, upstream_tsv, /*require_sorted*/ false);
+    for (locale_id, upstream_path) in &upstream_tsvs {
+        let generated_path = locale_data_dir().join(format!("{locale_id}.errors.tsv"));
+
+        let upstream_tsv = std::fs::read_to_string(upstream_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read upstream locale error TSV {}: {err}",
+                upstream_path.display()
+            )
+        });
+        let generated_tsv = std::fs::read_to_string(&generated_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read generated locale error TSV {}: {err}",
+                generated_path.display()
+            )
+        });
+
+        let parsed =
+            parse_error_tsv(locale_id, &generated_path, &generated_tsv, /*require_sorted*/ true);
+        let upstream = parse_error_tsv(
+            locale_id,
+            upstream_path,
+            &upstream_tsv,
+            /*require_sorted*/ false,
+        );
 
         let missing: Vec<String> = expected.difference(&parsed.canonical_keys).cloned().collect();
         let extra: Vec<String> = parsed.canonical_keys.difference(&expected).cloned().collect();
@@ -342,7 +435,12 @@ fn locale_error_tsvs_are_complete_and_unique() {
             "\nLocale error TSV {locale_id} is out of sync with formula-engine ErrorKind\n"
         ));
         failures.push_str(&format!(
-            "  TSV path: crates/formula-engine/src/locale/data/{locale_id}.errors.tsv\n"
+            "  Generated TSV path: {}\n",
+            generated_path.display()
+        ));
+        failures.push_str(&format!(
+            "  Upstream TSV path: {}\n",
+            upstream_path.display()
         ));
 
         if !missing.is_empty() {
@@ -361,7 +459,8 @@ fn locale_error_tsvs_are_complete_and_unique() {
 
         if !upstream_missing.is_empty() || !upstream_extra.is_empty() {
             failures.push_str(&format!(
-                "\n  Upstream mapping is out of sync (crates/formula-engine/src/locale/data/upstream/errors/{locale_id}.tsv):\n"
+                "\n  Upstream mapping is out of sync ({}):\n",
+                upstream_path.display()
             ));
             if !upstream_missing.is_empty() {
                 failures.push_str("    Missing canonical error keys:\n");
