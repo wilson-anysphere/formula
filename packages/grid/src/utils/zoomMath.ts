@@ -1,5 +1,7 @@
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 
+// Keep zoom bounds aligned with the desktop layout pane zoom clamp so the app can
+// persist values without "snapping" on reload.
 export const MIN_GRID_ZOOM = 0.25;
 export const MAX_GRID_ZOOM = 4.0;
 

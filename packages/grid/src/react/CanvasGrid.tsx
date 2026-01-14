@@ -10,6 +10,7 @@ import type { GridTheme } from "../theme/GridTheme";
 import { resolveGridTheme } from "../theme/GridTheme";
 import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
 import type { FillMode } from "../interaction/fillHandle";
+import { clampZoom } from "../utils/zoomMath";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { wheelDeltaToPixels } from "./wheelDeltaToPixels";
@@ -142,7 +143,7 @@ export interface CanvasGridProps {
   /**
    * Default font family used for cell text when `CellStyle.fontFamily` is unset.
    *
-   * When omitted, the renderer preserves existing behavior (`"system-ui"`).
+   * When omitted, the renderer uses its default system UI font stack.
    */
   defaultCellFontFamily?: string;
   /**
@@ -252,14 +253,6 @@ function clamp(value: number, min: number, max: number): number {
 function clampIndex(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return clamp(Math.trunc(value), min, max);
-}
-
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 4.0;
-
-function clampZoom(zoom: number): number {
-  if (!Number.isFinite(zoom)) return 1;
-  return clamp(zoom, MIN_ZOOM, MAX_ZOOM);
 }
 
 function partialThemeEqual(a: Partial<GridTheme>, b: Partial<GridTheme>): boolean {

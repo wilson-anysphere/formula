@@ -2,6 +2,7 @@ import type { CellBorderSpec, CellData, CellProvider, CellProviderUpdate, CellRa
 import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker.ts";
 import { setupHiDpiCanvas } from "./HiDpiCanvas.ts";
 import { LruCache } from "../utils/LruCache.ts";
+import { clampZoom as clampGridZoom } from "../utils/zoomMath.ts";
 import type { GridPresence } from "../presence/types.ts";
 import type { GridTheme } from "../theme/GridTheme.ts";
 import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/GridTheme.ts";
@@ -95,13 +96,13 @@ export interface CanvasGridRendererOptions {
   /**
    * Default font family used when rendering/measuring cell text if `CellStyle.fontFamily` is unset.
    *
-   * Defaults to `"system-ui"` to preserve existing behavior.
+   * Defaults to the renderer's system UI font stack.
    */
   defaultCellFontFamily?: string;
   /**
    * Default font family used when rendering/measuring header cell text if `CellStyle.fontFamily` is unset.
    *
-   * Defaults to `defaultCellFontFamily` (or `"system-ui"` when unset).
+   * Defaults to `defaultCellFontFamily` when unset.
    */
   defaultHeaderFontFamily?: string;
   /**
@@ -192,6 +193,14 @@ function clampIndex(value: number, min: number, max: number): number {
   return clamp(Math.trunc(value), min, max);
 }
 
+function ensureSansSerifFallback(fontFamily: string): string {
+  // Many of our default font stacks already include a `sans-serif` fallback. Avoid generating
+  // duplicated values like `..., sans-serif, sans-serif` which cause snapshot churn and make
+  // debugging font issues harder.
+  if (fontFamily.toLowerCase().includes("sans-serif")) return fontFamily;
+  return `${fontFamily}, sans-serif`;
+}
+
 function resolveTextIndentPx(textIndentPx: number | undefined, zoom: number): number {
   if (typeof textIndentPx !== "number" || !Number.isFinite(textIndentPx) || textIndentPx <= 0) return 0;
   return textIndentPx * zoom;
@@ -220,16 +229,6 @@ function getCanvasImageSourceDimensions(source: CanvasImageSource): { width: num
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
   if (width <= 0 || height <= 0) return null;
   return { width, height };
-}
-
-// Keep zoom bounds aligned with the desktop layout pane zoom clamp so the app can
-// persist values without "snapping" on reload.
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 4.0;
-
-function clampZoom(zoom: number): number {
-  if (!Number.isFinite(zoom)) return 1;
-  return clamp(zoom, MIN_ZOOM, MAX_ZOOM);
 }
 
 function padRect(rect: Rect, padding: number): Rect {
@@ -653,7 +652,7 @@ export class CanvasGridRenderer {
     const defaultCellFontFamily = sanitizeFontFamily(options.defaultCellFontFamily) ?? DEFAULT_CELL_FONT_FAMILY;
     this.defaultCellFontFamily = defaultCellFontFamily;
     this.defaultHeaderFontFamily = sanitizeFontFamily(options.defaultHeaderFontFamily) ?? defaultCellFontFamily;
-    this.presenceFont = `${12 * this.zoom}px ${this.defaultHeaderFontFamily}, sans-serif`;
+    this.presenceFont = `${12 * this.zoom}px ${ensureSansSerifFallback(this.defaultHeaderFontFamily)}`;
 
     this.backgroundPatternImage = options.backgroundPatternImage ?? null;
     this.baseDefaultRowHeight = options.defaultRowHeight ?? 21;
@@ -835,7 +834,7 @@ export class CanvasGridRenderer {
   }
 
   setZoom(nextZoom: number, options?: { anchorX?: number; anchorY?: number }): void {
-    const clamped = clampZoom(nextZoom);
+    const clamped = clampGridZoom(nextZoom);
     if (clamped === this.zoom) return;
 
     const prevZoom = this.zoom;
@@ -902,7 +901,7 @@ export class CanvasGridRenderer {
 
     this.scroll = nextScroll;
     this.zoom = clamped;
-    this.presenceFont = `${12 * this.zoom}px ${this.defaultHeaderFontFamily}, sans-serif`;
+    this.presenceFont = `${12 * this.zoom}px ${ensureSansSerifFallback(this.defaultHeaderFontFamily)}`;
 
     this.scroll.setScroll(targetScrollX, targetScrollY);
     const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
@@ -3298,7 +3297,9 @@ export class CanvasGridRenderer {
           const rawLabel = image.altText ?? (typeof cell.value === "string" ? cell.value : "");
           const label = rawLabel && rawLabel.trim() !== "" ? rawLabel : "[Image]";
           const fontSize = Math.max(10, Math.round(11 * zoom));
-          const placeholderFontFamily = `${isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily}, sans-serif`;
+          const placeholderFontFamily = ensureSansSerifFallback(
+            isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily
+          );
           contentCtx.font = `${fontSize}px ${placeholderFontFamily}`;
           contentCtx.fillStyle = "#333333";
           contentCtx.textAlign = "center";
