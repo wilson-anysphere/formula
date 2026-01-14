@@ -9,6 +9,38 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::fmt;
 
+/// Maximum size (in bytes) of a filesystem path string accepted over IPC.
+///
+/// Rationale: OS limits are typically far lower (e.g. 4KiB on many POSIX systems) and real-world
+/// paths are usually a few hundred bytes at most. This cap is intentionally generous (8KiB) while
+/// still bounding allocations from untrusted WebView input.
+pub const MAX_IPC_PATH_BYTES: usize = 8_192; // 8 KiB
+
+/// Maximum size (in bytes) of a URL string accepted over IPC.
+///
+/// Rationale: URLs used by the app (marketplace, OAuth, external links) are expected to be small.
+/// 8KiB is comfortably above common practical limits while preventing a compromised WebView from
+/// forcing the backend to allocate and parse multi-megabyte "URLs".
+pub const MAX_IPC_URL_BYTES: usize = 8_192; // 8 KiB
+
+/// Maximum size (in bytes) of the OAuth loopback redirect URI accepted over IPC.
+///
+/// This is kept separate from `MAX_IPC_URL_BYTES` so the limit can be tightened independently if
+/// needed in the future.
+pub const MAX_OAUTH_REDIRECT_URI_BYTES: usize = MAX_IPC_URL_BYTES;
+
+/// Maximum size (in bytes) of a system notification title accepted over IPC.
+///
+/// Rationale: notification titles are short UI strings; allowing unbounded payloads provides an
+/// easy memory/CPU DoS vector against the privileged backend.
+pub const MAX_NOTIFICATION_TITLE_BYTES: usize = 256;
+
+/// Maximum size (in bytes) of a system notification body accepted over IPC.
+///
+/// Rationale: notification bodies should still be human-readable snippets. 4KiB is large enough
+/// for multi-line error messages while keeping worst-case allocations bounded.
+pub const MAX_NOTIFICATION_BODY_BYTES: usize = 4_096; // 4 KiB
+
 /// Maximum size (in bytes) of a script `code` payload accepted over IPC.
 pub const MAX_SCRIPT_CODE_BYTES: usize = 1_000_000; // ~1MB
 
@@ -28,32 +60,18 @@ pub const MAX_SHEET_ID_BYTES: usize = 128;
 /// Print areas are typically a small number of disjoint ranges; this cap prevents allocating large
 /// vectors when deserializing untrusted IPC inputs.
 pub const MAX_PRINT_AREA_RANGES: usize = 1_000;
-/// Maximum size (in bytes) of filesystem path strings accepted over IPC.
-///
-/// Rationale:
-/// - Typical OS paths are far smaller than 8 KiB.
-/// - The backend treats IPC inputs as untrusted; capping the size prevents pathological allocations
-///   (OOM) and slow parsing on extremely large inputs.
-pub const MAX_IPC_PATH_BYTES: usize = 8_192;
-
-/// Maximum size (in bytes) of URL strings accepted over IPC.
-///
-/// Rationale:
-/// - Common browsers impose URL length limits well below this range.
-/// - We still defensively cap IPC URL payloads to avoid oversized JSON inputs.
-pub const MAX_IPC_URL_BYTES: usize = 8_192;
 
 /// Maximum size (in bytes) of system notification titles accepted over IPC.
 ///
 /// Rationale: notification titles are short UI strings; anything larger is likely unintended or
 /// malicious.
-pub const MAX_IPC_NOTIFICATION_TITLE_BYTES: usize = 256;
+pub const MAX_IPC_NOTIFICATION_TITLE_BYTES: usize = MAX_NOTIFICATION_TITLE_BYTES;
 
 /// Maximum size (in bytes) of system notification bodies accepted over IPC.
 ///
 /// Rationale: notification bodies can be longer than titles, but should still be bounded to avoid
 /// untrusted IPC inputs allocating excessive memory.
-pub const MAX_IPC_NOTIFICATION_BODY_BYTES: usize = 4_096;
+pub const MAX_IPC_NOTIFICATION_BODY_BYTES: usize = MAX_NOTIFICATION_BODY_BYTES;
 
 /// A `String` wrapper that enforces a maximum UTF-8 byte length during deserialization.
 ///

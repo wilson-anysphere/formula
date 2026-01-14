@@ -2192,9 +2192,11 @@ pub async fn open_workbook(
 
     let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
-    let resolved =
-        crate::fs_scope::canonicalize_in_allowed_roots(std::path::Path::new(&path), &allowed_roots)
-            .map_err(|e| e.to_string())?;
+    let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+        std::path::Path::new(path.as_ref()),
+        &allowed_roots,
+    )
+    .map_err(|e| e.to_string())?;
     let resolved_str = resolved.to_string_lossy().to_string();
 
     let workbook = read_workbook(resolved, password)
@@ -3727,7 +3729,6 @@ pub async fn save_workbook(
             .ok_or_else(|| "no persistent workbook id available".to_string())?;
         let autosave = state.autosave_manager();
         let save_path = path
-            .clone()
             .or_else(|| workbook.path.clone())
             .ok_or_else(|| "no save path provided".to_string())?;
         (save_path, workbook, storage, memory, workbook_id, autosave)
@@ -7547,7 +7548,7 @@ pub async fn network_fetch(
 
     let url = url.into_inner();
     let init = init.unwrap_or(JsonValue::Null);
-    crate::network_fetch::network_fetch_impl(&url, &init).await
+    crate::network_fetch::network_fetch_impl(url.as_ref(), &init).await
 }
 
 #[cfg(feature = "desktop")]
