@@ -70,14 +70,16 @@ impl WorkbookCellPatches {
 pub struct WorksheetCellPatches {
     // Deterministic ordering (row-major) makes patch application deterministic.
     cells: BTreeMap<(u32, u32), CellPatch>,
-    /// Optional replacement for the worksheet `<cols>` section.
+    /// Optional patch for the worksheet `<cols>` section (column metadata).
     ///
-    /// This is treated as the full desired set of per-column overrides (sparse, 0-based indices),
-    /// matching [`formula_model::Worksheet::col_properties`].
+    /// The payload is a sparse map of 0-based column indices to overrides, matching
+    /// [`formula_model::Worksheet::col_properties`]. When applied, only the `width` and `hidden`
+    /// attributes are updated to match the provided map; any other existing `<col>` attributes
+    /// (e.g. `outlineLevel`, `collapsed`, `style`) are preserved when present.
     ///
     /// - `None`: preserve the existing `<cols>` section.
-    /// - `Some(map)`: rewrite `<cols>` to match `map` (and remove `<cols>` entirely if the
-    ///   rendered section would be empty).
+    /// - `Some(map)`: update the existing `<cols>` section so `width`/`hidden` match `map`, and
+    ///   remove `<cols>` only if it becomes empty after applying these updates.
     col_properties: Option<BTreeMap<u32, ColProperties>>,
 }
 
@@ -92,7 +94,7 @@ impl WorksheetCellPatches {
         self.cells.insert((cell.row, cell.col), patch);
     }
 
-    /// Replace the worksheet `<cols>` section using the provided `col_properties` map.
+    /// Patch the worksheet `<cols>` section using the provided `col_properties` map.
     ///
     /// Column indices are 0-based (matching `formula_model`); `width` values are expressed in
     /// Excel "character" units (OOXML `col/@width`).
@@ -100,7 +102,10 @@ impl WorksheetCellPatches {
         self.col_properties = Some(col_properties);
     }
 
-    /// Clear all existing worksheet column overrides by removing the `<cols>` section.
+    /// Clear all `width`/`hidden` column overrides.
+    ///
+    /// This removes the `width`/`customWidth` and `hidden` attributes from any existing `<col>`
+    /// elements. Other `<col>` attributes (e.g. outline metadata) are preserved.
     pub fn clear_col_properties(&mut self) {
         self.col_properties = Some(BTreeMap::new());
     }
