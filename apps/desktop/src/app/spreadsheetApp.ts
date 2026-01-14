@@ -230,6 +230,18 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
   };
 
+  // Row/col/sheet style metadata is optional (older WASM builds may not support it). Only expose
+  // these hooks when present so `engineApplyDocumentChange` can treat them as best-effort.
+  if (typeof engine.setRowStyleId === "function") {
+    target.setRowStyleId = (row, styleId, sheet) => engine.setRowStyleId!(row, styleId, sheet);
+  }
+  if (typeof engine.setColStyleId === "function") {
+    target.setColStyleId = (col, styleId, sheet) => engine.setColStyleId!(col, styleId, sheet);
+  }
+  if (typeof engine.setSheetDefaultStyleId === "function") {
+    target.setSheetDefaultStyleId = (styleId, sheet) => engine.setSheetDefaultStyleId!(styleId, sheet);
+  }
+
   ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);
   return target;
 }
