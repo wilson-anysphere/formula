@@ -111,6 +111,17 @@ fn decrypts_standard_basic_xlsm_fixture_matches_plaintext() {
 }
 
 #[test]
+fn decrypts_agile_fixture_empty_password_matches_plaintext() {
+    let plaintext = read_fixture("plaintext.xlsx");
+    let agile = read_fixture("agile-empty-password.xlsx");
+
+    let decrypted =
+        decrypt_encrypted_package_ole(&agile, "").expect("decrypt agile empty password");
+    assert_eq!(decrypted, plaintext);
+    assert!(decrypted.starts_with(b"PK"));
+}
+
+#[test]
 fn decrypts_agile_basic_xlsm_fixture_matches_plaintext() {
     let plaintext = read_fixture("plaintext-basic.xlsm");
     let agile = read_fixture("agile-basic.xlsm");
