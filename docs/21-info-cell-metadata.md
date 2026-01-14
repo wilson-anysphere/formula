@@ -4,32 +4,34 @@
 
 The Rust `formula-engine` intentionally does **not** reach out to the host OS / filesystem / UI. To match Excel, **hosts must inject metadata** into the engine. This document describes:
 
-- which keys are supported today vs planned
+- which keys are supported today (and what is still missing vs Excel)
 - which keys are engine-internal vs host-provided
 - what workbook/worksheet metadata is required for Excel-compatible results
 - which APIs hosts should call to supply that metadata
 
 ## Status (implementation reality)
 
-As of today:
+As of today, the following keys are implemented in `formula-engine`:
 
 - `INFO()` supports the following keys:
   - engine-internal: `INFO("recalc")`, `INFO("numfile")`
-  - host-provided (via `EngineInfo`): `INFO("system")`, `INFO("directory")`, `INFO("osversion")`,
-    `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`
-  - per-sheet view metadata (via `setSheetOrigin`): `INFO("origin")` (defaults to `"$A$1"` when unset)
+  - host-provided (via `EngineInfo`): `INFO("system")`, `INFO("directory")`, `INFO("osversion")`, `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`
+    - `system` defaults to `"pcdos"` when unset (Excel-like).
+    - `directory` prefers `EngineInfo.directory`; otherwise it falls back to workbook file metadata (`setWorkbookFileMetadata`) and returns `#N/A` until the workbook has a filename.
+    - `osversion` / `release` / `version` / `memavail` / `totmem` return `#N/A` when unset.
+  - per-sheet view metadata (via `setSheetOrigin` / `Engine::set_sheet_origin`): `INFO("origin")` (defaults to `"$A$1"` when unset)
 - `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
 - `CELL("protect")` and `CELL("prefix")` are implemented based on the cell’s **effective style** (layered style resolution), matching Excel semantics:
   - `protect`: `1` if the effective style is locked (default), `0` if unlocked.
   - `prefix`: single-character alignment prefix (`'`, `"`, `^`, `\`) or `""` for general/unspecified.
+- `CELL("format")`, `CELL("color")`, and `CELL("parentheses")` are implemented based on the cell’s
+  **effective number format string** (using `formula-format`) and **ignore conditional formatting**.
 - `CELL("width")` is implemented with Excel-compatible encoding:
   - consults per-column metadata (`ColProperties.width` / `ColProperties.hidden`) and the sheet default width
   - returns an encoded number:
     - integer part: `floor(widthChars)`
     - fractional marker: `+ 0.0` when the column uses the sheet default width, `+ 0.1` when it has an explicit per-column width override
   - returns `0` when the column is hidden
-- `CELL("format")`, `CELL("color")`, and `CELL("parentheses")` are implemented based on the effective number format string
-  (style-table lookup), but do **not** consider conditional formatting rules.
 
   `widthChars` is the Excel column-width unit (OOXML `col/@width`). When unset, the engine falls back to Excel’s standard `8.43` width, which encodes as `8.0`.
 
@@ -47,14 +49,14 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 |---|---|---|---|---|
 | `recalc` | text | engine (`CalcSettings.calculation_mode`) | implemented | n/a |
 | `numfile` | number | engine (sheet count) | implemented | n/a |
-| `system` | text | host (`EngineInfo.system`) | implemented | defaults to `"pcdos"` |
-| `directory` | text | host (`EngineInfo.directory`) or workbook file metadata | implemented | return `#N/A` if unknown |
-| `origin` | text | host (`setSheetOrigin`) | implemented | defaults to `"$A$1"` |
-| `osversion` | text | host (`EngineInfo.osversion`) | implemented | return `#N/A` if missing |
-| `release` | text | host (`EngineInfo.release`) | implemented | return `#N/A` if missing |
-| `version` | text | host (`EngineInfo.version`) | implemented | return `#N/A` if missing |
-| `memavail` | number | host (`EngineInfo.memavail`) | implemented | return `#N/A` if missing |
-| `totmem` | number | host (`EngineInfo.totmem`) | implemented | return `#N/A` if missing |
+| `system` | text | host (`EngineInfo.system`) | implemented | defaults to `"pcdos"` when unset |
+| `directory` | text | host (`EngineInfo.directory`) **or** workbook file metadata | implemented | returns `#N/A` until the workbook has a filename (unless `EngineInfo.directory` is set) |
+| `origin` | text | host (per-sheet origin cell) | implemented | defaults to `"$A$1"` when unset |
+| `osversion` | text | host (`EngineInfo.osversion`) | implemented | return `#N/A` when unset |
+| `release` | text | host (`EngineInfo.release`) | implemented | return `#N/A` when unset |
+| `version` | text | host (`EngineInfo.version`) | implemented | return `#N/A` when unset |
+| `memavail` | number | host (`EngineInfo.memavail`) | implemented | return `#N/A` when unset |
+| `totmem` | number | host (`EngineInfo.totmem`) | implemented | return `#N/A` when unset |
 
 #### Notes
 
@@ -67,18 +69,21 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 
 - `INFO("numfile")` uses the engine’s notion of *sheet count*. Hosts must ensure the engine knows about **all sheets**, not just sheets containing cells. (For example, the WASM `fromJson` path only creates sheets that exist in the JSON payload.)
 
-- `INFO("origin")` is UI-dependent in Excel (top-left visible cell in the active window). It cannot be derived from workbook data alone.
+- `INFO("origin")` is UI-dependent in Excel (top-left visible cell in the active window). It cannot be derived from workbook data alone. The engine models this as a **per-sheet origin cell**.
 
 ### Host-provided INFO metadata (what to supply)
 
-To get Excel-compatible results, hosts should supply a best-effort snapshot of:
+Hosts should supply a best-effort snapshot of:
 
-- `system`: `"pcdos"` (Windows-style) or `"mac"` (macOS-style). For web, choose one (we default to `"pcdos"` today).
-- `directory`: workbook directory / “current directory” string (platform-specific path conventions).
-- `origin`: top-left visible cell for the sheet view. Hosts should provide this via `setSheetOrigin(sheet, originA1)`; the engine will normalize it to absolute A1 (including `$` markers).
+- `system`: `"pcdos"` (Windows-style) or `"mac"` (macOS-style). When unset, the engine defaults to `"pcdos"`.
+- `directory`:
+  - host override via `EngineInfo.directory`
+  - otherwise supplied implicitly via workbook file metadata (`setWorkbookFileMetadata`)
+  - the engine returns a trailing path separator (e.g. `"/tmp/"`, `"C:\\Dir\\"`) to match Excel
+- `origin`: set per-sheet via `setSheetOrigin(sheet, originA1)`; the engine always returns an absolute A1 string with `$` markers (e.g. `"$C$5"`). When unset, the engine defaults to `"$A$1"`.
 - `osversion`: OS version string (exact string should match Excel as closely as feasible on that platform).
-- `release` / `version`: application/host version identifiers (to be defined to match Excel behavior once implemented).
-- `memavail` / `totmem`: numeric memory values (units to be validated against Excel; treat as bytes unless/until we lock a different convention).
+- `release` / `version`: application/host version identifiers.
+- `memavail` / `totmem`: numeric memory values. In WASM, these must be finite numbers (`NaN`/`Infinity` are rejected). Units are host-defined (bytes recommended).
 
 ---
 
@@ -95,15 +100,14 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `col` | number | none | implemented |
 | `contents` | value/text | cell formula/value | implemented |
 | `type` | text | cell formula/value | implemented |
+| `format` | text | **effective style** (`number_format`) | implemented (uses `formula-format`, ignores conditional formatting) |
+| `color` | number | **effective style** (`number_format`) | implemented (uses `formula-format`, ignores conditional formatting) |
+| `parentheses` | number | **effective style** (`number_format`) | implemented (uses `formula-format`, ignores conditional formatting) |
 | `filename` | text | workbook file metadata + sheet name | implemented (returns `""` until metadata is set) |
 | `protect` | number | **effective style** (`protection.locked`) | implemented |
 | `prefix` | text | **effective style** (`alignment.horizontal`) | implemented |
 | `width` | number | column width + column hidden state | implemented (encodes `floor(widthChars) + 0.0/0.1`; returns `0` when hidden) |
-| `format` | text | **effective number format** (style table) | implemented |
-| `color` | number | **effective number format** (style table) | implemented |
-| `parentheses` | number | **effective number format** (style table) | implemented |
-
-Other `CELL()` keys are not implemented yet; unknown keys return `#VALUE!` (Excel-compatible).
+Other Excel-valid `CELL()` keys that are not listed above are currently **unsupported** and return `#VALUE!` (unknown `info_type`).
 
 ### Metadata-backed keys (Excel-compatible behavior)
 
@@ -124,10 +128,13 @@ C:\Users\me\Documents\[Book1.xlsx]Sheet1
 Behavior:
 
 - If the workbook is **unsaved** (no filename/path), Excel returns `""` (empty string). The engine matches this today.
-- Once saved, the engine needs:
-  - workbook directory (may be empty in web contexts; should use the platform’s path separator and match Excel’s display form, typically including a trailing separator)
-  - workbook filename (including extension)
-  - the referenced sheet name
+- The engine treats the workbook as “saved” only once a **non-empty** `filename` is known; supplying a directory alone is not enough.
+- When only a filename is known (common on web), `CELL("filename")` returns:
+  - `[Book.xlsx]Sheet1` (no directory prefix)
+- When a directory is also known, the engine returns Excel’s `path[workbook]sheet` shape, ensuring the directory has a trailing separator:
+  - `C:\Dir\[Book.xlsx]Sheet1`
+  - `/dir/[Book.xlsx]Sheet1`
+- `CELL("filename", reference)` uses the referenced cell’s sheet name component.
 
 In this repo, hosts can inject this metadata via:
 
@@ -136,7 +143,7 @@ In this repo, hosts can inject this metadata via:
 Where this metadata comes from in this repo today:
 
 - Cross-platform workbook backends return `WorkbookInfo.path` (`@formula/workbook-backend`). Desktop implementations typically set it to an absolute path; the WASM backend currently returns `null` (no filesystem path in the browser).
-- For web, hosts generally only know a filename (e.g. from a file picker). When we implement workbook file metadata injection, web hosts should pass `fileName` only and leave `directory` empty.
+- For web, hosts generally only know a filename (e.g. from a file picker). Web hosts should pass `filename` only and leave `directory` empty/`null`.
 
 #### `CELL("protect")`
 
@@ -155,7 +162,7 @@ This is computed from the cell’s **effective style**:
 
 Excel returns a **single-character prefix** describing the effective horizontal alignment.
 
-Mapping (Excel semantics):
+Mapping (Excel-compatible):
 
 | Effective alignment | `CELL("prefix")` |
 |---|---|
@@ -183,9 +190,26 @@ Current behavior (Excel encoding):
 
 `widthChars` is stored in Excel column-width units (OOXML `<col width="…">` semantics). When unset, the engine falls back to the Excel standard `8.43`.
 
+#### `CELL("format")` / `CELL("color")` / `CELL("parentheses")`
+
+These keys are computed from the cell’s **effective number format string** (`Style.number_format`), not from the cell’s value.
+
+- `CELL("format")` returns an Excel format code string (e.g. `"G"`, `"F2"`, `"N0"`, `"C2"`).
+- `CELL("color")` returns `1` if the **negative section** of the number format specifies a color (e.g. `0;[Red](0)`), otherwise `0`.
+- `CELL("parentheses")` returns `1` if the **negative section** of the number format uses parentheses for negatives, otherwise `0`.
+
+Notes:
+
+- The number format is resolved from the base style layers: `cell (non-zero) > row > col > sheet default > 0 (General)`. Range-run formatting is not currently consulted for these keys.
+- Conditional formatting is ignored.
+- When number format metadata is unavailable (no style table, or external workbook refs), the engine falls back to General semantics:
+  - `CELL("format")` → `"G"`
+  - `CELL("color")` → `0`
+  - `CELL("parentheses")` → `0`
+
 ---
 
-## Formatting / style data model (required for `CELL("protect")` and `CELL("prefix")`)
+## Formatting / style data model (required for `CELL("protect")`, `CELL("prefix")`, `CELL("format")`, `CELL("color")`, `CELL("parentheses")`)
 
 ### 1) Style table + `style_id`
 
@@ -222,7 +246,7 @@ Reference implementation: `apps/desktop/src/document/documentController.js::getC
 
 #### Extracting the style layers in JS (DocumentController)
 
-If your host integration already has a `DocumentController` instance, the data needed by the planned `CELL()` keys is available without materializing full effective styles:
+If your host integration already has a `DocumentController` instance, the data needed by formatting-backed `CELL()` keys is available without materializing full effective styles:
 
 - sheet default: `doc.getSheetDefaultStyleId(sheetId)`
 - row default: `doc.getRowStyleId(sheetId, row)`
@@ -289,35 +313,55 @@ In the Rust model, this is `ColProperties.hidden: bool`. In JS/UI, hidden column
 
 ## Host integration APIs (what to call)
 
-This section documents the intended “wiring points” for hosts.
+This section documents the “wiring points” for hosts.
 
 ### Web/WASM worker (`packages/engine` + `crates/formula-wasm`)
 
-**Exists today**
+**Exists today (public API: `EngineClient` from `packages/engine/src/client.ts`)**
 
 - Sheet count (`INFO("numfile")`): create all sheets up-front when loading a workbook
   - `WasmWorkbook.fromJson({ sheets: { Sheet1: …, Sheet2: … } })`
   - `WasmWorkbook.fromXlsxBytes(bytes)` (creates all sheets from the XLSX model)
-- Calculation mode (`INFO("recalc")`): exposed via `getCalcSettings` / `setCalcSettings`.
-  - Note: the worker protocol typically runs the engine in manual mode so JS callers can explicitly
-    request `recalculate()` and receive deterministic value-change deltas.
-- INFO metadata (`INFO("system")`, `INFO("directory")`, `INFO("osversion")`, …):
+
+- Calculation mode (`INFO("recalc")`): exposed via `EngineClient.getCalcSettings()` / `EngineClient.setCalcSettings()`.
+  - Note: the worker protocol typically runs edits in manual mode so JS callers can explicitly request `recalculate()` and receive deterministic value-change deltas.
+
+- INFO environment metadata (`INFO("system")`, `INFO("directory")`, `INFO("osversion")`, `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`):
   - `EngineClient.setEngineInfo({ system, directory, osversion, release, version, memavail, totmem })`
-  - (worker RPC → `WasmWorkbook.setEngineInfo`)
-- View origin (`INFO("origin")`):
-  - `EngineClient.setSheetOrigin(sheet, originA1)` (worker RPC → `WasmWorkbook.setSheetOrigin`)
-- Workbook file metadata (`CELL("filename")`, `INFO("directory")`):
-  - `EngineClient.setWorkbookFileMetadata(directory, filename)` (via `packages/engine` RPC → `WasmWorkbook.setWorkbookFileMetadata`)
-- Column metadata (`CELL("width")` plumbing):
+    - `null` / empty string clears string values
+    - `memavail` / `totmem` must be finite numbers
+- Per-sheet origin cell (`INFO("origin")`):
+  - `EngineClient.setSheetOrigin(sheet, originA1)`
+  - `originA1` should be an in-bounds A1 address (`"C5"` or `"$C$5"`); the engine returns absolute A1 with `$`.
+
+- Workbook file metadata (`CELL("filename")`, `INFO("directory")` fallback):
+  - `EngineClient.setWorkbookFileMetadata(directory, filename)`
+    - `CELL("filename")` returns `""` until `filename` is known (Excel unsaved behavior)
+    - `INFO("directory")` returns `#N/A` until `filename` is known (unless overridden via `EngineInfo.directory`)
+
+- Formatting metadata (`CELL("protect")`, `CELL("prefix")`, `CELL("format")`, `CELL("color")`, `CELL("parentheses")`):
+  - `EngineClient.internStyle(stylePatch)` → `styleId`
+  - `EngineClient.setSheetDefaultStyleId(sheet, styleId|null)`
+  - `EngineClient.setRowStyleId(sheet, row, styleId|null)`
+  - `EngineClient.setColStyleId(sheet, col, styleId|null)`
+  - `EngineClient.setCellStyleId(address, styleId, sheet)`
+
+  Notes:
+  - These keys use **number format strings** and **base styles** only; conditional formatting is ignored.
+  - Style ids are workbook-global; `0` is always the default/empty style.
+
+- Column metadata (`CELL("width")`):
   - `EngineClient.setColWidthChars(sheet, col, widthChars)` (preferred) or `EngineClient.setColWidth(col, widthChars, sheet)`
     - widths are in Excel “character” units (OOXML `col/@width`), not pixels
   - `EngineClient.setColHidden(col, hidden, sheet)` to set the explicit hidden flag
-- Formatting metadata (for `CELL("protect")`, `CELL("prefix")`, `CELL("format")`, …):
-  - `EngineClient.internStyle(style)` → style id
-  - Then apply style ids via:
-    - `setSheetDefaultStyleId`, `setRowStyleId`, `setColStyleId`, `setFormatRunsByCol`, `setCellStyleId`
 
 > In practice most web callers use `EngineClient` (`packages/engine/src/client.ts`) rather than calling `WasmWorkbook` directly; the same sheet-count rule applies to the JSON schema passed to `EngineClient.loadWorkbookFromJson(...)`.
+
+**Still pending / gaps**
+
+- **Range-run formatting** (`formatRunsByCol` / `Engine::set_format_runs_by_col`) is implemented in the native Rust engine, but is not currently exposed through the WASM worker RPC (`EngineClient`). Until it is, web hosts must either:
+  - materialize large formatting operations into row/col/cell style ids, or
+  - accept that `CELL("prefix")` (and any future formatting-backed keys) may not reflect range-run formatting.
 
 ### Desktop/Tauri
 
@@ -328,7 +372,7 @@ Desktop hosts generally have access to:
 - the UI viewport origin cell (for `INFO("origin")`)
 - formatting and column metadata (from the workbook model and/or UI doc model)
 
-**Planned wiring points**
+**Suggested wiring points**
 
 - On workbook open/save:
   - update workbook file metadata (directory + filename)
@@ -338,7 +382,7 @@ Desktop hosts generally have access to:
   - trigger a recalculation (or treat `INFO()` as depending on a “view state” version counter)
 - On formatting edits / column resize / hide/unhide:
   - update style/column metadata
-  - trigger a recalculation so `CELL("protect")` / `CELL("prefix")` / `CELL("width")` update
+  - trigger a recalculation so formatting/width-backed `CELL()` keys update (`protect`, `prefix`, `format`, `color`, `parentheses`, `width`)
 
 ---
 
@@ -353,5 +397,12 @@ Most of the metadata plumbing described above is implemented. Key code locations
 
 Remaining TODOs / future work:
 
-- Implement additional `CELL()` keys and conditional formatting-aware number formats (Excel has many more variants).
-- Keep `CELL("width")` encoding stable (default/custom/hidden semantics are tested in `crates/formula-engine/tests/functions/info_cell.rs`).
+1. **Expose range-run formatting to WASM**:
+   - add `WasmWorkbook.setFormatRunsByCol` (or equivalent) in `crates/formula-wasm/src/lib.rs`
+   - add worker RPC + `EngineClient` surface in `packages/engine`
+2. **Conditional formatting**:
+   - Excel’s `CELL("color")` semantics involve *format strings*, not conditional formatting, but other potential `CELL()` keys (and future UI parity work) may require modeling conditional formats.
+3. **Additional Excel `CELL()` keys**:
+   - Implement more `CELL(info_type)` variants (e.g. `row`, `col` are done; others are still missing).
+4. **Keep metadata encoding tests stable**:
+   - `CELL("width")` integer+flag encoding (default/custom/hidden)
