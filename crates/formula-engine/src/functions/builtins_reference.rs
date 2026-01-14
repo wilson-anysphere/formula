@@ -1,4 +1,4 @@
-use crate::eval::{CompiledExpr, Expr, SheetReference};
+use crate::eval::{CompiledExpr, Expr};
 use crate::functions::array_lift;
 use crate::functions::{
     eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety,
@@ -570,43 +570,37 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let origin_ast = crate::CellAddr::new(origin.row, origin.col);
     let lowered = crate::eval::lower_ast(&parsed, if a1 { None } else { Some(origin_ast) });
 
-    fn resolve_sheet(ctx: &dyn FunctionContext, sheet: &SheetReference<String>) -> Option<usize> {
-        match sheet {
-            SheetReference::Current => Some(ctx.current_sheet_id()),
-            SheetReference::Sheet(name) => ctx.resolve_sheet_name(name),
-            SheetReference::SheetRange(start, end) => {
-                let start_id = ctx.resolve_sheet_name(start)?;
-                let end_id = ctx.resolve_sheet_name(end)?;
-                if start_id == end_id {
-                    Some(start_id)
-                } else {
-                    None
-                }
-            }
-            SheetReference::External(_) => None,
-        }
-    }
-
     match lowered {
-        crate::eval::Expr::CellRef(r) => {
-            let Some(sheet_id) = resolve_sheet(ctx, &r.sheet) else {
-                return Value::Error(ErrorKind::Ref);
+        // Validate that the parsed expression is a "simple" static reference (cell or rectangular
+        // range) before compiling it. This preserves the historical behavior of rejecting unions,
+        // intersections, defined names, structured refs, etc.
+        crate::eval::Expr::CellRef(_) | crate::eval::Expr::RangeRef(_) => {
+            let mut resolve_sheet = |name: &str| ctx.resolve_sheet_name(name);
+            let mut sheet_dimensions = |sheet_id: usize| {
+                ctx.sheet_dimensions(&crate::functions::SheetId::Local(sheet_id))
             };
-            Value::Reference(crate::functions::Reference {
-                sheet_id: crate::functions::SheetId::Local(sheet_id),
-                start: r.addr,
-                end: r.addr,
-            })
-        }
-        crate::eval::Expr::RangeRef(r) => {
-            let Some(sheet_id) = resolve_sheet(ctx, &r.sheet) else {
-                return Value::Error(ErrorKind::Ref);
-            };
-            Value::Reference(crate::functions::Reference {
-                sheet_id: crate::functions::SheetId::Local(sheet_id),
-                start: r.start,
-                end: r.end,
-            })
+            let compiled = crate::eval::compile_canonical_expr(
+                &parsed.expr,
+                ctx.current_sheet_id(),
+                ctx.current_cell_addr(),
+                &mut resolve_sheet,
+                &mut sheet_dimensions,
+            );
+
+            match ctx.eval_arg(&compiled) {
+                ArgValue::Reference(r) => {
+                    // External workbook references are not supported by INDIRECT and should
+                    // surface as `#REF!` even if an external value provider is configured.
+                    if matches!(r.sheet_id, crate::functions::SheetId::External(_)) {
+                        Value::Error(ErrorKind::Ref)
+                    } else {
+                        Value::Reference(r)
+                    }
+                }
+                ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Ref),
+                ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
+                _ => Value::Error(ErrorKind::Ref),
+            }
         }
         crate::eval::Expr::NameRef(_) => Value::Error(ErrorKind::Ref),
         crate::eval::Expr::Error(e) => Value::Error(e),
