@@ -736,7 +736,13 @@ export class EncryptedRangeManager {
     } else {
       const map = getYMap(existing);
       if (map) {
-        map.forEach((value, key) => cloneEntry(value, String(key)));
+        // Deterministic ordering across clients: iterate map entries by sorted key.
+        const keys = Array.from(map.keys())
+          .map((k) => String(k))
+          .sort();
+        for (const key of keys) {
+          cloneEntry(map.get(key), key);
+        }
       } else if (Array.isArray(existing)) {
         for (const item of existing) cloneEntry(item);
       } else {
