@@ -64,6 +64,10 @@ Notes / caveats:
   pack and set the Excel display language before extracting.
 - Newer error kinds (e.g. `#SPILL!`) may not exist in older Excel versions; the script will fail
   rather than emitting a misleading mapping if Excel appears not to recognize an error literal.
+- If extracting changes any localized spellings, you must also update
+  `crates/formula-engine/src/locale/registry.rs` (`error_literal_map`) to keep runtime translations in
+  sync with the committed `*.errors.tsv` exports. The Rust test
+  `crates/formula-engine/tests/locale_error_tsv_sync.rs` enforces this.
 
 ## Extract localized function-name spellings (locale data)
 

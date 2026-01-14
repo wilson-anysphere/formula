@@ -95,6 +95,11 @@ To extract/verify localized spellings against a real Excel install, see:
 
 - `tools/excel-oracle/extract-error-literals.ps1`
 
+Note: `*.errors.tsv` exports are expected to match the runtime locale tables in
+`src/locale/registry.rs`. The test `crates/formula-engine/tests/locale_error_tsv_sync.rs` enforces
+that bidirectional mapping, so if you update upstream error spellings you may also need to update
+`registry.rs` accordingly.
+
 ## TSV format
 
 Each TSV file is a simple tab-separated mapping:
