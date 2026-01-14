@@ -1351,6 +1351,15 @@ Validation + edge cases (Rust behavior):
   - On return, `applySolution` controls final state:
     - `true`: the best solution is applied to the model.
     - `false`: the original variable values are restored (the solve still recalculates during the search).
+  - If the solver fails to find *any* candidate solution (`outcome.bestVars` is empty), the model is restored to the original variables regardless of `applySolution`.
+  - Variable domain projection:
+    - All methods clamp candidate variables into `VarSpec` bounds.
+    - Integer variables are snapped via `round()`; binary variables are snapped to `0`/`1` using a `0.5` threshold.
+    - Implication: hosts should treat solver variables as *owned* by the solver during the run (don’t assume they remain exactly the user-entered floating-point values).
+- Progress callback frequency (implementation detail, but useful for hosts):
+  - `Simplex`: callback is invoked during branch-and-bound node search and once at the end (can be frequent for mixed-integer problems).
+  - `GrgNonlinear`: callback is invoked once per iteration.
+  - `Evolutionary`: callback is invoked once per generation.
 - Engine integration (`EngineSolverModel`):
   - Cell-ref parsing:
     - Accepted forms include `A1` (default sheet), `Sheet1!A1`, and `'My Sheet'!A1` (quoted with Excel escaping `''`).
