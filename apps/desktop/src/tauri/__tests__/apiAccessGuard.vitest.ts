@@ -72,6 +72,14 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*confirm\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*confirm\b/,
       /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*confirm\b/,
+
+      // Avoid ad-hoc checks for message/alert dialogs too; use nativeDialogs or tauri/api helpers.
+      /\b__TAURI__\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*\.\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*(?:\?\.)\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
+      /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(message|alert)\b/,
     ];
 
     for (const absPath of files) {
