@@ -186,80 +186,84 @@ export class ImageBitmapCache {
     // still the active in-flight request for the image id. This prevents stale
     // requests (e.g. after `invalidate()` or `clear()`, or abort cleanup) from
     // repopulating the cache.
-    void promise.then(
-      (bitmap) => {
-        const current = this.entries.get(id);
-        if (current !== record || current.promise !== promise) {
-          // This decode is no longer the active request for the image id (e.g.
-          // it was invalidated or superseded). If every tracked consumer has
-          // already aborted and there were no untracked consumers, ensure we
-          // don't leak the decoded bitmap.
-          record.onReady.clear();
-          if (!record.pinned && record.waiters === 0) {
-            ImageBitmapCache.tryClose(bitmap);
+    void promise
+      .then(
+        (bitmap) => {
+          const current = this.entries.get(id);
+          if (current !== record || current.promise !== promise) {
+            // This decode is no longer the active request for the image id (e.g.
+            // it was invalidated or superseded). If every tracked consumer has
+            // already aborted and there were no untracked consumers, ensure we
+            // don't leak the decoded bitmap.
+            record.onReady.clear();
+            if (!record.pinned && record.waiters === 0) {
+              ImageBitmapCache.tryClose(bitmap);
+            }
+            return;
           }
-          return;
-        }
 
-        // If the decode finishes after all callers have aborted (and no
-        // untracked waiters exist), drop it immediately to avoid caching a bitmap
-        // nobody will use.
-        if (!record.pinned && record.waiters === 0 && record.onReady.size === 0) {
-          this.entries.delete(id);
-          ImageBitmapCache.tryClose(bitmap);
-          return;
-        }
+          // If the decode finishes after all callers have aborted (and no
+          // untracked waiters exist), drop it immediately to avoid caching a bitmap
+          // nobody will use.
+          if (!record.pinned && record.waiters === 0 && record.onReady.size === 0) {
+            this.entries.delete(id);
+            ImageBitmapCache.tryClose(bitmap);
+            return;
+          }
 
-        // A max size of 0 means caching is disabled. Still dedupe the in-flight
-        // request, but don't store the decoded bitmap (and do not close it,
-        // since the caller owns the resolved value).
-        if (this.maxEntries === 0) {
+          // A max size of 0 means caching is disabled. Still dedupe the in-flight
+          // request, but don't store the decoded bitmap (and do not close it,
+          // since the caller owns the resolved value).
+          if (this.maxEntries === 0) {
+            this.entries.delete(id);
+            this.fireReadyCallbacks(record);
+            // With caching disabled, any `getOrRequest()` callers will never receive the bitmap value.
+            // Close it unless there is an active `get()` consumer waiting on the same decode.
+            if (!record.pinned && record.waiters === 0) {
+              ImageBitmapCache.tryClose(bitmap);
+            }
+            return;
+          }
+
+          // This is the first time the entry has resolved; attach the bitmap and
+          // count it toward the cache size.
+          if (!record.bitmap) {
+            record.bitmap = bitmap;
+            this.decodedCount++;
+          } else if (record.bitmap !== bitmap) {
+            // Should be impossible, but keep accounting correct if it happens.
+            ImageBitmapCache.tryClose(record.bitmap);
+            record.bitmap = bitmap;
+          }
+
+          this.negativeCache.delete(id);
+
+          // Mark as most-recently-used. This avoids evicting+closing the bitmap in
+          // the same microtask that resolves the promise (which would make the
+          // resolved bitmap unusable for awaiting callers).
+          this.touch(id, record);
+
+          this.evictIfNeeded();
+          this.fireReadyCallbacks(record);
+        },
+        (err) => {
+          const current = this.entries.get(id);
+          if (current !== record || current.promise !== promise) return;
+
+          this.__testOnly_failCount++;
+          if (this.negativeCacheMs > 0) {
+            // Replace + touch for predictable iteration order (useful for pruning).
+            this.negativeCache.delete(id);
+            this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
+          }
+
           this.entries.delete(id);
           this.fireReadyCallbacks(record);
-          // With caching disabled, any `getOrRequest()` callers will never receive the bitmap value.
-          // Close it unless there is an active `get()` consumer waiting on the same decode.
-          if (!record.pinned && record.waiters === 0) {
-            ImageBitmapCache.tryClose(bitmap);
-          }
-          return;
-        }
-
-        // This is the first time the entry has resolved; attach the bitmap and
-        // count it toward the cache size.
-        if (!record.bitmap) {
-          record.bitmap = bitmap;
-          this.decodedCount++;
-        } else if (record.bitmap !== bitmap) {
-          // Should be impossible, but keep accounting correct if it happens.
-          ImageBitmapCache.tryClose(record.bitmap);
-          record.bitmap = bitmap;
-        }
-
-        this.negativeCache.delete(id);
-
-        // Mark as most-recently-used. This avoids evicting+closing the bitmap in
-        // the same microtask that resolves the promise (which would make the
-        // resolved bitmap unusable for awaiting callers).
-        this.touch(id, record);
-
-        this.evictIfNeeded();
-        this.fireReadyCallbacks(record);
-      },
-      (err) => {
-        const current = this.entries.get(id);
-        if (current !== record || current.promise !== promise) return;
-
-        this.__testOnly_failCount++;
-        if (this.negativeCacheMs > 0) {
-          // Replace + touch for predictable iteration order (useful for pruning).
-          this.negativeCache.delete(id);
-          this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
-        }
-
-        this.entries.delete(id);
-        this.fireReadyCallbacks(record);
-      },
-    );
+        },
+      )
+      .catch(() => {
+        // Best-effort: cache bookkeeping should never surface as an unhandled rejection.
+      });
 
     return this.wrapWithAbort(id, record, opts.signal, Boolean(opts.signal));
   }
@@ -310,62 +314,66 @@ export class ImageBitmapCache {
     };
     this.entries.set(id, record);
 
-    void promise.then(
-      (bitmap) => {
-        const current = this.entries.get(id);
-        if (current !== record || current.promise !== promise) {
-          record.onReady.clear();
-          if (!record.pinned && record.waiters === 0) {
-            ImageBitmapCache.tryClose(bitmap);
+    void promise
+      .then(
+        (bitmap) => {
+          const current = this.entries.get(id);
+          if (current !== record || current.promise !== promise) {
+            record.onReady.clear();
+            if (!record.pinned && record.waiters === 0) {
+              ImageBitmapCache.tryClose(bitmap);
+            }
+            return;
           }
-          return;
-        }
 
-        if (!record.pinned && record.waiters === 0 && record.onReady.size === 0) {
-          this.entries.delete(id);
-          ImageBitmapCache.tryClose(bitmap);
-          return;
-        }
+          if (!record.pinned && record.waiters === 0 && record.onReady.size === 0) {
+            this.entries.delete(id);
+            ImageBitmapCache.tryClose(bitmap);
+            return;
+          }
 
-        if (this.maxEntries === 0) {
+          if (this.maxEntries === 0) {
+            this.entries.delete(id);
+            this.fireReadyCallbacks(record);
+            // With caching disabled, `getOrRequest()` callers will never receive the bitmap value.
+            // Close it unless there is an active `get()` consumer waiting on the same decode.
+            if (!record.pinned && record.waiters === 0) {
+              ImageBitmapCache.tryClose(bitmap);
+            }
+            return;
+          }
+
+          if (!record.bitmap) {
+            record.bitmap = bitmap;
+            this.decodedCount++;
+          } else if (record.bitmap !== bitmap) {
+            ImageBitmapCache.tryClose(record.bitmap);
+            record.bitmap = bitmap;
+          }
+
+          this.negativeCache.delete(id);
+          this.touch(id, record);
+          this.evictIfNeeded();
+          this.fireReadyCallbacks(record);
+        },
+        (err) => {
+          const current = this.entries.get(id);
+          if (current !== record || current.promise !== promise) return;
+
+          this.__testOnly_failCount++;
+          if (this.negativeCacheMs > 0) {
+            // Replace + touch for predictable iteration order (useful for pruning).
+            this.negativeCache.delete(id);
+            this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
+          }
+
           this.entries.delete(id);
           this.fireReadyCallbacks(record);
-          // With caching disabled, `getOrRequest()` callers will never receive the bitmap value.
-          // Close it unless there is an active `get()` consumer waiting on the same decode.
-          if (!record.pinned && record.waiters === 0) {
-            ImageBitmapCache.tryClose(bitmap);
-          }
-          return;
-        }
-
-        if (!record.bitmap) {
-          record.bitmap = bitmap;
-          this.decodedCount++;
-        } else if (record.bitmap !== bitmap) {
-          ImageBitmapCache.tryClose(record.bitmap);
-          record.bitmap = bitmap;
-        }
-
-        this.negativeCache.delete(id);
-        this.touch(id, record);
-        this.evictIfNeeded();
-        this.fireReadyCallbacks(record);
-      },
-      (err) => {
-        const current = this.entries.get(id);
-        if (current !== record || current.promise !== promise) return;
-
-        this.__testOnly_failCount++;
-        if (this.negativeCacheMs > 0) {
-          // Replace + touch for predictable iteration order (useful for pruning).
-          this.negativeCache.delete(id);
-          this.negativeCache.set(id, { error: err, expiresAt: Date.now() + this.negativeCacheMs });
-        }
-
-        this.entries.delete(id);
-        this.fireReadyCallbacks(record);
-      },
-    );
+        },
+      )
+      .catch(() => {
+        // Best-effort: cache bookkeeping should never surface as an unhandled rejection.
+      });
 
     return null;
   }

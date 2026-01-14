@@ -474,10 +474,18 @@ async function buildExtension(extensionDir, options = {}) {
       await Promise.allSettled([ctxCjs.dispose(), ...esmContexts.map((c) => c.dispose())]);
     };
     process.on("SIGINT", () => {
-      void dispose().finally(() => process.exit(0));
+      void dispose()
+        .catch(() => {
+          // Best-effort: ignore dispose failures during shutdown.
+        })
+        .finally(() => process.exit(0));
     });
     process.on("SIGTERM", () => {
-      void dispose().finally(() => process.exit(0));
+      void dispose()
+        .catch(() => {
+          // Best-effort: ignore dispose failures during shutdown.
+        })
+        .finally(() => process.exit(0));
     });
 
     // Keep the process alive.

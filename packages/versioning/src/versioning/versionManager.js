@@ -79,7 +79,25 @@ class SimpleEventEmitter {
       } catch (err) {
         // Avoid crashing the app due to a listener; surface the failure asynchronously
         // like many event emitter implementations do.
-        const enqueue = typeof queueMicrotask === "function" ? queueMicrotask : (cb) => Promise.resolve().then(cb);
+        const enqueue =
+          typeof queueMicrotask === "function"
+            ? queueMicrotask
+            : (cb) => {
+                void Promise.resolve()
+                  .then(cb)
+                  .catch((thrown) => {
+                    // Promise microtasks turn thrown errors into rejections; rethrow on a timer so
+                    // failures surface as an error instead of an unhandled promise rejection.
+                    if (typeof setTimeout === "function") {
+                      setTimeout(() => {
+                        throw thrown;
+                      }, 0);
+                      return;
+                    }
+                    // eslint-disable-next-line no-console
+                    console.error(thrown);
+                  });
+              };
         enqueue(() => {
           throw err;
         });

@@ -4558,55 +4558,60 @@ export class SpreadsheetApp {
         if (!this.formulaBar) return;
         if (this.formulaBarCompletion) return;
 
-        void loadFormulaBarTabCompletionModule().then((mod) => {
-          if (!mod) return;
-          if (this.disposed) return;
-          if (!this.formulaBar) return;
-          if (this.formulaBarCompletion) return;
+        void loadFormulaBarTabCompletionModule()
+          .then((mod) => {
+            if (!mod) return;
+            if (this.disposed) return;
+            if (!this.formulaBar) return;
+            if (this.formulaBarCompletion) return;
 
-          this.formulaBarCompletion = new mod.FormulaBarTabCompletionController({
-            formulaBar: this.formulaBar,
-            document: this.document,
-            getSheetId: () => this.sheetId,
-            getWorkbookFileMetadata: () => this.workbookFileMetadata,
-            getEngineClient: () => this.wasmEngine,
-            sheetNameResolver: this.sheetNameResolver ?? undefined,
-            limits: this.limits,
-            schemaProvider: {
-              getNamedRanges: () => {
-                const formatSheetPrefix = (id: string): string => {
-                  const token = formatSheetNameForA1(id);
-                  return token ? `${token}!` : "";
-                };
+            this.formulaBarCompletion = new mod.FormulaBarTabCompletionController({
+              formulaBar: this.formulaBar,
+              document: this.document,
+              getSheetId: () => this.sheetId,
+              getWorkbookFileMetadata: () => this.workbookFileMetadata,
+              getEngineClient: () => this.wasmEngine,
+              sheetNameResolver: this.sheetNameResolver ?? undefined,
+              limits: this.limits,
+              schemaProvider: {
+                getNamedRanges: () => {
+                  const formatSheetPrefix = (id: string): string => {
+                    const token = formatSheetNameForA1(id);
+                    return token ? `${token}!` : "";
+                  };
 
-                const out: Array<{ name: string; range?: string }> = [];
-                for (const entry of this.searchWorkbook.names.values()) {
-                  const e: any = entry as any;
-                  const name = typeof e?.name === "string" ? (e.name as string) : "";
-                  if (!name) continue;
-                  const sheetName = typeof e?.sheetName === "string" ? (e.sheetName as string) : "";
-                  const range = e?.range;
-                  const rangeText = sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
-                  out.push({ name, range: rangeText });
-                }
-                return out;
+                  const out: Array<{ name: string; range?: string }> = [];
+                  for (const entry of this.searchWorkbook.names.values()) {
+                    const e: any = entry as any;
+                    const name = typeof e?.name === "string" ? (e.name as string) : "";
+                    if (!name) continue;
+                    const sheetName = typeof e?.sheetName === "string" ? (e.sheetName as string) : "";
+                    const range = e?.range;
+                    const rangeText = sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
+                    out.push({ name, range: rangeText });
+                  }
+                  return out;
+                },
+                getTables: () =>
+                  Array.from(this.searchWorkbook.tables.values())
+                    .map((table: any) => ({
+                      name: typeof table?.name === "string" ? table.name : "",
+                      sheetName: typeof table?.sheetName === "string" ? table.sheetName : undefined,
+                      startRow: typeof table?.startRow === "number" ? table.startRow : undefined,
+                      startCol: typeof table?.startCol === "number" ? table.startCol : undefined,
+                      endRow: typeof table?.endRow === "number" ? table.endRow : undefined,
+                      endCol: typeof table?.endCol === "number" ? table.endCol : undefined,
+                      columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
+                    }))
+                    .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
+                getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
               },
-              getTables: () =>
-                Array.from(this.searchWorkbook.tables.values())
-                  .map((table: any) => ({
-                    name: typeof table?.name === "string" ? table.name : "",
-                    sheetName: typeof table?.sheetName === "string" ? table.sheetName : undefined,
-                    startRow: typeof table?.startRow === "number" ? table.startRow : undefined,
-                    startCol: typeof table?.startCol === "number" ? table.startCol : undefined,
-                    endRow: typeof table?.endRow === "number" ? table.endRow : undefined,
-                    endCol: typeof table?.endCol === "number" ? table.endCol : undefined,
-                    columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
-                  }))
-                  .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
-              getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
-            },
+            });
+          })
+          .catch(() => {
+            // Best-effort: tab completion is an optional enhancement; avoid surfacing unhandled
+            // rejections if the lazy init callback throws.
           });
-        });
       };
 
       // Preload after first paint, but also ensure user interaction triggers initialization immediately.
@@ -14596,7 +14601,11 @@ export class SpreadsheetApp {
         queueMicrotask(cb);
         return;
       }
-      void Promise.resolve().then(cb);
+      void Promise.resolve()
+        .then(cb)
+        .catch(() => {
+          // Best-effort: avoid unhandled rejections from the microtask fallback scheduler.
+        });
     };
 
     schedule(() => {

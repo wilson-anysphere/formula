@@ -523,7 +523,11 @@ export class DrawingOverlay {
       typeof queueMicrotask === "function"
         ? queueMicrotask
         : (cb: () => void) => {
-            void Promise.resolve().then(cb);
+            void Promise.resolve()
+              .then(cb)
+              .catch(() => {
+                // Best-effort: avoid unhandled rejections from the microtask fallback scheduler.
+              });
           };
 
     schedule(() => {
@@ -591,38 +595,42 @@ export class DrawingOverlay {
 
     this.pendingImageHydrations.set(id, promise);
 
-    void promise.then((entry) => {
-      this.pendingImageHydrations.delete(id);
-      // The overlay can be torn down (sheet close, split pane destruction, tests/hot reload)
-      // while an async hydration is still in-flight. Avoid mutating shared image stores after
-      // teardown so the decoded bytes can be released promptly.
-      if (this.destroyed) return;
-      // If callers cleared image caches (e.g. applyState swapping workbook snapshots) while a
-      // hydration request was already in-flight, ignore the stale result so we don't repopulate
-      // caches with bytes from the previous epoch.
-      if (epoch !== this.imageHydrationEpoch) return;
-      if (!entry) {
-        this.imageHydrationNegativeCache.set(id, Date.now() + 250);
-        return;
-      }
-
-      // Ensure subsequent sync `get()` calls can resolve without awaiting `getAsync`.
-      try {
-        if (!this.images.get(id)) {
-          this.images.set(entry);
+    void promise
+      .then((entry) => {
+        this.pendingImageHydrations.delete(id);
+        // The overlay can be torn down (sheet close, split pane destruction, tests/hot reload)
+        // while an async hydration is still in-flight. Avoid mutating shared image stores after
+        // teardown so the decoded bytes can be released promptly.
+        if (this.destroyed) return;
+        // If callers cleared image caches (e.g. applyState swapping workbook snapshots) while a
+        // hydration request was already in-flight, ignore the stale result so we don't repopulate
+        // caches with bytes from the previous epoch.
+        if (epoch !== this.imageHydrationEpoch) return;
+        if (!entry) {
+          this.imageHydrationNegativeCache.set(id, Date.now() + 250);
+          return;
         }
-      } catch {
-        // Best-effort: ignore caching failures.
-      }
 
-      // Kick off bitmap decode so we can re-render once ready.
-      // Note: the bitmap cache already negative-caches failures to avoid tight retry loops.
-      if (entry.bytes.byteLength > 0) {
-        this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
-      }
+        // Ensure subsequent sync `get()` calls can resolve without awaiting `getAsync`.
+        try {
+          if (!this.images.get(id)) {
+            this.images.set(entry);
+          }
+        } catch {
+          // Best-effort: ignore caching failures.
+        }
 
-      this.scheduleHydrationRerender();
-    });
+        // Kick off bitmap decode so we can re-render once ready.
+        // Note: the bitmap cache already negative-caches failures to avoid tight retry loops.
+        if (entry.bytes.byteLength > 0) {
+          this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
+        }
+
+        this.scheduleHydrationRerender();
+      })
+      .catch(() => {
+        // Best-effort: hydration callbacks should never surface as unhandled rejections.
+      });
   }
 
   render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): void {

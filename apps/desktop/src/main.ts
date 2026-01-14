@@ -2944,7 +2944,16 @@ let sheetTabsRenderScheduled = false;
 function scheduleSheetTabsRender(): void {
   if (sheetTabsRenderScheduled) return;
   sheetTabsRenderScheduled = true;
-  const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
+  const schedule =
+    typeof queueMicrotask === "function"
+      ? queueMicrotask
+      : (cb: () => void) => {
+          void Promise.resolve()
+            .then(cb)
+            .catch(() => {
+              // Best-effort: avoid unhandled rejections from the microtask fallback scheduler.
+            });
+        };
   schedule(() => {
     sheetTabsRenderScheduled = false;
     if (!sheetTabsRenderReady) return;
@@ -3274,7 +3283,16 @@ const scheduleRibbonCommandRegistryDisabledRefresh = (): void => {
   if (ribbonCommandRegistryRefreshScheduled) return;
   ribbonCommandRegistryRefreshScheduled = true;
 
-  const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
+  const schedule =
+    typeof queueMicrotask === "function"
+      ? queueMicrotask
+      : (cb: () => void) => {
+          void Promise.resolve()
+            .then(cb)
+            .catch(() => {
+              // Best-effort: avoid unhandled rejections from the microtask fallback scheduler.
+            });
+        };
   schedule(() => {
     ribbonCommandRegistryRefreshScheduled = false;
     ribbonCommandRegistryDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
@@ -7807,14 +7825,19 @@ if (
 
     if (!panelBodyRenderer) {
       body.textContent = "Loading panel…";
-      void ensurePanelBodyRenderer().then((renderer) => {
-        if (!body.isConnected) return;
-        if (!renderer) {
-          body.textContent = "Failed to load panel.";
-          return;
-        }
-        rerenderLayout?.();
-      });
+      void ensurePanelBodyRenderer()
+        .then((renderer) => {
+          if (!body.isConnected) return;
+          if (!renderer) {
+            body.textContent = "Failed to load panel.";
+            return;
+          }
+          rerenderLayout?.();
+        })
+        .catch(() => {
+          // Best-effort: panel body rendering is optional; avoid unhandled rejections if the
+          // async rerender callback throws.
+        });
       return;
     }
 
@@ -9032,14 +9055,19 @@ function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (ne
 
     React.useEffect(() => {
       let cancelled = false;
-      void loadPageSetupDialogModule().then((mod) => {
-        if (cancelled) return;
-        if (!mod) {
+      void loadPageSetupDialogModule()
+        .then((mod) => {
+          if (cancelled) return;
+          if (!mod) {
+            setLoadFailed(true);
+            return;
+          }
+          setPrintModule(mod);
+        })
+        .catch(() => {
+          if (cancelled) return;
           setLoadFailed(true);
-          return;
-        }
-        setPrintModule(mod);
-      });
+        });
       return () => {
         cancelled = true;
       };
@@ -9385,14 +9413,19 @@ function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string
 
     React.useEffect(() => {
       let cancelled = false;
-      void loadPrintPreviewDialogModule().then((mod) => {
-        if (cancelled) return;
-        if (!mod) {
+      void loadPrintPreviewDialogModule()
+        .then((mod) => {
+          if (cancelled) return;
+          if (!mod) {
+            setLoadFailed(true);
+            return;
+          }
+          setPrintModule(mod);
+        })
+        .catch(() => {
+          if (cancelled) return;
           setLoadFailed(true);
-          return;
-        }
-        setPrintModule(mod);
-      });
+        });
       return () => {
         cancelled = true;
       };
@@ -9488,14 +9521,19 @@ function showGoalSeekDialogModal(): void {
 
     React.useEffect(() => {
       let cancelled = false;
-      void loadGoalSeekDialogModule().then((mod) => {
-        if (cancelled) return;
-        if (!mod) {
+      void loadGoalSeekDialogModule()
+        .then((mod) => {
+          if (cancelled) return;
+          if (!mod) {
+            setLoadFailed(true);
+            return;
+          }
+          setGoalSeekModule(mod);
+        })
+        .catch(() => {
+          if (cancelled) return;
           setLoadFailed(true);
-          return;
-        }
-        setGoalSeekModule(mod);
-      });
+        });
       return () => {
         cancelled = true;
       };
@@ -12258,8 +12296,12 @@ void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() })
     schedule(() => {
       // Split view (secondary grid) is large and not required for the initial shell render.
       // Preload it after TTI so the toggle command can create the secondary pane instantly.
-      void loadSecondaryGridViewModule().then((mod) => {
-        if (mod) secondaryGridViewModule = mod;
-      });
+      void loadSecondaryGridViewModule()
+        .then((mod) => {
+          if (mod) secondaryGridViewModule = mod;
+        })
+        .catch(() => {
+          // Best-effort: split view is optional.
+        });
     });
   });

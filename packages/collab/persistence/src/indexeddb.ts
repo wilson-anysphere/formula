@@ -115,7 +115,9 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
         this.queues.delete(docId);
       }
     };
-    void next.then(cleanup, cleanup);
+    void next.then(cleanup, cleanup).catch(() => {
+      // Best-effort: avoid unhandled rejections from internal queue bookkeeping.
+    });
     return next;
   }
 

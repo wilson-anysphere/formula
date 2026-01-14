@@ -464,13 +464,17 @@ export class RefreshManager {
    */
   recordSuccessfulRun(queryId, completedAtMs) {
     if (!this.stateStore) return;
-    void this.stateReady.then(() => {
-      const policy =
-        this.registrations.get(queryId)?.policy ??
-        this.state[queryId]?.policy ?? { type: "manual" };
-      this.state[queryId] = { policy, lastRunAtMs: completedAtMs };
-      this.persistState();
-    });
+    void this.stateReady
+      .then(() => {
+        const policy =
+          this.registrations.get(queryId)?.policy ??
+          this.state[queryId]?.policy ?? { type: "manual" };
+        this.state[queryId] = { policy, lastRunAtMs: completedAtMs };
+        this.persistState();
+      })
+      .catch(() => {
+        // Best-effort: if state hydration failed, skip persisting the last-run timestamp.
+      });
   }
 
   /**

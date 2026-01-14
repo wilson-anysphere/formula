@@ -81,7 +81,9 @@ export class FileCollabPersistence implements CollabPersistence {
         this.queues.delete(docId);
       }
     };
-    void next.then(cleanup, cleanup);
+    void next.then(cleanup, cleanup).catch(() => {
+      // Best-effort: avoid unhandled rejections from internal queue bookkeeping.
+    });
     return next;
   }
 
@@ -90,7 +92,9 @@ export class FileCollabPersistence implements CollabPersistence {
 
     const timer = setTimeout(() => {
       this.compactTimers.delete(docId);
-      void this.compactNow(docId, doc);
+      void this.compactNow(docId, doc).catch(() => {
+        // Best-effort: compaction should not crash consumers of persistence.
+      });
     }, 250);
     this.compactTimers.set(docId, timer);
   }
