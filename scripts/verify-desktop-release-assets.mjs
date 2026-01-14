@@ -791,7 +791,9 @@ function validateLatestJson(manifest, expectedVersion, assetsByName) {
     const requiredPlatformKeys = [
       // Keep this list in sync with docs/desktop-updater-target-mapping.md and
       // scripts/ci/validate-updater-manifest.mjs (which is the stricter CI validator).
-      "darwin-universal",
+      // macOS universal bundles are written under both arch keys (same updater archive URL).
+      "darwin-x86_64",
+      "darwin-aarch64",
       "windows-x86_64",
       "windows-aarch64",
       "linux-x86_64",

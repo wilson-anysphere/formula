@@ -53,30 +53,24 @@ const EXPECTED_PLATFORMS = [
     key: "darwin-aarch64",
     label: "macOS (aarch64)",
     expectedUpdaterAsset: {
-      description: "macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz)",
-      matches: (name) => name.endsWith(".tar.gz"),
+      description: "macOS updater archive (*.app.tar.gz)",
+      matches: (name) => name.endsWith(".app.tar.gz"),
     },
   },
   {
     key: "windows-x86_64",
     label: "Windows (x64)",
     expectedUpdaterAsset: {
-      description: "Windows updater installer (*.msi or *.exe)",
-      matches: (name) => {
-        const lower = name.toLowerCase();
-        return lower.endsWith(".msi") || lower.endsWith(".exe");
-      },
+      description: "Windows updater installer (*.msi)",
+      matches: (name) => name.toLowerCase().endsWith(".msi"),
     },
   },
   {
     key: "windows-aarch64",
     label: "Windows (ARM64)",
     expectedUpdaterAsset: {
-      description: "Windows updater installer (*.msi or *.exe)",
-      matches: (name) => {
-        const lower = name.toLowerCase();
-        return lower.endsWith(".msi") || lower.endsWith(".exe");
-      },
+      description: "Windows updater installer (*.msi)",
+      matches: (name) => name.toLowerCase().endsWith(".msi"),
     },
   },
   {

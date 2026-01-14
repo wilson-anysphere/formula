@@ -27,7 +27,8 @@ test("validateLatestJson passes for a minimal manifest (version normalization + 
       "linux-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
       "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
-      "darwin-universal": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
     },
   };
 
@@ -51,7 +52,8 @@ test("validateLatestJson finds a nested platforms map", () => {
         "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
         "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
         "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
-        "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+        "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+        "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       },
     },
   };
@@ -74,6 +76,8 @@ test("validateLatestJson fails when a required OS is missing", () => {
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
       "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      // Include one macOS entry, but intentionally omit the other to exercise required-key validation.
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
   };
 
@@ -82,10 +86,11 @@ test("validateLatestJson fails when a required OS is missing", () => {
     "Formula_arm64.AppImage",
     "Formula_x64.msi",
     "Formula_arm64.msi",
+    "Formula.app.tar.gz",
   ]);
   assert.throws(
     () => validateLatestJson(manifest, "0.1.0", assets),
-    (err) => err instanceof ActionableError && err.message.includes("missing required key \"darwin-universal\""),
+    (err) => err instanceof ActionableError && err.message.includes("missing required key \"darwin-x86_64\""),
   );
 });
 
@@ -97,7 +102,8 @@ test("validateLatestJson fails when a platform URL references a missing asset", 
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
       "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
-      "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
   };
 
@@ -121,7 +127,8 @@ test("validateLatestJson accepts missing inline signature when a sibling .sig as
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "" },
       "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "" },
       "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "" },
-      "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "" },
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "" },
     },
   };
 
@@ -149,7 +156,8 @@ test("validateLatestJson fails when both inline signature and sibling .sig are m
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
       "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
-      "darwin-universal": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
   };
 

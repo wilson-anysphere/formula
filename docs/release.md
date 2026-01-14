@@ -981,16 +981,16 @@ auto-update artifact is not always the same file you’d choose for manual insta
 
 - macOS: updater uses `*.app.tar.gz` (not the `.dmg`)
 - Linux: updater uses `*.AppImage` (not `.deb`/`.rpm`)
-- Windows: updater uses the installer referenced in `latest.json` (`.msi` preferred; `.exe` also allowed)
+- Windows: updater uses the installer referenced in `latest.json` (`.msi`)
 
 Quick reference (auto-update vs manual install):
 
 | Target key (`latest.json.platforms`) | Auto-update asset (`platforms[key].url`) | Manual install |
 | --- | --- | --- |
-| `darwin-x86_64` | `*.app.tar.gz` (universal archive) | `.dmg` |
-| `darwin-aarch64` | `*.app.tar.gz` (universal archive) | `.dmg` |
-| `windows-x86_64` | `.msi` (preferred) or `.exe` | `.msi` / `.exe` |
-| `windows-aarch64` | `.msi` (preferred) or `.exe` | `.msi` / `.exe` |
+| `darwin-x86_64` | `*.app.tar.gz` (universal updater archive) | `.dmg` |
+| `darwin-aarch64` | `*.app.tar.gz` (universal updater archive) | `.dmg` |
+| `windows-x86_64` | `.msi` | `.msi` / `.exe` |
+| `windows-aarch64` | `.msi` | `.msi` / `.exe` |
 | `linux-x86_64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
 | `linux-aarch64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
 
@@ -1012,8 +1012,8 @@ wired to the correct **updater-consumed** artifacts:
    - Then inspect:
    - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
-   - macOS: `*.app.tar.gz` (or `*.tar.gz`; **not** `.dmg`)
-   - Windows: `.msi` (preferred) or `.exe`
+   - macOS: `*.app.tar.gz` (**not** `.dmg`)
+   - Windows: `.msi`
    - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
 4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
 5. (Optional) Verify the manifest signature locally:
@@ -1087,10 +1087,10 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
     PY
     ```
 
-   Also confirm each platform entry points at the **updater-consumed** asset type:
-   - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive (**not** the `.dmg`)
-   - `windows-*` → `*.msi` (preferred; updater runs the Windows Installer) or `*.exe` (depending on updater strategy)
-   - `linux-*` → `*.AppImage`
+    Also confirm each platform entry points at the **updater-consumed** asset type:
+    - `darwin-*` → `*.app.tar.gz`
+    - `windows-*` → `*.msi` (updater runs the Windows Installer)
+    - `linux-*` → `*.AppImage`
 
 3. Download the artifacts and do quick sanity checks:
 
