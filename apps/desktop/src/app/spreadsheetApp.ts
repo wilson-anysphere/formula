@@ -23621,6 +23621,11 @@ export class SpreadsheetApp {
 
   private autoSumSelection(fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN"): void {
     const sheetId = this.sheetId;
+    // Avoid resurrecting deleted sheets: AutoSum scans cells and applies an edit to the active
+    // sheet. During sheet deletion/undo/applyState, SpreadsheetApp can briefly hold a stale
+    // sheet id; treat those as no-ops rather than letting `DocumentController.getCell()` lazily
+    // materialize a phantom sheet.
+    if (this.isSheetKnownMissing(sheetId)) return;
     const localizedFn = localizeFunctionNameForLocale(fn, this.currentFormulaLocaleId());
     const coordScratch = { row: 0, col: 0 };
 
@@ -27285,10 +27290,17 @@ export class SpreadsheetApp {
       ]);
       return;
     }
+    // Avoid resurrecting deleted sheets when UI state holds a stale sheet id (e.g. during sheet
+    // deletion/undo/applyState windows). `DocumentController.getCell()` materializes sheets lazily.
+    if (this.isSheetKnownMissing(sheetId)) return;
     if (!this.canEditCellOrShowToast({ sheetId, row: cell.row, col: cell.col })) return;
 
     const label = options?.label ?? "Edit cell";
-    const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+    const docAny: any = this.document as any;
+    const original =
+      typeof docAny.peekCell === "function"
+        ? (docAny.peekCell(sheetId, cell) as { value: unknown; formula: string | null })
+        : (this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null });
     const originalInput = (() => {
       if (!original) return "";
       if (original.formula != null) return original.formula;
