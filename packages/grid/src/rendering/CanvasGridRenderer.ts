@@ -566,6 +566,17 @@ export class CanvasGridRenderer {
   private readonly fullViewportRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly fullViewportRectListScratch: Rect[] = [this.fullViewportRectScratch];
   private readonly intersectionRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly scrollDirtyRectPool: Rect[] = [
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 }
+  ];
+  private scrollDirtyRectPoolIndex = 0;
 
   private scheduled = false;
   private renderRafId: number | null = null;
@@ -2705,6 +2716,36 @@ export class CanvasGridRenderer {
     return alignScrollToDevicePixelsUtil(pos, this.scroll.getMaxScroll(), this.devicePixelRatio);
   }
 
+  private allocScrollDirtyRect(): Rect {
+    const idx = this.scrollDirtyRectPoolIndex++;
+    if (idx < this.scrollDirtyRectPool.length) {
+      return this.scrollDirtyRectPool[idx]!;
+    }
+    const rect: Rect = { x: 0, y: 0, width: 0, height: 0 };
+    this.scrollDirtyRectPool.push(rect);
+    return rect;
+  }
+
+  private markDirtyBothPaddedIntoPool(x: number, y: number, width: number, height: number, paddingPx: number): void {
+    const rect = this.allocScrollDirtyRect();
+    rect.x = x - paddingPx;
+    rect.y = y - paddingPx;
+    rect.width = width + paddingPx * 2;
+    rect.height = height + paddingPx * 2;
+    this.dirty.background.markDirty(rect);
+    this.dirty.content.markDirty(rect);
+  }
+
+  private markDirtySelectionPaddedIntoPool(x: number, y: number, width: number, height: number, padding: number): void {
+    const p = Number.isFinite(padding) ? Math.max(1, Math.floor(padding)) : 1;
+    const rect = this.allocScrollDirtyRect();
+    rect.x = x - p;
+    rect.y = y - p;
+    rect.width = width + p * 2;
+    rect.height = height + p * 2;
+    this.dirty.selection.markDirty(rect);
+  }
+
   private markFullViewportDirty(viewport: GridViewportState): void {
     const full = { x: 0, y: 0, width: viewport.width, height: viewport.height };
     this.dirty.background.markDirty(full);
@@ -2854,10 +2895,13 @@ export class CanvasGridRenderer {
   }
 
   private markScrollDirtyRegions(viewport: GridViewportState, deltaX: number, deltaY: number): void {
+    this.scrollDirtyRectPoolIndex = 0;
+
     const frozenWidth = viewport.frozenWidth;
     const frozenHeight = viewport.frozenHeight;
 
     const selectionPadding = 1;
+    const borderDirtyPaddingPx = Math.max(1, Math.ceil(2 * this.zoom));
 
     // Frozen rows + scrollable columns (top-right): horizontal-only scroll.
     {
@@ -2868,13 +2912,13 @@ export class CanvasGridRenderer {
       if (rectW > 0 && rectH > 0) {
         const shiftX = deltaX;
         if (shiftX > 0) {
-          const stripe = { x: rectX, y: rectY, width: shiftX, height: rectH };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          this.markDirtyBothPaddedIntoPool(rectX, rectY, shiftX, rectH, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(rectX, rectY, shiftX, rectH, selectionPadding);
         } else if (shiftX < 0) {
-          const stripe = { x: rectX + rectW + shiftX, y: rectY, width: -shiftX, height: rectH };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          const stripeX = rectX + rectW + shiftX;
+          const stripeW = -shiftX;
+          this.markDirtyBothPaddedIntoPool(stripeX, rectY, stripeW, rectH, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(stripeX, rectY, stripeW, rectH, selectionPadding);
         }
       }
     }
@@ -2888,13 +2932,13 @@ export class CanvasGridRenderer {
       if (rectW > 0 && rectH > 0) {
         const shiftY = deltaY;
         if (shiftY > 0) {
-          const stripe = { x: rectX, y: rectY, width: rectW, height: shiftY };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          this.markDirtyBothPaddedIntoPool(rectX, rectY, rectW, shiftY, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(rectX, rectY, rectW, shiftY, selectionPadding);
         } else if (shiftY < 0) {
-          const stripe = { x: rectX, y: rectY + rectH + shiftY, width: rectW, height: -shiftY };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          const stripeY = rectY + rectH + shiftY;
+          const stripeH = -shiftY;
+          this.markDirtyBothPaddedIntoPool(rectX, stripeY, rectW, stripeH, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(rectX, stripeY, rectW, stripeH, selectionPadding);
         }
       }
     }
@@ -2909,23 +2953,23 @@ export class CanvasGridRenderer {
         const shiftX = deltaX;
         const shiftY = deltaY;
         if (shiftX > 0) {
-          const stripe = { x: rectX, y: rectY, width: shiftX, height: rectH };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          this.markDirtyBothPaddedIntoPool(rectX, rectY, shiftX, rectH, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(rectX, rectY, shiftX, rectH, selectionPadding);
         } else if (shiftX < 0) {
-          const stripe = { x: rectX + rectW + shiftX, y: rectY, width: -shiftX, height: rectH };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          const stripeX = rectX + rectW + shiftX;
+          const stripeW = -shiftX;
+          this.markDirtyBothPaddedIntoPool(stripeX, rectY, stripeW, rectH, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(stripeX, rectY, stripeW, rectH, selectionPadding);
         }
 
         if (shiftY > 0) {
-          const stripe = { x: rectX, y: rectY, width: rectW, height: shiftY };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          this.markDirtyBothPaddedIntoPool(rectX, rectY, rectW, shiftY, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(rectX, rectY, rectW, shiftY, selectionPadding);
         } else if (shiftY < 0) {
-          const stripe = { x: rectX, y: rectY + rectH + shiftY, width: rectW, height: -shiftY };
-          this.markDirtyBoth(stripe);
-          this.markDirtySelection(stripe, selectionPadding);
+          const stripeY = rectY + rectH + shiftY;
+          const stripeH = -shiftY;
+          this.markDirtyBothPaddedIntoPool(rectX, stripeY, rectW, stripeH, borderDirtyPaddingPx);
+          this.markDirtySelectionPaddedIntoPool(rectX, stripeY, rectW, stripeH, selectionPadding);
         }
       }
     }
@@ -2934,20 +2978,32 @@ export class CanvasGridRenderer {
       // Cursor name badges can overlap into frozen quadrants, which aren't shifted during blit.
       // Mark the (padded) cursor rects dirty in both the previous and next viewport so badges
       // are cleared/redrawn correctly.
-      const previousViewport = {
-        ...viewport,
-        scrollX: viewport.scrollX + deltaX,
-        scrollY: viewport.scrollY + deltaY
-      } as GridViewportState;
+      const previousScrollX = viewport.scrollX + deltaX;
+      const previousScrollY = viewport.scrollY + deltaY;
+      const cursorRect = this.remotePresenceCursorCellRectScratch;
 
       for (const presence of this.remotePresences) {
         const cursor = presence.cursor;
         if (!cursor) continue;
 
-        const previousRect = this.cellRectInViewport(cursor.row, cursor.col, previousViewport);
-        const nextRect = this.cellRectInViewport(cursor.row, cursor.col, viewport);
-        if (previousRect) this.markDirtySelection(previousRect, this.remotePresenceDirtyPadding);
-        if (nextRect) this.markDirtySelection(nextRect, this.remotePresenceDirtyPadding);
+        if (this.cellRectInViewportIntoWithScroll(cursor.row, cursor.col, viewport, previousScrollX, previousScrollY, cursorRect)) {
+          this.markDirtySelectionPaddedIntoPool(
+            cursorRect.x,
+            cursorRect.y,
+            cursorRect.width,
+            cursorRect.height,
+            this.remotePresenceDirtyPadding
+          );
+        }
+        if (this.cellRectInViewportInto(cursor.row, cursor.col, viewport, cursorRect)) {
+          this.markDirtySelectionPaddedIntoPool(
+            cursorRect.x,
+            cursorRect.y,
+            cursorRect.width,
+            cursorRect.height,
+            this.remotePresenceDirtyPadding
+          );
+        }
       }
     }
 
@@ -2958,11 +3014,21 @@ export class CanvasGridRenderer {
     const ghostWidth = 6;
     if (viewport.frozenCols > 0 && deltaX !== 0) {
       const ghostX = crispLine(viewport.frozenWidth) + deltaX;
-      this.dirty.selection.markDirty({ x: ghostX - ghostWidth, y: 0, width: ghostWidth * 2, height: viewport.height });
+      const rect = this.allocScrollDirtyRect();
+      rect.x = ghostX - ghostWidth;
+      rect.y = 0;
+      rect.width = ghostWidth * 2;
+      rect.height = viewport.height;
+      this.dirty.selection.markDirty(rect);
     }
     if (viewport.frozenRows > 0 && deltaY !== 0) {
       const ghostY = crispLine(viewport.frozenHeight) + deltaY;
-      this.dirty.selection.markDirty({ x: 0, y: ghostY - ghostWidth, width: viewport.width, height: ghostWidth * 2 });
+      const rect = this.allocScrollDirtyRect();
+      rect.x = 0;
+      rect.y = ghostY - ghostWidth;
+      rect.width = viewport.width;
+      rect.height = ghostWidth * 2;
+      this.dirty.selection.markDirty(rect);
     }
   }
 
@@ -6667,6 +6733,62 @@ export class CanvasGridRenderer {
     const scrollRows = row >= viewport.frozenRows;
     const x = scrollCols ? colX - viewport.scrollX : colX;
     const y = scrollRows ? rowY - viewport.scrollY : rowY;
+
+    if (options?.clampToViewport === false) {
+      out.x = x;
+      out.y = y;
+      out.width = width;
+      out.height = height;
+      return true;
+    }
+
+    const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+    const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+    const quadrantX = scrollCols ? frozenWidthClamped : 0;
+    const quadrantY = scrollRows ? frozenHeightClamped : 0;
+    const quadrantWidth = scrollCols ? Math.max(0, viewport.width - frozenWidthClamped) : frozenWidthClamped;
+    const quadrantHeight = scrollRows ? Math.max(0, viewport.height - frozenHeightClamped) : frozenHeightClamped;
+
+    const x1 = Math.max(x, quadrantX);
+    const y1 = Math.max(y, quadrantY);
+    const x2 = Math.min(x + width, quadrantX + quadrantWidth);
+    const y2 = Math.min(y + height, quadrantY + quadrantHeight);
+    const clippedWidth = x2 - x1;
+    const clippedHeight = y2 - y1;
+    if (clippedWidth <= 0 || clippedHeight <= 0) return false;
+
+    out.x = x1;
+    out.y = y1;
+    out.width = clippedWidth;
+    out.height = clippedHeight;
+    return true;
+  }
+
+  private cellRectInViewportIntoWithScroll(
+    row: number,
+    col: number,
+    viewport: GridViewportState,
+    scrollX: number,
+    scrollY: number,
+    out: Rect,
+    options?: { clampToViewport?: boolean }
+  ): boolean {
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+    if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return false;
+
+    const rowAxis = this.scroll.rows;
+    const colAxis = this.scroll.cols;
+
+    const colX = colAxis.positionOf(col);
+    const rowY = rowAxis.positionOf(row);
+    const width = colAxis.getSize(col);
+    const height = rowAxis.getSize(row);
+
+    const scrollCols = col >= viewport.frozenCols;
+    const scrollRows = row >= viewport.frozenRows;
+    const x = scrollCols ? colX - scrollX : colX;
+    const y = scrollRows ? rowY - scrollY : rowY;
 
     if (options?.clampToViewport === false) {
       out.x = x;
