@@ -3928,6 +3928,39 @@ mod engine_filter_field_tests {
 
         assert_eq!(filter.allowed, Some(expected));
     }
+
+    #[test]
+    fn timeline_selection_to_engine_filter_handles_serial_strings_with_best_effort_date_system() {
+        // Some producers persist date shared-items as strings (often via `<d v="1.0"/>`) rather
+        // than `<n>`. Timeline filtering should still infer the correct workbook date system and
+        // enumerate the selected dates.
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "OrderDate".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::DateTime("1.0".to_string()),
+                    PivotCacheValue::DateTime("2.0".to_string()),
+                    PivotCacheValue::DateTime("3.0".to_string()),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // In the 1904 date system, serial 1 = 1904-01-02 and serial 2 = 1904-01-03.
+        let selection = TimelineSelectionState {
+            start: Some("1904-01-02".to_string()),
+            end: Some("1904-01-03".to_string()),
+        };
+
+        let filter = timeline_selection_to_engine_filter_field_with_cache(&cache_def, 0, &selection);
+
+        let mut expected = HashSet::new();
+        expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(1904, 1, 2).unwrap()));
+        expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(1904, 1, 3).unwrap()));
+
+        assert_eq!(filter.allowed, Some(expected));
+    }
 }
 
 #[cfg(test)]
