@@ -876,7 +876,7 @@ test(
     writeFakeTool(
       binDir,
       "codesign",
-      `#!/usr/bin/env bash\nset -euo pipefail\necho \"codesign $*\" >> \"${logPath}\"\n# validate-macos-bundle.sh probes hardened runtime metadata via:\n#   codesign -dv --verbose=4 <app>\n# Simulate a hardened-runtime signed binary so the validator can pass in unit tests.\ncase \"${"$"}*\" in\n  *\"-dv\"*)\n    echo \"Runtime Version=13.0.0\" >&2\n    echo \"CodeDirectory v=20500 size=0 flags=0x10000(runtime) hashes=0 location=embedded\" >&2\n    ;;\nesac\nexit 0\n`,
+      `#!/usr/bin/env bash\nset -euo pipefail\necho \"codesign $*\" >> \"${logPath}\"\n# validate-macos-bundle.sh probes hardened runtime metadata via:\n#   codesign -dv --verbose=4 <app>\n# and extracts embedded entitlements via:\n#   codesign -d --entitlements :- <app>\n# Simulate a hardened-runtime signed binary so the validator can pass in unit tests.\ncase \"${"$"}*\" in\n  *\"--entitlements\"*)\n    # codesign -d typically prints to stderr.\n    echo \"Executable=${"$"}{4:-/path/to/formula-desktop}\" >&2\n    cat >&2 <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n  <dict>\n    <key>com.apple.security.network.client</key>\n    <true/>\n    <key>com.apple.security.cs.allow-jit</key>\n    <true/>\n    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>\n    <true/>\n  </dict>\n</plist>\nPLIST\n    ;;\n  *\"-dv\"*)\n    echo \"Runtime Version=13.0.0\" >&2\n    echo \"CodeDirectory v=20500 size=0 flags=0x10000(runtime) hashes=0 location=embedded\" >&2\n    ;;\nesac\nexit 0\n`,
     );
     writeFakeTool(
       binDir,
@@ -911,6 +911,7 @@ test(
     const log = readFileSync(logPath, "utf8");
     assert.match(log, /codesign --verify/, "expected codesign verify invocation");
     assert.match(log, /codesign -dv --verbose=4/, "expected codesign -dv hardened runtime probe");
+    assert.match(log, /codesign -d --entitlements :-/, "expected codesign entitlements extraction");
     assert.match(log, /spctl --assess --type execute/, "expected spctl execute assessment");
   },
 );

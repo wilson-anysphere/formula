@@ -9,6 +9,7 @@
 # - Missing universal binary slices (Intel + Apple Silicon)
 # - Invalid code signing / Gatekeeper assessment when signing is enabled
 # - Signed app missing the Hardened Runtime flag (Developer ID distribution should use `--options runtime`)
+# - Signed app missing required hardened-runtime entitlements (WKWebView JIT keys, etc)
 # - Missing stapled notarization tickets when notarization is configured
 #
 # Usage:
@@ -914,6 +915,34 @@ validate_codesign() {
   if ! echo "$runtime_info" | grep -Eq 'Runtime Version=|\\(runtime\\)'; then
     echo "$runtime_info" >&2 || true
     die "hardened runtime not detected in codesign metadata (expected Runtime Version=... or CodeDirectory flags including (runtime))."
+  fi
+
+  echo "signing: validating embedded entitlements..."
+  if ! command -v node >/dev/null 2>&1; then
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+      die "node not found (required to validate embedded entitlements in signed macOS bundles)."
+    fi
+    warn "node not found; skipping macOS entitlements validation. Install Node and run: node scripts/check-macos-entitlements.mjs"
+  else
+    local entitlements_plist
+    local entitlements_raw
+    entitlements_plist="$(mktemp -t formula-entitlements.XXXXXX)"
+    entitlements_raw="$(mktemp -t formula-entitlements-raw.XXXXXX)"
+    CURRENT_TMP_FILES+=("$entitlements_plist" "$entitlements_raw")
+
+    # `codesign -d` may print non-XML metadata (e.g. "Executable=...") alongside the entitlements.
+    # Extract just the plist so we can lint + validate it using the same guardrail script used in CI.
+    codesign -d --entitlements :- "$app_path" 2>&1 | tee "$entitlements_raw" \
+      | awk 'BEGIN{p=0} /^[[:space:]]*<\?xml/{p=1} /^[[:space:]]*<plist/{if(p==0)p=1} p{print} p && /<\/plist>/{exit}' \
+      > "$entitlements_plist"
+
+    if [[ ! -s "$entitlements_plist" ]]; then
+      echo "Raw codesign output:" >&2
+      cat "$entitlements_raw" >&2 || true
+      die "failed to extract entitlements plist from codesign output for ${app_path}"
+    fi
+
+    node "$REPO_ROOT/scripts/check-macos-entitlements.mjs" --path "$entitlements_plist"
   fi
 
   echo "signing: assessing with Gatekeeper (spctl)..."

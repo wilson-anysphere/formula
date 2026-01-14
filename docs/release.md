@@ -549,7 +549,7 @@ CI guardrail (tagged releases when secrets are configured):
 - The release workflow validates that the produced macOS artifacts are **notarized + stapled** so they pass Gatekeeper:
   - `xcrun stapler validate` (requires a stapled notarization ticket)
   - `spctl --assess` (Gatekeeper evaluation)
-  - See `scripts/validate-macos-bundle.sh` (also checks Hardened Runtime is enabled for signed builds, validates basic bundle metadata like the `formula://` URL scheme, and verifies the app is **universal** via `lipo`).
+  - See `scripts/validate-macos-bundle.sh` (also checks Hardened Runtime is enabled for signed builds, validates embedded entitlements via `node scripts/check-macos-entitlements.mjs`, validates basic bundle metadata like the `formula://` URL scheme, and verifies the app is **universal** via `lipo`).
 
 #### Hardened runtime entitlements (WKWebView / WASM)
 
