@@ -282,6 +282,48 @@ test("fails when required runtime platform keys are missing (non-dry-run)", () =
   assert.doesNotMatch(proc.stderr, /api\\.github\\.com/i);
 });
 
+test("fails when Windows runtime updater asset name is missing an arch token (non-dry-run)", () => {
+  const tmp = makeTempDir();
+  const manifestsDir = path.join(tmp, "manifests");
+  mkdirSync(manifestsDir, { recursive: true });
+
+  writeFileSync(
+    path.join(manifestsDir, "bad-windows.json"),
+    JSON.stringify(
+      {
+        version: "0.1.0",
+        platforms: {
+          "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          // Missing x64 token in filename should be rejected by the stricter validator.
+          "windows-x86_64": { url: "https://example.com/Formula.msi", signature: "sig" },
+          "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+          "linux-x86_64": { url: "https://example.com/Formula_x86_64.AppImage", signature: "sig" },
+          "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  const proc = run({
+    cwd: tmp,
+    args: ["v0.1.0", manifestsDir],
+    env: {
+      // Provide placeholders so the script gets past required env checks if it reaches them.
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_TOKEN: "dummy",
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Invalid Windows updater asset naming/i);
+  assert.match(proc.stderr, /arch token/i);
+  // If this ever appears, the script got past manifest validation and attempted a network call.
+  assert.doesNotMatch(proc.stderr, /api\\.github\\.com/i);
+});
+
 test("fails loudly on conflicting top-level manifest fields", () => {
   const tmp = makeTempDir();
   const manifestsDir = path.join(tmp, "manifests");

@@ -37,6 +37,7 @@ import {
   parseTauriUpdaterPubkey,
 } from "./tauri-minisign.mjs";
 import { validateTauriUpdaterManifest } from "../tauri-updater-manifest.mjs";
+import { validatePlatformEntries } from "./validate-updater-manifest.mjs";
 
 // GitHub Actions sets GITHUB_API_URL for both github.com and GHES. Prefer it over a hard-coded
 // api.github.com base so this script works in enterprise installs.
@@ -509,6 +510,49 @@ async function main() {
         "linux-aarch64",
       ];
   validateTauriUpdaterManifest(combined, { expectedVersion, requiredPlatforms });
+
+  // In non-dry-run mode, reuse the strict CI updater-manifest validator's collision + arch-token
+  // guardrails against the merged platforms map. This is an offline approximation (it can't yet
+  // confirm that referenced assets exist on the GitHub Release), but it catches common regressions
+  // before we sign and overwrite `latest.json` on the draft release.
+  if (!dryRun) {
+    /** @type {Set<string>} */
+    const syntheticAssetNames = new Set();
+    for (const entry of Object.values(sortedPlatforms)) {
+      if (!entry || typeof entry !== "object") continue;
+      const url = /** @type {any} */ (entry).url;
+      if (typeof url !== "string" || url.trim().length === 0) continue;
+      try {
+        const parsed = new URL(url);
+        const last = parsed.pathname.split("/").filter(Boolean).pop() ?? "";
+        const decoded = decodeURIComponent(last);
+        if (decoded) syntheticAssetNames.add(decoded);
+      } catch {
+        // Ignore invalid URLs here; validatePlatformEntries will report them under invalidTargets.
+      }
+    }
+
+    const { errors: platformErrors, invalidTargets } = validatePlatformEntries({
+      platforms: sortedPlatforms,
+      assetNames: syntheticAssetNames,
+    });
+
+    if (platformErrors.length > 0 || invalidTargets.length > 0) {
+      const blocks = [];
+      if (platformErrors.length > 0) {
+        blocks.push(platformErrors.join("\n\n"));
+      }
+      if (invalidTargets.length > 0) {
+        blocks.push(
+          [
+            `Invalid platform entries in merged updater manifest:`,
+            ...invalidTargets.map((t) => `  - ${t.target}: ${t.message}`),
+          ].join("\n"),
+        );
+      }
+      throw new Error(`Merged updater manifest failed validation:\n\n${blocks.join("\n\n")}`);
+    }
+  }
 
   const latestJsonText = `${JSON.stringify(combined, null, 2)}\n`;
   const latestJsonBytes = Buffer.from(latestJsonText, "utf8");
