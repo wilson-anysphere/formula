@@ -156,7 +156,7 @@ fn xlsx_package_loader_decrypts_standard_fixture_and_exposes_password_errors() {
 
 #[test]
 fn xlsm_fixtures_surface_invalid_password_errors() {
-    for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm"] {
+    for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm", "basic-password.xlsm"] {
         let encrypted = read_fixture(encrypted_name);
 
         let err = read_workbook_model_from_bytes_with_password(&encrypted, "wrong")
@@ -184,7 +184,7 @@ fn xlsm_fixtures_surface_invalid_password_errors() {
 
 #[test]
 fn workbook_and_document_loaders_decrypt_agile_and_standard_xlsm_fixtures() {
-    for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm"] {
+    for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm", "basic-password.xlsm"] {
         let encrypted = read_fixture(encrypted_name);
 
         let model = read_workbook_model_from_bytes_with_password(&encrypted, "password")

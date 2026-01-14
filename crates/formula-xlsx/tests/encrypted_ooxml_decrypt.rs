@@ -167,7 +167,7 @@ fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
 
 #[test]
 fn xlsxpackage_from_bytes_with_password_decrypts_agile_and_standard_xlsm() {
-    for encrypted in ["agile-basic.xlsm", "standard-basic.xlsm"] {
+    for encrypted in ["agile-basic.xlsm", "standard-basic.xlsm", "basic-password.xlsm"] {
         let path = fixture_path_buf(encrypted);
         let bytes =
             std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
