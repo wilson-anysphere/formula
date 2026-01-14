@@ -13,6 +13,7 @@ use roxmltree::{Document, Node};
 
 use super::cache::{parse_num_cache, parse_num_ref, parse_str_cache, parse_str_ref};
 use super::REL_NS;
+use crate::drawingml::anchor::flatten_alternate_content;
 use crate::drawingml::style::{parse_marker, parse_solid_fill, parse_sppr, parse_txpr};
 
 #[derive(Debug, thiserror::Error)]
@@ -717,65 +718,6 @@ fn is_ext_lst_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
 /// `Fallback` even when `Choice` contains other (unrelated) elements.
 ///
 /// The caller is responsible for any further filtering (e.g., `*Chart`, `*Ax`).
-fn flatten_alternate_content<'a, 'input>(
-    node: Node<'a, 'input>,
-    desired: fn(Node<'a, 'input>) -> bool,
-) -> Vec<Node<'a, 'input>> {
-    if node.tag_name().name() != "AlternateContent" {
-        return vec![node];
-    }
-
-    let mut first_choice_children: Option<Vec<Node<'a, 'input>>> = None;
-    for choice in node
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "Choice")
-    {
-        let children: Vec<_> = choice
-            .children()
-            .filter(|n| n.is_element())
-            .flat_map(|n| flatten_alternate_content(n, desired))
-            .collect();
-        if first_choice_children.is_none() && !children.is_empty() {
-            first_choice_children = Some(children.clone());
-        }
-        if choice.descendants().any(desired) {
-            return children;
-        }
-    }
-
-    let mut first_fallback_children: Option<Vec<Node<'a, 'input>>> = None;
-    for fallback in node
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "Fallback")
-    {
-        let children: Vec<_> = fallback
-            .children()
-            .filter(|n| n.is_element())
-            .flat_map(|n| flatten_alternate_content(n, desired))
-            .collect();
-        if first_fallback_children.is_none() && !children.is_empty() {
-            first_fallback_children = Some(children.clone());
-        }
-        if fallback.descendants().any(desired) {
-            return children;
-        }
-    }
-
-    if let Some(children) = first_choice_children {
-        return children;
-    }
-    if let Some(children) = first_fallback_children {
-        return children;
-    }
-
-    // Unknown structure: treat AlternateContent as transparent and just emit its
-    // direct element children.
-    node.children()
-        .filter(|n| n.is_element())
-        .flat_map(|n| flatten_alternate_content(n, desired))
-        .collect()
-}
-
 fn warn_on_numeric_categories_with_non_numeric_axis(
     plot_area_node: Node<'_, '_>,
     series: &[SeriesModel],

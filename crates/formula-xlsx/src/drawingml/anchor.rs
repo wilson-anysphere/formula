@@ -56,6 +56,14 @@ pub(crate) fn parse_anchor(anchor: &Node<'_, '_>) -> Option<Anchor> {
     }
 }
 
+fn is_wsdr_anchor_node(node: Node<'_, '_>) -> bool {
+    node.is_element()
+        && matches!(
+            node.tag_name().name(),
+            "oneCellAnchor" | "twoCellAnchor" | "absoluteAnchor"
+        )
+}
+
 /// Return the `<xdr:*Anchor>` nodes inside a worksheet drawing (`<xdr:wsDr>`), handling
 /// `mc:AlternateContent` wrappers.
 ///
@@ -63,72 +71,12 @@ pub(crate) fn parse_anchor(anchor: &Node<'_, '_>) -> Option<Anchor> {
 /// `mc:Fallback` branches). A naive `.descendants()` search will find anchors in *both*
 /// branches, resulting in duplicate chart refs / drawing objects.
 ///
-/// This helper:
-/// - walks only direct children of `<xdr:wsDr>`,
-/// - treats `mc:AlternateContent` as transparent, selecting the **first** `mc:Choice`
-///   branch that contains any anchor nodes (falling back to `mc:Fallback` when no choice
-///   contains anchors),
-/// - and returns the matching anchor nodes in document order.
+/// This helper treats `mc:AlternateContent` as transparent and selects a single branch (prefer the
+/// first `mc:Choice` with anchor nodes, otherwise the first `mc:Fallback` with anchor nodes).
+///
+/// Anchors are returned in document order.
 pub(crate) fn wsdr_anchor_nodes<'a, 'input>(wsdr: Node<'a, 'input>) -> Vec<Node<'a, 'input>> {
-    fn is_anchor_node(node: Node<'_, '_>) -> bool {
-        node.is_element()
-            && matches!(
-                node.tag_name().name(),
-                "oneCellAnchor" | "twoCellAnchor" | "absoluteAnchor"
-            )
-    }
-
-    fn anchors_in_branch<'a, 'input>(branch: Node<'a, 'input>) -> Vec<Node<'a, 'input>> {
-        branch
-            .descendants()
-            .filter(|n| is_anchor_node(*n))
-            .collect()
-    }
-
-    let mut out = Vec::new();
-    for child in wsdr.children().filter(|n| n.is_element()) {
-        if is_anchor_node(child) {
-            out.push(child);
-            continue;
-        }
-
-        if child.tag_name().name() != "AlternateContent" {
-            continue;
-        }
-
-        // Prefer the first Choice branch that contains anchors.
-        let mut selected: Option<Vec<Node<'a, 'input>>> = None;
-        for choice in child
-            .children()
-            .filter(|n| n.is_element() && n.tag_name().name() == "Choice")
-        {
-            let anchors = anchors_in_branch(choice);
-            if !anchors.is_empty() {
-                selected = Some(anchors);
-                break;
-            }
-        }
-
-        // Fall back when no Choice branch contains anchors.
-        if selected.is_none() {
-            for fallback in child
-                .children()
-                .filter(|n| n.is_element() && n.tag_name().name() == "Fallback")
-            {
-                let anchors = anchors_in_branch(fallback);
-                if !anchors.is_empty() {
-                    selected = Some(anchors);
-                    break;
-                }
-            }
-        }
-
-        if let Some(anchors) = selected {
-            out.extend(anchors);
-        }
-    }
-
-    out
+    descendants_selecting_alternate_content(wsdr, is_wsdr_anchor_node, is_wsdr_anchor_node)
 }
 
 /// Flattens `mc:AlternateContent` wrappers by selecting a single branch.
