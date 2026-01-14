@@ -65,8 +65,8 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:disabled {
@@ -92,8 +92,8 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__window-button:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__window-button--close {
@@ -182,8 +182,8 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:disabled {
