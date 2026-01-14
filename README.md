@@ -52,13 +52,29 @@ pnpm generate:function-catalog
 ```
 
 ### AI tab-completion latency benchmark
-
+ 
 To guard against performance regressions in the JavaScript tab-completion engine (`TabCompletionEngine`),
 you can run a lightweight micro-benchmark locally:
 
 ```bash
 pnpm bench:tab-completion
 ```
+
+### Desktop performance (startup, memory, size)
+
+To measure **desktop shell** performance locally (Tauri binary + real WebView), run from the repo root:
+
+```bash
+pnpm perf:desktop-startup
+pnpm perf:desktop-memory
+pnpm perf:desktop-size
+```
+
+These commands use an isolated, repo-local HOME (`target/perf-home`) so they don't touch your real user profile.
+For more details (metrics, tuning knobs, CI gating env vars), see:
+
+- [`docs/11-desktop-shell.md`](./docs/11-desktop-shell.md)
+- [`docs/16-performance-targets.md`](./docs/16-performance-targets.md)
 
 ### Rust/WASM engine (formula-wasm)
 
