@@ -457,15 +457,68 @@ impl<'a> Parser<'a> {
     fn parse_table_literal(&mut self) -> DaxResult<Expr> {
         self.expect(Token::LBrace)?;
         let mut rows: Vec<Vec<Expr>> = Vec::new();
+        let mut expected_cols: Option<usize> = None;
         if self.lookahead != Token::RBrace {
             loop {
-                let expr = self.parse_expr(0)?;
-                if matches!(expr, Expr::TableLiteral { .. }) {
-                    return Err(DaxError::Parse(
-                        "nested table constructors are not supported".into(),
-                    ));
+                let row = if self.lookahead == Token::LParen {
+                    // Multi-column table constructors use row tuples like `{(1,2), (3,4)}`. For
+                    // simplicity we treat *any* parenthesized element inside `{...}` as a tuple
+                    // row; `((1+2))` therefore parses as a one-column row tuple.
+                    self.bump()?; // '('
+                    if self.lookahead == Token::RParen {
+                        return Err(DaxError::Parse(
+                            "table constructor row tuples cannot be empty".into(),
+                        ));
+                    }
+
+                    let mut row = Vec::new();
+                    loop {
+                        let expr = self.parse_expr(0)?;
+                        if matches!(expr, Expr::TableLiteral { .. }) {
+                            return Err(DaxError::Parse(
+                                "nested table constructors are not supported".into(),
+                            ));
+                        }
+                        row.push(expr);
+
+                        match self.lookahead {
+                            Token::Comma | Token::Semicolon => {
+                                self.bump()?;
+                                if self.lookahead == Token::RParen {
+                                    return Err(DaxError::Parse(
+                                        "table constructor row tuples cannot end with a separator"
+                                            .into(),
+                                    ));
+                                }
+                                continue;
+                            }
+                            _ => break,
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    row
+                } else {
+                    let expr = self.parse_expr(0)?;
+                    if matches!(expr, Expr::TableLiteral { .. }) {
+                        return Err(DaxError::Parse(
+                            "nested table constructors are not supported".into(),
+                        ));
+                    }
+                    vec![expr]
+                };
+
+                if let Some(expected) = expected_cols {
+                    if row.len() != expected {
+                        return Err(DaxError::Parse(format!(
+                            "table constructor rows must all have the same number of values (expected {expected}, got {})",
+                            row.len()
+                        )));
+                    }
+                } else {
+                    expected_cols = Some(row.len());
                 }
-                rows.push(vec![expr]);
+
+                rows.push(row);
 
                 match self.lookahead {
                     Token::Comma | Token::Semicolon => {

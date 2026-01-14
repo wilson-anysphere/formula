@@ -80,6 +80,42 @@ fn containsrow_with_table_literal_and_column_ref() {
 }
 
 #[test]
+fn containsrow_with_multi_column_table_literal() {
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "CONTAINSROW({(1,2), (3,4)}, 3, 4)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+
+    let value = engine
+        .evaluate(
+            &model,
+            "CONTAINSROW({(1,2), (3,4)}, 3, 5)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(false));
+
+    let value = engine
+        .evaluate(
+            &model,
+            "VAR t = {(1,2), (3,4)} RETURN CONTAINSROW(t, 1, 2)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+}
+
+#[test]
 fn containsrow_with_multi_column_table_expression() {
     let model = build_model();
     let engine = DaxEngine::new();

@@ -756,9 +756,16 @@ impl DaxEngine {
         row_ctx: &RowContext,
         env: &mut VarEnv,
     ) -> DaxResult<VarValue> {
-        if matches!(expr, Expr::TableLiteral { .. }) {
-            let values = self.eval_one_column_table_literal(model, expr, filter, row_ctx, env)?;
-            return Ok(VarValue::OneColumnTable(values));
+        if let Expr::TableLiteral { rows } = expr {
+            let col_count = rows.first().map(|row| row.len()).unwrap_or(1);
+            if col_count == 1 {
+                let values =
+                    self.eval_one_column_table_literal(model, expr, filter, row_ctx, env)?;
+                return Ok(VarValue::OneColumnTable(values));
+            }
+
+            let table = self.eval_table(model, expr, filter, row_ctx, env)?;
+            return Ok(VarValue::Table(table));
         }
 
         match self.eval_scalar(model, expr, filter, row_ctx, env) {
@@ -3629,16 +3636,48 @@ impl DaxEngine {
                 }
             },
             Expr::TableLiteral { .. } => {
-                let values =
-                    self.eval_one_column_table_literal(model, expr, filter, row_ctx, env)?;
-                let mut rows = Vec::with_capacity(values.len());
-                for value in values {
-                    rows.push(vec![value]);
+                let Expr::TableLiteral { rows } = expr else {
+                    unreachable!();
+                };
+
+                let col_count = rows.first().map(|row| row.len()).unwrap_or(1);
+                for row in rows {
+                    if row.len() != col_count {
+                        return Err(DaxError::Type(
+                            "table constructor rows must all have the same number of values".into(),
+                        ));
+                    }
                 }
+
+                let columns: Vec<(String, String)> = if col_count == 1 {
+                    // DAX one-column table constructors expose a single implicit column named
+                    // `Value`.
+                    vec![("__TABLE_LITERAL__".to_string(), "Value".to_string())]
+                } else {
+                    // Multi-column table constructors expose synthetic columns `Value1`, `Value2`,
+                    // ... in order.
+                    (1..=col_count)
+                        .map(|idx| {
+                            (
+                                "__TABLE_LITERAL__".to_string(),
+                                format!("Value{idx}"),
+                            )
+                        })
+                        .collect()
+                };
+
+                let mut out_rows: Vec<Vec<Value>> = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let mut out_row: Vec<Value> = Vec::with_capacity(col_count);
+                    for cell in row {
+                        out_row.push(self.eval_scalar(model, cell, filter, row_ctx, env)?);
+                    }
+                    out_rows.push(out_row);
+                }
+
                 Ok(TableResult::Virtual {
-                    // DAX table constructors expose a single implicit column named `Value`.
-                    columns: vec![("__TABLE_LITERAL__".to_string(), "Value".to_string())],
-                    rows,
+                    columns,
+                    rows: out_rows,
                 })
             }
             Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {

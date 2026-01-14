@@ -733,20 +733,19 @@ Supported expression forms:
   - `VAR Name = <expr> ... RETURN <expr>` (one or more `VAR` bindings)
   - Variables are referenced by bare identifiers (parsed as `Expr::TableName`) and can be **scalar** or
     **table** valued.
-- Table constructors (limited one-column literals): `{ 1, 2, 3 }`  
+- Table constructors: `{ 1, 2, 3 }` (one column) and `{ (1, 2), (3, 4) }` (multi-column row tuples)  
   Separators may be `,` or `;`. Nested table constructors are not supported.
-  These evaluate to a **virtual one-column table** with a synthetic column named `[Value]`, and can
-  be used:
-  - on the RHS of the `IN` operator (`expr IN { ... }`)
-  - as the first argument to `CONTAINSROW({ ... }, value)`
-  - as a table expression in iterators and table functions (e.g. `COUNTROWS({1,2,3})`,
-    `SUMX({1,2,3}, [Value])`, `FILTER({1,2,3}, [Value] > 1)`).
+  - One-column constructors evaluate to a **virtual one-column table** with a synthetic column
+    named `[Value]` and can be used on the RHS of the `IN` operator (`expr IN { ... }`), as the
+    first argument to `CONTAINSROW`, and as a table expression in iterators and table functions.
+  - Multi-column constructors evaluate to a **virtual multi-column table** with synthetic columns
+    named `[Value1]`, `[Value2]`, ... in order. (Note: `IN` still requires a one-column table.)
   Table literals can also be bound to a `VAR` and referenced by name.
 
 Unsupported / not yet implemented in the parser:
 
 - Exponent notation for numbers (`1e3`)
-- Multi-column table constructors (row tuples) like `{(1,2), (3,4)}`
+- Multi-line / query-style DAX (`EVALUATE`, `DEFINE MEASURE`, etc.)
 
 ---
 
@@ -915,9 +914,10 @@ This is not an exhaustive list, but the most common contributor-facing constrain
     if a hop matches multiple rows (many-to-many).
 - **DAX language coverage**
   - Variables (`VAR`/`RETURN`) are supported.
-  - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),
-    and evaluate to a one-column virtual table with a synthetic `[Value]` column (usable in iterators),
-    as well as membership tests via `IN` and `CONTAINSROW`.
+  - Table constructors (`{ ... }`) support both one-column and multi-column row tuples (no nesting),
+    and evaluate to a virtual table with synthetic columns (`[Value]` for one column, `[Value1]`,
+    `[Value2]`, ... for multi-column). These are usable in iterators, as well as membership tests via
+    `CONTAINSROW` (and via `IN` for one-column constructors).
   - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
   - Only `Blank`, `Number(ordered_float::OrderedFloat<f64>)`, `Boolean`, and `Text` exist at the DAX layer.

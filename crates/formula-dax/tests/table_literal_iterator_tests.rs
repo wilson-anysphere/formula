@@ -45,3 +45,19 @@ fn sumx_table_constructor_measure_does_not_error_and_repeats_measure() {
     assert_eq!(result, Value::from(129.0));
 }
 
+#[test]
+fn sumx_table_constructor_multi_column_value_columns_sum() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let result = engine
+        .evaluate(
+            &model,
+            "SUMX({(1,2), (3,4)}, [Value1] + [Value2])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(result, Value::from(10.0));
+}
