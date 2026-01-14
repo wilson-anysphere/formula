@@ -245,8 +245,14 @@ bytes).
     was used at encryption time.
   - For debugging a “wrong password” report with a Unicode password, try NFC vs NFD variants before
     assuming the file is corrupted.
-  - See the in-repo Unicode-password fixture `fixtures/encrypted/ooxml/agile-unicode.xlsx` and the
-    regression tests in `crates/formula-io/tests/encrypted_ooxml_decrypt.rs`.
+  - See the in-repo Unicode-password fixtures:
+    - `fixtures/encrypted/ooxml/agile-unicode.xlsx` (`pässwörd`, NFC)
+    - `fixtures/encrypted/ooxml/agile-unicode-excel.xlsx` (`pässwörd🔒`, NFC, includes non-BMP emoji)
+    - `fixtures/encrypted/ooxml/standard-unicode.xlsx` (`pässwörd🔒`, NFC, includes non-BMP emoji)
+    and the regression tests in `crates/formula-io/tests/encrypted_ooxml_decrypt.rs`.
+- **Whitespace is significant**: do not trim. If the password was set with leading/trailing
+  whitespace, that whitespace is part of the UTF-16LE byte sequence used by the KDF, and a trimmed
+  password will fail verification. (See `crates/formula-io/tests/encrypted_unicode_passwords.rs`.)
 
 ### Agile `blockKey` constants (must match spec exactly)
 

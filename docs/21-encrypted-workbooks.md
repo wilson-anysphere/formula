@@ -636,6 +636,7 @@ When implementing (or calling) encrypted-workbook support:
   - `fixtures/encrypted/ooxml/agile-large.xlsx` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/standard.xlsx` (Standard encryption; `EncryptionInfo` 3.2)
   - `fixtures/encrypted/ooxml/standard-4.2.xlsx` (Standard encryption; `EncryptionInfo` 4.2)
+  - `fixtures/encrypted/ooxml/standard-unicode.xlsx` (Standard encryption; `EncryptionInfo` 4.2; Unicode password `pässwörd🔒` in NFC form; decrypts to `plaintext.xlsx`)
   - `fixtures/encrypted/ooxml/standard-rc4.xlsx` (Standard encryption; `EncryptionInfo` 3.2; RC4 CryptoAPI)
   - `fixtures/encrypted/ooxml/standard-large.xlsx` (Standard encryption; `EncryptionInfo` 3.2; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/agile-empty-password.xlsx` (Agile encryption; `EncryptionInfo` 4.4; empty password `""`)

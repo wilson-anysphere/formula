@@ -341,6 +341,7 @@ Encrypted workbook fixtures are stored under:
 - `agile-empty-password.xlsx`: empty string (`""`) (distinct from a *missing* password)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 - `agile-unicode-excel.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
+- `standard-unicode.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
 
 These are **vendored test fixtures** used by multiple encryption-focused tests (for example under
 `crates/formula-io/tests/*encrypted_ooxml*` and `crates/formula-xlsx/tests/encrypted_ooxml_*.rs`).

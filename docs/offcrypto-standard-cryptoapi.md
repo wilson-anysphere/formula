@@ -215,6 +215,8 @@ Convert the password to **UTF‑16LE** bytes:
 
 * No BOM
 * No NUL terminator
+* No Unicode normalization and no whitespace trimming: the KDF operates on the exact UTF-16LE byte
+  sequence. NFC vs NFD (and trailing spaces) produce different derived keys.
 
 Example:
 
@@ -620,6 +622,8 @@ key (24 bytes, AES-192) =
 
 This vector matches a real Standard-encrypted workbook in this repo:
 `fixtures/encrypted/ooxml/standard.xlsx` (password: `password`).
+See also `fixtures/encrypted/ooxml/standard-unicode.xlsx` (password: `pässwörd🔒`, NFC, includes
+non-BMP emoji) for Unicode password regression coverage.
 
 Parameters:
 
