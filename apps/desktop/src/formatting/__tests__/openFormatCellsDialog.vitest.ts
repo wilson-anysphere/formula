@@ -179,4 +179,31 @@ describe("openFormatCellsDialog formatting performance guards", () => {
 
     expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("#,##0.00");
   });
+
+  it("preserves whitespace in custom number format codes", () => {
+    const doc = new DocumentController();
+
+    openFormatCellsDialog({
+      isEditing: () => false,
+      getDocument: () => doc,
+      getSheetId: () => "Sheet1",
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getSelectionRanges: () => [],
+      focusGrid: () => {},
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.format-cells-dialog");
+    expect(dialog).not.toBeNull();
+
+    const number = dialog!.querySelector<HTMLSelectElement>('[data-testid="format-cells-number"]');
+    number!.value = "__custom__";
+    number!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const customInput = dialog!.querySelector<HTMLInputElement>('[data-testid="format-cells-number-custom"]');
+    customInput!.value = "0.00 ";
+
+    dialog!.querySelector<HTMLButtonElement>('[data-testid="format-cells-apply"]')!.click();
+
+    expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("0.00 ");
+  });
 });

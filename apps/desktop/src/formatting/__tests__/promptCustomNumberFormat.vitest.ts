@@ -43,5 +43,21 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     expect(showInputBox).toHaveBeenCalledWith(expect.objectContaining({ value: "0.00" }));
     expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBeNull();
   });
-});
 
+  it("preserves whitespace in the provided number format code", async () => {
+    const doc = new DocumentController();
+    const showInputBox = vi.fn().mockResolvedValue("0.00 ");
+    const applyFormattingToSelection = vi.fn((_, fn) => {
+      fn(doc, "Sheet1", [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }]);
+    });
+
+    await promptAndApplyCustomNumberFormat({
+      isEditing: () => false,
+      showInputBox,
+      getActiveCellNumberFormat: () => null,
+      applyFormattingToSelection,
+    });
+
+    expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("0.00 ");
+  });
+});
