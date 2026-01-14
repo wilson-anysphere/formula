@@ -149,6 +149,7 @@ Notes:
     - includes best-effort WebView runtime metadata (WebKitGTK / WKWebView / WebView2 version) to help attribute regressions to runner image updates
     - scheduled runs on `main` also publish key p95 metrics to the benchmark-action `gh-pages` history (non-gating)
       - metric name prefix: `desktop.platform.<os>.…` (`linux` / `windows` / `macos`)
+      - these gh-pages publishing jobs (across perf workflows) share a concurrency group (`benchmark-gh-pages-publish`) to avoid concurrent pushes racing
     - manual `workflow_dispatch` runs can override run counts/timeouts via inputs: `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs` (and can optionally restrict the OS via `os`)
   
   For on-demand PR runs (same-repo PRs only), maintainers can apply the `desktop-perf-matrix` / `run-desktop-perf` label to trigger:

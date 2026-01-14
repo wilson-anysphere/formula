@@ -337,6 +337,10 @@ Note: This repository pins all third-party GitHub Actions to immutable commit SH
 hardening). CI enforces this via `scripts/ci/check-gha-action-sha-pins.sh`. The example workflow
 below uses action version tags for readability.
 
+Note: multiple workflows publish benchmark history to `gh-pages` (via `benchmark-action`), so we
+serialize publishes with a shared job-level concurrency group (`benchmark-gh-pages-publish`) to avoid
+push races.
+
 In addition to the main Linux perf gates, the repo also runs a scheduled **cross-platform** desktop
 startup + idle-memory workflow (Linux/Windows/macOS) and uploads per-OS JSON artifacts:
 
@@ -381,6 +385,9 @@ env:
 jobs:
   benchmark:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -388,6 +395,41 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
       - run: npm run benchmark
+
+      # Upload results so we can publish from a separate job (serialized gh-pages push).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perf-benchmark-results
+          path: benchmark-results.json
+
+      # PRs: comment + fail-on-alert (no gh-pages push).
+      - uses: benchmark-action/github-action-benchmark@v1
+        if: github.event_name == 'pull_request'
+        with:
+          tool: 'customSmallerIsBetter'
+          output-file-path: benchmark-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          alert-threshold: '120%'
+          comment-on-alert: true
+          fail-on-alert: true
+
+  publish:
+    needs: benchmark
+    runs-on: ubuntu-24.04
+    # Avoid concurrent gh-pages pushes from multiple benchmark workflows.
+    concurrency:
+      group: benchmark-gh-pages-publish
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: perf-benchmark-results
       - uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: 'customSmallerIsBetter'
