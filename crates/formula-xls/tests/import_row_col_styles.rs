@@ -59,3 +59,24 @@ fn imports_row_and_col_default_styles_from_ixfe() {
         "expected distinct row/col style ids"
     );
 }
+
+#[test]
+fn warns_on_out_of_range_row_col_ixfe() {
+    let bytes = xls_fixture_builder::build_row_col_style_out_of_range_xf_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    assert_eq!(result.warnings.len(), 1, "expected one warning");
+    let msg = &result.warnings[0].message;
+    assert!(
+        msg.contains("out-of-range XF indices"),
+        "unexpected warning message: {msg}"
+    );
+    assert!(
+        msg.contains("RowColStylesOutOfRange"),
+        "expected sheet name in warning: {msg}"
+    );
+    assert!(
+        msg.contains("rows") && msg.contains("columns"),
+        "expected row+col counts in warning: {msg}"
+    );
+}
