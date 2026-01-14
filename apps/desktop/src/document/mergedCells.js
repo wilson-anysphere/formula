@@ -108,12 +108,42 @@ export function mergeCells(doc, sheetId, range, options = {}) {
 export function mergeAcross(doc, sheetId, range, options = {}) {
   const r = normalizeMergedRange(range);
   if (r.startCol === r.endCol) return false;
-  let merged = false;
+
+  const existing = typeof doc.getMergedRanges === "function" ? doc.getMergedRanges(sheetId) : [];
+  // Any merges that intersect the selection are removed first (Excel-like).
+  const remaining = existing.filter((m) => !rangesIntersect(m, r));
+
+  /** @type {MergedRange[]} */
+  const newMerges = [];
   for (let row = r.startRow; row <= r.endRow; row += 1) {
-    const didMerge = mergeCells(doc, sheetId, { startRow: row, endRow: row, startCol: r.startCol, endCol: r.endCol }, options);
-    if (didMerge) merged = true;
+    newMerges.push({ startRow: row, endRow: row, startCol: r.startCol, endCol: r.endCol });
   }
-  return merged;
+
+  const next = sortRanges([...remaining, ...newMerges]);
+
+  if (typeof doc.setMergedRanges === "function") {
+    doc.setMergedRanges(sheetId, next, options);
+  }
+
+  // Clear values/formulas in non-anchor cells (preserve formatting). Each merged row is anchored
+  // at its left-most cell.
+  /** @type {Array<{ sheetId: string, row: number, col: number, value: any, formula: string | null }>} */
+  const clearInputs = [];
+  const anchorCol = r.startCol;
+  if (typeof doc.forEachCellInSheet === "function") {
+    doc.forEachCellInSheet(sheetId, ({ row, col, cell }) => {
+      if (row < r.startRow || row > r.endRow) return;
+      if (col < r.startCol || col > r.endCol) return;
+      if (col === anchorCol) return;
+      if (cell?.value == null && cell?.formula == null) return;
+      clearInputs.push({ sheetId, row, col, value: null, formula: null });
+    });
+  }
+  if (clearInputs.length > 0 && typeof doc.setCellInputs === "function") {
+    doc.setCellInputs(clearInputs, { label: options.label });
+  }
+
+  return true;
 }
 
 /**
@@ -166,4 +196,3 @@ export function unmergeCells(doc, sheetId, range, options = {}) {
   }
   return removed;
 }
-
