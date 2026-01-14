@@ -227,6 +227,41 @@ describe("AddStepMenu", () => {
     });
   });
 
+  it("considers existing groupBy aggregation output names when generating a default Add Column name", async () => {
+    const preview = new DataTable(
+      [
+        { name: "Region", type: "string" },
+        { name: "Sales", type: "number" },
+      ],
+      [],
+    );
+    const query: Query = {
+      ...baseQuery(),
+      steps: [
+        {
+          id: "s1",
+          name: "Grouped",
+          operation: { type: "groupBy", groupColumns: ["Region"], aggregations: [{ column: "Sales", op: "count", as: "Custom" }] },
+        },
+      ],
+    };
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query, preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "Add Column").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({ type: "addColumn", name: "Custom 1", formula: "[Region]" });
+  });
+
   it("disables schema-dependent operations when preview schema is missing", async () => {
     const onAddStep = vi.fn();
     await act(async () => {

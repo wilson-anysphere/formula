@@ -76,6 +76,17 @@ export function AddStepMenu(props: {
       if (op.type === "renameColumn" && typeof op.newName === "string" && op.newName.trim()) {
         usedColumnNames.add(op.newName);
       }
+      if (op.type === "groupBy" && Array.isArray(op.aggregations)) {
+        for (const agg of op.aggregations) {
+          const name =
+            typeof agg?.as === "string" && agg.as.trim()
+              ? agg.as.trim()
+              : typeof agg?.op === "string" && typeof agg?.column === "string" && agg.column.trim()
+                ? `${agg.op} of ${agg.column}`
+                : null;
+          if (name) usedColumnNames.add(name);
+        }
+      }
     }
 
     return [
