@@ -15,8 +15,13 @@ export function resolveCssVar(
 ) {
   if (!root || typeof getComputedStyle !== "function") return fallback;
 
+  // `getComputedStyle(...).getPropertyValue("--token")` returns the specified value for custom
+  // properties (so it can itself contain `var(--other-token)` indirections). Resolving those
+  // indirections is on the hot path for canvas renderers, so avoid calling `getComputedStyle`
+  // repeatedly while following the chain.
+  const style = getComputedStyle(root);
   const read = (name) => {
-    const raw = getComputedStyle(root).getPropertyValue(name);
+    const raw = style.getPropertyValue(name);
     return typeof raw === "string" ? raw.trim() : "";
   };
 
@@ -105,5 +110,10 @@ export function resolveCssVar(
 
   const start = read(varName);
   if (!start) return fallback;
+  // Fast path: most tokens are direct values (colors, numbers) and do not include `var(...)`
+  // indirections. Avoid allocating `Set`/recursing in that common case.
+  if (!start.startsWith("var(") || !start.endsWith(")")) {
+    return start || fallback;
+  }
   return resolveValue(start, new Set([varName]));
 }
