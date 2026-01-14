@@ -334,7 +334,8 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       const updated = doc.getSheetDrawings(sheetId)[0];
       expect(updated.anchor.type).toBe("absolute");
       // Moving by 1 screen px at 2x zoom shifts the underlying sheet position by 0.5px.
-      expect(updated.anchor.pos.xEmu).toBeCloseTo(pxToEmu(0.5));
+      // Anchors are persisted in integer EMUs, so expect rounding at sub-pixel steps.
+      expect(updated.anchor.pos.xEmu).toBe(Math.round(pxToEmu(0.5)));
       expect(updated.anchor.pos.yEmu).toBe(0);
       expect(app.getActiveCell()).toEqual(activeBefore);
 
