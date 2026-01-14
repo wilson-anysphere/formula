@@ -1553,6 +1553,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          for cmd in dpkg dpkg-deb ldd awk sort grep; do
+            if ! command -v "${cmd}" >/dev/null 2>&1; then
+              echo "::error::Missing required command '${cmd}' on PATH (expected on ubuntu runner)" >&2
+              exit 1
+            fi
+          done
+
           preferred_dir="apps/desktop/src-tauri/target/release/bundle/deb"
           echo "Preferred .deb output dir: ${preferred_dir}"
           ls -lah "${preferred_dir}" 2>/dev/null || true
