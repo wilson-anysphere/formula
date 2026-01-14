@@ -95,15 +95,24 @@ fn decrypt_agile_without_data_integrity_element() {
     }
     let xml_no_di = format!("{}{}", &xml_str[..di_start], &xml_str[di_end..]);
 
-    // Build a new EncryptionInfo stream with just the 8-byte header + modified XML (no length
-    // prefix, which is also a known producer variant).
-    let mut info_no_di = Vec::new();
-    info_no_di.extend_from_slice(&baseline_info[..8]);
-    info_no_di.extend_from_slice(xml_no_di.as_bytes());
+    // Real-world producers vary how the XML is wrapped/encoded; in particular, some write UTF-16LE
+    // XML with an explicit length prefix. Ensure the missing-`dataIntegrity` case still works in
+    // that form (integrity verification is skipped).
+    let mut xml_utf16le = Vec::new();
+    xml_utf16le.extend_from_slice(&[0xFF, 0xFE]); // UTF-16LE BOM
+    for cu in xml_no_di.encode_utf16() {
+        xml_utf16le.extend_from_slice(&cu.to_le_bytes());
+    }
+    xml_utf16le.extend_from_slice(&[0x00, 0x00]); // terminating NUL
 
-    let ole_no_di = build_ole(&info_no_di, &baseline_package);
-    let decrypted =
-        decrypt_encrypted_package_ole(&ole_no_di, password).expect("decrypt no dataIntegrity");
+    let mut info_utf16le = Vec::new();
+    info_utf16le.extend_from_slice(&baseline_info[..8]);
+    info_utf16le.extend_from_slice(&(xml_utf16le.len() as u32).to_le_bytes());
+    info_utf16le.extend_from_slice(&xml_utf16le);
+
+    let ole_no_di = build_ole(&info_utf16le, &baseline_package);
+    let decrypted = decrypt_encrypted_package_ole(&ole_no_di, password)
+        .expect("decrypt missing dataIntegrity (utf16le)");
     assert_eq!(decrypted, plaintext);
 }
 
