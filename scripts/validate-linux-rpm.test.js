@@ -155,7 +155,12 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
   const listFile = join(tmp, "rpm-list.txt");
   writeFileSync(
     listFile,
-    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop", "/usr/share/doc/formula/README"].join("\n"),
+    [
+      "/usr/bin/formula-desktop",
+      "/usr/share/applications/formula.desktop",
+      "/usr/share/doc/formula-desktop/LICENSE",
+      "/usr/share/doc/formula-desktop/NOTICE",
+    ].join("\n"),
     { encoding: "utf8" },
   );
 
@@ -264,4 +269,3 @@ test("validate-linux-rpm fails when RPM name does not match tauri.conf.json", { 
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /RPM name mismatch/i);
 });
-
