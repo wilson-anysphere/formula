@@ -425,7 +425,8 @@ function normalizeImageEntry(id: string, raw: unknown): ImageEntry | undefined {
   const record = raw as any;
   const bytes: unknown = record.bytes;
   if (!(bytes instanceof Uint8Array)) return undefined;
-  const entryId = typeof record.id === "string" && record.id.trim() !== "" ? record.id : id;
+  const recordId = typeof record.id === "string" ? record.id.trim() : "";
+  const entryId = recordId !== "" ? recordId : id;
   const mimeTypeRaw: unknown = record.mimeType ?? record.contentType ?? record.content_type;
   const mimeType =
     typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== "" ? mimeTypeRaw.trim() : inferMimeTypeFromId(entryId, bytes);
@@ -1080,8 +1081,10 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const enabled = params.get("collab");
     if (enabled !== "1" && enabled !== "true") return null;
 
-    const docId = params.get("collabDocId") ?? params.get("docId") ?? "";
-    const wsUrl = params.get("collabWsUrl") ?? params.get("wsUrl") ?? "";
+    const docIdRaw = params.get("collabDocId") ?? params.get("docId") ?? "";
+    const wsUrlRaw = params.get("collabWsUrl") ?? params.get("wsUrl") ?? "";
+    const docId = docIdRaw.trim();
+    const wsUrl = wsUrlRaw.trim();
     if (!docId || !wsUrl) return null;
 
     // Tokens are accepted from either query params (legacy) or the URL hash (recommended),
@@ -1089,7 +1092,11 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
     const tokenFromUrl =
       params.get("collabToken") ?? params.get("token") ?? hashParams.get("collabToken") ?? hashParams.get("token") ?? undefined;
-    const tokenFromUrlTrimmed = typeof tokenFromUrl === "string" && tokenFromUrl.trim() !== "" ? tokenFromUrl : undefined;
+    let tokenFromUrlTrimmed: string | undefined;
+    if (typeof tokenFromUrl === "string") {
+      const trimmed = tokenFromUrl.trim();
+      if (trimmed !== "") tokenFromUrlTrimmed = trimmed;
+    }
     if (tokenFromUrlTrimmed) {
       storeCollabToken({ wsUrl, docId, token: tokenFromUrlTrimmed });
       // Best-effort: remove tokens from query/hash so we don't leak secrets into screenshots,

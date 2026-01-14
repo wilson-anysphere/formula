@@ -362,7 +362,7 @@ describe("CanvasGridRenderer image cells", () => {
               row,
               col,
               value: null,
-              image: { imageId: "missing", altText: "Missing image", width: 100, height: 50 }
+              image: { imageId: "missing", altText: " Missing image ", width: 100, height: 50 }
             }
           : null
     };

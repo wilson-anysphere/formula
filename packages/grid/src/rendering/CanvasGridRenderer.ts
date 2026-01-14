@@ -3881,7 +3881,8 @@ export class CanvasGridRenderer {
           contentCtx.fillRect(destX, destY, destW, destH);
 
           const rawLabel = image.altText ?? (typeof cell.value === "string" ? cell.value : "");
-          const label = rawLabel && rawLabel.trim() !== "" ? rawLabel : "[Image]";
+          const trimmedLabel = rawLabel.trim();
+          const label = trimmedLabel !== "" ? trimmedLabel : "[Image]";
           const fontSize = Math.max(10, Math.round(11 * zoom));
           const placeholderFontFamily = ensureSansSerifFallback(
             isHeader ? this.defaultHeaderFontFamily : this.defaultCellFontFamily

@@ -267,6 +267,33 @@ describe("SpreadsheetApp collab persistence", () => {
     root.remove();
   });
 
+  it("trims collab connection fields read from the URL", () => {
+    // Exercise the `resolveCollabOptionsFromUrl()` path (no explicit `opts.collab`).
+    history.replaceState(
+      null,
+      "",
+      `?collab=1&collabDocId=${encodeURIComponent(" doc-trim ")}&collabWsUrl=${encodeURIComponent(" ws://example.invalid ")}&collabToken=${encodeURIComponent(" tok ")}`,
+    );
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    expect(mocks.createCollabSession).toHaveBeenCalledTimes(1);
+    const options = mocks.createCollabSession.mock.calls[0]?.[0] as any;
+    expect(options?.connection?.docId).toBe("doc-trim");
+    expect(options?.connection?.wsUrl).toBe("ws://example.invalid");
+    expect(options?.connection?.token).toBe("tok");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("disables persistence when collabOffline=0 is present in the URL", () => {
     // Exercise the `resolveCollabOptionsFromUrl()` path (no explicit `opts.collab`).
     history.replaceState(
