@@ -1002,6 +1002,13 @@ wired to the correct **updater-consumed** artifacts:
    - `latest.json`
    - `latest.json.sig` (signature for `latest.json`)
 2. Download `latest.json` and inspect the platform URLs:
+   - Published “latest” (public):
+     - `curl -L -o latest.json https://github.com/OWNER/REPO/releases/latest/download/latest.json`
+     - `curl -L -o latest.json.sig https://github.com/OWNER/REPO/releases/latest/download/latest.json.sig`
+   - Specific tag (useful for draft QA; may require auth if the release is still a draft):
+     - `curl -L -o latest.json https://github.com/OWNER/REPO/releases/download/vX.Y.Z/latest.json`
+     - `curl -L -o latest.json.sig https://github.com/OWNER/REPO/releases/download/vX.Y.Z/latest.json.sig`
+   - Then inspect:
    - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
    - macOS: `*.app.tar.gz` (or `*.tar.gz`; **not** `.dmg`)
