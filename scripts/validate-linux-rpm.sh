@@ -783,6 +783,8 @@ validate_container() {
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/LICENSE\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/NOTICE\n'
   container_cmd+=$'test -f /usr/share/mime/packages/app.formula.desktop.xml\n'
+  container_cmd+=$'grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml\n'
+  container_cmd+=$'grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml\n'
   container_cmd+=$'grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2\n'
   container_cmd+=$'\n'
   container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'
