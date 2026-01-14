@@ -2025,9 +2025,9 @@ mod key_encryptor_tests {
         let xml = format!(
             r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
                 xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
-              <keyData saltValue="" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+              <keyData saltValue="AA==" saltSize="1" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
                        keyBits="128" blockSize="16" hashSize="20"/>
-              <dataIntegrity encryptedHmacKey="" encryptedHmacValue=""/>
+              <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA=="/>
               <keyEncryptors>
                 <keyEncryptor uri="{KEY_ENCRYPTOR_URI_CERTIFICATE}">
                   <c:encryptedKey/>
