@@ -467,7 +467,6 @@ mod trim_float_tests {
         assert_eq!(trim_float(-1e-16), "0");
     }
 }
-
 fn workbook_defined_names_xml(workbook: &Workbook) -> String {
     let mut settings_by_sheet_name: HashMap<String, &SheetPrintSettings> = HashMap::new();
     for sheet_settings in &workbook.print_settings.sheets {

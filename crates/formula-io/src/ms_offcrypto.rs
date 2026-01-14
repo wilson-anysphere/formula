@@ -38,6 +38,9 @@ use thiserror::Error;
 const STANDARD_VERSION_MAJOR: u16 = 3;
 const STANDARD_VERSION_MINOR: u16 = 2;
 
+/// `EncryptionHeader` fixed-size fields are 8 DWORDs (32 bytes).
+const ENCRYPTION_HEADER_FIXED_LEN: usize = 8 * 4;
+
 /// CryptoAPI `ALG_ID` values for AES (Windows).
 ///
 /// These are commonly used in Office Standard encryption headers.
@@ -62,6 +65,8 @@ pub(crate) enum EncryptionInfoError {
     InvalidEncryptionHeaderSize(u32),
     #[error("invalid CSPName byte length: {len} (must be even for UTF-16LE)")]
     InvalidCspNameLength { len: usize },
+    #[error("invalid CSPName: missing UTF-16LE NUL terminator")]
+    InvalidCspNameMissingTerminator,
     #[error("unsupported external Standard encryption (fExternal flag set)")]
     UnsupportedExternalEncryption,
     #[error("unsupported Standard encryption: fCryptoAPI flag not set")]
@@ -158,8 +163,7 @@ fn parse_standard_encryption_header(
 ) -> Result<StandardEncryptionHeader, EncryptionInfoError> {
     // `EncryptionHeader` fixed-size fields are 8 DWORDs, followed by variable-length
     // CSPName bytes and trailing sizeExtra bytes.
-    const FIXED_LEN: usize = 8 * 4;
-    if buf.len() < FIXED_LEN {
+    if buf.len() < ENCRYPTION_HEADER_FIXED_LEN {
         return Err(EncryptionInfoError::Truncated);
     }
 
@@ -192,26 +196,29 @@ fn parse_standard_encryption_header(
         });
     }
 
-    let header_size_usize = buf.len();
+    let tail = &buf[ENCRYPTION_HEADER_FIXED_LEN..];
     let size_extra_usize = size_extra as usize;
-    if header_size_usize < FIXED_LEN + size_extra_usize {
+    if size_extra_usize > tail.len() {
         return Err(EncryptionInfoError::InvalidEncryptionHeaderSize(
-            header_size_usize as u32,
+            buf.len() as u32,
         ));
     }
 
-    let csp_name_bytes_len = header_size_usize - FIXED_LEN - size_extra_usize;
-    if csp_name_bytes_len % 2 != 0 {
+    let csp_bytes = &tail[..tail.len() - size_extra_usize];
+    if csp_bytes.len() % 2 != 0 {
         return Err(EncryptionInfoError::InvalidCspNameLength {
-            len: csp_name_bytes_len,
+            len: csp_bytes.len(),
         });
     }
+    // `CSPName` must be NUL-terminated (`0x0000`) in UTF-16LE.
+    if !csp_bytes.chunks_exact(2).any(|pair| pair == [0x00, 0x00]) {
+        return Err(EncryptionInfoError::InvalidCspNameMissingTerminator);
+    }
 
-    let csp_name_bytes = &buf[offset..offset + csp_name_bytes_len];
-    let (cow, _) = UTF_16LE.decode_without_bom_handling(csp_name_bytes);
+    let (cow, _) = UTF_16LE.decode_without_bom_handling(csp_bytes);
     let csp_name = cow.into_owned();
 
-    let header_extra = buf[offset + csp_name_bytes_len..].to_vec();
+    let header_extra = tail[tail.len() - size_extra_usize..].to_vec();
     debug_assert_eq!(header_extra.len(), size_extra_usize);
 
     Ok(StandardEncryptionHeader {
@@ -250,8 +257,9 @@ pub(crate) fn parse_standard_encryption_info(
         EncryptionInfoError::InvalidEncryptionHeaderSize(header_size)
     })?;
 
-    // The header must contain at least the fixed 8 DWORD fields.
-    if header_size_usize < 8 * 4 {
+    // The header must contain at least the fixed 8 DWORD fields plus a UTF-16LE NUL terminator for
+    // the (possibly empty) CSPName string.
+    if header_size_usize < ENCRYPTION_HEADER_FIXED_LEN + 2 {
         return Err(EncryptionInfoError::InvalidEncryptionHeaderSize(header_size));
     }
 
@@ -533,5 +541,87 @@ mod tests {
             assert_eq!(info.header.flags.f_aes, true);
             assert_eq!(info.header.alg_id, CALG_AES_128);
         }
+    }
+
+    #[test]
+    fn standard_accepts_odd_total_header_size_when_size_extra_is_odd() {
+        // Some real-world Standard headers include `sizeExtra` bytes that are not UTF-16LE and can
+        // make the overall `headerSize` odd. The parser must validate CSPName only over
+        // `headerSize - 32 - sizeExtra` bytes.
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI;
+        let alg_id = CALG_RC4;
+
+        let csp_name = "Odd sizeExtra CSP\0";
+        let csp_name_bytes = utf16le_bytes(csp_name);
+        assert_eq!(csp_name_bytes.len() % 2, 0);
+
+        let header_extra = vec![0xAB]; // sizeExtra = 1 (odd)
+        let header_size = (ENCRYPTION_HEADER_FIXED_LEN + csp_name_bytes.len() + header_extra.len()) as u32;
+        assert_eq!(header_size % 2, 1, "expected odd headerSize");
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&STANDARD_VERSION_MAJOR.to_le_bytes());
+        out.extend_from_slice(&STANDARD_VERSION_MINOR.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags
+        out.extend_from_slice(&header_size.to_le_bytes());
+
+        // EncryptionHeader fixed fields.
+        out.extend_from_slice(&flags.to_le_bytes()); // Flags
+        out.extend_from_slice(&(header_extra.len() as u32).to_le_bytes()); // SizeExtra
+        out.extend_from_slice(&alg_id.to_le_bytes()); // AlgId
+        out.extend_from_slice(&0u32.to_le_bytes()); // AlgIdHash
+        out.extend_from_slice(&128u32.to_le_bytes()); // KeySize
+        out.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+        out.extend_from_slice(&csp_name_bytes);
+        out.extend_from_slice(&header_extra);
+
+        // Minimal EncryptionVerifier.
+        out.extend_from_slice(&16u32.to_le_bytes()); // SaltSize
+        out.extend_from_slice(&[0u8; 16]); // Salt
+        out.extend_from_slice(&[0u8; 16]); // EncryptedVerifier
+        out.extend_from_slice(&20u32.to_le_bytes()); // VerifierHashSize
+        out.extend_from_slice(&[0u8; 20]); // EncryptedVerifierHash (RC4 exact length)
+
+        let parsed = parse_standard_encryption_info(&out).expect("should parse");
+        assert_eq!(parsed.header_size, header_size);
+        assert_eq!(parsed.header.size_extra, 1);
+        assert_eq!(parsed.header.csp_name, csp_name);
+        assert_eq!(parsed.header.header_extra, header_extra);
+    }
+
+    #[test]
+    fn standard_rejects_size_extra_larger_than_header_tail() {
+        // headerSize includes CSPName bytes + sizeExtra. If sizeExtra exceeds the remaining tail
+        // bytes after the fixed 32-byte header fields, the header is internally inconsistent and
+        // must be rejected without panicking.
+        let header_size = (ENCRYPTION_HEADER_FIXED_LEN + 2) as u32; // fixed fields + UTF-16LE NUL
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&STANDARD_VERSION_MAJOR.to_le_bytes());
+        out.extend_from_slice(&STANDARD_VERSION_MINOR.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags
+        out.extend_from_slice(&header_size.to_le_bytes());
+
+        // EncryptionHeader fixed fields.
+        out.extend_from_slice(&EncryptionHeaderFlags::F_CRYPTOAPI.to_le_bytes()); // Flags
+        out.extend_from_slice(&3u32.to_le_bytes()); // SizeExtra (tail len is only 2)
+        out.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgId
+        out.extend_from_slice(&0u32.to_le_bytes()); // AlgIdHash
+        out.extend_from_slice(&128u32.to_le_bytes()); // KeySize
+        out.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+        out.extend_from_slice(&0u16.to_le_bytes()); // CSPName terminator (2 bytes)
+
+        let err = parse_standard_encryption_info(&out).expect_err("expected error");
+        assert!(
+            matches!(
+                err,
+                EncryptionInfoError::Truncated | EncryptionInfoError::InvalidEncryptionHeaderSize(_)
+            ),
+            "unexpected error: {err:?}"
+        );
     }
 }
