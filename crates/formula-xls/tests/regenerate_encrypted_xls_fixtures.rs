@@ -3,14 +3,18 @@
 //! This is an ignored test so it doesn't run in CI; it's a convenient, in-repo way to keep the
 //! binary fixture blobs reproducible and auditable.
 //!
-//! This generator covers two kinds of fixtures:
-//! - **Detection fixtures** that contain just enough BIFF8 to exercise `FILEPASS` detection.
-//! - A **decryptable** RC4 CryptoAPI fixture used to validate `import_xls_path_with_password`.
+//! This generator produces **decryptable** BIFF8 `.xls` workbooks for each supported `FILEPASS`
+//! encryption scheme:
+//! - XOR obfuscation (`wEncryptionType=0x0000`)
+//! - RC4 "Standard Encryption" (`wEncryptionType=0x0001`, `subType=0x0001`)
+//! - RC4 CryptoAPI (`wEncryptionType=0x0001`, `subType=0x0002`)
 //!
 //! Run:
 //!   cargo test -p formula-xls --test regenerate_encrypted_xls_fixtures -- --ignored
 
-use sha1::{Digest as _, Sha1};
+use formula_model::hash_legacy_password;
+use md5::{Digest as _, Md5};
+use sha1::Sha1;
 use std::io::{Cursor, Write};
 use std::path::PathBuf;
 
@@ -55,15 +59,6 @@ fn bof_biff8(dt: u16) -> [u8; 16] {
     out[4..6].copy_from_slice(&0x0DBBu16.to_le_bytes()); // build
     out[6..8].copy_from_slice(&0x07CCu16.to_le_bytes()); // year (1996)
     out
-}
-
-fn workbook_stream_with_filepass(filepass_payload: &[u8]) -> Vec<u8> {
-    [
-        record(RECORD_BOF, &bof_biff8(BOF_DT_WORKBOOK_GLOBALS)),
-        record(RECORD_FILEPASS, filepass_payload),
-        record(RECORD_EOF, &[]),
-    ]
-    .concat()
 }
 
 fn build_xls_bytes(workbook_stream: &[u8]) -> Vec<u8> {
@@ -153,6 +148,74 @@ fn number_cell(row: u16, col: u16, xf: u16, v: f64) -> [u8; 14] {
     out
 }
 
+fn build_plain_biff8_workbook_stream(filepass_payload: &[u8], extra_sheet_payload_len: usize) -> Vec<u8> {
+    // Common workbook structure used across all encrypted fixtures. The record payload bytes after
+    // FILEPASS are encrypted by the scheme-specific builder.
+
+    // -- Globals ----------------------------------------------------------------
+    let mut globals = Vec::<u8>::new();
+    push_record(&mut globals, RECORD_BOF, &bof_biff8(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_FILEPASS, filepass_payload);
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: keep the usual 16 style XFs so BIFF consumers stay happy.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true, 0x20));
+    }
+    // Cell XF used by the sheet's NUMBER record. Make it non-default (vertical alignment = Top)
+    // so the decrypt + BIFF parser tests can assert that XF metadata after FILEPASS was imported.
+    let xf_cell: u16 = 16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false, 0x00));
+
+    // BoundSheet with placeholder offset.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet ------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof_biff8(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 42.0));
+
+    if extra_sheet_payload_len > 0 {
+        // Add an extra unknown record with a large payload so RC4 Standard fixtures cross the
+        // 1024-byte payload boundary and exercise per-block rekeying.
+        const RECORD_DUMMY_UNKNOWN: u16 = 0xFFFF;
+        let mut payload = Vec::with_capacity(extra_sheet_payload_len);
+        for i in 0..extra_sheet_payload_len {
+            payload.push(((i * 31) % 251) as u8);
+        }
+        push_record(&mut sheet, RECORD_DUMMY_UNKNOWN, &payload);
+    }
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+
+    // Patch BoundSheet offset to point at the sheet BOF.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
     let mut hasher = Sha1::new();
     for chunk in chunks {
@@ -170,6 +233,37 @@ fn utf16le_bytes(s: &str) -> Vec<u8> {
         out.extend_from_slice(&unit.to_le_bytes());
     }
     out
+}
+
+fn utf16le_bytes_truncated_15(password: &str) -> Vec<u8> {
+    // Excel 97-2003 legacy RC4 encryption truncates passwords to 15 UTF-16 code units.
+    let mut out = Vec::with_capacity(password.len().min(15) * 2);
+    for unit in password.encode_utf16().take(15) {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+fn md5_bytes(chunks: &[&[u8]]) -> [u8; 16] {
+    let mut h = Md5::new();
+    for chunk in chunks {
+        h.update(chunk);
+    }
+    h.finalize().into()
+}
+
+fn derive_rc4_standard_intermediate_key(password: &str, salt: &[u8; 16]) -> [u8; 16] {
+    // [MS-OFFCRYPTO] "Standard Encryption" key derivation (Excel 97-2003 RC4):
+    // - password_hash = MD5(UTF16LE(password)[..15])
+    // - intermediate_key = MD5(password_hash + salt)
+    let pw_bytes = utf16le_bytes_truncated_15(password);
+    let password_hash = md5_bytes(&[&pw_bytes]);
+    md5_bytes(&[&password_hash, salt])
+}
+
+fn derive_rc4_standard_block_key(intermediate_key: &[u8; 16], block: u32) -> [u8; 16] {
+    // block_key = MD5(intermediate_key + block_index_le32)
+    md5_bytes(&[intermediate_key, &block.to_le_bytes()])
 }
 
 fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
@@ -278,6 +372,88 @@ impl PayloadRc4 {
     }
 }
 
+struct PayloadRc4Standard {
+    intermediate_key: [u8; 16],
+    key_len: usize,
+    block: u32,
+    pos_in_block: usize,
+    rc4: Rc4,
+}
+
+impl PayloadRc4Standard {
+    fn new(intermediate_key: [u8; 16], key_len: usize) -> Self {
+        let key0 = derive_rc4_standard_block_key(&intermediate_key, 0);
+        Self {
+            intermediate_key,
+            key_len,
+            block: 0,
+            pos_in_block: 0,
+            rc4: Rc4::new(&key0[..key_len]),
+        }
+    }
+
+    fn rekey(&mut self) {
+        self.block = self.block.wrapping_add(1);
+        let key = derive_rc4_standard_block_key(&self.intermediate_key, self.block);
+        self.rc4 = Rc4::new(&key[..self.key_len]);
+        self.pos_in_block = 0;
+    }
+
+    fn apply_keystream(&mut self, mut data: &mut [u8]) {
+        const PAYLOAD_BLOCK_SIZE: usize = 1024;
+        while !data.is_empty() {
+            if self.pos_in_block == PAYLOAD_BLOCK_SIZE {
+                self.rekey();
+            }
+
+            let remaining_in_block = PAYLOAD_BLOCK_SIZE.saturating_sub(self.pos_in_block);
+            let chunk_len = data.len().min(remaining_in_block);
+            let (chunk, rest) = data.split_at_mut(chunk_len);
+            self.rc4.apply_keystream(chunk);
+            self.pos_in_block += chunk_len;
+            data = rest;
+        }
+    }
+}
+
+struct PayloadXor {
+    key_bytes: [u8; 2],
+    xor_array: [u8; 16],
+    pos: usize,
+}
+
+impl PayloadXor {
+    fn new(key: u16, password: &str) -> Self {
+        Self {
+            key_bytes: key.to_le_bytes(),
+            xor_array: derive_xor_array(password),
+            pos: 0,
+        }
+    }
+
+    fn apply_keystream(&mut self, data: &mut [u8]) {
+        for b in data.iter_mut() {
+            let ks = self.xor_array[self.pos % self.xor_array.len()] ^ self.key_bytes[self.pos % 2];
+            *b ^= ks;
+            self.pos = self.pos.saturating_add(1);
+        }
+    }
+}
+
+fn derive_xor_array(password: &str) -> [u8; 16] {
+    // Mirrors the legacy BIFF XOR obfuscation "XOR array" used by `crates/formula-xls`.
+    const PAD: [u8; 16] = [
+        0xBB, 0xFF, 0xFF, 0xBA, 0xFF, 0xFF, 0xB9, 0xFF, 0xFF, 0xB8, 0xFF, 0xFF, 0xB7, 0xFF,
+        0xFF, 0xB6,
+    ];
+
+    let mut out = PAD;
+    for (i, ch) in password.encode_utf16().take(out.len()).enumerate() {
+        out[i] ^= (ch & 0xFF) as u8;
+    }
+    out
+}
+
 fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
     // FILEPASS payload layout (CryptoAPI) [MS-XLS 2.4.105]:
     //   u16 wEncryptionType = 0x0001 (RC4)
@@ -355,68 +531,131 @@ fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
     payload
 }
 
+fn encrypt_payloads_after_filepass<T>(
+    workbook_stream: &mut [u8],
+    filepass_data_end: usize,
+    mut cipher: T,
+) where
+    T: FnMut(&mut [u8]),
+{
+    let mut cursor = filepass_data_end;
+    while cursor < workbook_stream.len() {
+        let remaining = workbook_stream.len().saturating_sub(cursor);
+        if remaining < 4 {
+            break;
+        }
+
+        let len = u16::from_le_bytes([workbook_stream[cursor + 2], workbook_stream[cursor + 3]]) as usize;
+        let data_start = cursor + 4;
+        let data_end = data_start + len;
+        assert!(
+            data_end <= workbook_stream.len(),
+            "generated BIFF record extends past end of stream"
+        );
+
+        cipher(&mut workbook_stream[data_start..data_end]);
+        cursor = data_end;
+    }
+}
+
+fn build_xor_encrypted_xls_bytes(password: &str) -> Vec<u8> {
+    // BIFF8 XOR obfuscation fixture.
+    const KEY: u16 = 0x1234;
+    let verifier = hash_legacy_password(password);
+    let filepass_payload = [
+        0x00, 0x00, // wEncryptionType (XOR)
+        KEY.to_le_bytes()[0],
+        KEY.to_le_bytes()[1],
+        verifier.to_le_bytes()[0],
+        verifier.to_le_bytes()[1],
+    ];
+
+    let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 0);
+
+    let mut offset = 0usize;
+    let mut filepass_data_end = None::<usize>;
+    while let Some((record_id, payload, next)) = super_read_record(&workbook_stream, offset) {
+        if record_id == RECORD_FILEPASS {
+            filepass_data_end = Some(offset + 4 + payload.len());
+            break;
+        }
+        offset = next;
+    }
+    let filepass_data_end =
+        filepass_data_end.expect("generated workbook stream should contain FILEPASS");
+
+    let mut cipher = PayloadXor::new(KEY, password);
+    encrypt_payloads_after_filepass(&mut workbook_stream, filepass_data_end, |data| {
+        cipher.apply_keystream(data);
+    });
+
+    build_xls_bytes(&workbook_stream)
+}
+
+fn build_rc4_standard_encrypted_xls_bytes(password: &str) -> Vec<u8> {
+    // BIFF8 RC4 "Standard Encryption" fixture. Ensure payload-after-FILEPASS crosses 1024 bytes by
+    // adding a large dummy record in the worksheet substream.
+
+    // Deterministic "DocId" / salt bytes.
+    let salt: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+        0xDC, 0xFE,
+    ];
+    let verifier_plain: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+        0x0E, 0x0F,
+    ];
+    let verifier_hash_plain = md5_bytes(&[&verifier_plain]);
+
+    let intermediate_key = derive_rc4_standard_intermediate_key(password, &salt);
+    let block0_key = derive_rc4_standard_block_key(&intermediate_key, 0);
+    let mut rc4 = Rc4::new(&block0_key);
+    let mut verifier_buf = [0u8; 32];
+    verifier_buf[..16].copy_from_slice(&verifier_plain);
+    verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
+    rc4.apply_keystream(&mut verifier_buf);
+
+    let mut encrypted_verifier = [0u8; 16];
+    encrypted_verifier.copy_from_slice(&verifier_buf[..16]);
+    let mut encrypted_verifier_hash = [0u8; 16];
+    encrypted_verifier_hash.copy_from_slice(&verifier_buf[16..]);
+
+    let mut filepass_payload = Vec::<u8>::new();
+    filepass_payload.extend_from_slice(&[0x01, 0x00]); // wEncryptionType (RC4)
+    filepass_payload.extend_from_slice(&[0x01, 0x00]); // major (subType)
+    filepass_payload.extend_from_slice(&[0x02, 0x00]); // minor (128-bit)
+    filepass_payload.extend_from_slice(&salt);
+    filepass_payload.extend_from_slice(&encrypted_verifier);
+    filepass_payload.extend_from_slice(&encrypted_verifier_hash);
+
+    let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 2048);
+
+    let mut offset = 0usize;
+    let mut filepass_data_end = None::<usize>;
+    while let Some((record_id, payload, next)) = super_read_record(&workbook_stream, offset) {
+        if record_id == RECORD_FILEPASS {
+            filepass_data_end = Some(offset + 4 + payload.len());
+            break;
+        }
+        offset = next;
+    }
+    let filepass_data_end =
+        filepass_data_end.expect("generated workbook stream should contain FILEPASS");
+
+    let mut cipher = PayloadRc4Standard::new(intermediate_key, 16);
+    encrypt_payloads_after_filepass(&mut workbook_stream, filepass_data_end, |data| {
+        cipher.apply_keystream(data);
+    });
+
+    build_xls_bytes(&workbook_stream)
+}
+
 fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     // Build a minimal BIFF8 workbook stream with one sheet containing A1=42, then encrypt all
     // record payload bytes after FILEPASS using RC4 CryptoAPI.
 
     let filepass_payload = build_filepass_cryptoapi_payload(password);
-
-    // -- Globals ----------------------------------------------------------------
-    let mut globals = Vec::<u8>::new();
-    push_record(&mut globals, RECORD_BOF, &bof_biff8(BOF_DT_WORKBOOK_GLOBALS));
-    push_record(&mut globals, RECORD_FILEPASS, &filepass_payload);
-    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
-    push_record(&mut globals, RECORD_WINDOW1, &window1());
-    push_record(&mut globals, RECORD_FONT, &font("Arial"));
-
-    // XF table: keep the usual 16 style XFs so BIFF consumers stay happy.
-    for _ in 0..16 {
-        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true, 0x20));
-    }
-    // Cell XF used by the sheet's NUMBER record. Make it non-default (vertical alignment = Top)
-    // so the decrypt + BIFF parser tests can assert that XF metadata after FILEPASS was imported.
-    let xf_cell: u16 = 16;
-    // Make the cell XF "interesting" so the decryption integration test can assert that
-    // workbook-global styles (XF) are imported correctly after decrypting the stream.
-    //
-    // Alignment byte 0x00 = General + Top (vertical=top is non-default vs Excel's default bottom).
-    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false, 0x00));
-
-    // BoundSheet with placeholder offset.
-    let boundsheet_start = globals.len();
-    let mut boundsheet = Vec::<u8>::new();
-    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
-    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
-    write_short_unicode_string(&mut boundsheet, "Sheet1");
-    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
-    let boundsheet_offset_pos = boundsheet_start + 4;
-
-    push_record(&mut globals, RECORD_EOF, &[]);
-
-    // -- Sheet ------------------------------------------------------------------
-    let sheet_offset = globals.len();
-    let mut sheet = Vec::<u8>::new();
-    push_record(&mut sheet, RECORD_BOF, &bof_biff8(BOF_DT_WORKSHEET));
-
-    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
-    let mut dims = Vec::<u8>::new();
-    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
-    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
-    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
-    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
-    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
-    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
-    push_record(&mut sheet, RECORD_WINDOW2, &window2());
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 42.0));
-    push_record(&mut sheet, RECORD_EOF, &[]);
-
-    // Patch BoundSheet offset to point at the sheet BOF.
-    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
-        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
-    globals.extend_from_slice(&sheet);
-
-    // Encrypt payloads after FILEPASS.
-    let mut workbook_stream = globals;
+    let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 0);
     let mut offset = 0usize;
     let mut filepass_data_end = None::<usize>;
     while let Some((record_id, payload, next)) =
@@ -437,24 +676,9 @@ fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     ];
     let key_material = derive_cryptoapi_key_material(password, &salt);
     let mut cipher = PayloadRc4::new(key_material, 16);
-
-    let mut cursor = filepass_data_end;
-    while cursor < workbook_stream.len() {
-        let remaining = workbook_stream.len().saturating_sub(cursor);
-        if remaining < 4 {
-            break;
-        }
-        let len = u16::from_le_bytes([workbook_stream[cursor + 2], workbook_stream[cursor + 3]])
-            as usize;
-        let data_start = cursor + 4;
-        let data_end = data_start + len;
-        assert!(
-            data_end <= workbook_stream.len(),
-            "generated BIFF record extends past end of stream"
-        );
-        cipher.apply_keystream(&mut workbook_stream[data_start..data_end]);
-        cursor = data_end;
-    }
+    encrypt_payloads_after_filepass(&mut workbook_stream, filepass_data_end, |data| {
+        cipher.apply_keystream(data);
+    });
 
     build_xls_bytes(&workbook_stream)
 }
@@ -482,46 +706,18 @@ fn regenerate_encrypted_xls_fixtures() {
         .join("encrypted");
     std::fs::create_dir_all(&fixtures_dir).expect("create encrypted fixtures dir");
 
-    // FILEPASS payloads for detection fixtures are intentionally minimal; `formula-xls` only needs
-    // to observe that `FILEPASS` exists and to classify the scheme.
-    //
-    // FILEPASS payload layouts we care about for classification:
-    //
-    // - BIFF8 XOR obfuscation:
-    //   wEncryptionType (0x0000) + key (u16) + verifier (u16)
-    //
-    // - BIFF8 RC4:
-    //   wEncryptionType (0x0001) + subType (0x0001) + opaque algorithm payload
-    //
-    // - BIFF8 RC4 CryptoAPI:
-    //   wEncryptionType (0x0001) + subType (0x0002) + CryptoAPI EncryptionInfo bytes
-    //
-    // We intentionally keep the algorithm-specific bytes synthetic/deterministic; the importer
-    // currently only needs to classify the variant.
-    let xor_payload = [0x00, 0x00, 0x34, 0x12, 0x78, 0x56]; // type + key + verifier
+    // Decryptable BIFF8 XOR fixture.
+    let xor_path = fixtures_dir.join("biff8_xor_pw_open.xls");
+    let xor_bytes = build_xor_encrypted_xls_bytes("password");
+    std::fs::write(&xor_path, xor_bytes)
+        .unwrap_or_else(|err| panic!("write encrypted fixture {xor_path:?} failed: {err}"));
 
-    // Use a 52-byte payload for RC4: 4-byte header + 48 bytes of deterministic filler.
-    let mut rc4_standard_payload = Vec::with_capacity(4 + 48);
-    rc4_standard_payload.extend_from_slice(&[
-        0x01, 0x00, // wEncryptionType (RC4)
-        0x01, 0x00, // subType (RC4)
-    ]);
-    rc4_standard_payload.extend(0u8..48u8);
-
-    let detection_fixtures: [(&str, Vec<u8>); 2] = [
-        ("biff8_xor_pw_open.xls", xor_payload.to_vec()),
-        ("biff8_rc4_standard_pw_open.xls", rc4_standard_payload),
-    ];
-
-    for (filename, filepass_payload) in detection_fixtures {
-        let workbook_stream = workbook_stream_with_filepass(&filepass_payload);
-        let bytes = build_xls_bytes(&workbook_stream);
-
-        let path = fixtures_dir.join(filename);
-        std::fs::write(&path, bytes).unwrap_or_else(|err| {
-            panic!("write encrypted fixture {path:?} failed: {err}");
-        });
-    }
+    // Decryptable BIFF8 RC4 Standard fixture.
+    let rc4_standard_path = fixtures_dir.join("biff8_rc4_standard_pw_open.xls");
+    let rc4_standard_bytes = build_rc4_standard_encrypted_xls_bytes("password");
+    std::fs::write(&rc4_standard_path, rc4_standard_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {rc4_standard_path:?} failed: {err}");
+    });
 
     // Decryptable BIFF8 RC4 CryptoAPI fixture.
     let cryptoapi_path = fixtures_dir.join("biff8_rc4_cryptoapi_pw_open.xls");

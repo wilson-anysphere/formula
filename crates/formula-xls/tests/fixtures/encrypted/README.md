@@ -20,18 +20,25 @@ Why a dedicated directory?
 
 ## Fixture inventory
 
-All fixtures are intentionally tiny.
+All fixtures are intentionally tiny **real encrypted workbooks** generated deterministically by
+`tests/regenerate_encrypted_xls_fixtures.rs`.
 
-- The XOR + “RC4 standard” fixtures are **detection fixtures** (minimal CFB + `Workbook` stream
-  containing just enough BIFF to surface a `FILEPASS` record).
-- The RC4 CryptoAPI fixture is a **real encrypted workbook** (still small) used to validate the
-  decryption path.
+Each fixture contains:
+
+- workbook globals with at least one `FONT` + `XF` record **after** `FILEPASS` (so those payload bytes
+  are encrypted)
+- a single worksheet `Sheet1` with `A1=42` and a non-default cell style (vertical alignment = Top)
+
+The RC4 Standard fixture additionally ensures the encrypted record-data stream after `FILEPASS`
+crosses the 1024-byte boundary (to exercise RC4 per-block rekeying).
 
 `formula-xls` treats `FILEPASS` as a signal that the workbook is encrypted/password-protected.
 
 - `import_xls_path` does **not** support encrypted workbooks and returns `ImportError::EncryptedWorkbook`.
-- `import_xls_path_with_password` supports a subset of BIFF8 encryption: **RC4 CryptoAPI**
-  (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`).
+- `import_xls_path_with_password` supports these legacy `.xls` encryption schemes:
+  - XOR obfuscation (`wEncryptionType=0x0000`)
+  - RC4 Standard (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
+  - RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
 
 Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` field distinguishes
 “RC4 standard” (`subType=0x0001`) from “RC4 CryptoAPI” (`subType=0x0002`).

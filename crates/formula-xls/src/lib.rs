@@ -268,8 +268,11 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
 /// Import a legacy `.xls` workbook from disk using a password for BIFF8 `FILEPASS` encryption.
 ///
-/// This currently supports Excel 2000/2003-style RC4 CryptoAPI encryption (`FILEPASS`
-/// `wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`).
+/// This supports BIFF5/BIFF8 `.xls` workbooks that use the legacy `FILEPASS` record for workbook
+/// password protection, including:
+/// - BIFF8 XOR obfuscation (`wEncryptionType=0x0000`)
+/// - BIFF8 RC4 "Standard Encryption" (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
+/// - BIFF8 RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
 pub fn import_xls_path_with_password(
     path: impl AsRef<Path>,
     password: &str,
@@ -344,7 +347,7 @@ fn import_xls_path_with_biff_reader(
             .as_deref()
             .expect("checked Some via needs_decrypt");
         let decrypted = catch_calamine_panic_with_context("decrypting `.xls` workbook stream", || {
-            decrypt::decrypt_biff8_workbook_stream_rc4_cryptoapi(encrypted_stream, password)
+            decrypt::decrypt_biff_workbook_stream(encrypted_stream, password)
         })??;
         workbook_stream = Some(decrypted);
     }

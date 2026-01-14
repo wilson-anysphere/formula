@@ -18,8 +18,10 @@ const RECORD_FILEPASS: u16 = 0x002F;
 const RECORD_MASKED: u16 = 0xFFFF;
 
 // FILEPASS.wEncryptionType values [MS-XLS 2.4.105].
+const ENCRYPTION_TYPE_XOR: u16 = 0x0000;
 const ENCRYPTION_TYPE_RC4: u16 = 0x0001;
 // FILEPASS.wEncryptionSubType values for `wEncryptionType == 0x0001`.
+const ENCRYPTION_SUBTYPE_STANDARD: u16 = 0x0001;
 const ENCRYPTION_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
 
 // CryptoAPI algorithm identifiers [MS-OFFCRYPTO] / WinCrypt.h.
@@ -28,6 +30,78 @@ const CALG_SHA1: u32 = 0x0000_8004;
 
 const PAYLOAD_BLOCK_SIZE: usize = 1024;
 const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
+
+fn map_biff_decrypt_error(err: crate::biff::encryption::DecryptError) -> DecryptError {
+    match err {
+        crate::biff::encryption::DecryptError::WrongPassword => DecryptError::WrongPassword,
+        crate::biff::encryption::DecryptError::UnsupportedEncryption(_) => {
+            DecryptError::UnsupportedEncryption
+        }
+        crate::biff::encryption::DecryptError::InvalidFilePass(message) => {
+            DecryptError::InvalidFormat(message)
+        }
+        crate::biff::encryption::DecryptError::NoFilePass => {
+            DecryptError::InvalidFormat("missing FILEPASS record".to_string())
+        }
+        crate::biff::encryption::DecryptError::PasswordRequired => DecryptError::WrongPassword,
+    }
+}
+
+/// Decrypt an in-memory BIFF workbook stream for any supported `FILEPASS` scheme.
+///
+/// The returned workbook stream has the `FILEPASS` record id *masked* (replaced with `0xFFFF`) so
+/// downstream BIFF parsers (and `calamine`) treat the stream as plaintext without shifting any
+/// record offsets (e.g. `BoundSheet8.lbPlyPos`).
+pub(crate) fn decrypt_biff_workbook_stream(
+    workbook_stream: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, DecryptError> {
+    let biff_version = crate::biff::detect_biff_version(workbook_stream);
+    if biff_version != crate::biff::BiffVersion::Biff8 {
+        // Legacy BIFF5 XOR (and any future non-BIFF8 schemes) are handled by the BIFF decryptor.
+        let mut out = workbook_stream.to_vec();
+        crate::biff::encryption::decrypt_workbook_stream(&mut out, password)
+            .map_err(map_biff_decrypt_error)?;
+        crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(&mut out);
+        return Ok(out);
+    }
+
+    // For BIFF8, dispatch CryptoAPI RC4 decryption to the existing implementation (it returns a
+    // new Vec and masks FILEPASS), but use the BIFF decryptor for XOR + legacy RC4.
+    let (filepass_offset, filepass_len) = find_filepass_record_offset(workbook_stream)?;
+    let filepass_data_start = filepass_offset + 4;
+    let filepass_data_end = filepass_data_start
+        .checked_add(filepass_len)
+        .ok_or_else(|| DecryptError::InvalidFormat("FILEPASS length overflow".to_string()))?;
+    let filepass_payload = workbook_stream
+        .get(filepass_data_start..filepass_data_end)
+        .ok_or_else(|| DecryptError::InvalidFormat("FILEPASS payload out of bounds".to_string()))?;
+
+    // FILEPASS payload begins with `wEncryptionType` (u16). For BIFF8 RC4, the next u16 is
+    // `wEncryptionSubType` (0x0001=Standard, 0x0002=CryptoAPI).
+    let encryption_type = read_u16_le(filepass_payload, 0).ok_or_else(|| {
+        DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
+    })?;
+
+    if encryption_type == ENCRYPTION_TYPE_RC4 {
+        let sub_type = read_u16_le(filepass_payload, 2).ok_or_else(|| {
+            DecryptError::InvalidFormat("FILEPASS missing wEncryptionSubType".to_string())
+        })?;
+        if sub_type == ENCRYPTION_SUBTYPE_CRYPTOAPI {
+            return decrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream, password);
+        }
+        if sub_type != ENCRYPTION_SUBTYPE_STANDARD {
+            return Err(DecryptError::UnsupportedEncryption);
+        }
+    } else if encryption_type != ENCRYPTION_TYPE_XOR {
+        return Err(DecryptError::UnsupportedEncryption);
+    }
+
+    let mut out = workbook_stream.to_vec();
+    crate::biff::encryption::decrypt_workbook_stream(&mut out, password).map_err(map_biff_decrypt_error)?;
+    crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(&mut out);
+    Ok(out)
+}
 
 #[derive(Debug, Clone)]
 struct EncryptionHeader {
