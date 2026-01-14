@@ -810,6 +810,7 @@ a:visited {
 .formula-range-preview-tooltip__header {
   font-weight: 700;
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .formula-range-preview-tooltip__grid {
