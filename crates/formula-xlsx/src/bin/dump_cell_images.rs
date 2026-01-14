@@ -38,7 +38,7 @@ fn usage() -> &'static str {
 Inspects `xl/cellimages.xml` and related parts in one or more workbooks.\n\
 \n\
 Options:\n\
-  --password <pw>  Password for Office-encrypted workbooks (OLE `EncryptedPackage`)\n\
+  --password <pw>  Password for Office-encrypted workbooks (OLE `EncryptedPackage`; use --password '' for empty password)\n\
   --print-xml  Print the raw `cellimages.xml` (UTF-8 only)\n\
   --json       Emit one JSON object per workbook (one per line)\n\
 "
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some(pw) = args.next() else {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 };
-                if pw.is_empty() {
+                if pw.starts_with('-') {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 }
                 password = Some(pw);
@@ -80,9 +80,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some((_, pw)) = flag.split_once('=') else {
                     unreachable!();
                 };
-                if pw.is_empty() {
-                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
-                }
                 password = Some(pw.to_string());
             }
             flag if flag.starts_with('-') => {

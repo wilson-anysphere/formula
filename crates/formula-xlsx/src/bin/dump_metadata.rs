@@ -29,6 +29,7 @@ fn usage() -> &'static str {
     "dump_metadata [--password <pw>] <path.xlsx|path.xlsm>\n\
 \n\
 Debug CLI to inspect SpreadsheetML linked/rich-data metadata:\n\
+  - (use --password '' for empty-password encrypted workbooks)\n\
   - xl/metadata.xml\n\
   - xl/_rels/metadata.xml.rels\n\
   - xl/richData/*\n\
@@ -54,7 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some(pw) = args.next() else {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 };
-                if pw.is_empty() {
+                if pw.starts_with('-') {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 }
                 password = Some(pw);
@@ -63,9 +64,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some((_, pw)) = flag.split_once('=') else {
                     unreachable!();
                 };
-                if pw.is_empty() {
-                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
-                }
                 password = Some(pw.to_string());
             }
             flag if flag.starts_with('-') => {

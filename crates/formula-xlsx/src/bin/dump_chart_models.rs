@@ -70,6 +70,9 @@ fn usage() -> &'static str {
 Writes one JSON file per extracted chart under:\n\
   <out-dir>/<workbook-stem>/chart<N>.json\n\
 \n\
+Notes:\n\
+  - Use --password '' for empty-password encrypted workbooks.\n\
+\n\
 Defaults:\n\
   --out-dir fixtures/charts/models\n\
 "
@@ -104,7 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some(pw) = args.next() else {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 };
-                if pw.is_empty() {
+                if pw.starts_with('-') {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 }
                 password = Some(pw);
@@ -113,9 +116,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some((_, pw)) = flag.split_once('=') else {
                     unreachable!();
                 };
-                if pw.is_empty() {
-                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
-                }
                 password = Some(pw.to_string());
             }
             "--print-parts" => {

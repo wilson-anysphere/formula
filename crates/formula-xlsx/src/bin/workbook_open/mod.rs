@@ -19,7 +19,7 @@ pub fn open_xlsx_package(path: &Path, password: Option<&str>) -> Result<XlsxPack
 
     if password.is_none() && is_encrypted_ooxml_ole(&bytes) {
         return Err(format!(
-            "password required: workbook `{}` is Office-encrypted; pass --password <pw>",
+            "password required: workbook `{}` is Office-encrypted; pass --password <pw> (use --password '' for empty password)",
             path.display()
         )
         .into());

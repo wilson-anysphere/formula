@@ -58,7 +58,7 @@ Output format (one line per cell):\n\
 \n\
 Options:\n\
   --password <pw>\n\
-      Password for Office-encrypted workbooks (OLE `EncryptedPackage`).\n\
+      Password for Office-encrypted workbooks (OLE `EncryptedPackage`; use --password '' for empty password).\n\
   --print-parts\n\
       Print a list of richData-related ZIP parts (to stderr).\n\
   --extract-cell-images\n\
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some(pw) = args.next() else {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 };
-                if pw.is_empty() {
+                if pw.starts_with('-') {
                     return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
                 }
                 password = Some(pw);
@@ -98,9 +98,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let Some((_, pw)) = flag.split_once('=') else {
                     unreachable!();
                 };
-                if pw.is_empty() {
-                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
-                }
                 password = Some(pw.to_string());
             }
             "--extract-cell-images" => {
