@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write as _};
 
-use formula_xlsx::offcrypto::{decrypt_agile_ooxml_from_cfb, OffCryptoError};
+use formula_xlsx::{decrypt_agile_ooxml_from_cfb, OffCryptoError};
 use ms_offcrypto_writer::Ecma376AgileWriter;
 use rand::{rngs::StdRng, SeedableRng};
 

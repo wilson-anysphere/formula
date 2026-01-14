@@ -82,7 +82,9 @@ pub use embedded_images::{extract_embedded_images, EmbeddedImageCell};
 pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
-pub use offcrypto::{decrypt_agile_encrypted_package, OffCryptoError};
+pub use offcrypto::{
+    decrypt_agile_encrypted_package, decrypt_agile_ooxml_from_cfb, OffCryptoError,
+};
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use package::{
     read_part_from_reader, rewrite_content_types_workbook_content_type,
