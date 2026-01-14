@@ -225,7 +225,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       const sheetId = app.getCurrentSheetId();
 
       (app as any).document.setSheetDrawings(sheetId, [
@@ -315,7 +315,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       const sheetId = app.getCurrentSheetId();
 
       (app as any).document.setSheetDrawings(sheetId, [

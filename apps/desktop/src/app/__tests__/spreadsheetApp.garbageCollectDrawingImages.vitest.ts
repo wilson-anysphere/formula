@@ -145,6 +145,8 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
     };
 
     const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    // Stub the ImageStore used by SpreadsheetApp so we can assert on the "keep" set passed to GC.
+    // Note: SpreadsheetApp teardown also clears the image store.
     (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
 
     await app.garbageCollectDrawingImages();
