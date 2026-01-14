@@ -64,7 +64,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     expect(calls).toEqual(["loadWorkbookFromJson", "recalculate"]);
   });
 
-  it("applies incremental deltas without emitting format-only updates", async () => {
+  it("applies incremental deltas without emitting format-only updates when style sync hooks are absent", async () => {
     const engine = {
       loadWorkbookFromJson: vi.fn(async () => {}),
       setCell: vi.fn(async () => {}),
@@ -123,6 +123,8 @@ describe("engine sync helpers", () => {
   class FakeEngine implements EngineSyncTarget {
     readonly loadedJson: string[] = [];
     readonly setCalls: Array<{ address: string; value: unknown; sheet?: string }> = [];
+    readonly internStyleCalls: unknown[] = [];
+    readonly setStyleCalls: Array<{ address: string; styleId: number; sheet?: string }> = [];
     readonly recalcCalls: Array<string | undefined> = [];
     constructor(private readonly recalcResult: CellChange[]) {}
 
@@ -132,6 +134,15 @@ describe("engine sync helpers", () => {
 
     async setCell(address: string, value: any, sheet?: string): Promise<void> {
       this.setCalls.push({ address, value, sheet });
+    }
+
+    async internStyle(style: unknown): Promise<number> {
+      this.internStyleCalls.push(style);
+      return this.internStyleCalls.length;
+    }
+
+    async setCellStyleId(address: string, styleId: number, sheet?: string): Promise<void> {
+      this.setStyleCalls.push({ address, styleId, sheet });
     }
 
     async recalculate(sheet?: string): Promise<CellChange[]> {
@@ -155,8 +166,12 @@ describe("engine sync helpers", () => {
     expect(changes).toEqual(expected);
   });
 
-  it("engineApplyDeltas skips formatting-only edits (no recalc)", async () => {
+  it("engineApplyDeltas skips formatting-only edits when style sync hooks are absent (no recalc)", async () => {
     const engine = new FakeEngine([{ sheet: "Sheet1", address: "A1", value: 1 }]);
+
+    // Disable style sync hooks for this test.
+    (engine as Partial<EngineSyncTarget> & { internStyle?: unknown; setCellStyleId?: unknown }).internStyle = undefined;
+    (engine as Partial<EngineSyncTarget> & { internStyle?: unknown; setCellStyleId?: unknown }).setCellStyleId = undefined;
 
     const changes = await engineApplyDeltas(engine, [
       {
@@ -171,6 +186,58 @@ describe("engine sync helpers", () => {
     expect(changes).toEqual([]);
     expect(engine.setCalls).toEqual([]);
     expect(engine.recalcCalls).toEqual([]);
+  });
+
+  it("engineHydrateFromDocument syncs styleIds when style sync hooks are available", async () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { font: { italic: true } });
+    const styleId = doc.getCell("Sheet1", "A1").styleId;
+    expect(styleId).not.toBe(0);
+
+    const engine = new FakeEngine([]);
+
+    await engineHydrateFromDocument(engine, doc);
+
+    expect(engine.internStyleCalls).toEqual([doc.styleTable.get(styleId)]);
+    expect(engine.setStyleCalls).toEqual([{ address: "A1", styleId: 1, sheet: "Sheet1" }]);
+  });
+
+  it("engineApplyDeltas propagates formatting-only deltas via internStyle + setCellStyleId", async () => {
+    const doc = new DocumentController();
+    // Intern a style into the document's style table without attaching it to a cell so
+    // we can assert the delta path triggers `internStyle`.
+    const docStyleId = doc.styleTable.intern({ font: { bold: true } });
+
+    const engine = new FakeEngine([]);
+    await engineHydrateFromDocument(engine, doc);
+
+    await engineApplyDeltas(
+      engine,
+      [
+        {
+          sheetId: "Sheet1",
+          row: 0,
+          col: 0,
+          before: { value: null, formula: null, styleId: 0 },
+          after: { value: null, formula: null, styleId: docStyleId },
+        },
+        // Same style id should not be re-interned.
+        {
+          sheetId: "Sheet1",
+          row: 0,
+          col: 1,
+          before: { value: null, formula: null, styleId: 0 },
+          after: { value: null, formula: null, styleId: docStyleId },
+        },
+      ],
+      { recalculate: false },
+    );
+
+    expect(engine.internStyleCalls).toEqual([doc.styleTable.get(docStyleId)]);
+    expect(engine.setStyleCalls).toEqual([
+      { address: "A1", styleId: 1, sheet: "Sheet1" },
+      { address: "B1", styleId: 1, sheet: "Sheet1" },
+    ]);
   });
 
   it("engineApplyDeltas propagates value changes and returns recalc changes", async () => {

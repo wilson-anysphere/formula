@@ -46,8 +46,37 @@ export interface EngineSyncTarget {
   setCells?: (
     updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }>,
   ) => Promise<void> | void;
+  /**
+   * Intern a formatting/protection style object into the engine and return its engine-specific id.
+   *
+   * Optional: engines that don't implement formatting metadata can omit this method.
+   */
+  internStyle?: (style: unknown) => Promise<number> | number;
+  /**
+   * Set the engine style id for a single cell.
+   *
+   * Optional: engines that don't implement formatting metadata can omit this method.
+   */
+  setCellStyleId?: (address: string, styleId: number, sheet?: string) => Promise<void> | void;
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
 }
+
+type StyleTableLike = { get(styleId: number): unknown };
+
+type EngineStyleSyncContext = {
+  /**
+   * Reference to the document's style table, used to resolve `DocumentCellState.styleId` into the
+   * style payload passed to `EngineSyncTarget.internStyle`.
+   */
+  styleTable: StyleTableLike;
+  /**
+   * Cache mapping `DocumentController` style ids → engine style ids.
+   */
+  docStyleIdToEngineStyleId: Map<number, number>;
+};
+
+// WeakMap ensures we don't leak engine instances in long-lived apps.
+const STYLE_SYNC_BY_ENGINE = new WeakMap<EngineSyncTarget, EngineStyleSyncContext>();
 
 function parseRowColKey(key: string): { row: number; col: number } | null {
   const [rowStr, colStr] = key.split(",");
@@ -121,6 +150,47 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
 export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: any): Promise<CellChange[]> {
   const workbookJson = exportDocumentToEngineWorkbookJson(doc);
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
+
+  const styleTable = doc?.styleTable as StyleTableLike | null;
+  if (styleTable && typeof styleTable.get === "function") {
+    const ctx: EngineStyleSyncContext = { styleTable, docStyleIdToEngineStyleId: new Map() };
+    STYLE_SYNC_BY_ENGINE.set(engine, ctx);
+
+    // Only attempt to sync per-cell style ids if the engine exposes the optional formatting hooks.
+    if (engine.setCellStyleId && engine.internStyle) {
+      const sheetIds: string[] =
+        typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
+      const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+
+      for (const sheetId of ids) {
+        const sheet = doc?.model?.sheets?.get?.(sheetId);
+        if (!sheet?.cells?.entries) continue;
+
+        // Note: we intentionally include formatting-only cells (no value/formula) so CELL() can
+        // observe formatting/protection metadata even on empty cells.
+        const styleUpdates: Array<Promise<void> | void> = [];
+        for (const [key, cell] of sheet.cells.entries() as Iterable<[string, DocumentCellState]>) {
+          const docStyleId = cell?.styleId ?? 0;
+          if (!docStyleId) continue;
+
+          const coord = parseRowColKey(key);
+          if (!coord) continue;
+          const address = toA1(coord.row, coord.col);
+
+          let engineStyleId = ctx.docStyleIdToEngineStyleId.get(docStyleId);
+          if (engineStyleId == null) {
+            const style = styleTable.get(docStyleId);
+            engineStyleId = await engine.internStyle(style);
+            ctx.docStyleIdToEngineStyleId.set(docStyleId, engineStyleId);
+          }
+          styleUpdates.push(engine.setCellStyleId(address, engineStyleId, sheetId));
+        }
+        // Apply per-sheet to keep memory bounded for large workbooks.
+        if (styleUpdates.length > 0) await Promise.all(styleUpdates);
+      }
+    }
+  }
+
   return await engine.recalculate();
 }
 
@@ -131,25 +201,69 @@ export async function engineApplyDeltas(
 ): Promise<CellChange[]> {
   const shouldRecalculate = options.recalculate ?? true;
   const updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }> = [];
+  const styleUpdates: Array<{ address: string; docStyleId: number; sheet?: string }> = [];
+  let didApply = false;
 
   for (const delta of deltas) {
     const beforeInput = cellStateToEngineInput(delta.before);
     const afterInput = cellStateToEngineInput(delta.after);
 
-    // Ignore formatting-only edits and rich-text run edits that don't change the plain input.
-    if (beforeInput === afterInput) continue;
-
     const address = toA1(delta.row, delta.col);
-    updates.push({ address, value: afterInput, sheet: delta.sheetId });
+
+    // Track value/formula edits (including rich-text run edits that change plain text).
+    if (beforeInput !== afterInput) {
+      updates.push({ address, value: afterInput, sheet: delta.sheetId });
+    }
+
+    // Track formatting-only edits when the engine supports style metadata.
+    if (engine.setCellStyleId && delta.before.styleId !== delta.after.styleId) {
+      styleUpdates.push({ address, docStyleId: delta.after.styleId, sheet: delta.sheetId });
+    }
   }
 
-  if (updates.length === 0) return [];
-
-  if (engine.setCells) {
-    await engine.setCells(updates);
-  } else {
-    await Promise.all(updates.map((u) => engine.setCell(u.address, u.value, u.sheet)));
+  if (updates.length > 0) {
+    if (engine.setCells) {
+      await engine.setCells(updates);
+    } else {
+      await Promise.all(updates.map((u) => engine.setCell(u.address, u.value, u.sheet)));
+    }
+    didApply = true;
   }
+
+  if (styleUpdates.length > 0 && engine.setCellStyleId) {
+    const ctx = STYLE_SYNC_BY_ENGINE.get(engine);
+    const styleTable = ctx?.styleTable;
+    const cache = ctx?.docStyleIdToEngineStyleId;
+
+    const setStylePromises: Array<Promise<void> | void> = [];
+    for (const update of styleUpdates) {
+      // Clearing back to the default style does not require interning.
+      if (update.docStyleId === 0) {
+        setStylePromises.push(engine.setCellStyleId(update.address, 0, update.sheet));
+        continue;
+      }
+
+      if (!engine.internStyle || !styleTable || !cache) {
+        // Backwards compatibility: if we can't resolve the style object, ignore formatting-only deltas.
+        continue;
+      }
+
+      let engineStyleId = cache.get(update.docStyleId);
+      if (engineStyleId == null) {
+        const style = styleTable.get(update.docStyleId);
+        engineStyleId = await engine.internStyle(style);
+        cache.set(update.docStyleId, engineStyleId);
+      }
+      setStylePromises.push(engine.setCellStyleId(update.address, engineStyleId, update.sheet));
+    }
+
+    if (setStylePromises.length > 0) {
+      await Promise.all(setStylePromises);
+      didApply = true;
+    }
+  }
+
+  if (!didApply) return [];
   if (!shouldRecalculate) return [];
   return await engine.recalculate();
 }
