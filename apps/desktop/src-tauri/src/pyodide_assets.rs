@@ -734,6 +734,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oversized_cached_assets_are_treated_as_missing_and_replaced() {
+        let files = vec![("a.txt".to_string(), b"hello".to_vec())];
+        let base_url = serve_files_once(files.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // Create an oversized file so `file_has_expected_hash` refuses to hash it.
+        let bad_entry = cache_dir.join("a.txt");
+        let file = std::fs::File::create(&bad_entry).unwrap();
+        file.set_len((MAX_SINGLE_PYODIDE_ASSET_BYTES as u64) + 1).unwrap();
+        drop(file);
+
+        let expected_sha = sha256_bytes(b"hello");
+        let specs = vec![PyodideAssetSpec {
+            file_name: "a.txt",
+            sha256: expected_sha.as_str(),
+        }];
+
+        let ok = ensure_pyodide_assets_in_dir(&cache_dir, &base_url, &specs, true, |_| {})
+            .await
+            .unwrap();
+        assert!(ok);
+        assert!(bad_entry.is_file(), "expected oversized cached file to be replaced");
+        assert_eq!(std::fs::read(&bad_entry).unwrap(), b"hello");
+    }
+
+    #[tokio::test]
     async fn downloads_and_verifies_sha256() {
         let files = vec![
             ("a.txt".to_string(), b"hello".to_vec()),
