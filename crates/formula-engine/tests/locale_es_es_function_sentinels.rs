@@ -142,9 +142,9 @@ fn locale_es_es_identity_mapping_rate_is_not_suspiciously_high() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (canonical, localized) = line
-            .split_once('\t')
-            .unwrap_or_else(|| panic!("invalid TSV entry (expected Canonical<TAB>Localized): {line}"));
+        let (canonical, localized) = line.split_once('\t').unwrap_or_else(|| {
+            panic!("invalid TSV entry (expected Canonical<TAB>Localized): {line}")
+        });
         total += 1;
         if canonical == localized {
             identity += 1;
