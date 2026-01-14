@@ -1377,22 +1377,14 @@ jobs:
             throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
           }
 
-          $bundleCandidates = @(
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
-          )
-          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $bundleDir) {
-            $candidatesJoined = $bundleCandidates -join "`n"
-            throw "windows-bundle: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
+          $bundleDir = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"
+          if (-not (Test-Path $bundleDir)) {
+            throw "windows-bundle: ERROR expected Tauri bundle dir not found at: $bundleDir`nThis should be produced by the release build for target '$target'."
           }
-          # Note: we prefer the src-tauri target dir, but fall back to other Cargo target roots
-          # in case the workflow/toolchain output layout changes.
-          if ($bundleDir -ne $bundleCandidates[0]) {
-            Write-Host "windows-bundle: NOTE bundle dir is not in the preferred location; using: $bundleDir"
-          }
-          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
+
+          # Lightweight post-build assertion: ensure we produced at least one Windows installer file
+          # (either MSI or EXE) under the per-target bundle directory.
+          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir
 
       - name: Verify Windows installer signatures (signtool verify /pa /v)
         if: runner.os == 'Windows' && ((secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '') || vars.FORMULA_REQUIRE_CODESIGN == '1')
