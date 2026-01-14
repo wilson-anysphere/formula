@@ -168,6 +168,11 @@ treat it as `u32 totalSize` + `u32 reserved` (often 0). To avoid truncation or �
 parse as `lo=u32le(bytes[0..4])`, `hi=u32le(bytes[4..8])`, then
 `original_size = lo as u64 | ((hi as u64) << 32)`.
 
+If you implement a “high DWORD is reserved” fallback (treating `original_size = lo` when `hi != 0`
+and the combined `u64` is not plausible for the ciphertext length), avoid applying that fallback
+when `lo == 0`. Some real files may store a true 64-bit size that is an exact multiple of `2^32`
+(e.g. exactly 4GiB).
+
 After decryption, the plaintext stream is truncated to `original_size`.
 
 ## Key derivation + verification (nuances that matter)

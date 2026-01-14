@@ -90,6 +90,11 @@ hi = u32le(prefix[4..8])
 orig_size = lo as u64 | ((hi as u64) << 32)
 ```
 
+Some libraries treat the upper DWORD as “reserved”. In that case, a tolerant reader can fall back to
+`orig_size = lo` when `hi != 0` **and** the combined 64-bit size is not plausible for the available
+ciphertext length. However, avoid applying this fallback when `lo == 0`, because some real files may
+store a true 64-bit size that is an exact multiple of `2^32` (e.g. exactly 4GiB).
+
 Spec note (MS-OFFCRYPTO §2.3.4.4): the *physical* stream length can be **larger** than `orig_size`
 because the encrypted data is padded to a cipher block boundary.
 

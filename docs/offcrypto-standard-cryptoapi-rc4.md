@@ -62,6 +62,12 @@ Important details:
   hi = u32le(bytes[4..8])
   original_size = lo as u64 | ((hi as u64) << 32)
   ```
+
+  Some implementations treat the upper DWORD as “reserved” and will ignore it. For compatibility,
+  readers may fall back to interpreting the size as `lo` when `hi != 0` and the combined 64-bit size
+  is not plausible for the available ciphertext length. However, avoid falling back when `lo == 0`:
+  some real files may store a true 64-bit size that is an exact multiple of `2^32` (e.g. exactly
+  4GiB).
 - The ciphertext may contain extra trailing bytes beyond `original_size` (e.g. OLE sector padding).
   Callers should decrypt and then **truncate to `original_size`**.
 - `original_size` is *not* a crypto padding indicator (RC4 is a stream cipher; there is no PKCS#7).
