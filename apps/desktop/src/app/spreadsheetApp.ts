@@ -7851,12 +7851,13 @@ export class SpreadsheetApp {
     const uiId = typeof (commit as any).id === "number" ? (commit as any).id : after.id;
     if (typeof uiId !== "number" || !Number.isFinite(uiId)) return;
 
+    const commitKind = typeof (commit as any).kind === "string" ? String((commit as any).kind) : "";
     const label =
-      commit.kind === "move"
+      commitKind === "move"
         ? "Move Drawing"
-        : commit.kind === "resize"
+        : commitKind === "resize"
           ? "Resize Drawing"
-          : commit.kind === "rotate"
+          : commitKind === "rotate"
             ? "Rotate Drawing"
             : "Edit Drawing";
 
@@ -7918,8 +7919,15 @@ export class SpreadsheetApp {
       };
 
       // Persist rotation/flips (or clear if the UI removed them).
-      if (after.transform) next.transform = after.transform;
-      else if ("transform" in next) delete next.transform;
+      // Be conservative for move/resize commits: if the UI-layer `after` object does not include
+      // `transform` (e.g. because the adapter couldn't parse a malformed raw transform payload),
+      // preserve the raw field rather than wiping it. Only treat absence as authoritative during
+      // rotate commits (where the user explicitly edited rotation).
+      const shouldUpdateTransform = commitKind === "rotate" || Object.prototype.hasOwnProperty.call(after, "transform");
+      if (shouldUpdateTransform) {
+        if (after.transform) next.transform = after.transform;
+        else if ("transform" in next) delete next.transform;
+      }
 
       // Persist any preserved DrawingML payloads (e.g. patched `<a:xfrm>` in `xlsx.pic_xml`).
       //
