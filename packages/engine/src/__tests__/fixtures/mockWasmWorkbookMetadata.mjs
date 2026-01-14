@@ -30,7 +30,15 @@ export class WasmWorkbook {
     return [];
   }
   setCell(_address, _value, _sheet) {}
-  setRange(_range, _values, _sheet) {}
+  setCells(updates) {
+    recordCall("setCells", updates);
+  }
+  setCellRich(address, value, sheet) {
+    recordCall("setCellRich", address, value, sheet);
+  }
+  setRange(range, values, sheet) {
+    recordCall("setRange", range, values, sheet);
+  }
   recalculate(_sheet) {
     return [];
   }

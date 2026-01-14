@@ -628,16 +628,25 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               result = wb.toJson();
               break;
             case "getCell":
-              result = normalizeCellData(wb.getCell(params.address, params.sheet));
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                result = normalizeCellData(wb.getCell(params.address, sheet));
+              }
               break;
             case "getCellRich":
               if (typeof (wb as any).getCellRich !== "function") {
                 throw new Error("getCellRich: WasmWorkbook.getCellRich is not available in this WASM build");
               }
-              result = cloneToPlainData((wb as any).getCellRich(params.address, params.sheet));
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                result = cloneToPlainData((wb as any).getCellRich(params.address, sheet));
+              }
               break;
             case "getRange":
-              result = normalizeRangeData(wb.getRange(params.range, params.sheet));
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                result = normalizeRangeData(wb.getRange(params.range, sheet));
+              }
               break;
             case "getRangeCompact":
               if (typeof (wb as any).getRangeCompact !== "function") {
@@ -645,7 +654,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   "getRangeCompact: WasmWorkbook.getRangeCompact is not available in this WASM build"
                 );
               }
-              result = normalizeRangeDataCompact((wb as any).getRangeCompact(params.range, params.sheet));
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                result = normalizeRangeDataCompact((wb as any).getRangeCompact(params.range, sheet));
+              }
               break;
             case "setSheetDimensions":
               if (typeof (wb as any).setSheetDimensions !== "function") {
@@ -690,6 +702,11 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               result = null;
               break;
             case "setCells":
+              for (const update of params.updates as Array<any>) {
+                if (typeof update?.sheet === "string" && update.sheet.trim() === "") {
+                  delete update.sheet;
+                }
+              }
               if (typeof (wb as any).setCells === "function") {
                 (wb as any).setCells(params.updates);
               } else {
@@ -703,11 +720,17 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setCellRich !== "function") {
                 throw new Error("setCellRich: WasmWorkbook.setCellRich is not available in this WASM build");
               }
-              (wb as any).setCellRich(params.address, params.value, params.sheet);
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                (wb as any).setCellRich(params.address, params.value, sheet);
+              }
               result = null;
               break;
             case "setRange":
-              wb.setRange(params.range, params.values, params.sheet);
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                wb.setRange(params.range, params.values, sheet);
+              }
               result = null;
               break;
             case "setLocale":
@@ -837,7 +860,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               result = (wb as any).internStyle(params.style);
               break;
             case "recalculate":
-              result = normalizeCellChanges(wb.recalculate(params.sheet));
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                result = normalizeCellChanges(wb.recalculate(sheet));
+              }
               break;
             case "applyOperation":
               if (typeof (wb as any).applyOperation === "function") {

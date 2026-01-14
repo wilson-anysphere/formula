@@ -361,6 +361,71 @@ describe("engine.worker workbook metadata RPCs", () => {
       delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
     }
   });
+
+  it("treats blank sheet names as missing for sheet-optional cell edit RPCs", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [
+            { sheet: "", address: "A1", value: 1 },
+            { sheet: "Sheet2", address: "A2", value: 2 },
+            { sheet: "   ", address: "A3", value: 3 }
+          ]
+        }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setRange",
+        params: { sheet: "", range: "A1:A1", values: [[1]] }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 3,
+        method: "setCellRich",
+        params: { sheet: " ", address: "B1", value: null }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 4,
+        method: "getCell",
+        params: { sheet: "", address: "A1" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toEqual({ sheet: "Sheet1", address: "A1", input: null, value: null });
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        [
+          "setCells",
+          [
+            { address: "A1", value: 1 },
+            { address: "A2", value: 2, sheet: "Sheet2" },
+            { address: "A3", value: 3 }
+          ]
+        ],
+        ["setRange", "A1:A1", [[1]], undefined],
+        ["setCellRich", "B1", null, undefined]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
 });
 
 const previousSelf = (globalThis as any).self;
