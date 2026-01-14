@@ -12,6 +12,15 @@ import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 export type RewriteFormulasForCopyDeltaRequest = { formula: string; deltaRow: number; deltaCol: number };
 
+function normalizeFormulaText(formula: unknown): string | null {
+  if (formula == null) return null;
+  const trimmed = String(formula).trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
+}
+
 export interface ApplyFillCommitOptions {
   document: DocumentController;
   sheetId: string;
@@ -74,7 +83,7 @@ export function applyFillCommitToDocumentController(options: ApplyFillCommitOpti
     for (let col = sourceRange.startCol; col < sourceRange.endCol; col++) {
       coordScratch.col = col;
       const cell = doc.getCell(sheetId, coordScratch) as { value: unknown; formula: string | null };
-      const formula = typeof cell?.formula === "string" && cell.formula.trim() !== "" ? cell.formula : null;
+      const formula = normalizeFormulaText(cell?.formula);
       if (formula) {
         let computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
         if (mode === "copy" && typeof computed === "string") {
@@ -205,7 +214,7 @@ export async function computeFillEditsForDocumentControllerWithFormulaRewrite(
     for (let col = sourceRange.startCol; col < sourceRange.endCol; col++) {
       coordScratch.col = col;
       const cell = doc.getCell(sheetId, coordScratch) as { value: unknown; formula: string | null };
-      const formula = typeof cell?.formula === "string" && cell.formula.trim() !== "" ? cell.formula : null;
+      const formula = normalizeFormulaText(cell?.formula);
       if (formula) {
         let computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
         if (mode === "copy" && typeof computed === "string") {

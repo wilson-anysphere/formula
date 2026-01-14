@@ -46,10 +46,10 @@ export function splitWorkbookPath(path: string): WorkbookFileMetadata | null {
 export function getWorkbookFileMetadataFromWorkbookInfo(
   info: Pick<WorkbookInfo, "path" | "origin_path"> | null,
 ): WorkbookFileMetadata {
-  const rawPath = typeof info?.path === "string" && info.path.trim() !== "" ? info.path : null;
-  const rawOrigin = typeof info?.origin_path === "string" && info.origin_path.trim() !== "" ? info.origin_path : null;
+  const rawPath = typeof info?.path === "string" ? info.path.trim() : "";
+  const rawOrigin = typeof info?.origin_path === "string" ? info.origin_path.trim() : "";
 
-  const best = rawPath ?? rawOrigin;
+  const best = rawPath || rawOrigin;
   if (!best) return { directory: null, filename: null };
 
   const parsed = splitWorkbookPath(best);

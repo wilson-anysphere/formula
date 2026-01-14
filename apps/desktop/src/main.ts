@@ -639,11 +639,7 @@ function getWorkbookSnapshotForExtensions(options: { pathOverride?: string | nul
   const trimmedPath = typeof rawPath === "string" ? rawPath.trim() : "";
   const path = trimmedPath ? trimmedPath : null;
 
-  const name = (() => {
-    const pick = typeof path === "string" && path.trim() !== "" ? path : null;
-    if (!pick) return "Workbook";
-    return pick.split(/[/\\]/).pop() ?? "Workbook";
-  })();
+  const name = path ? path.split(/[/\\]/).pop() ?? "Workbook" : "Workbook";
 
   return { name, path, sheets, activeSheet };
 }
@@ -1141,9 +1137,11 @@ function installCollabStatusIndicator(app: SpreadsheetApp, element: HTMLElement)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const s = session as any;
     const direct = s?.docId ?? s?.doc_id ?? s?.id;
-    if (typeof direct === "string" && direct.trim() !== "") return direct;
+    const directTrimmed = typeof direct === "string" ? direct.trim() : "";
+    if (directTrimmed) return directTrimmed;
     const guid = s?.doc?.guid;
-    if (typeof guid === "string" && guid.trim() !== "") return guid;
+    const guidTrimmed = typeof guid === "string" ? guid.trim() : "";
+    if (guidTrimmed) return guidTrimmed;
     return "unknown";
   };
 
@@ -10241,7 +10239,8 @@ function normalizeSheetList(info: WorkbookInfo): SheetUiInfo[] {
         if (typeof rawTabColor !== "object") return undefined;
         const color = rawTabColor as any;
         const out: TabColor = {};
-        if (typeof color.rgb === "string" && color.rgb.trim() !== "") out.rgb = color.rgb;
+        const rgb = typeof color.rgb === "string" ? color.rgb.trim() : "";
+        if (rgb) out.rgb = rgb;
         if (typeof color.theme === "number") out.theme = color.theme;
         if (typeof color.indexed === "number") out.indexed = color.indexed;
         if (typeof color.tint === "number") out.tint = color.tint;
@@ -10316,9 +10315,9 @@ function randomSessionId(prefix: string): string {
 async function computeWorkbookSignature(info: WorkbookInfo): Promise<string> {
   const basePath =
     typeof info.path === "string" && info.path.trim() !== ""
-      ? info.path
+      ? info.path.trim()
       : typeof info.origin_path === "string" && info.origin_path.trim() !== ""
-        ? info.origin_path
+        ? info.origin_path.trim()
         : null;
 
   if (!basePath) {
@@ -11654,17 +11653,21 @@ try {
     listen,
     emit,
     onOpenPath: (path) => {
+      const trimmed = typeof path === "string" ? path.trim() : "";
+      if (!trimmed) return;
       // Ignore non-spreadsheet open requests (defensive): the desktop app may receive file-open IPC
       // events from OS integrations and we should avoid attempting to open images/other assets.
-      if (!isOpenWorkbookPath(path)) return;
-      queueOpenWorkbook(path);
+      if (!isOpenWorkbookPath(trimmed)) return;
+      queueOpenWorkbook(trimmed);
     },
   });
 
   listenBestEffort("file-dropped", async (event) => {
     const paths = (event as any)?.payload;
     const firstWorkbookPath = Array.isArray(paths)
-      ? paths.find((p) => typeof p === "string" && p.trim() !== "" && isOpenWorkbookPath(p))
+      ? paths
+          .map((p) => (typeof p === "string" ? p.trim() : ""))
+          .find((p) => p !== "" && isOpenWorkbookPath(p))
       : null;
     if (!firstWorkbookPath) return;
     // Ignore non-spreadsheet drops (e.g. images) so drag/drop picture insertion doesn't trigger
