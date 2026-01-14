@@ -191,6 +191,12 @@ fn shared_strings_roundtrip_preserves_phonetic_and_unknown_subtrees() {
     let sheet = doc.workbook.sheets.first().expect("sheet exists");
     let value = sheet.value_a1("A1").expect("A1");
     assert_eq!(value, CellValue::String("Base".to_string()));
+    let cell = sheet.cell_a1("A1").expect("A1").expect("cell exists");
+    assert_eq!(
+        cell.phonetic_text(),
+        Some(PHONETIC_MARKER),
+        "expected worksheet cell to retain imported shared string phonetic guide text"
+    );
 
     let saved = doc.save_to_vec().expect("save");
     let ss_xml = zip_part(&saved, "xl/sharedStrings.xml");

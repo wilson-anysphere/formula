@@ -3766,6 +3766,7 @@ impl WasmWorkbook {
 
             for (cell_ref, cell) in sheet.iter_cells() {
                 let address = cell_ref.to_a1();
+                let phonetic = cell.phonetic.as_deref().map(|s| s.to_string());
 
                 // Skip style-only cells (not representable in this WASM DTO surface).
                 let has_formula = cell.formula.is_some();
@@ -3831,6 +3832,14 @@ impl WasmWorkbook {
                         // cached value and still store the display formula in the input map.
                         let _ = wb.engine.set_cell_formula(&sheet_name, &address, &display);
 
+                        if let Some(phonetic) = &phonetic {
+                            let _ = wb.engine.set_cell_phonetic(
+                                &sheet_name,
+                                &address,
+                                Some(phonetic.to_string()),
+                            );
+                        }
+
                         let sheet_cells = wb
                             .sheets
                             .get_mut(&sheet_name)
@@ -3838,6 +3847,12 @@ impl WasmWorkbook {
                         sheet_cells.insert(address.clone(), JsonValue::String(display));
                         continue;
                     }
+                }
+
+                if let Some(phonetic) = &phonetic {
+                    let _ = wb
+                        .engine
+                        .set_cell_phonetic(&sheet_name, &address, Some(phonetic.to_string()));
                 }
 
                 // Non-formula cell; store scalar value as input.

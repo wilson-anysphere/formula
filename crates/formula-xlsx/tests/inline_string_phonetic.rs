@@ -90,7 +90,11 @@ fn load_inline_string_imports_phonetic_text() -> Result<(), Box<dyn std::error::
         CellValue::String("Base".to_string())
     );
     let cell = sheet.cell(cell_ref).expect("cell exists");
-    assert_eq!(cell.phonetic.as_deref(), Some(PHONETIC_TEXT));
+    assert_eq!(
+        cell.phonetic_text(),
+        Some(PHONETIC_TEXT),
+        "expected inline string phonetic guide text to be imported into the model cell"
+    );
 
     Ok(())
 }
@@ -142,6 +146,12 @@ fn streaming_patch_preserves_inline_string_phonetic_subtree_on_style_only_patch(
     assert_eq!(
         sheet.value(CellRef::from_a1("A1")?),
         CellValue::String("Base".to_string())
+    );
+    let cell = sheet.cell(CellRef::from_a1("A1")?).expect("cell exists");
+    assert_eq!(
+        cell.phonetic_text(),
+        Some(PHONETIC_TEXT),
+        "expected inline string phonetic guide text to survive a style-only streaming patch"
     );
 
     Ok(())
