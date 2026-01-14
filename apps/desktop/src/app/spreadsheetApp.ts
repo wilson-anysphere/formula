@@ -1485,11 +1485,14 @@ export class SpreadsheetApp {
   private readonly selectionVisibleRowsScratch: number[] = [];
   private readonly selectionVisibleColsScratch: number[] = [];
   private readonly selectionRendererMetricsScratch: {
-    getCellRect: (cell: CellCoord) => { x: number; y: number; width: number; height: number } | null;
+    getCellRect: (
+      cell: CellCoord,
+      out?: { x: number; y: number; width: number; height: number },
+    ) => { x: number; y: number; width: number; height: number } | null;
     visibleRows: readonly number[];
     visibleCols: readonly number[];
   } = {
-    getCellRect: (cell) => this.getCellRect(cell),
+    getCellRect: (cell, out) => this.getCellRect(cell, out),
     visibleRows: [],
     visibleCols: [],
   };
@@ -19572,13 +19575,25 @@ export class SpreadsheetApp {
     return null;
   }
 
-  private getCellRect(cell: CellCoord) {
+  private getCellRect(
+    cell: CellCoord,
+    out?: { x: number; y: number; width: number; height: number },
+  ): { x: number; y: number; width: number; height: number } | null {
     if (this.sharedGrid) {
       const headerRows = this.sharedHeaderRows();
       const headerCols = this.sharedHeaderCols();
       const gridRow = cell.row + headerRows;
       const gridCol = cell.col + headerCols;
-      return this.sharedGrid.getCellRect(gridRow, gridCol);
+      const rect = this.sharedGrid.getCellRect(gridRow, gridCol);
+      if (!rect) return null;
+      if (out) {
+        out.x = rect.x;
+        out.y = rect.y;
+        out.width = rect.width;
+        out.height = rect.height;
+        return out;
+      }
+      return rect;
     }
 
     if (cell.row < 0 || cell.row >= this.limits.maxRows) return null;
@@ -19596,12 +19611,20 @@ export class SpreadsheetApp {
     const frozenRows = this.frozenRows;
     const frozenCols = this.frozenCols;
 
-    return {
-      x: this.rowHeaderWidth + visualCol * this.cellWidth - (cell.col < frozenCols ? 0 : this.scrollX),
-      y: this.colHeaderHeight + visualRow * this.cellHeight - (cell.row < frozenRows ? 0 : this.scrollY),
-      width: colDirect == null ? 0 : this.cellWidth,
-      height: rowDirect == null ? 0 : this.cellHeight
-    };
+    const x = this.rowHeaderWidth + visualCol * this.cellWidth - (cell.col < frozenCols ? 0 : this.scrollX);
+    const y = this.colHeaderHeight + visualRow * this.cellHeight - (cell.row < frozenRows ? 0 : this.scrollY);
+    const width = colDirect == null ? 0 : this.cellWidth;
+    const height = rowDirect == null ? 0 : this.cellHeight;
+
+    if (out) {
+      out.x = x;
+      out.y = y;
+      out.width = width;
+      out.height = height;
+      return out;
+    }
+
+    return { x, y, width, height };
   }
 
   private cellFromPoint(pointX: number, pointY: number, out?: CellCoord): CellCoord {
