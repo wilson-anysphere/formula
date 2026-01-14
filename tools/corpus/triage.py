@@ -531,6 +531,11 @@ def _redact_uri_like(text: str) -> str:
     if any(allowed in lowered for allowed in _SAFE_SCHEMA_HOST_SUFFIXES):
         return text
 
+    # Linked workbook filenames can appear in external relationship targets. Hash common spreadsheet
+    # file extensions even when the value is a relative path (no scheme/hostname).
+    if re.search(r"\.(xlsx|xlsm|xlsb|xltx|xltm|xls|csv|tsv)\b", lowered):
+        return f"sha256={_sha256_text(text)}"
+
     # Redact IPv4 address-like tokens (e.g. `10.0.0.1` or `10.0.0.1/share`). These often appear in
     # internal URLs and can leak corporate network topology.
     if re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text):
@@ -602,6 +607,14 @@ def _redact_uri_like_in_text(text: str) -> str:
     out = re.sub(r"\b[A-Za-z]:\\[^\s\"'<>]+", _replace_url, out)
     out = re.sub(r"\\\\[^\s\"'<>]+", _replace_url, out)
     out = re.sub(r"~/(?:[^\s\"'<>]+)", _replace_url, out)
+
+    # Linked workbook filenames (relative paths) without a domain/scheme.
+    out = re.sub(
+        r"[^\s\"'<>]+\.(?:xlsx|xlsm|xlsb|xltx|xltm|xls|csv|tsv)\b",
+        _replace_url,
+        out,
+        flags=re.IGNORECASE,
+    )
     return out
 
 
