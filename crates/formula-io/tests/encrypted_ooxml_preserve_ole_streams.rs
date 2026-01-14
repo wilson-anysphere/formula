@@ -192,7 +192,7 @@ fn preserves_extra_ole_metadata_streams_for_standard_fixture_roundtrip() {
 }
 
 #[test]
-fn preserved_ole_open_reports_malformed_encryptedpackage_as_unsupported() {
+fn preserved_ole_open_reports_malformed_encryptedpackage_as_decrypt_error() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
     {
@@ -218,7 +218,7 @@ fn preserved_ole_open_reports_malformed_encryptedpackage_as_unsupported() {
     let err = open_workbook_with_password_and_preserved_ole(&path, Some("wrong"))
         .expect_err("expected malformed encrypted container to error");
     assert!(
-        matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
-        "expected Error::UnsupportedOoxmlEncryption, got {err:?}"
+        matches!(err, Error::DecryptOoxml { .. }),
+        "expected Error::DecryptOoxml, got {err:?}"
     );
 }

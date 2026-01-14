@@ -45,7 +45,7 @@ fn encrypted_package_with_size_prefix(decrypted_size: u64, payload: &[u8]) -> Ve
 fn standard_streaming_open_rejects_invalid_encrypted_package_size_prefix() {
     // `open_workbook_with_options` prefers the Standard AES streaming open path for Standard-encrypted
     // workbooks. If the EncryptedPackage size prefix is inconsistent with the ciphertext length,
-    // treat it as an unsupported/malformed encryption container (not a generic `.xlsx` open error).
+    // treat it as a decryption error (not a generic `.xlsx` open error).
     let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/encrypted/ooxml")
         .join("standard.xlsx");
@@ -82,16 +82,15 @@ fn standard_streaming_open_rejects_invalid_encrypted_package_size_prefix() {
     )
     .expect_err("expected corrupt encrypted workbook to error");
     assert!(
-        matches!(err, formula_io::Error::UnsupportedOoxmlEncryption { .. }),
-        "expected UnsupportedOoxmlEncryption, got {err:?}"
+        matches!(err, formula_io::Error::DecryptOoxml { .. }),
+        "expected DecryptOoxml, got {err:?}"
     );
 }
 
 #[test]
-fn encrypted_package_size_prefix_only_is_unsupported_ooxml_encryption() {
+fn encrypted_package_size_prefix_only_is_decrypt_error() {
     // If `EncryptedPackage` only contains the 8-byte size prefix (and no ciphertext payload),
-    // treat the workbook as a malformed/unsupported encrypted container rather than as a wrong
-    // password.
+    // treat the workbook as a malformed encrypted container rather than as a wrong password.
     let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/encrypted/ooxml")
         .join("standard.xlsx");
@@ -113,8 +112,8 @@ fn encrypted_package_size_prefix_only_is_unsupported_ooxml_encryption() {
 
     let err = open_workbook_with_password(&path, Some("password")).expect_err("expected error");
     assert!(
-        matches!(err, formula_io::Error::UnsupportedOoxmlEncryption { .. }),
-        "expected UnsupportedOoxmlEncryption, got {err:?}"
+        matches!(err, formula_io::Error::DecryptOoxml { .. }),
+        "expected DecryptOoxml, got {err:?}"
     );
 }
 
