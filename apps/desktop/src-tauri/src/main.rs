@@ -1714,20 +1714,36 @@ fn main() {
       }
     });
 
+  const safeGetProp = (obj, prop) => {
+    if (!obj) return undefined;
+    try {
+      return obj[prop];
+    } catch {
+      return undefined;
+    }
+  };
+
    let started = false;
    const tick = async () => {
-     if (started) return;
+      if (started) return;
 
     // Some hardened environments (or tests) may define `__TAURI__` with a throwing getter. Treat
     // that as "unavailable" and keep polling rather than aborting the startup benchmark.
     let invoke = null;
-    try {
-      invoke = globalThis.__TAURI__?.core?.invoke ?? null;
-    } catch {}
-    if (!invoke) {
-      try {
-        invoke = globalThis.__TAURI_INTERNALS__?.invoke ?? null;
-      } catch {}
+    let invokeOwner = null;
+    const tauri = safeGetProp(globalThis, "__TAURI__") ?? null;
+    const core = safeGetProp(tauri, "core") ?? null;
+    const coreInvoke = safeGetProp(core, "invoke") ?? null;
+    if (typeof coreInvoke === "function") {
+      invoke = coreInvoke;
+      invokeOwner = core;
+    } else {
+      const internals = safeGetProp(globalThis, "__TAURI_INTERNALS__") ?? null;
+      const internalsInvoke = safeGetProp(internals, "invoke") ?? null;
+      if (typeof internalsInvoke === "function") {
+        invoke = internalsInvoke;
+        invokeOwner = internals;
+      }
     }
     if (typeof invoke !== "function") {
       if (Date.now() > deadline) return;
@@ -1736,12 +1752,13 @@ fn main() {
     }
 
     started = true;
+    const invokeCall = (cmd) => invoke.call(invokeOwner, cmd);
 
     // Notify the Rust host that the JS bridge is ready to invoke commands. This is idempotent
     // and (in the real app) allows the host to re-emit cached startup timing events once the
     // frontend has installed listeners.
     try {
-      await invoke("report_startup_webview_loaded");
+      await invokeCall("report_startup_webview_loaded");
     } catch {
       // Best-effort: if the bridge is in a transient bad state, keep going. We'll still attempt to
       // record TTI (required for printing the `[startup] ...` line) below.
@@ -1754,14 +1771,14 @@ fn main() {
     // Record a "first render" mark after the first frame. This is best-effort (and in `--startup-bench`
     // mode we use it as a proxy for "the minimal document has painted at least once").
     try {
-      await invoke("report_startup_first_render");
+      await invokeCall("report_startup_first_render");
     } catch {
       // Best-effort: this mark is optional for the shell benchmark.
     }
 
     let ttiOk = false;
     try {
-      await invoke("report_startup_tti");
+      await invokeCall("report_startup_tti");
       ttiOk = true;
     } catch {
       ttiOk = false;
@@ -1779,7 +1796,9 @@ fn main() {
     // Hard-exit after the `[startup] ...` line is printed. Add a tiny delay so stdout is
     // reliably flushed when captured via pipes.
     setTimeout(() => {
-      invoke("quit_app").catch(() => {});
+      try {
+        Promise.resolve(invokeCall("quit_app")).catch(() => {});
+      } catch {}
     }, 25);
   };
 
