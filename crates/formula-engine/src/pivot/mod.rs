@@ -18,9 +18,9 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub use formula_model::pivots::{
-    AggregationType, CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
-    PivotField, PivotFieldRef, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition,
-    ValueField,
+    AggregationType, CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout,
+    PivotConfig, PivotField, PivotFieldRef, PivotKeyPart, PivotValue, ShowAsType, SortOrder,
+    SubtotalPosition, ValueField,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

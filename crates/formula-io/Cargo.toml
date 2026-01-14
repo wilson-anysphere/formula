@@ -39,6 +39,7 @@ formula-offcrypto = { path = "../formula-offcrypto" }
 formula-xlsx = { path = "../formula-xlsx", default-features = false }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
+md5 = { package = "md-5", version = "0.10" }
 roxmltree = "0.20"
 sha2 = "0.10"
 tempfile = "3.10"
