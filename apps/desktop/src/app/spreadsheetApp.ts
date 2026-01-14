@@ -6239,22 +6239,45 @@ export class SpreadsheetApp {
   }
 
   private async openNameBoxMenu(): Promise<void> {
+    const formatSheetPrefix = (sheetName: string): string => {
+      const token = formatSheetNameForA1(sheetName);
+      return token ? `${token}!` : "";
+    };
+
+    const normalizeDocRange = (range: any): Range | null => {
+      if (!range) return null;
+      const { startRow, endRow, startCol, endCol } = range as any;
+      if (
+        !Number.isInteger(startRow) ||
+        !Number.isInteger(endRow) ||
+        !Number.isInteger(startCol) ||
+        !Number.isInteger(endCol) ||
+        startRow < 0 ||
+        endRow < 0 ||
+        startCol < 0 ||
+        endCol < 0
+      ) {
+        return null;
+      }
+
+      return {
+        startRow: Math.min(startRow, endRow),
+        endRow: Math.max(startRow, endRow),
+        startCol: Math.min(startCol, endCol),
+        endCol: Math.max(startCol, endCol),
+      };
+    };
+
     const items: Array<{ label: string; value: string; description?: string }> = [];
 
     for (const entry of this.searchWorkbook.names.values()) {
       const name = typeof (entry as any)?.name === "string" ? ((entry as any).name as string).trim() : "";
       if (!name) continue;
 
-      const range = (entry as any)?.range as Range | undefined;
+      const range = normalizeDocRange((entry as any)?.range);
       const sheetName = typeof (entry as any)?.sheetName === "string" ? ((entry as any).sheetName as string).trim() : "";
       const a1 =
-        range &&
-        typeof (range as any).startRow === "number" &&
-        typeof (range as any).startCol === "number" &&
-        typeof (range as any).endRow === "number" &&
-        typeof (range as any).endCol === "number"
-          ? rangeToA1(range)
-          : null;
+        range ? rangeToA1(range) : null;
 
       items.push({
         label: name,
@@ -6268,18 +6291,23 @@ export class SpreadsheetApp {
       if (!name) continue;
 
       const sheetName = typeof (table as any)?.sheetName === "string" ? ((table as any).sheetName as string).trim() : "";
-      const startRow = (table as any)?.startRow;
-      const startCol = (table as any)?.startCol;
-      const endRow = (table as any)?.endRow;
-      const endCol = (table as any)?.endCol;
-      const a1 =
-        typeof startRow === "number" && typeof startCol === "number" && typeof endRow === "number" && typeof endCol === "number"
-          ? rangeToA1({ startRow, startCol, endRow, endCol })
-          : null;
+      const range = normalizeDocRange({
+        startRow: (table as any)?.startRow,
+        startCol: (table as any)?.startCol,
+        endRow: (table as any)?.endRow,
+        endCol: (table as any)?.endCol,
+      });
+      const a1 = range ? rangeToA1(range) : null;
+
+      const structuredOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+      // `parseGoTo` only understands structured refs for tables with identifier-like names.
+      // Fall back to sheet-qualified A1 when we have valid bounds.
+      const value = structuredOk ? `${name}[#All]` : sheetName && a1 ? `${formatSheetPrefix(sheetName)}${a1}` : null;
+      if (!value) continue;
 
       items.push({
         label: name,
-        value: `${name}[#All]`,
+        value,
         description: a1 ? (sheetName ? `${sheetName}!${a1}` : a1) : undefined,
       });
     }
