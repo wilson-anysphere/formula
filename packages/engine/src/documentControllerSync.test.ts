@@ -643,7 +643,7 @@ describe("engine sync helpers", () => {
   it("maps row/col/sheet style layer deltas through sheetIdToSheet when provided", async () => {
     const styleObj = { font: { italic: true } };
     const recalcResult: CellChange[] = [{ sheet: "Budget", address: "B2", value: 456 }];
-    const sheetIdToSheet = (sheetId: string) => (sheetId === "sheet_2" ? "Budget" : sheetId);
+    const sheetIdToSheet = (sheetId: string) => (sheetId === "sheet_2" ? "  Budget  " : sheetId);
 
     const internStyle = vi.fn((_: unknown) => 100);
     const setRowStyleId = vi.fn(async () => {});

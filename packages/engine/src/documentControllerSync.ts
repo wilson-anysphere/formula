@@ -715,6 +715,11 @@ export async function engineApplyDocumentChange(
   // `DocumentController` emits a JSON-ish payload; keep parsing tolerant since callers may
   // pass through other event sources in tests.
   const payload = changePayload as any;
+  const resolveSheet = (sheetId: string): string => {
+    const resolved = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(sheetId) : null;
+    const trimmed = typeof resolved === "string" ? resolved.trim() : "";
+    return trimmed ? trimmed : sheetId;
+  };
 
   // Handle "reset boundary" payloads by forcing callers to re-hydrate. We intentionally
   // don't attempt to mirror sheet structure changes incrementally here.
@@ -838,8 +843,7 @@ export async function engineApplyDocumentChange(
 
       const engineStyleId =
         docStyleId === 0 ? null : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
-      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
-      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
+      const sheet = resolveSheet(d.sheetId);
       await engine.setRowStyleId(sheet, d.row, engineStyleId);
       didApplyAnyLayerStyles = true;
     }
@@ -853,8 +857,7 @@ export async function engineApplyDocumentChange(
 
       const engineStyleId =
         docStyleId === 0 ? null : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
-      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
-      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
+      const sheet = resolveSheet(d.sheetId);
       await engine.setColStyleId(sheet, d.col, engineStyleId);
       didApplyAnyLayerStyles = true;
     }
@@ -868,8 +871,7 @@ export async function engineApplyDocumentChange(
 
       const engineStyleId =
         docStyleId === 0 ? null : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
-      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
-      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
+      const sheet = resolveSheet(d.sheetId);
       await engine.setSheetDefaultStyleId(sheet, engineStyleId);
       didApplyAnyLayerStyles = true;
     }
@@ -895,8 +897,7 @@ export async function engineApplyDocumentChange(
       const col = Number((delta as any)?.col);
       if (!Number.isInteger(col) || col < 0 || col >= 16_384) continue;
 
-      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(sheetId) : null;
-      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : sheetId;
+      const sheet = resolveSheet(sheetId);
 
       const afterRuns: unknown[] = Array.isArray((delta as any)?.afterRuns) ? (delta as any).afterRuns : [];
       if (afterRuns.length === 0) {
@@ -951,8 +952,7 @@ export async function engineApplyDocumentChange(
     for (const delta of sheetViewDeltas) {
       const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : "";
       if (!sheetId) continue;
-      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(sheetId) : null;
-      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : sheetId;
+      const sheet = resolveSheet(sheetId);
 
       const beforeColWidths = delta?.before?.colWidths ?? null;
       const afterColWidths = delta?.after?.colWidths ?? null;
