@@ -169,6 +169,41 @@ describe("Ribbon UI state overrides", () => {
     act(() => root.unmount());
   });
 
+  it("shows shortcut hints for dropdown menu items when shortcutById overrides change", async () => {
+    const { container, root } = renderRibbon();
+
+    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.paste"]');
+    expect(paste).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      paste?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    const menuItemId = "clipboard.pasteSpecial.values";
+    const menuItem = container.querySelector<HTMLButtonElement>(`[data-command-id="${menuItemId}"]`);
+    expect(menuItem).toBeInstanceOf(HTMLButtonElement);
+    expect(menuItem?.dataset.shortcut).toBeUndefined();
+    expect(menuItem?.getAttribute("title")).toBe("Paste Values");
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: Object.create(null),
+        shortcutById: { [menuItemId]: "Alt+V" },
+        ariaKeyShortcutsById: Object.create(null),
+      });
+    });
+
+    const updated = container.querySelector<HTMLButtonElement>(`[data-command-id="${menuItemId}"]`);
+    expect(updated).toBeInstanceOf(HTMLButtonElement);
+    expect(updated?.dataset.shortcut).toBe("Alt+V");
+    expect(updated?.getAttribute("title")).toBe("Paste Values (Alt+V)");
+
+    act(() => root.unmount());
+  });
+
   it("includes expected editing-mode disabled command ids", () => {
     const expected = [
       "home.cells.insert",
