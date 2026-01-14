@@ -447,18 +447,10 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     sheet_offset: usize,
     ctx: &rgce::RgceDecodeContext<'_>,
 ) -> Result<PtgExpFallbackResult, String> {
-    // Lazily parse SHRFMLA/ARRAY definitions when needed so we can suppress misleading fallback
-    // warnings for well-formed shared/array groups whose base cell legitimately stores `PtgExp` in
-    // `FORMULA.rgce` (the real `rgce` lives in SHRFMLA/ARRAY records).
-    //
-    // Parsing the full worksheet formula table is relatively expensive for large sheets, so we only
-    // do it when we encounter a `PtgExp` base cell *and* fail to resolve it via an in-stream SHRFMLA
-    // definition.
-    let mut parsed_defs: Option<worksheet_formulas::ParsedBiff8WorksheetFormulas> = None;
-    let mut parsed_defs_attempted = false;
-
     let allows_continuation = |id: u16| {
-        id == worksheet_formulas::RECORD_FORMULA || id == worksheet_formulas::RECORD_SHRFMLA
+        id == worksheet_formulas::RECORD_FORMULA
+            || id == worksheet_formulas::RECORD_SHRFMLA
+            || id == worksheet_formulas::RECORD_ARRAY
     };
     let mut iter = records::LogicalBiffRecordIter::from_offset(
         workbook_stream,
@@ -470,12 +462,13 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     // appear later in the stream.
     let mut rgce_by_cell: HashMap<(u32, u32), (Vec<u8>, Vec<u8>)> = HashMap::new();
     let mut shrfmla_by_cell: HashMap<(u32, u32), (Vec<u8>, Vec<u8>)> = HashMap::new();
+    let mut array_ranges_by_cell: HashMap<(u32, u32), (CellRef, CellRef)> = HashMap::new();
     let mut ptgexp_cells: Vec<(u32, u32, u32, u32, worksheet_formulas::FormulaGrbit)> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
     // Ref8 columns can carry flags in their high bits; mask down to the 14-bit payload.
     const REF8_COL_MASK: u16 = 0x3FFF;
-    let parse_shrfmla_anchor = |data: &[u8]| -> Option<(u32, u32)> {
+    let parse_ref_range = |data: &[u8]| -> Option<(CellRef, CellRef)> {
         // Prefer Ref8 when it decodes to classic `.xls` column bounds (<=255). Some producers store
         // Ref8 even when RefU would suffice.
         if let Some(chunk) = data.get(0..8) {
@@ -487,7 +480,10 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
             let col_last = col_last_raw & REF8_COL_MASK;
             if rw_first <= rw_last && col_first <= col_last && col_first <= 0x00FF && col_last <= 0x00FF
             {
-                return Some((rw_first as u32, col_first as u32));
+                return Some((
+                    CellRef::new(rw_first as u32, col_first as u32),
+                    CellRef::new(rw_last as u32, col_last as u32),
+                ));
             }
         }
 
@@ -497,7 +493,10 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
             let col_first = chunk[4] as u16;
             let col_last = chunk[5] as u16;
             if rw_first <= rw_last && col_first <= col_last {
-                return Some((rw_first as u32, col_first as u32));
+                return Some((
+                    CellRef::new(rw_first as u32, col_first as u32),
+                    CellRef::new(rw_last as u32, col_last as u32),
+                ));
             }
         }
 
@@ -509,7 +508,10 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
             let col_first = col_first_raw & REF8_COL_MASK;
             let col_last = col_last_raw & REF8_COL_MASK;
             if rw_first <= rw_last && col_first <= col_last {
-                return Some((rw_first as u32, col_first as u32));
+                return Some((
+                    CellRef::new(rw_first as u32, col_first as u32),
+                    CellRef::new(rw_last as u32, col_last as u32),
+                ));
             }
         }
 
@@ -558,7 +560,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                 rgce_by_cell.insert((row, col), (rgce, rgcb));
             }
             worksheet_formulas::RECORD_SHRFMLA => {
-                let Some((row, col)) = parse_shrfmla_anchor(record.data.as_ref()) else {
+                let Some((start, _end)) = parse_ref_range(record.data.as_ref()) else {
                     push_warning_bounded(
                         &mut warnings,
                         format!(
@@ -569,6 +571,8 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                     );
                     continue;
                 };
+                let row = start.row;
+                let col = start.col;
 
                 let parsed = match worksheet_formulas::parse_biff8_shrfmla_record(&record) {
                     Ok(parsed) => parsed,
@@ -584,6 +588,14 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                     }
                 };
                 shrfmla_by_cell.insert((row, col), (parsed.rgce, parsed.rgcb));
+            }
+            worksheet_formulas::RECORD_ARRAY => {
+                let Some((start, end)) = parse_ref_range(record.data.as_ref()) else {
+                    // Best-effort: ARRAY records vary between producers; if we cannot parse the range
+                    // header, treat it as unknown and fall back on warnings for unresolved PtgExp.
+                    continue;
+                };
+                array_ranges_by_cell.insert((start.row, start.col), (start, end));
             }
             _ => {}
         }
@@ -615,29 +627,15 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                 base_rgce_bytes = shared_rgce;
                 base_rgcb_bytes = shared_rgcb;
             } else {
-                // If a SHRFMLA/ARRAY definition exists for this base cell + range, then the base-cell
-                // fallback is not applicable and we should not emit a misleading warning about a
-                // "missing" definition.
-                if parsed_defs.is_none() && !parsed_defs_attempted {
-                    parsed_defs_attempted = true;
-                    parsed_defs = worksheet_formulas::parse_biff8_worksheet_formulas(
-                        workbook_stream,
-                        sheet_offset,
-                    )
-                    .ok();
-                }
-                if let Some(parsed) = parsed_defs.as_ref() {
-                    if parsed
-                        .shrfmla
-                        .get(&base_cell_ref)
-                        .is_some_and(|def| range_contains(def.range, cell_ref))
-                        || parsed
-                            .array
-                            .get(&base_cell_ref)
-                            .is_some_and(|def| range_contains(def.range, cell_ref))
-                    {
-                        continue;
-                    }
+                // If this cell is part of a well-formed ARRAY formula group, the base cell's rgce is
+                // also `PtgExp` and the real formula text lives in an `ARRAY` record. The base-cell
+                // fallback cannot recover that rgce, so suppress the misleading "missing ARRAY"
+                // warning.
+                if array_ranges_by_cell
+                    .get(&(base_row, base_col))
+                    .is_some_and(|&range| range_contains(range, cell_ref))
+                {
+                    continue;
                 }
 
                 let expected = match grbit.membership_hint() {
