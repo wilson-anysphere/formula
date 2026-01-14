@@ -341,21 +341,19 @@ type FunctionSuggestion = { name: string; signature: string };
 
 let AUTOCOMPLETE_INSTANCE_ID = 0;
 
-const FUNCTION_NAMES: string[] = (() => {
-  const names = new Set<string>();
-  const items = (FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [];
-  for (const fn of items) {
-    const name = typeof fn?.name === "string" ? fn.name.trim() : "";
-    if (!name) continue;
-    names.add(name);
+const FUNCTION_ENTRIES: Array<{ name: string; upper: string }> = (() => {
+  // Deduplicate case-insensitively; we shouldn't surface multiple entries for the same
+  // function name just because the catalog casing differs.
+  const out: Array<{ name: string; upper: string }> = [];
+  const seen = new Set<string>();
+  for (const name of ALL_FUNCTION_NAMES_SORTED) {
+    const upper = name.toUpperCase();
+    if (seen.has(upper)) continue;
+    seen.add(upper);
+    out.push({ name, upper });
   }
-  return Array.from(names).sort((a, b) => a.localeCompare(b));
+  return out;
 })();
-
-const FUNCTION_ENTRIES: Array<{ name: string; upper: string }> = FUNCTION_NAMES.map((name) => ({
-  name,
-  upper: name.toUpperCase(),
-}));
 
 const FUNCTION_NAMES_UPPER = new Set(FUNCTION_ENTRIES.map((e) => e.upper));
 
