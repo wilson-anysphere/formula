@@ -319,8 +319,15 @@ function normalizeDlpOptions(dlp) {
  * @returns {unknown[] | null | undefined}
  */
 function compactAttachmentsForPrompt(attachments, options = {}) {
-  if (!Array.isArray(attachments)) return attachments;
   const dropAllData = options.dropAllData === true;
+  if (!Array.isArray(attachments)) {
+    if (!dropAllData) return attachments;
+    if (attachments === null || attachments === undefined) return attachments;
+    if (typeof attachments === "string" && attachments.trim() === "") return attachments;
+    // Under structured DLP redaction, treat malformed non-array attachment payloads as
+    // prompt-unsafe (they can contain arbitrary non-heuristic sensitive strings).
+    return ["[REDACTED]"];
+  }
   return attachments.map((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       // Under structured DLP redaction, treat any non-object attachment entries as
@@ -334,8 +341,11 @@ function compactAttachmentsForPrompt(attachments, options = {}) {
       // Under structured DLP redaction, attachments may contain arbitrary nested payloads
       // (including raw cell values) that are not reliably detectable by heuristic redaction.
       // Keep only a minimal prompt-safe skeleton.
+      const allowedTypes = new Set(["range", "formula", "table", "chart"]);
+      const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
+      const safeType = allowedTypes.has(normalizedType) ? normalizedType : "[REDACTED]";
       return {
-        type: typeof type === "string" ? type : String(type ?? ""),
+        type: safeType,
         reference: typeof reference === "string" ? reference : "[REDACTED]",
       };
     }

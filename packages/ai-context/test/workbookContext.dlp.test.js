@@ -428,6 +428,57 @@ test("buildWorkbookContext: structured DLP REDACT also redacts non-object attach
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT also redacts non-array attachments payloads (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-attachments-structured-non-array",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "Hello" }, { v: "World" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0,
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    // `attachments` should be an array, but callers may accidentally pass a scalar. Under structured
+    // DLP redaction, treat it as prompt-unsafe to avoid leaking non-heuristic strings.
+    attachments: "TopSecret",
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Public", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: workbook_schema redacts sensitive header strings even with a no-op redactor (DLP REDACT + empty retrieval)", async () => {
   const workbook = {
     id: "wb-dlp-schema-header-noop-redactor",
