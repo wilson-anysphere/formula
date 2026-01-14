@@ -3,6 +3,10 @@
 # Source this at the start of each agent session: . scripts/agent-init.sh
 # (bash/zsh also support: source scripts/agent-init.sh)
 
+_formula_errexit_was_set=0
+case $- in
+  *e*) _formula_errexit_was_set=1 ;;
+esac
 set -e
 
 # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
@@ -205,3 +209,8 @@ if [ -n "$DISPLAY" ]; then
 echo "║  DISPLAY:           ${DISPLAY}"
 fi
 echo "╚════════════════════════════════════════════════════════════════╝"
+
+if [ "${_formula_errexit_was_set}" -eq 0 ]; then
+  set +e
+fi
+unset _formula_errexit_was_set

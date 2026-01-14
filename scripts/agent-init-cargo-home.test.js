@@ -152,6 +152,40 @@ test('agent-init derives CARGO_BUILD_JOBS from FORMULA_CARGO_JOBS', { skip: !has
   assert.equal(rayon, '7');
 });
 
+test('agent-init does not enable errexit in bash when it was previously disabled', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'set +e',
+      'export DISPLAY=:99',
+      'before=$-',
+      'source scripts/agent-init.sh >/dev/null',
+      'after=$-',
+      'printf "%s\\n%s" "$before" "$after"',
+    ].join(' && '),
+  );
+
+  const [before, after] = out.split('\n');
+  assert.ok(!before.includes('e'), `expected errexit disabled before sourcing; got $-=${before}`);
+  assert.ok(!after.includes('e'), `expected errexit disabled after sourcing; got $-=${after}`);
+});
+
+test('agent-init preserves errexit in bash when it was previously enabled', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'set -e',
+      'export DISPLAY=:99',
+      'before=$-',
+      'source scripts/agent-init.sh >/dev/null',
+      'after=$-',
+      'printf "%s\\n%s" "$before" "$after"',
+    ].join(' && '),
+  );
+
+  const [before, after] = out.split('\n');
+  assert.ok(before.includes('e'), `expected errexit enabled before sourcing; got $-=${before}`);
+  assert.ok(after.includes('e'), `expected errexit enabled after sourcing; got $-=${after}`);
+});
+
 test(
   'agent-init treats CARGO_HOME=$HOME/.cargo as unset in local runs (defaults to repo-local cargo-home)',
   { skip: !hasBash },
