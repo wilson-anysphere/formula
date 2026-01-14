@@ -952,6 +952,33 @@ mod tests {
     }
 
     #[test]
+    fn patches_priority_in_unsupported_rules() {
+        let xml =
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let range = parse_range_a1("A1:A1").unwrap();
+        let raw = r#"<cfRule type="expression"><formula>A1&gt;0</formula></cfRule>"#;
+        let rules = vec![CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: u32::MAX,
+            applies_to: vec![range],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::Unsupported {
+                type_name: Some("expression".to_string()),
+                raw_xml: raw.to_string(),
+            },
+            dependencies: vec![range],
+        }];
+
+        let updated = update_worksheet_conditional_formatting_xml(xml, &rules).unwrap();
+        assert!(
+            updated.contains(r#"<cfRule type="expression" priority="1">"#),
+            "expected patched priority on raw cfRule, got:\n{updated}"
+        );
+    }
+
+    #[test]
     fn x14_extlst_rewrite_preserves_other_ext_entries() {
         let xml = format!(
             r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><extLst><ext uri="{{OTHER}}"><foo/></ext><ext uri="{x14_uri}" xmlns:x14="{x14_ns}"><x14:conditionalFormattings/></ext></extLst></worksheet>"#,

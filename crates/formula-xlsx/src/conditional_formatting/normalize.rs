@@ -232,5 +232,37 @@ mod tests {
         let rules = vec![rule(u32::MAX), rule(2)];
         assert_eq!(normalize_cf_priorities(&rules), vec![1, 2]);
     }
-}
 
+    #[test]
+    fn patch_cf_rule_priority_inserts_when_missing() {
+        let raw = r#"<cfRule type="expression"><formula>A1&gt;0</formula></cfRule>"#;
+        let patched = patch_cf_rule_priority(raw, 3);
+        assert!(
+            patched.starts_with(r#"<cfRule type="expression" priority="3">"#),
+            "got: {patched}"
+        );
+    }
+
+    #[test]
+    fn patch_cf_rule_priority_rewrites_when_present() {
+        let raw = r#"<cfRule type="expression" priority="99"><formula>A1&gt;0</formula></cfRule>"#;
+        let patched = patch_cf_rule_priority(raw, 3);
+        assert!(patched.contains(r#"priority="3""#), "got: {patched}");
+        assert!(!patched.contains(r#"priority="99""#), "got: {patched}");
+    }
+
+    #[test]
+    fn patch_cf_rule_priority_is_idempotent_when_numeric_value_matches() {
+        // Preserve the original formatting (leading zeros) when the numeric value matches.
+        let raw = r#"<cfRule type="expression" priority="001"><formula>A1&gt;0</formula></cfRule>"#;
+        let patched = patch_cf_rule_priority(raw, 1);
+        assert_eq!(patched, raw);
+    }
+
+    #[test]
+    fn patch_cf_rule_priority_handles_self_closing_tag() {
+        let raw = r#"<cfRule type="uniqueValues"/>"#;
+        let patched = patch_cf_rule_priority(raw, 7);
+        assert_eq!(patched, r#"<cfRule type="uniqueValues" priority="7"/>"#);
+    }
+}

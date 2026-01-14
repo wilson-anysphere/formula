@@ -475,4 +475,31 @@ mod tests {
             "expected _xlfn prefix in x14 cfvo val, got:\n{xml}"
         );
     }
+
+    #[test]
+    fn patches_priority_in_unsupported_rules() {
+        let applies_to = vec![Range::from_a1("A1").unwrap()];
+
+        // Missing priority in raw XML + unset priority in model.
+        let raw = r#"<cfRule type="expression"><formula>A1&gt;0</formula></cfRule>"#;
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: u32::MAX,
+            applies_to,
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::Unsupported {
+                type_name: Some("expression".to_string()),
+                raw_xml: raw.to_string(),
+            },
+            dependencies: vec![],
+        };
+
+        let xml = write_conditional_formatting_xml(&[rule]);
+        assert!(
+            xml.contains(r#"<cfRule type="expression" priority="1">"#),
+            "expected patched priority on raw cfRule, got:\n{xml}"
+        );
+    }
 }
