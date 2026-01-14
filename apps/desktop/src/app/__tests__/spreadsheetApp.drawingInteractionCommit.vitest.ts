@@ -416,6 +416,66 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 
+  it("rounds snake_case formula-model EMUs while preserving float UI EMUs on fractional moves", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "chart", chart_id: "Sheet1:7", raw_xml: "<xdr:graphicFrame/>" },
+      // Formula-model/Rust anchor enum encoding (externally tagged), but with UI-style EMU fields
+      // present too (some persistence layers may store both).
+      anchor: {
+        Absolute: {
+          pos: { x_emu: pxToEmu(0), y_emu: pxToEmu(0), xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+          ext: { cx: pxToEmu(120), cy: pxToEmu(80) },
+        },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("absolute");
+    if (before.anchor.type !== "absolute") {
+      throw new Error("Expected absolute anchor for test drawing");
+    }
+
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        // 0.5px in sheet space (e.g. 1 screen px at 2x zoom).
+        pos: { xEmu: pxToEmu(0.5), yEmu: 0 },
+      },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "move", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated).toBeTruthy();
+    expect(Object.keys(updated.anchor ?? {})).toEqual(["Absolute"]);
+
+    // Keep formula-model keys integer-compatible.
+    expect(updated.anchor.Absolute.pos.x_emu).toBe(Math.round(pxToEmu(0.5)));
+    expect(updated.anchor.Absolute.pos.y_emu).toBe(0);
+    // Preserve float precision for the UI keys.
+    expect(updated.anchor.Absolute.pos.xEmu).toBe(pxToEmu(0.5));
+    expect(updated.anchor.Absolute.pos.yEmu).toBe(0);
+
+    app.dispose();
+    root.remove();
+  });
+
   it("preserves internally-tagged formula-model anchor encodings (kind field) on commit", () => {
     const root = createRoot();
     const status = {
