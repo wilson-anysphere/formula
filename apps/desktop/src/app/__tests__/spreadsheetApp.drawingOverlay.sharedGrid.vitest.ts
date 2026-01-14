@@ -621,7 +621,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
-  it("computes consistent render vs interaction viewports for drawings (headers + frozen panes)", async () => {
+  it("computes consistent render vs interaction viewports for drawings (headers + frozen panes)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {

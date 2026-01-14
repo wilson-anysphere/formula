@@ -284,7 +284,7 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     }
   });
 
-  it("computes consistent render vs interaction viewports for drawings (legacy grid)", async () => {
+  it("computes consistent render vs interaction viewports for drawings (legacy grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
