@@ -254,11 +254,14 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
 
   // Date functions with optional holiday ranges
   assert.equal(registry.isRangeArg("WORKDAY", 0), false, "Expected WORKDAY start_date not to be a range");
+  assert.equal(registry.getArgType("WORKDAY", 0), "value", "Expected WORKDAY start_date to be value-like");
   assert.equal(registry.isRangeArg("WORKDAY", 1), false, "Expected WORKDAY days not to be a range");
   assert.ok(registry.isRangeArg("WORKDAY", 2), "Expected WORKDAY holidays to be a range");
   assert.ok(registry.isRangeArg("WORKDAY.INTL", 3), "Expected WORKDAY.INTL holidays to be a range");
   assert.ok(registry.isRangeArg("NETWORKDAYS", 2), "Expected NETWORKDAYS holidays to be a range");
   assert.ok(registry.isRangeArg("NETWORKDAYS.INTL", 3), "Expected NETWORKDAYS.INTL holidays to be a range");
+  assert.equal(registry.getArgType("NETWORKDAYS", 0), "value", "Expected NETWORKDAYS start_date to be value-like");
+  assert.equal(registry.getArgType("NETWORKDAYS", 1), "value", "Expected NETWORKDAYS end_date to be value-like");
 
   // String-only parameters where suggesting cell refs is undesirable (argument hinting)
   assert.equal(registry.getArgType("DATEDIF", 2), "string", "Expected DATEDIF unit to be a string");

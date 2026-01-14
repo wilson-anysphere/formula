@@ -236,7 +236,7 @@ const CURATED_FUNCTIONS = [
     name: "WORKDAY",
     description: "Returns a date that is a specified number of working days before or after a start date.",
     args: [
-      { name: "start_date", type: "number" },
+      { name: "start_date", type: "value" },
       { name: "days", type: "number" },
       { name: "holidays", type: "range", optional: true },
     ],
@@ -315,7 +315,7 @@ const CURATED_FUNCTIONS = [
     name: "WORKDAY.INTL",
     description: "Returns a date that is a specified number of working days before or after a start date with custom weekends.",
     args: [
-      { name: "start_date", type: "number" },
+      { name: "start_date", type: "value" },
       { name: "days", type: "number" },
       { name: "weekend", type: "number", optional: true },
       { name: "holidays", type: "range", optional: true },
@@ -325,8 +325,8 @@ const CURATED_FUNCTIONS = [
     name: "NETWORKDAYS",
     description: "Returns the number of whole working days between two dates.",
     args: [
-      { name: "start_date", type: "number" },
-      { name: "end_date", type: "number" },
+      { name: "start_date", type: "value" },
+      { name: "end_date", type: "value" },
       { name: "holidays", type: "range", optional: true },
     ],
   },
@@ -334,8 +334,8 @@ const CURATED_FUNCTIONS = [
     name: "NETWORKDAYS.INTL",
     description: "Returns the number of whole working days between two dates with custom weekends.",
     args: [
-      { name: "start_date", type: "number" },
-      { name: "end_date", type: "number" },
+      { name: "start_date", type: "value" },
+      { name: "end_date", type: "value" },
       { name: "weekend", type: "number", optional: true },
       { name: "holidays", type: "range", optional: true },
     ],
