@@ -1750,7 +1750,12 @@ fn main() {
     // Notify the Rust host that the JS bridge is ready to invoke commands. This is idempotent
     // and (in the real app) allows the host to re-emit cached startup timing events once the
     // frontend has installed listeners.
-    await invoke("report_startup_webview_loaded");
+    try {
+      await invoke("report_startup_webview_loaded");
+    } catch {
+      // Best-effort: if the bridge is in a transient bad state, keep going. We'll still attempt to
+      // record TTI (required for printing the `[startup] ...` line) below.
+    }
 
     // Approximate "time to interactive": a microtask + first frame later.
     await Promise.resolve();
@@ -1758,9 +1763,28 @@ fn main() {
 
     // Record a "first render" mark after the first frame. This is best-effort (and in `--startup-bench`
     // mode we use it as a proxy for "the minimal document has painted at least once").
-    await invoke("report_startup_first_render");
+    try {
+      await invoke("report_startup_first_render");
+    } catch {
+      // Best-effort: this mark is optional for the shell benchmark.
+    }
 
-    await invoke("report_startup_tti");
+    let ttiOk = false;
+    try {
+      await invoke("report_startup_tti");
+      ttiOk = true;
+    } catch {
+      ttiOk = false;
+    }
+
+    // `report_startup_tti` is required for the `[startup] ...` log line. If it fails (e.g. due to a
+    // transient IPC issue), retry until the deadline so the benchmark harness doesn't hang.
+    if (!ttiOk) {
+      started = false;
+      if (Date.now() > deadline) return;
+      setTimeout(tick, 50);
+      return;
+    }
 
     // Hard-exit after the `[startup] ...` line is printed. Add a tiny delay so stdout is
     // reliably flushed when captured via pipes.
