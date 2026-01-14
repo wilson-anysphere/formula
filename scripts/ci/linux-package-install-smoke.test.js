@@ -40,3 +40,14 @@ test("linux-package-install-smoke: uses token-based Exec= matching (avoid substr
   // Historical implementation used `grep -rlE` to find a desktop file by substring.
   assert.doesNotMatch(script, /grep -rlE/);
 });
+
+test("linux-package-install-smoke: uses identifier-based Parquet shared-mime-info path", () => {
+  const script = readFileSync(scriptPath, "utf8");
+  assert.match(script, /FORMULA_TAURI_IDENTIFIER/);
+  assert.ok(
+    script.includes('mime_xml="/usr/share/mime/packages/${ident}.xml"'),
+    "Expected linux-package-install-smoke.sh to build the shared-mime-info XML path from the Tauri identifier (mime_xml=/usr/share/mime/packages/${ident}.xml).",
+  );
+  // Avoid hardcoding the current identifier filename so we don't regress if identifier changes.
+  assert.doesNotMatch(script, /app\\.formula\\.desktop\\.xml/);
+});
