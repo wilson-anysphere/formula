@@ -497,6 +497,76 @@ fn refreshes_pivot_cache_records_with_embedded_sheet_in_ref() {
 }
 
 #[test]
+fn refreshes_pivot_cache_records_with_absolute_a1_range_in_ref() {
+    let fixture = include_bytes!("fixtures/pivot-cache-refresh.xlsx");
+    let mut pkg = XlsxPackage::from_bytes(fixture).expect("read fixture");
+
+    // Excel often writes A1 ranges with `$` absolute markers. Ensure we can still parse the
+    // worksheetSource ref when the sheet name is embedded.
+    let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" refreshOnLoad="1" recordCount="4">
+  <cacheSource type="worksheet">
+    <worksheetSource ref="Sheet1!$A$1:$C$6"/>
+  </cacheSource>
+  <cacheFields count="3">
+    <cacheField name="Region" numFmtId="0"/>
+    <cacheField name="Product" numFmtId="0"/>
+    <cacheField name="Sales" numFmtId="0"/>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+    pkg.set_part(
+        "xl/pivotCache/pivotCacheDefinition1.xml",
+        cache_definition_xml.as_bytes().to_vec(),
+    );
+
+    pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+        .expect("refresh cache");
+
+    let cache_definition_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("cache definition exists"),
+    )
+    .expect("utf-8");
+    let doc = roxmltree::Document::parse(cache_definition_xml).expect("parse definition xml");
+    assert_eq!(doc.root_element().attribute("recordCount"), Some("4"));
+
+    let cache_records_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheRecords1.xml")
+            .expect("cache records exists"),
+    )
+    .expect("utf-8");
+    let doc = roxmltree::Document::parse(cache_records_xml).expect("parse records xml");
+    assert_eq!(doc.root_element().attribute("count"), Some("4"));
+
+    let rows = parse_cache_records(cache_records_xml);
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                CacheValue::String("East".to_string()),
+                CacheValue::String("A".to_string()),
+                CacheValue::Number("100".to_string())
+            ],
+            vec![
+                CacheValue::String("East".to_string()),
+                CacheValue::String("B".to_string()),
+                CacheValue::Number("150".to_string())
+            ],
+            vec![
+                CacheValue::String("West".to_string()),
+                CacheValue::String("A".to_string()),
+                CacheValue::Number("200".to_string())
+            ],
+            vec![
+                CacheValue::String("West".to_string()),
+                CacheValue::String("B".to_string()),
+                CacheValue::Number("250".to_string())
+            ],
+        ]
+    );
+}
+
+#[test]
 fn refreshes_pivot_cache_records_with_quoted_sheet_in_ref() {
     let fixture = include_bytes!("fixtures/pivot-cache-refresh.xlsx");
     let mut pkg = XlsxPackage::from_bytes(fixture).expect("read fixture");
