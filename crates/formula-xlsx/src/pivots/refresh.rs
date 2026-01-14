@@ -22,6 +22,15 @@ const REL_TYPE_SHARED_STRINGS: &str =
 const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
+fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
+    }
+    a.chars()
+        .flat_map(|c| c.to_uppercase())
+        .eq(b.chars().flat_map(|c| c.to_uppercase()))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorksheetSource {
     sheet: Option<String>,
@@ -315,9 +324,16 @@ fn split_sheet_qualified_reference(input: &str) -> (Option<String>, &str) {
                     // Not actually a sheet-qualified reference; treat the whole string as the token.
                     return (None, s);
                 }
-                other => sheet.push(other as char),
+                _ => {
+                    let ch = s[i..]
+                        .chars()
+                        .next()
+                        .expect("i always at char boundary");
+                    sheet.push(ch);
+                    i += ch.len_utf8();
+                    continue;
+                }
             }
-            i += 1;
         }
         // Unterminated quote; treat as unqualified.
         return (None, s);
@@ -376,7 +392,7 @@ fn resolve_defined_name_reference(
                     current = None;
                     continue;
                 };
-                if dn_name.eq_ignore_ascii_case(name) {
+                if text_eq_case_insensitive(&dn_name, name) {
                     current = Some(ParsedDefinedName {
                         name: dn_name,
                         local_sheet_id,
@@ -406,7 +422,7 @@ fn resolve_defined_name_reference(
                 let Some(dn_name) = dn_name else {
                     continue;
                 };
-                if dn_name.eq_ignore_ascii_case(name) {
+                if text_eq_case_insensitive(&dn_name, name) {
                     matches.push(ParsedDefinedName {
                         name: dn_name,
                         local_sheet_id,
@@ -1962,5 +1978,82 @@ mod tests {
         assert_eq!(first_values[0].attribute("v"), Some(expected_dt.as_str()));
         assert_eq!(first_values[1].tag_name().name(), "s");
         assert_eq!(first_values[1].attribute("v"), Some("Alpha"));
+    }
+
+
+    #[test]
+    fn split_sheet_qualified_reference_handles_unicode_quoted_sheet_names() {
+        let (sheet, rest) = split_sheet_qualified_reference("'Straße'!$A$1");
+        assert_eq!(sheet.as_deref(), Some("Straße"));
+        assert_eq!(rest, "$A$1");
+    }
+
+    #[test]
+    fn resolve_defined_name_reference_matches_unicode_case_insensitive_name_and_sheet_hint() {
+        // Two sheet-scoped defined names share the same name; Excel selects the one matching the
+        // worksheetSource/@sheet hint (case-insensitive across Unicode).
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Straße" sheetId="2" r:id="rId2"/>
+  </sheets>
+  <definedNames>
+    <definedName name="Straße" localSheetId="0">A1</definedName>
+    <definedName name="Straße" localSheetId="1">B2</definedName>
+  </definedNames>
+</workbook>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let resolved =
+            resolve_defined_name_reference(&pkg, "STRASSE", Some("STRASSE")).expect("resolve");
+        let (sheet, range) = resolved.expect("expected match");
+        assert_eq!(sheet.as_deref(), Some("Straße"));
+        assert_eq!(range, Range::from_a1("B2").unwrap());
+    }
+
+    #[test]
+    fn resolve_worksheet_part_matches_unicode_sheet_names_case_insensitive_like_excel() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Straße" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let part = resolve_worksheet_part(&pkg, "STRASSE").expect("resolve worksheet");
+        assert_eq!(part, "xl/worksheets/sheet1.xml");
     }
 }

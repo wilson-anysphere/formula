@@ -269,9 +269,16 @@ fn split_sheet_name(input: &str) -> Result<(String, &str), PrintError> {
                     let rest = &input[(i + 2)..];
                     return Ok((sheet, rest));
                 }
-                _ => sheet.push(bytes[i] as char),
+                _ => {
+                    let ch = input[i..]
+                        .chars()
+                        .next()
+                        .expect("i always at char boundary");
+                    sheet.push(ch);
+                    i += ch.len_utf8();
+                    continue;
+                }
             }
-            i += 1;
         }
 
         return Err(PrintError::InvalidA1(format!(
@@ -445,4 +452,32 @@ fn format_col_range(range: ColRange) -> String {
         return format!("${col}:${col}", col = start);
     }
     format!("${start}:${end}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_print_area_defined_name_matches_unicode_sheet_names_case_insensitive_like_excel() {
+        let ranges = parse_print_area_defined_name("Straße", "'STRASSE'!$A$1:$A$1")
+            .expect("should parse print area with Unicode-aware sheet matching");
+        assert_eq!(
+            ranges,
+            vec![CellRange {
+                start_row: 1,
+                end_row: 1,
+                start_col: 1,
+                end_col: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_print_titles_defined_name_matches_unicode_sheet_names_case_insensitive_like_excel() {
+        let titles = parse_print_titles_defined_name("Straße", "'STRASSE'!$1:$1,'STRASSE'!$A:$A")
+            .expect("should parse print titles with Unicode-aware sheet matching");
+        assert_eq!(titles.repeat_rows, Some(RowRange { start: 1, end: 1 }));
+        assert_eq!(titles.repeat_cols, Some(ColRange { start: 1, end: 1 }));
+    }
 }

@@ -1986,6 +1986,28 @@ fn resolve_worksheet_part_for_selector(
     )))
 }
 
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+    use formula_model::SheetVisibility;
+
+    #[test]
+    fn resolve_worksheet_part_for_selector_matches_unicode_sheet_names_case_insensitive_like_excel() {
+        let sheets = vec![crate::WorkbookSheetInfo {
+            name: "Straße".to_string(),
+            sheet_id: 1,
+            rel_id: "rId1".to_string(),
+            visibility: SheetVisibility::Visible,
+        }];
+        let rel_targets: HashMap<String, String> =
+            [("rId1".to_string(), "xl/worksheets/sheet1.xml".to_string())].into();
+
+        let resolved = resolve_worksheet_part_for_selector("STRASSE", &sheets, &rel_targets)
+            .expect("should match sheet name case-insensitively");
+        assert_eq!(resolved, "xl/worksheets/sheet1.xml");
+    }
+}
+
 fn plan_shared_strings<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
