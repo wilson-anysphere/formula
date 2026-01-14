@@ -2264,17 +2264,16 @@ export class SpreadsheetApp {
              if (renderer) {
                const rowsVersion = renderer.scroll.rows.getVersion();
                const colsVersion = renderer.scroll.cols.getVersion();
-               if (rowsVersion !== this.sharedGridRowsVersion || colsVersion !== this.sharedGridColsVersion) {
-                 this.sharedGridRowsVersion = rowsVersion;
-                 this.sharedGridColsVersion = colsVersion;
-                 const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
-                 overlay?.invalidateSpatialIndex();
-                 this.drawingHitTestIndex = null;
-                 this.drawingHitTestIndexObjects = null;
-                 this.drawingsInteraction?.invalidateHitTestIndex();
-                 this.drawingInteractionController?.invalidateHitTestIndex();
-               }
-             }
+                  if (rowsVersion !== this.sharedGridRowsVersion || colsVersion !== this.sharedGridColsVersion) {
+                    this.sharedGridRowsVersion = rowsVersion;
+                    this.sharedGridColsVersion = colsVersion;
+                    const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+                    overlay?.invalidateSpatialIndex();
+                    this.invalidateDrawingHitTestIndexCaches();
+                    this.drawingsInteraction?.invalidateHitTestIndex();
+                    this.drawingInteractionController?.invalidateHitTestIndex();
+                  }
+                }
              this.clearSharedHoverCellCache();
              this.hideCommentTooltip();
              this.renderDrawings(effectiveViewport);
@@ -5468,8 +5467,7 @@ export class SpreadsheetApp {
     drawingOverlay?.invalidateSpatialIndex();
 
     // Hit test indices cache sheet-space bounds too; clear so hover/interaction logic stays aligned.
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.drawingInteractionController?.invalidateHitTestIndex();
   }
 
@@ -8885,8 +8883,7 @@ export class SpreadsheetApp {
     // Invalidate hit-test caches too: like the overlay spatial index, these indices
     // store sheet-space bounds derived from `drawingGeom`, which is stable by reference
     // but depends on live CanvasGridRenderer axis sizes.
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.drawingInteractionController?.invalidateHitTestIndex();
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
