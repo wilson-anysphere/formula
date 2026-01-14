@@ -361,8 +361,8 @@ if (recorder.finalizeError) {
 
 `createDefaultAIAuditStore(...)` picks a sensible backend for the current runtime:
 
-- Browser-like runtimes: prefer `IndexedDbAIAuditStore` (when available), then fall back to `LocalStorageAIAuditStore`, then `MemoryAIAuditStore`.
-- Node runtimes: default to `MemoryAIAuditStore` (opt into sqlite explicitly).
+- Browser-like runtimes (where `window` exists): prefer `IndexedDbAIAuditStore` (when available), then fall back to `LocalStorageAIAuditStore`, then `MemoryAIAuditStore`.
+- Node runtimes (no `window`): default to `MemoryAIAuditStore` (opt into sqlite explicitly).
 
 It also wraps the chosen store in `BoundedAIAuditStore` by default (pass `bounded: false` to disable).
 
