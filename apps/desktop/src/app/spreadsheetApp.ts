@@ -4948,6 +4948,10 @@ export class SpreadsheetApp {
         } else if (!this.sharedGrid) {
           this.refresh("scroll");
         }
+        // Workbook metadata changes can affect computed values for the active cell (and selection
+        // summary) even when no document deltas occur (multi-sheet fallback evaluation or missing
+        // WASM engine). Keep status/formula bar UI in sync.
+        this.scheduleStatusUpdate();
       }
     }
 
