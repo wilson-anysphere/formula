@@ -13,9 +13,11 @@ The Rust `formula-engine` intentionally does **not** reach out to the host OS / 
 
 As of today:
 
-- `INFO("recalc")` and `INFO("numfile")` are implemented (engine-internal).
-- `INFO("system")` is implemented but currently hard-coded to `"pcdos"`.
-- Other `INFO()` keys listed below currently return `#N/A` (recognized but not available).
+- `INFO()` supports the following keys:
+  - engine-internal: `INFO("recalc")`, `INFO("numfile")`
+  - host-provided (via `EngineInfo`): `INFO("system")`, `INFO("directory")`, `INFO("osversion")`,
+    `INFO("release")`, `INFO("version")`, `INFO("memavail")`, `INFO("totmem")`
+  - per-sheet view metadata (via `setSheetOrigin`): `INFO("origin")`
 - `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
 - `CELL("protect")` and `CELL("prefix")` are implemented based on the cell’s **effective style**
   (layered style resolution), matching Excel semantics:
@@ -27,6 +29,8 @@ As of today:
     - integer part: `floor(widthChars)`
     - fractional marker: `+ 0.0` when the column uses the sheet default width, `+ 0.1` when it has an explicit per-column width override
   - returns `0` when the column is hidden
+- `CELL("format")`, `CELL("color")`, and `CELL("parentheses")` are implemented based on the effective number format string
+  (style-table lookup), but do **not** consider conditional formatting rules.
 
   `widthChars` is the Excel column-width unit (OOXML `col/@width`). When unset, the engine falls back to Excel’s standard `8.43` width, which encodes as `8.0`.
 
@@ -44,14 +48,14 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 |---|---|---|---|---|
 | `recalc` | text | engine (`CalcSettings.calculation_mode`) | implemented | n/a |
 | `numfile` | number | engine (sheet count) | implemented | n/a |
-| `system` | text | host | **partially implemented** (currently always `"pcdos"`) | if host does not supply: defaults to `"pcdos"` |
-| `directory` | text | host | planned | return `#N/A` if missing |
-| `origin` | text | host | planned | return `#N/A` if missing |
-| `osversion` | text | host | planned | return `#N/A` if missing |
-| `release` | text | host | planned | return `#N/A` if missing |
-| `version` | text | host | planned | return `#N/A` if missing |
-| `memavail` | number | host | planned | return `#N/A` if missing |
-| `totmem` | number | host | planned | return `#N/A` if missing |
+| `system` | text | host (`EngineInfo.system`) | implemented | defaults to `"pcdos"` |
+| `directory` | text | host (`EngineInfo.directory`) or workbook file metadata | implemented | return `#N/A` if unknown |
+| `origin` | text | host (`setSheetOrigin`) | implemented | defaults to `"$A$1"` |
+| `osversion` | text | host (`EngineInfo.osversion`) | implemented | return `#N/A` if missing |
+| `release` | text | host (`EngineInfo.release`) | implemented | return `#N/A` if missing |
+| `version` | text | host (`EngineInfo.version`) | implemented | return `#N/A` if missing |
+| `memavail` | number | host (`EngineInfo.memavail`) | implemented | return `#N/A` if missing |
+| `totmem` | number | host (`EngineInfo.totmem`) | implemented | return `#N/A` if missing |
 
 #### Notes
 
@@ -68,7 +72,7 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 
 ### Host-provided INFO metadata (what to supply)
 
-When implementing the planned keys, hosts should supply a best-effort snapshot of:
+To get Excel-compatible results, hosts should supply a best-effort snapshot of:
 
 - `system`: `"pcdos"` (Windows-style) or `"mac"` (macOS-style). For web, choose one (we default to `"pcdos"` today).
 - `directory`: workbook directory / “current directory” string (platform-specific path conventions).
@@ -96,8 +100,11 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `protect` | number | **effective style** (`protection.locked`) | implemented |
 | `prefix` | text | **effective style** (`alignment.horizontal`) | implemented |
 | `width` | number | column width + column hidden state | implemented (encodes `floor(widthChars) + 0.0/0.1`; returns `0` when hidden) |
+| `format` | text | **effective number format** (style table) | implemented |
+| `color` | number | **effective number format** (style table) | implemented |
+| `parentheses` | number | **effective number format** (style table) | implemented |
 
-Other Excel-valid `CELL()` keys (`color`, `format`, `parentheses`, …) are currently recognized but return `#N/A` in this engine.
+Other `CELL()` keys are not implemented yet; unknown keys return `#VALUE!` (Excel-compatible).
 
 ### Metadata-backed keys (Excel-compatible behavior)
 
@@ -283,7 +290,7 @@ In the Rust model, this is `ColProperties.hidden: bool`. In JS/UI, hidden column
 
 ## Host integration APIs (what to call)
 
-This section documents the intended “wiring points” for hosts. Some calls exist today; others are planned.
+This section documents the intended “wiring points” for hosts.
 
 ### Web/WASM worker (`packages/engine` + `crates/formula-wasm`)
 
@@ -292,28 +299,26 @@ This section documents the intended “wiring points” for hosts. Some calls ex
 - Sheet count (`INFO("numfile")`): create all sheets up-front when loading a workbook
   - `WasmWorkbook.fromJson({ sheets: { Sheet1: …, Sheet2: … } })`
   - `WasmWorkbook.fromXlsxBytes(bytes)` (creates all sheets from the XLSX model)
-- Calculation mode (`INFO("recalc")`): currently always “Manual” in WASM because `formula_engine::Engine` defaults to manual and the setting is not exposed through the WASM API.
+- Calculation mode (`INFO("recalc")`): exposed via `getCalcSettings` / `setCalcSettings`.
+  - Note: the worker protocol typically runs the engine in manual mode so JS callers can explicitly
+    request `recalculate()` and receive deterministic value-change deltas.
+- INFO metadata (`INFO("system")`, `INFO("directory")`, `INFO("osversion")`, …):
+  - `EngineClient.setEngineInfo({ system, directory, osversion, release, version, memavail, totmem })`
+  - (worker RPC → `WasmWorkbook.setEngineInfo`)
+- View origin (`INFO("origin")`):
+  - `EngineClient.setSheetOrigin(sheet, originA1)` (worker RPC → `WasmWorkbook.setSheetOrigin`)
 - Workbook file metadata (`CELL("filename")`, `INFO("directory")`):
   - `EngineClient.setWorkbookFileMetadata(directory, filename)` (via `packages/engine` RPC → `WasmWorkbook.setWorkbookFileMetadata`)
 - Column metadata (`CELL("width")` plumbing):
   - `EngineClient.setColWidthChars(sheet, col, widthChars)` (preferred) or `EngineClient.setColWidth(col, widthChars, sheet)`
     - widths are in Excel “character” units (OOXML `col/@width`), not pixels
   - `EngineClient.setColHidden(col, hidden, sheet)` to set the explicit hidden flag
+- Formatting metadata (for `CELL("protect")`, `CELL("prefix")`, `CELL("format")`, …):
+  - `EngineClient.internStyle(style)` → style id
+  - Then apply style ids via:
+    - `setSheetDefaultStyleId`, `setRowStyleId`, `setColStyleId`, `setFormatRunsByCol`, `setCellStyleId`
 
 > In practice most web callers use `EngineClient` (`packages/engine/src/client.ts`) rather than calling `WasmWorkbook` directly; the same sheet-count rule applies to the JSON schema passed to `EngineClient.loadWorkbookFromJson(...)`.
-
-**Planned**
-
-Worker/RPC methods to add to `packages/engine` (and corresponding WASM exports on `WasmWorkbook`):
-
-- `setInfoEnvMetadata({ system?: string, osversion?: string, release?: string, version?: string, memavail?: number, totmem?: number, directory?: string, origin?: string })`
-- formatting / styles:
-  - `setStyleTable(styles: StylePatch[])` (or a minimal subset needed for `CELL`)
-  - `setSheetDefaultStyleId(sheetId, styleId)`
-  - `setRowStyleIds(sheetId, updates: Array<{ row: number, styleId: number }>)`
-  - `setColStyleIds(sheetId, updates: Array<{ col: number, styleId: number }>)`
-  - `setFormatRunsByCol(sheetId, col, runs: Array<{ startRow: number, endRowExclusive: number, styleId: number }>)`
-  - `setCellStyleIds(sheetId, updates: Array<{ address: string, styleId: number }>)`
 
 ### Desktop/Tauri
 
@@ -330,7 +335,7 @@ Desktop hosts generally have access to:
   - update workbook file metadata (directory + filename)
   - trigger a recalculation so dependent `INFO/CELL` formulas update
 - On viewport scroll:
-  - update `INFO("origin")`
+  - update `INFO("origin")` by calling `setSheetOrigin(sheet, originA1)`
   - trigger a recalculation (or treat `INFO()` as depending on a “view state” version counter)
 - On formatting edits / column resize / hide/unhide:
   - update style/column metadata
@@ -338,16 +343,7 @@ Desktop hosts generally have access to:
 
 ---
 
-## Implementation TODOs (for contributors)
+## Remaining TODOs (for contributors)
 
-These are the concrete code areas that will need changes to fully support the planned keys:
-
-1. **Plumb host metadata into evaluation**:
-   - extend `formula_engine::functions::FunctionContext` to expose env/workbook/style/column metadata needed by `INFO/CELL`
-2. **Implement keys in `formula-engine`**:
-   - `crates/formula-engine/src/functions/information/worksheet.rs`
-3. **Expose setters in WASM + worker protocol**:
-   - add `WasmWorkbook` methods in `crates/formula-wasm/src/lib.rs`
-   - add worker RPC methods/types in `packages/engine/src/*`
-4. **Maintain `CELL("width")` encoding tests**:
-   - keep the integer+flag encoding stable (default/custom/hidden)
+- Implement additional `CELL()` keys and conditional formatting-aware number formats (Excel has many more variants).
+- Keep `CELL("width")` encoding stable (default/custom/hidden semantics are tested in `crates/formula-engine/tests/functions/info_cell.rs`).
