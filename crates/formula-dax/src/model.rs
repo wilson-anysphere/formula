@@ -441,7 +441,11 @@ impl TableBackend for Table {
         self.backend().distinct_values_filtered(idx, rows)
     }
 
-    fn distinct_values_filtered_mask(&self, idx: usize, mask: Option<&BitVec>) -> Option<Vec<Value>> {
+    fn distinct_values_filtered_mask(
+        &self,
+        idx: usize,
+        mask: Option<&BitVec>,
+    ) -> Option<Vec<Value>> {
         self.backend().distinct_values_filtered_mask(idx, mask)
     }
 
@@ -616,12 +620,16 @@ impl UnmatchedFactRows {
                 if rows.len() > sparse_to_dense_threshold {
                     let word_len = (new_len + 63) / 64;
                     let mut bits = vec![0u64; word_len];
+                    let mut count = 0usize;
                     for &row in rows.iter() {
                         let word = row / 64;
                         let bit = row % 64;
-                        bits[word] |= 1u64 << bit;
+                        let mask = 1u64 << bit;
+                        if (bits[word] & mask) == 0 {
+                            bits[word] |= mask;
+                            count += 1;
+                        }
                     }
-                    let count = rows.len();
                     *self = UnmatchedFactRows::Dense {
                         bits,
                         len: new_len,
@@ -750,12 +758,16 @@ impl UnmatchedFactRowsBuilder {
                 if rows.len() > self.sparse_to_dense_threshold {
                     let word_len = (self.row_count + 63) / 64;
                     let mut bits = vec![0u64; word_len];
+                    let mut count = 0usize;
                     for &row in rows.iter() {
                         let word = row / 64;
                         let bit = row % 64;
-                        bits[word] |= 1u64 << bit;
+                        let mask = 1u64 << bit;
+                        if (bits[word] & mask) == 0 {
+                            bits[word] |= mask;
+                            count += 1;
+                        }
                     }
-                    let count = rows.len();
                     self.rows = UnmatchedFactRows::Dense {
                         bits,
                         len: self.row_count,
@@ -2337,6 +2349,29 @@ mod tests {
         dense.extend_into(&mut rows);
         rows.sort_unstable();
         assert_eq!(rows, vec![0, 1]);
+    }
+
+    #[test]
+    fn unmatched_fact_rows_builder_sparse_to_dense_dedups_duplicates() {
+        // When converting from the sparse vec to the dense bitmap representation, we should
+        // compute `count` based on the number of unique bits set, not the length of the vec.
+        let mut builder = UnmatchedFactRowsBuilder::new(64);
+        builder.push(0);
+        assert!(matches!(builder.rows, UnmatchedFactRows::Sparse(_)));
+
+        // Duplicate push triggers conversion (threshold is 1, and we switch when len > 1).
+        builder.push(0);
+
+        match &builder.rows {
+            UnmatchedFactRows::Dense { count, .. } => assert_eq!(*count, 1),
+            UnmatchedFactRows::Sparse(_) => panic!("expected dense representation"),
+        }
+
+        let dense = builder.finish();
+        let mut rows = Vec::new();
+        dense.extend_into(&mut rows);
+        rows.sort_unstable();
+        assert_eq!(rows, vec![0]);
     }
 
     #[test]
