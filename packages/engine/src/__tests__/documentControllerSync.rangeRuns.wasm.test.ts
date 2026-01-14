@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../../apps/desktop/src/document/documentController.js";
 
-import { engineApplyDocumentChange, engineHydrateFromDocument } from "../documentControllerSync.ts";
+import { engineApplyDocumentChange, engineHydrateFromDocument, type EngineSyncTarget } from "../documentControllerSync.ts";
 import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
 
 const skipWasmBuild = process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env.FORMULA_SKIP_WASM_BUILD === "true";
@@ -96,6 +96,24 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
       channelFactory: createMockChannel,
     });
 
+    // `engineHydrateFromDocument` / `engineApplyDocumentChange` operate on the narrower
+    // `EngineSyncTarget` surface (sheet-first signatures for some metadata APIs). The public
+    // EngineWorker client is an EngineClient-style API (sheet-last helpers like
+    // `setCellStyleId(address, styleId, sheet)` and `setColWidth(col, width, sheet)`).
+    //
+    // Wrap it so `tsc` typechecking stays strict while still exercising the real worker RPC.
+    const syncTarget: EngineSyncTarget = {
+      loadWorkbookFromJson: (json) => engine.loadWorkbookFromJson(json),
+      setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
+      setCells: (updates) => engine.setCells(updates),
+      recalculate: (sheet) => engine.recalculate(sheet),
+      setSheetDisplayName: (sheetId, name) => engine.setSheetDisplayName(sheetId, name),
+      internStyle: (styleObj) => engine.internStyle(styleObj as any),
+      setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
+      setFormatRunsByCol: (sheet, col, runs) => engine.setFormatRunsByCol(sheet, col, runs),
+      setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
+    };
+
     try {
       const doc = new DocumentController();
 
@@ -103,7 +121,7 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
       // Keep the formula cell out of the formatted rectangle so only the referenced cell's format changes.
       doc.setCellFormula("Sheet1", "AA1", 'CELL("protect",A1)');
 
-      await engineHydrateFromDocument(engine, doc);
+      await engineHydrateFromDocument(syncTarget, doc);
 
       let cell = await engine.getCell("AA1", "Sheet1");
       expect(cell.value).toBe(1);
@@ -120,7 +138,7 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
       expect(Array.isArray(payload?.rangeRunDeltas)).toBe(true);
       expect(payload.rangeRunDeltas.length).toBeGreaterThan(0);
 
-      await engineApplyDocumentChange(engine, payload, { getStyleById: (id) => doc.styleTable.get(id) });
+      await engineApplyDocumentChange(syncTarget, payload, { getStyleById: (id) => doc.styleTable.get(id) });
 
       cell = await engine.getCell("AA1", "Sheet1");
       expect(cell.value).toBe(0);
@@ -137,7 +155,7 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
       expect(Array.isArray(payload?.rangeRunDeltas)).toBe(true);
       expect(payload.rangeRunDeltas.length).toBeGreaterThan(0);
 
-      await engineApplyDocumentChange(engine, payload, { getStyleById: (id) => doc.styleTable.get(id) });
+      await engineApplyDocumentChange(syncTarget, payload, { getStyleById: (id) => doc.styleTable.get(id) });
 
       cell = await engine.getCell("AA1", "Sheet1");
       expect(cell.value).toBe(1);
@@ -159,4 +177,3 @@ function loadWorkerModule(): Promise<unknown> {
   }
   return workerModulePromise;
 }
-
