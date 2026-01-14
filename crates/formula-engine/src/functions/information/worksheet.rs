@@ -235,6 +235,10 @@ fn resolve_number_format<'a>(
     sheet_id: &SheetId,
     addr: CellAddr,
 ) -> Option<&'a str> {
+    if let Some(fmt) = ctx.get_cell_number_format(sheet_id, addr) {
+        return Some(fmt);
+    }
+
     let styles = ctx.style_table()?;
 
     // Style precedence matches the DocumentController layering:
