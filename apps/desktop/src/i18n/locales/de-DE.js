@@ -215,6 +215,16 @@ export const deDE = {
   "versionHistory.compare.sheetMetaField.tabColor": "Tab-Farbe",
   "versionHistory.compare.sheetMetaField.frozenRows": "Fixierte Zeilen",
   "versionHistory.compare.sheetMetaField.frozenCols": "Fixierte Spalten",
+  "filterDropdown.filtered": "(gefiltert)",
+  "filterDropdown.search.placeholder": "Suchen…",
+  "filterDropdown.search.ariaLabel": "Filterwerte suchen",
+  "filterDropdown.noMatches": "Keine Treffer",
+  "filterDropdown.selectAll": "Alle auswählen",
+  "filterDropdown.selectAllSearchResults": "Alle Suchergebnisse auswählen",
+  "filterDropdown.blanks": "(Leere)",
+  "filterDropdown.clear": "Löschen",
+  "filterDropdown.apply": "Anwenden",
+  "table.filter.ariaLabel": "Filter {column}",
   "formulaDiff.aria.emptyFormula": "Leere Formel",
   "formulaDiff.label.diff": "Diff"
 }; 

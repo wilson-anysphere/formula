@@ -215,6 +215,16 @@ export const ar = {
   "versionHistory.compare.sheetMetaField.tabColor": "لون علامة التبويب",
   "versionHistory.compare.sheetMetaField.frozenRows": "صفوف مجمّدة",
   "versionHistory.compare.sheetMetaField.frozenCols": "أعمدة مجمّدة",
+  "filterDropdown.filtered": "(مُصفّى)",
+  "filterDropdown.search.placeholder": "بحث…",
+  "filterDropdown.search.ariaLabel": "البحث في قيم التصفية",
+  "filterDropdown.noMatches": "لا توجد مطابقات",
+  "filterDropdown.selectAll": "تحديد الكل",
+  "filterDropdown.selectAllSearchResults": "تحديد كل نتائج البحث",
+  "filterDropdown.blanks": "(فارغة)",
+  "filterDropdown.clear": "مسح",
+  "filterDropdown.apply": "تطبيق",
+  "table.filter.ariaLabel": "تصفية {column}",
   "formulaDiff.aria.emptyFormula": "صيغة فارغة",
   "formulaDiff.label.diff": "الفرق"
 }; 
