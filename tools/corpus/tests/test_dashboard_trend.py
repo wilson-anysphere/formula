@@ -250,6 +250,41 @@ class DashboardTrendTests(unittest.TestCase):
             entries, _ = _append_trend_file(trend_path, summary=summary, max_entries=0)
             self.assertEqual(len(entries), 4)
 
+    def test_append_trend_file_replaces_last_entry_when_timestamp_matches(self) -> None:
+        # If the last entry in trend.json matches the current run timestamp, we should replace it
+        # rather than appending a duplicate entry. This makes `--append-trend` idempotent when
+        # re-running the dashboard on an existing triage output directory.
+        summary = {
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "commit": "abc",
+            "run_url": "https://example.invalid/run/1",
+            "counts": {"total": 1, "open_ok": 1, "round_trip_ok": 1},
+            "rates": {"open": 1.0, "round_trip": 1.0},
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            trend_path = Path(td) / "trend.json"
+            trend_path.write_text(
+                json.dumps(
+                    [
+                        {"timestamp": "t0", "open_rate": 0.0},
+                        {"timestamp": summary["timestamp"], "open_rate": 0.0},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            entries, prev = _append_trend_file(trend_path, summary=summary, max_entries=90)
+            self.assertEqual(prev, {"timestamp": summary["timestamp"], "open_rate": 0.0})
+            self.assertEqual(len(entries), 2)
+            self.assertEqual(entries[-1]["timestamp"], summary["timestamp"])
+            self.assertAlmostEqual(entries[-1]["open_rate"], 1.0)
+
+            on_disk = json.loads(trend_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(on_disk), 2)
+            self.assertEqual(on_disk[-1]["timestamp"], summary["timestamp"])
+            self.assertAlmostEqual(on_disk[-1]["open_rate"], 1.0)
+
     def test_append_trend_file_private_mode_redacts_existing_run_urls_and_functions(self) -> None:
         summary = {
             "timestamp": "2026-01-01T00:00:00+00:00",

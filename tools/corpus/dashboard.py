@@ -510,7 +510,13 @@ def _append_trend_file(
 
     entry = _trend_entry(summary)
     _redact_trend_entry(entry, privacy_mode=privacy_mode)
-    entries.append(entry)
+    # Make appends idempotent for a given triage run: if the trend file already ends with an entry
+    # for the same timestamp, replace it instead of appending a duplicate. This is especially
+    # useful when re-generating dashboards from an existing `index.json` / triage output directory.
+    if entries and entries[-1].get("timestamp") == entry.get("timestamp"):
+        entries[-1] = entry
+    else:
+        entries.append(entry)
     if max_entries > 0 and len(entries) > max_entries:
         entries = entries[-max_entries:]
 
