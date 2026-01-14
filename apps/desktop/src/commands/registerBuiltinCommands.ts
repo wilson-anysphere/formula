@@ -8,6 +8,7 @@ import { showQuickPick, showToast } from "../extensions/ui.js";
 import { getPasteSpecialMenuItems } from "../clipboard/pasteSpecial.js";
 import type { ThemeController } from "../theme/themeController.js";
 import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { cycleWorkbenchFocusRegion, type WorkbenchFocusCycleDeps } from "./workbenchFocusCycle.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
@@ -323,11 +324,7 @@ export function registerBuiltinCommands(params: {
 
     const isReadOnly = typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true;
     if (isReadOnly && !decision.allRangesBand) {
-      try {
-        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-      } catch {
-        // `showToast` requires a #toast-root; unit tests don't always include it.
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
       return;
     }
 
@@ -379,11 +376,7 @@ export function registerBuiltinCommands(params: {
 
     const isReadOnly = typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true;
     if (isReadOnly && !decision.allRangesBand) {
-      try {
-        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-      } catch {
-        // `showToast` requires a #toast-root; unit tests don't always include it.
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
       return false;
     }
 

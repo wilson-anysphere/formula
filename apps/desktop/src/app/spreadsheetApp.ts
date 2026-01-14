@@ -22998,11 +22998,7 @@ export class SpreadsheetApp {
     }
 
     if (this.isReadOnly() && !decision.allRangesBand) {
-      try {
-        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-      } catch {
-        // `showToast` requires a #toast-root; unit tests don't always include it.
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
       return true;
     }
 

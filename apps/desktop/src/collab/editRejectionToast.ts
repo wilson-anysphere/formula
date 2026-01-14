@@ -2,7 +2,16 @@ import { showToast } from "../extensions/ui.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 
 type RejectionReason = "permission" | "encryption" | "unknown";
-type RejectionKind = "cell" | "format" | "rangeRun" | "drawing" | "chart" | "undoRedo" | "rowColVisibility" | "unknown";
+type RejectionKind =
+  | "cell"
+  | "format"
+  | "formatDefaults"
+  | "rangeRun"
+  | "drawing"
+  | "chart"
+  | "undoRedo"
+  | "rowColVisibility"
+  | "unknown";
 
 // Editing surfaces may call this helper in response to every key press (e.g. typing into a
 // read-only sheet). To avoid spamming users with identical warnings, throttle repeated toasts.
@@ -49,6 +58,7 @@ function inferRejectionKind(rejected: any[]): RejectionKind {
     if (
       kind === "cell" ||
       kind === "format" ||
+      kind === "formatDefaults" ||
       kind === "rangeRun" ||
       kind === "drawing" ||
       kind === "chart" ||
@@ -89,7 +99,7 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
     return rangeToA1({ startRow: first.startRow, startCol: first.col, endRow, endCol: first.col });
   }
 
-  if (kind === "drawing" || kind === "chart" || kind === "undoRedo" || kind === "rowColVisibility") {
+  if (kind === "formatDefaults" || kind === "drawing" || kind === "chart" || kind === "undoRedo" || kind === "rowColVisibility") {
     return null;
   }
 
@@ -142,6 +152,10 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
       return target
         ? `Read-only: you don't have permission to change formatting (${target})`
         : "Read-only: you don't have permission to change formatting";
+    }
+
+    if (kind === "formatDefaults") {
+      return "Read-only: select an entire row, column, or sheet to change formatting defaults.";
     }
 
     if (kind === "drawing") {

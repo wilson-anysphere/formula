@@ -128,6 +128,7 @@ import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collab
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
 import { loadCollabToken, preloadCollabTokenFromKeychain, storeCollabToken } from "./sharing/collabTokenStore.js";
 import { getWorkbookMutationPermission, READ_ONLY_SHEET_MUTATION_MESSAGE } from "./collab/permissionGuards";
+import { showCollabEditRejectedToast } from "./collab/editRejectionToast";
 import { registerEncryptionUiCommands } from "./collab/encryption-ui/registerEncryptionUiCommands";
 import type { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
@@ -1661,7 +1662,7 @@ function applyFormattingToSelection(
   }
 
   if (isReadOnly && !decision.allRangesBand) {
-    showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+    showCollabEditRejectedToast([{ rejectionKind: "formatDefaults", rejectionReason: "permission" }]);
     return;
   }
 

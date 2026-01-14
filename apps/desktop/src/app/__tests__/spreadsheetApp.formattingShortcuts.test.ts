@@ -416,6 +416,13 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
     expect(spy).not.toHaveBeenCalled();
     expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("formatting defaults");
 
+    // Repeating the shortcut (e.g. key-repeat) should not spam identical toasts.
+    const repeat = new KeyboardEvent("keydown", { key: "b", ctrlKey: true, cancelable: true });
+    root.dispatchEvent(repeat);
+    expect(repeat.defaultPrevented).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('[data-testid="toast"]')).toHaveLength(1);
+
     // Cleanup toast to avoid leaving timers running.
     (document.querySelector<HTMLElement>('[data-testid="toast"]') as any)?.click?.();
 
