@@ -405,6 +405,22 @@ impl XlsxDocument {
         &mut self.meta
     }
 
+    /// Returns the baseline conditional formatting XML blocks extracted from the worksheet when
+    /// this document was loaded (if any).
+    ///
+    /// This is a convenience wrapper over [`XlsxMeta::conditional_formatting`]. The returned
+    /// blocks preserve the original SpreadsheetML schema (including x14 extensions) so
+    /// round-trip tooling can detect when conditional formatting has been rewritten.
+    pub fn conditional_formatting_blocks(
+        &self,
+        sheet_id: WorksheetId,
+    ) -> Option<&[RawConditionalFormattingBlock]> {
+        self.meta
+            .conditional_formatting
+            .get(&sheet_id)
+            .map(|v| v.as_slice())
+    }
+
     /// Returns metadata captured for a specific cell (if any).
     ///
     /// This is a convenience wrapper over [`XlsxMeta::cell_meta`] and exists
