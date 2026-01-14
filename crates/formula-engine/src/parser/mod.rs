@@ -585,41 +585,106 @@ fn scan_sheet_name_token(src: &str, start: usize) -> Option<usize> {
 }
 
 fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
-    let end = find_workbook_prefix_end(src, start)?;
-
-    // Heuristic: only treat this as an external workbook prefix if it is immediately followed by:
-    // - a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`), OR
-    // - a defined name identifier (e.g. `[Book.xlsx]MyName`).
+    // Workbook prefixes are not nesting, but workbook ids can still contain `[` / `]` characters
+    // (e.g. `C:\[foo]\[Book.xlsx`). Some producers escape literal `]` as `]]`, while others emit
+    // bracketed path components like `[foo]` without escaping the inner `]`.
     //
-    // This avoids incorrectly treating nested structured references (which *are* nested) as
-    // workbook prefixes while still supporting workbook names that contain `[` characters (Excel
-    // treats `[` as plain text within workbook ids).
-    let i = skip_ws(src, end);
-    if let Some(mut sheet_end) = scan_sheet_name_token(src, i) {
-        sheet_end = skip_ws(src, sheet_end);
-
-        // `[Book.xlsx]Sheet1:Sheet3!A1` (external 3D span)
-        if sheet_end < src.len() && src[sheet_end..].starts_with(':') {
-            sheet_end += 1;
-            sheet_end = skip_ws(src, sheet_end);
-            sheet_end = scan_sheet_name_token(src, sheet_end)?;
-            sheet_end = skip_ws(src, sheet_end);
-        }
-
-        if sheet_end < src.len() && src[sheet_end..].starts_with('!') {
-            return Some(end);
-        }
+    // To handle both forms, treat any unescaped `]` as a *candidate* delimiter and pick the first
+    // one that yields a valid sheet prefix (`[workbook]sheet!`) if present; otherwise, fall back
+    // to a workbook-scoped name/table prefix (`[workbook]Name`).
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
+        return None;
     }
 
-    // Workbook-scoped external defined name `[Book.xlsx]MyName`.
-    // Note: defined names are not quoted with `'` in formula text, so we only scan the unquoted
-    // identifier form here.
-    let name_start = skip_ws(src, end);
-    if scan_unquoted_sheet_name(src, name_start).is_some() {
-        return Some(end);
+    let mut i = start + 1;
+    let mut best_name_end: Option<usize> = None;
+
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            // Escaped literal `]` inside workbook ids: `]]` -> `]`.
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+
+            let end = i + 1;
+
+            // Heuristic: treat this as an external workbook prefix if it is immediately followed
+            // by a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`).
+            let after_end = skip_ws(src, end);
+            if let Some(mut sheet_end) = scan_sheet_name_token(src, after_end) {
+                sheet_end = skip_ws(src, sheet_end);
+
+                // `[Book.xlsx]Sheet1:Sheet3!A1` (external 3D span)
+                if sheet_end < src.len() && src[sheet_end..].starts_with(':') {
+                    sheet_end += 1;
+                    sheet_end = skip_ws(src, sheet_end);
+                    sheet_end = scan_sheet_name_token(src, sheet_end)?;
+                    sheet_end = skip_ws(src, sheet_end);
+                }
+
+                if sheet_end < src.len() && src[sheet_end..].starts_with('!') {
+                    return Some(end);
+                }
+            }
+
+            // Workbook-scoped prefix `[Book.xlsx]Name` (external defined name or table name).
+            //
+            // This is ambiguous with nested brackets inside workbook ids (e.g. `C:\[foo]\Book.xlsx`)
+            // because the remainder after an inner `]` often starts with `\`. To avoid locking on a
+            // false delimiter when the workbook id continues with a bracketed path component
+            // (`\[Book.xlsx]Sheet1!A1`), only accept name candidates that are not obviously part of
+            // a larger bracketed workbook prefix.
+            let name_start = skip_ws(src, end);
+            if let Some(name_end) = scan_unquoted_sheet_name(src, name_start) {
+                let next = skip_ws(src, name_end);
+                // If the token after the candidate name is another `]`, we're still inside a larger
+                // bracketed segment, so this `]` was not the workbook delimiter.
+                if next < src.len() && src[next..].starts_with(']') {
+                    // keep scanning
+                } else if name_end == name_start + 1 && bytes.get(name_start) == Some(&b'\\') {
+                    // A lone path separator is not a meaningful defined name/table name; treat
+                    // this as an internal path bracket (e.g. `C:\[foo]\[Book.xlsx]...`).
+                } else if next < src.len() && src[next..].starts_with('[') {
+                    // If the next bracketed segment itself looks like an external workbook sheet
+                    // prefix (`[Book.xlsx]Sheet1!`), treat this as a false delimiter and keep
+                    // scanning for the real workbook end.
+                    if let Some(nested_end) = find_workbook_prefix_end(src, next) {
+                        let nested_after = skip_ws(src, nested_end);
+                        if let Some(mut nested_sheet_end) = scan_sheet_name_token(src, nested_after)
+                        {
+                            nested_sheet_end = skip_ws(src, nested_sheet_end);
+                            if nested_sheet_end < src.len()
+                                && src[nested_sheet_end..].starts_with('!')
+                            {
+                                // This looks like `\[Book.xlsx]Sheet!`; keep scanning.
+                            } else {
+                                best_name_end = Some(end);
+                            }
+                        } else {
+                            best_name_end = Some(end);
+                        }
+                    } else {
+                        best_name_end = Some(end);
+                    }
+                } else {
+                    best_name_end = Some(end);
+                }
+            }
+
+            // Keep scanning for a later `]` that yields a valid sheet prefix.
+            i += 1;
+            continue;
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside multi-byte sequences as actual bracket characters.
+        let ch = src[i..].chars().next()?;
+        i += ch.len_utf8();
     }
 
-    None
+    best_name_end
 }
 
 impl<'a> Lexer<'a> {
@@ -3643,7 +3708,6 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     let workbook = self.src[workbook_start..workbook_end].to_string();
-
                     // Workbook-scoped external structured reference, e.g. `[Book.xlsx]Table1[Col]`.
                     //
                     // This is ambiguous with workbook-scoped external defined names
@@ -4530,5 +4594,46 @@ mod tests {
             reparsed.to_string(SerializeOptions::default()).unwrap(),
             rendered
         );
+    }
+
+    #[test]
+    fn external_workbook_prefix_parses_when_workbook_contains_open_bracket_after_bracketed_path() {
+        // Regression test: workbook ids may contain bracketed path components *and* literal `[` in
+        // the workbook name itself. Workbook prefixes are not nesting, so we should treat the
+        // inner `[` as plain text and still locate the correct closing `]`.
+        //
+        // Example: a file name like `[Book.xlsx` in a folder `C:\[foo]\`.
+        let formula = r"=[C:\[foo]\[Book.xlsx]Sheet1!A1";
+        let ast = parse_formula(formula, ParseOptions::default()).unwrap();
+
+        match &ast.expr {
+            Expr::CellRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some(r"C:\[foo]\[Book.xlsx"));
+                assert_eq!(
+                    r.sheet,
+                    Some(SheetRef::Sheet("Sheet1".to_string())),
+                    "expected external workbook prefix to be parsed as a sheet reference"
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workbook_only_external_structured_ref_parses() {
+        // External structured refs can be workbook-only (no explicit sheet), e.g.
+        // `[Book.xlsx]Table1[Col]`.
+        let formula = "=[Book.xlsx]Table1[Col]";
+        let ast = parse_formula(formula, ParseOptions::default()).unwrap();
+
+        match &ast.expr {
+            Expr::StructuredRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some("Book.xlsx"));
+                assert_eq!(r.sheet, None);
+                assert_eq!(r.table.as_deref(), Some("Table1"));
+                assert_eq!(r.spec, "Col");
+            }
+            other => panic!("expected StructuredRef, got {other:?}"),
+        }
     }
 }
