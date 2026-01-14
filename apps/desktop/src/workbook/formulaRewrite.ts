@@ -215,15 +215,9 @@ function parseUnquotedSheetSpec(
 
   // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
   if (first.ch === "[") {
-    while (i < formula.length) {
-      const next = codePointAt(formula, i);
-      if (!next) return null;
-      if (next.ch === "]") {
-        i = next.nextIndex;
-        break;
-      }
-      i = next.nextIndex;
-    }
+    const end = findMatchingBracketEnd(formula, startIndex);
+    if (!end) return null;
+    i = end;
 
     if (i >= formula.length) return null;
 
@@ -268,9 +262,8 @@ function splitWorkbookPrefix(sheetSpec: string): { workbookPrefix: string | null
   // (e.g. `'C:\\[foo]\\[Book.xlsx]Sheet1'!A1`). The workbook delimiter is the last `[...]` pair.
   const openIdx = sheetSpec.lastIndexOf("[");
   if (openIdx === -1) return { workbookPrefix: null, remainder: sheetSpec };
-  const closeIdx = sheetSpec.indexOf("]", openIdx);
-  if (closeIdx === -1) return { workbookPrefix: null, remainder: sheetSpec };
-  const prefixEnd = closeIdx + 1;
+  const prefixEnd = findMatchingBracketEnd(sheetSpec, openIdx);
+  if (!prefixEnd) return { workbookPrefix: null, remainder: sheetSpec };
   if (prefixEnd >= sheetSpec.length) return { workbookPrefix: null, remainder: sheetSpec };
   return { workbookPrefix: sheetSpec.slice(0, prefixEnd), remainder: sheetSpec.slice(prefixEnd) };
 }
