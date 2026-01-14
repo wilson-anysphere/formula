@@ -6019,6 +6019,16 @@ if (
     return extensionHostManagerInitPromise;
   };
 
+  // Pre-initialize the extension host manager (without loading extensions) so e2e + UI surfaces
+  // can safely reference `window.__formulaExtensionHostManager` / `window.__formulaExtensionHost`
+  // without having to first open the Extensions panel.
+  //
+  // This does *not* load built-in or installed extensions; worker startup remains lazy and is
+  // still gated behind `ensureExtensionsLoaded()`.
+  void ensureExtensionHostManager().catch((err) => {
+    console.error("Failed to initialize extension host manager:", err);
+  });
+
   const focusAfterSheetNavigationFromCommand = (): void => {
     if (!shouldRestoreFocusAfterSheetNavigation()) return;
     if (contextKeys.get(KeyboardContextKeyIds.focusInSheetTabs) === true) {
@@ -8575,45 +8585,53 @@ registerDesktopCommands({
     exportPdf: () => handleRibbonExportPdf(),
   },
   workbenchFileHandlers: {
-    newWorkbook: () => {
+    newWorkbook: async () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
         return;
       }
-      void handleNewWorkbook().catch((err) => {
+      try {
+        await handleNewWorkbook();
+      } catch (err) {
         console.error("Failed to create workbook:", err);
         showToast(`Failed to create workbook: ${String(err)}`, "error");
-      });
+      }
     },
-    openWorkbook: () => {
+    openWorkbook: async () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Opening workbooks is available in the desktop app.");
         return;
       }
-      void promptOpenWorkbook().catch((err) => {
+      try {
+        await promptOpenWorkbook();
+      } catch (err) {
         console.error("Failed to open workbook:", err);
         showToast(`Failed to open workbook: ${String(err)}`, "error");
-      });
+      }
     },
-    saveWorkbook: () => {
+    saveWorkbook: async () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Saving workbooks is available in the desktop app.");
         return;
       }
-      void handleSave().catch((err) => {
+      try {
+        await handleSave();
+      } catch (err) {
         console.error("Failed to save workbook:", err);
         showToast(`Failed to save workbook: ${String(err)}`, "error");
-      });
+      }
     },
-    saveWorkbookAs: () => {
+    saveWorkbookAs: async () => {
       if (!tauriBackend) {
         showDesktopOnlyToast("Save As is available in the desktop app.");
         return;
       }
-      void handleSaveAs().catch((err) => {
+      try {
+        await handleSaveAs();
+      } catch (err) {
         console.error("Failed to save workbook:", err);
         showToast(`Failed to save workbook: ${String(err)}`, "error");
-      });
+      }
     },
     setAutoSaveEnabled: (enabled?: boolean) => {
       const nextEnabled = typeof enabled === "boolean" ? enabled : !autoSaveEnabled;
@@ -10937,10 +10955,19 @@ try {
   // - close-prep-done, close-handled
   // - updater-ui-ready, coi-check-result
   const { listen, emit } = getTauriEventApiOrThrow();
-  let pendingOpenFiles: Promise<void> = Promise.resolve();
+  // File/open/save operations can trigger expensive async work (backend sync, workbook loading).
+  // Serialize them so overlapping menu/IPC triggers can't interleave and cause inconsistent UI
+  // state or missed extension lifecycle events.
+  let pendingWorkbookFileCommands: Promise<void> = Promise.resolve();
+
+  const queueWorkbookFileCommand = (task: () => Promise<void>) => {
+    pendingWorkbookFileCommands = pendingWorkbookFileCommands
+      .then(task)
+      .catch((err) => console.error("Workbook file command failed:", err));
+  };
 
   const queueOpenWorkbook = (path: string) => {
-    pendingOpenFiles = pendingOpenFiles.then(async () => {
+    queueWorkbookFileCommand(async () => {
       try {
         // Ensure the window is visible so any UI feedback (toasts, prompts) is visible even
         // when the app is running in the background (e.g. opened via file association while
@@ -11116,24 +11143,28 @@ try {
   });
 
   void listen("tray-open", () => {
-    void (async () => {
-      // Ensure the window is visible so any toast-based error handling is observable.
-      await showTauriWindowBestEffort();
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
-    })().catch((err) => {
-      console.error("Failed to open workbook:", err);
-      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+    queueWorkbookFileCommand(async () => {
+      try {
+        // Ensure the window is visible so any toast-based error handling is observable.
+        await showTauriWindowBestEffort();
+        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
+      } catch (err) {
+        console.error("Failed to open workbook:", err);
+        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+      }
     });
   });
 
   void listen("tray-new", () => {
-    void (async () => {
-      // Ensure the window is visible so any toast-based error handling is observable.
-      await showTauriWindowBestEffort();
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
-    })().catch((err) => {
-      console.error("Failed to create workbook:", err);
-      void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
+    queueWorkbookFileCommand(async () => {
+      try {
+        // Ensure the window is visible so any toast-based error handling is observable.
+        await showTauriWindowBestEffort();
+        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
+      } catch (err) {
+        console.error("Failed to create workbook:", err);
+        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
+      }
     });
   });
 
@@ -11145,30 +11176,46 @@ try {
 
   // Native menu bar integration (desktop shell emits menu-open/menu-save/... events).
   void listen("menu-open", () => {
-    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook).catch((err) => {
-      console.error("Failed to open workbook:", err);
-      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+    queueWorkbookFileCommand(async () => {
+      try {
+        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
+      } catch (err) {
+        console.error("Failed to open workbook:", err);
+        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+      }
     });
   });
 
   void listen("menu-new", () => {
-    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook).catch((err) => {
-      console.error("Failed to create workbook:", err);
-      void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
+    queueWorkbookFileCommand(async () => {
+      try {
+        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
+      } catch (err) {
+        console.error("Failed to create workbook:", err);
+        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
+      }
     });
   });
 
   void listen("menu-save", () => {
-    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook).catch((err) => {
-      console.error("Failed to save workbook:", err);
-      void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+    queueWorkbookFileCommand(async () => {
+      try {
+        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook);
+      } catch (err) {
+        console.error("Failed to save workbook:", err);
+        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+      }
     });
   });
 
   void listen("menu-save-as", () => {
-    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs).catch((err) => {
-      console.error("Failed to save workbook:", err);
-      void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+    queueWorkbookFileCommand(async () => {
+      try {
+        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
+      } catch (err) {
+        console.error("Failed to save workbook:", err);
+        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+      }
     });
   });
 
