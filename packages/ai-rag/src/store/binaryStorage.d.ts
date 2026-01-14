@@ -38,6 +38,3 @@ export class IndexedDBBinaryStorage implements BinaryStorage {
   save(data: Uint8Array): Promise<void>;
   remove(): Promise<void>;
 }
-
-export function toBase64(data: Uint8Array): string;
-export function fromBase64(encoded: string): Uint8Array;
