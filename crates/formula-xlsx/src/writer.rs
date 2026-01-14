@@ -625,19 +625,23 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
         return String::new();
     }
 
-    let mut out = String::new();
-    out.push_str("<sheetFormatPr");
+    let mut attrs = String::new();
     if let Some(base) = sheet.base_col_width {
-        out.push_str(&format!(r#" baseColWidth="{base}""#));
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
     }
     if let Some(width) = sheet.default_col_width {
-        out.push_str(&format!(r#" defaultColWidth="{width}""#));
+        attrs.push_str(&format!(
+            r#" defaultColWidth="{}""#,
+            trim_float(width as f64)
+        ));
     }
     if let Some(height) = sheet.default_row_height {
-        out.push_str(&format!(r#" defaultRowHeight="{height}""#));
+        attrs.push_str(&format!(
+            r#" defaultRowHeight="{}""#,
+            trim_float(height as f64)
+        ));
     }
-    out.push_str("/>");
-    out
+    format!(r#"<sheetFormatPr{attrs}/>"#)
 }
 #[cfg(test)]
 mod sheet_format_pr_tests {
