@@ -8019,7 +8019,9 @@ export class SpreadsheetApp {
 
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/*";
+    // Prefer the broad MIME accept string, but include explicit extensions so platforms
+    // with weaker MIME inference still show common image formats.
+    input.accept = "image/*,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg";
     input.style.display = "none";
     input.dataset.testid = "insert-image-input";
 
