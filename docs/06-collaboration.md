@@ -270,7 +270,8 @@ APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/coll
     - Like `add`, `patch.sheetId` is best-effort resolved from sheet display name → stable id when possible.
   - `remove(id: string): void`
 - `createEncryptedRangeManagerForSession(session)` → `EncryptedRangeManager`
-  - Uses `session.transactLocal(...)` so range edits participate in collaborative undo scope.
+  - Uses `session.transactLocal(...)` so range edits participate in the session’s local-origin collaborative undo scope (when undo is enabled).
+  - If your application uses a separate Yjs `UndoManager` / origin token, prefer `new EncryptedRangeManager({ doc, transact })` with a `transact` that uses that origin so range edits are undoable.
 - `createEncryptionPolicyFromDoc(doc)` → `{ shouldEncryptCell(cell): boolean; keyIdForCell(cell): string | null }`
   - Reads `metadata.encryptedRanges` (including legacy schemas) to answer:
     - **should this cell be encrypted on write?** (`shouldEncryptCell`)
