@@ -165,6 +165,46 @@ describe("bindSheetViewToCollabSession (frozen + axis overrides)", () => {
     binder.destroy();
   });
 
+  it("hydrates legacy top-level axis overrides even when `view` exists but does not include them", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    sheetMap.set("frozenRows", 2);
+    sheetMap.set("frozenCols", 1);
+    sheetMap.set("colWidths", { "1": 100 });
+    sheetMap.set("rowHeights", { "0": 25 });
+
+    // Create a `view` map, but omit axis overrides so the binder must fall back to the
+    // legacy top-level encodings.
+    const view = new Y.Map<any>();
+    view.set("frozenRows", 0);
+    view.set("frozenCols", 0);
+    sheetMap.set("view", view);
+
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    // frozenRows/frozenCols come from the view map (preferred)
+    expect(document.getSheetView(sheetId).frozenRows).toBe(0);
+    expect(document.getSheetView(sheetId).frozenCols).toBe(0);
+
+    // axis overrides should fall back to the top-level keys because the view map lacks them
+    expect(document.getSheetView(sheetId).colWidths).toEqual({ "1": 100 });
+    expect(document.getSheetView(sheetId).rowHeights).toEqual({ "0": 25 });
+
+    binder.destroy();
+  });
+
   it("migrates legacy axis overrides into nested Y.Maps when applying unrelated view changes", () => {
     const doc = new Y.Doc();
     const sheets = doc.getArray<Y.Map<any>>("sheets");

@@ -422,15 +422,25 @@ function getSheetIdFromSheetMap(sheet: any): string | null {
 function readSheetViewFromSheetMap(sheet: any): SheetViewState {
   const viewRaw = sheet?.get?.("view");
 
-  const frozenRows =
-    viewRaw !== undefined ? normalizeFrozenCount(readYMapOrObject(viewRaw, "frozenRows")) : normalizeFrozenCount(sheet?.get?.("frozenRows"));
-  const frozenCols =
-    viewRaw !== undefined ? normalizeFrozenCount(readYMapOrObject(viewRaw, "frozenCols")) : normalizeFrozenCount(sheet?.get?.("frozenCols"));
+  let frozenRowsRaw: unknown = undefined;
+  if (viewRaw !== undefined) frozenRowsRaw = readYMapOrObject(viewRaw, "frozenRows");
+  if (frozenRowsRaw === undefined) frozenRowsRaw = sheet?.get?.("frozenRows") ?? sheet?.frozenRows;
+  const frozenRows = normalizeFrozenCount(frozenRowsRaw);
 
-  const colWidths =
-    viewRaw !== undefined ? readAxisOverrides(readYMapOrObject(viewRaw, "colWidths")) : readAxisOverrides(sheet?.get?.("colWidths"));
-  const rowHeights =
-    viewRaw !== undefined ? readAxisOverrides(readYMapOrObject(viewRaw, "rowHeights")) : readAxisOverrides(sheet?.get?.("rowHeights"));
+  let frozenColsRaw: unknown = undefined;
+  if (viewRaw !== undefined) frozenColsRaw = readYMapOrObject(viewRaw, "frozenCols");
+  if (frozenColsRaw === undefined) frozenColsRaw = sheet?.get?.("frozenCols") ?? sheet?.frozenCols;
+  const frozenCols = normalizeFrozenCount(frozenColsRaw);
+
+  let colWidthsRaw: unknown = undefined;
+  if (viewRaw !== undefined) colWidthsRaw = readYMapOrObject(viewRaw, "colWidths");
+  if (colWidthsRaw === undefined) colWidthsRaw = sheet?.get?.("colWidths") ?? sheet?.colWidths;
+  const colWidths = readAxisOverrides(colWidthsRaw);
+
+  let rowHeightsRaw: unknown = undefined;
+  if (viewRaw !== undefined) rowHeightsRaw = readYMapOrObject(viewRaw, "rowHeights");
+  if (rowHeightsRaw === undefined) rowHeightsRaw = sheet?.get?.("rowHeights") ?? sheet?.rowHeights;
+  const rowHeights = readAxisOverrides(rowHeightsRaw);
   let mergedRangesRaw: unknown = undefined;
   if (viewRaw !== undefined) {
     mergedRangesRaw =
