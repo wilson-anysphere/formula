@@ -428,6 +428,31 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(clearedCell?.value).toBe(0.5);
   });
 
+  it("treats an imported 'General' number_format as equivalent to no number format", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", 0.1234567);
+    // Imported formula-model style (snake_case) may explicitly encode "General".
+    doc.setRangeFormat(sheetId, "A1", { number_format: "General" });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    // General should not force numeric values through the custom formatter; keep as number.
+    expect(cell?.value).toBe(0.1234567);
+  });
+
   it("maps alignment.indent into grid CellStyle.textIndentPx", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";

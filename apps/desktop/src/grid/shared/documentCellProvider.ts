@@ -218,11 +218,17 @@ export class DocumentCellProvider implements CellProvider {
       // fall back to the imported `number_format` value.
       if (hasOwn(docStyle, "numberFormat")) {
         const raw = docStyle?.numberFormat;
-        return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+        if (typeof raw !== "string") return null;
+        const trimmed = raw.trim();
+        if (trimmed === "" || trimmed.toLowerCase() === "general") return null;
+        return raw;
       }
       if (hasOwn(docStyle, "number_format")) {
         const raw = docStyle?.number_format;
-        return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+        if (typeof raw !== "string") return null;
+        const trimmed = raw.trim();
+        if (trimmed === "" || trimmed.toLowerCase() === "general") return null;
+        return raw;
       }
       return null;
     };
@@ -535,7 +541,10 @@ export class DocumentCellProvider implements CellProvider {
     if (fontColor) out.color = fontColor;
 
     const rawNumberFormat = hasOwn(docStyle, "numberFormat") ? (docStyle as any).numberFormat : (docStyle as any).number_format;
-    if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") out.numberFormat = rawNumberFormat;
+    if (typeof rawNumberFormat === "string") {
+      const trimmed = rawNumberFormat.trim();
+      if (trimmed !== "" && trimmed.toLowerCase() !== "general") out.numberFormat = rawNumberFormat;
+    }
 
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
     // Horizontal alignment may exist in several shapes depending on provenance:
