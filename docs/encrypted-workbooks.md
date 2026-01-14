@@ -133,6 +133,9 @@ Current desktop limitations:
 - Legacy `.xls` BIFF `FILEPASS` password prompting is not yet wired through the desktop open path.
 - Encrypted `.xlsb` containers are detected, but the decrypted payload is not currently routed
   through the `.xlsb` reader.
+- Saving **encrypted** `.xlsx`/`.xlsm` is supported when the save command is invoked with a
+  `password` (the output is wrapped back into an OLE/CFB `EncryptedPackage` container).
+- Saving encrypted `.xlsb` is not supported yet (save as `.xlsx` instead).
 
 ---
 
@@ -167,6 +170,7 @@ full mapping table and remediation suggestions.
 
 - **Not all encryption schemes are supported.** Files using unknown `EncryptionInfo` versions or
   unsupported legacy `.xls` `FILEPASS` variants will return an “unsupported encryption” error.
-- **Encryption may be dropped on save** unless the caller explicitly re-encrypts the output (Formula
-  generally operates on plaintext workbook bytes once opened). See
+- **Encryption may be dropped on save** unless the caller explicitly re-encrypts the output. In
+  general, Formula operates on plaintext workbook bytes once opened; callers must opt into
+  re-encryption for the output file. See
   [`docs/21-encrypted-workbooks.md#saving--round-trip-limitations`](./21-encrypted-workbooks.md#saving--round-trip-limitations).

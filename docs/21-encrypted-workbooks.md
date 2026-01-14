@@ -617,14 +617,21 @@ back into a generic “encrypted workbook” error:
 
 Opening an encrypted workbook inherently produces a **decrypted in-memory representation**.
 
-Unless Formula explicitly re-wraps the output workbook with a new `EncryptionInfo` +
-`EncryptedPackage` (OOXML) or re-emits BIFF encryption structures (`.xls`), a “save” operation will
-write a **decrypted** file.
+Unless the caller explicitly re-wraps the output workbook with a new `EncryptionInfo` +
+`EncryptedPackage` (OOXML) (or re-emits BIFF encryption structures for legacy `.xls`), a “save”
+operation will write a **decrypted** file.
 
-Current limitation to document and handle in product:
+Current limitation (core library export paths):
 
 - **Editing + saving an encrypted workbook may drop encryption** unless/until re-encryption is
-  implemented.
+  enabled on save.
+
+Current desktop behavior:
+
+- The desktop save command supports writing an **encrypted** `.xlsx`/`.xlsm` when a `password` is
+  provided (it encrypts the plaintext ZIP package into an OLE/CFB wrapper via
+  `formula_office_crypto::encrypt_package_to_ole`).
+- Saving encrypted `.xlsb` is currently rejected (save as `.xlsx` instead).
 
 Mitigations:
 
