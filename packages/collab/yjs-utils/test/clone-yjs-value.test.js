@@ -15,7 +15,17 @@ test("collab-yjs-utils: cloneYjsValue preserves source constructors when constru
   const cloned = cloneYjsValue(foreignMap);
   assert.equal(cloned instanceof Y.Map, false);
   assert.equal(cloned instanceof Ycjs.Map, true);
-  assert.equal(cloned.get("x"), 1);
+
+  // Newer Yjs versions only allow reading content once the type is integrated
+  // into a document. Insert the cloned map into a doc created with the same
+  // module instance so we can verify contents without constructor mismatches.
+  const doc = new Ycjs.Doc();
+  const root = doc.getMap("root");
+  root.set("data", cloned);
+
+  const data = root.get("data");
+  assert.equal(data instanceof Ycjs.Map, true);
+  assert.equal(data.get("x"), 1);
 });
 
 test("collab-yjs-utils: cloneYjsValue can clone foreign values into local constructors for insertion", () => {

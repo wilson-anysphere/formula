@@ -400,15 +400,16 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
     const MapCtor = constructors?.Map ?? (map as any).constructor;
     const out = new (MapCtor as any)();
     const prelim = (map as any)?.doc == null ? (map as any)?._prelimContent : null;
-    const keys = prelim instanceof Map ? Array.from(prelim.keys()).sort() : Array.from(map.keys()).sort();
+    const keys =
+      prelim instanceof Map ? Array.from(prelim.keys()).sort() : Array.from(map.keys()).sort();
     for (const key of keys) {
       const nextValue = prelim instanceof Map ? prelim.get(key) : map.get(key);
       out.set(key, cloneYjsValue(nextValue, constructors));
     }
 
-    // Yjs warns on reading unintegrated types (doc=null) via `get()`. For cloning and test usage we
-    // want the returned value to be inspectable before insertion, so fall back to `_prelimContent`
-    // while the type is unintegrated.
+    // Yjs intentionally warns on reading unintegrated types (doc=null) via `get()`. For cloning
+    // and test usage we want the returned value to behave like a normal map before insertion,
+    // so fall back to `_prelimContent` while the type is unintegrated.
     const outPrelim = (out as any)?._prelimContent;
     if ((out as any)?.doc == null && outPrelim instanceof Map && typeof (out as any).get === "function") {
       const originalGet = (out as any).get as (key: any) => any;
@@ -431,7 +432,9 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
     const ArrayCtor = constructors?.Array ?? (array as any).constructor;
     const out = new (ArrayCtor as any)();
     const prelim = (array as any)?.doc == null && Array.isArray((array as any)?._prelimContent) ? (array as any)._prelimContent : null;
-    for (const item of prelim ?? array.toArray()) out.push([cloneYjsValue(item, constructors)]);
+    for (const item of prelim ?? array.toArray()) {
+      out.push([cloneYjsValue(item, constructors)]);
+    }
     return out;
   }
 
@@ -439,8 +442,18 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
   if (text) {
     const TextCtor = constructors?.Text ?? (text as any).constructor;
     const out = new (TextCtor as any)();
+
+    const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
+    const safeClone = <T>(input: T): T => {
+      if (typeof structuredCloneFn !== "function") return input;
+      try {
+        return structuredCloneFn(input) as T;
+      } catch {
+        return input;
+      }
+    };
+
     const cloneDelta = (delta: any[]): any[] => {
-      const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
       return delta.map((op) => {
         const next: any = { ...op };
         if ("insert" in next) {
@@ -471,13 +484,108 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
     };
 
     // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
+    //
     // Note: unintegrated Y.Text instances store edits in `_pending`; calling `toDelta()` returns
-    // an empty delta until the text is integrated into a Doc. To clone prelim values (including
-    // ones from a different Yjs module instance), materialize pending ops in a temporary doc first.
-    let delta: any[] = [];
+    // an empty delta until the text is integrated into a Doc. To avoid mutating the source
+    // (integrating it into a temporary doc), replay the queued operations by intercepting
+    // method calls, then apply them to the clone.
     if ((text as any)?.doc != null) {
-      delta = text.toDelta();
+      out.applyDelta(cloneDelta(text.toDelta()));
+      return out;
+    }
+
+    const pending = (text as any)?._pending;
+    if (Array.isArray(pending)) {
+      const ops: Array<{ kind: string; args: any[] }> = [];
+      const record = (kind: string, args: any[]): void => {
+        ops.push({ kind, args });
+      };
+
+      const original = {
+        insert: (text as any).insert,
+        delete: (text as any).delete,
+        format: (text as any).format,
+        applyDelta: (text as any).applyDelta,
+        insertEmbed: (text as any).insertEmbed,
+        removeAttribute: (text as any).removeAttribute,
+        setAttribute: (text as any).setAttribute,
+      };
+
+      try {
+        (text as any).insert = (index: number, str: string, attributes?: any) => record("insert", [index, str, attributes]);
+        (text as any).delete = (index: number, length: number) => record("delete", [index, length]);
+        (text as any).format = (index: number, length: number, attributes?: any) => record("format", [index, length, attributes]);
+        (text as any).applyDelta = (delta: any) => record("applyDelta", [delta]);
+        (text as any).insertEmbed = (index: number, embed: any, attributes?: any) => record("insertEmbed", [index, embed, attributes]);
+        (text as any).removeAttribute = (attributeName: string) => record("removeAttribute", [attributeName]);
+        (text as any).setAttribute = (attributeName: string, attributeValue: any) =>
+          record("setAttribute", [attributeName, attributeValue]);
+
+        for (const fn of pending) {
+          if (typeof fn !== "function") continue;
+          try {
+            fn();
+          } catch {
+            // Best-effort.
+          }
+        }
+      } finally {
+        (text as any).insert = original.insert;
+        (text as any).delete = original.delete;
+        (text as any).format = original.format;
+        (text as any).applyDelta = original.applyDelta;
+        (text as any).insertEmbed = original.insertEmbed;
+        (text as any).removeAttribute = original.removeAttribute;
+        (text as any).setAttribute = original.setAttribute;
+      }
+
+      for (const op of ops) {
+        switch (op.kind) {
+          case "insert": {
+            const [index, str, attributes] = op.args;
+            (out as any).insert(index, str, attributes ? safeClone(attributes) : attributes);
+            break;
+          }
+          case "delete": {
+            const [index, length] = op.args;
+            (out as any).delete(index, length);
+            break;
+          }
+          case "format": {
+            const [index, length, attributes] = op.args;
+            (out as any).format(index, length, attributes ? safeClone(attributes) : attributes);
+            break;
+          }
+          case "applyDelta": {
+            const [delta] = op.args;
+            (out as any).applyDelta(cloneDelta(Array.isArray(delta) ? delta : []));
+            break;
+          }
+          case "insertEmbed": {
+            const [index, embed, attributes] = op.args;
+            (out as any).insertEmbed(index, cloneYjsValue(embed, constructors), attributes ? safeClone(attributes) : attributes);
+            break;
+          }
+          case "removeAttribute": {
+            const [attributeName] = op.args;
+            (out as any).removeAttribute(attributeName);
+            break;
+          }
+          case "setAttribute": {
+            const [attributeName, attributeValue] = op.args;
+            (out as any).setAttribute(attributeName, cloneYjsValue(attributeValue, constructors));
+            break;
+          }
+          default:
+            break;
+        }
+      }
     } else if (typeof (text as any)._integrate === "function") {
+      // Best-effort fallback: some preliminary Y.Text values may not expose `_pending` in a usable
+      // way (e.g. across module instances or after prototype patching). In that case, try to
+      // materialize the pending operations by integrating into a temporary doc and cloning the
+      // resulting delta.
+      let delta: any[] = [];
       try {
         const doc = new Y.Doc();
         try {
@@ -489,9 +597,8 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
       } catch {
         delta = [];
       }
+      out.applyDelta(cloneDelta(delta));
     }
-
-    out.applyDelta(cloneDelta(delta));
     return out;
   }
 
