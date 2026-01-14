@@ -239,6 +239,16 @@ done
 
 # Optional local tooling pins (keep local release builds aligned with CI).
 nvmrc_major="$(extract_nvmrc_node_major ".nvmrc")"
+mise_node_major="$(extract_mise_node_major "mise.toml")"
+
+if [ -z "$nvmrc_major" ] && [ -z "$mise_node_major" ]; then
+  echo "Node workflow pin check failed: no repo-local Node version pin found." >&2
+  echo "Add either:" >&2
+  echo "  - .nvmrc (recommended), or" >&2
+  echo "  - mise.toml [tools] node = \"<major>\"" >&2
+  exit 1
+fi
+
 if [ -n "$nvmrc_major" ] && [ "$nvmrc_major" != "$ci_node_major" ]; then
   echo "Node major pin mismatch between workflows and .nvmrc:" >&2
   echo "  workflows: NODE_VERSION=${ci_node_major}" >&2
@@ -248,7 +258,6 @@ if [ -n "$nvmrc_major" ] && [ "$nvmrc_major" != "$ci_node_major" ]; then
   exit 1
 fi
 
-mise_node_major="$(extract_mise_node_major "mise.toml")"
 if [ -n "$mise_node_major" ] && [ "$mise_node_major" != "$ci_node_major" ]; then
   echo "Node major pin mismatch between workflows and mise.toml:" >&2
   echo "  workflows: NODE_VERSION=${ci_node_major}" >&2
