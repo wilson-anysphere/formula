@@ -85,11 +85,16 @@ These inputs should fail with actionable “unsupported” errors (not “corrup
 The MS-OFFCRYPTO XML descriptor contains many parameters. Different Formula crates enforce different
 levels of validation:
 
-- `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` validate:
+- `crates/formula-xlsx::offcrypto` validates:
   - `cipherAlgorithm == AES`
   - `cipherChaining == ChainingModeCBC`
-  - password key-encryptor present (and will reject certificate-only encryption with an explicit
-    “unsupported key encryptor” error)
+  - password key-encryptor present (certificate-only encryption fails with
+    `formula_xlsx::offcrypto::OffCryptoError::UnsupportedKeyEncryptor { .. }`)
+- `crates/formula-office-crypto` validates:
+  - `cipherAlgorithm == AES`
+  - `cipherChaining == ChainingModeCBC`
+  - password key-encryptor present (certificate-only encryption is rejected; today this surfaces as
+    `formula_office_crypto::OfficeCryptoError::InvalidFormat("missing password keyEncryptor")`)
 - `crates/formula-offcrypto`’s Agile `EncryptionInfo` parser is also strict about the dominant
   Excel scheme:
   - it validates `keyData.cipherAlgorithm == AES` / `keyData.cipherChaining == ChainingModeCBC`
