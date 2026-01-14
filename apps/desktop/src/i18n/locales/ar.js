@@ -194,5 +194,6 @@ export const ar = {
   "versionHistory.compare.sheetMetaField.visibility": "الرؤية",
   "versionHistory.compare.sheetMetaField.tabColor": "لون علامة التبويب",
   "versionHistory.compare.sheetMetaField.frozenRows": "صفوف مجمّدة",
-  "versionHistory.compare.sheetMetaField.frozenCols": "أعمدة مجمّدة"
+  "versionHistory.compare.sheetMetaField.frozenCols": "أعمدة مجمّدة",
+  "formulaDiff.aria.emptyFormula": "صيغة فارغة"
 }; 

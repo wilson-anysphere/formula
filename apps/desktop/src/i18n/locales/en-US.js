@@ -696,5 +696,6 @@ export const enUS = {
   "versionHistory.compare.sheetMetaField.visibility": "Visibility",
   "versionHistory.compare.sheetMetaField.tabColor": "Tab color",
   "versionHistory.compare.sheetMetaField.frozenRows": "Frozen rows",
-  "versionHistory.compare.sheetMetaField.frozenCols": "Frozen columns"
+  "versionHistory.compare.sheetMetaField.frozenCols": "Frozen columns",
+  "formulaDiff.aria.emptyFormula": "Empty formula"
 };

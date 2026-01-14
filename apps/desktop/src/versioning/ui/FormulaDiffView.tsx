@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 
 import { diffFormulaToRenderOps, isEffectivelyEmptyFormula } from "./formulaDiffRender.js";
+import { t } from "../../i18n/index.js";
 
 export type FormulaDiffViewProps = {
   before: string | null;
@@ -29,7 +30,7 @@ export function FormulaDiffView({ before, after, className }: FormulaDiffViewPro
   if (isEmptyBefore && isEmptyAfter) {
     return (
       <code className={joinClassName("formula-diff-view", "formula-diff-view--empty", className)}>
-        <span className="formula-diff-empty-marker" aria-label="Empty formula">
+        <span className="formula-diff-empty-marker" aria-label={t("formulaDiff.aria.emptyFormula")}>
           ∅
         </span>
       </code>
