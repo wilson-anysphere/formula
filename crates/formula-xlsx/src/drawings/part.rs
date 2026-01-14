@@ -436,6 +436,7 @@ impl DrawingPart {
             }
 
             // Unknown anchor type: preserve the entire anchor subtree.
+            let size = size_from_anchor(anchor);
             objects.push(DrawingObject {
                 id: DrawingObjectId((z + 1) as u32),
                 kind: DrawingObjectKind::Unknown {
@@ -443,7 +444,7 @@ impl DrawingPart {
                 },
                 anchor,
                 z_order: z as i32,
-                size: None,
+                size,
                 preserved: anchor_preserved,
             });
         }
@@ -686,6 +687,7 @@ impl DrawingPart {
 
             // Unknown anchor type: preserve the entire anchor subtree.
             let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+            let size = size_from_anchor(anchor);
             objects.push(DrawingObject {
                 id: DrawingObjectId((z + 1) as u32),
                 kind: DrawingObjectKind::Unknown {
@@ -693,7 +695,7 @@ impl DrawingPart {
                 },
                 anchor,
                 z_order: z as i32,
-                size: None,
+                size,
                 preserved: anchor_preserved,
             });
         }
