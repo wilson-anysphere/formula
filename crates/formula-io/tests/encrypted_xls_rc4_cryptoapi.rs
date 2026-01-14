@@ -128,3 +128,28 @@ fn encrypted_xls_unicode_wrong_password_returns_invalid_password() {
         "expected Error::InvalidPassword, got {err:?}"
     );
 }
+
+#[test]
+fn encrypted_xls_unicode_password_different_normalization_fails() {
+    // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
+    let nfd = "pa\u{0308}sswo\u{0308}rd";
+    assert_ne!(
+        nfd, UNICODE_PASSWORD,
+        "strings should differ before UTF-16 encoding"
+    );
+
+    let path = encrypted_xls_unicode_fixture_path();
+
+    let err = open_workbook_with_password(&path, Some(nfd)).expect_err("expected invalid password");
+    assert!(
+        matches!(err, Error::InvalidPassword { .. }),
+        "expected Error::InvalidPassword, got {err:?}"
+    );
+
+    let err = open_workbook_model_with_password(&path, Some(nfd))
+        .expect_err("expected invalid password");
+    assert!(
+        matches!(err, Error::InvalidPassword { .. }),
+        "expected Error::InvalidPassword, got {err:?}"
+    );
+}

@@ -195,6 +195,23 @@ fn rc4_cryptoapi_unicode_password_wrong_password_errors() {
 }
 
 #[test]
+fn rc4_cryptoapi_unicode_password_different_normalization_fails() {
+    // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
+    let nfd = "pa\u{0308}sswo\u{0308}rd";
+    assert_ne!(
+        nfd, UNICODE_PASSWORD,
+        "strings should differ before UTF-16 encoding"
+    );
+
+    let err = formula_xls::import_xls_path_with_password(unicode_fixture_path(), nfd)
+        .expect_err("expected wrong password error");
+    assert!(matches!(
+        err,
+        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
+    ));
+}
+
+#[test]
 fn rc4_cryptoapi_unsupported_algorithm_errors() {
     // Patch the fixture FILEPASS header to claim AES-128 instead of RC4.
     const CALG_AES_128: u32 = 0x0000_660E;
