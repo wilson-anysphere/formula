@@ -122,7 +122,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                     { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets" },
                   ],
                 },
-                { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z" },
+                // Exempt command id to prove the exemption list keeps implemented ribbon-only
+                // actions enabled even when the CommandRegistry doesn't register them.
+                { id: "home.editing.fill.up", label: "Fill Up", ariaLabel: "Fill Up" },
                 // Non-exempt id to prove the baseline is still working.
                 { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
               ],
@@ -157,9 +159,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
-    const sort = container.querySelector<HTMLButtonElement>('[data-command-id="data.sortFilter.sortAtoZ"]');
-    expect(sort).toBeInstanceOf(HTMLButtonElement);
-    expect(sort?.disabled).toBe(false);
+    const fillUp = container.querySelector<HTMLButtonElement>('[data-command-id="home.editing.fill.up"]');
+    expect(fillUp).toBeInstanceOf(HTMLButtonElement);
+    expect(fillUp?.disabled).toBe(false);
 
     const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
     expect(unknown).toBeInstanceOf(HTMLButtonElement);
