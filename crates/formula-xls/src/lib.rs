@@ -157,27 +157,78 @@ impl ImportWarning {
 /// Individual BIFF parsers already cap warnings in some cases, but the importer aggregates warnings
 /// across many phases and sheets. A pathological workbook could otherwise produce an excessively
 /// large `Vec<ImportWarning>` and very noisy UX.
+#[cfg(not(test))]
 const MAX_IMPORT_WARNINGS_TOTAL: usize = 1000;
+// Keep unit tests fast by using a smaller cap.
+#[cfg(test)]
+const MAX_IMPORT_WARNINGS_TOTAL: usize = 200;
 
-const IMPORT_WARNING_SUPPRESSION_MESSAGE: &str = "additional `.xls` import warnings suppressed";
+const IMPORT_WARNINGS_SUPPRESSED_MESSAGE: &str = "additional `.xls` import warnings suppressed";
 
-fn push_import_warning(
-    warnings: &mut Vec<ImportWarning>,
-    msg: impl Into<String>,
-    suppressed: &mut bool,
-) {
+/// Global warning accumulator for `.xls` import.
+///
+/// This enforces a hard cap on the number of warnings stored in memory across the entire workbook,
+/// while still tracking how many warnings were *attempted* (for conservative heuristics).
+#[derive(Debug, Default)]
+struct ImportWarnings {
+    warnings: Vec<ImportWarning>,
+    total_count: usize,
+    suppressed: bool,
+}
+
+impl ImportWarnings {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn push(&mut self, warning: ImportWarning) {
+        self.total_count = self.total_count.saturating_add(1);
+
+        if self.suppressed {
+            return;
+        }
+
+        if self.warnings.len() < MAX_IMPORT_WARNINGS_TOTAL {
+            self.warnings.push(warning);
+            return;
+        }
+
+        // First overflow: record a single sentinel warning and stop storing further warnings.
+        self.warnings
+            .push(ImportWarning::new(IMPORT_WARNINGS_SUPPRESSED_MESSAGE));
+        self.suppressed = true;
+    }
+
+    fn push_msg(&mut self, msg: impl Into<String>) {
+        self.push(ImportWarning::new(msg));
+    }
+
+    fn extend<I: IntoIterator<Item = ImportWarning>>(&mut self, iter: I) {
+        for w in iter {
+            self.push(w);
+        }
+    }
+
+    /// Number of warnings *attempted* (including suppressed ones).
+    fn count(&self) -> usize {
+        self.total_count
+    }
+
+    fn into_vec(self) -> Vec<ImportWarning> {
+        self.warnings
+    }
+}
+
+fn push_import_warning(warnings: &mut ImportWarnings, msg: impl Into<String>, suppressed: &mut bool) {
+    // Preserve existing call sites that still thread a `suppressed` flag: callers may set
+    // `suppressed=true` to model the post-cap state in tests.
     if *suppressed {
-        return;
+        warnings.suppressed = true;
     }
-
-    if warnings.len() < MAX_IMPORT_WARNINGS_TOTAL {
-        warnings.push(ImportWarning::new(msg));
-        return;
+    warnings.push_msg(msg);
+    if warnings.suppressed {
+        *suppressed = true;
     }
-
-    // Cap reached: surface a single suppression warning and drop any subsequent warnings.
-    warnings.push(ImportWarning::new(IMPORT_WARNING_SUPPRESSION_MESSAGE));
-    *suppressed = true;
 }
 
 /// A merged cell range in the source workbook.
@@ -370,7 +421,7 @@ fn import_xls_with_biff_reader(
     // legacy `.xls` encryption (BIFF `FILEPASS`) before handing off to calamine.
     // Calamine does not support BIFF encryption and may return opaque parse
     // errors for password-protected workbooks.
-    let mut warnings = Vec::new();
+    let mut warnings = ImportWarnings::new();
     let mut warnings_suppressed = false;
     let mut workbook_stream = match catch_calamine_panic_with_context(
         "reading `.xls` workbook stream",
@@ -627,8 +678,9 @@ fn import_xls_with_biff_reader(
             if out.view.window.is_none() {
                 out.view.window = globals.workbook_window.take();
             }
-            for warning in globals.warnings.drain(..) {
-                push_import_warning(&mut warnings, warning, &mut warnings_suppressed);
+            warnings.extend(globals.warnings.drain(..).map(|w| ImportWarning::new(w)));
+            if warnings.suppressed {
+                warnings_suppressed = true;
             }
             sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 
@@ -1948,9 +2000,9 @@ fn import_xls_with_biff_reader(
 
                     let mut apply_recovered_formulas =
                         |mut recovered: biff::formulas::PtgExpFallbackResult,
-                         override_existing: bool,
-                         warnings: &mut Vec<ImportWarning>,
-                         warnings_suppressed: &mut bool| {
+                          override_existing: bool,
+                          warnings: &mut ImportWarnings,
+                          warnings_suppressed: &mut bool| {
                             for warning in recovered.warnings.drain(..) {
                                 push_import_warning(warnings, warning, &mut *warnings_suppressed);
                             }
@@ -3306,7 +3358,7 @@ fn import_xls_with_biff_reader(
             format: SourceFormat::Xls,
         },
         merged_ranges,
-        warnings,
+        warnings: warnings.into_vec(),
     })
 }
 
@@ -3432,7 +3484,7 @@ fn apply_row_col_style_ids(
     sheet: &mut formula_model::Worksheet,
     props: &biff::SheetRowColProperties,
     xf_style_ids: Option<&[u32]>,
-    warnings: &mut Vec<ImportWarning>,
+    warnings: &mut ImportWarnings,
     suppressed: &mut bool,
     sheet_name: &str,
 ) {
@@ -3617,7 +3669,7 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
     workbook: &Workbook,
     name: &str,
     refers_to: &str,
-    warnings: &mut Vec<ImportWarning>,
+    warnings: &mut ImportWarnings,
     suppressed: &mut bool,
 ) -> WorkbookScopedDefinedNameSheetInference {
     // `Workbook::create_defined_name` strips leading `=` but not `@`. Strip both defensively so we
@@ -3695,13 +3747,15 @@ fn infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
     workbook: &Workbook,
     name: &str,
     refers_to: &str,
-    warnings: &mut Vec<ImportWarning>,
+    warnings: &mut ImportWarnings,
     suppressed: &mut bool,
 ) -> (Option<String>, bool) {
+    let warnings_before_infer = warnings.count();
     let inferred = infer_sheet_name_from_workbook_scoped_defined_name(
         workbook, name, refers_to, warnings, suppressed,
     );
-    let inference_failed = matches!(inferred, WorkbookScopedDefinedNameSheetInference::Failure);
+    let inference_failed = matches!(inferred, WorkbookScopedDefinedNameSheetInference::Failure)
+        || warnings.count() != warnings_before_infer;
 
     let sheet_name = match inferred {
         WorkbookScopedDefinedNameSheetInference::Inferred(name) => Some(name),
@@ -3744,7 +3798,7 @@ fn infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
 
 fn populate_print_settings_from_defined_names(
     workbook: &mut Workbook,
-    warnings: &mut Vec<ImportWarning>,
+    warnings: &mut ImportWarnings,
     suppressed: &mut bool,
 ) {
     // We need to snapshot the defined names up-front so we can mutably update print settings while
@@ -3834,7 +3888,7 @@ enum ParsedEndpoint {
 fn parse_print_area_refers_to(
     expected_sheet_name: &str,
     refers_to: &str,
-    warnings: &mut Vec<ImportWarning>,
+    warnings: &mut ImportWarnings,
     suppressed: &mut bool,
 ) -> Option<Vec<Range>> {
     let refers_to = refers_to.trim();
@@ -3918,7 +3972,7 @@ fn parse_print_area_refers_to(
 fn parse_print_titles_refers_to(
     expected_sheet_name: &str,
     refers_to: &str,
-    warnings: &mut Vec<ImportWarning>,
+    warnings: &mut ImportWarnings,
     suppressed: &mut bool,
 ) -> Option<PrintTitles> {
     let refers_to = refers_to.trim();
@@ -4473,7 +4527,7 @@ fn import_biff8_shared_formulas(
     sheet_names_by_biff_idx: &[String],
     sheet_ids_by_biff_idx: &[Option<formula_model::WorksheetId>],
     rgce_decoder: &biff::worksheet_formulas::WorksheetFormulaDecoder,
-    warnings: &mut Vec<ImportWarning>,
+    warnings: &mut ImportWarnings,
     suppressed: &mut bool,
 ) {
     // BIFF8 shared formulas are encoded as:
@@ -6235,7 +6289,7 @@ mod tests {
         workbook.add_sheet("Sheet1").unwrap();
         workbook.add_sheet("Sheet2").unwrap();
 
-        let mut warnings = Vec::new();
+        let mut warnings = ImportWarnings::new();
         let mut suppressed = false;
         let sheet = infer_sheet_name_from_workbook_scoped_defined_name(
             &workbook,
@@ -6249,7 +6303,34 @@ mod tests {
             WorkbookScopedDefinedNameSheetInference::Inferred(ref sheet_name)
                 if sheet_name == "Sheet1"
         ));
-        assert!(warnings.is_empty(), "warnings={warnings:?}");
+        assert_eq!(warnings.count(), 0, "unexpected warnings attempted");
+        let stored = warnings.into_vec();
+        assert!(stored.is_empty(), "warnings={stored:?}");
+    }
+
+    #[test]
+    fn import_warnings_caps_total_and_emits_sentinel() {
+        let mut warnings = ImportWarnings::new();
+        let attempted = MAX_IMPORT_WARNINGS_TOTAL + 50;
+        warnings.extend((0..attempted).map(|i| ImportWarning::new(format!("warning {i}"))));
+
+        assert_eq!(warnings.count(), attempted);
+
+        let stored = warnings.into_vec();
+        assert!(
+            stored.len() <= MAX_IMPORT_WARNINGS_TOTAL + 1,
+            "stored warning count should be capped; len={}; cap={}",
+            stored.len(),
+            MAX_IMPORT_WARNINGS_TOTAL
+        );
+        let sentinel_count = stored
+            .iter()
+            .filter(|w| w.message == IMPORT_WARNINGS_SUPPRESSED_MESSAGE)
+            .count();
+        assert_eq!(
+            sentinel_count, 1,
+            "expected exactly one sentinel warning; stored={stored:?}"
+        );
     }
 
     #[test]
@@ -6258,7 +6339,7 @@ mod tests {
         workbook.add_sheet("Sheet1").unwrap();
         workbook.add_sheet("Sheet2").unwrap();
 
-        let mut warnings = Vec::new();
+        let mut warnings = ImportWarnings::new();
         let mut suppressed = true;
         let sheet = infer_sheet_name_from_workbook_scoped_defined_name(
             &workbook,
@@ -6269,10 +6350,9 @@ mod tests {
         );
 
         assert_eq!(sheet, WorkbookScopedDefinedNameSheetInference::Failure);
-        assert!(
-            warnings.is_empty(),
-            "expected warnings to be suppressed, got: {warnings:?}"
-        );
+        assert!(warnings.count() > 0, "expected at least one warning to be attempted");
+        let stored = warnings.into_vec();
+        assert!(stored.is_empty(), "expected warnings to be suppressed, got: {stored:?}");
     }
 
     #[test]
@@ -6289,14 +6369,14 @@ mod tests {
             .map(|s| s.id)
             .expect("Sheet2");
         let sheet2 = workbook.sheet_mut(sheet2_id).expect("Sheet2 mut");
-        sheet2.auto_filter = Some(SheetAutoFilter {
-            range: Range::from_a1("A1:B3").unwrap(),
-            filter_columns: Vec::new(),
-            sort_state: None,
-            raw_xml: Vec::new(),
-        });
+         sheet2.auto_filter = Some(SheetAutoFilter {
+             range: Range::from_a1("A1:B3").unwrap(),
+             filter_columns: Vec::new(),
+             sort_state: None,
+             raw_xml: Vec::new(),
+         });
 
-        let mut warnings = Vec::new();
+        let mut warnings = ImportWarnings::new();
         let mut suppressed = true;
         let (sheet_name, inference_failed) = infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
             &workbook,

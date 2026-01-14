@@ -3843,14 +3843,14 @@ mod tests {
     */
 
     fn assert_print_area_parseable(sheet_name: &str, expr: &str) {
-        let mut warnings = Vec::<crate::ImportWarning>::new();
+        let mut warnings = crate::ImportWarnings::new();
         let mut suppressed = false;
         crate::parse_print_area_refers_to(sheet_name, expr, &mut warnings, &mut suppressed)
             .expect("parse print area defined name");
     }
 
     fn assert_print_titles_parseable(sheet_name: &str, expr: &str) {
-        let mut warnings = Vec::<crate::ImportWarning>::new();
+        let mut warnings = crate::ImportWarnings::new();
         let mut suppressed = false;
         crate::parse_print_titles_refers_to(sheet_name, expr, &mut warnings, &mut suppressed)
             .expect("parse print titles defined name");
