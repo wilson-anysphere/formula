@@ -154,6 +154,50 @@ describe("SpreadsheetApp goTo", () => {
     root.remove();
   });
 
+  it("does not recreate a deleted sheet when navigating with a stale sheetNameResolver mapping", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const sheetNames = new Map<string, string>();
+    sheetNames.set("Sheet1", "Sheet1");
+
+    const app = new SpreadsheetApp(root, status, {
+      sheetNameResolver: {
+        getSheetNameById: (sheetId) => sheetNames.get(sheetId) ?? null,
+        getSheetIdByName: (sheetName) => {
+          const trimmed = String(sheetName).trim();
+          if (!trimmed) return null;
+          for (const [id, name] of sheetNames.entries()) {
+            if (name.toLowerCase() === trimmed.toLowerCase()) return id;
+          }
+          return null;
+        },
+      },
+    });
+
+    const doc = app.getDocument();
+    // Ensure Sheet1 exists so deleting Sheet2 is allowed.
+    doc.getCell("Sheet1", { row: 0, col: 0 });
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 123);
+    sheetNames.set("Sheet2", "Budget");
+
+    // Delete the sheet but keep the resolver stale (it still maps "Budget" -> "Sheet2").
+    doc.deleteSheet("Sheet2");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+    expect(app.goTo("Budget!A1")).toBe(false);
+    expect(app.getCurrentSheetId()).toBe("Sheet1");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+    expect(doc.getSheetMeta("Sheet2")).toBeNull();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("resolves named range sheetName display names to stable ids", () => {
     const root = createRoot();
     const status = {

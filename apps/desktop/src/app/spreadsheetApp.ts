@@ -8430,8 +8430,17 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Switch the active sheet id and re-render.
+   * Helpers for sheet switching/navigation.
    */
+  private canActivateSheetId(sheetId: string): boolean {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return false;
+    const meta = this.document.getSheetMeta(id);
+    if (!meta) return false;
+    const visibility = meta.visibility ?? "visible";
+    return visibility === "visible";
+  }
+
   private cancelLegacyGesturesForSheetChange(): void {
     // Legacy chart dragging (non-canvas charts) uses SpreadsheetApp-managed pointer listeners.
     // If a sheet switch occurs mid-drag (e.g. programmatic navigation), cancel the gesture and
@@ -8538,6 +8547,7 @@ export class SpreadsheetApp {
   activateSheet(sheetId: string): void {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
+    if (!this.canActivateSheetId(sheetId)) return;
     this.cancelLegacyGesturesForSheetChange();
     // Switching sheets mid-drag/resize should cancel the active gesture before we
     // swap out the active-sheet drawing list; otherwise the interaction
@@ -8618,6 +8628,7 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      if (!this.canActivateSheetId(target.sheetId)) return;
       this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
@@ -8696,6 +8707,7 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      if (!this.canActivateSheetId(target.sheetId)) return;
       this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
@@ -13612,6 +13624,7 @@ export class SpreadsheetApp {
       const ref = rawRef.trim();
       const targetSheetId = qualifiedSheetName ? this.resolveSheetIdByName(qualifiedSheetName) : this.sheetId;
       if (!targetSheetId) return false;
+      if (targetSheetId !== this.sheetId && !this.canActivateSheetId(targetSheetId)) return false;
 
       const colRange = /^(\$?[A-Za-z]{1,3})\s*:\s*(\$?[A-Za-z]{1,3})$/.exec(ref);
       if (colRange) {
@@ -13666,6 +13679,7 @@ export class SpreadsheetApp {
       const targetSheetIdForParsed =
         parsed.source === "a1" && !qualifiedSheetName ? this.sheetId : this.resolveSheetIdByName(parsed.sheetName);
       if (!targetSheetIdForParsed) return false;
+      if (targetSheetIdForParsed !== this.sheetId && !this.canActivateSheetId(targetSheetIdForParsed)) return false;
       if (range.startRow === range.endRow && range.startCol === range.endCol) {
         this.activateCell({ sheetId: targetSheetIdForParsed, row: range.startRow, col: range.startCol });
       } else {
