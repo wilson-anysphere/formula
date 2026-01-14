@@ -224,8 +224,12 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
         <ul className="selection-pane__list" role="listbox" aria-label="Selection Pane objects">
           {items.map(({ obj, label }, index) => {
             const selected = obj.id === selectedId;
-            const canBringForward = index > 0;
-            const canSendBackward = index < items.length - 1;
+            // ChartStore (canvas) charts use negative ids derived from their string ids. These are not
+            // currently reorderable (z-order is managed by the workbook drawing layer), so disable
+            // arrange actions to avoid no-op buttons.
+            const canArrange = obj.id >= 0;
+            const canBringForward = canArrange && index > 0;
+            const canSendBackward = canArrange && index < items.length - 1;
             return (
               <li
                 key={obj.id}
