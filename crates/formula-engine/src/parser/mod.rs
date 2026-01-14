@@ -1571,9 +1571,8 @@ impl<'a> Lexer<'a> {
             // narrow NBSP (U+202F) also appears in spreadsheets. When configured for either,
             // accept both while scanning the mantissa so we can still detect the decimal
             // separator later in the literal.
-            let is_thousands_sep = Some(ch) == self.locale.thousands_separator
-                || (self.locale.thousands_separator == Some('\u{00A0}') && ch == '\u{202F}')
-                || (self.locale.thousands_separator == Some('\u{202F}') && ch == '\u{00A0}');
+            let is_thousands_sep =
+                LocaleConfig::matches_thousands_separator(self.locale.thousands_separator, ch);
             if is_digit(ch) || ch == self.locale.decimal_separator || ch == '.' || is_thousands_sep
             {
                 end = start + rel + ch.len_utf8();
@@ -1627,9 +1626,7 @@ impl<'a> Lexer<'a> {
             // Note: Some locales (notably fr-FR) commonly use NBSP (U+00A0) as the grouping
             // separator, but some spreadsheets may contain the narrow no-break space (U+202F)
             // instead. When configured for either, accept both.
-            let is_thousands_sep = Some(ch) == group_sep
-                || (group_sep == Some('\u{00A0}') && ch == '\u{202F}')
-                || (group_sep == Some('\u{202F}') && ch == '\u{00A0}');
+            let is_thousands_sep = LocaleConfig::matches_thousands_separator(group_sep, ch);
             if is_thousands_sep && !out.is_empty() && self.peek_next_is_digit() {
                 self.bump();
                 continue;
