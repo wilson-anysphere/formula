@@ -932,7 +932,7 @@ export interface GoalSeekParams {
 
   // Default: 100 (from `GoalSeekParams::new`).
   maxIterations: number;
-  // Default: 0.001 (from `GoalSeekParams::new`).
+  // Default: 1e-7 (from `GoalSeekParams::new`).
   tolerance: number;
   /**
    * Finite-difference derivative step.
@@ -990,7 +990,7 @@ export interface GoalSeekRequest {
   changingCell: string;
 
   // Optional tuning; when omitted (or set to `null`), defaults match `GoalSeekParams::new(...)`:
-  //   maxIterations=100, tolerance=0.001, derivativeStep=null (auto), minDerivative=1e-10,
+  //   maxIterations=100, tolerance=1e-7, derivativeStep=null (auto), minDerivative=1e-10,
   //   maxBracketExpansions=50.
   maxIterations?: number;
   tolerance?: number;
@@ -1040,7 +1040,7 @@ WASM binding validation rules (current `formula-wasm` implementation):
 - `maxIterations` (optional) must be an integer `> 0`.
   - when omitted or `null`, the binding uses the Rust default `100` (from `GoalSeekParams::new`).
 - `tolerance` (optional) must be a finite number and `> 0`.
-  - when omitted or `null`, the binding uses the Rust default `0.001` (from `GoalSeekParams::new`).
+  - when omitted or `null`, the binding uses the Rust default `1e-7` (from `GoalSeekParams::new`).
 - `derivativeStep` (optional) must be a finite number and `> 0`.
   - when omitted or `null`, the solver uses an auto step size per-iteration (Rust `GoalSeekParams.derivative_step = None`).
 - `minDerivative` (optional) must be a finite number and `> 0`.
