@@ -56,14 +56,144 @@ function parseStructuredRef(input) {
   // - TableName[ColumnName]
   // - TableName[#All] / [#Headers] / [#Data] / [#Totals]
   // - TableName[[#All],[ColumnName]] (and other selectors like #Data/#Headers/#Totals)
-  const qualifiedMatch = suffix.match(/^\[\[\s*(#[A-Za-z]+)\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]$/i);
-  if (qualifiedMatch) {
-    return { tableName, selector: qualifiedMatch[1], columnName: qualifiedMatch[2] };
+  // - TableName[[#All],[Col1],[Col2]] (multi-column; contiguous columns only)
+  // - TableName[[#All],[Col1]:[Col3]] (column-range)
+
+  function findMatchingStructuredRefBracketEnd(src, start) {
+    // Structured references escape closing brackets inside items by doubling: `]]` -> literal `]`.
+    // That makes naive depth counting incorrect (it will pop twice for an escaped bracket).
+    //
+    // Use a small backtracking parser:
+    // - On `[` increase depth.
+    // - On `]]`, prefer treating it as an escape (consume both, depth unchanged), but remember
+    //   a choice point. If we later fail to close all brackets, backtrack and reinterpret that
+    //   `]]` as a real closing bracket.
+    if (src[start] !== "[") return null;
+
+    let i = start;
+    let depth = 0;
+    const escapeChoices = [];
+
+    const backtrack = () => {
+      const choice = escapeChoices.pop();
+      if (!choice) return false;
+      i = choice.i;
+      depth = choice.depth;
+      // Reinterpret the first `]` of the `]]` pair as a real closing bracket.
+      depth -= 1;
+      i += 1;
+      return true;
+    };
+
+    while (true) {
+      if (i >= src.length) {
+        if (!backtrack()) return null;
+        if (depth === 0) return i;
+        continue;
+      }
+
+      const ch = src[i];
+      if (ch === "[") {
+        depth += 1;
+        i += 1;
+        continue;
+      }
+
+      if (ch === "]") {
+        if (src[i + 1] === "]" && depth > 0) {
+          escapeChoices.push({ i, depth });
+          i += 2;
+          continue;
+        }
+
+        depth -= 1;
+        i += 1;
+        if (depth === 0) return i;
+        if (depth < 0) {
+          if (!backtrack()) return null;
+          if (depth === 0) return i;
+        }
+        continue;
+      }
+
+      i += 1;
+    }
+  }
+
+  function parseNestedItems(nested) {
+    if (!nested.startsWith("[[")) return null;
+    const items = [];
+    const seps = [];
+    let pos = 1; // start at the second '['
+    while (true) {
+      if (nested[pos] !== "[") return null;
+      const end = findMatchingStructuredRefBracketEnd(nested, pos);
+      if (!end) return null;
+      const raw = nested.slice(pos + 1, end - 1);
+      // Excel escapes `]` inside structured reference items by doubling it: `]]`.
+      items.push(raw.replaceAll("]]", "]"));
+      pos = end;
+      while (pos < nested.length && /\s/.test(nested[pos])) pos += 1;
+      const ch = nested[pos];
+      if (ch === "," || ch === ":") {
+        seps.push(ch);
+        pos += 1;
+        while (pos < nested.length && /\s/.test(nested[pos])) pos += 1;
+        continue;
+      }
+      if (ch === "]") {
+        pos += 1;
+        while (pos < nested.length && /\s/.test(nested[pos])) pos += 1;
+        if (pos !== nested.length) return null;
+        break;
+      }
+      return null;
+    }
+
+    if (items.length === 0) return null;
+
+    let selector = null;
+    let columnItems = items;
+    let columnSeps = seps;
+
+    const first = String(items[0] ?? "").trim();
+    if (first.startsWith("#")) {
+      if (items.length < 2) return null;
+      if (seps[0] !== ",") return null;
+      selector = first;
+      columnItems = items.slice(1);
+      columnSeps = seps.slice(1);
+    }
+
+    if (columnItems.length === 1) {
+      return { selector, columnName: String(columnItems[0] ?? "").trim(), columns: null, columnMode: null };
+    }
+
+    const hasColon = columnSeps.includes(":");
+    if (hasColon) {
+      if (columnItems.length !== 2) return null;
+      if (columnSeps.length !== 1 || columnSeps[0] !== ":") return null;
+      return { selector, columnName: null, columns: columnItems.map((c) => String(c ?? "").trim()), columnMode: "range" };
+    }
+
+    if (!columnSeps.every((sep) => sep === ",")) return null;
+    return { selector, columnName: null, columns: columnItems.map((c) => String(c ?? "").trim()), columnMode: "list" };
+  }
+
+  const nested = parseNestedItems(suffix);
+  if (nested) {
+    return {
+      tableName,
+      selector: nested.selector,
+      columnName: nested.columnName,
+      columns: nested.columns,
+      columnMode: nested.columnMode,
+    };
   }
 
   const simpleMatch = suffix.match(/^\[\s*([^\[\]]+?)\s*\]$/);
   if (simpleMatch) {
-    return { tableName, selector: null, columnName: simpleMatch[1] };
+    return { tableName, selector: null, columnName: simpleMatch[1], columns: null, columnMode: null };
   }
 
   return null;
@@ -110,11 +240,67 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
     if (!table) throw new Error(`Unknown table: ${structured.tableName}`);
     const tableSheetName = resolveSheetName(table.sheetName, workbook);
 
-    const columnNorm = normalizeName(structured.columnName);
     const selectorNorm = structured.selector ? normalizeName(structured.selector) : null;
 
+    const normalizeColumns = (names) =>
+      Array.isArray(names)
+        ? names.map((c) => normalizeName(c)).filter((c) => typeof c === "string" && c.length > 0)
+        : [];
+
+    const columns = table.columns ?? [];
+    const findColumnIndex = (name) => columns.findIndex((c) => normalizeName(c) === normalizeName(name));
+
+    if (structured.columns && structured.columnMode) {
+      const requested = normalizeColumns(structured.columns);
+      if (requested.length === 0) throw new Error(`Invalid structured reference: ${input}`);
+
+      let indices = [];
+      if (structured.columnMode === "range") {
+        if (requested.length !== 2) throw new Error(`Invalid structured reference: ${input}`);
+        const a = findColumnIndex(structured.columns[0]);
+        const b = findColumnIndex(structured.columns[1]);
+        if (a === -1 || b === -1) throw new Error(`Unknown table column: ${structured.tableName}[[${structured.columns.join("]:[")}]]`);
+        indices = [a, b];
+      } else {
+        indices = structured.columns.map((name) => findColumnIndex(name));
+        if (indices.some((idx) => idx === -1)) {
+          throw new Error(`Unknown table column in structured reference: ${structured.tableName}`);
+        }
+      }
+
+      const uniq = Array.from(new Set(indices)).sort((a, b) => a - b);
+      const minIdx = uniq[0];
+      const maxIdx = uniq[uniq.length - 1];
+
+      // Comma-separated multi-column refs represent a union. `parseGoTo` only returns a single range,
+      // so only support contiguous columns to avoid selecting a misleading bounding rectangle.
+      if (structured.columnMode === "list" && maxIdx - minIdx + 1 !== uniq.length) {
+        throw new Error(`Non-contiguous structured reference columns are not supported: ${structured.tableName}`);
+      }
+
+      const startCol = table.startCol + minIdx;
+      const endCol = table.startCol + maxIdx;
+
+      let startRow = table.startRow;
+      let endRow = table.endRow;
+
+      if (selectorNorm === "#HEADERS") {
+        endRow = startRow;
+      } else if (selectorNorm === "#TOTALS") {
+        startRow = endRow;
+      } else if (selectorNorm === "#DATA") {
+        if (endRow > startRow) startRow = startRow + 1;
+      } else if (selectorNorm === "#ALL") {
+        // keep full range
+      }
+
+      return { type: "range", source: "table", sheetName: tableSheetName, range: { startRow, endRow, startCol, endCol } };
+    }
+
+    const columnNorm = normalizeName(structured.columnName);
+
     // Whole-table specifiers: `Table1[#All]`, `Table1[#Headers]`, `Table1[#Data]`, `Table1[#Totals]`.
-    if (!selectorNorm && columnNorm.startsWith("#")) {
+    if (columnNorm.startsWith("#") && !structured.columns) {
       if (columnNorm === "#ALL") {
         return {
           type: "range",
@@ -151,7 +337,6 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
     }
 
     // Column references: `Table1[Col2]` or selector-qualified `Table1[[#Headers],[Col2]]`.
-    const columns = table.columns ?? [];
     const idx = columns.findIndex((c) => normalizeName(c) === columnNorm);
     if (idx === -1) {
       const suffix = selectorNorm ? `[[${structured.selector}],[${structured.columnName}]]` : `[${structured.columnName}]`;

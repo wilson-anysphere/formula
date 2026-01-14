@@ -160,6 +160,64 @@ test("parseGoTo supports selector-qualified structured table column references",
   assert.deepEqual(all.range, { startRow: 0, endRow: 9, startCol: 1, endCol: 1 });
 });
 
+test("parseGoTo supports multi-column structured table references when columns are contiguous", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 2,
+    columns: ["Col1", "Col2", "Col3"],
+  });
+
+  const parsed = parseGoTo("Table1[[#All],[Col1],[Col2]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "table");
+  assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 0, endCol: 1 });
+});
+
+test("parseGoTo supports multi-column structured table references with column ranges", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 2,
+    columns: ["Col1", "Col2", "Col3"],
+  });
+
+  const parsed = parseGoTo("Table1[[#Data],[Col1]:[Col3]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "table");
+  assert.deepEqual(parsed.range, { startRow: 1, endRow: 9, startCol: 0, endCol: 2 });
+});
+
+test("parseGoTo throws for non-contiguous multi-column structured table references", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 2,
+    columns: ["Col1", "Col2", "Col3"],
+  });
+
+  assert.throws(
+    () => parseGoTo("Table1[[#All],[Col1],[Col3]]", { workbook: wb, currentSheetName: "Sheet1" }),
+    /non-contiguous/i,
+  );
+});
+
 test("parseGoTo throws for unknown sheet-qualified references when workbook.getSheet is available", () => {
   const wb = new InMemoryWorkbook();
   wb.addSheet("Sheet1");
