@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildDesktopStartupProfileRoot,
+  buildBenchmarkResultFromValues,
   formatPerfPath,
   parseStartupLine,
   repoRoot,
@@ -212,6 +213,21 @@ describe('desktopStartupUtil buildDesktopStartupProfileRoot', () => {
     expect(
       buildDesktopStartupProfileRoot({ perfHome, benchKind: 'shell', mode: 'cold', now: 123, pid: 456 }),
     ).toBe(resolve(perfHome, 'desktop-startup-shell-cold-123-456'));
+  });
+});
+
+describe('desktopStartupUtil buildBenchmarkResultFromValues', () => {
+  it('computes summary stats for an unsorted list of values', () => {
+    const result = buildBenchmarkResultFromValues('example.p95', [3, 1, 2], 10, 'ms');
+    expect(result.name).toBe('example.p95');
+    expect(result.iterations).toBe(3);
+    expect(result.unit).toBe('ms');
+    expect(result.mean).toBe(2);
+    expect(result.median).toBe(2);
+    expect(result.p95).toBe(3);
+    expect(result.p99).toBe(3);
+    expect(result.stdDev).toBeGreaterThan(0);
+    expect(result.passed).toBe(true);
   });
 });
 
