@@ -339,9 +339,14 @@ def main() -> int:
     calc_total = oracle.total_cases if oracle else None
     calc_mismatches = oracle.mismatches if oracle else None
     calc_mismatch_rate = oracle.mismatch_rate if oracle else None
-    calc_pass_rate = (
-        (1.0 - calc_mismatch_rate)
+    calc_mismatch_rate_output = (
+        calc_mismatch_rate
         if calc_mismatch_rate is not None and calc_total is not None and calc_total > 0
+        else None
+    )
+    calc_pass_rate = (
+        (1.0 - calc_mismatch_rate_output)
+        if calc_mismatch_rate_output is not None
         else None
     )
     calc_passes = (
@@ -411,7 +416,7 @@ def main() -> int:
         if calc_total == 0:
             calc_notes_parts.append("no cases")
         else:
-            calc_notes_parts.append(f"mismatch rate={_fmt_pct(calc_mismatch_rate)}")
+            calc_notes_parts.append(f"mismatch rate={_fmt_pct(calc_mismatch_rate_output)}")
             if calc_mismatches is not None and calc_total is not None:
                 calc_notes_parts.append(f"mismatches={calc_mismatches}/{calc_total}")
         if oracle.max_mismatch_rate is not None:
@@ -472,7 +477,7 @@ def main() -> int:
                 },
                 "l2Calculate": {
                     "passRate": calc_pass_rate,
-                    "mismatchRate": calc_mismatch_rate,
+                    "mismatchRate": calc_mismatch_rate_output,
                     "passes": calc_passes,
                     "mismatches": calc_mismatches,
                     "total": calc_total,
