@@ -1,6 +1,6 @@
 import { explainFormulaError, type ErrorExplanation } from "./errors.js";
-import { getFunctionCallContext, type FunctionHint } from "./highlight/functionContext.js";
-import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
+import { getFunctionCallContext } from "./highlight/functionContext.js";
+import { getFunctionSignature, signatureParts, type FunctionSignature } from "./highlight/functionSignatures.js";
 import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormula.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
@@ -31,6 +31,12 @@ type ActiveCellInfo = {
 type FormulaBarAiSuggestion = {
   text: string;
   preview?: unknown;
+};
+
+type FunctionHint = {
+  context: { name: string; argIndex: number };
+  signature: FunctionSignature;
+  parts: Array<{ text: string; kind: "name" | "param" | "paramActive" | "punct" }>;
 };
 
 export class FormulaBarModel {

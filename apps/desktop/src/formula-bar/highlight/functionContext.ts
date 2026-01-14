@@ -11,7 +11,7 @@ export function getFunctionCallContext(formula: string, cursorIndex: number): Fu
   return { name: active.fnName, argIndex: active.argIndex };
 }
 
-export type FunctionHint = {
+type FunctionHint = {
   context: FunctionCallContext;
   signature: FunctionSignature;
   parts: SignaturePart[];
