@@ -1,3 +1,4 @@
+use formula_model::charts::ChartKind;
 use formula_model::drawings::Anchor;
 use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Chart, ChartType as XlsxChartType, Workbook};
@@ -161,5 +162,21 @@ fn detects_and_preserves_chart_ex_part_from_chart_relationships() {
         chart_ex.rels_bytes.as_deref(),
         package.part(chart_ex_rels_path),
         "chartEx rels bytes should be stored on the OpcPart"
+    );
+
+    let model = chart_object.model.as_ref().expect("chart model present");
+    match &model.chart_kind {
+        ChartKind::Unknown { name } => assert!(
+            name.starts_with("ChartEx:"),
+            "expected ChartEx chart kind prefix, got {name:?}"
+        ),
+        other => panic!("expected ChartKind::Unknown for ChartEx, got {other:?}"),
+    }
+
+    // Even when a minimal chartEx part exists, the extracted model should still include the
+    // richer series information from the classic chartSpace part.
+    assert!(
+        !model.series.is_empty(),
+        "expected non-empty series from chartSpace when chartEx is minimal"
     );
 }

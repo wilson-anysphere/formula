@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use formula_model::charts::{
     Chart, ChartAnchor, ChartColorStylePartModel, ChartKind, ChartModel, ChartStylePartModel,
-    ChartType,
+    ChartType, PlotAreaModel,
 };
 use formula_model::drawings::Anchor as DrawingAnchor;
 use roxmltree::Document;
@@ -36,7 +36,10 @@ impl XlsxPackage {
         let mut charts = Vec::with_capacity(chart_objects.len());
 
         for chart_object in chart_objects {
-            let parsed = chart_object.model.as_ref().map(legacy_parsed_chart_from_model);
+            let parsed = chart_object
+                .model
+                .as_ref()
+                .map(legacy_parsed_chart_from_model);
 
             let (chart_type, title, series) = match parsed {
                 Some(parsed) => (parsed.chart_type, parsed.title, parsed.series),
@@ -608,101 +611,50 @@ fn merge_chart_models(
     chart_ex_part: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> ChartModel {
+    // Excel may store both a classic `c:chartSpace` part (`xl/charts/chartN.xml`) and a ChartEx
+    // `cx:chartSpace` part (`xl/charts/chartExN.xml`) for the same chart. Our ChartEx parsing is
+    // best-effort and can be minimal; when both models are available we merge them as follows:
+    //
+    // - Preserve ChartEx identity: keep the ChartEx `chart_kind` (typically `ChartEx:*`) and keep
+    //   ChartEx diagnostics.
+    // - Fill missing fields from the classic chartSpace model (series, axes, title/legend, plot
+    //   area/layout/style) when ChartEx does not provide them.
+    // - Never drop model diagnostics: append chartSpace diagnostics after ChartEx diagnostics.
     let chart_space_series_len = chart_space.series.len();
     let chart_ex_series_len = chart_ex.series.len();
     let chart_space_axes_len = chart_space.axes.len();
     let chart_ex_axes_len = chart_ex.axes.len();
 
-    let mut merged = chart_space;
+    let mut chart_space = chart_space;
+    let mut merged = chart_ex;
 
-    // Chart kind: prefer ChartEx if it appears to be a meaningful subtype (e.g. "ChartEx:waterfall")
-    // rather than the parser placeholder (e.g. "ChartEx:unknown").
-    if chart_ex_kind_is_specific(&chart_ex.chart_kind) {
+    diagnostics.push(ChartDiagnostic {
+        severity: ChartDiagnosticSeverity::Info,
+        message: format!(
+            "model.chart_kind: using ChartEx {chart_ex_kind:?} (chartSpace was {chart_space_kind:?})",
+            chart_ex_kind = &merged.chart_kind,
+            chart_space_kind = &chart_space.chart_kind,
+        ),
+        part: Some(chart_ex_part.to_string()),
+        xpath: None,
+    });
+
+    // Preserve whichever diagnostics are available from both models. Keep ChartEx first.
+    merged
+        .diagnostics
+        .extend(std::mem::take(&mut chart_space.diagnostics));
+
+    // Series / axes: only fall back to chartSpace when ChartEx is missing them entirely.
+    if merged.series.is_empty() && !chart_space.series.is_empty() {
         diagnostics.push(ChartDiagnostic {
             severity: ChartDiagnosticSeverity::Info,
             message: format!(
-                "model.chart_kind: using ChartEx {chart_ex_kind:?} (chartSpace was {chart_space_kind:?})",
-                chart_ex_kind = &chart_ex.chart_kind,
-                chart_space_kind = &merged.chart_kind,
-            ),
-            part: Some(chart_ex_part.to_string()),
-            xpath: None,
-        });
-        merged.chart_kind = chart_ex.chart_kind.clone();
-        // Keep plot_area consistent with chart_kind (ChartEx charts often have a
-        // minimal chartSpace fallback like `<c:barChart/>` that is not representative
-        // of the real chart type).
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: "model.plot_area: using ChartEx".to_string(),
-            part: Some(chart_ex_part.to_string()),
-            xpath: None,
-        });
-        merged.plot_area = chart_ex.plot_area.clone();
-    } else {
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: format!(
-                "model.chart_kind: using chartSpace {chart_space_kind:?} (ChartEx was {chart_ex_kind:?})",
-                chart_space_kind = &merged.chart_kind,
-                chart_ex_kind = &chart_ex.chart_kind,
+                "model.series: using chartSpace (ChartEx empty, chartSpace={chart_space_series_len})",
             ),
             part: Some(chart_space_part.to_string()),
             xpath: None,
         });
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: "model.plot_area: using chartSpace".to_string(),
-            part: Some(chart_space_part.to_string()),
-            xpath: None,
-        });
-    }
-
-    // Title / legend: prefer ChartEx when present (future-proofing, as ChartEx parsing is still incomplete).
-    if chart_ex.title.is_some() {
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: "model.title: using ChartEx".to_string(),
-            part: Some(chart_ex_part.to_string()),
-            xpath: None,
-        });
-        merged.title = chart_ex.title.clone();
-    } else {
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: "model.title: using chartSpace".to_string(),
-            part: Some(chart_space_part.to_string()),
-            xpath: None,
-        });
-    }
-
-    if chart_ex.legend.is_some() {
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: "model.legend: using ChartEx".to_string(),
-            part: Some(chart_ex_part.to_string()),
-            xpath: None,
-        });
-        merged.legend = chart_ex.legend.clone();
-    } else {
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: "model.legend: using chartSpace".to_string(),
-            part: Some(chart_space_part.to_string()),
-            xpath: None,
-        });
-    }
-
-    // Series / axes: fall back to chartSpace when ChartEx doesn't produce as many objects.
-    if chart_space_series_len > chart_ex_series_len {
-        diagnostics.push(ChartDiagnostic {
-            severity: ChartDiagnosticSeverity::Info,
-            message: format!(
-                "model.series: using chartSpace (chartSpace={chart_space_series_len}, ChartEx={chart_ex_series_len})",
-            ),
-            part: Some(chart_space_part.to_string()),
-            xpath: None,
-        });
+        merged.series = std::mem::take(&mut chart_space.series);
     } else {
         diagnostics.push(ChartDiagnostic {
             severity: ChartDiagnosticSeverity::Info,
@@ -712,18 +664,18 @@ fn merge_chart_models(
             part: Some(chart_ex_part.to_string()),
             xpath: None,
         });
-        merged.series = chart_ex.series.clone();
     }
 
-    if chart_space_axes_len > chart_ex_axes_len {
+    if merged.axes.is_empty() && !chart_space.axes.is_empty() {
         diagnostics.push(ChartDiagnostic {
             severity: ChartDiagnosticSeverity::Info,
             message: format!(
-                "model.axes: using chartSpace (chartSpace={chart_space_axes_len}, ChartEx={chart_ex_axes_len})",
+                "model.axes: using chartSpace (ChartEx empty, chartSpace={chart_space_axes_len})",
             ),
             part: Some(chart_space_part.to_string()),
             xpath: None,
         });
+        merged.axes = std::mem::take(&mut chart_space.axes);
     } else {
         diagnostics.push(ChartDiagnostic {
             severity: ChartDiagnosticSeverity::Info,
@@ -733,22 +685,131 @@ fn merge_chart_models(
             part: Some(chart_ex_part.to_string()),
             xpath: None,
         });
-        merged.axes = chart_ex.axes.clone();
     }
 
-    // External workbook links: prefer the classic chartSpace value when present
-    // (that's where Excel usually stores it), otherwise fall back to ChartEx.
-    match (&merged.external_data_rel_id, &chart_ex.external_data_rel_id) {
-        (None, Some(chart_ex_rid)) => {
+    // Title / legend: fall back to chartSpace when ChartEx is missing.
+    if merged.title.is_none() && chart_space.title.is_some() {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.title: using chartSpace".to_string(),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+        merged.title = chart_space.title.take();
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.title: using ChartEx".to_string(),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+    }
+
+    if merged.legend.is_none() && chart_space.legend.is_some() {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.legend: using chartSpace".to_string(),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+        merged.legend = chart_space.legend.take();
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.legend: using ChartEx".to_string(),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+    }
+
+    // Plot area: prefer chartSpace when ChartEx only provides an `Unknown` placeholder and the
+    // chartSpace model has any non-"missing*" value.
+    let chart_space_plot_area_present = match &chart_space.plot_area {
+        PlotAreaModel::Unknown { name } => name != "missingPlotArea" && name != "missingChartType",
+        _ => true,
+    };
+
+    if matches!(merged.plot_area, PlotAreaModel::Unknown { .. }) && chart_space_plot_area_present {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.plot_area: using chartSpace".to_string(),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
+        merged.plot_area = std::mem::replace(
+            &mut chart_space.plot_area,
+            PlotAreaModel::Unknown {
+                name: "missingPlotArea".to_string(),
+            },
+        );
+    } else {
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.plot_area: using ChartEx".to_string(),
+            part: Some(chart_ex_part.to_string()),
+            xpath: None,
+        });
+    }
+
+    if merged.plot_area_layout.is_none() {
+        merged.plot_area_layout = chart_space.plot_area_layout.take();
+    }
+
+    if merged.style_id.is_none() {
+        merged.style_id = chart_space.style_id.take();
+    }
+
+    if merged.rounded_corners.is_none() {
+        merged.rounded_corners = chart_space.rounded_corners.take();
+    }
+
+    if merged.disp_blanks_as.is_none() {
+        merged.disp_blanks_as = chart_space.disp_blanks_as.take();
+    }
+
+    if merged.plot_vis_only.is_none() {
+        merged.plot_vis_only = chart_space.plot_vis_only.take();
+    }
+
+    if merged.chart_area_style.is_none() {
+        merged.chart_area_style = chart_space.chart_area_style.take();
+    }
+
+    if merged.plot_area_style.is_none() {
+        merged.plot_area_style = chart_space.plot_area_style.take();
+    }
+
+    if merged.chart_space_ext_lst_xml.is_none() {
+        merged.chart_space_ext_lst_xml = chart_space.chart_space_ext_lst_xml.take();
+    }
+
+    if merged.chart_ext_lst_xml.is_none() {
+        merged.chart_ext_lst_xml = chart_space.chart_ext_lst_xml.take();
+    }
+
+    if merged.plot_area_ext_lst_xml.is_none() {
+        merged.plot_area_ext_lst_xml = chart_space.plot_area_ext_lst_xml.take();
+    }
+
+    // External workbook links: prefer the classic chartSpace value when present (that's where
+    // Excel usually stores it), otherwise fall back to ChartEx.
+    let chart_ex_rel_id = merged.external_data_rel_id.clone();
+    let chart_ex_auto_update = merged.external_data_auto_update;
+
+    match (
+        chart_space.external_data_rel_id.as_deref(),
+        merged.external_data_rel_id.as_deref(),
+    ) {
+        (Some(chart_space_rid), None) => {
             diagnostics.push(ChartDiagnostic {
                 severity: ChartDiagnosticSeverity::Info,
                 message: format!(
-                    "model.external_data_rel_id: using ChartEx {chart_ex_rid:?} (chartSpace was None)",
+                    "model.external_data_rel_id: using chartSpace {chart_space_rid:?} (ChartEx was None)",
                 ),
-                part: Some(chart_ex_part.to_string()),
+                part: Some(chart_space_part.to_string()),
                 xpath: None,
             });
-            merged.external_data_rel_id = Some(chart_ex_rid.clone());
+            merged.external_data_rel_id = chart_space.external_data_rel_id.take();
         }
         (Some(chart_space_rid), Some(chart_ex_rid)) if chart_space_rid != chart_ex_rid => {
             diagnostics.push(ChartDiagnostic {
@@ -759,50 +820,43 @@ fn merge_chart_models(
                 part: Some(chart_space_part.to_string()),
                 xpath: None,
             });
+            merged.external_data_rel_id = chart_space.external_data_rel_id.take();
         }
         _ => {}
     }
 
-    if merged.external_data_auto_update.is_none() {
-        if let Some(chart_ex_auto) = chart_ex.external_data_auto_update {
-            // Only use ChartEx autoUpdate if the relationship id matches (or if
-            // chartSpace didn't have one and we just copied it from ChartEx).
-            let rel_ids_match = match (&merged.external_data_rel_id, &chart_ex.external_data_rel_id)
-            {
-                (Some(a), Some(b)) => a == b,
-                (Some(_), None) => true,
-                _ => false,
-            };
-            if rel_ids_match {
+    if let Some(chart_space_auto) = chart_space.external_data_auto_update {
+        if let Some(chart_ex_auto) = merged.external_data_auto_update {
+            if chart_space_auto != chart_ex_auto {
                 diagnostics.push(ChartDiagnostic {
-                    severity: ChartDiagnosticSeverity::Info,
+                    severity: ChartDiagnosticSeverity::Warning,
                     message: format!(
-                        "model.external_data_auto_update: using ChartEx {chart_ex_auto:?} (chartSpace was None)",
+                        "model.external_data_auto_update: chartSpace {chart_space_auto:?} differs from ChartEx {chart_ex_auto:?}; using chartSpace",
                     ),
-                    part: Some(chart_ex_part.to_string()),
+                    part: Some(chart_space_part.to_string()),
                     xpath: None,
                 });
-                merged.external_data_auto_update = Some(chart_ex_auto);
             }
         }
-    } else if let (Some(chart_space_auto), Some(chart_ex_auto)) = (
-        merged.external_data_auto_update,
-        chart_ex.external_data_auto_update,
-    ) {
-        if chart_space_auto != chart_ex_auto {
+        merged.external_data_auto_update = Some(chart_space_auto);
+    } else if chart_ex_auto_update.is_some() {
+        // Only keep the ChartEx autoUpdate value if the relationship id still matches after
+        // resolving any chartSpace vs ChartEx externalData relationship conflicts.
+        let rel_ids_match = match (&merged.external_data_rel_id, &chart_ex_rel_id) {
+            (Some(a), Some(b)) => a == b,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if !rel_ids_match {
             diagnostics.push(ChartDiagnostic {
                 severity: ChartDiagnosticSeverity::Warning,
-                message: format!(
-                    "model.external_data_auto_update: chartSpace {chart_space_auto:?} differs from ChartEx {chart_ex_auto:?}; using chartSpace",
-                ),
-                part: Some(chart_space_part.to_string()),
+                message: "model.external_data_auto_update: ignoring ChartEx autoUpdate due to externalData rel id mismatch".to_string(),
+                part: Some(chart_ex_part.to_string()),
                 xpath: None,
             });
+            merged.external_data_auto_update = None;
         }
     }
-
-    // Preserve whichever diagnostics are available from both models.
-    merged.diagnostics.extend(chart_ex.diagnostics);
 
     merged
 }
@@ -877,20 +931,6 @@ mod tests {
         assert_eq!(merged.external_data_rel_id.as_deref(), Some("rId1"));
         assert_eq!(merged.external_data_auto_update, Some(false));
     }
-}
-
-fn chart_ex_kind_is_specific(kind: &ChartKind) -> bool {
-    let ChartKind::Unknown { name } = kind else {
-        // A fully-modeled ChartEx kind would be represented as a concrete enum variant. Treat it as specific.
-        return true;
-    };
-
-    let Some(kind) = name.strip_prefix("ChartEx:") else {
-        return false;
-    };
-
-    let kind = kind.trim();
-    !kind.is_empty() && !kind.eq_ignore_ascii_case("unknown")
 }
 
 fn normalize_relationship_target(target: &str) -> String {
