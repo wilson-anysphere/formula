@@ -158,6 +158,11 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "formulas.formulaAuditing.traceDependents",
   "formulas.formulaAuditing.removeArrows",
 
+  // --- What-If Analysis / Solver ---------------------------------------------
+  "data.forecast.whatIfAnalysis.scenarioManager",
+  "data.forecast.whatIfAnalysis.goalSeek",
+  "formulas.solutions.solver",
+
   // --- Insert pictures --------------------------------------------------------
   // Insert → Pictures menu items are routed via `handleInsertPicturesRibbonCommand` in main.ts.
   "insert.illustrations.pictures",

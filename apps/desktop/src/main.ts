@@ -37,7 +37,7 @@ import "./styles/what-if.css";
 import "./styles/solver.css";
 
 import React from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 
 import { SheetTabStrip } from "./sheets/SheetTabStrip";
 import { openOrganizeSheetsDialog } from "./sheets/OrganizeSheetsDialog";
@@ -71,6 +71,8 @@ import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
 import { resolveEnableDrawingInteractions } from "./drawings/drawingInteractionsFlag.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
+import { GoalSeekDialog } from "./panels/what-if/GoalSeekDialog.js";
+import { createWhatIfApi } from "./panels/what-if/api.js";
 import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
 import { mountTitlebar } from "./titlebar/mountTitlebar.js";
 import {
@@ -8109,6 +8111,46 @@ function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string
   dialog.showModal();
 }
 
+const whatIfApi = createWhatIfApi();
+let goalSeekDialogMount: { root: Root; container: HTMLDivElement } | null = null;
+
+function showGoalSeekDialogModal(): void {
+  if (typeof document === "undefined") return;
+  if (goalSeekDialogMount) return;
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+
+  const root = createRoot(container);
+  goalSeekDialogMount = { root, container };
+
+  function Wrapper() {
+    const [open, setOpen] = React.useState(true);
+
+    React.useEffect(() => {
+      if (open) return;
+      // Defer cleanup so `GoalSeekDialog` can run its focus-restoration effect on close.
+      const timeout = window.setTimeout(() => {
+        try {
+          root.unmount();
+        } finally {
+          container.remove();
+          goalSeekDialogMount = null;
+          app.focus();
+        }
+      }, 0);
+
+      return () => {
+        window.clearTimeout(timeout);
+      };
+    }, [open]);
+
+    return React.createElement(GoalSeekDialog, { api: whatIfApi, open, onClose: () => setOpen(false) });
+  }
+
+  root.render(React.createElement(Wrapper));
+}
+
 async function handleRibbonPrintPreview(args: { autoPrint: boolean }): Promise<void> {
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
@@ -8953,6 +8995,27 @@ function handleRibbonCommand(commandId: string): void {
       case "navigation.goTo":
         executeBuiltinCommand("navigation.goTo");
         return;
+      case "data.forecast.whatIfAnalysis.scenarioManager": {
+        const controller = ribbonLayoutController;
+        if (!controller) {
+          showToast("Scenario Manager is not available in this build yet.");
+          return;
+        }
+        controller.openPanel(PanelIds.SCENARIO_MANAGER);
+        return;
+      }
+      case "data.forecast.whatIfAnalysis.goalSeek":
+        showGoalSeekDialogModal();
+        return;
+      case "formulas.solutions.solver": {
+        const controller = ribbonLayoutController;
+        if (!controller) {
+          showToast("Solver is not available in this build yet.");
+          return;
+        }
+        controller.openPanel(PanelIds.SOLVER);
+        return;
+      }
       case "home.editing.sortFilter.filter":
       case "data.sortFilter.filter": {
         // In Excel, the ribbon "Filter" button is a toggle. For this MVP we treat it as:

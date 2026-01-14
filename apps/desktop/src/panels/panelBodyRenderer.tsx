@@ -9,6 +9,9 @@ import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
 import { VbaMigratePanel } from "./vba-migrate/index.js";
 import { createMarketplacePanel } from "./marketplace/index.js";
+import { SolverPanel } from "./solver/SolverPanel.js";
+import { ScenarioManagerPanel } from "./what-if/ScenarioManagerPanel.js";
+import { createWhatIfApi } from "./what-if/api.js";
 import { ExtensionPanelBody } from "../extensions/ExtensionPanelBody.js";
 import { ExtensionsPanel } from "../extensions/ExtensionsPanel.js";
 import type { ExtensionPanelBridge } from "../extensions/extensionPanelBridge.js";
@@ -143,6 +146,7 @@ interface DomPanelInstance {
 export function createPanelBodyRenderer(options: PanelBodyRendererOptions): PanelBodyRenderer {
   const reactPanels = new Map<string, ReactPanelInstance>();
   const domPanels = new Map<string, DomPanelInstance>();
+  const whatIfApi = createWhatIfApi();
 
   // Marketplace wiring (lazy so desktop builds without a marketplace service don't
   // eagerly touch IndexedDB / crypto).
@@ -363,6 +367,17 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           drainBackendSync={options.drainBackendSync}
         />,
       );
+      return;
+    }
+
+    if (panelId === PanelIds.SOLVER) {
+      renderReactPanel(panelId, body, <SolverPanel />);
+      return;
+    }
+
+    if (panelId === PanelIds.SCENARIO_MANAGER) {
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(panelId, body, <ScenarioManagerPanel api={whatIfApi} />);
       return;
     }
 
