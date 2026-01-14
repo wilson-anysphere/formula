@@ -3610,8 +3610,16 @@ impl<'a> Parser<'a> {
             }
         } else {
             if !matches!(self.peek_kind(), TokenKind::Bang) {
-                self.pos = save;
-                return self.parse_structured_ref(None, None, None);
+                // Workbook-scoped external defined name, e.g. `[Book.xlsx]MyName`.
+                //
+                // Note: `formula-xlsb`'s NameX decoder prefers emitting the fully-quoted form
+                // (`'[Book.xlsx]MyName'`) to avoid the structured-ref ambiguity, but some producers
+                // (and users) omit quotes. Support both.
+                return Ok(Expr::NameRef(NameRef {
+                    workbook: Some(workbook),
+                    sheet: None,
+                    name: start_sheet,
+                }));
             }
             match split_sheet_span_name(&start_sheet) {
                 Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => {
@@ -4333,5 +4341,22 @@ mod tests {
             }
             other => panic!("expected NameRef, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unquoted_external_workbook_name_ref_parses_as_name_ref() {
+        let ast = parse_formula("=[Book.xlsx]MyName", ParseOptions::default()).unwrap();
+        match &ast.expr {
+            Expr::NameRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some("Book.xlsx"));
+                assert_eq!(r.sheet, None);
+                assert_eq!(r.name, "MyName");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
+        }
+
+        // The serializer prefers the fully-quoted token form for workbook-scoped external names.
+        let rendered = ast.to_string(SerializeOptions::default()).unwrap();
+        assert_eq!(rendered, "='[Book.xlsx]MyName'");
     }
 }
