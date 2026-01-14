@@ -700,7 +700,11 @@ validate_appimage() {
   # This mirrors the `.deb` / `.rpm` validations in the release workflow.
   if command -v python3 >/dev/null 2>&1; then
     info "Running strict Linux desktop integration verifier against extracted AppImage payload"
-    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" --package-root "$appdir" --tauri-config "$TAURI_CONF_PATH"; then
+    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" \
+      --package-root "$appdir" \
+      --tauri-config "$TAURI_CONF_PATH" \
+      --expected-main-binary "$EXPECTED_MAIN_BINARY" \
+      --doc-package-name "$EXPECTED_MAIN_BINARY"; then
       die "Linux desktop integration verification failed for AppImage: $appimage_path"
     fi
   else
