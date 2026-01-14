@@ -244,6 +244,40 @@ fn bytecode_custom_sheet_dims_column_sheet_prefixed_whole_column_does_not_trigge
 }
 
 #[test]
+fn bytecode_custom_sheet_dims_column_sheet_prefixed_column_range_does_not_trigger_range_cell_limit() {
+    // Regression test: `COLUMN(Sheet2!A:B)` returns a 1x2 vector even though `A:B` spans all rows.
+    // The compiler should not reject it based on the dense range cell count.
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 10, 5)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 6_000_000, 10)
+        .expect("set Sheet2 dimensions");
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=COLUMN(Sheet2!A:B)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formula to compile to bytecode; got report: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start.row, 0);
+    assert_eq!(start.col, 0);
+    assert_eq!(end.row, 0);
+    assert_eq!(end.col, 1);
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+}
+
+#[test]
 fn bytecode_custom_sheet_dims_row_sheet_prefixed_full_row_range_does_not_trigger_range_cell_limit() {
     // Regression test: `ROW(Sheet2!1:1000)` spans an entire *row range* (all columns), but the
     // output is a 1000x1 vector (one element per row), not a dense 1000xN grid. The bytecode
