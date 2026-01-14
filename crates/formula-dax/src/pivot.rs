@@ -1795,7 +1795,6 @@ fn pivot_planned_row_group_by(
         return Ok(None);
     }
 
-    let base_table_key = normalize_ident(base_table);
     let (table_ref, group_key_accessors) =
         build_group_key_accessors(model, base_table, group_by, filter)?;
     let base_table_key = normalize_ident(base_table);
