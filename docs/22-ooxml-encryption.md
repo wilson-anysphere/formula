@@ -78,7 +78,7 @@ Standard/CryptoAPI (minor=2) encryption is a different scheme; see
 | Package key sizes | 128/192/256-bit (`keyBits` 128/192/256) |
 | Hash algorithms | `SHA1`, `SHA256`, `SHA384`, `SHA512` (case-insensitive) |
 | Key encryptor | **Password** key-encryptor only (`uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password"`) |
-| Integrity | `dataIntegrity` HMAC verification is supported when `<dataIntegrity>` is present (algorithm documented below). `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` treat `<dataIntegrity>` as optional; `crates/formula-offcrypto` can validate integrity when enabled (`DecryptOptions.verify_integrity = true`). `formula-io`’s streaming decrypt reader does not validate `dataIntegrity`. |
+| Integrity | `dataIntegrity` HMAC verification is supported when `<dataIntegrity>` is present (algorithm documented below). `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto` treat `<dataIntegrity>` as optional (decrypts but skips integrity verification when absent). `crates/formula-offcrypto` can verify `dataIntegrity` when `DecryptOptions.verify_integrity = true` (default: `false`). `formula-io`’s streaming decrypt reader does not validate `dataIntegrity`. |
 
 ### Explicitly unsupported (hard errors)
 
