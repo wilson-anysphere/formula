@@ -351,6 +351,52 @@ fn phonetic_metadata_is_removed_when_set_range_values_clears_cell() {
 }
 
 #[test]
+fn phonetic_metadata_is_removed_when_set_cell_value_clears_cell() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "漢字");
+    sheet.set_phonetic("A1", Some("かんじ"));
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+
+    sheet.set("A1", Value::Blank);
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text(String::new()));
+}
+
+#[test]
+fn phonetic_metadata_is_removed_when_set_cell_value_clears_contents_but_preserves_style() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
+    engine.set_cell_value("Sheet1", "A1", "漢字").unwrap();
+    engine
+        .set_cell_phonetic("Sheet1", "A1", Some("かんじ".to_string()))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=PHONETIC(A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("かんじ".to_string())
+    );
+
+    // Clearing contents should preserve style, but must clear phonetic metadata.
+    engine.set_cell_value("Sheet1", "A1", Value::Blank).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+    assert_eq!(engine.get_cell_style_id("Sheet1", "A1").unwrap(), Some(style_id));
+    assert_eq!(engine.get_cell_phonetic("Sheet1", "A1"), None);
+}
+
+#[test]
 fn phonetic_propagates_errors() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=1/0");
