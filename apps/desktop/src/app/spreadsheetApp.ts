@@ -1262,6 +1262,7 @@ export class SpreadsheetApp {
   private splitViewSecondaryGridPointerAbort: AbortController | null = null;
   private splitViewSecondarySelectionCanvas: HTMLCanvasElement | null = null;
   private splitViewSecondaryDrawingInteractionController: DrawingInteractionController | null = null;
+  private splitViewSecondaryChartDrawingInteractionController: DrawingInteractionController | null = null;
   private readonly drawingsListeners = new Set<() => void>();
   private readonly drawingSelectionListeners = new Set<(id: DrawingObjectId | null) => void>();
   private readonly formulaChartModelStore = new FormulaChartModelStore();
@@ -4677,6 +4678,8 @@ export class SpreadsheetApp {
     this.splitViewSecondarySelectionCanvas = null;
     this.splitViewSecondaryDrawingInteractionController?.dispose({ revert: false });
     this.splitViewSecondaryDrawingInteractionController = null;
+    this.splitViewSecondaryChartDrawingInteractionController?.dispose({ revert: false });
+    this.splitViewSecondaryChartDrawingInteractionController = null;
     this.splitViewSecondaryGrid = null;
     this.splitViewDrawingHitTestIndex = null;
     this.splitViewDrawingHitTestIndexObjects = null;
@@ -7145,6 +7148,7 @@ export class SpreadsheetApp {
        // Note: `drawingsInteraction` is a backwards-compat alias of `drawingInteractionController`,
        // but keep the null-safe calls for resilience in older/partially-stubbed test harnesses.
        this.chartDrawingInteraction?.reset({ clearSelection: true });
+       this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
        this.drawingsInteraction?.reset({ clearSelection: true });
        this.drawingInteractionController?.reset({ clearSelection: true });
        this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
@@ -7189,6 +7193,7 @@ export class SpreadsheetApp {
          // swapping `sheetId`.
          this.drawingInteractionController?.reset({ clearSelection: true });
          this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
+         this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
          this.selectedDrawingId = null;
          this.selectedDrawingIndex = null;
          this.drawingOverlay.setSelectedId(null);
@@ -7549,6 +7554,7 @@ export class SpreadsheetApp {
     // swap out the active-sheet drawing list; otherwise the interaction
     // controller could apply its cleanup (`setObjects`) to the new sheet.
     this.chartDrawingInteraction?.reset({ clearSelection: true });
+    this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
     this.drawingInteractionController?.reset({ clearSelection: true });
     this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
     this.sheetId = sheetId;
@@ -7623,6 +7629,7 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
+      this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
@@ -7698,6 +7705,7 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
+      this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
@@ -8331,6 +8339,8 @@ export class SpreadsheetApp {
     // pre-gesture state. During full app teardown (`this.disposed`), avoid invoking `setObjects` work.
     this.splitViewSecondaryDrawingInteractionController?.dispose({ revert: !this.disposed });
     this.splitViewSecondaryDrawingInteractionController = null;
+    this.splitViewSecondaryChartDrawingInteractionController?.dispose({ revert: !this.disposed });
+    this.splitViewSecondaryChartDrawingInteractionController = null;
 
     this.splitViewSecondaryGrid = view;
     // Drop any cached hit-test index tied to the previous secondary grid instance.
@@ -8356,6 +8366,15 @@ export class SpreadsheetApp {
       } catch {
         this.splitViewSecondarySelectionCanvas = null;
       }
+      const enableChartGestures = this.chartDrawingInteraction != null;
+      if (enableChartGestures) {
+        // Canvas charts (ChartStore charts rendered as drawing objects) have their own interaction controller.
+        // Attach a dedicated instance to the secondary pane so charts can be selected/moved/resized from
+        // either split pane.
+        const chartController = this.ensureSplitViewSecondaryChartDrawingInteractionController(view);
+        chartController.setSelectedId(this.selectedChartId != null ? chartStoreIdToDrawingId(this.selectedChartId) : null);
+      }
+
       const enableDrawingGestures = this.drawingInteractionController != null;
       if (enableDrawingGestures) {
         // When drawing interactions are enabled, attach a dedicated controller to the secondary pane
@@ -8557,6 +8576,174 @@ export class SpreadsheetApp {
     );
 
     this.splitViewSecondaryDrawingInteractionController = controller;
+    return controller;
+  }
+
+  private ensureSplitViewSecondaryChartDrawingInteractionController(view: {
+    container: HTMLElement;
+    grid: DesktopSharedGrid;
+  }): DrawingInteractionController {
+    const existing = this.splitViewSecondaryChartDrawingInteractionController;
+    if (existing) return existing;
+
+    const headerRows = 1;
+    const headerCols = 1;
+
+    const geom: DrawingGridGeometry = {
+      cellOriginPx: (cell) => {
+        const headerWidth = headerCols > 0 ? view.grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+        const headerHeight = headerRows > 0 ? view.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: view.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: view.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          width: view.grid.renderer.getColWidth(gridCol),
+          height: view.grid.renderer.getRowHeight(gridRow),
+        };
+      },
+    };
+
+    const focusSecondary = (): void => {
+      try {
+        (view.container as any).focus?.({ preventScroll: true });
+      } catch {
+        view.container.focus?.();
+      }
+    };
+
+    const anchorsEqual = (a: DrawingObject["anchor"], b: DrawingObject["anchor"]): boolean => {
+      if (a.type !== b.type) return false;
+      if (a.type === "absolute") {
+        return a.pos.xEmu === (b as any).pos.xEmu && a.pos.yEmu === (b as any).pos.yEmu && a.size.cx === (b as any).size.cx && a.size.cy === (b as any).size.cy;
+      }
+      if (a.type === "oneCell") {
+        const bb = b as any;
+        return (
+          a.from.cell.row === bb.from.cell.row &&
+          a.from.cell.col === bb.from.cell.col &&
+          a.from.offset.xEmu === bb.from.offset.xEmu &&
+          a.from.offset.yEmu === bb.from.offset.yEmu &&
+          a.size.cx === bb.size.cx &&
+          a.size.cy === bb.size.cy
+        );
+      }
+      // twoCell
+      const bb = b as any;
+      return (
+        a.from.cell.row === bb.from.cell.row &&
+        a.from.cell.col === bb.from.cell.col &&
+        a.from.offset.xEmu === bb.from.offset.xEmu &&
+        a.from.offset.yEmu === bb.from.offset.yEmu &&
+        a.to.cell.row === bb.to.cell.row &&
+        a.to.cell.col === bb.to.cell.col &&
+        a.to.offset.xEmu === bb.to.offset.xEmu &&
+        a.to.offset.yEmu === bb.to.offset.yEmu
+      );
+    };
+
+    // Cache the last anchor seen during a gesture so we can avoid redundant `setObjects` work.
+    let lastCanvasChartAnchor: DrawingObject["anchor"] | null = null;
+
+    const controller = new DrawingInteractionController(
+      view.container,
+      geom,
+      {
+        getViewport: () => this.getSplitViewSecondaryDrawingInteractionViewportScratch(view),
+        getObjects: () => this.listCanvasChartDrawingObjectsForSheet(this.sheetId),
+        shouldHandlePointerDown: (e) => {
+          // When the formula bar is in range-selection mode, chart hits should not steal the
+          // pointerdown; let normal grid range selection continue.
+          if (this.formulaBar?.isFormulaEditing()) return false;
+          const target = e.target as HTMLElement | null;
+          if (!target) return true;
+          return target === view.container || target.tagName === "CANVAS";
+        },
+        setObjects: (next) => {
+          const activeChartId = this.selectedChartId;
+          if (!activeChartId) return;
+          const targetDrawingId = chartStoreIdToDrawingId(activeChartId);
+          const obj = next.find((o) => o.id === targetDrawingId) ?? null;
+          if (!obj) return;
+          if (lastCanvasChartAnchor && anchorsEqual(lastCanvasChartAnchor, obj.anchor)) return;
+          lastCanvasChartAnchor = obj.anchor;
+          // Cache the in-flight chart drawing objects during the gesture so render/hit-test paths can
+          // reuse object identities from the DrawingInteractionController (avoids rebuilding fresh
+          // chart drawing objects from `ChartStore` on every pointermove).
+          this.canvasChartDrawingObjectsOverride = { sheetId: this.sheetId, objects: next };
+          this.scheduleDrawingsRender("split:chart-gesture");
+          // Split view: ensure the secondary pane redraws its drawings overlay when in-memory chart
+          // drawing objects are updated during an interaction gesture.
+          this.scheduleDrawingsChangedWindowEvent();
+        },
+        commitObjects: (next) => {
+          const activeChartId = this.selectedChartId;
+          if (!activeChartId) return;
+          const targetDrawingId = chartStoreIdToDrawingId(activeChartId);
+          const obj = next.find((o) => o.id === targetDrawingId) ?? null;
+          if (!obj) return;
+          const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
+          if (typeof chartId !== "string" || chartId.trim() === "") return;
+          this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
+        },
+        beginBatch: () => {
+          this.chartDrawingGestureActive = true;
+          lastCanvasChartAnchor = null;
+        },
+        endBatch: () => {
+          this.chartDrawingGestureActive = false;
+          lastCanvasChartAnchor = null;
+          this.canvasChartDrawingObjectsOverride = null;
+          this.scheduleDrawingsRender("split:chart-gesture-end");
+          this.scheduleDrawingsChangedWindowEvent();
+        },
+        cancelBatch: () => {
+          this.chartDrawingGestureActive = false;
+          lastCanvasChartAnchor = null;
+          this.canvasChartDrawingObjectsOverride = null;
+          this.scheduleDrawingsRender("split:chart-gesture-cancel");
+          this.scheduleDrawingsChangedWindowEvent();
+        },
+        onPointerDownHit: () => {
+          if (this.editor.isOpen()) {
+            this.editor.commit("command");
+          }
+          focusSecondary();
+        },
+        onSelectionChange: (selectedId) => {
+          lastCanvasChartAnchor = null;
+          let nextChartId: string | null = null;
+          if (selectedId != null) {
+            const charts = this.chartStore.listCharts();
+            for (const chart of charts) {
+              if (chart.sheetId !== this.sheetId) continue;
+              if (chartStoreIdToDrawingId(chart.id) === selectedId) {
+                nextChartId = chart.id;
+                break;
+              }
+            }
+          }
+          this.setSelectedChartId(nextChartId);
+          focusSecondary();
+        },
+        requestFocus: focusSecondary,
+        scrollBy: (dx, dy) => {
+          const before = view.grid.getScroll();
+          view.grid.scrollBy(dx, dy);
+          const after = view.grid.getScroll();
+          return before.x !== after.x || before.y !== after.y;
+        },
+      },
+      { capture: true },
+    );
+
+    this.splitViewSecondaryChartDrawingInteractionController = controller;
     return controller;
   }
 
@@ -12174,6 +12361,7 @@ export class SpreadsheetApp {
     this.chartDrawingInteraction?.invalidateHitTestIndex();
     this.drawingsInteraction?.invalidateHitTestIndex();
     this.splitViewSecondaryDrawingInteractionController?.invalidateHitTestIndex();
+    this.splitViewSecondaryChartDrawingInteractionController?.invalidateHitTestIndex();
     if (controller && controller !== this.drawingsInteraction) {
       controller.invalidateHitTestIndex();
     }
@@ -14304,7 +14492,9 @@ export class SpreadsheetApp {
       // Charts are rendered + selected through the drawings overlay; keep the interaction
       // controller selection in sync so resize handles can be grabbed after selecting
       // via non-pointer UI (e.g. Selection Pane).
-      this.chartDrawingInteraction?.setSelectedId(next != null ? chartStoreIdToDrawingId(next) : null);
+      const selectedChartDrawingId = next != null ? chartStoreIdToDrawingId(next) : null;
+      this.chartDrawingInteraction?.setSelectedId(selectedChartDrawingId);
+      this.splitViewSecondaryChartDrawingInteractionController?.setSelectedId(selectedChartDrawingId);
       this.renderDrawings();
     } else if (next !== prevChartId || clearedDrawingSelection) {
       // In legacy DOM/SVG chart mode, chart selection is rendered on the chart selection overlay.
