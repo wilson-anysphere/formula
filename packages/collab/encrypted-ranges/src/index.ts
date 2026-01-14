@@ -231,9 +231,15 @@ function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedR
   const obj = map ? null : value && typeof value === "object" ? (value as any) : null;
   const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
 
-  const sheetIdRaw = coerceString(get("sheetId")) ?? coerceString(get("sheetName")) ?? coerceString(get("sheet"));
+  // Tolerate older/partial schemas:
+  // - `sheetName`/`sheet` instead of `sheetId`
+  // - empty `sheetId` values (treat as missing rather than blocking fallback)
+  const sheetIdCandidate = coerceString(get("sheetId"))?.trim() ?? "";
+  const sheetNameCandidate = coerceString(get("sheetName"))?.trim() ?? "";
+  const sheetCandidate = coerceString(get("sheet"))?.trim() ?? "";
+  const sheetId = sheetIdCandidate || sheetNameCandidate || sheetCandidate;
+
   const keyIdRaw = coerceString(get("keyId"));
-  const sheetId = sheetIdRaw?.trim() ?? "";
   const keyId = keyIdRaw?.trim() ?? "";
   if (!sheetId || !keyId) return null;
 

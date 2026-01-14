@@ -499,6 +499,34 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 1 })).toBe(false);
   });
 
+  it("policy helper falls back to legacy `sheetName` when `sheetId` is present but blank", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    ranges.push([
+      {
+        // Corrupt/partial legacy shape: blank `sheetId` but a valid sheet name.
+        sheetId: "   ",
+        sheetName: "s1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        keyId: "k1",
+      },
+    ]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k1");
+  });
+
   it("policy helper resolves legacy sheet names to stable sheet ids via workbook sheets metadata", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
