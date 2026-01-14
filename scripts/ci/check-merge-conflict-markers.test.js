@@ -53,16 +53,19 @@ test("passes when no conflict markers are present", { skip: !canRun }, () => {
 });
 
 test("fails when standard conflict markers are present", { skip: !canRun }, () => {
+  // NOTE: Avoid embedding raw conflict markers at the start of a line in this
+  // repository, since CI runs `scripts/ci/check-merge-conflict-markers.sh` over
+  // tracked sources. Construct the fixture programmatically so the test still
+  // validates the guard logic without tripping the guard itself.
+  const conflict = [
+    "<<<<<<< ours",
+    "hello",
+    "=======",
+    "world",
+    ">>>>>>> theirs",
+  ].join("\n");
   const proc = run({
-    // Build the marker text dynamically so this test file itself does not contain
-    // raw conflict markers at the start of a line (the CI guard scans the repo).
-    "conflict.txt": [
-      "<<<<<<< ours",
-      "hello",
-      "=======",
-      "world",
-      ">>>>>>> theirs",
-    ].join("\n"),
+    "conflict.txt": conflict,
   });
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /Merge conflict markers detected/i);
