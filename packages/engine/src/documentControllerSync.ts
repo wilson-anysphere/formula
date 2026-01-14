@@ -68,6 +68,12 @@ export interface EngineSyncTarget {
   setCells?: (
     updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }>,
   ) => Promise<void> | void;
+  /**
+   * Rename a worksheet and rewrite formulas that reference it (Excel-like).
+   *
+   * This is optional because older WASM builds may not expose the API.
+   */
+  renameSheet?: (oldName: string, newName: string) => Promise<boolean> | boolean;
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
   /**
    * Update workbook-level file metadata used by Excel-compatible functions like `CELL("filename")`
@@ -625,6 +631,9 @@ export async function engineApplyDocumentChange(
     return [];
   }
 
+  const sheetMetaDeltas: Array<{ sheetId: string; before: any; after: any }> = Array.isArray(payload?.sheetMetaDeltas)
+    ? payload.sheetMetaDeltas
+    : [];
   const deltas: readonly DocumentCellDelta[] = Array.isArray(payload?.deltas) ? payload.deltas : [];
   const formatDeltas: unknown[] = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
   const rowStyleDeltas: Array<{ sheetId: string; row: number; afterStyleId: number }> = Array.isArray(payload?.rowStyleDeltas)
@@ -640,7 +649,6 @@ export async function engineApplyDocumentChange(
     ? payload.sheetViewDeltas
     : [];
   const rangeRunDeltas: unknown[] = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
-  const sheetMetaDeltas: unknown[] = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
 
   // Backwards compatibility: older DocumentController payload shapes only include `formatDeltas`.
   // Prefer the explicit delta streams when present, but derive them from `formatDeltas` if needed.
@@ -676,6 +684,39 @@ export async function engineApplyDocumentChange(
   // style objects without needing an initial `engineHydrateFromDocument` call.
   const ctx = getOrCreateStyleSyncContext(engine, options);
   const canResolveNonZeroStyles = Boolean(engine.internStyle && ctx);
+
+  // Apply sheet metadata renames before any other deltas so `sheetIdToSheet` resolution stays
+  // coherent for the remainder of the payload (cell edits, view metadata, etc).
+  let didRenameAnySheets = false;
+  if (sheetMetaDeltas.length > 0) {
+    for (const delta of sheetMetaDeltas) {
+      if (!delta) continue;
+      const sheetId = typeof delta.sheetId === "string" ? delta.sheetId.trim() : "";
+      if (!sheetId) continue;
+      // We only support sheet renames here (not add/delete).
+      if (delta.before == null || delta.after == null) continue;
+
+      const beforeNameRaw = typeof delta.before?.name === "string" ? delta.before.name : "";
+      const afterNameRaw = typeof delta.after?.name === "string" ? delta.after.name : "";
+      const oldName = beforeNameRaw.trim() || sheetId;
+      const newName = afterNameRaw.trim() || sheetId;
+      if (!oldName || !newName || oldName === newName) continue;
+
+      if (typeof engine.renameSheet !== "function") {
+        throw new Error(
+          `engineApplyDocumentChange: sheet rename detected (${JSON.stringify(oldName)} -> ${JSON.stringify(newName)}) but engine.renameSheet is not available; rehydrate the engine`,
+        );
+      }
+
+      const ok = await engine.renameSheet(oldName, newName);
+      if (!ok) {
+        throw new Error(
+          `engineApplyDocumentChange: failed to rename sheet (${JSON.stringify(oldName)} -> ${JSON.stringify(newName)})`,
+        );
+      }
+      didRenameAnySheets = true;
+    }
+  }
 
   const didApplyCellInputs = deltas.some((d) => cellStateToEngineInput(d.before) !== cellStateToEngineInput(d.after));
   const didApplyCellStyles =
@@ -852,6 +893,13 @@ export async function engineApplyDocumentChange(
   const didApplyAnyMetadataDeltas = didApplyAnyFormattingMetadata || hasSheetMeta;
 
   if (didApplyAnyMetadataDeltas && options.recalculate !== false) {
+    shouldRecalculate = true;
+  }
+
+  // Sheet renames can affect worksheet information functions like `CELL("filename")` and
+  // `CELL("address")`, but DocumentController emits them with `recalc: false`. Override so any
+  // dependent formulas observe the updated tab name.
+  if (didRenameAnySheets && options.recalculate !== false) {
     shouldRecalculate = true;
   }
 

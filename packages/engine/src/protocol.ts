@@ -551,6 +551,7 @@ export type RpcMethod =
   | "calculatePivot"
   | "setSheetDimensions"
   | "getSheetDimensions"
+  | "renameSheet"
   // Workbook metadata
   | "getCalcSettings"
   | "setCalcSettings"

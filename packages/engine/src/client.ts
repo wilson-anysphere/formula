@@ -192,6 +192,13 @@ export interface EngineClient {
   getSheetDimensions(sheet: string, options?: RpcOptions): Promise<{ rows: number; cols: number }>;
 
   /**
+   * Rename a worksheet and rewrite formulas that reference it (Excel-like).
+   *
+   * Returns `false` when `oldName` does not exist or `newName` conflicts with another sheet.
+   */
+  renameSheet(oldName: string, newName: string, options?: RpcOptions): Promise<boolean>;
+
+  /**
    * Set (or clear) a per-column width override.
    *
    * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
@@ -415,6 +422,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setSheetDimensions(sheet, rows, cols, rpcOptions)),
     getSheetDimensions: async (sheet, rpcOptions) =>
       await withEngine((connected) => connected.getSheetDimensions(sheet, rpcOptions)),
+    renameSheet: async (oldName, newName, rpcOptions) =>
+      await withEngine((connected) => connected.renameSheet(oldName, newName, rpcOptions)),
     setColWidthChars: async (sheet, col, widthChars, rpcOptions) =>
       await withEngine((connected) => connected.setColWidthChars(sheet, col, widthChars, rpcOptions)),
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),

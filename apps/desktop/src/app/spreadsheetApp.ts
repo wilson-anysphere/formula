@@ -223,6 +223,7 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     loadWorkbookFromJson: (json) => engine.loadWorkbookFromJson(json),
     setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
     setCells: (updates) => engine.setCells(updates),
+    renameSheet: (oldName, newName) => engine.renameSheet(oldName, newName),
     recalculate: (sheet) => engine.recalculate(sheet),
     setWorkbookFileMetadata: (directory, filename) => engine.setWorkbookFileMetadata(directory, filename),
     internStyle: (styleObj) => engine.internStyle(styleObj as any),
@@ -6935,16 +6936,13 @@ export class SpreadsheetApp {
                return;
              }
 
-             const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
-             const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
-               if (!delta) return false;
-               // Sheet add/delete.
-               if (delta.before == null || delta.after == null) return true;
-               // Sheet rename.
-               const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
-               const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
-               return beforeName !== afterName;
-             });
+              const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+              const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
+                if (!delta) return false;
+                // Sheet add/delete.
+                if (delta.before == null || delta.after == null) return true;
+                return false;
+              });
 
              if (sheetMetaRequiresHydrate) {
                this.clearComputedValuesByCoord();
@@ -6972,17 +6970,17 @@ export class SpreadsheetApp {
              const recalc = payload?.recalc;
              const wantsRecalc = recalc === true;
 
-             // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
-             // task unless the payload can impact calculation results.
-             if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns && !hasSheetMeta) {
-               if (wantsRecalc) {
-                 void this.enqueueWasmSync(async (worker) => {
-                   const changes = await worker.recalculate();
-                   this.applyComputedChanges(changes);
-                 });
-               }
-               return;
-             }
+              // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
+              // task unless the payload can impact calculation results.
+              if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns && !hasSheetMeta) {
+                if (wantsRecalc) {
+                  void this.enqueueWasmSync(async (worker) => {
+                    const changes = await worker.recalculate();
+                    this.applyComputedChanges(changes);
+                  });
+                }
+                return;
+              }
 
              const sheetNameCache = new Map<string, string>();
              const sheetIdToSheet = (sheetId: string): string => {

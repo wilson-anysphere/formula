@@ -617,6 +617,11 @@ export class EngineWorker {
     return (await this.invoke("getSheetDimensions", { sheet }, options)) as { rows: number; cols: number };
   }
 
+  async renameSheet(oldName: string, newName: string, options?: RpcOptions): Promise<boolean> {
+    await this.flush();
+    return (await this.invoke("renameSheet", { oldName, newName }, options)) as boolean;
+  }
+
   /**
    * Set (or clear) a per-column width override.
    *

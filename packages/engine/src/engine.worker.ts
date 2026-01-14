@@ -36,6 +36,7 @@ type WasmWorkbookInstance = {
   applyOperation?: (op: unknown) => unknown;
   setSheetDimensions?: (sheet: string, rows: number, cols: number) => void;
   getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
+  renameSheet?: (oldName: string, newName: string) => boolean;
   setWorkbookFileMetadata?: (directory: string | null, filename: string | null) => void;
   setCellStyleId?: (address: string, styleId: number, sheet?: string) => void;
   setRowStyleId?: (sheet: string, row: number, styleId: number) => void;
@@ -538,6 +539,12 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("getSheetDimensions: not available in this WASM build");
               }
               result = (wb as any).getSheetDimensions(params.sheet);
+              break;
+            case "renameSheet":
+              if (typeof (wb as any).renameSheet !== "function") {
+                throw new Error("renameSheet: WasmWorkbook.renameSheet is not available in this WASM build");
+              }
+              result = Boolean((wb as any).renameSheet(params.oldName, params.newName));
               break;
             case "setColWidthChars":
               if (typeof (wb as any).setColWidthChars !== "function") {

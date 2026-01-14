@@ -202,6 +202,7 @@ describe("engine sync helpers", () => {
       runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
     }> = [];
     readonly colWidthCalls: Array<{ sheet: string; col: number; widthChars: number | null }> = [];
+    readonly renameSheetCalls: Array<{ oldName: string; newName: string }> = [];
     readonly recalcCalls: Array<string | undefined> = [];
     constructor(private readonly recalcResult: CellChange[]) {}
 
@@ -244,6 +245,11 @@ describe("engine sync helpers", () => {
 
     async setColWidth(sheet: string, col: number, widthChars: number | null): Promise<void> {
       this.colWidthCalls.push({ sheet, col, widthChars });
+    }
+
+    async renameSheet(oldName: string, newName: string): Promise<boolean> {
+      this.renameSheetCalls.push({ oldName, newName });
+      return true;
     }
 
     async recalculate(sheet?: string): Promise<CellChange[]> {
@@ -654,6 +660,42 @@ describe("engine sync helpers", () => {
     await engineApplyDocumentChange(engine, payload);
 
     expect(engine.recalcCalls).toEqual([undefined]);
+  });
+
+  it("syncs sheet renames via renameSheet and forces a recalc (CELL filename/address metadata)", async () => {
+    const doc = new DocumentController();
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+
+    doc.renameSheet("Sheet1", "Budget");
+    unsubscribe();
+
+    expect(payload?.recalc).toBe(false);
+    expect(Array.isArray(payload?.sheetMetaDeltas)).toBe(true);
+
+    const calls: string[] = [];
+    const renameSheet = vi.fn(async (_oldName: string, _newName: string) => {
+      calls.push(`renameSheet:${_oldName}->${_newName}`);
+      return true;
+    });
+
+    const engine: EngineSyncTarget = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => {
+        calls.push("recalculate");
+        return [];
+      }),
+      renameSheet,
+    };
+
+    await engineApplyDocumentChange(engine, payload);
+
+    expect(renameSheet).toHaveBeenCalledTimes(1);
+    expect(renameSheet).toHaveBeenCalledWith("Sheet1", "Budget");
+    expect(calls).toEqual(["renameSheet:Sheet1->Budget", "recalculate"]);
   });
 
   it("engineApplyDocumentChange triggers a recalc tick for formatting-only cell deltas", async () => {

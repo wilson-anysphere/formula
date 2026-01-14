@@ -1750,6 +1750,94 @@ impl WorkbookState {
             .ok_or_else(|| js_err(format!("missing sheet: {name}")))
     }
 
+    fn rename_sheet_internal(&mut self, old_name: &str, new_name: &str) -> bool {
+        let old_display = match self.resolve_sheet(old_name) {
+            Some(name) => name.to_string(),
+            None => return false,
+        };
+        let new_display = new_name.trim();
+        if new_display.is_empty() {
+            return false;
+        }
+        if old_display == new_display {
+            return true;
+        }
+
+        if !self.engine.rename_sheet(&old_display, new_display) {
+            return false;
+        }
+        let new_display = new_display.to_string();
+
+        // Update the case-insensitive sheet name mapping.
+        let old_key = normalize_sheet_key(&old_display);
+        let new_key = normalize_sheet_key(&new_display);
+        if old_key != new_key {
+            self.sheet_lookup.remove(&old_key);
+        }
+        self.sheet_lookup.insert(new_key, new_display.clone());
+
+        // Rename sheet-scoped input maps used by `toJson` / `getCell.input`.
+        if let Some(cells) = self.sheets.remove(&old_display) {
+            self.sheets.insert(new_display.clone(), cells);
+        } else {
+            self.sheets.entry(new_display.clone()).or_default();
+        }
+        if let Some(cells) = self.sheets_rich.remove(&old_display) {
+            self.sheets_rich.insert(new_display.clone(), cells);
+        } else {
+            self.sheets_rich.entry(new_display.clone()).or_default();
+        }
+        if let Some(cols) = self.col_widths_chars.remove(&old_display) {
+            self.col_widths_chars.insert(new_display.clone(), cols);
+        }
+
+        // Rename pending spill/formula bookkeeping entries so the next recalc tick stays coherent.
+        if !self.pending_spill_clears.is_empty() {
+            let pending = std::mem::take(&mut self.pending_spill_clears);
+            self.pending_spill_clears = pending
+                .into_iter()
+                .map(|mut key| {
+                    if key.sheet == old_display {
+                        key.sheet = new_display.clone();
+                    }
+                    key
+                })
+                .collect();
+        }
+
+        if !self.pending_formula_baselines.is_empty() {
+            let pending = std::mem::take(&mut self.pending_formula_baselines);
+            let mut next = BTreeMap::new();
+            for (mut key, value) in pending {
+                if key.sheet == old_display {
+                    key.sheet = new_display.clone();
+                }
+                next.insert(key, value);
+            }
+            self.pending_formula_baselines = next;
+        }
+
+        // Rewrite stored formula inputs so `toJson()` / `getCell.input` match Excel-like rename
+        // semantics (and stay consistent with `Engine::rename_sheet`).
+        for sheet_cells in self.sheets.values_mut() {
+            for input in sheet_cells.values_mut() {
+                if !is_formula_input(input) {
+                    continue;
+                }
+                let Some(formula) = input.as_str() else {
+                    continue;
+                };
+                let rewritten =
+                    formula_model::rewrite_sheet_names_in_formula(formula, &old_display, &new_display);
+                if rewritten != formula {
+                    *input = JsonValue::String(rewritten);
+                }
+            }
+        }
+
+        true
+    }
+
     fn parse_address(address: &str) -> Result<CellRef, JsValue> {
         CellRef::from_a1(address).map_err(|_| js_err(format!("invalid cell address: {address}")))
     }
@@ -3523,6 +3611,14 @@ impl WasmWorkbook {
         object_set(&obj, "rows", &JsValue::from_f64(rows as f64))?;
         object_set(&obj, "cols", &JsValue::from_f64(cols as f64))?;
         Ok(obj.into())
+    }
+
+    /// Rename a worksheet and rewrite formulas that reference it (Excel-like).
+    ///
+    /// Returns `false` when `old_name` does not exist or `new_name` conflicts with another sheet.
+    #[wasm_bindgen(js_name = "renameSheet")]
+    pub fn rename_sheet(&mut self, old_name: String, new_name: String) -> bool {
+        self.inner.rename_sheet_internal(&old_name, &new_name)
     }
 
     /// Set (or clear) a per-column width override for a sheet.
