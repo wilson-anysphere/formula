@@ -880,6 +880,29 @@ fn cell_is_operator_attr(op: CellIsOperator) -> &'static str {
     }
 }
 
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_row_height.is_none()
+        && sheet.default_col_width.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<sheetFormatPr");
+    if let Some(base) = sheet.base_col_width {
+        out.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        out.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        out.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+    out.push_str("/>");
+    out
+}
+
 fn sheet_xml(
     sheet: &Worksheet,
     print_settings: Option<&SheetPrintSettings>,
