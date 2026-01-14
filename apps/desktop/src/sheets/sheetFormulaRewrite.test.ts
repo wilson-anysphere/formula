@@ -53,6 +53,11 @@ describe("sheetFormulaRewrite", () => {
       const input = "=SUM([Book.xlsx]Sheet1!A1,Sheet1!A1)";
       expect(rewriteDeletedSheetReferencesInFormula(input, "Sheet1", ["Sheet1"])).toBe("=SUM([Book.xlsx]Sheet1!A1,#REF!)");
     });
+
+    it("does not rewrite external workbook refs on delete when workbook names contain '[' characters", () => {
+      const input = "=SUM([Book[Name]].xlsx]Sheet1!A1,Sheet1!A1)";
+      expect(rewriteDeletedSheetReferencesInFormula(input, "Sheet1", ["Sheet1"])).toBe("=SUM([Book[Name]].xlsx]Sheet1!A1,#REF!)");
+    });
   });
 
   describe("rewriteDocumentFormulasForSheetRename", () => {
@@ -140,6 +145,16 @@ describe("sheetFormulaRewrite", () => {
       rewriteDocumentFormulasForSheetRename(doc, "Sheet1", "Renamed");
 
       expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=[Book]]Name.xlsx]Sheet1!A1+1");
+    });
+
+    it("does not rewrite external workbook refs when workbook names contain '[' characters", () => {
+      const doc = new DocumentController();
+      // Workbook name: `Book[Name].xlsx` (note: `]` inside the name is escaped as `]]`).
+      doc.setCellFormula("S1", { row: 0, col: 0 }, "=[Book[Name]].xlsx]Sheet1!A1+1");
+
+      rewriteDocumentFormulasForSheetRename(doc, "Sheet1", "Renamed");
+
+      expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=[Book[Name]].xlsx]Sheet1!A1+1");
     });
   });
 

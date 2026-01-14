@@ -228,7 +228,7 @@ function parseUnquotedSheetSpec(
 
   // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
   if (first.ch === "[") {
-    const end = findMatchingBracketEnd(formula, startIndex);
+    const end = findWorkbookPrefixEnd(formula, startIndex);
     if (!end) return null;
     i = end;
 
@@ -273,12 +273,35 @@ function rewriteSheetSpec(sheetSpec: string, oldName: string, newName: string): 
 function splitWorkbookPrefix(sheetSpec: string): { workbookPrefix: string | null; remainder: string } {
   // External references can include `[` / `]` inside a path component
   // (e.g. `'C:\\[foo]\\[Book.xlsx]Sheet1'!A1`). The workbook delimiter is the last `[...]` pair.
-  const openIdx = sheetSpec.lastIndexOf("[");
-  if (openIdx === -1) return { workbookPrefix: null, remainder: sheetSpec };
-  const prefixEnd = findMatchingBracketEnd(sheetSpec, openIdx);
-  if (!prefixEnd) return { workbookPrefix: null, remainder: sheetSpec };
-  if (prefixEnd >= sheetSpec.length) return { workbookPrefix: null, remainder: sheetSpec };
-  return { workbookPrefix: sheetSpec.slice(0, prefixEnd), remainder: sheetSpec.slice(prefixEnd) };
+  //
+  // Workbook names escape literal `]` characters by doubling them: `]]` -> `]`. We treat any other
+  // characters (including `[`) as normal text inside the workbook segment.
+  //
+  // Track the last complete `[...]` span (with `]]` escapes) and split there.
+  let lastEnd: number | null = null;
+  let i = 0;
+  while (i < sheetSpec.length) {
+    if (sheetSpec[i] !== "[") {
+      i += 1;
+      continue;
+    }
+
+    const end = findWorkbookPrefixEnd(sheetSpec, i);
+    if (!end) {
+      i += 1;
+      continue;
+    }
+
+    // Workbook prefix must have a remainder (sheet name) after the closing `]`.
+    if (end < sheetSpec.length) {
+      lastEnd = end;
+    }
+    i = end;
+  }
+
+  if (lastEnd == null) return { workbookPrefix: null, remainder: sheetSpec };
+  if (lastEnd >= sheetSpec.length) return { workbookPrefix: null, remainder: sheetSpec };
+  return { workbookPrefix: sheetSpec.slice(0, lastEnd), remainder: sheetSpec.slice(lastEnd) };
 }
 
 function split3d(remainder: string): [string, string | null] {
@@ -582,6 +605,28 @@ function sheetRefTailEnd(formula: string, startIndex: number): number {
   }
 
   return i;
+}
+
+function findWorkbookPrefixEnd(formulaText: string, start: number): number | null {
+  // External workbook prefixes escape closing brackets by doubling: `]]` -> literal `]`.
+  //
+  // Unlike structured references, workbook names do *not* use nested `[` / `]` pairs as syntax,
+  // so treat `[` as a normal character inside the workbook segment.
+  if (formulaText[start] !== "[") return null;
+
+  let i = start + 1;
+  while (i < formulaText.length) {
+    if (formulaText[i] === "]") {
+      if (formulaText[i + 1] === "]") {
+        i += 2;
+        continue;
+      }
+      return i + 1;
+    }
+    i += 1;
+  }
+
+  return null;
 }
 
 function findMatchingBracketEnd(formulaText: string, start: number): number | null {
