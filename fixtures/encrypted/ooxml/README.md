@@ -98,6 +98,7 @@ To generate encrypted OOXML fixtures **without Excel**, you can use the Apache P
 
 - Source: `tools/encrypted-ooxml-fixtures/GenerateEncryptedXlsx.java`
 - Wrapper script (downloads pinned jars + verifies SHA-256): `tools/encrypted-ooxml-fixtures/generate.sh`
+- Generator README: `tools/encrypted-ooxml-fixtures/README.md`
 
 Example (from repo root):
 

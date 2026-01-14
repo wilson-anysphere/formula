@@ -34,6 +34,7 @@ tools/encrypted-ooxml-fixtures/generate.sh agile "" fixtures/encrypted/ooxml/pla
 
 - downloads a **pinned** set of jars from Maven Central into `tools/encrypted-ooxml-fixtures/.cache/`
 - verifies each jar by **SHA-256 checksum**
+- caches downloaded jars + compiled classes in `tools/encrypted-ooxml-fixtures/.cache/` (gitignored)
 
 Apache POI version: **5.2.5** (see `generate.sh` for the full pinned jar list + checksums).
 
@@ -43,4 +44,3 @@ Apache POI version: **5.2.5** (see `generate.sh` for the full pinned jar list + 
   random salts/IVs).
 - POI's `standard` mode currently emits an `EncryptionInfo` header version of `4.2`
   (still Standard/CryptoAPI encryption).
-
