@@ -279,8 +279,9 @@ canonicalization would appear as:
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
   endpoints). Use external 3D spans inside functions like `SUM(...)` instead.
-* **INDIRECT + external 3D spans:** `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")` currently evaluates to
-  `#REF!` (span expansion is only supported for direct references).
+* **INDIRECT + external 3D spans:** `INDIRECT` supports external single-sheet references/ranges (e.g.
+  `INDIRECT("[Book.xlsx]Sheet1!A1")`), but `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")` currently
+  evaluates to `#REF!` (span expansion is only supported for direct references).
 
 #### Minimal provider sketch (including `sheet_order`)
 
