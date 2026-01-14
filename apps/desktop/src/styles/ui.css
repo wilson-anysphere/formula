@@ -793,12 +793,12 @@ a:visited {
   gap: var(--space-3);
   padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   max-width: 360px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
+  background: var(--formula-grid-bg, var(--bg-primary));
+  border: 1px solid var(--formula-grid-line, var(--border));
   border-radius: var(--radius);
   box-shadow: var(--shadow-surface);
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--formula-grid-cell-text, var(--text-primary));
   pointer-events: none;
   user-select: none;
 }
@@ -831,7 +831,18 @@ a:visited {
 }
 
 .formula-range-preview-tooltip__summary {
-  color: var(--text-secondary);
+  color: inherit;
+  opacity: 0.75;
+}
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  .formula-range-preview-tooltip__summary {
+    opacity: 1;
+  }
+}
+
+:root[data-theme="high-contrast"] .formula-range-preview-tooltip__summary {
+  opacity: 1;
 }
 
 .grid {
