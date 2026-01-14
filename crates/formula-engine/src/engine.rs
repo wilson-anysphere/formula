@@ -1118,9 +1118,13 @@ impl Engine {
                 crate::eval::AddressParseError::RowOutOfRange,
             ));
         }
-        let mut changed = self.workbook.grow_sheet_dimensions(sheet_id, addr);
-        if changed {
+        let sheet_dims_changed = self.workbook.grow_sheet_dimensions(sheet_id, addr);
+        if sheet_dims_changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+            // Sheet dimensions affect out-of-bounds `#REF!` semantics for references. Formatting
+            // edits can grow the sheet (creating new in-bounds coordinates), so conservatively mark
+            // compiled formulas dirty so results refresh on the next recalculation.
+            self.mark_all_compiled_cells_dirty();
         }
 
         let key = CellKey {
@@ -1147,7 +1151,6 @@ impl Engine {
                     sheet.cells.remove(&addr);
                 }
             }
-            changed = true;
         } else if style_id == 0 {
             // Prune empty default-style cells to keep sheet storage sparse.
             let remove_cell = self.workbook.get_cell(key).is_some_and(|cell| {
@@ -1163,14 +1166,18 @@ impl Engine {
                 }
             }
         }
-        if changed {
-            // Formatting edits can affect worksheet information functions like `CELL("width")` and
-            // `CELL("protect")`, even though the metadata is not represented as a cell value.
-            // Conservatively refresh compiled formula results.
+        // We avoid full-workbook dirtying for style changes in default full-precision mode because
+        // only volatile metadata functions (CELL/INFO) consult formatting state. In Excel's
+        // "precision as displayed" mode, formatting can affect stored numeric values, so retain the
+        // conservative full-dirty behavior.
+        let style_changed = existing_style_id != style_id;
+        if style_changed && !sheet_dims_changed && !self.calc_settings.full_precision {
             self.mark_all_compiled_cells_dirty();
-            if self.calc_settings.calculation_mode != CalculationMode::Manual {
-                self.recalculate();
-            }
+        }
+        if (sheet_dims_changed || style_changed)
+            && self.calc_settings.calculation_mode != CalculationMode::Manual
+        {
+            self.recalculate();
         }
         Ok(())
     }
@@ -1359,8 +1366,12 @@ impl Engine {
         }
 
         // Formatting changes can affect worksheet information functions that consult formatting
-        // (e.g. `CELL("prefix")`). Conservatively refresh all compiled formula cells.
-        self.mark_all_compiled_cells_dirty();
+        // (e.g. `CELL("prefix")`). In full-precision mode, those functions are volatile so a recalc
+        // tick is sufficient. In "precision as displayed" mode, retain conservative full-dirty
+        // semantics.
+        if !self.calc_settings.full_precision {
+            self.mark_all_compiled_cells_dirty();
+        }
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -1911,9 +1922,15 @@ impl Engine {
     pub fn set_style_table(&mut self, styles: StyleTable) {
         self.workbook.styles = styles;
 
-        // Style table changes can affect worksheet information functions that consult formatting,
-        // so conservatively refresh all compiled formulas.
-        self.mark_all_compiled_cells_dirty();
+        // Formatting metadata affects worksheet information functions like `CELL("format")`, but
+        // those functions are volatile so a recalculation tick is sufficient in the default
+        // full-precision mode.
+        //
+        // In "precision as displayed" mode, formatting can affect stored numeric values at formula
+        // boundaries, so retain the conservative full-dirty behavior.
+        if !self.calc_settings.full_precision {
+            self.mark_all_compiled_cells_dirty();
+        }
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -1934,7 +1951,9 @@ impl Engine {
         }
         sheet_state.default_style_id = style_id;
 
-        self.mark_all_compiled_cells_dirty();
+        if !self.calc_settings.full_precision {
+            self.mark_all_compiled_cells_dirty();
+        }
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -2004,7 +2023,9 @@ impl Engine {
             }
         }
 
-        self.mark_all_compiled_cells_dirty();
+        if dims_changed || !self.calc_settings.full_precision {
+            self.mark_all_compiled_cells_dirty();
+        }
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -2074,7 +2095,9 @@ impl Engine {
             }
         }
 
-        self.mark_all_compiled_cells_dirty();
+        if dims_changed || !self.calc_settings.full_precision {
+            self.mark_all_compiled_cells_dirty();
+        }
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }

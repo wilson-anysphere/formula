@@ -751,11 +751,12 @@ fn info_exposes_host_provided_metadata() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A8"),
-        Value::Error(ErrorKind::NA)
+        // Excel defaults to the top-left visible cell ($A$1) when no view origin is provided.
+        Value::Text("$A$1".to_string())
     );
     assert_eq!(
         engine.get_cell_value("Sheet2", "A8"),
-        Value::Error(ErrorKind::NA)
+        Value::Text("$A$1".to_string())
     );
 
     engine.set_engine_info(EngineInfo {
@@ -766,10 +767,10 @@ fn info_exposes_host_provided_metadata() {
         version: Some("v1".to_string()),
         memavail: Some(1234.0),
         totmem: Some(5678.0),
-        origin: Some("$A$1".to_string()),
         ..EngineInfo::default()
     });
-    engine.set_info_origin_for_sheet("Sheet2", Some("$B$2"));
+    engine.set_sheet_origin("Sheet1", Some("$C$3")).unwrap();
+    engine.set_sheet_origin("Sheet2", Some("$B$2")).unwrap();
     engine.recalculate_single_threaded();
 
     assert_eq!(
@@ -796,7 +797,7 @@ fn info_exposes_host_provided_metadata() {
     assert_number(&engine.get_cell_value("Sheet1", "A7"), 5678.0);
     assert_eq!(
         engine.get_cell_value("Sheet1", "A8"),
-        Value::Text("$A$1".to_string())
+        Value::Text("$C$3".to_string())
     );
     assert_eq!(
         engine.get_cell_value("Sheet2", "A8"),
@@ -1325,6 +1326,16 @@ fn metadata_setters_trigger_auto_recalc_in_automatic_mode() {
         .unwrap();
     let tick_before = engine.get_cell_value("Sheet1", "B3");
 
+    // Formatting-dependent CELL() keys should update in automatic mode without forcing unrelated
+    // non-volatile formulas to recalculate.
+    engine
+        .set_cell_formula("Sheet1", "B4", "=CELL(\"format\",A1)")
+        .unwrap();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B4"),
+        Value::Text("G".to_string())
+    );
+
     // In automatic mode, metadata setters should eagerly recalculate.
     engine.set_workbook_file_metadata(Some("/tmp/"), Some("Book1.xlsx"));
     assert_eq!(
@@ -1352,10 +1363,23 @@ fn metadata_setters_trigger_auto_recalc_in_automatic_mode() {
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
 
     // Pure style-table growth should not force recalculation.
-    let _unused_style_id = engine.intern_style(Style {
+    let fmt_style_id = engine.intern_style(Style {
         number_format: Some("0.00".to_string()),
         ..Style::default()
     });
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B4"),
+        Value::Text("G".to_string())
+    );
+
+    // Applying style metadata should update CELL() outputs but not dirty unrelated non-volatile
+    // formulas.
+    engine.set_col_style_id("Sheet1", 0, Some(fmt_style_id));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B4"),
+        Value::Text("F2".to_string())
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
 }
 
