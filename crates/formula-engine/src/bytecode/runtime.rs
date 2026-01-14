@@ -2004,9 +2004,10 @@ fn fn_fieldaccess(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Err(e) => return Value::Error(e),
         },
     };
-    // Match the AST evaluator's `.["..."]` semantics: reject empty/whitespace-only keys, but
-    // otherwise preserve the exact string (including leading/trailing spaces) for lookup so
-    // selectors like `A1.[" Price "]` can address keys that include whitespace.
+    // Preserve the key exactly as written (including leading/trailing whitespace) to match the
+    // AST evaluator's `.["..."]` semantics.
+    //
+    // This lets selectors like `A1.[" Price "]` address keys that include whitespace.
     let field_key = field.as_str();
     if field_key.trim().is_empty() {
         return Value::Error(ErrorKind::Value);

@@ -102,6 +102,22 @@ fn translate_formula_with_style(
     let mut bracket_depth: usize = 0;
     let mut idx = 0usize;
     while idx < tokens.len() {
+        // Special-case localized function names that contain dots (e.g. `CONTAR.SI(...)` in es-ES).
+        //
+        // The lexer tokenizes `.` as [`TokenKind::Dot`] (used for field access and other syntax),
+        // so without this step a localized function like `CONTAR.SI(` would appear as the token
+        // sequence `Ident("CONTAR")`, `Dot`, `Ident("SI")`, `LParen`, and the function-name
+        // translation logic would incorrectly treat `SI` as a field-access selector.
+        if bracket_depth == 0 && matches!(dir, Direction::ToCanonical) {
+            if let Some((translated, next_idx)) =
+                try_translate_dotted_function_call(&tokens, idx, locale)
+            {
+                out.push_str(&translated);
+                idx = next_idx;
+                continue;
+            }
+        }
+
         let tok = &tokens[idx];
         match &tok.kind {
             TokenKind::Eof => break,
@@ -273,6 +289,63 @@ fn is_function_ident(tokens: &[Token], idx: usize) -> bool {
     matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::LParen))
 }
 
+fn try_translate_dotted_function_call(
+    tokens: &[Token],
+    idx: usize,
+    locale: &FormulaLocale,
+) -> Option<(String, usize)> {
+    let TokenKind::Ident(first) = tokens.get(idx).map(|t| &t.kind)? else {
+        return None;
+    };
+
+    // A dotted function name must start at the beginning of the identifier sequence (not as a
+    // field-access selector like `A1.TRUE`).
+    if matches!(prev_non_trivia_kind(tokens, idx), Some(TokenKind::Dot)) {
+        return None;
+    }
+
+    let mut j = idx;
+    let mut combined = first.clone();
+    while matches!(tokens.get(j + 1).map(|t| &t.kind), Some(TokenKind::Dot)) {
+        let Some(TokenKind::Ident(next)) = tokens.get(j + 2).map(|t| &t.kind) else {
+            break;
+        };
+        combined.push('.');
+        combined.push_str(next);
+        j += 2;
+    }
+
+    // No dots => not a dotted function name.
+    if j == idx {
+        return None;
+    }
+
+    // Must be a function call (allow whitespace before `(`).
+    let mut k = j + 1;
+    while matches!(
+        tokens.get(k).map(|t| &t.kind),
+        Some(TokenKind::Whitespace(_))
+    ) {
+        k += 1;
+    }
+    if !matches!(tokens.get(k).map(|t| &t.kind), Some(TokenKind::LParen)) {
+        return None;
+    }
+
+    let translated = locale.canonical_function_name(&combined);
+
+    // Only treat this as a function name when it is an explicit locale translation. Otherwise,
+    // preserve the original token stream so expressions like `SomeRecord.Field(...)` are not
+    // rewritten.
+    if translated == casefold_function_name_for_compare(&combined) {
+        return None;
+    }
+
+    // Advance to the token immediately after the last identifier; any whitespace before the `(`
+    // should be handled by the main loop (to preserve formatting).
+    Some((translated, j + 1))
+}
+
 fn is_field_access_selector(tokens: &[Token], idx: usize) -> bool {
     if !matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Ident(_))) {
         return false;
@@ -289,6 +362,38 @@ fn is_field_access_selector(tokens: &[Token], idx: usize) -> bool {
     }
 
     false
+}
+
+fn casefold_function_name_for_compare(name: &str) -> String {
+    let (has_prefix, base) = split_xlfn_prefix(name);
+    let mut out = String::new();
+    if has_prefix {
+        out.push_str("_xlfn.");
+    }
+    out.push_str(&casefold_ident(base));
+    out
+}
+
+fn split_xlfn_prefix(name: &str) -> (bool, &str) {
+    const PREFIX: &str = "_xlfn.";
+    let Some(prefix) = name.get(..PREFIX.len()) else {
+        return (false, name);
+    };
+    if prefix.eq_ignore_ascii_case(PREFIX) {
+        (true, &name[PREFIX.len()..])
+    } else {
+        (false, name)
+    }
+}
+
+fn casefold_ident(ident: &str) -> String {
+    // Mirror `locale::registry::casefold_ident`: use Unicode uppercasing for non-ASCII to match
+    // Excel-style case-insensitive matching semantics.
+    if ident.is_ascii() {
+        ident.to_ascii_uppercase()
+    } else {
+        ident.chars().flat_map(|ch| ch.to_uppercase()).collect()
+    }
 }
 
 fn next_non_trivia_kind<'a>(tokens: &'a [Token], idx: usize) -> Option<&'a TokenKind> {

@@ -28,8 +28,9 @@ use formula_format::{
     DateSystem as FmtDateSystem, FormatOptions as FmtFormatOptions, Value as FmtValue,
 };
 use formula_model::{
-    sheet_name_eq_case_insensitive, CellId, CellRef, ColProperties, Range, RowProperties, Style,
-    StyleTable, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    rewrite_table_names_in_formula, sheet_name_eq_case_insensitive, validate_table_name, CellId,
+    CellRef, ColProperties, Range, RowProperties, Style, StyleTable, Table, TableError,
+    EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
@@ -2189,6 +2190,135 @@ impl Engine {
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
+    }
+
+    /// Rename an Excel table (ListObject) and rewrite any impacted formulas.
+    ///
+    /// This emulates Excel's "Rename Table" behavior:
+    /// - The new name is validated using [`formula_model::validate_table_name`].
+    /// - Table names are workbook-scoped and must be unique (case-insensitive) across both
+    ///   `Table.name` and `Table.display_name`.
+    /// - Formulas referencing either the table `name` or `display_name` are rewritten to preserve
+    ///   semantics.
+    ///
+    /// Returns a list of rewritten cell formulas so callers can update UI state.
+    pub fn rename_table(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<Vec<FormulaRewrite>, TableError> {
+        let new_name = new_name.trim();
+        validate_table_name(new_name)?;
+
+        let (sheet_idx, table_idx) = self
+            .workbook
+            .sheets
+            .iter()
+            .enumerate()
+            .find_map(|(si, sheet)| {
+                sheet
+                    .tables
+                    .iter()
+                    .position(|t| {
+                        t.name.eq_ignore_ascii_case(old_name)
+                            || t.display_name.eq_ignore_ascii_case(old_name)
+                    })
+                    .map(|ti| (si, ti))
+            })
+            .ok_or(TableError::TableNotFound)?;
+
+        let actual_old_name = self.workbook.sheets[sheet_idx].tables[table_idx]
+            .name
+            .clone();
+        let actual_old_display_name = self.workbook.sheets[sheet_idx].tables[table_idx]
+            .display_name
+            .clone();
+
+        // Enforce workbook-wide uniqueness (case-insensitive) across both `name` and `display_name`.
+        for (si, sheet) in self.workbook.sheets.iter().enumerate() {
+            for (ti, table) in sheet.tables.iter().enumerate() {
+                if si == sheet_idx && ti == table_idx {
+                    continue;
+                }
+                if table.name.eq_ignore_ascii_case(new_name)
+                    || table.display_name.eq_ignore_ascii_case(new_name)
+                {
+                    return Err(TableError::DuplicateName);
+                }
+            }
+        }
+
+        // Build rename pairs. Excel rewrites references to either `name` or `display_name`.
+        let mut renames = vec![(actual_old_name.clone(), new_name.to_string())];
+        if !actual_old_display_name.eq_ignore_ascii_case(&actual_old_name) {
+            renames.push((actual_old_display_name, new_name.to_string()));
+        }
+
+        let sheet_names = sheet_names_by_id(&self.workbook);
+        let mut rewrites: Vec<FormulaRewrite> = Vec::new();
+
+        // 1) Rewrite worksheet cell formulas (and update compiled IR to match).
+        for (sheet_id, sheet) in self.workbook.sheets.iter_mut().enumerate() {
+            let sheet_name = sheet_names
+                .get(&sheet_id)
+                .cloned()
+                .unwrap_or_else(|| sheet_id.to_string());
+
+            for (addr, cell) in sheet.cells.iter_mut() {
+                let Some(formula) = cell.formula.as_mut() else {
+                    continue;
+                };
+                let rewritten = rewrite_table_names_in_formula(formula, &renames);
+                if rewritten == *formula {
+                    continue;
+                }
+
+                let before = std::mem::replace(formula, rewritten);
+                let after = formula.clone();
+
+                if let Some(compiled) = cell.compiled.as_mut() {
+                    rewrite_table_names_in_compiled_formula(compiled, &renames);
+                }
+
+                rewrites.push(FormulaRewrite {
+                    sheet: sheet_name.clone(),
+                    cell: CellRef::new(addr.row, addr.col),
+                    before,
+                    after,
+                });
+            }
+
+            // 2) Rewrite formulas stored in table metadata (best-effort).
+            for table in &mut sheet.tables {
+                for column in &mut table.columns {
+                    if let Some(formula) = column.formula.as_mut() {
+                        *formula = rewrite_table_names_in_formula(formula, &renames);
+                    }
+                    if let Some(formula) = column.totals_formula.as_mut() {
+                        *formula = rewrite_table_names_in_formula(formula, &renames);
+                    }
+                }
+            }
+        }
+
+        // 3) Rewrite defined-name formulas (workbook + sheet scoped).
+        rewrite_table_names_in_defined_names(&mut self.workbook.names, &renames);
+        for sheet in &mut self.workbook.sheets {
+            rewrite_table_names_in_defined_names(&mut sheet.names, &renames);
+        }
+
+        // 4) Rename the actual table.
+        let renamed = &mut self.workbook.sheets[sheet_idx].tables[table_idx];
+        renamed.name = new_name.to_string();
+        renamed.display_name = new_name.to_string();
+
+        // Mark formulas dirty so recalculation picks up the updated table metadata / formula text.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+
+        Ok(rewrites)
     }
 
     fn recompile_all_formula_cells(&mut self) -> Result<(), EngineError> {
@@ -6504,6 +6634,106 @@ fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {
         .enumerate()
         .filter_map(|(id, name)| name.clone().map(|name| (id, name)))
         .collect()
+}
+
+fn rewrite_table_names_in_defined_names(
+    names: &mut HashMap<String, DefinedName>,
+    renames: &[(String, String)],
+) {
+    for def in names.values_mut() {
+        let mut changed = false;
+        match &mut def.definition {
+            NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                let rewritten = rewrite_table_names_in_formula(formula, renames);
+                if rewritten != *formula {
+                    *formula = rewritten;
+                    changed = true;
+                }
+            }
+            NameDefinition::Constant(_) => {}
+        }
+
+        if changed {
+            if let Some(compiled) = def.compiled.as_mut() {
+                rewrite_table_names_in_compiled_expr(compiled, renames);
+            }
+        }
+    }
+}
+
+fn rewrite_table_names_in_compiled_formula(
+    compiled: &mut CompiledFormula,
+    renames: &[(String, String)],
+) {
+    match compiled {
+        CompiledFormula::Ast(expr) => rewrite_table_names_in_compiled_expr(expr, renames),
+        CompiledFormula::Bytecode(bc) => rewrite_table_names_in_compiled_expr(&mut bc.ast, renames),
+    }
+}
+
+fn rewrite_table_names_in_compiled_expr(expr: &mut CompiledExpr, renames: &[(String, String)]) {
+    match expr {
+        Expr::ArrayLiteral { values, .. } => {
+            // `Arc<[T]>` does not expose mutable iteration over the slice, so clone to a vec and
+            // re-wrap if any entries were rewritten.
+            let mut out: Vec<Expr<usize>> = values.iter().cloned().collect();
+            let mut changed = false;
+            for el in &mut out {
+                let before = el.clone();
+                rewrite_table_names_in_compiled_expr(el, renames);
+                changed |= *el != before;
+            }
+            if changed {
+                *values = Arc::from(out);
+            }
+        }
+        Expr::NameRef(nref) => {
+            for (old, new) in renames {
+                if nref.name.eq_ignore_ascii_case(old) {
+                    nref.name = new.clone();
+                    break;
+                }
+            }
+        }
+        Expr::StructuredRef(sref) => {
+            let Some(name) = sref.table_name.as_deref() else {
+                return;
+            };
+            for (old, new) in renames {
+                if name.eq_ignore_ascii_case(old) {
+                    sref.table_name = Some(new.clone());
+                    break;
+                }
+            }
+        }
+        Expr::FieldAccess { base, .. } => rewrite_table_names_in_compiled_expr(base, renames),
+        Expr::Unary { expr, .. }
+        | Expr::Postfix { expr, .. }
+        | Expr::ImplicitIntersection(expr)
+        | Expr::SpillRange(expr) => rewrite_table_names_in_compiled_expr(expr, renames),
+        Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
+            rewrite_table_names_in_compiled_expr(left, renames);
+            rewrite_table_names_in_compiled_expr(right, renames);
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                rewrite_table_names_in_compiled_expr(arg, renames);
+            }
+        }
+        Expr::Call { callee, args } => {
+            rewrite_table_names_in_compiled_expr(callee, renames);
+            for arg in args {
+                rewrite_table_names_in_compiled_expr(arg, renames);
+            }
+        }
+        Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Bool(_)
+        | Expr::Blank
+        | Expr::Error(_)
+        | Expr::CellRef(_)
+        | Expr::RangeRef(_) => {}
+    }
 }
 
 fn cell_ref_from_addr(addr: CellAddr) -> CellRef {

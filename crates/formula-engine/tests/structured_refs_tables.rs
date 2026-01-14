@@ -1,11 +1,10 @@
 use formula_engine::eval::{CellAddr, Expr, Parser};
 use formula_engine::structured_refs::{
-    resolve_structured_ref, StructuredColumn, StructuredColumns,
-    StructuredRefItem,
+    resolve_structured_ref, StructuredColumn, StructuredColumns, StructuredRefItem,
 };
 use formula_engine::{Engine, Value};
 use formula_model::table::TableColumn;
-use formula_model::{Range, Table};
+use formula_model::{Range, Table, TableError};
 
 fn table_fixture_single_col() -> Table {
     Table {
@@ -197,6 +196,19 @@ fn setup_engine_with_table_and_totals() -> Engine {
     engine
 }
 
+fn setup_engine_with_single_col_table(table: Table) -> Engine {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table]);
+
+    // Header row.
+    engine.set_cell_value("Sheet1", "A1", "Col").expect("A1");
+    // Data rows.
+    engine.set_cell_value("Sheet1", "A2", 1.0_f64).expect("A2");
+    engine.set_cell_value("Sheet1", "A3", 2.0_f64).expect("A3");
+
+    engine
+}
+
 #[test]
 fn resolves_table_name_case_insensitively() {
     let tables_by_sheet = vec![vec![table_fixture_single_col()]];
@@ -332,7 +344,11 @@ fn evaluates_multi_column_structured_ref_sum() {
 fn evaluates_header_area_multi_column_selection() {
     let mut engine = setup_engine_with_table();
     engine
-        .set_cell_formula("Sheet1", "E1", "=COUNTA(Table1[[#Headers],[Col1],[Col2]])")
+        .set_cell_formula(
+            "Sheet1",
+            "E1",
+            "=COUNTA(Table1[[#Headers],[Col1],[Col2]])",
+        )
         .expect("formula");
     engine.recalculate_single_threaded();
 
@@ -360,7 +376,11 @@ fn this_row_structured_refs_still_work() {
         .expect("formula");
     // `[#This Row]` works with an explicit table name.
     engine
-        .set_cell_formula("Sheet1", "D3", "=SUM(Table1[[#This Row],[Col1],[Col3]])")
+        .set_cell_formula(
+            "Sheet1",
+            "D3",
+            "=SUM(Table1[[#This Row],[Col1],[Col3]])",
+        )
         .expect("formula");
 
     engine.recalculate_single_threaded();
@@ -398,7 +418,11 @@ fn this_row_structured_refs_do_not_resolve_outside_the_table_sheet() {
     let mut engine = setup_engine_with_table();
     // Use a cell address that would otherwise fall within the table's data-range coordinates.
     engine
-        .set_cell_formula("Sheet2", "D2", "=SUM(Table1[[#This Row],[Col1],[Col3]])")
+        .set_cell_formula(
+            "Sheet2",
+            "D2",
+            "=SUM(Table1[[#This Row],[Col1],[Col3]])",
+        )
         .expect("formula");
     engine.recalculate_single_threaded();
 
@@ -457,7 +481,11 @@ fn evaluates_multi_item_structured_ref_union_dedups_overlaps() {
 fn evaluates_multi_item_structured_ref_union_column_range() {
     let mut engine = setup_engine_with_table_and_totals();
     engine
-        .set_cell_formula("Sheet1", "E1", "=COUNTA(Table1[[#Headers],[#Data],[Col1]:[Col3]])")
+        .set_cell_formula(
+            "Sheet1",
+            "E1",
+            "=COUNTA(Table1[[#Headers],[#Data],[Col1]:[Col3]])",
+        )
         .expect("formula");
     engine.recalculate_single_threaded();
 
@@ -634,4 +662,96 @@ fn missing_headers_or_totals_yield_ref_error() {
         engine.get_cell_value("Sheet1", "B1"),
         Value::Error(formula_engine::ErrorKind::Ref)
     );
+}
+
+#[test]
+fn rename_table_rewrites_cell_formulas_and_preserves_value() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet1", "E1", "=SUM(Table1[Col1])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(6.0));
+
+    let rewrites = engine
+        .rename_table("Table1", "Sales")
+        .expect("rename should succeed");
+
+    assert!(
+        rewrites
+            .iter()
+            .any(|r| r.sheet == "Sheet1" && r.cell.to_a1() == "E1"),
+        "expected rewrite entry for Sheet1!E1, got {rewrites:?}"
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "E1"),
+        Some("=SUM(Sales[Col1])")
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(6.0));
+}
+
+#[test]
+fn rename_table_rewrites_formulas_that_use_display_name() {
+    let table = Table {
+        display_name: "MyTable".into(),
+        ..table_fixture_single_col()
+    };
+    let mut engine = setup_engine_with_single_col_table(table);
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(MyTable[Col])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+
+    engine
+        .rename_table("Table1", "Sales")
+        .expect("rename should succeed");
+
+    assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some("=SUM(Sales[Col])"));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+}
+
+#[test]
+fn rename_table_rejects_duplicate_name_case_insensitive() {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_single_col()]);
+    engine.set_sheet_tables(
+        "Sheet2",
+        vec![Table {
+            id: 2,
+            name: "Sales".into(),
+            display_name: "Sales".into(),
+            range: Range::from_a1("A1:A2").unwrap(),
+            header_row_count: 1,
+            totals_row_count: 0,
+            columns: vec![TableColumn {
+                id: 1,
+                name: "Col".into(),
+                formula: None,
+                totals_formula: None,
+            }],
+            style: None,
+            auto_filter: None,
+            relationship_id: None,
+            part_path: None,
+        }],
+    );
+
+    let err = engine
+        .rename_table("Table1", "sales")
+        .expect_err("should reject duplicate name");
+    assert_eq!(err, TableError::DuplicateName);
+}
+
+#[test]
+fn rename_table_rejects_invalid_name() {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_single_col()]);
+    let err = engine
+        .rename_table("Table1", "1Bad")
+        .expect_err("should reject invalid name");
+    assert_eq!(err, TableError::InvalidStartChar);
 }
