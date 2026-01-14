@@ -663,7 +663,9 @@ describe("SpreadsheetApp chart selection + drag", () => {
       chart_type: "bar",
       data_range: "A2:B5",
       title: "Resizable Chart",
-      position: "A1:H10",
+      // Keep the chart fully within the visible cell area so the bottom-right resize handle
+      // is hit-testable in this 800x600 test viewport (shared-grid headers reduce the cell area).
+      position: "A1:G10",
     });
     const chart = app.listCharts().find((c) => c.id === result.chart_id);
     expect(chart).toBeTruthy();
