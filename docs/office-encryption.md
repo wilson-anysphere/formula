@@ -694,7 +694,8 @@ Nuances (as implemented; mirrors Excel/Apache POI behavior):
   - Some legacy headers omit/zero `AlgIDHash`; we treat `AlgIDHash==0` as SHA-1 for compatibility.
 - **40-bit RC4 key quirk:** Excel/WinCrypt uses a 16-byte RC4 key for 40-bit encryption where the
   first 5 bytes are derived and the remaining 11 bytes are zero (CryptoAPI “effective key length”
-  behavior).
+  behavior). Some producers use the raw 5-byte RC4 key; `formula-xls` accepts both by verifier
+  validation.
 - **Different stream-position semantics:** the RC4 block index + in-block position are derived from
   the **absolute workbook-stream offset**. Record headers are not encrypted, but they still advance
   the RC4 “encryption stream position”.

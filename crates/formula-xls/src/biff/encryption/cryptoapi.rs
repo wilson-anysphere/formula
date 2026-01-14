@@ -286,8 +286,10 @@ fn decrypt_range_by_offset(
 /// workbooks (Excel 2002/2003), which uses SHA-1 + a spin count to harden password derivation.
 ///
 /// `key_len` is `KeySize / 8` from the CryptoAPI header (e.g. 16 for 128-bit RC4, 5 for 40-bit).
-/// Note: for 40-bit CryptoAPI RC4, the 5-byte key material is padded with 11 zero bytes before
-/// running RC4 KSA (so the effective RC4 key length is 16 bytes).
+///
+/// Note: this helper returns the **WinCrypt/Excel-style** key shape for 40-bit RC4: the derived
+/// 5 bytes padded with 11 zero bytes (so the effective RC4 key length is 16 bytes). The main BIFF
+/// CryptoAPI decryptor also accepts the raw 5-byte key variant by verifier validation.
 pub(crate) fn derive_biff8_cryptoapi_key(
     alg_id_hash: u32,
     password: &str,
