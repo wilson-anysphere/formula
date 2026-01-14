@@ -18,6 +18,7 @@ describe("Drawing context menu (main wiring helper)", () => {
     const app = {
       hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
       getSelectedDrawingId: vi.fn(() => selectedId),
+      isSelectedDrawingImage: vi.fn(() => true),
       selectDrawingById: vi.fn((id: number | null) => {
         selectedId = id;
       }),
@@ -81,6 +82,7 @@ describe("Drawing context menu (main wiring helper)", () => {
     const app = {
       hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
       getSelectedDrawingId: vi.fn(() => selectedId),
+      isSelectedDrawingImage: vi.fn(() => true),
       selectDrawingById: vi.fn((id: number | null) => {
         selectedId = id;
       }),
@@ -110,6 +112,49 @@ describe("Drawing context menu (main wiring helper)", () => {
     } finally {
       contextMenu.close();
       document.querySelector('[data-testid="context-menu-drawing-editing"]')?.remove();
+    }
+  });
+
+  it("disables Cut/Copy for non-image drawings", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-non-image" });
+    let selectedId: number | null = 1;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      isSelectedDrawingImage: vi.fn(() => false),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteSelectedDrawing: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-non-image"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      expect(buttonByLabel("Cut")?.disabled).toBe(true);
+      expect(buttonByLabel("Copy")?.disabled).toBe(true);
+      expect(buttonByLabel("Delete")?.disabled).toBe(false);
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(false);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(false);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-non-image"]')?.remove();
     }
   });
 });

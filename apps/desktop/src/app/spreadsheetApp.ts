@@ -7057,6 +7057,19 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Returns true when the current drawing selection is an image.
+   *
+   * Note: only image drawings currently support Cut/Copy (clipboard image payload).
+   */
+  isSelectedDrawingImage(): boolean {
+    const selectedId = this.getSelectedDrawingId();
+    if (selectedId == null) return false;
+    const objects = this.listDrawingObjectsForSheet();
+    const selected = objects.find((obj) => obj.id === selectedId) ?? null;
+    return selected?.kind.type === "image";
+  }
+
+  /**
    * Select a drawing by id (or clear selection).
    *
    * Used by context menu right-click selection so the object under the cursor becomes

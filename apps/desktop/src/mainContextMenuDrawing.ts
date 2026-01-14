@@ -9,6 +9,7 @@ type DrawingContextMenuApp = Pick<
   SpreadsheetApp,
   | "hitTestDrawingAtClientPoint"
   | "getSelectedDrawingId"
+  | "isSelectedDrawingImage"
   | "selectDrawingById"
   | "cut"
   | "copy"
@@ -25,6 +26,7 @@ export function buildDrawingContextMenuItems(params: {
   const { app, isEditing } = params;
   const hasSelection = app.getSelectedDrawingId() != null;
   const enabled = !isEditing && hasSelection;
+  const clipboardEnabled = enabled && app.isSelectedDrawingImage();
 
   const cutLabelRaw = t("clipboard.cut");
   const cutLabel = cutLabelRaw === "clipboard.cut" ? "Cut" : cutLabelRaw;
@@ -35,7 +37,7 @@ export function buildDrawingContextMenuItems(params: {
     {
       type: "item",
       label: cutLabel,
-      enabled,
+      enabled: clipboardEnabled,
       onSelect: () => {
         // Ensure clipboard commands treat the grid as the active focus target (so
         // they don't early-return due to focus being in an input, and so Cut doesn't
@@ -47,7 +49,7 @@ export function buildDrawingContextMenuItems(params: {
     {
       type: "item",
       label: copyLabel,
-      enabled,
+      enabled: clipboardEnabled,
       onSelect: () => {
         app.focus();
         app.copy();
