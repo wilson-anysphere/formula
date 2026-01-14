@@ -28,6 +28,44 @@ from typing import Any, Iterable
 _PRIVACY_PUBLIC = "public"
 _PRIVACY_PRIVATE = "private"
 
+_KNOWN_FUNCTION_NAMES: set[str] | None = None
+
+
+def _load_known_function_names() -> set[str]:
+    global _KNOWN_FUNCTION_NAMES
+    if _KNOWN_FUNCTION_NAMES is not None:
+        return _KNOWN_FUNCTION_NAMES
+
+    names: set[str] = set()
+    try:
+        repo_root = Path(__file__).resolve().parents[2]
+        catalog_path = repo_root / "shared" / "functionCatalog.json"
+        data = json.loads(catalog_path.read_text(encoding="utf-8"))
+        funcs = data.get("functions") if isinstance(data, dict) else None
+        if isinstance(funcs, list):
+            for entry in funcs:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name.upper())
+    except Exception:  # noqa: BLE001 (best-effort; privacy mode still works without allowlist)
+        names = set()
+
+    _KNOWN_FUNCTION_NAMES = names
+    return names
+
+
+def _redact_function_name(name: str, *, privacy_mode: str) -> str:
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return name
+    if not name or name.startswith("sha256="):
+        return name
+    known = _load_known_function_names()
+    if name.upper() in known:
+        return name
+    return f"sha256={_sha256_text(name)}"
+
 
 def _load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
@@ -300,7 +338,8 @@ def main() -> int:
         default=_PRIVACY_PUBLIC,
         help=(
             "Control redaction of outputs. `private` hashes filesystem path metadata in the report "
-            "(for example, paths that include local usernames/mount points)."
+            "(for example, paths that include local usernames/mount points) and hashes any non-standard "
+            "formula function names surfaced in summary aggregations (e.g. topMissingFunctions)."
         ),
     )
     parser.add_argument(
@@ -679,6 +718,13 @@ def main() -> int:
                 if code == "#NAME?":
                     for fn in _extract_function_names(m.get("formula")):
                         missing_functions[fn] = missing_functions.get(fn, 0) + 1
+
+    if args.privacy_mode == _PRIVACY_PRIVATE and missing_functions:
+        redacted_counts: dict[str, int] = {}
+        for fn, cnt in missing_functions.items():
+            key = _redact_function_name(fn, privacy_mode=args.privacy_mode)
+            redacted_counts[key] = redacted_counts.get(key, 0) + int(cnt)
+        missing_functions = redacted_counts
 
     top_missing_functions = [
         {"name": k, "count": v}
