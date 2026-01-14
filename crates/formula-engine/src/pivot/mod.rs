@@ -3514,6 +3514,14 @@ mod tests {
     }
 
     #[test]
+    fn pivot_value_display_string_formats_non_finite_numbers_as_num_error() {
+        // Excel doesn't have NaN/Infinity; Formula renders them as #NUM! (matching `formula-format`).
+        assert_eq!(PivotValue::Number(f64::NAN).display_string(), "#NUM!");
+        assert_eq!(PivotValue::Number(f64::INFINITY).display_string(), "#NUM!");
+        assert_eq!(PivotValue::Number(f64::NEG_INFINITY).display_string(), "#NUM!");
+    }
+
+    #[test]
     fn pivot_key_part_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints()
     {
         let s = PivotKeyPart::Number((1e20_f64).to_bits()).display_string();
@@ -3534,6 +3542,22 @@ mod tests {
     fn pivot_key_part_display_string_formats_booleans_like_excel() {
         assert_eq!(PivotKeyPart::Bool(true).display_string(), "TRUE");
         assert_eq!(PivotKeyPart::Bool(false).display_string(), "FALSE");
+    }
+
+    #[test]
+    fn pivot_key_part_display_string_formats_non_finite_numbers_as_num_error() {
+        assert_eq!(
+            PivotKeyPart::Number(PivotValue::canonical_number_bits(f64::NAN)).display_string(),
+            "#NUM!"
+        );
+        assert_eq!(
+            PivotKeyPart::Number(f64::INFINITY.to_bits()).display_string(),
+            "#NUM!"
+        );
+        assert_eq!(
+            PivotKeyPart::Number(f64::NEG_INFINITY.to_bits()).display_string(),
+            "#NUM!"
+        );
     }
 
     #[test]
