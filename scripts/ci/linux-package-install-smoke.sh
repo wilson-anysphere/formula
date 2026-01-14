@@ -487,13 +487,36 @@ deb_smoke_test_dir() {
       echo "Installed desktop entry: ${desktop_file}"
       grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
       grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
+      mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "${desktop_file}" | head -n 1 || true)"
+      mime_value="$(printf "%s" "${mime_line}" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//I")"
+      if [ -z "${mime_value}" ]; then
+        echo "Installed desktop entry is missing MimeType= (required for file associations + URL scheme handlers): ${desktop_file}" >&2
+        exit 1
+      fi
+      IFS=";" read -r -a mime_tokens <<< "${mime_value}"
       IFS="," read -r -a schemes <<<"${schemes_csv}"
       for scheme in "${schemes[@]}"; do
         scheme="${scheme%%://}"
         scheme="${scheme%%:}"
         scheme="${scheme%%/}"
+        scheme="$(printf "%s" "${scheme}" | tr "[:upper:]" "[:lower:]")"
         if [ -n "${scheme}" ]; then
-          grep -qi "x-scheme-handler/${scheme}" "${desktop_file}"
+          expected_mime="x-scheme-handler/${scheme}"
+          found=0
+          for token in "${mime_tokens[@]}"; do
+            token="${token#"${token%%[![:space:]]*}"}"
+            token="${token%"${token##*[![:space:]]}"}"
+            token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
+            if [ "${token}" = "${expected_mime}" ]; then
+              found=1
+              break
+            fi
+          done
+          if [ "${found}" -ne 1 ]; then
+            echo "Missing URL scheme handler in desktop entry MimeType=: ${expected_mime}" >&2
+            echo "Observed MimeType= value: ${mime_value}" >&2
+            exit 1
+          fi
         fi
       done
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
@@ -624,13 +647,36 @@ rpm_smoke_test_dir() {
       echo "Installed desktop entry: ${desktop_file}"
       grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
       grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
+      mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "${desktop_file}" | head -n 1 || true)"
+      mime_value="$(printf "%s" "${mime_line}" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//I")"
+      if [ -z "${mime_value}" ]; then
+        echo "Installed desktop entry is missing MimeType= (required for file associations + URL scheme handlers): ${desktop_file}" >&2
+        exit 1
+      fi
+      IFS=";" read -r -a mime_tokens <<< "${mime_value}"
       IFS="," read -r -a schemes <<<"${schemes_csv}"
       for scheme in "${schemes[@]}"; do
         scheme="${scheme%%://}"
         scheme="${scheme%%:}"
         scheme="${scheme%%/}"
+        scheme="$(printf "%s" "${scheme}" | tr "[:upper:]" "[:lower:]")"
         if [ -n "${scheme}" ]; then
-          grep -qi "x-scheme-handler/${scheme}" "${desktop_file}"
+          expected_mime="x-scheme-handler/${scheme}"
+          found=0
+          for token in "${mime_tokens[@]}"; do
+            token="${token#"${token%%[![:space:]]*}"}"
+            token="${token%"${token##*[![:space:]]}"}"
+            token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
+            if [ "${token}" = "${expected_mime}" ]; then
+              found=1
+              break
+            fi
+          done
+          if [ "${found}" -ne 1 ]; then
+            echo "Missing URL scheme handler in desktop entry MimeType=: ${expected_mime}" >&2
+            echo "Observed MimeType= value: ${mime_value}" >&2
+            exit 1
+          fi
         fi
       done
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"

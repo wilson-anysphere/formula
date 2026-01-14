@@ -1649,7 +1649,8 @@ integration metadata made it into the final bundles (not just `tauri.conf.json`)
   - Note: MSI validation is static/authoritative (Windows Installer tables via COM). NSIS `.exe`
     validation is **heuristic** (marker scan) and is intended to catch obvious regressions.
 - Linux: the installed `.desktop` file advertises the expected `MimeType=` list
-  (including `x-scheme-handler/formula` for deep links) and has an `Exec=`
+  (including `x-scheme-handler/<scheme>` entries for deep links from `plugins.deep-link.desktop.schemes`)
+  and has an `Exec=`
   placeholder so double-click open passes a path/URL.
   - Note: Parquet (`.parquet`) is not consistently defined in distros’ shared-mime-info
     databases. Formula ships a shared-mime-info definition file in Linux bundles so
