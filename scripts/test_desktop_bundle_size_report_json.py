@@ -100,6 +100,10 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             proc = self._run(repo_root, ["--json", str(json_rel), "--limit-mb", "1"])
             self.assertEqual(proc.returncode, 0)
             self.assertIn("## Desktop installer artifact sizes", proc.stdout)
+            # Ensure the human-facing markdown table is rendered (this is also what gets
+            # appended to GITHUB_STEP_SUMMARY in CI).
+            self.assertIn("| Artifact | Size | Over limit |", proc.stdout)
+            self.assertIn("apps/desktop/src-tauri/target/release/bundle/formula.dmg", proc.stdout)
 
             report = self._read_report(repo_root, json_rel)
             self._assert_basic_schema(report)
@@ -129,6 +133,9 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             json_rel = Path("target") / "bundle-size.json"
             proc = self._run(repo_root, ["--json", str(json_rel), "--limit-mb", "1", "--enforce"])
             self.assertEqual(proc.returncode, 1)
+            # When enforcement is enabled, the script should fail with a clear error listing the offender(s).
+            self.assertIn("bundle-size: ERROR", proc.stderr)
+            self.assertIn("apps/desktop/src-tauri/target/release/bundle/formula.dmg", proc.stderr)
 
             report = self._read_report(repo_root, json_rel)
             self._assert_basic_schema(report)
