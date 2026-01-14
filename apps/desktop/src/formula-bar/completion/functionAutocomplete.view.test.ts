@@ -554,12 +554,19 @@ describe("FormulaBarView function autocomplete dropdown", () => {
 
     const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
     expect(dropdown?.hasAttribute("hidden")).toBe(false);
+    expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(true);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("true");
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(true);
     expect(view.model.isEditing).toBe(true);
 
     view.setReadOnly(true);
 
     expect(view.model.isEditing).toBe(false);
     expect(dropdown?.hasAttribute("hidden")).toBe(true);
+    expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(false);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("false");
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(false);
+    expect(view.textarea.readOnly).toBe(true);
 
     host.remove();
   });
