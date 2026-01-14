@@ -1037,6 +1037,7 @@ export class SpreadsheetApp {
   private drawingCanvas: HTMLCanvasElement;
   private readonly drawingGeom: DrawingGridGeometry;
   private drawingOverlay: DrawingOverlay;
+  private readonly drawingChartRenderer: ChartRendererAdapter;
   private readonly drawingsDemoEnabled: boolean = resolveDrawingsDemoEnabledFromUrl();
   private drawingInteractionController: DrawingInteractionController | null = null;
   private drawingInteractionCallbacks: DrawingInteractionCallbacks | null = null;
@@ -2373,34 +2374,12 @@ export class SpreadsheetApp {
     };
 
     this.drawingGeom = this.gridMode === "shared" ? sharedDrawingGeom : legacyDrawingGeom;
+    this.drawingChartRenderer = new ChartRendererAdapter(this.createDrawingChartRendererStore());
     this.drawingOverlay = new DrawingOverlay(
       this.drawingCanvas,
       this.drawingImages,
       this.drawingGeom,
-      new ChartRendererAdapter({
-        getChartModel: (chartId) => {
-          // In canvas-charts mode, ChartStore charts are rendered as drawing objects
-          // using their ChartStore ids. Imported workbook charts use their own ids
-          // (e.g. `${sheetId}:${drawingObjectId}`) and continue to read from
-          // `formulaChartModelStore`.
-          if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartModel(chartId);
-          return this.formulaChartModelStore.getChartModel(chartId);
-        },
-        getChartData: (chartId) => {
-          if (this.getChartRecordById(chartId)) return undefined;
-          return this.formulaChartModelStore.getChartData(chartId);
-        },
-        getChartTheme: (chartId) => {
-          if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartTheme(chartId);
-          return this.formulaChartModelStore.getChartTheme(chartId);
-        },
-        getChartRevision: (chartId) => {
-          // Return NaN for chart ids we don't own so ChartRendererAdapter falls back
-          // to model/theme identity checks rather than freezing cached surfaces.
-          if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartRevision(chartId);
-          return Number.NaN;
-        },
-      }),
+      this.drawingChartRenderer,
     );
     this.drawingOverlay.setSelectedId(null);
 
@@ -6374,7 +6353,12 @@ export class SpreadsheetApp {
   getDrawingObjects(sheetId: string = this.sheetId): DrawingObject[] {
     const id = String(sheetId ?? this.sheetId);
     if (!id) return [];
-    return this.listDrawingObjectsForSheet(id);
+    const baseObjects = this.listDrawingObjectsForSheet(id);
+    if (!this.useCanvasCharts) return baseObjects;
+
+    const maxZ = baseObjects.reduce((acc, obj) => Math.max(acc, obj.zOrder), -1);
+    const charts = this.listCanvasChartDrawingObjectsForSheet(id, maxZ + 1);
+    return charts.length > 0 ? [...baseObjects, ...charts] : baseObjects;
   }
 
   /**
@@ -6460,13 +6444,39 @@ export class SpreadsheetApp {
     }
   }
 
+  private createDrawingChartRendererStore(): ChartRendererStore {
+    return {
+      getChartModel: (chartId) => {
+        // In canvas-charts mode, ChartStore charts are rendered as drawing objects using
+        // their ChartStore ids. Imported workbook charts use their own ids (e.g.
+        // `${sheetId}:${drawingObjectId}`) and continue to read from `formulaChartModelStore`.
+        if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartModel(chartId);
+        return this.formulaChartModelStore.getChartModel(chartId);
+      },
+      getChartData: (chartId) => {
+        if (this.getChartRecordById(chartId)) return undefined;
+        return this.formulaChartModelStore.getChartData(chartId);
+      },
+      getChartTheme: (chartId) => {
+        if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartTheme(chartId);
+        return this.formulaChartModelStore.getChartTheme(chartId);
+      },
+      getChartRevision: (chartId) => {
+        // Return NaN for chart ids we don't own so ChartRendererAdapter falls back to
+        // model/theme identity checks rather than freezing cached surfaces.
+        if (this.getChartRecordById(chartId)) return this.chartCanvasStoreAdapter.getChartRevision(chartId);
+        return Number.NaN;
+      },
+    };
+  }
+
   /**
-   * Chart renderer used by the drawings overlay for imported DrawingML charts.
+   * Chart renderer used by drawings overlays (primary + split-view secondary pane).
    *
-   * Split-view secondary panes can reuse this so chart drawings render in both panes.
+   * In `?canvasCharts=1` mode this also supports ChartStore charts rendered as drawing objects.
    */
   getDrawingChartRenderer(): ChartRendererAdapter {
-    return new ChartRendererAdapter(this.formulaChartModelStore);
+    return new ChartRendererAdapter(this.createDrawingChartRendererStore());
   }
 
   /**
@@ -6477,7 +6487,8 @@ export class SpreadsheetApp {
    */
   getSelectedDrawingId(): number | null {
     if (this.selectedDrawingId != null) return this.selectedDrawingId;
-    return this.selectedChartId ? this.chartIdToDrawingId(this.selectedChartId) : null;
+    if (!this.selectedChartId) return null;
+    return this.useCanvasCharts ? chartStoreIdToDrawingId(this.selectedChartId) : this.chartIdToDrawingId(this.selectedChartId);
   }
 
   getGridLimits(): GridLimits {
@@ -11763,6 +11774,15 @@ export class SpreadsheetApp {
         : this.useCanvasCharts && this.selectedChartId != null
           ? chartStoreIdToDrawingId(this.selectedChartId)
           : null;
+
+    const keepChartIds = new Set<string>();
+    for (const obj of objects) {
+      if (obj.kind.type !== "chart") continue;
+      const id = typeof obj.kind.chartId === "string" ? obj.kind.chartId.trim() : "";
+      if (id) keepChartIds.add(id);
+    }
+    // Avoid retaining cached offscreen surfaces for charts that are no longer on the active sheet.
+    this.drawingChartRenderer.pruneSurfaces(keepChartIds);
 
     overlay.setSelectedId(selectedOverlayId);
     void overlay.render(objects, viewport).catch((err) => {
