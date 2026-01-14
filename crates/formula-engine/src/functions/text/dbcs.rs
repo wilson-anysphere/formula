@@ -68,10 +68,18 @@ pub(crate) fn midb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     let codepage = ctx.text_codepage();
+    let dbcs_codepage = matches!(codepage, 932 | 936 | 949 | 950);
     array_lift::lift1(text, |text| {
         let s = text.coerce_to_string_with_ctx(ctx)?;
-        let bytes = encode_bytes_len(codepage, &s);
-        Ok(Value::Number(bytes as f64))
+        // Excel's `LENB` reports byte counts in DBCS locales/codepages.
+        // For non-DBCS (single-byte) codepages, treat the byte count as the character count so
+        // `LENB` matches `LEN` (consistent with other `*B` aliases like LEFTB/RIGHTB/MIDB today).
+        let count = if dbcs_codepage {
+            encode_bytes_len(codepage, &s)
+        } else {
+            s.chars().count()
+        };
+        Ok(Value::Number(count as f64))
     })
 }
 
