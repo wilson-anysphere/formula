@@ -951,10 +951,13 @@ export interface GoalSeekRequest {
   changingCell: string;
 
   targetValue: number;
+  // Optional; defaults to 0.001 (matches `GoalSeekParams::new`).
   tolerance?: number;
+  // Optional; defaults to 100 (matches `GoalSeekParams::new`).
   maxIterations?: number;
 
-  // Optional; note: on wasm builds "multiThreaded" falls back to single-threaded recalc.
+  // Optional; defaults to "singleThreaded". Note: on wasm builds "multiThreaded" falls back to
+  // single-threaded recalc.
   recalcMode?: RecalcMode;
 }
 
@@ -998,7 +1001,9 @@ WASM binding validation rules (current `formula-wasm` implementation):
   - A1 parsing is case-insensitive (e.g. `"a1"` is accepted).
 - `targetValue` must be a finite number.
 - `tolerance` (optional) must be a finite number and `> 0`.
+  - when omitted or `null`, the binding uses the Rust default `0.001` (from `GoalSeekParams::new`).
 - `maxIterations` (optional) must be an integer `> 0` and not exceed `usize::MAX`.
+  - when omitted or `null`, the binding uses the Rust default `100` (from `GoalSeekParams::new`).
 - `recalcMode` (optional) must be `"singleThreaded"` or `"multiThreaded"`.
   - Note: on wasm, `"multiThreaded"` currently falls back to single-threaded recalc (see `Engine::recalculate_multi_threaded`).
   - Note: even if the solve status is `"NumericalFailure"`, `goalSeek` will still return normally as long as the final `solution` is finite; if the computed solution is non-finite, the binding throws `"goalSeek produced a non-finite solution"`.
