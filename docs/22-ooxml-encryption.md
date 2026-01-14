@@ -251,6 +251,12 @@ an encrypted verifier:
 - decrypt `encryptedVerifierHashValue`
 - compute `Hash(verifierHashInput)` and compare to `verifierHashValue`
 
+Notes:
+
+- `encryptedVerifierHashValue` decrypts to a buffer that is typically **AES-block padded**
+  (e.g. SHA-1’s 20-byte digest stored in a 32-byte decrypted buffer). Compare only the digest prefix
+  (`hashSize` bytes / hash output length), not the full decrypted buffer.
+
 If this comparison fails, we should return a **wrong password** error:
 
 - at the decryption layer: `formula_offcrypto::OffcryptoError::InvalidPassword`
@@ -346,8 +352,10 @@ Excel parity, new implementations should follow the spec (authenticate the strea
 1. Obtain the **package key** (by password verification + decrypting `encryptedKeyValue`)
 2. Decrypt `encryptedHmacKey` and `encryptedHmacValue` using the **package key**
    - IVs are derived from `keyData/@saltValue` and constant blocks:
-     - HMAC key block: `5F B2 AD 01 0C B9 E1 F6`
-     - HMAC value block: `A0 67 7F 02 B2 2C 84 33`
+      - HMAC key block: `5F B2 AD 01 0C B9 E1 F6`
+      - HMAC value block: `A0 67 7F 02 B2 2C 84 33`
+   - The decrypted `hmacKey` / `hmacValue` buffers can include AES-CBC block padding; use only the
+     digest-length prefix when computing/comparing.
 3. Compute:
 
 ```text
