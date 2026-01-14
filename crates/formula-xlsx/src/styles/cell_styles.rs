@@ -251,6 +251,16 @@ impl StylesPart {
         Ok(out)
     }
 
+    /// Resolve a `numFmtId` to an explicit format code when the workbook defines
+    /// a custom number format for that id in `styles.xml` (`<numFmts>`).
+    ///
+    /// Built-in formats are *not* returned here; use
+    /// [`formula_format::builtin_format_code`] (or the `__builtin_numFmtId:<id>`
+    /// placeholder convention) for those.
+    pub fn num_fmt_code_for_id(&self, num_fmt_id: u16) -> Option<&str> {
+        self.num_fmt_by_id.get(&num_fmt_id).map(|s| s.as_str())
+    }
+
     fn append_cell_xf(&mut self, xf: XmlElement) -> u32 {
         let cell_xfs = ensure_styles_child(&mut self.root, "cellXfs");
         let count = cell_xfs.children_by_local("xf").count();

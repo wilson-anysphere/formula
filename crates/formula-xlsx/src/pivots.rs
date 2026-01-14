@@ -9,6 +9,7 @@ use crate::XlsxError;
 pub mod cache_definition;
 pub mod cache_records;
 pub mod engine_bridge;
+pub mod model_bridge;
 pub mod graph;
 pub mod pivot_charts;
 pub mod preserve;
