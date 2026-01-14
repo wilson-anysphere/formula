@@ -401,8 +401,11 @@ pub fn write_xlsx_from_storage(
         || wants_content_type_enforcement
         || needs_date_system_update
     {
-        let mut pkg =
-            formula_xlsx::XlsxPackage::from_bytes(&bytes).context("parse generated xlsx")?;
+        let mut pkg = formula_xlsx::XlsxPackage::from_bytes_limited(
+            &bytes,
+            formula_xlsx::XlsxPackageLimits::default(),
+        )
+        .context("parse generated xlsx")?;
 
         if wants_vba {
             pkg.set_part(

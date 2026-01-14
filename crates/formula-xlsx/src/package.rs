@@ -20,6 +20,36 @@ use crate::theme::{parse_theme_palette, ThemePalette};
 use crate::zip_util::open_zip_part;
 use formula_model::{CellRef, CellValue, SheetVisibility, StyleTable, TabColor};
 
+/// Maximum allowed *inflated* bytes for a single ZIP entry in an XLSX package.
+///
+/// This is a safety limit to prevent loading ZIP bombs into memory when callers need to
+/// materialize an entire XLSX/XLSM package (`XlsxPackage`) for preservation/repacking.
+pub const MAX_XLSX_PACKAGE_PART_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
+
+/// Maximum allowed *inflated* bytes across all ZIP entries in an XLSX package.
+///
+/// This is a safety limit to prevent loading ZIP bombs into memory when callers need to
+/// materialize an entire XLSX/XLSM package (`XlsxPackage`) for preservation/repacking.
+pub const MAX_XLSX_PACKAGE_TOTAL_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+
+/// Size limits enforced by [`XlsxPackage::from_bytes_limited`].
+#[derive(Debug, Clone, Copy)]
+pub struct XlsxPackageLimits {
+    /// Maximum allowed uncompressed bytes for any single part.
+    pub max_part_bytes: u64,
+    /// Maximum allowed uncompressed bytes across the whole package.
+    pub max_total_bytes: u64,
+}
+
+impl Default for XlsxPackageLimits {
+    fn default() -> Self {
+        Self {
+            max_part_bytes: MAX_XLSX_PACKAGE_PART_BYTES,
+            max_total_bytes: MAX_XLSX_PACKAGE_TOTAL_BYTES,
+        }
+    }
+}
+
 /// Excel workbook "kind" that drives the `/xl/workbook.xml` content type override in
 /// `[Content_Types].xml`.
 ///
@@ -294,6 +324,16 @@ pub enum XlsxError {
     MissingPart(String),
     #[error("invalid xlsx: {0}")]
     Invalid(String),
+    #[error(
+        "xlsx package part is too large to load safely: {part} is {size} bytes (max {max}). \
+Try reducing workbook size or saving without preserved parts."
+    )]
+    PartTooLarge { part: String, size: u64, max: u64 },
+    #[error(
+        "xlsx package is too large to load safely: {total} bytes uncompressed (max {max}). \
+Try reducing workbook size or saving without preserved parts."
+    )]
+    PackageTooLarge { total: u64, max: u64 },
     #[error("invalid sheetId value")]
     InvalidSheetId,
     #[error("hyperlink error: {0}")]
@@ -623,19 +663,60 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
 
 impl XlsxPackage {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, XlsxError> {
+        Self::from_bytes_limited(bytes, XlsxPackageLimits::default())
+    }
+
+    pub fn from_bytes_limited(bytes: &[u8], limits: XlsxPackageLimits) -> Result<Self, XlsxError> {
         let reader = Cursor::new(bytes);
         let mut zip = zip::ZipArchive::new(reader)?;
 
         let mut parts = BTreeMap::new();
+        let mut total_bytes: u64 = 0;
         for i in 0..zip.len() {
-            let mut file = zip.by_index(i)?;
+            let file = zip.by_index(i)?;
             if !file.is_file() {
                 continue;
             }
 
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            parts.insert(file.name().to_string(), buf);
+            let name = file.name().to_string();
+
+            let declared_size = file.size();
+            if declared_size > limits.max_part_bytes {
+                return Err(XlsxError::PartTooLarge {
+                    part: name,
+                    size: declared_size,
+                    max: limits.max_part_bytes,
+                });
+            }
+
+            let remaining_total = limits.max_total_bytes.saturating_sub(total_bytes);
+            let read_limit = limits.max_part_bytes.min(remaining_total);
+            let take_limit = read_limit.saturating_add(1);
+
+            let mut buf = Vec::with_capacity(
+                usize::try_from(declared_size.min(read_limit)).unwrap_or_default(),
+            );
+            let mut limited_reader = file.take(take_limit);
+            limited_reader.read_to_end(&mut buf)?;
+
+            let actual_size = buf.len() as u64;
+            if actual_size > limits.max_part_bytes {
+                return Err(XlsxError::PartTooLarge {
+                    part: name,
+                    size: actual_size,
+                    max: limits.max_part_bytes,
+                });
+            }
+
+            if actual_size > remaining_total {
+                return Err(XlsxError::PackageTooLarge {
+                    total: total_bytes.saturating_add(actual_size),
+                    max: limits.max_total_bytes,
+                });
+            }
+
+            total_bytes = total_bytes.saturating_add(actual_size);
+            parts.insert(name, buf);
         }
 
         Ok(Self { parts })
@@ -1550,6 +1631,49 @@ mod tests {
         }
 
         zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn from_bytes_limited_rejects_packages_exceeding_total_limit() {
+        let bytes = build_package(&[
+            ("xl/a.xml", b"123456"),
+            ("xl/b.xml", b"abcdef"),
+        ]);
+
+        let limits = XlsxPackageLimits {
+            max_part_bytes: 10,
+            max_total_bytes: 10,
+        };
+
+        match XlsxPackage::from_bytes_limited(&bytes, limits) {
+            Err(XlsxError::PackageTooLarge { total, max }) => {
+                assert_eq!(max, 10);
+                assert!(
+                    total > max,
+                    "expected reported total ({total}) to exceed max ({max})"
+                );
+            }
+            other => panic!("expected PackageTooLarge error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_bytes_limited_rejects_parts_exceeding_part_limit() {
+        let bytes = build_package(&[("xl/too-big.bin", b"0123456789A")]); // 11 bytes
+
+        let limits = XlsxPackageLimits {
+            max_part_bytes: 10,
+            max_total_bytes: 100,
+        };
+
+        match XlsxPackage::from_bytes_limited(&bytes, limits) {
+            Err(XlsxError::PartTooLarge { part, size, max }) => {
+                assert_eq!(part, "xl/too-big.bin");
+                assert_eq!(size, 11);
+                assert_eq!(max, 10);
+            }
+            other => panic!("expected PartTooLarge error, got {other:?}"),
+        }
     }
 
     #[test]

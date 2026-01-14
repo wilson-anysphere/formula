@@ -24,7 +24,7 @@ use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, strip_vba_project_streaming,
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, WorkbookKind,
-    XlsxPackage,
+    XlsxPackage, XlsxPackageLimits,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Cursor, Read};
@@ -2114,7 +2114,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         if needs_inject_vba {
-            let mut pkg = XlsxPackage::from_bytes(&bytes)
+            let mut pkg = XlsxPackage::from_bytes_limited(&bytes, XlsxPackageLimits::default())
                 .context("parse workbook package for VBA injection")?;
             pkg.set_part(
                 "xl/vbaProject.bin",
@@ -2129,7 +2129,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         if needs_date_system_update {
-            let mut pkg = XlsxPackage::from_bytes(&bytes)
+            let mut pkg = XlsxPackage::from_bytes_limited(&bytes, XlsxPackageLimits::default())
                 .context("parse workbook package for date system update")?;
             pkg.set_workbook_date_system(xlsx_date_system)
                 .context("set workbook date system")?;
@@ -2185,7 +2185,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         || needs_date_system_update
     {
         let mut pkg =
-            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+            XlsxPackage::from_bytes_limited(&bytes, XlsxPackageLimits::default())
+                .context("parse generated workbook package")?;
 
         if wants_vba {
             pkg.set_part(
