@@ -41,7 +41,15 @@ function writeConfig(dir, { includeDeepLink = true } = {}) {
   return configPath;
 }
 
-function writeInfoPlist(dir, { includeXlsxDocumentType = true, includeUrlScheme = true, xlsxInUtiOnly = false } = {}) {
+function writeInfoPlist(
+  dir,
+  {
+    includeXlsxDocumentType = true,
+    includeUrlScheme = true,
+    xlsxInUtiOnly = false,
+    includeLsItemContentTypes = false,
+  } = {},
+) {
   const plistPath = path.join(dir, "Info.plist");
 
   const urlBlock = includeUrlScheme
@@ -49,10 +57,13 @@ function writeInfoPlist(dir, { includeXlsxDocumentType = true, includeUrlScheme 
     : "";
 
   const docTypeExt = includeXlsxDocumentType ? "xlsx" : "txt";
-  const docBlock = `  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>${docTypeExt}</string>\n      </array>\n    </dict>\n  </array>\n`;
+  const lsItemBlock = includeLsItemContentTypes
+    ? `      <key>LSItemContentTypes</key>\n      <array>\n        <string>org.openxmlformats.spreadsheetml.sheet</string>\n      </array>\n`
+    : "";
+  const docBlock = `  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>${docTypeExt}</string>\n      </array>\n${lsItemBlock}    </dict>\n  </array>\n`;
 
   const utiBlock = xlsxInUtiOnly
-    ? `  <key>UTImportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n`
+    ? `  <key>UTImportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeIdentifier</key>\n      <string>org.openxmlformats.spreadsheetml.sheet</string>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n`
     : "";
 
   const content = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n${urlBlock}${docBlock}${utiBlock}</dict>\n</plist>\n`;
@@ -102,6 +113,49 @@ test("verify_macos_bundle_associations fails when xlsx appears only in UT*TypeDe
 
   const proc = runValidator({ configPath, infoPlistPath });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
-  assert.match(proc.stderr, /CFBundleDocumentTypes/i);
+  assert.match(proc.stderr, /UT\*TypeDeclarations/i);
 });
 
+test("verify_macos_bundle_associations passes when xlsx is registered via LSItemContentTypes + UT*TypeDeclarations", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-macos-assoc-test-"));
+  const configPath = writeConfig(tmp);
+  const infoPlistPath = writeInfoPlist(tmp, {
+    includeXlsxDocumentType: false,
+    includeUrlScheme: true,
+    xlsxInUtiOnly: true,
+    includeLsItemContentTypes: true,
+  });
+
+  const proc = runValidator({ configPath, infoPlistPath });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("verify_macos_bundle_associations supports tauri.conf.json fileAssociations ext as a string", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-macos-assoc-test-"));
+  const configPath = path.join(tmp, "tauri.conf.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      bundle: {
+        fileAssociations: [
+          {
+            ext: "xlsx",
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          },
+        ],
+      },
+      plugins: {
+        "deep-link": {
+          desktop: {
+            schemes: ["formula"],
+          },
+        },
+      },
+    }),
+    "utf8",
+  );
+  const infoPlistPath = writeInfoPlist(tmp, { includeXlsxDocumentType: true, includeUrlScheme: true });
+
+  const proc = runValidator({ configPath, infoPlistPath });
+  assert.equal(proc.status, 0, proc.stderr);
+});

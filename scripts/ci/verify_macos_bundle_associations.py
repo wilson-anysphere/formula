@@ -67,9 +67,13 @@ def load_expected_extensions(tauri_config_path: Path) -> set[str]:
     for assoc in associations:
         if not isinstance(assoc, dict):
             continue
-        for ext in assoc.get("ext", []) or []:
-            if not isinstance(ext, str):
-                continue
+        raw = assoc.get("ext")
+        exts: list[str] = []
+        if isinstance(raw, str):
+            exts = [raw]
+        elif isinstance(raw, list):
+            exts = [item for item in raw if isinstance(item, str)]
+        for ext in exts:
             normalized = _normalize_ext(ext)
             if normalized:
                 expected.add(normalized)
@@ -103,14 +107,42 @@ def _extensions_from_document_types(document_types: Any) -> set[str]:
     return out
 
 
-def _extensions_from_uti_declarations(plist: dict[str, Any]) -> set[str]:
+def _utis_from_document_types(document_types: Any) -> set[str]:
     out: set[str] = set()
+    if not isinstance(document_types, list):
+        return out
+    for entry in document_types:
+        if not isinstance(entry, dict):
+            continue
+        raw_utis = entry.get("LSItemContentTypes")
+        if isinstance(raw_utis, str):
+            uti = raw_utis.strip().lower()
+            if uti:
+                out.add(uti)
+        elif isinstance(raw_utis, list):
+            for item in raw_utis:
+                if not isinstance(item, str):
+                    continue
+                uti = item.strip().lower()
+                if uti:
+                    out.add(uti)
+    return out
+
+
+def _uti_extension_map(plist: dict[str, Any]) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
     for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
         decls = plist.get(key)
         if not isinstance(decls, list):
             continue
         for decl in decls:
             if not isinstance(decl, dict):
+                continue
+            uti_raw = decl.get("UTTypeIdentifier")
+            if not isinstance(uti_raw, str):
+                continue
+            uti = uti_raw.strip().lower()
+            if not uti:
                 continue
             tags = decl.get("UTTypeTagSpecification")
             if not isinstance(tags, dict):
@@ -119,21 +151,26 @@ def _extensions_from_uti_declarations(plist: dict[str, Any]) -> set[str]:
             if isinstance(raw_exts, str):
                 normalized = _normalize_ext(raw_exts)
                 if normalized:
-                    out.add(normalized)
+                    out.setdefault(uti, set()).add(normalized)
             elif isinstance(raw_exts, list):
                 for ext in raw_exts:
                     if not isinstance(ext, str):
                         continue
                     normalized = _normalize_ext(ext)
                     if normalized:
-                        out.add(normalized)
+                        out.setdefault(uti, set()).add(normalized)
     return out
 
 
 def extract_registered_extensions(plist: dict[str, Any]) -> set[str]:
-    return _extensions_from_document_types(plist.get("CFBundleDocumentTypes")) | _extensions_from_uti_declarations(
-        plist
-    )
+    doc_types = plist.get("CFBundleDocumentTypes")
+    doc_exts = _extensions_from_document_types(doc_types)
+    doc_utis = _utis_from_document_types(doc_types)
+    uti_map = _uti_extension_map(plist)
+    ext_via_utis: set[str] = set()
+    for uti in doc_utis:
+        ext_via_utis |= uti_map.get(uti, set())
+    return doc_exts | ext_via_utis
 
 
 def extract_url_schemes(plist: dict[str, Any]) -> set[str]:
@@ -206,8 +243,15 @@ def main() -> int:
         )
 
     document_type_exts = _extensions_from_document_types(doc_types)
-    uti_exts = _extensions_from_uti_declarations(plist)
-    registered_exts = document_type_exts | uti_exts
+    document_type_utis = _utis_from_document_types(doc_types)
+    uti_map = _uti_extension_map(plist)
+    uti_exts: set[str] = set()
+    for exts in uti_map.values():
+        uti_exts |= exts
+    registered_via_utis: set[str] = set()
+    for uti in document_type_utis:
+        registered_via_utis |= uti_map.get(uti, set())
+    registered_exts = document_type_exts | registered_via_utis
     registered_schemes = extract_url_schemes(plist)
 
     print(f"[macos] Info.plist: {args.info_plist}")
@@ -215,21 +259,33 @@ def main() -> int:
     print(
         f"[macos] Observed file extensions (CFBundleDocumentTypes, {len(document_type_exts)}): {_format_set(document_type_exts)}"
     )
-    if uti_exts:
-        print(f"[macos] Observed file extensions (UT*TypeDeclarations, {len(uti_exts)}): {_format_set(uti_exts)}")
+    if document_type_utis:
+        print(f"[macos] Observed content types (LSItemContentTypes, {len(document_type_utis)}): {_format_set(document_type_utis)}")
+    if uti_map:
+        if uti_exts:
+            print(f"[macos] Observed file extensions (UT*TypeDeclarations, {len(uti_exts)}): {_format_set(uti_exts)}")
+        if registered_via_utis:
+            print(
+                f"[macos] Observed file extensions (via LSItemContentTypes -> UT*TypeDeclarations, {len(registered_via_utis)}): {_format_set(registered_via_utis)}"
+            )
     print(
         f"[macos] Observed file extensions (combined, {len(registered_exts)}): {_format_set(registered_exts)}"
     )
     print(f"[macos] Expected URL schemes ({len(expected_schemes)}): {_format_set(expected_schemes)}")
     print(f"[macos] Observed URL schemes ({len(registered_schemes)}): {_format_set(registered_schemes)}")
 
-    if not document_type_exts:
-        print("[macos] ERROR: CFBundleDocumentTypes did not declare any CFBundleTypeExtensions", file=sys.stderr)
+    if not document_type_exts and not document_type_utis:
+        print(
+            "[macos] ERROR: CFBundleDocumentTypes did not declare any CFBundleTypeExtensions or LSItemContentTypes",
+            file=sys.stderr,
+        )
         return 1
 
     # File associations are driven by CFBundleDocumentTypes; UT*TypeDeclarations are helpful for
-    # defining custom UTIs but are not sufficient on their own to register "open with" handling.
-    missing_exts = expected_exts - document_type_exts
+    # defining UTIs but are not sufficient on their own to register "open with" handling. We accept
+    # extensions registered either directly via CFBundleTypeExtensions or indirectly via
+    # CFBundleDocumentTypes.LSItemContentTypes + UT*TypeDeclarations defining filename extensions.
+    missing_exts = expected_exts - registered_exts
     missing_schemes = expected_schemes - registered_schemes
 
     if missing_exts or missing_schemes:
@@ -242,7 +298,7 @@ def main() -> int:
             missing_only_in_uti = missing_exts & uti_exts
             if missing_only_in_uti:
                 print(
-                    f"[macos] Note: these extensions were present in UT*TypeDeclarations but missing from CFBundleDocumentTypes: {_format_set(missing_only_in_uti)}",
+                    f"[macos] Note: these extensions were present in UT*TypeDeclarations but did not appear to be registered via CFBundleTypeExtensions or LSItemContentTypes: {_format_set(missing_only_in_uti)}",
                     file=sys.stderr,
                 )
         if missing_schemes:

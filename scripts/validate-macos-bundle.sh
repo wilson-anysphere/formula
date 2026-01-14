@@ -430,6 +430,12 @@ import sys
 plist_path = sys.argv[1]
 expected_exts = [arg.lower().lstrip(".") for arg in sys.argv[2:] if arg and str(arg).strip()]
 
+def _norm_ext(raw: str) -> str:
+    return raw.strip().lower().lstrip(".")
+
+def _norm_uti(raw: str) -> str:
+    return raw.strip().lower()
+
 try:
     with open(plist_path, "rb") as f:
         data = plistlib.load(f)
@@ -437,29 +443,44 @@ except Exception as e:
     print(str(e))
     raise SystemExit(2)
 
-found_exts = set()
-
-# Collect extension registrations from both CFBundleDocumentTypes and UT*TypeDeclarations.
 doc_types = data.get("CFBundleDocumentTypes")
 if doc_types is None:
     print("CFBundleDocumentTypes is missing")
     raise SystemExit(1)
-if isinstance(doc_types, (list, tuple)):
-    for doc in doc_types:
-        if not isinstance(doc, dict):
-            continue
-        exts = doc.get("CFBundleTypeExtensions") or []
-        if isinstance(exts, str):
-            normalized = exts.strip().lower().lstrip(".")
-            if normalized:
-                found_exts.add(normalized)
-        elif isinstance(exts, (list, tuple)):
-            for ext in exts:
-                if isinstance(ext, str) and ext.strip():
-                    normalized = ext.strip().lower().lstrip(".")
-                    if normalized:
-                        found_exts.add(normalized)
+if not isinstance(doc_types, (list, tuple)):
+    print(f"CFBundleDocumentTypes has unexpected type {type(doc_types)}")
+    raise SystemExit(1)
 
+doc_exts = set()
+doc_utis = set()
+for doc in doc_types:
+    if not isinstance(doc, dict):
+        continue
+    exts = doc.get("CFBundleTypeExtensions") or []
+    if isinstance(exts, str):
+        normalized = _norm_ext(exts)
+        if normalized:
+            doc_exts.add(normalized)
+    elif isinstance(exts, (list, tuple)):
+        for ext in exts:
+            if isinstance(ext, str) and ext.strip():
+                normalized = _norm_ext(ext)
+                if normalized:
+                    doc_exts.add(normalized)
+
+    utis = doc.get("LSItemContentTypes") or []
+    if isinstance(utis, str):
+        normalized = _norm_uti(utis)
+        if normalized:
+            doc_utis.add(normalized)
+    elif isinstance(utis, (list, tuple)):
+        for uti in utis:
+            if isinstance(uti, str) and uti.strip():
+                normalized = _norm_uti(uti)
+                if normalized:
+                    doc_utis.add(normalized)
+
+uti_to_exts = {}
 for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
     decls = data.get(key) or []
     if not isinstance(decls, (list, tuple)):
@@ -467,35 +488,47 @@ for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations"):
     for decl in decls:
         if not isinstance(decl, dict):
             continue
+        uti_raw = decl.get("UTTypeIdentifier")
+        if not isinstance(uti_raw, str) or not uti_raw.strip():
+            continue
+        uti = _norm_uti(uti_raw)
         tags = decl.get("UTTypeTagSpecification") or {}
         if not isinstance(tags, dict):
             continue
         raw_exts = tags.get("public.filename-extension")
+        values = []
         if isinstance(raw_exts, str):
-            normalized = raw_exts.strip().lower().lstrip(".")
-            if normalized:
-                found_exts.add(normalized)
+            values = [raw_exts]
         elif isinstance(raw_exts, (list, tuple)):
-            for ext in raw_exts:
-                if isinstance(ext, str) and ext.strip():
-                    normalized = ext.strip().lower().lstrip(".")
-                    if normalized:
-                        found_exts.add(normalized)
-                        found_exts.add(normalized)
+            values = [item for item in raw_exts if isinstance(item, str)]
+        for ext_raw in values:
+            normalized = _norm_ext(ext_raw)
+            if not normalized:
+                continue
+            uti_to_exts.setdefault(uti, set()).add(normalized)
 
-if not found_exts:
-    print("no file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")
+exts_via_utis = set()
+for uti in doc_utis:
+    exts_via_utis |= uti_to_exts.get(uti, set())
+
+# File associations are driven by CFBundleDocumentTypes. We accept extensions registered either
+# directly via CFBundleTypeExtensions or indirectly via LSItemContentTypes -> UT*TypeDeclarations.
+effective_exts = doc_exts | exts_via_utis
+
+if not effective_exts:
+    print("no file association registrations found in CFBundleDocumentTypes (missing CFBundleTypeExtensions and LSItemContentTypes)")
     raise SystemExit(1)
 
-# Some bundle generators place certain extensions only under UT*TypeDeclarations (e.g. `xlsx`)
-# instead of listing them under CFBundleDocumentTypes. Treat those as acceptable as long as
-# they are present somewhere in the Info.plist.
-effective_exts = set(found_exts)
-
-missing = [ext for ext in expected_exts if ext and ext not in effective_exts]
+missing = sorted(set(expected_exts) - effective_exts)
 if missing:
-    found = ", ".join(sorted(effective_exts)) if effective_exts else "(none)"
-    print("missing extension(s): " + ", ".join(sorted(set(missing))) + f". Found extensions: {found}")
+    doc_exts_str = ", ".join(sorted(doc_exts)) if doc_exts else "(none)"
+    doc_utis_str = ", ".join(sorted(doc_utis)) if doc_utis else "(none)"
+    via_utis_str = ", ".join(sorted(exts_via_utis)) if exts_via_utis else "(none)"
+    print(
+        "missing extension(s): "
+        + ", ".join(missing)
+        + f". CFBundleTypeExtensions: {doc_exts_str}. LSItemContentTypes: {doc_utis_str}. Extensions via LSItemContentTypes: {via_utis_str}."
+    )
     raise SystemExit(1)
 PY
   )"
