@@ -413,7 +413,7 @@ fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
 /// Return the end offset (in bytes) of the UTF-16 text payload for a reusable "plain" `BrtSI`.
 ///
 /// This treats strings as reusable when:
-/// - `flags == 0` (even if benign trailing bytes exist), or
+/// - `flags & 0x03 == 0` (even if reserved bits and/or benign trailing bytes exist), or
 /// - only the rich/phonetic flag bits are set and the corresponding blocks are empty
 ///   (`cRun == 0` / `cb == 0`), with no trailing bytes.
 pub(crate) fn reusable_plain_si_utf16_end(payload: &[u8]) -> Option<usize> {
@@ -432,10 +432,9 @@ pub(crate) fn reusable_plain_si_utf16_end(payload: &[u8]) -> Option<usize> {
         return None;
     }
 
-    // Fast path: plain string with no extra blocks.
-    if flags == 0 {
-        // Some writers include benign trailing bytes after the UTF-16 text even when `flags==0`.
-        // Be tolerant and only require that the declared UTF-16 bytes are present.
+    // Plain string: no rich/phonetic blocks. Be tolerant of reserved bits in `flags` and trailing
+    // bytes after the UTF-16 payload.
+    if flags & 0x03 == 0 {
         return Some(utf16_end);
     }
 
