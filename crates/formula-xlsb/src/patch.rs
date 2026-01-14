@@ -1719,6 +1719,12 @@ fn value_record_expected_payload_len(record_id: u32, payload: &[u8]) -> Result<u
                                 score -= 5;
                                 continue;
                             }
+                            if cp >= 0x1_0000 {
+                                // Non-BMP characters require valid surrogate pairs in UTF-16.
+                                // Misaligned parsing is unlikely to accidentally form valid pairs.
+                                score += 3;
+                                continue;
+                            }
                             if ch.is_ascii() {
                                 if ch.is_ascii_graphic() || ch == ' ' {
                                     // Strongly prefer ASCII-visible text.

@@ -1854,6 +1854,12 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                         // text and are often a sign of misalignment.
                                         if ch == '\0' {
                                             score -= 5;
+                                        } else if cp >= 0x1_0000 {
+                                            // Characters outside the BMP require valid surrogate
+                                            // pairs in UTF-16. Misaligned parsing is unlikely to
+                                            // accidentally form valid pairs, so prefer candidates
+                                            // that contain supplementary-plane chars.
+                                            score += 3;
                                         } else if ch.is_control()
                                             && ch != '\t'
                                             && ch != '\n'

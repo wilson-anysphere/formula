@@ -351,6 +351,33 @@ fn parser_reads_flagged_inline_string_with_low_byte_zero() {
 }
 
 #[test]
+fn parser_reads_flagged_inline_string_with_surrogate_pairs() {
+    // Regression: some producers emit the flagged layout even when there are no rich/phonetic
+    // extras (`flags=0`). The reader must still decode strings that contain surrogate pairs
+    // correctly (and not misclassify the record as the simple layout).
+    let text = "😀".to_string();
+    let cch = text.encode_utf16().count() as u32;
+    assert_eq!(cch, 2, "expected emoji to use a surrogate pair");
+    let utf16 = utf16_le_bytes(&text);
+
+    let mut cell_st_payload = Vec::new();
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    cell_st_payload.extend_from_slice(&cch.to_le_bytes());
+    cell_st_payload.push(0); // flags byte (flagged layout)
+    cell_st_payload.extend_from_slice(&utf16);
+
+    let sheet_bin = sheet_with_single_cell_st(&cell_st_payload);
+    let parsed = parse_sheet_bin(&mut Cursor::new(&sheet_bin), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("find cell");
+    assert_eq!(cell.value, CellValue::Text(text));
+}
+
+#[test]
 fn parser_reads_simple_inline_string_with_trailing_bytes_low_byte_zero() {
     // Regression: simple-layout strings can start with a UTF-16 code unit whose low byte happens
     // to look like a plausible flags byte (e.g. `0x00`). When extra trailing bytes are present, the
