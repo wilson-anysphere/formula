@@ -13,7 +13,7 @@ import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { FormulaBarFunctionAutocompleteController } from "./completion/functionAutocomplete.js";
 import { computeFormulaIndentation } from "./computeFormulaIndentation.js";
-import { buildFunctionPickerItems, renderFunctionPickerList, type FunctionPickerItem } from "./functionPicker.js";
+import { buildFunctionPickerItems, renderFunctionPickerList } from "./functionPicker.js";
 
 type FixFormulaErrorWithAiInfo = {
   address: string;
@@ -95,6 +95,8 @@ function storeFormulaBarExpandedState(expanded: boolean): void {
 }
 
 type NameBoxDropdownItemKind = "namedRange" | "table" | "sheet" | "recent";
+
+type FunctionPickerItem = { name: string; signature?: string; summary?: string };
 
 export type NameBoxDropdownItem = {
   /**

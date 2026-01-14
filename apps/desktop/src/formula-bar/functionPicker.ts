@@ -3,7 +3,7 @@ import { searchFunctionResults } from "../command-palette/commandPaletteSearch.j
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
 
-export type FunctionPickerItem = {
+type FunctionPickerItem = {
   name: string;
   signature?: string;
   summary?: string;
