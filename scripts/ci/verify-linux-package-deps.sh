@@ -228,7 +228,11 @@ if [[ "${#bundle_dirs[@]}" -eq 0 ]]; then
     fi
     while IFS= read -r -d '' dir; do
       bundle_dirs+=("$dir")
-    done < <(find "$target_dir" -type d -path "*/release/bundle" -print0)
+    # Avoid a full traversal of the Cargo target directory (which can be large in CI) by
+    # bounding the search depth. The bundle layout is expected to be shallow:
+    #   <target_dir>/release/bundle
+    #   <target_dir>/<triple>/release/bundle
+    done < <(find "$target_dir" -maxdepth 6 -type d -path "*/release/bundle" -print0)
   done
 fi
 

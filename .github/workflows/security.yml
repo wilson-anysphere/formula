@@ -48,7 +48,9 @@ jobs:
           # Keep security scans on the same Node.js major as CI/release builds to reduce drift.
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-          cache-dependency-path: "**/pnpm-lock.yaml"
+          # Avoid recursive `**/pnpm-lock.yaml` globs (they can be surprisingly slow once the repo
+          # has a large `target/` tree). This repo uses a single root lockfile.
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Enable pnpm via Corepack
         run: |
