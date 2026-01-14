@@ -196,3 +196,15 @@ fn reads_theme_palette_without_workbook_relationship() {
         .expect("theme palette present");
     assert_eq!(theme.accent1, 0xFF112233);
 }
+
+#[test]
+fn workbook_package_populates_workbook_theme_palette() {
+    for case in [
+        ThemeCase::RelationshipToCustomPart,
+        ThemeCase::NoThemeRelationship,
+    ] {
+        let bytes = build_xlsx(case);
+        let pkg = formula_xlsx::WorkbookPackage::from_bytes(&bytes).expect("load workbook package");
+        assert_eq!(pkg.workbook.theme.accent1, ArgbColor(0xFF112233));
+    }
+}

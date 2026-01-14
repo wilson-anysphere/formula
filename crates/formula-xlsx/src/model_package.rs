@@ -8,8 +8,9 @@ use formula_model::{Cell, CellRef, CellValue, SheetVisibility, Workbook, Workshe
 use crate::package::{XlsxError, XlsxPackage};
 use crate::path::{resolve_target, resolve_target_candidates};
 use crate::styles::{StylesPart, StylesPartError};
-use crate::zip_util::zip_part_names_equivalent;
+use crate::theme::convert::to_model_theme_palette;
 use crate::xml::{XmlDomError, XmlElement, XmlNode};
+use crate::zip_util::zip_part_names_equivalent;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const REL_TYPE_WORKSHEET: &str =
@@ -131,26 +132,29 @@ impl WorkbookPackage {
         let workbook_xml = package
             .part(workbook_part)
             .ok_or_else(|| WorkbookPackageError::MissingPart(workbook_part.to_string()))?;
-        let workbook_root = XmlElement::parse(workbook_xml).map_err(|source| WorkbookPackageError::Xml {
-            part: workbook_part.to_string(),
-            source,
-        })?;
+        let workbook_root =
+            XmlElement::parse(workbook_xml).map_err(|source| WorkbookPackageError::Xml {
+                part: workbook_part.to_string(),
+                source,
+            })?;
 
         let rels_part = "xl/_rels/workbook.xml.rels";
         let rels_xml = package
             .part(rels_part)
             .ok_or_else(|| WorkbookPackageError::MissingPart(rels_part.to_string()))?;
-        let rels_root = XmlElement::parse(rels_xml).map_err(|source| WorkbookPackageError::Xml {
-            part: rels_part.to_string(),
-            source,
-        })?;
+        let rels_root =
+            XmlElement::parse(rels_xml).map_err(|source| WorkbookPackageError::Xml {
+                part: rels_part.to_string(),
+                source,
+            })?;
 
         let rels = parse_relationships(&rels_root);
         let styles_part_name = rels
             .iter()
             .find(|rel| rel.type_ == REL_TYPE_STYLES)
             .and_then(|rel| {
-                if let Some(found) = resolve_existing_part_name(&package, workbook_part, &rel.target)
+                if let Some(found) =
+                    resolve_existing_part_name(&package, workbook_part, &rel.target)
                 {
                     return Some(found);
                 }
@@ -167,6 +171,11 @@ impl WorkbookPackage {
             .unwrap_or_else(|| "xl/styles.xml".to_string());
 
         let mut workbook = Workbook::new();
+        // Best-effort: populate the workbook theme palette so downstream style/color resolution can
+        // interpret `Color::Theme` values correctly when the workbook uses a non-default theme.
+        if let Ok(Some(theme)) = package.theme_palette() {
+            workbook.theme = to_model_theme_palette(theme);
+        }
         let styles =
             StylesPart::parse_or_default(package.part(&styles_part_name), &mut workbook.styles)?;
 
@@ -183,9 +192,7 @@ impl WorkbookPackage {
                 .attr("name")
                 .ok_or(WorkbookPackageError::MissingSheetAttribute("name"))?
                 .to_string();
-            let xlsx_sheet_id = sheet_el
-                .attr("sheetId")
-                .and_then(|v| v.parse::<u32>().ok());
+            let xlsx_sheet_id = sheet_el.attr("sheetId").and_then(|v| v.parse::<u32>().ok());
             let visibility = match sheet_el.attr("state") {
                 Some("hidden") => SheetVisibility::Hidden,
                 Some("veryHidden") => SheetVisibility::VeryHidden,
@@ -352,9 +359,11 @@ fn parse_sheet_cells(
             let Some(r) = c.attr("r") else {
                 continue;
             };
-            let cell_ref = CellRef::from_a1(r).map_err(|source| WorkbookPackageError::InvalidCellReference {
-                reference: r.to_string(),
-                source,
+            let cell_ref = CellRef::from_a1(r).map_err(|source| {
+                WorkbookPackageError::InvalidCellReference {
+                    reference: r.to_string(),
+                    source,
+                }
             })?;
 
             let style_id = c
