@@ -3754,28 +3754,19 @@ fn patch_existing_cell<R: BufRead, W: Write>(
 
     // `vm="..."` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
     //
-    // We generally preserve it for fidelity. The main exception is the embedded in-cell image
-    // placeholder representation, which uses `t="e"` + `<v>#VALUE!</v>`; when a patch changes the
-    // cached value away from that placeholder semantics, we must drop `vm` to avoid leaving a
-    // dangling rich-data pointer.
+    // We generally preserve it for fidelity. The main exception is the in-cell image placeholder
+    // representation (commonly `t="e"` + `<v>#VALUE!</v>`, but some producers use a numeric `0`):
+    // when a patch changes the cached value away from the placeholder semantics, we must drop `vm`
+    // to avoid leaving a dangling rich-data pointer.
     //
     // Additionally, when patching incomplete workbook packages (see `drop_vm_on_value_change`),
     // drop `vm` whenever the cached value semantics change (unless the caller explicitly overrides
     // `vm`).
-    let patch_is_rich_value_placeholder = matches!(&patch.value, CellValue::Error(ErrorValue::Value));
+    let patch_is_rich_value_placeholder =
+        matches!(&patch.value, CellValue::Error(ErrorValue::Value))
+            || matches!(&patch.value, CellValue::Number(n) if *n == 0.0);
     let existing_is_rich_value_placeholder = if original_has_vm {
-        let t_is_error = match existing_t.as_deref() {
-            None => true,
-            Some(t) => t.trim().eq_ignore_ascii_case("e"),
-        };
-        if t_is_error {
-            extract_cell_v_text(&inner_events)?
-                .as_deref()
-                .and_then(|v| v.trim().parse::<ErrorValue>().ok())
-                == Some(ErrorValue::Value)
-        } else {
-            false
-        }
+        cell_is_rich_value_placeholder(existing_t.as_deref(), &inner_events)?
     } else {
         false
     };
@@ -4380,6 +4371,34 @@ fn extract_cell_inline_string_text(
     }
 
     Ok(None)
+}
+
+fn cell_is_rich_value_placeholder(
+    existing_t: Option<&str>,
+    inner_events: &[Event<'static>],
+) -> Result<bool, StreamingPatchError> {
+    let Some(v) = extract_cell_v_text(inner_events)? else {
+        return Ok(false);
+    };
+    let v = v.trim();
+
+    let existing_t = existing_t.map(|t| t.trim()).filter(|t| !t.is_empty());
+    if existing_t.is_some_and(|t| t.eq_ignore_ascii_case("e")) {
+        return Ok(v.eq_ignore_ascii_case(ErrorValue::Value.as_str()));
+    }
+
+    // Some in-cell image placeholder workbooks store the cached value as a number `0` (with no
+    // `t=` attribute, which implies SpreadsheetML numeric cells).
+    if existing_t.is_none() {
+        if v.eq_ignore_ascii_case(ErrorValue::Value.as_str()) {
+            return Ok(true);
+        }
+        if let Ok(n) = v.parse::<f64>() {
+            return Ok(n == 0.0);
+        }
+    }
+
+    Ok(false)
 }
 
 #[allow(dead_code)]

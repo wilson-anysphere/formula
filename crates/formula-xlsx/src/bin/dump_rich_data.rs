@@ -30,12 +30,15 @@ use quick_xml::events::Event;
 #[cfg(not(target_arch = "wasm32"))]
 use quick_xml::Reader;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod workbook_open;
+
 #[cfg(target_arch = "wasm32")]
 fn main() {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
-    "dump_rich_data <path.xlsx> [--print-parts] [--extract-cell-images] [--extract-cell-images-out <dir>]\n\
+    "dump_rich_data [--password <pw>] <path.xlsx> [--print-parts] [--extract-cell-images] [--extract-cell-images-out <dir>]\n\
 \n\
 Print a best-effort overview of rich-data related parts:\n\
   - xl/metadata.xml presence/size\n\
@@ -54,6 +57,8 @@ Output format (one line per cell):\n\
   <sheet>!<cell> vm=<vm> -> rv=<rich_value_index> -> <xl/media/* path> rel=<rel_index>\n\
 \n\
 Options:\n\
+  --password <pw>\n\
+      Password for Office-encrypted workbooks (OLE `EncryptedPackage`).\n\
   --print-parts\n\
       Print a list of richData-related ZIP parts (to stderr).\n\
   --extract-cell-images\n\
@@ -65,6 +70,7 @@ Options:\n\
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {
     let mut xlsx_path: Option<PathBuf> = None;
+    let mut password: Option<String> = None;
     let mut print_parts = false;
     let mut extract_cell_images = false;
     let mut extract_cell_images_out: Option<PathBuf> = None;
@@ -78,6 +84,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             "--print-parts" => {
                 print_parts = true;
+            }
+            "--password" => {
+                let Some(pw) = args.next() else {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw);
+            }
+            flag if flag.starts_with("--password=") => {
+                let Some((_, pw)) = flag.split_once('=') else {
+                    unreachable!();
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw.to_string());
             }
             "--extract-cell-images" => {
                 extract_cell_images = true;
@@ -128,8 +152,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let xlsx_path = xlsx_path.ok_or_else(|| format!("missing <path.xlsx>\n\n{}", usage()))?;
 
-    let bytes = fs::read(&xlsx_path)?;
-    let pkg = XlsxPackage::from_bytes(&bytes)?;
+    let pkg = workbook_open::open_xlsx_package(&xlsx_path, password.as_deref())?;
 
     eprintln!("workbook: {}", xlsx_path.display());
     dump_required_part_presence(&pkg);

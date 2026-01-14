@@ -39,6 +39,7 @@ zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 formula-fs = { path = "../formula-fs" }
+office-crypto = "0.2"
 
 [dev-dependencies]
 ms-offcrypto-writer = "1.0.7"

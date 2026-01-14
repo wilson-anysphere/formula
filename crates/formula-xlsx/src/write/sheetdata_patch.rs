@@ -582,14 +582,18 @@ fn patch_or_copy_cell<W: Write>(
                 // cached value changes.
                 //
                 // The exception is the rich-value placeholder semantics used by in-cell images:
-                // Excel stores the image itself in `xl/richData/*` and represents the cell's cached
-                // value as the error `#VALUE!` with a `vm` pointer. When the cell is edited away
-                // from that placeholder value, we must drop `vm` to avoid leaving dangling rich-value
-                // metadata pointers.
+                //
+                // Excel stores the image itself in `xl/richData/*` and represents the cell's
+                // cached value as a placeholder (commonly the error `#VALUE!`, but some producers
+                // use a numeric value like `0`) with a `vm` pointer. When the cell is edited away
+                // from that placeholder value, we must drop `vm` to avoid leaving dangling
+                // rich-value metadata pointers.
                 let original_is_rich_placeholder =
-                    matches!(original.value, CellValue::Error(ErrorValue::Value));
+                    matches!(&original.value, CellValue::Error(ErrorValue::Value))
+                        || matches!(&original.value, CellValue::Number(n) if *n == 0.0);
                 let desired_is_rich_placeholder =
-                    matches!(desired_semantics.value, CellValue::Error(ErrorValue::Value));
+                    matches!(&desired_semantics.value, CellValue::Error(ErrorValue::Value))
+                        || matches!(&desired_semantics.value, CellValue::Number(n) if *n == 0.0);
                 let preserve_vm = !(original_is_rich_placeholder && !desired_is_rich_placeholder);
                 write_updated_cell(
                     doc,

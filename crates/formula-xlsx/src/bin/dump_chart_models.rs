@@ -12,9 +12,10 @@ use formula_model::drawings::Anchor;
 #[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::drawingml::charts::{parse_chart_ex, parse_chart_space};
 #[cfg(not(target_arch = "wasm32"))]
-use formula_xlsx::XlsxPackage;
-#[cfg(not(target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
+
+#[cfg(not(target_arch = "wasm32"))]
+mod workbook_open;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,7 +61,7 @@ struct ChartFixtureModels {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
-    "dump_chart_models <path.xlsx|dir>\n\
+    "dump_chart_models [--password <pw>] <path.xlsx|dir>\n\
   [--out-dir <dir>]\n\
   [--print-parts]\n\
   [--use-chart-object-model]\n\
@@ -84,6 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut print_parts = false;
     let mut use_chart_object_model = false;
     let mut emit_both_models = false;
+    let mut password: Option<String> = None;
 
     let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -97,6 +99,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .next()
                     .ok_or("--out-dir expects a value (directory path)")?;
                 out_dir = PathBuf::from(value);
+            }
+            "--password" => {
+                let Some(pw) = args.next() else {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw);
+            }
+            flag if flag.starts_with("--password=") => {
+                let Some((_, pw)) = flag.split_once('=') else {
+                    unreachable!();
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw.to_string());
             }
             "--print-parts" => {
                 print_parts = true;
@@ -129,6 +149,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for xlsx_path in inputs {
         dump_one(
             &xlsx_path,
+            password.as_deref(),
             &out_dir,
             print_parts,
             use_chart_object_model,
@@ -142,6 +163,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(not(target_arch = "wasm32"))]
 fn dump_one(
     xlsx_path: &Path,
+    password: Option<&str>,
     out_dir: &Path,
     print_parts: bool,
     use_chart_object_model: bool,
@@ -153,8 +175,7 @@ fn dump_one(
         .ok_or("invalid xlsx path (missing file stem)")?
         .to_string();
 
-    let bytes = fs::read(xlsx_path)?;
-    let pkg = XlsxPackage::from_bytes(&bytes)?;
+    let pkg = workbook_open::open_xlsx_package(xlsx_path, password)?;
     let charts = pkg.extract_chart_objects()?;
 
     if print_parts {

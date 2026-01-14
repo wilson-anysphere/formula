@@ -1,8 +1,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::error::Error;
 #[cfg(not(target_arch = "wasm32"))]
-use std::fs;
-#[cfg(not(target_arch = "wasm32"))]
 use std::io::Cursor;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
@@ -24,8 +22,11 @@ use std::cmp::Ordering;
 const MAX_CELL_REFS: usize = 10;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod workbook_open;
+
+#[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
-    "dump_metadata <path.xlsx|path.xlsm>\n\
+    "dump_metadata [--password <pw>] <path.xlsx|path.xlsm>\n\
 \n\
 Debug CLI to inspect SpreadsheetML linked/rich-data metadata:\n\
   - xl/metadata.xml\n\
@@ -39,19 +40,49 @@ fn main() {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut args = std::env::args().skip(1);
-    let Some(path) = args.next() else {
-        eprintln!("{}", usage());
-        return Ok(());
-    };
-    if let Some(extra) = args.next() {
-        eprintln!("unexpected extra argument: {extra}\n\n{}", usage());
-        return Ok(());
+    let mut xlsx_path: Option<PathBuf> = None;
+    let mut password: Option<String> = None;
+
+    let mut args = std::env::args().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--help" | "-h" => {
+                eprintln!("{}", usage());
+                return Ok(());
+            }
+            "--password" => {
+                let Some(pw) = args.next() else {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw);
+            }
+            flag if flag.starts_with("--password=") => {
+                let Some((_, pw)) = flag.split_once('=') else {
+                    unreachable!();
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw.to_string());
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("unknown flag: {flag}\n\n{}", usage()).into());
+            }
+            value => {
+                if xlsx_path.is_some() {
+                    return Err(format!("unexpected extra argument: {value}\n\n{}", usage()).into());
+                }
+                xlsx_path = Some(PathBuf::from(value));
+            }
+        }
     }
 
-    let path = PathBuf::from(path);
-    let bytes = fs::read(&path)?;
-    let pkg = XlsxPackage::from_bytes(&bytes)?;
+    let path = xlsx_path.ok_or_else(|| format!("missing <path.xlsx|path.xlsm>\n\n{}", usage()))?;
+
+    let pkg = workbook_open::open_xlsx_package(&path, password.as_deref())?;
 
     println!("workbook: {}", path.display());
     println!();

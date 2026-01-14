@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use formula_xlsx::{openxml, XlsxPackage};
 use serde::Serialize;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod workbook_open;
+
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 #[derive(Debug, Clone, Serialize)]
@@ -30,11 +33,12 @@ struct WorkbookCellImagesDump {
 }
 
 fn usage() -> &'static str {
-    "dump_cell_images <path.xlsx|dir> [--print-xml] [--json]\n\
+    "dump_cell_images [--password <pw>] <path.xlsx|dir> [--print-xml] [--json]\n\
 \n\
 Inspects `xl/cellimages.xml` and related parts in one or more workbooks.\n\
 \n\
 Options:\n\
+  --password <pw>  Password for Office-encrypted workbooks (OLE `EncryptedPackage`)\n\
   --print-xml  Print the raw `cellimages.xml` (UTF-8 only)\n\
   --json       Emit one JSON object per workbook (one per line)\n\
 "
@@ -46,6 +50,7 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {
     let mut input_path: Option<PathBuf> = None;
+    let mut password: Option<String> = None;
     let mut print_xml = false;
     let mut json = false;
 
@@ -61,6 +66,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             "--json" => {
                 json = true;
+            }
+            "--password" => {
+                let Some(pw) = args.next() else {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw);
+            }
+            flag if flag.starts_with("--password=") => {
+                let Some((_, pw)) = flag.split_once('=') else {
+                    unreachable!();
+                };
+                if pw.is_empty() {
+                    return Err(format!("missing <pw> for --password\n\n{}", usage()).into());
+                }
+                password = Some(pw.to_string());
             }
             flag if flag.starts_with('-') => {
                 return Err(format!("unknown flag: {flag}\n\n{}", usage()).into());
@@ -84,7 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     for xlsx_path in inputs {
-        if let Err(err) = dump_one(&xlsx_path, print_xml, json) {
+        if let Err(err) = dump_one(&xlsx_path, password.as_deref(), print_xml, json) {
             eprintln!("{}: {err}", xlsx_path.display());
         }
     }
@@ -93,9 +116,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_one(xlsx_path: &Path, print_xml: bool, json: bool) -> Result<(), Box<dyn Error>> {
-    let bytes = fs::read(xlsx_path)?;
-    let pkg = XlsxPackage::from_bytes(&bytes)?;
+fn dump_one(
+    xlsx_path: &Path,
+    password: Option<&str>,
+    print_xml: bool,
+    json: bool,
+) -> Result<(), Box<dyn Error>> {
+    let pkg = workbook_open::open_xlsx_package(xlsx_path, password)?;
     let workbook = xlsx_path.display().to_string();
 
     let dump = inspect_package(&pkg, workbook);
