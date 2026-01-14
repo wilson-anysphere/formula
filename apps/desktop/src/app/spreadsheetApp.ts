@@ -6026,6 +6026,11 @@ export class SpreadsheetApp {
   activateSheet(sheetId: string): void {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
+    // Switching sheets mid-drag/resize should cancel the active gesture before we
+    // swap out the active-sheet drawing list; otherwise the interaction
+    // controller could apply its cleanup (`setObjects`) to the new sheet.
+    this.drawingsInteraction?.reset({ clearSelection: true });
+    this.drawingInteractionController?.reset({ clearSelection: true });
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
     this.drawingHitTestIndex = null;
@@ -6085,6 +6090,8 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.drawingsInteraction?.reset({ clearSelection: true });
+      this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
       this.drawingHitTestIndex = null;
@@ -6153,6 +6160,8 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.drawingsInteraction?.reset({ clearSelection: true });
+      this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
       this.drawingHitTestIndex = null;

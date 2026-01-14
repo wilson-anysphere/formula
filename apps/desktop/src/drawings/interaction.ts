@@ -207,6 +207,26 @@ export class DrawingInteractionController {
   }
 
   /**
+   * Reset interaction state (drag/resize/rotate + selection).
+   *
+   * This is intended for integrations that swap out the underlying drawing layer
+   * (e.g. switching sheets) while a gesture is in progress. We cancel any active
+   * gesture before the integration changes the active sheet so that gesture
+   * cleanup (`setObjects`, undo batching) is applied to the correct sheet.
+   */
+  reset(options?: { clearSelection?: boolean }): void {
+    // Best-effort: if an interaction is in progress, cancel it and release any
+    // pointer capture so sheet switches / teardown do not leave stale state.
+    this.cancelActiveGesture();
+    if (options?.clearSelection) {
+      this.selectedId = null;
+    }
+    // Cursor best-effort: avoid leaving resize/move cursors stuck when the
+    // sheet changes mid-hover.
+    this.element.style.cursor = "default";
+  }
+
+  /**
    * Cached bounding rect (client-space) used to convert `clientX/Y` → local
    * coordinates without doing per-pointermove layout reads.
    *
