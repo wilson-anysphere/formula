@@ -379,6 +379,42 @@ if (filteredRustflags !== inheritedRustflags) {
   }
 }
 
+function assertCargoLockUpToDate() {
+  // `wasm-pack` runs `cargo metadata` internally. When `Cargo.lock` is out of date, that internal
+  // `cargo metadata` call can silently rewrite the lockfile even though we pass `--locked` through
+  // to the subsequent `cargo build` invocation. That leaves the working tree dirty after a
+  // successful build and can cause confusing drift in agent/CI workflows.
+  //
+  // Fail fast here so callers explicitly update + commit `Cargo.lock` when manifests change.
+  const manifestPath = path.join(crateDir, "Cargo.toml");
+  const result = spawnSync(
+    "cargo",
+    ["metadata", "--locked", "--format-version", "1", "--manifest-path", manifestPath],
+    {
+      cwd: repoRoot,
+      env: wasmPackEnv,
+      // `cargo metadata` prints JSON to stdout; discard it while preserving error output.
+      stdio: ["ignore", "ignore", "inherit"],
+    },
+  );
+
+  if (result.error) {
+    fatal(`[formula] Failed to run 'cargo metadata --locked': ${result.error.message}`);
+  }
+
+  if ((result.status ?? 0) !== 0) {
+    const relManifest = path.relative(repoRoot, manifestPath) || manifestPath;
+    fatal(
+      [
+        "[formula] Cargo.lock is out of date for the current dependency graph.",
+        "Update it by running:",
+        `  cargo metadata --format-version=1 --manifest-path ${relManifest} >/dev/null`,
+        "and commit the updated Cargo.lock.",
+      ].join("\n"),
+    );
+  }
+}
+
 function isPositiveIntegerString(value) {
   return typeof value === "string" && /^[1-9]\d*$/.test(value.trim());
 }
@@ -484,6 +520,8 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
 // dedicated directory and swap it into place once the build completes successfully.
 await rm(buildOutDir, { recursive: true, force: true });
 await rm(backupOutDir, { recursive: true, force: true });
+
+assertCargoLockUpToDate();
 
 const concurrency = defaultWasmConcurrency();
 let result = runWasmPack({
