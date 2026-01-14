@@ -8914,8 +8914,9 @@ function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (ne
   }
 
   const dialog = document.createElement("dialog");
-  dialog.className = "page-setup-dialog";
+  dialog.className = "dialog page-setup-dialog";
   markKeybindingBarrier(dialog);
+  dialog.setAttribute("aria-label", t("print.pageSetup.title"));
 
   const container = document.createElement("div");
   dialog.appendChild(container);
