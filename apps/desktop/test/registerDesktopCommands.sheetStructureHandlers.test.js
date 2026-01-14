@@ -37,10 +37,46 @@ test("main.ts wires sheetStructureHandlers into registerDesktopCommands (Insert/
     /\bdeleteActiveSheet\s*:\s*handleDeleteActiveSheet\b/,
     "Expected sheetStructureHandlers.deleteActiveSheet to be wired to handleDeleteActiveSheet",
   );
+  assert.match(
+    segment,
+    /\bopenOrganizeSheets\b/,
+    "Expected sheetStructureHandlers.openOrganizeSheets to be provided by main.ts",
+  );
+
+  assert.match(
+    segment,
+    /\bautoFilterHandlers\s*:\s*{/,
+    "Expected main.ts to pass autoFilterHandlers into registerDesktopCommands",
+  );
+  assert.match(
+    segment,
+    /\btoggle\s*:\s*\(\)\s*=>\s*\{/,
+    "Expected autoFilterHandlers.toggle to be wired in main.ts",
+  );
+  assert.match(
+    segment,
+    /\bribbonAutoFilterStore\.hasAny\b/,
+    "Expected autoFilterHandlers.toggle to consult ribbonAutoFilterStore.hasAny",
+  );
+  assert.match(
+    segment,
+    /\bapplyRibbonAutoFilterFromSelection\b/,
+    "Expected autoFilterHandlers.toggle to apply ribbon AutoFilter from selection",
+  );
+  assert.match(
+    segment,
+    /\bclear\s*:\s*\(\)\s*=>\s*clearRibbonAutoFiltersForActiveSheet\b/,
+    "Expected autoFilterHandlers.clear to be wired to clearRibbonAutoFiltersForActiveSheet",
+  );
+  assert.match(
+    segment,
+    /\breapply\s*:\s*\(\)\s*=>\s*reapplyRibbonAutoFiltersForActiveSheet\b/,
+    "Expected autoFilterHandlers.reapply to be wired to reapplyRibbonAutoFiltersForActiveSheet",
+  );
 
   // These ribbon command ids are now registered in CommandRegistry; keep main.ts from
   // special-casing them in the `onUnknownCommand` switch.
-  const ids = ["home.cells.insert.insertSheet", "home.cells.delete.deleteSheet"];
+  const ids = ["home.cells.insert.insertSheet", "home.cells.delete.deleteSheet", "home.cells.format.organizeSheets"];
   for (const id of ids) {
     assert.doesNotMatch(
       main,
@@ -49,4 +85,3 @@ test("main.ts wires sheetStructureHandlers into registerDesktopCommands (Insert/
     );
   }
 });
-
