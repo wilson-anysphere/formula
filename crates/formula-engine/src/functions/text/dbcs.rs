@@ -259,9 +259,14 @@ pub(crate) fn phonetic_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> V
         // `Value::Reference` values. Treat them like normal reference arguments.
         ArgValue::Scalar(Value::Reference(reference)) => phonetic_from_reference(ctx, reference),
         ArgValue::Scalar(Value::ReferenceUnion(_)) => Value::Error(ErrorKind::Value),
-        // TODO: Verify Excel's behavior for scalar/non-reference arguments (e.g. `PHONETIC("abc")`).
-        // Historically, the engine treated PHONETIC as a string-coercion placeholder; preserve that
-        // behavior until we have an Excel oracle case for scalar arguments.
+        // Excel accepts non-reference inputs. From Microsoft's documentation:
+        // https://support.microsoft.com/en-us/office/phonetic-function-9a329dac-0c0f-42f8-9a55-639086988554
+        //
+        // > Reference: Required. Text string or a reference to a single cell or a range of cells
+        // > that contain a furigana text string.
+        //
+        // When no per-cell phonetic metadata exists (e.g. literals like `"abc"` or computed
+        // scalars), PHONETIC behaves like a text coercion.
         ArgValue::Scalar(value) => array_lift::lift1(value, |v| {
             Ok(Value::Text(v.coerce_to_string_with_ctx(ctx)?))
         }),
