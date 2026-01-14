@@ -51,17 +51,17 @@ fn parse_dxf(dxf: roxmltree::Node<'_, '_>, main_ns: &str) -> CfStyleOverride {
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "font" && n.tag_name().namespace() == Some(main_ns))
     {
-        if font
+        if let Some(b) = font
             .children()
-            .any(|n| n.is_element() && n.tag_name().name() == "b")
+            .find(|n| n.is_element() && n.tag_name().name() == "b")
         {
-            out.bold = Some(true);
+            out.bold = Some(parse_dxf_bool(b));
         }
-        if font
+        if let Some(i) = font
             .children()
-            .any(|n| n.is_element() && n.tag_name().name() == "i")
+            .find(|n| n.is_element() && n.tag_name().name() == "i")
         {
-            out.italic = Some(true);
+            out.italic = Some(parse_dxf_bool(i));
         }
         if let Some(color) = font.children().find(|n| n.is_element() && n.tag_name().name() == "color") {
             if let Some(rgb) = color.attribute("rgb") {
@@ -90,6 +90,13 @@ fn parse_dxf(dxf: roxmltree::Node<'_, '_>, main_ns: &str) -> CfStyleOverride {
     }
 
     out
+}
+
+fn parse_dxf_bool(el: roxmltree::Node<'_, '_>) -> bool {
+    match el.attribute("val") {
+        None => true,
+        Some(v) => !(v == "0" || v.eq_ignore_ascii_case("false")),
+    }
 }
 
 pub struct DxfProvider<'a> {

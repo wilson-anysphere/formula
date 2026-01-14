@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use formula_model::StyleTable;
+use formula_model::{CfStyleOverride, StyleTable};
 
 use super::{StylesPart, StylesPartError};
 
@@ -71,5 +71,9 @@ impl XlsxStylesEditor {
     pub fn styles_part_mut(&mut self) -> &mut StylesPart {
         &mut self.part
     }
-}
 
+    /// Replace the differential formats (`<dxfs>`) table used by conditional formatting.
+    pub fn set_conditional_formatting_dxfs(&mut self, dxfs: &[CfStyleOverride]) {
+        self.part.set_conditional_formatting_dxfs(dxfs);
+    }
+}

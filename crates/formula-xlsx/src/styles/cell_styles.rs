@@ -228,6 +228,22 @@ impl StylesPart {
             .collect()
     }
 
+    /// Replace the differential formats (`<dxfs>`) table used by conditional formatting.
+    ///
+    /// `dxfs` is the global table referenced from worksheet conditional formatting rules via
+    /// `cfRule/@dxfId`.
+    ///
+    /// This preserves all other style structures (fonts/fills/borders/cellXfs/etc) unchanged.
+    pub fn set_conditional_formatting_dxfs(&mut self, dxfs: &[CfStyleOverride]) {
+        let dxfs_el = ensure_styles_child(&mut self.root, "dxfs");
+
+        dxfs_el.children.clear();
+        dxfs_el
+            .children
+            .extend(dxfs.iter().map(|dxf| XmlNode::Element(build_conditional_formatting_dxf(dxf))));
+        dxfs_el.set_attr("count", dxfs.len().to_string());
+    }
+
     /// Ensure every `style_id` in `style_ids` has a corresponding `xf` index.
     ///
     /// The returned map can be used to set worksheet `c/@s` attributes.
@@ -365,11 +381,11 @@ fn parse_conditional_formatting_dxf(dxf: &XmlElement) -> CfStyleOverride {
     let mut out = CfStyleOverride::default();
 
     if let Some(font) = dxf.child("font") {
-        if font.children_by_local("b").next().is_some() {
-            out.bold = Some(true);
+        if let Some(b) = font.children_by_local("b").next() {
+            out.bold = Some(parse_dxf_bool(b));
         }
-        if font.children_by_local("i").next().is_some() {
-            out.italic = Some(true);
+        if let Some(i) = font.children_by_local("i").next() {
+            out.italic = Some(parse_dxf_bool(i));
         }
         if let Some(color) = font.child("color") {
             if let Some(rgb) = color.attr("rgb") {
@@ -389,6 +405,60 @@ fn parse_conditional_formatting_dxf(dxf: &XmlElement) -> CfStyleOverride {
     }
 
     out
+}
+
+fn parse_dxf_bool(el: &XmlElement) -> bool {
+    match el.attr("val") {
+        None => true,
+        Some(v) => !(v == "0" || v.eq_ignore_ascii_case("false")),
+    }
+}
+
+fn build_conditional_formatting_dxf(style: &CfStyleOverride) -> XmlElement {
+    let mut dxf = empty_element("dxf");
+
+    if let Some(fill_color) = style.fill {
+        let mut fill = empty_element("fill");
+        let mut pattern_fill = empty_element("patternFill");
+        pattern_fill.set_attr("patternType", "solid");
+        pattern_fill
+            .children
+            .push(XmlNode::Element(build_color_element("fgColor", fill_color)));
+        let mut bg = empty_element("bgColor");
+        bg.set_attr("indexed", "64");
+        pattern_fill.children.push(XmlNode::Element(bg));
+        fill.children.push(XmlNode::Element(pattern_fill));
+        dxf.children.push(XmlNode::Element(fill));
+    }
+
+    if style.font_color.is_some() || style.bold.is_some() || style.italic.is_some() {
+        let mut font = empty_element("font");
+        if let Some(bold) = style.bold {
+            if bold {
+                font.children.push(XmlNode::Element(empty_element("b")));
+            } else {
+                let mut b = empty_element("b");
+                b.set_attr("val", "0");
+                font.children.push(XmlNode::Element(b));
+            }
+        }
+        if let Some(italic) = style.italic {
+            if italic {
+                font.children.push(XmlNode::Element(empty_element("i")));
+            } else {
+                let mut i = empty_element("i");
+                i.set_attr("val", "0");
+                font.children.push(XmlNode::Element(i));
+            }
+        }
+        if let Some(color) = style.font_color {
+            font.children
+                .push(XmlNode::Element(build_color_element("color", color)));
+        }
+        dxf.children.push(XmlNode::Element(font));
+    }
+
+    dxf
 }
 
 fn parse_num_fmts(root: &XmlElement) -> HashMap<u16, String> {
@@ -1109,4 +1179,183 @@ fn insertion_index(root: &XmlElement, local: &str) -> usize {
     }
 
     root.children.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use roxmltree::Document;
+
+    fn fixture(path: &str) -> String {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join(path);
+        dir.to_string_lossy().to_string()
+    }
+
+    fn load_fixture_styles_xml(path: &str) -> Vec<u8> {
+        let bytes = std::fs::read(fixture(path)).expect("fixture exists");
+        let mut zip =
+            zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("valid fixture zip");
+        let mut file = zip.by_name("xl/styles.xml").expect("styles.xml exists");
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut out).expect("read styles.xml");
+        out
+    }
+
+    #[test]
+    fn writes_conditional_formatting_dxfs_into_default_styles() {
+        let mut style_table = StyleTable::new();
+        let mut part = StylesPart::parse_or_default(None, &mut style_table).unwrap();
+
+        let dxfs = vec![
+            CfStyleOverride {
+                fill: Some(Color::new_argb(0xFFFF0000)),
+                font_color: Some(Color::new_argb(0xFFFFFFFF)),
+                bold: Some(true),
+                italic: Some(false),
+            },
+            CfStyleOverride {
+                fill: Some(Color::new_argb(0xFF00FF00)),
+                font_color: None,
+                bold: None,
+                italic: None,
+            },
+            CfStyleOverride {
+                fill: None,
+                font_color: Some(Color::new_argb(0xFF0000FF)),
+                bold: Some(false),
+                italic: Some(true),
+            },
+        ];
+
+        part.set_conditional_formatting_dxfs(&dxfs);
+        assert_eq!(part.conditional_formatting_dxfs(), dxfs);
+
+        let xml = String::from_utf8(part.to_xml_bytes()).unwrap();
+        let doc = Document::parse(&xml).unwrap();
+        let main_ns = NS_MAIN;
+        let dxfs_node = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "dxfs" && n.tag_name().namespace() == Some(main_ns))
+            .expect("dxfs element present");
+        assert_eq!(dxfs_node.attribute("count"), Some("3"));
+        let dxf_nodes: Vec<_> = dxfs_node
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "dxf")
+            .collect();
+        assert_eq!(dxf_nodes.len(), 3);
+
+        // dxf[0]: fill + font, with italic disabled.
+        let fill = dxf_nodes[0]
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "fill")
+            .expect("fill present");
+        let pattern_fill = fill
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "patternFill")
+            .unwrap();
+        assert_eq!(pattern_fill.attribute("patternType"), Some("solid"));
+        let fg = pattern_fill
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "fgColor")
+            .unwrap();
+        assert_eq!(fg.attribute("rgb"), Some("FFFF0000"));
+        let bg = pattern_fill
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "bgColor")
+            .unwrap();
+        assert_eq!(bg.attribute("indexed"), Some("64"));
+
+        let font = dxf_nodes[0]
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "font")
+            .expect("font present");
+        assert!(font
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "b"));
+        let i = font
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "i")
+            .expect("italic element present");
+        assert_eq!(i.attribute("val"), Some("0"));
+        let color = font
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "color")
+            .unwrap();
+        assert_eq!(color.attribute("rgb"), Some("FFFFFFFF"));
+
+        // dxf[1]: fill only, no font element.
+        assert!(dxf_nodes[1]
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "fill"));
+        assert!(!dxf_nodes[1]
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "font"));
+
+        // dxf[2]: font only, no fill element.
+        assert!(!dxf_nodes[2]
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "fill"));
+        assert!(dxf_nodes[2]
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "font"));
+    }
+
+    #[test]
+    fn inserts_dxfs_when_missing_and_keeps_order() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1"><font/></fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border/></borders>
+  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>"#;
+
+        let mut style_table = StyleTable::new();
+        let mut part = StylesPart::parse(xml.as_bytes(), &mut style_table).unwrap();
+        part.set_conditional_formatting_dxfs(&[]);
+
+        let xml = String::from_utf8(part.to_xml_bytes()).unwrap();
+        let doc = Document::parse(&xml).unwrap();
+        let root = doc.root_element();
+        let children: Vec<_> = root
+            .children()
+            .filter(|n| n.is_element())
+            .map(|n| n.tag_name().name())
+            .collect();
+
+        let dxfs_idx = children
+            .iter()
+            .position(|name| *name == "dxfs")
+            .expect("dxfs inserted");
+        let table_styles_idx = children
+            .iter()
+            .position(|name| *name == "tableStyles")
+            .expect("tableStyles present");
+        assert!(dxfs_idx < table_styles_idx, "dxfs should appear before tableStyles");
+    }
+
+    #[test]
+    fn rewriting_fixture_dxfs_preserves_semantics_and_other_children() {
+        let styles_xml = load_fixture_styles_xml("conditional_formatting_2007.xlsx");
+        let mut style_table = StyleTable::new();
+        let mut part = StylesPart::parse(&styles_xml, &mut style_table).unwrap();
+        let original_root = part.root.clone();
+        let dxfs = part.conditional_formatting_dxfs();
+
+        part.set_conditional_formatting_dxfs(&dxfs);
+        assert_eq!(part.conditional_formatting_dxfs(), dxfs);
+
+        let strip_dxfs = |root: &XmlElement| {
+            root.children
+                .iter()
+                .filter(|child| !matches!(child, XmlNode::Element(el) if el.name.local == "dxfs"))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(strip_dxfs(&part.root), strip_dxfs(&original_root));
+    }
 }
