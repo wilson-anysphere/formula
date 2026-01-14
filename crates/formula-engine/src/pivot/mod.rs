@@ -52,6 +52,31 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
     }
 }
 
+fn escape_dax_bracket_identifier(raw: &str) -> Cow<'_, str> {
+    // In DAX, `]` is escaped as `]]` within `[...]`.
+    if raw.contains(']') {
+        Cow::Owned(raw.replace(']', "]]"))
+    } else {
+        Cow::Borrowed(raw)
+    }
+}
+
+fn dax_quoted_table_name(raw: &str) -> Cow<'_, str> {
+    // In DAX, table names that require quoting use single quotes, and embedded single quotes are
+    // escaped by doubling (e.g. `O'Brien` => `'O''Brien'`).
+    if raw.contains('\'') {
+        Cow::Owned(raw.replace('\'', "''"))
+    } else {
+        Cow::Borrowed(raw)
+    }
+}
+
+fn dax_quoted_column_ref(table: &str, column: &str) -> String {
+    let table = dax_quoted_table_name(table);
+    let column = escape_dax_bracket_identifier(column);
+    format!("'{table}'[{column}]")
+}
+
 fn pivot_field_ref_caption(field: &PivotFieldRef) -> Cow<'_, str> {
     // Value field captions should use the human-facing field name (Excel-like), not the DAX
     // reference form. In particular, measures are displayed without surrounding brackets.
@@ -295,6 +320,12 @@ impl PivotCache {
                 }
             }
             PivotFieldRef::DataModelColumn { table, column } => {
+                // Some caches store DAX-quoted table captions (e.g. `'Sales Table'[Region]`).
+                let quoted = dax_quoted_column_ref(table, column);
+                if let Some(idx) = self.field_index(&quoted) {
+                    return Some(idx);
+                }
+
                 // Unquoted table name + escaped bracket identifier.
                 let escaped_column = column.replace(']', "]]");
                 let unquoted = format!("{table}[{escaped_column}]");
@@ -306,6 +337,15 @@ impl PivotCache {
                 let unescaped = format!("{table}[{column}]");
                 if unescaped != unquoted {
                     if let Some(idx) = self.field_index(&unescaped) {
+                        return Some(idx);
+                    }
+                }
+
+                // Rare: quoted table name but raw (unescaped) column name.
+                let table = dax_quoted_table_name(table);
+                let quoted_unescaped = format!("'{table}'[{column}]");
+                if quoted_unescaped != quoted {
+                    if let Some(idx) = self.field_index(&quoted_unescaped) {
                         return Some(idx);
                     }
                 }
@@ -3333,6 +3373,11 @@ impl FieldIndices {
                 PivotFieldRef::DataModelColumn { table, column } => {
                     let unquoted = format!("{table}[{column}]");
                     if let Some(idx) = source.field_index(&unquoted) {
+                        return Ok(idx);
+                    }
+
+                    let quoted = dax_quoted_column_ref(table, column);
+                    if let Some(idx) = source.field_index(&quoted) {
                         return Ok(idx);
                     }
                 }

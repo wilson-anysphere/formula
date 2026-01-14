@@ -329,7 +329,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
 
     // Best-effort: capture any attribute-based hints that might identify the ChartEx chart kind.
     //
-    // This is diagnostic-only; keep output stable by:
+    // This is diagnostic-only; keep output small + stable by:
     // - de-duplicating
     // - capping the total output size (so diagnostics remain readable)
     let mut out: Vec<String> = Vec::new();
