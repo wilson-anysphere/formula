@@ -21,6 +21,7 @@ use formula_model::{
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use unicode_normalization::UnicodeNormalization;
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "dax")]
@@ -959,7 +960,17 @@ fn is_formula_input(value: &JsonValue) -> bool {
 }
 
 fn normalize_sheet_key(name: &str) -> String {
-    name.to_ascii_uppercase()
+    // Match `formula_engine::Workbook::sheet_key` / `formula_model::sheet_name_eq_case_insensitive`.
+    //
+    // Excel compares sheet names case-insensitively across Unicode and applies compatibility
+    // normalization (NFKC). We approximate this by normalizing with Unicode NFKC and then applying
+    // Unicode uppercasing (locale-independent).
+    //
+    // Fast-path ASCII sheet names to avoid the cost of Unicode normalization on the common case.
+    if name.is_ascii() {
+        return name.to_ascii_uppercase();
+    }
+    name.nfkc().flat_map(|c| c.to_uppercase()).collect()
 }
 
 /// Encode a literal text string as a scalar workbook `input` value.

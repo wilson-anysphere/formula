@@ -151,6 +151,9 @@ class WasmBackedWorker implements WorkerLike {
           case "recalculate":
             result = this.workbook?.recalculate(params.sheet);
             break;
+          case "renameSheet":
+            result = Boolean(this.workbook?.renameSheet?.(params.oldName, params.newName));
+            break;
           default:
             throw new Error(`unsupported method: ${req.method}`);
         }
@@ -199,6 +202,32 @@ describeWasm("EngineWorker null clear semantics", () => {
       await engine.setCell("A1", "  =  SUM(A1:A2)  ");
       const cell = await engine.getCell("A1");
       expect(cell.input).toBe("=SUM(A1:A2)");
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("resolves sheet names using Unicode NFKC + case-insensitive compare (no duplicate sheet aliases)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+
+      // Angstrom sign (U+212B) normalizes to Å (U+00C5) under NFKC. The engine should treat
+      // both as equivalent sheet names for lookups, without creating duplicate wrapper entries.
+      expect(await engine.renameSheet("Sheet1", "Å")).toBe(true);
+      await engine.setCell("A1", 1, "Å");
+
+      const exported = JSON.parse(await engine.toJson());
+      expect(Object.keys(exported.sheets)).toEqual(["Å"]);
+      expect(exported.sheets["Å"].cells.A1).toBe(1);
     } finally {
       engine.terminate();
     }
