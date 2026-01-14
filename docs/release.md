@@ -115,7 +115,7 @@ for ad-hoc pipeline tests without bumping the app version, prefer `upload=false`
 
 The release workflow pins its Node.js major via `NODE_VERSION` in `.github/workflows/release.yml`.
 If you run the preflight scripts or build release bundles locally, use the same Node version to avoid
-subtle differences between local and CI artifacts (see `.nvmrc` / `mise.toml`).
+subtle differences between local and CI artifacts (see `.nvmrc` / `.node-version` / `mise.toml`).
 
 The workflow also pins the Rust CLI tools it installs at runtime:
 

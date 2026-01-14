@@ -8,7 +8,7 @@ This repository is early-stage and evolving quickly. Please open an issue before
 
 ### Prerequisites
 
-- Node.js (see `.nvmrc` or `mise.toml`; matches CI/release)
+- Node.js (see `.nvmrc` / `.node-version` / `mise.toml`; matches CI/release)
 - `pnpm` (see `packageManager` in the root `package.json`)
 - Rust toolchain (install via rustup; pinned in `rust-toolchain.toml`)
 
