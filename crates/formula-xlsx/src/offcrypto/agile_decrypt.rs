@@ -1085,11 +1085,6 @@ fn parse_key_data(
 ) -> Result<KeyData> {
     validate_cipher_settings(node)?;
 
-    let block_size = parse_usize_attr(node, "blockSize")?;
-    if block_size != AES_BLOCK_SIZE {
-        return Err(OffCryptoError::InvalidBlockSize { block_size });
-    }
-
     let salt_size = parse_usize_attr(node, "saltSize")?;
     if salt_size == 0 {
         return Err(OffCryptoError::InvalidAttribute {
@@ -1796,10 +1791,10 @@ mod tests {
 
         let encryption_info = wrap_encryption_info(xml);
         let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw").unwrap_err();
-        assert!(matches!(
-            err,
-            OffCryptoError::InvalidBlockSize { block_size: 32 }
-        ));
+        assert!(
+            matches!(err, OffCryptoError::InvalidAttribute { ref attr, .. } if attr == "blockSize"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
