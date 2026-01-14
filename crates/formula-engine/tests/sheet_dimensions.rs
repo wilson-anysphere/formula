@@ -31,6 +31,22 @@ fn sheet_dimensions_affect_full_column_rows() {
 }
 
 #[test]
+fn set_sheet_dimensions_is_noop_when_dimensions_unchanged() {
+    let mut engine = Engine::new();
+    engine.set_sheet_dimensions("Sheet1", 10, 10).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROWS(A:A)")
+        .unwrap();
+    engine.recalculate();
+
+    assert!(!engine.is_dirty("Sheet1", "B1"));
+
+    // Setting the same dimensions again should not dirty/recompile formulas.
+    engine.set_sheet_dimensions("Sheet1", 10, 10).unwrap();
+    assert!(!engine.is_dirty("Sheet1", "B1"));
+}
+
+#[test]
 fn sheet_dimensions_affect_full_row_columns() {
     let mut engine = Engine::new();
     engine.set_sheet_dimensions("Sheet1", 10, 100).unwrap();

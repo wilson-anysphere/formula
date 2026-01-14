@@ -2413,11 +2413,18 @@ impl Engine {
         if changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
         }
+        if !changed {
+            return Ok(());
+        }
 
-        // Changing sheet dimensions can affect whole-column / whole-row references, which are
-        // baked into compiled expressions. Recompile formulas to ensure range endpoints are
-        // updated, and then recalculate.
-        self.recompile_all_formula_cells()?;
+        // Changing sheet dimensions affects:
+        // - Out-of-bounds `#REF!` semantics for references
+        // - Whole-row/whole-column references (`A:A`, `1:1`) inside bytecode programs (range
+        //   endpoints are expanded during compilation)
+        //
+        // Mark all compiled formula cells dirty so results refresh on the next recalculation, and
+        // bump `sheet_dims_generation` so stale bytecode programs fall back to AST evaluation.
+        self.mark_all_compiled_cells_dirty();
 
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
@@ -4299,6 +4306,7 @@ impl Engine {
         Some(sheet.tables.as_slice())
     }
 
+    #[allow(dead_code)]
     fn recompile_all_formula_cells(&mut self) -> Result<(), EngineError> {
         let tables_by_sheet: Vec<Vec<Table>> = self
             .workbook
