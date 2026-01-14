@@ -254,4 +254,29 @@ describe("SpreadsheetApp drag/drop image file insertion", () => {
     app.destroy();
     root.remove();
   });
+
+  it("shows a copy drop affordance for images with unknown MIME type during dragover", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "" });
+    const item = { kind: "file", type: "", getAsFile: () => file } as any;
+    const dataTransfer = { files: [], items: [item], types: ["Files"], dropEffect: "none" } as any;
+
+    const event = new Event("dragover", { bubbles: true, cancelable: true }) as any;
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    root.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(dataTransfer.dropEffect).toBe("copy");
+
+    app.destroy();
+    root.remove();
+  });
 });

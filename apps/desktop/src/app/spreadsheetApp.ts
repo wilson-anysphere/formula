@@ -15677,15 +15677,42 @@ export class SpreadsheetApp {
       return /\.(png|jpe?g|gif|bmp|webp|svg)$/.test(name);
     };
 
-    const hasImage =
-      Array.from(dt.items ?? []).some((item) => item.kind === "file" && item.type.startsWith("image/")) ||
-      Array.from(dt.files ?? []).some((file) => isImageFile(file));
+    const canInsertContext = !this.isReadOnly() && !this.isEditing();
+    let hasImage = false;
+    if (canInsertContext) {
+      const files = Array.from(dt.files ?? []);
+      if (files.some((file) => isImageFile(file))) {
+        hasImage = true;
+      } else {
+        const items = Array.from(dt.items ?? []);
+        hasImage = items.some((item) => item.kind === "file" && item.type.startsWith("image/"));
+
+        // Desktop file drags (and some browsers) can expose `DataTransferItem.type === ""` during dragover.
+        // Fall back to checking the filename/extension via `getAsFile()` when `files` is not populated yet.
+        if (!hasImage && files.length === 0) {
+          for (const item of items) {
+            if (!item || typeof item !== "object") continue;
+            if ((item as any).kind !== "file") continue;
+            const getAsFile = (item as any).getAsFile;
+            if (typeof getAsFile !== "function") continue;
+            try {
+              const file = getAsFile.call(item) as File | null;
+              if (file && isImageFile(file)) {
+                hasImage = true;
+                break;
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    }
     try {
       // Keep drop events flowing even in read-only/editing mode so we can suppress default
       // navigation and (when relevant) show a permission toast on drop, but don't show a misleading
       // "copy" affordance.
-      const canInsert = hasImage && !this.isReadOnly() && !this.isEditing();
-      dt.dropEffect = canInsert ? "copy" : "none";
+      dt.dropEffect = canInsertContext && hasImage ? "copy" : "none";
     } catch {
       // ignore
     }
