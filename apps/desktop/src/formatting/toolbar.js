@@ -788,47 +788,53 @@ export function applyOutsideBorders(doc, sheetId, range, { style = "thin", color
   if (!ensureSafeFormattingRange(range)) return false;
   const resolvedColor = color ?? `#${DEFAULT_BORDER_ARGB}`;
   const edge = { style, color: resolvedColor };
+  const shouldBatch = doc?.batchDepth === 0;
+  if (shouldBatch) doc.beginBatch({ label: "Borders" });
   let applied = true;
-  for (const r of normalizeRanges(range)) {
-    const rect = normalizeCellRange(r);
-    const startRow = rect.start.row;
-    const endRow = rect.end.row;
-    const startCol = rect.start.col;
-    const endCol = rect.end.col;
+  try {
+    for (const r of normalizeRanges(range)) {
+      const rect = normalizeCellRange(r);
+      const startRow = rect.start.row;
+      const endRow = rect.end.row;
+      const startCol = rect.start.col;
+      const endCol = rect.end.col;
 
-    const okTop = doc.setRangeFormat(
-      sheetId,
-      { start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } },
-      { border: { top: edge } },
-      { label: "Borders" },
-    );
-    if (okTop === false) applied = false;
+      const okTop = doc.setRangeFormat(
+        sheetId,
+        { start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } },
+        { border: { top: edge } },
+        { label: "Borders" },
+      );
+      if (okTop === false) applied = false;
 
-    const okBottom = doc.setRangeFormat(
-      sheetId,
-      { start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } },
-      { border: { bottom: edge } },
-      { label: "Borders" },
-    );
-    if (okBottom === false) applied = false;
+      const okBottom = doc.setRangeFormat(
+        sheetId,
+        { start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } },
+        { border: { bottom: edge } },
+        { label: "Borders" },
+      );
+      if (okBottom === false) applied = false;
 
-    const okLeft = doc.setRangeFormat(
-      sheetId,
-      { start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } },
-      { border: { left: edge } },
-      { label: "Borders" },
-    );
-    if (okLeft === false) applied = false;
+      const okLeft = doc.setRangeFormat(
+        sheetId,
+        { start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } },
+        { border: { left: edge } },
+        { label: "Borders" },
+      );
+      if (okLeft === false) applied = false;
 
-    const okRight = doc.setRangeFormat(
-      sheetId,
-      { start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } },
-      { border: { right: edge } },
-      { label: "Borders" },
-    );
-    if (okRight === false) applied = false;
+      const okRight = doc.setRangeFormat(
+        sheetId,
+        { start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } },
+        { border: { right: edge } },
+        { label: "Borders" },
+      );
+      if (okRight === false) applied = false;
+    }
+    return applied;
+  } finally {
+    if (shouldBatch) doc.endBatch();
   }
-  return applied;
 }
 
 export function setHorizontalAlign(doc, sheetId, range, align) {
