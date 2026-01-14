@@ -306,6 +306,7 @@ fn patch_sheet_bin_rejects_inserting_formula_that_requires_rgcb_without_rgcb() {
             new_rgcb: None,
             new_formula_flags: None,
             shared_string_index: None,
+            clear_formula: false,
             new_style: None,
         }],
     )
