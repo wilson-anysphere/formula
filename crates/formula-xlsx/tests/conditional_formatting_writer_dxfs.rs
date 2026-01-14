@@ -293,3 +293,81 @@ fn xlsxdocument_roundtrip_injects_cf_and_remaps_cf_rule_dxfid() {
     assert_eq!(extract_cf_rule_dxf_ids(sheet1_xml), vec![Some(0), None, None]);
     assert_eq!(extract_cf_rule_dxf_ids(sheet2_xml), vec![Some(1), Some(2)]);
 }
+
+#[test]
+fn xlsxdocument_roundtrip_injects_cf_with_existing_base_dxfs() {
+    // Like `xlsxdocument_roundtrip_injects_cf_and_remaps_cf_rule_dxfid`, but starts from an XLSX
+    // that already has `styles.xml <dxfs>` entries. This ensures we remap newly-injected rules to
+    // the correct *offset* in the workbook-global dxf table.
+    let mut base = Workbook::new();
+    let sheet1_id = base.add_sheet("Sheet1").unwrap();
+    base.add_sheet("Sheet2").unwrap();
+
+    let dxf_existing = CfStyleOverride {
+        fill: Some(Color::new_argb(0xFFFFFF00)),
+        ..Default::default()
+    };
+    let s1_rules = vec![CfRule {
+        schema: CfRuleSchema::Office2007,
+        id: None,
+        priority: 1,
+        applies_to: vec![parse_range_a1("A1").unwrap()],
+        dxf_id: Some(0), // existing dxf
+        stop_if_true: false,
+        kind: CfRuleKind::Expression {
+            formula: "A1>0".to_string(),
+        },
+        dependencies: vec![],
+    }];
+    base.sheet_mut(sheet1_id)
+        .unwrap()
+        .set_conditional_formatting(s1_rules, vec![dxf_existing.clone()]);
+
+    let mut cursor = Cursor::new(Vec::<u8>::new());
+    formula_xlsx::write_workbook_to_writer(&base, &mut cursor).expect("write base workbook");
+    let base_bytes = cursor.into_inner();
+
+    let mut doc = formula_xlsx::load_from_bytes(&base_bytes).expect("load xlsx document");
+    let sheet2_id = doc.workbook.sheets[1].id;
+
+    let dxf_new = CfStyleOverride {
+        font_color: Some(Color::new_argb(0xFF00FF00)),
+        ..Default::default()
+    };
+    let s2_rules = vec![CfRule {
+        schema: CfRuleSchema::Office2007,
+        id: None,
+        priority: 1,
+        applies_to: vec![parse_range_a1("B1").unwrap()],
+        dxf_id: Some(0), // local idx 0 -> global idx 1 (because `dxf_existing` already occupies 0)
+        stop_if_true: false,
+        kind: CfRuleKind::Expression {
+            formula: "B1>0".to_string(),
+        },
+        dependencies: vec![],
+    }];
+    doc.workbook
+        .sheet_mut(sheet2_id)
+        .unwrap()
+        .set_conditional_formatting(s2_rules, vec![dxf_new.clone()]);
+
+    let bytes = doc.save_to_vec().expect("save updated xlsx document");
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("open updated workbook");
+
+    let styles_xml = std::str::from_utf8(pkg.part("xl/styles.xml").unwrap()).unwrap();
+    let styles = formula_xlsx::Styles::parse(styles_xml).unwrap();
+    assert_eq!(styles.dxfs.len(), 2);
+    assert_eq!(
+        styles.dxfs[0].fill,
+        Some(Color::new_argb(0xFFFFFF00)),
+        "existing dxf should remain at index 0"
+    );
+    assert_eq!(
+        styles.dxfs[1].font_color,
+        Some(Color::new_argb(0xFF00FF00)),
+        "newly-added dxf should be appended"
+    );
+
+    let sheet2_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet2.xml").unwrap()).unwrap();
+    assert_eq!(extract_cf_rule_dxf_ids(sheet2_xml), vec![Some(1)]);
+}
