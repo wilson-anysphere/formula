@@ -117,7 +117,7 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsx() {
 }
 
 #[test]
-fn open_workbook_with_password_decrypts_encrypted_xlsb() {
+fn open_workbook_with_password_decrypts_agile_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -127,7 +127,7 @@ fn open_workbook_with_password_decrypts_encrypted_xlsb() {
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
     let wb =
-        open_workbook_with_password(&path, Some(password)).expect("expected XLSB to decrypt/open");
+        open_workbook_with_password(&path, Some(password)).expect("open decrypted xlsb workbook");
     match wb {
         Workbook::Xlsb(wb) => {
             assert_eq!(wb.sheet_metas().len(), 1);
@@ -138,7 +138,7 @@ fn open_workbook_with_password_decrypts_encrypted_xlsb() {
 }
 
 #[test]
-fn open_workbook_model_with_password_decrypts_encrypted_xlsb() {
+fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -147,8 +147,8 @@ fn open_workbook_model_with_password_decrypts_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let model =
-        open_workbook_model_with_password(&path, Some(password)).expect("expected model to open");
+    let model = open_workbook_model_with_password(&path, Some(password))
+        .expect("open decrypted xlsb workbook model");
     let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
     assert_eq!(
         sheet.value(CellRef::from_a1("A1").unwrap()),
@@ -158,6 +158,11 @@ fn open_workbook_model_with_password_decrypts_encrypted_xlsb() {
         sheet.value(CellRef::from_a1("B1").unwrap()),
         CellValue::Number(42.5)
     );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("C1").unwrap()),
+        CellValue::Number(85.0)
+    );
+    assert_eq!(sheet.formula(CellRef::from_a1("C1").unwrap()), Some("B1*2"));
 }
 
 fn fixture_path(rel: &str) -> PathBuf {

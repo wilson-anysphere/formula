@@ -2277,14 +2277,6 @@ fn open_encrypted_ooxml_workbook(path: &Path, password: &str) -> Result<Option<W
     };
 
     match format {
-        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
-            let package =
-                xlsx::XlsxLazyPackage::from_vec(decrypted).map_err(|source| Error::OpenXlsx {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-            Ok(Some(Workbook::Xlsx(package)))
-        }
         WorkbookFormat::Xlsb => {
             let wb = xlsb::XlsbWorkbook::open_from_vec(decrypted).map_err(|source| Error::OpenXlsb {
                 path: path.to_path_buf(),
@@ -2292,9 +2284,17 @@ fn open_encrypted_ooxml_workbook(path: &Path, password: &str) -> Result<Option<W
             })?;
             Ok(Some(Workbook::Xlsb(wb)))
         }
-        _ => Err(Error::InvalidPassword {
-            path: path.to_path_buf(),
-        }),
+        _ => {
+            // Some callers encrypt arbitrary ZIP payloads in an OOXML-in-OLE container (including
+            // synthetic fixtures). Treat the decrypted bytes as an OPC package even when the
+            // contents do not look like a specific workbook kind (XLSX/XLSM).
+            let package =
+                xlsx::XlsxLazyPackage::from_vec(decrypted).map_err(|source| Error::OpenXlsx {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            Ok(Some(Workbook::Xlsx(package)))
+        }
     }
 }
 
