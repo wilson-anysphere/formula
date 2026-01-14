@@ -52,6 +52,21 @@ class DocumentControllerStub {
     // Mirror DocumentController's change payload shape.
     this._emitter.emit("change", { sheetViewDeltas: deltas, source: options.source });
   }
+
+  /**
+   * Simulate a user edit (undoable in DocumentController, but in collab mode the canonical undo stack
+   * is Yjs UndoManager). Emits a normal `change` event without a `source` tag.
+   *
+   * @param {string} sheetId
+   * @param {number} frozenRows
+   * @param {number} frozenCols
+   */
+  setFrozen(sheetId, frozenRows, frozenCols) {
+    const before = this.getSheetView(sheetId);
+    const after = { ...before, frozenRows, frozenCols };
+    this._sheetViews.set(sheetId, after);
+    this._emitter.emit("change", { sheetViewDeltas: [{ sheetId, before, after }] });
+  }
 }
 
 test("remote sheet view updates applied via sheetViewBinder are not echoed back into Yjs by the full binder (prevents undo pollution)", async () => {
@@ -174,6 +189,65 @@ test("remote drawings updates applied via sheetViewBinder are not echoed back in
     assert.deepEqual(dc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0, drawings });
     assert.equal(localUpdates, 0, "expected no binder-origin Yjs updates from remote drawings changes");
     assert.equal(undoService.canUndo(), false, "expected remote drawings changes to not create undoable local steps");
+  } finally {
+    doc.off("update", onUpdate);
+    sheetViewBinder.destroy();
+    fullBinder.destroy();
+    undoService.undoManager.destroy();
+    doc.destroy();
+  }
+});
+
+test("local sheet view edits do not produce duplicate Yjs updates when both binders are attached", async () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  doc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+  });
+
+  const binderOrigin = { type: "test:binder-origin" };
+  const undoService = createCollabUndoService({ doc, scope: [sheets], origin: binderOrigin });
+
+  const dc = new DocumentControllerStub();
+  const sheetViewBinder = bindSheetViewToCollabSession({
+    session: /** @type {any} */ ({ doc, sheets, localOrigins: new Set(), isReadOnly: () => false }),
+    documentController: /** @type {any} */ (dc),
+    origin: binderOrigin,
+  });
+  const fullBinder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController: dc,
+    undoService,
+    defaultSheetId: "Sheet1",
+  });
+
+  let binderOriginUpdates = 0;
+  const onUpdate = (_update, origin) => {
+    if (origin === binderOrigin) binderOriginUpdates += 1;
+  };
+
+  try {
+    await flushAsync(5);
+
+    // Ignore any binder setup work.
+    undoService.undoManager.clear();
+    binderOriginUpdates = 0;
+    doc.on("update", onUpdate);
+
+    dc.setFrozen("Sheet1", 2, 1);
+
+    // Give the full binder's async write chain a chance to run.
+    await flushAsync(10);
+
+    assert.equal(
+      binderOriginUpdates,
+      1,
+      "expected only one binder-origin Yjs update for a local sheet view edit (full binder should no-op)",
+    );
   } finally {
     doc.off("update", onUpdate);
     sheetViewBinder.destroy();
