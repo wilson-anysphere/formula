@@ -196,8 +196,17 @@ jobs:
         if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
 
-      - name: Print Tauri CLI version
-        run: cargo tauri --version
+      - name: Verify Tauri CLI version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${TAURI_CLI_VERSION}"
+          actual="$(cargo tauri --version | tr -d '\r' | awk '{print $2}')"
+          echo "cargo-tauri version: ${actual}"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected cargo-tauri ${expected}, but found ${actual}." >&2
+            exit 1
+          fi
 
       - name: Cache Tauri tooling downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
