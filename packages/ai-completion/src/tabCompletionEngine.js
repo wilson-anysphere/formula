@@ -1,6 +1,7 @@
 import { LRUCache } from "./lruCache.js";
 import { FunctionRegistry } from "./functionRegistry.js";
 import { parsePartialFormula as parsePartialFormulaFallback } from "./formulaPartialParser.js";
+import { findMatchingBracketEnd } from "./bracketMatcher.js";
 import { suggestRanges } from "./rangeSuggester.js";
 import { suggestPatternValues } from "./patternSuggester.js";
 import { normalizeCellRef, toA1, columnIndexToLetter } from "./a1.js";
@@ -2513,7 +2514,6 @@ function findUnclosedSheetQuoteStart(textPrefix) {
 
   let inString = false;
   let inSheetQuote = false;
-  let bracketDepth = 0;
   let start = -1;
 
   for (let i = 0; i < text.length; i++) {
@@ -2549,15 +2549,16 @@ function findUnclosedSheetQuoteStart(textPrefix) {
     }
 
     if (ch === "[") {
-      bracketDepth += 1;
-      continue;
-    }
-    if (ch === "]") {
-      bracketDepth = Math.max(0, bracketDepth - 1);
+      // Skip bracketed segments (structured refs / external workbook prefixes) so we don't
+      // treat apostrophes inside them as sheet-name quotes. This also handles Excel's `]]`
+      // escape semantics within bracket segments.
+      const end = findMatchingBracketEnd(text, i, text.length);
+      if (end == null) break;
+      i = end - 1;
       continue;
     }
 
-    if (ch === "'" && bracketDepth === 0) {
+    if (ch === "'") {
       inSheetQuote = true;
       start = i;
     }
@@ -2582,7 +2583,6 @@ function findLastSheetBangIndex(textPrefix) {
 
   let inString = false;
   let inSheetQuote = false;
-  let bracketDepth = 0;
   let lastBang = -1;
 
   for (let i = 0; i < text.length; i++) {
@@ -2616,20 +2616,18 @@ function findLastSheetBangIndex(textPrefix) {
     }
 
     if (ch === "[") {
-      bracketDepth += 1;
-      continue;
-    }
-    if (ch === "]") {
-      bracketDepth = Math.max(0, bracketDepth - 1);
+      const end = findMatchingBracketEnd(text, i, text.length);
+      if (end == null) break;
+      i = end - 1;
       continue;
     }
 
-    if (ch === "'" && bracketDepth === 0) {
+    if (ch === "'") {
       inSheetQuote = true;
       continue;
     }
 
-    if (ch === "!" && bracketDepth === 0) {
+    if (ch === "!") {
       lastBang = i;
     }
   }
@@ -2725,7 +2723,6 @@ function findOpenStructuredRefTokenStart(textPrefix) {
 
   let inString = false;
   let inSheetQuote = false;
-  let bracketDepth = 0;
   let firstBracketIdx = -1;
 
   for (let i = 0; i < text.length; i++) {
@@ -2758,29 +2755,26 @@ function findOpenStructuredRefTokenStart(textPrefix) {
       continue;
     }
 
-    if (ch === "'" && bracketDepth === 0) {
+    if (ch === "'") {
       // Treat sheet quotes as opaque so we don't interpret brackets inside sheet names.
       inSheetQuote = true;
       continue;
     }
 
     if (ch === "[") {
-      bracketDepth += 1;
-      if (bracketDepth === 1) {
+      // If we can't find a matching close before the end of the prefix, the cursor is
+      // currently inside a structured reference token. Record the first bracket so we can
+      // return the full `Table[...]` token start.
+      const end = findMatchingBracketEnd(text, i, text.length);
+      if (end == null) {
         firstBracketIdx = i;
+        break;
       }
-      continue;
-    }
-
-    if (ch === "]") {
-      bracketDepth = Math.max(0, bracketDepth - 1);
-      if (bracketDepth === 0) {
-        firstBracketIdx = -1;
-      }
+      i = end - 1;
     }
   }
 
-  if (bracketDepth === 0 || firstBracketIdx < 0) return null;
+  if (firstBracketIdx < 0) return null;
 
   // The table name token precedes the first '[' and cannot contain whitespace.
   let start = firstBracketIdx;
