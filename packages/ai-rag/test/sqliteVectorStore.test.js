@@ -152,6 +152,7 @@ test(
   "SqliteVectorStore throws on invalid dimension metadata when resetOnCorrupt=false (file storage)",
   { skip: !sqlJsAvailable },
   async () => {
+    const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
     const tmpRoot = path.join(__dirname, ".tmp");
     await mkdir(tmpRoot, { recursive: true });
     const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-invalid-dim-meta-"));
@@ -671,7 +672,11 @@ test(
         return prefix ? `${prefix}${file}` : file;
       }
 
-      const sqlMod = await import("sql.js");
+      // Keep this as a computed dynamic import (no literal bare specifier) so
+      // `scripts/run-node-tests.mjs` can still execute this file when `node_modules/`
+      // is missing.
+      const sqlJsModuleName = "sql" + ".js";
+      const sqlMod = await import(sqlJsModuleName);
       const initSqlJs = sqlMod.default ?? sqlMod;
       const SQL = await initSqlJs({ locateFile: locateSqlJsFile });
       const db = new SQL.Database();
