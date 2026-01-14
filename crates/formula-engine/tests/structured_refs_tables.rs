@@ -940,10 +940,7 @@ fn insert_cols_inside_table_updates_table_sort_state_ranges() {
 #[test]
 fn insert_cols_rewrites_table_column_formulas() {
     let mut engine = setup_engine_with_table();
-    let mut tables: Vec<Table> = engine
-        .get_sheet_tables("Sheet1")
-        .expect("tables")
-        .to_vec();
+    let mut tables: Vec<Table> = engine.get_sheet_tables("Sheet1").expect("tables").to_vec();
     assert_eq!(tables.len(), 1);
     // Give Col2 a calculated-column formula that references the first data cell of Col1.
     tables[0].columns[1].formula = Some("A2".to_string());
@@ -1002,10 +999,7 @@ fn delete_cols_removing_referenced_column_yields_ref_error() {
 #[test]
 fn delete_cols_rewrites_table_column_formulas_to_ref_error() {
     let mut engine = setup_engine_with_table();
-    let mut tables: Vec<Table> = engine
-        .get_sheet_tables("Sheet1")
-        .expect("tables")
-        .to_vec();
+    let mut tables: Vec<Table> = engine.get_sheet_tables("Sheet1").expect("tables").to_vec();
     assert_eq!(tables.len(), 1);
     // Give Col2 a calculated-column formula that points at Col3's first data cell (C2).
     tables[0].columns[1].formula = Some("C2".to_string());
