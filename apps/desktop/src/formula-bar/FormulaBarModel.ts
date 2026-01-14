@@ -107,6 +107,7 @@ export class FormulaBarModel {
   #engineLexTokens: EngineFormulaToken[] | null = null;
   #engineHighlightErrorSpanStart: number | null = null;
   #engineHighlightErrorSpanEnd: number | null = null;
+  #engineHighlightRefs: ColoredFormulaReference[] | null = null;
   #engineFunctionContext: EngineFunctionContext | null = null;
   #engineSyntaxError: FormulaParseError | null = null;
   #engineToolingFormula: string | null = null;
@@ -474,7 +475,8 @@ export class FormulaBarModel {
       this.#engineHighlightSpans != null &&
       this.#engineLexTokens === args.lexResult.tokens &&
       this.#engineHighlightErrorSpanStart === errorSpanStart &&
-      this.#engineHighlightErrorSpanEnd === errorSpanEnd;
+      this.#engineHighlightErrorSpanEnd === errorSpanEnd &&
+      this.#engineHighlightRefs === this.#coloredReferences;
 
     if (!highlightStable) {
       // Reuse the already-computed reference extraction metadata so applying engine results
@@ -487,6 +489,7 @@ export class FormulaBarModel {
       this.#engineLexTokens = args.lexResult.tokens;
       this.#engineHighlightErrorSpanStart = errorSpanStart;
       this.#engineHighlightErrorSpanEnd = errorSpanEnd;
+      this.#engineHighlightRefs = this.#coloredReferences;
     }
   }
 
@@ -804,6 +807,7 @@ export class FormulaBarModel {
     this.#engineLexTokens = null;
     this.#engineHighlightErrorSpanStart = null;
     this.#engineHighlightErrorSpanEnd = null;
+    this.#engineHighlightRefs = null;
     this.#engineFunctionContext = null;
     this.#engineSyntaxError = null;
     this.#engineToolingFormula = null;
