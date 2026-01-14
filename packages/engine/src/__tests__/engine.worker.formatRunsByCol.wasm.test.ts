@@ -22,7 +22,7 @@ class MockWorkerGlobal {
 
 class MockMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
-  private listeners = new Set<(event: MessageEvent<unknown>) => void>();
+  private listeners = new Map<string, Set<(event: MessageEvent<unknown>) => void>>();
   private other: MockMessagePort | null = null;
 
   connect(other: MockMessagePort) {
@@ -43,18 +43,25 @@ class MockMessagePort {
     this.other = null;
   }
 
-  addEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
-    this.listeners.add(listener);
+  addEventListener(type: string, listener: (event: MessageEvent<unknown>) => void): void {
+    const key = String(type ?? "");
+    let set = this.listeners.get(key);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(key, set);
+    }
+    set.add(listener);
   }
 
-  removeEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
-    this.listeners.delete(listener);
+  removeEventListener(type: string, listener: (event: MessageEvent<unknown>) => void): void {
+    const key = String(type ?? "");
+    this.listeners.get(key)?.delete(listener);
   }
 
   private dispatchMessage(data: unknown): void {
     const event = { data } as MessageEvent<unknown>;
     this.onmessage?.(event);
-    for (const listener of this.listeners) {
+    for (const listener of this.listeners.get("message") ?? []) {
       listener(event);
     }
   }
@@ -242,4 +249,3 @@ function loadWorkerModule(): Promise<unknown> {
   }
   return workerModulePromise;
 }
-
