@@ -17767,7 +17767,7 @@ export class SpreadsheetApp {
       throw err;
     }
 
-    const prevSelected = this.getSelectedDrawingId();
+    const prevEffectiveSelected = this.getSelectedDrawingId();
     this.drawingObjectsCache = null;
     this.selectedDrawingId = drawingId;
     if (this.selectedChartId != null) {
@@ -17780,7 +17780,7 @@ export class SpreadsheetApp {
     }
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     this.emitDrawingsChanged();
-    if (this.getSelectedDrawingId() !== prevSelected) {
+    if (this.getSelectedDrawingId() !== prevEffectiveSelected) {
       this.emitDrawingSelectionChanged();
     }
     this.focus();
