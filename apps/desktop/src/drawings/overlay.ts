@@ -397,6 +397,12 @@ export class DrawingOverlay {
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
 
+    const selectedId = this.selectedId;
+    let selectedScreenRect: Rect | null = null;
+    let selectedClipRect: Rect | null = null;
+    let selectedAabb: Rect | null = null;
+    let selectedTransform: DrawingTransform | undefined = undefined;
+
     if (drawObjects) {
       for (const obj of ordered) {
         if (seq !== this.renderSeq || signal?.aborted) return;
@@ -412,6 +418,13 @@ export class DrawingOverlay {
         };
         const clipRect = paneLayout.quadrants[pane.quadrant];
         const aabb = getAabbForObject(screenRect, obj.transform);
+
+        if (selectedId != null && obj.id === selectedId) {
+          selectedScreenRect = screenRect;
+          selectedClipRect = clipRect;
+          selectedAabb = aabb;
+          selectedTransform = obj.transform;
+        }
 
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
         // Skip objects that are fully outside of their pane quadrant.
@@ -651,28 +664,40 @@ export class DrawingOverlay {
 
     // Selection overlay.
     if (seq !== this.renderSeq) return;
-    if (this.selectedId != null) {
-      const selected = ordered.find((o) => o.id === this.selectedId);
-      if (selected) {
-        const rect = anchorToRectPx(selected.anchor, this.geom, zoom);
-        const pane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-        const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
-        const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
-        const screen = {
-          x: rect.x - scrollX + paneLayout.headerOffsetX,
-          y: rect.y - scrollY + paneLayout.headerOffsetY,
-          width: rect.width,
-          height: rect.height,
-        };
-        const clipRect = paneLayout.quadrants[pane.quadrant];
-        const selectionAabb = getAabbForObject(screen, selected.transform);
-        if (clipRect.width > 0 && clipRect.height > 0 && intersects(selectionAabb, clipRect)) {
+    if (selectedId != null) {
+      if (selectedScreenRect && selectedClipRect && selectedAabb) {
+        if (selectedClipRect.width > 0 && selectedClipRect.height > 0 && intersects(selectedAabb, selectedClipRect)) {
           ctx.save();
           ctx.beginPath();
-          ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+          ctx.rect(selectedClipRect.x, selectedClipRect.y, selectedClipRect.width, selectedClipRect.height);
           ctx.clip();
-          drawSelection(ctx, screen, colors, selected.transform);
+          drawSelection(ctx, selectedScreenRect, colors, selectedTransform);
           ctx.restore();
+        }
+      } else {
+        // Fallback: selection can still be rendered when `drawObjects` is disabled.
+        const selected = ordered.find((o) => o.id === selectedId);
+        if (selected) {
+          const rect = anchorToRectPx(selected.anchor, this.geom, zoom);
+          const pane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+          const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
+          const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
+          const screen = {
+            x: rect.x - scrollX + paneLayout.headerOffsetX,
+            y: rect.y - scrollY + paneLayout.headerOffsetY,
+            width: rect.width,
+            height: rect.height,
+          };
+          const clipRect = paneLayout.quadrants[pane.quadrant];
+          const selectionAabb = getAabbForObject(screen, selected.transform);
+          if (clipRect.width > 0 && clipRect.height > 0 && intersects(selectionAabb, clipRect)) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+            ctx.clip();
+            drawSelection(ctx, screen, colors, selected.transform);
+            ctx.restore();
+          }
         }
       }
     }
