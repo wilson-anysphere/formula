@@ -438,6 +438,11 @@
   --motion-duration: 0ms;
   --motion-duration-fast: 0ms;
   --motion-ease: linear;
+  scroll-behavior: auto;
+}
+
+:root[data-reduced-motion="true"] * {
+  scroll-behavior: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -445,5 +450,10 @@
     --motion-duration: 0ms;
     --motion-duration-fast: 0ms;
     --motion-ease: linear;
+    scroll-behavior: auto;
+  }
+
+  :root * {
+    scroll-behavior: auto;
   }
 }
