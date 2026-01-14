@@ -250,6 +250,9 @@ export class TabCompletionEngine {
 
       const topLevelStructuredRefs = await this.suggestTopLevelStructuredRefs(context);
       if (topLevelStructuredRefs.length > 0) return topLevelStructuredRefs;
+
+      const topLevelA1Ranges = this.suggestTopLevelA1Ranges(context);
+      if (topLevelA1Ranges.length > 0) return topLevelA1Ranges;
     }
 
     // 1) Function name completion
@@ -944,6 +947,71 @@ export class TabCompletionEngine {
         displayText: insertedSuffix,
         type: "range",
         confidence: m.confidence,
+      });
+    }
+
+    return rankAndDedupe(suggestions).slice(0, this.maxSuggestions);
+  }
+
+  /**
+   * Suggest contiguous A1 range completions when the user is typing a range prefix
+   * at the top level of a formula (i.e. not inside a function call).
+   *
+   * We keep this conservative: only trigger for inputs that already look like a
+   * range (contain `:`) or are column-only references (no row digits).
+   *
+   * Examples:
+   * - `=A1:` -> `=A1:A10`
+   * - `=A:`  -> `=A:A`
+   *
+   * @param {CompletionContext} context
+   * @returns {Suggestion[]}
+   */
+  suggestTopLevelA1Ranges(context) {
+    const input = safeToString(context?.currentInput);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const prefix = input.slice(0, cursor);
+
+    // Avoid suggesting ranges while the user is typing plain text or other
+    // bracketed/quoted constructs.
+    if (isInUnclosedDoubleQuotedString(prefix)) return [];
+    if (findUnclosedSheetQuoteStart(prefix) !== null) return [];
+    if (findOpenStructuredRefTokenStart(prefix) !== null) return [];
+
+    const start = findA1TokenStart(prefix);
+    if (start === null) return [];
+    if (start - 1 >= 0 && prefix[start - 1] === "!") return [];
+
+    const tokenText = prefix.slice(start);
+    if (!tokenText) return [];
+
+    // Only trigger when the user is clearly typing a range (has ':') or the token
+    // is a column-only reference (no digits).
+    const hasColon = tokenText.includes(":");
+    const hasDigits = /\d/.test(tokenText);
+    if (!hasColon && hasDigits) return [];
+
+    const cellRef = safeNormalizeCellRef(context?.cellRef);
+    const candidates = safeSuggestRanges({
+      currentArgText: tokenText,
+      cellRef,
+      surroundingCells: context?.surroundingCells,
+    });
+
+    /** @type {Suggestion[]} */
+    const suggestions = [];
+    for (const candidate of candidates) {
+      if (typeof candidate?.range !== "string") continue;
+      if (!candidate.range.startsWith(tokenText)) continue;
+      const suffix = candidate.range.slice(tokenText.length);
+      if (suffix.length === 0) continue;
+      const replacement = `${tokenText}${suffix}`;
+      const newText = replaceSpan(input, start, cursor, replacement);
+      suggestions.push({
+        text: newText,
+        displayText: newText,
+        type: "range",
+        confidence: candidate.confidence,
       });
     }
 
@@ -2593,6 +2661,31 @@ function findSheetQualifiedTokenStart(textPrefix, bangIdx) {
   const before = start - 1 >= 0 ? text[start - 1] : "";
   if (before && !/[=\s(,;{+\\\-*/^@<>&]/.test(before)) return null;
   return start;
+}
+
+/**
+ * Find the start index of the current "token" in a formula prefix by scanning backwards
+ * to the nearest operator/whitespace boundary.
+ *
+ * This is a best-effort helper used for top-level range completions. It intentionally
+ * treats operators like `+`, `-`, `*`, etc. as token boundaries so we can offer a pure
+ * insertion for expressions like `=1+A1:`.
+ *
+ * @param {string} textPrefix
+ * @returns {number | null}
+ */
+function findA1TokenStart(textPrefix) {
+  const text = typeof textPrefix === "string" ? textPrefix : "";
+  if (!text) return null;
+
+  let i = text.length;
+  while (i > 0) {
+    const ch = text[i - 1];
+    if (/[=\s(,;{+\\\-*/^@<>&]/.test(ch)) break;
+    i -= 1;
+  }
+
+  return i < text.length ? i : null;
 }
 
 /**

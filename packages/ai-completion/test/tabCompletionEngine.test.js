@@ -4612,6 +4612,27 @@ test("Sheet-qualified ranges are suggested at top level (=Sheet2!A → =Sheet2!A
   );
 });
 
+test("Top-level A1 range suggestions work (=A1: → =A1:A10)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`A${r}`] = r;
+
+  const currentInput = "=A1:";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=A1:A10"),
+    `Expected a top-level A1 range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified VLOOKUP table_array prefers a 2D table range when adjacent columns form a table", async () => {
   const values = {};
   // Header row.
