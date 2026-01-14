@@ -131,6 +131,41 @@ describe("FormulaBarView function hint UI", () => {
     }
   });
 
+  it("treats unsupported locale IDs as en-US when inferring argument separators (pt-BR)", async () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "pt-BR";
+
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      // In the current engine, pt-BR is unsupported and formula punctuation falls back to en-US.
+      // That means commas are treated as argument separators (not decimal separators).
+      view.textarea.value = "=ROUND(1,2)";
+
+      const inFirstArg = view.textarea.value.indexOf("1") + 1;
+      view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+      view.textarea.dispatchEvent(new Event("input"));
+      await nextFrame();
+      expect(getSignatureName(host)).toBe("ROUND(");
+      expect(getActiveParamText(host)).toBe("number");
+
+      const inSecondArg = view.textarea.value.lastIndexOf("2") + 1;
+      view.textarea.setSelectionRange(inSecondArg, inSecondArg);
+      view.textarea.dispatchEvent(new Event("select"));
+      await nextFrame();
+      expect(getActiveParamText(host)).toBe("num_digits");
+
+      host.remove();
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("normalizes BCP-47 variants when inferring argument separators (de-CH-1996)", async () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "de-CH-1996";
