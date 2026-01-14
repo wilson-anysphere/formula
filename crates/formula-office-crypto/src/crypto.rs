@@ -971,6 +971,39 @@ mod tests {
     }
 
     #[test]
+    fn standard_cryptoapi_aes_md5_cryptderivekey_aes256_vector() {
+        // CryptoAPI `CryptDeriveKey` vectors for MD5 (same algorithm as SHA1 but with a 16-byte
+        // digest). While Standard AES typically uses SHA1, this locks in the ipad/opad XOR behavior
+        // for MD5 and exercises the keyLen > digestLen expansion (AES-256 keyLen=32 > 16).
+        //
+        // Input is `H_block0` from the MD5 Standard/CryptoAPI test vectors (password="password",
+        // salt=00..0f, spinCount=50_000):
+        // - H_block0 (MD5) = 69badcae244868e209d4e053ccd2a3bc
+        let h_block0 = hex_decode("69badcae244868e209d4e053ccd2a3bc");
+
+        // AES-128 (keyLen=16) => first digest.
+        let key128 = crypt_derive_key_aes(HashAlgorithm::Md5, &h_block0, 16).expect("key128");
+        assert_eq!(
+            key128.as_slice(),
+            hex_decode("8d666ec55103fdbdc3281cc271f6cb7c")
+        );
+
+        // AES-256 (keyLen=32) => inner||outer.
+        let key256 = crypt_derive_key_aes(HashAlgorithm::Md5, &h_block0, 32).expect("key256");
+        assert_eq!(
+            key256.as_slice(),
+            hex_decode("8d666ec55103fdbdc3281cc271f6cb7c3288b35db824f73eb002df77c5393e41")
+        );
+
+        // AES-192 is the 24-byte prefix of the same derivation output.
+        let key192 = crypt_derive_key_aes(HashAlgorithm::Md5, &h_block0, 24).expect("key192");
+        assert_eq!(
+            key192.as_slice(),
+            hex_decode("8d666ec55103fdbdc3281cc271f6cb7c3288b35db824f73e")
+        );
+    }
+
+    #[test]
     fn normalize_key_material_pads_with_0x36() {
         assert_eq!(
             normalize_key_material(&[0xAA, 0xBB], 5),
