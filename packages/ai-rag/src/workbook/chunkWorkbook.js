@@ -444,7 +444,13 @@ function detectRegions(sheet, predicate, opts) {
       let acc = 0;
       for (let i = start; i < end; i += 1) {
         const code = text.charCodeAt(i);
-        if (code < 48 || code > 57) return null;
+        if (code < 48 || code > 57) {
+          // Preserve legacy behavior for unusual key encodings (e.g. "1e3", "+1"):
+          // fall back to `Number()` parsing, even though it allocates a substring.
+          const num = Number(text.slice(start, end));
+          if (!Number.isInteger(num) || num < 0) return null;
+          return num;
+        }
         acc = acc * 10 + (code - 48);
       }
       return acc;
