@@ -315,3 +315,46 @@ fn record_batch_to_columnar_accepts_percentage_decimal128_with_metadata(
     assert_eq!(table.get_cell(1, 0), Value::Percentage(0));
     Ok(())
 }
+
+#[test]
+fn record_batch_to_columnar_accepts_more_integer_widths_as_number(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arrow_array::{Int64Array, Int8Array, UInt8Array};
+
+    let i8_arr: ArrayRef = Arc::new(Int8Array::from(vec![Some(-1), None, Some(2)]));
+    let u8_arr: ArrayRef = Arc::new(UInt8Array::from(vec![Some(0), Some(255), None]));
+    let i64_arr: ArrayRef = Arc::new(Int64Array::from(vec![
+        Some(-9_007_199_254_740_992_i64),
+        Some(0_i64),
+        None,
+    ]));
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("i8", DataType::Int8, true),
+        Field::new("u8", DataType::UInt8, true),
+        Field::new("i64", DataType::Int64, true),
+    ]));
+    let batch = RecordBatch::try_new(schema, vec![i8_arr, u8_arr, i64_arr])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.schema()[0].column_type, ColumnType::Number);
+    assert_eq!(table.schema()[1].column_type, ColumnType::Number);
+    assert_eq!(table.schema()[2].column_type, ColumnType::Number);
+
+    assert_eq!(table.get_cell(0, 0), Value::Number(-1.0));
+    assert_eq!(table.get_cell(1, 0), Value::Null);
+    assert_eq!(table.get_cell(2, 0), Value::Number(2.0));
+
+    assert_eq!(table.get_cell(0, 1), Value::Number(0.0));
+    assert_eq!(table.get_cell(1, 1), Value::Number(255.0));
+    assert_eq!(table.get_cell(2, 1), Value::Null);
+
+    assert_eq!(
+        table.get_cell(0, 2),
+        Value::Number(-9_007_199_254_740_992_i64 as f64)
+    );
+    assert_eq!(table.get_cell(1, 2), Value::Number(0.0));
+    assert_eq!(table.get_cell(2, 2), Value::Null);
+
+    Ok(())
+}
