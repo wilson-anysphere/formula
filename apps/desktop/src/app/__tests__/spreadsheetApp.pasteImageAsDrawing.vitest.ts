@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
+import * as ui from "../../extensions/ui.js";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -224,6 +225,36 @@ describe("SpreadsheetApp paste image clipboard", () => {
     const objects = app.getDrawingObjects();
     expect(objects).toHaveLength(1);
     expect(objects[0]!.kind.type).toBe("image");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows a toast and no-ops when the clipboard provider skips an oversized image", async () => {
+    const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    const content: any = {};
+    Object.defineProperty(content, "skippedOversizedImagePng", { value: true });
+
+    const provider = {
+      read: vi.fn(async () => content),
+      write: vi.fn(async () => {}),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    await app.pasteClipboardToSelection();
+
+    expect(app.getDrawingObjects()).toHaveLength(0);
+    expect(toastSpy).toHaveBeenCalledWith("Image too large (>5MB). Choose a smaller file.", "warning");
 
     app.destroy();
     root.remove();
