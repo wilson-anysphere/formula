@@ -182,6 +182,9 @@ fn write_workbook_print_settings_impl(
     // Excel sheet names are case-insensitive across Unicode; accept settings keyed by any casing.
     let mut settings_by_sheet: HashMap<String, &SheetPrintSettings> = HashMap::new();
     for sheet in &settings.sheets {
+        if sheet.sheet_name.is_empty() {
+            continue;
+        }
         settings_by_sheet.insert(sheet_name_casefold(&sheet.sheet_name), sheet);
     }
 
