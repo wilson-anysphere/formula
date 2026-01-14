@@ -673,6 +673,7 @@ Deep-link scheme config/registration:
 - Runtime: `apps/desktop/src-tauri/src/main.rs` attempts best-effort OS registration on Linux/Windows via
   `app.handle().deep_link().register_all()`. (macOS uses `Info.plist` `CFBundleURLTypes` and cannot register schemes dynamically.)
 - Delivery into Rust: on cold start / relaunch the URL is typically present in argv (handled by `extract_oauth_redirect_urls(...)` + the single-instance callback); on macOS, already-running instances can receive deep links via `tauri::RunEvent::Opened` (classified by `apps/desktop/src-tauri/src/opened_urls.rs`).
+  - Note: the open-file argv parser (`apps/desktop/src-tauri/src/open_file.rs`) explicitly ignores `formula://...` args so deep links aren't misinterpreted as filesystem paths.
 
 **How the frontend chooses:** `DesktopOAuthBroker.openAuthUrl(...)` (`apps/desktop/src/power-query/oauthBroker.ts`) inspects the auth URL’s `redirect_uri` query param. If it is a supported loopback URI, it invokes `oauth_loopback_listen` **before** opening the system browser; otherwise it relies on `formula://…` deep-link delivery.
 
