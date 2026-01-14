@@ -725,7 +725,8 @@ fn cell_prefix_respects_layered_alignment_and_explicit_clears() {
 
 #[test]
 fn cell_prefix_respects_range_run_precedence() {
-    use formula_engine::{Engine, FormatRun};
+    use formula_engine::metadata::FormatRun;
+    use formula_engine::Engine;
     use formula_model::{Alignment, HorizontalAlignment};
 
     let mut engine = Engine::new();
@@ -795,7 +796,8 @@ fn cell_prefix_respects_range_run_precedence() {
 
 #[test]
 fn cell_protect_and_format_respect_range_run_layer() {
-    use formula_engine::{Engine, FormatRun};
+    use formula_engine::metadata::FormatRun;
+    use formula_engine::Engine;
     use formula_model::{Protection, Style};
 
     let mut engine = Engine::new();
