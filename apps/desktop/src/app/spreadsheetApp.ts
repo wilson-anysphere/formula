@@ -270,6 +270,12 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
   }
   if (typeof engine.setFormatRunsByCol === "function") {
     target.setFormatRunsByCol = (sheet, col, runs) => engine.setFormatRunsByCol(sheet, col, runs);
+  } else if (typeof engine.setColFormatRuns === "function") {
+    // DocumentController emits per-column compressed formatting runs (`formatRunsByCol` /
+    // `rangeRunDeltas`) for large rectangles of formatting-only changes. Expose this as the
+    // `EngineSyncTarget.setFormatRunsByCol` hook so `engineApplyDocumentChange` can forward the
+    // deltas without materializing per-cell style ids.
+    target.setFormatRunsByCol = (sheet, col, runs) => engine.setColFormatRuns(sheet, col, runs);
   }
 
   ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);
@@ -7876,7 +7882,8 @@ export class SpreadsheetApp {
             const wantsRecalc = recalc === true;
 
             // Formatting-only / view-only payloads often omit cell deltas. Avoid scheduling a WASM
-            // task unless the payload can impact calculation results.
+            // task unless the payload can impact calculation results. Range-run formatting deltas
+            // can affect CELL() results and must be forwarded even when `deltas` is empty.
             if (deltas.length === 0 && !hasStyles && !hasViews && !hasRangeRuns && !hasSheetMeta) {
               if (wantsRecalc) {
                 void this.enqueueWasmSync(async (worker) => {

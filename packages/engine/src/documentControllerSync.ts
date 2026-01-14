@@ -138,6 +138,16 @@ export interface EngineSyncTarget {
    * Sync helpers must treat them as best-effort.
    */
   internStyle?: (styleObj: unknown) => Promise<number> | number;
+  /**
+   * Replace the range-run formatting runs for a column (DocumentController `formatRunsByCol`).
+   *
+   * Runs are expressed as half-open row intervals `[startRow, endRowExclusive)`.
+   */
+  setColFormatRuns?: (
+    sheet: string,
+    col: number,
+    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+  ) => Promise<void> | void;
   setCellStyleId?: (sheet: string, address: string, styleId: number) => Promise<void> | void;
   setRowStyleId?: (sheet: string, row: number, styleId: number | null) => Promise<void> | void;
   setColStyleId?: (sheet: string, col: number, styleId: number | null) => Promise<void> | void;
@@ -544,7 +554,14 @@ export async function engineHydrateFromDocument(
         // exposes the optional hook. This ensures large range formatting operations are visible
         // to Excel-compatible functions like `CELL("prefix")` / `CELL("protect")` even when the
         // DocumentController did not materialize per-cell style ids.
-        if (typeof engine.setFormatRunsByCol === "function" && sheet?.formatRunsByCol?.entries) {
+        const setFormatRunsByCol =
+          typeof engine.setFormatRunsByCol === "function"
+            ? engine.setFormatRunsByCol
+            : typeof engine.setColFormatRuns === "function"
+              ? engine.setColFormatRuns
+              : null;
+
+        if (setFormatRunsByCol && sheet?.formatRunsByCol?.entries) {
           for (const [col, rawRuns] of sheet.formatRunsByCol.entries() as Iterable<[number, any[]]>) {
             if (!Number.isInteger(col) || col < 0 || col >= 16_384) continue;
             if (!Array.isArray(rawRuns) || rawRuns.length === 0) continue;
@@ -564,7 +581,8 @@ export async function engineHydrateFromDocument(
             }
 
             if (runs.length > 0) {
-              await engine.setFormatRunsByCol(engineSheetId, col, runs);
+              // Preserve method binding for class-based engine implementations (e.g. tests).
+              await setFormatRunsByCol.call(engine as any, engineSheetId, col, runs);
             }
           }
         }
@@ -596,6 +614,7 @@ export async function engineHydrateFromDocument(
         if (styleUpdates.length > 0) await Promise.all(styleUpdates);
       }
     }
+
   }
 
   const metadata = options.workbookFileMetadata ?? null;
@@ -856,7 +875,12 @@ export async function engineApplyDocumentChange(
   // like `CELL("prefix")` cannot observe formatting correctly for cells that do not have explicit
   // per-cell style ids.
   let didApplyAnyRangeRuns = false;
-  const setFormatRunsByCol = typeof engine.setFormatRunsByCol === "function" ? engine.setFormatRunsByCol.bind(engine) : null;
+  const setFormatRunsByCol =
+    typeof engine.setFormatRunsByCol === "function"
+      ? engine.setFormatRunsByCol.bind(engine)
+      : typeof engine.setColFormatRuns === "function"
+        ? engine.setColFormatRuns.bind(engine)
+        : null;
   if (setFormatRunsByCol && rangeRunDeltas.length > 0) {
     for (const delta of rangeRunDeltas) {
       const sheetId = typeof (delta as any)?.sheetId === "string" ? (delta as any).sheetId : "";
@@ -964,7 +988,8 @@ export async function engineApplyDocumentChange(
   // ignore formatting/view metadata entirely (backwards compatibility).
   const didApplyAnyFormattingMetadata =
     didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyRangeRuns || didApplyAnyColWidths;
-  const didApplyAnyMetadataDeltas = didApplyAnyFormattingMetadata || didApplyAnySheetDisplayNames || didRenameAnySheets;
+  const didApplyAnyMetadataDeltas =
+    didApplyAnyFormattingMetadata || didApplyAnySheetDisplayNames || didRenameAnySheets;
 
   if (didApplyAnyMetadataDeltas && options.recalculate !== false) {
     shouldRecalculate = true;
@@ -974,6 +999,13 @@ export async function engineApplyDocumentChange(
   // `CELL("address")`, but DocumentController emits them with `recalc: false`. Override so any
   // dependent formulas observe the updated tab name.
   if (didRenameAnySheets && options.recalculate !== false) {
+    shouldRecalculate = true;
+  }
+
+  // Range-run formatting can affect worksheet information functions like `CELL("format")`, but
+  // DocumentController may emit formatting deltas with `recalc: false`. Override so
+  // formatting-dependent formulas update when large formatted rectangles change.
+  if (didApplyAnyRangeRuns && options.recalculate !== false) {
     shouldRecalculate = true;
   }
 

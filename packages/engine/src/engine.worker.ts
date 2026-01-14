@@ -35,6 +35,8 @@ type WasmWorkbookInstance = {
   setCell(address: string, value: CellScalar, sheet?: string): void;
   setCellRich?: (address: string, value: unknown, sheet?: string) => void;
   setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
+  internStyle?: (style: unknown) => number;
+  setColFormatRuns?: (sheet: string, col: number, runs: unknown) => void;
   setLocale?: (localeId: string) => boolean;
   getCalcSettings?: () => unknown;
   setCalcSettings?: (settings: unknown) => void;
@@ -67,7 +69,6 @@ type WasmWorkbookInstance = {
   ) => void;
   setColWidth?: (sheet: string, col: number, width: number | null) => void;
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
-  internStyle?: (style: unknown) => number;
   setSheetOrigin?: (sheet: string, origin: string | null) => void;
   setColWidthChars?: (sheet: string, col: number, widthChars: number | null) => void;
   setSheetDisplayName?: (sheetId: string, name: string) => void;
@@ -955,6 +956,16 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               {
                 const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
                 (wb as any).setColHidden(sheet, params.col, Boolean(params.hidden));
+              }
+              result = null;
+              break;
+            case "setColFormatRuns":
+              if (typeof (wb as any).setColFormatRuns !== "function") {
+                throw new Error("setColFormatRuns: WasmWorkbook.setColFormatRuns is not available in this WASM build");
+              }
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setColFormatRuns(sheet, params.col, params.runs);
               }
               result = null;
               break;

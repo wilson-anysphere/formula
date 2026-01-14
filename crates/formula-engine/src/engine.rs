@@ -19,6 +19,7 @@ use crate::locale::{
     canonicalize_formula, canonicalize_formula_with_style, localize_formula,
     localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
+use crate::metadata::{style_id_for_row_in_runs, FormatRun};
 use crate::pivot::{
     refresh_pivot, PivotRefreshContext, PivotRefreshError, PivotRefreshOutput, PivotSource,
     PivotTableDefinition, PivotTableId,
@@ -332,7 +333,9 @@ struct Sheet {
     row_properties: BTreeMap<u32, RowProperties>,
     /// Per-column formatting/visibility overrides.
     col_properties: BTreeMap<u32, ColProperties>,
-    /// Compressed formatting runs keyed by 0-based column index.
+    /// Range-based formatting layer stored as per-column row interval runs.
+    ///
+    /// Runs are expected to be sorted by `start_row` and non-overlapping.
     format_runs_by_col: BTreeMap<u32, Vec<FormatRun>>,
 }
 
@@ -906,6 +909,62 @@ impl Engine {
             next_recalc_id: 0,
             info: EngineInfo::default(),
         }
+    }
+
+    /// Replace the range-run formatting runs for a column.
+    ///
+    /// `runs` are expected to be sorted by `start_row` and non-overlapping, but this method will
+    /// perform a best-effort normalization (sorting + dropping empty/default runs) to avoid
+    /// corrupting engine state when callers pass malformed input.
+    pub fn set_col_format_runs(
+        &mut self,
+        sheet: &str,
+        col: u32,
+        mut runs: Vec<FormatRun>,
+    ) -> Result<(), EngineError> {
+        if col >= EXCEL_MAX_COLS {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::ColumnOutOfRange,
+            ));
+        }
+
+        // Normalize runs to preserve sparse semantics and prevent obvious corruption.
+        runs.retain(|r| r.start_row < r.end_row_exclusive && r.style_id != 0);
+        runs.sort_by_key(|r| r.start_row);
+
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        if let Some(max_row) = runs
+            .iter()
+            .map(|r| r.end_row_exclusive.saturating_sub(1))
+            .max()
+        {
+            if max_row >= i32::MAX as u32 {
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::RowOutOfRange,
+                ));
+            }
+            if self.workbook.grow_sheet_dimensions(sheet_id, CellAddr { row: max_row, col }) {
+                // Formatting metadata can introduce new in-bounds coordinates. Sheet dimensions
+                // affect out-of-bounds `#REF!` semantics, so conservatively refresh compiled results.
+                self.mark_all_compiled_cells_dirty();
+            }
+        } else if self
+            .workbook
+            .grow_sheet_dimensions(sheet_id, CellAddr { row: 0, col })
+        {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
+            return Ok(());
+        };
+
+        if runs.is_empty() {
+            sheet_state.format_runs_by_col.remove(&col);
+        } else {
+            sheet_state.format_runs_by_col.insert(col, runs);
+        }
+        Ok(())
     }
 
     pub fn calc_settings(&self) -> &CalcSettings {
@@ -1692,6 +1751,7 @@ impl Engine {
             sheet_state.default_style_id = None;
             sheet_state.row_properties.clear();
             sheet_state.col_properties.clear();
+            sheet_state.format_runs_by_col.clear();
         }
 
         // Rewrite formulas stored in remaining sheets.
@@ -10517,6 +10577,21 @@ impl crate::eval::ValueResolver for Snapshot {
             .get(sheet_id)
             .and_then(|map| map.get(&col))
             .cloned()
+    }
+
+    fn range_run_style_id(&self, sheet_id: usize, addr: CellAddr) -> u32 {
+        let (rows, cols) = self.sheet_dimensions(sheet_id);
+        if addr.row >= rows || addr.col >= cols {
+            return 0;
+        }
+
+        style_id_for_row_in_runs(
+            self.format_runs_by_col
+                .get(sheet_id)
+                .and_then(|map| map.get(&addr.col))
+                .map(|runs| runs.as_slice()),
+            addr.row,
+        )
     }
 
     fn workbook_directory(&self) -> Option<&str> {

@@ -37,6 +37,7 @@ pub mod functions;
 pub mod graph;
 pub mod iterative;
 pub mod locale;
+pub mod metadata;
 pub mod pivot;
 pub mod pivot_registry;
 pub mod simd;
@@ -73,6 +74,7 @@ pub use engine::{
     EngineInfo, ExternalDataProvider, ExternalValueProvider, FormatRun, NameDefinition, NameScope,
     PrecedentNode, RecalcMode, RecalcValueChange, SheetId, SheetLifecycleError,
 };
+pub use metadata::FormatRun;
 pub use parser::{
     lex, lex_partial, parse_formula_partial, FunctionContext, ParseContext, PartialLex, PartialParse,
     Token, TokenKind,

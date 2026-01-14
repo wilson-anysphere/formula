@@ -484,6 +484,21 @@ export class EngineWorker {
     await this.invoke("setRange", { range, values: normalizedValues, sheet }, options);
   }
 
+  async internStyle(style: WorkbookStyleDto | null, options?: RpcOptions): Promise<number> {
+    await this.flush();
+    return (await this.invoke("internStyle", { style }, options)) as number;
+  }
+
+  async setColFormatRuns(
+    sheet: string,
+    col: number,
+    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    options?: RpcOptions
+  ): Promise<void> {
+    await this.flush();
+    await this.invoke("setColFormatRuns", { sheet, col, runs }, options);
+  }
+
   async setLocale(localeId: string, options?: RpcOptions): Promise<boolean> {
     await this.flush();
     return (await this.invoke("setLocale", { localeId }, options)) as boolean;
@@ -704,11 +719,6 @@ export class EngineWorker {
   async setColHidden(col: number, hidden: boolean, sheet?: string, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setColHidden", { sheet, col, hidden }, options);
-  }
-
-  async internStyle(style: WorkbookStyleDto, options?: RpcOptions): Promise<number> {
-    await this.flush();
-    return (await this.invoke("internStyle", { style }, options)) as number;
   }
 
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {

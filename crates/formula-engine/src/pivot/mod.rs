@@ -97,6 +97,28 @@ impl PivotKey {
     }
 }
 
+pub(crate) fn pivot_field_ref_from_str(raw: &str) -> PivotFieldRef {
+    if let Some(measure) = formula_model::pivots::parse_dax_measure_ref(raw) {
+        return PivotFieldRef::DataModelMeasure(measure);
+    }
+    if let Some((table, column)) = formula_model::pivots::parse_dax_column_ref(raw) {
+        return PivotFieldRef::DataModelColumn { table, column };
+    }
+    PivotFieldRef::CacheFieldName(raw.to_string())
+}
+
+pub(crate) fn pivot_field_ref_display_string(field: &PivotFieldRef) -> String {
+    match field {
+        PivotFieldRef::CacheFieldName(name) => name.clone(),
+        PivotFieldRef::DataModelColumn { table, column } => format!("{table}[{column}]"),
+        PivotFieldRef::DataModelMeasure(name) => format!("[{name}]"),
+    }
+}
+
+pub(crate) fn pivot_field_ref_casefold(field: &PivotFieldRef) -> String {
+    crate::value::casefold(&pivot_field_ref_display_string(field))
+}
+
 impl PartialOrd for PivotKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))

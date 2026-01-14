@@ -127,8 +127,10 @@ export interface EngineClient {
   setColHidden(col: number, hidden: boolean, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
    * Intern (deduplicate) a style into the workbook's shared style table, returning its id.
+   *
+   * Style id `0` is always the default style. Passing `null` is treated as the default style.
    */
-  internStyle(style: WorkbookStyleDto, options?: RpcOptions): Promise<number>;
+  internStyle(style: WorkbookStyleDto | null, options?: RpcOptions): Promise<number>;
   /**
    * Set the locale used by the WASM engine when interpreting user-entered formulas and when
    * parsing locale-sensitive strings at runtime (criteria, VALUE/DATE parsing, etc).
@@ -158,6 +160,17 @@ export interface EngineClient {
    * Set (or clear) the per-sheet override for `INFO("origin")`.
    */
   setInfoOriginForSheet(sheet: string, origin: string | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Replace the range-run formatting runs for a column.
+   *
+   * Runs are expressed as half-open row intervals `[startRow, endRowExclusive)`.
+   */
+  setColFormatRuns(
+    sheet: string,
+    col: number,
+    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    options?: RpcOptions,
+  ): Promise<void>;
   /**
    * Recalculate the workbook and return value-change deltas.
    *
@@ -595,6 +608,8 @@ export function createEngineClient(options?: {
     setInfoOrigin: async (origin, rpcOptions) => await withEngine((connected) => connected.setInfoOrigin(origin, rpcOptions)),
     setInfoOriginForSheet: async (sheet, origin, rpcOptions) =>
       await withEngine((connected) => connected.setInfoOriginForSheet(sheet, origin, rpcOptions)),
+    setColFormatRuns: async (sheet, col, runs, rpcOptions) =>
+      await withEngine((connected) => connected.setColFormatRuns(sheet, col, runs, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
     getPivotSchema: async (sheet, sourceRangeA1, sampleSize, rpcOptions) =>
       await withEngine((connected) => connected.getPivotSchema(sheet, sourceRangeA1, sampleSize, rpcOptions)),

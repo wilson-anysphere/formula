@@ -1,17 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
+use formula_engine::{
+    CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
+    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, FormatRun as EngineFormatRun,
+    NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind,
+    Value as EngineValue,
+};
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
     iter_locales, ValueLocaleConfig, EN_US,
 };
 use formula_engine::pivot as pivot_engine;
-use formula_engine::{
-    CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, FormatRun, NameDefinition,
-    NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
-};
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
     CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, WhatIfError, WhatIfModel,
@@ -1844,6 +1845,14 @@ impl WhatIfModel for WorkbookGoalSeekModel<'_> {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FormatRunDto {
+    start_row: u32,
+    end_row_exclusive: u32,
+    style_id: u32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 enum EditOpDto {
     InsertRows {
@@ -2081,6 +2090,18 @@ impl WorkbookState {
         let sheet = self.require_sheet(sheet_key)?.to_string();
         self.engine.set_sheet_display_name(&sheet, display_name);
         Ok(())
+    }
+
+    fn set_col_format_runs_internal(
+        &mut self,
+        sheet: &str,
+        col: u32,
+        runs: Vec<EngineFormatRun>,
+    ) -> Result<(), JsValue> {
+        let sheet = self.ensure_sheet(sheet);
+        self.engine
+            .set_col_format_runs(&sheet, col, runs)
+            .map_err(|err| js_err(err.to_string()))
     }
 
     fn resolve_sheet(&self, name: &str) -> Option<&str> {
@@ -3925,6 +3946,32 @@ impl WasmWorkbook {
         // default style in the workbook style table).
         let style_id = style_id.filter(|id| *id != 0);
         self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
+    }
+
+    /// Replace the range-run formatting runs for a column.
+    ///
+    /// `runs` is an array of `{ startRow, endRowExclusive, styleId }`.
+    #[wasm_bindgen(js_name = "setColFormatRuns")]
+    pub fn set_col_format_runs(
+        &mut self,
+        sheet: String,
+        col: u32,
+        runs: JsValue,
+    ) -> Result<(), JsValue> {
+        let parsed: Vec<FormatRunDto> = if runs.is_null() || runs.is_undefined() {
+            Vec::new()
+        } else {
+            serde_wasm_bindgen::from_value(runs).map_err(|err| js_err(err.to_string()))?
+        };
+        let runs: Vec<EngineFormatRun> = parsed
+            .into_iter()
+            .map(|r| EngineFormatRun {
+                start_row: r.start_row,
+                end_row_exclusive: r.end_row_exclusive,
+                style_id: r.style_id,
+            })
+            .collect();
+        self.inner.set_col_format_runs_internal(&sheet, col, runs)
     }
 
     #[wasm_bindgen(js_name = "getCalcSettings")]

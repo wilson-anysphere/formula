@@ -675,6 +675,8 @@ export type RpcMethod =
   | "setSheetDisplayName"
   // Workbook metadata
   | "setWorkbookFileMetadata"
+  | "getCalcSettings"
+  | "setCalcSettings"
   | "setCellStyleId"
   | "setRowStyleId"
   | "setColStyleId"
@@ -683,6 +685,7 @@ export type RpcMethod =
   | "setColWidth"
   | "setColWidthChars"
   | "setColHidden"
+  | "setColFormatRuns"
   | "internStyle";
 
 /**

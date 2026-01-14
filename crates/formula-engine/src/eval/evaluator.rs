@@ -309,6 +309,16 @@ pub trait ValueResolver {
         None
     }
 
+    /// Return the style id from the range-run formatting layer for a cell, if present.
+    ///
+    /// This corresponds to DocumentController's `formatRunsByCol` layer (large range formatting
+    /// rectangles compressed into per-column runs).
+    ///
+    /// Style id `0` indicates "no run applies".
+    fn range_run_style_id(&self, _sheet_id: usize, _addr: CellAddr) -> u32 {
+        0
+    }
+
     /// Optional workbook directory metadata (typically with a trailing path separator).
     fn workbook_directory(&self) -> Option<&str> {
         None
@@ -2202,6 +2212,13 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         match sheet_id {
             FnSheetId::Local(id) => self.resolver.col_properties(*id, col),
             FnSheetId::External(_) => None,
+        }
+    }
+
+    fn range_run_style_id(&self, sheet_id: &FnSheetId, addr: CellAddr) -> u32 {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.range_run_style_id(*id, addr),
+            FnSheetId::External(_) => 0,
         }
     }
 
