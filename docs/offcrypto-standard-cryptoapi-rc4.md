@@ -143,11 +143,11 @@ rc4_key = h_block[0..key_size_bytes]   // key_size_bytes = key_size_bits/8 (for 
 Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 state per block).
 
 **40-bit note:** MS-OFFCRYPTO specifies `keySize == 0` MUST be interpreted as 40-bit RC4. In both
-cases (“0” or “40”), `key_size_bytes == 5`; use the 5-byte key directly
-(`rc4_key = h_block[0..5]`). Do **not** pad it to 16 bytes.
-
-This differs from legacy BIFF8 `FILEPASS` CryptoAPI RC4 in the wild, where some writers treat a
-40-bit key as a 16-byte RC4 key by appending 11 zero bytes (see `docs/office-encryption.md`).
+cases (“0” or “40”), `key_size_bytes == 5`.
+However, *Office/CryptoAPI has a quirk for the SHA-1 variant*: the derived 5 bytes are treated as a
+16-byte RC4 key by appending 11 zero bytes (**key length affects the RC4 KSA and keystream**).
+For the MD5 variant, the raw 5-byte key is used (no padding). These behaviors are locked down by
+unit tests in `crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`.
 
 ## Password verification (EncryptionVerifier)
 
@@ -200,7 +200,7 @@ RC4(key=block0, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   e7c9974140e69857dbdec656c7ccb4f9283d723236
 ```
 
-### 40-bit RC4 key length example (5-byte key; do not pad to 16 bytes)
+### 40-bit RC4 key length example (SHA-1 padding quirk)
 
 Using the same parameters as above but with `KeySize = 0` (interpreted as 40) or `KeySize = 40`
 bits (`key_size_bytes = 5`):
@@ -209,21 +209,21 @@ bits (`key_size_bytes = 5`):
 block 0 H_block (SHA1(H || LE32(0))) =
   6ad7dedf2da3514b1d85eabee069d47dd058967f
 
-key_material (5 bytes) =
+ key_material (5 bytes) =
   6ad7dedf2d
 
-zero-padded 16-byte key (a common legacy behavior; **incorrect for MS-OFFCRYPTO Standard RC4**) =
+ zero-padded 16-byte key (Office/CryptoAPI SHA-1 40-bit quirk) =
   6ad7dedf2d0000000000000000000000
 
-RC4(key=raw 5-byte key_material, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+ RC4(key=raw 5-byte key_material, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   d1fa444913b4839b06eb4851750a07761005f025bf
 
-RC4(key=zero-padded 16-byte key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+ RC4(key=zero-padded 16-byte key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   7a8bd000713a6e30ba9916476d27b01d36707a6ef8
 ```
 
-These ciphertexts differ, demonstrating why implementations must treat `keySize==0/40` as a **5-byte
-RC4 key** (`keyLen = keySize/8`) and must **not** zero-pad it to 16 bytes for Standard RC4.
+These ciphertexts differ. For the SHA-1 variant, Formula’s Standard RC4 decryptor uses the
+zero-padded 16-byte key form for compatibility with real-world files.
 
 ### 56-bit RC4 key truncation example
 
