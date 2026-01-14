@@ -223,6 +223,137 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "POWER",
+    description: "Returns the result of a number raised to a power.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "power", type: "number" },
+    ],
+  },
+  {
+    name: "SQRT",
+    description: "Returns the positive square root of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "EXP",
+    description: "Returns e raised to the power of a given number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "LN",
+    description: "Returns the natural logarithm of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "LOG",
+    description: "Returns the logarithm of a number to a specified base.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "base", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "LOG10",
+    description: "Returns the base-10 logarithm of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "MOD",
+    description: "Returns the remainder after number is divided by divisor.",
+    args: [
+      { name: "number", type: "value" },
+      { name: "divisor", type: "number" },
+    ],
+  },
+  {
+    name: "QUOTIENT",
+    description: "Returns the integer portion of a division.",
+    args: [
+      { name: "numerator", type: "value" },
+      { name: "denominator", type: "value" },
+    ],
+  },
+  {
+    name: "SIGN",
+    description: "Returns the sign of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "DEGREES",
+    description: "Converts radians to degrees.",
+    args: [
+      { name: "angle", type: "value" },
+    ],
+  },
+  {
+    name: "RADIANS",
+    description: "Converts degrees to radians.",
+    args: [
+      { name: "angle", type: "value" },
+    ],
+  },
+  {
+    name: "SIN",
+    description: "Returns the sine of an angle.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "COS",
+    description: "Returns the cosine of an angle.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "TAN",
+    description: "Returns the tangent of an angle.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ASIN",
+    description: "Returns the arcsine of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ACOS",
+    description: "Returns the arccosine of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ATAN",
+    description: "Returns the arctangent of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ATAN2",
+    description: "Returns the arctangent from x- and y-coordinates.",
+    args: [
+      { name: "x_num", type: "value" },
+      { name: "y_num", type: "value" },
+    ],
+  },
+  {
     name: "SUMIF",
     description: "Adds the cells specified by a given condition or criteria.",
     args: [

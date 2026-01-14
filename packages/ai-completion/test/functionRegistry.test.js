@@ -74,6 +74,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("ROUNDDOWN", 0), "value", "Expected ROUNDDOWN number to be value-like");
   assert.equal(registry.getArgType("INT", 0), "value", "Expected INT number to be value-like");
   assert.ok(registry.getFunction("TRUNC")?.args?.[1]?.optional, "Expected TRUNC num_digits to be optional");
+  assert.equal(registry.getArgType("POWER", 0), "value", "Expected POWER number to be value-like");
+  assert.equal(registry.getArgType("POWER", 1), "number", "Expected POWER power to be a number");
+  assert.equal(registry.getArgType("SQRT", 0), "value", "Expected SQRT number to be value-like");
+  assert.equal(registry.getArgType("LOG", 0), "value", "Expected LOG number to be value-like");
+  assert.ok(registry.getFunction("LOG")?.args?.[1]?.optional, "Expected LOG base to be optional");
+  assert.equal(registry.getArgType("SIN", 0), "value", "Expected SIN number to be value-like");
 
   // TEXTAFTER/TEXTBEFORE are curated (not present in the Rust catalog yet).
   assert.ok(registry.getFunction("TEXTAFTER"), "Expected TEXTAFTER to be present");
