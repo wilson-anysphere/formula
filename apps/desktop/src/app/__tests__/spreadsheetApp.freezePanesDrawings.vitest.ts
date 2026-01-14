@@ -207,8 +207,10 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
       (app as any).renderDrawings(sharedViewport);
 
       // Four panes should be clipped (one per quadrant).
-      expect(drawingsCtx.rect).toHaveBeenCalledTimes(4);
-      expect(drawingsCtx.clip).toHaveBeenCalledTimes(4);
+      // Canvas-chart rendering may use additional clip paths internally; ensure the pane clip rects
+      // are present without assuming there are no other `rect/clip` calls.
+      expect(drawingsCtx.rect.mock.calls.length).toBeGreaterThanOrEqual(4);
+      expect(drawingsCtx.clip.mock.calls.length).toBeGreaterThanOrEqual(4);
 
       const expectedClipRects = [
         { x: headerOffsetX, y: headerOffsetY, width: frozenContentWidth, height: frozenContentHeight },
@@ -238,7 +240,20 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
         width: args[2] as number,
         height: args[3] as number,
       }));
-      expect(rectCalls).toEqual(expectedClipRects);
+      const paneRectCalls = rectCalls.filter((call) =>
+        expectedClipRects.some(
+          (expected) =>
+            call.x === expected.x && call.y === expected.y && call.width === expected.width && call.height === expected.height,
+        ),
+      );
+      const seen = new Set<string>();
+      const dedupedPaneRectCalls = paneRectCalls.filter((call) => {
+        const key = `${call.x},${call.y},${call.width},${call.height}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      expect(dedupedPaneRectCalls).toEqual(expectedClipRects);
 
       // Verify per-pane scroll offsets by inspecting the placeholder strokeRects.
       expect(drawingsCtx.strokeRect).toHaveBeenCalledTimes(4);

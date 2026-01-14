@@ -247,8 +247,9 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       expect(renderSpy).toHaveBeenCalled();
       const objects = renderSpy.mock.calls.at(-1)?.[0] as any[];
-      expect(objects).toHaveLength(1);
-      expect(objects[0]).toMatchObject({
+      const nonChartObjects = objects.filter((obj) => obj?.kind?.type !== "chart");
+      expect(nonChartObjects).toHaveLength(1);
+      expect(nonChartObjects[0]).toMatchObject({
         id: 12,
         kind: { type: "image", imageId: "image1.png" },
         anchor: { type: "twoCell" },
@@ -541,8 +542,9 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       (app as any).renderDrawings();
       expect(renderSpy).toHaveBeenCalled();
       const objects = renderSpy.mock.calls[0]?.[0] as any[];
-      expect(objects).toHaveLength(1);
-      expect(objects[0]).toMatchObject({ kind: { type: "image", imageId } });
+      const imageObjects = objects.filter((obj) => obj?.kind?.type === "image");
+      expect(imageObjects).toHaveLength(1);
+      expect(imageObjects[0]).toMatchObject({ kind: { type: "image", imageId } });
 
       // Ensure the overlay image store is backed by the document's image map.
       const imageStore = (app as any).drawingImages;
@@ -643,6 +645,8 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
   it("does not throw when chart selection overlay render throws", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     try {
       const err = new Error("boom");
       const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
@@ -672,6 +676,8 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
+      if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCanvasCharts;
     }
   });
 
@@ -679,6 +685,8 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     vi.useRealTimers();
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     try {
       const err = new Error("boom");
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -721,6 +729,8 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
+      if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCanvasCharts;
     }
   });
 

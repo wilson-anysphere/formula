@@ -300,6 +300,8 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
   it("does not throw when chart selection overlay render throws", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     try {
       const err = new Error("boom");
       const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
@@ -329,6 +331,8 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
+      if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCanvasCharts;
     }
   });
 
@@ -336,6 +340,8 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     vi.useRealTimers();
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     try {
       const err = new Error("boom");
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -376,6 +382,8 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
+      if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCanvasCharts;
     }
   });
 

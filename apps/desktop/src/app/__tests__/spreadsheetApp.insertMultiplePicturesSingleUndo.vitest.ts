@@ -138,7 +138,7 @@ describe("SpreadsheetApp insertPicturesFromFiles (multi-file) undo batching", ()
 
     const drawings = doc.getSheetDrawings(sheetId) as any[];
     expect(drawings).toHaveLength(3);
-    const objects = app.getDrawingObjects(sheetId);
+    const objects = app.getDrawingObjects(sheetId).filter((obj) => obj.kind.type !== "chart");
     expect(objects).toHaveLength(3);
     expect(app.getSelectedDrawingId()).toBe(objects[objects.length - 1]!.id);
 

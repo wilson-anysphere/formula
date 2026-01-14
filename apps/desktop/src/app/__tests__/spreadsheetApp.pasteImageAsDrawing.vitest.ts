@@ -169,7 +169,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects();
+    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
     expect(objects).toHaveLength(1);
     expect(objects[0]!.kind.type).toBe("image");
     expect(app.getSelectedDrawingId()).toBe(objects[0]!.id);
@@ -219,7 +219,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects();
+    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
     expect(objects).toHaveLength(1);
     expect(objects[0]!.kind.type).toBe("image");
 
@@ -253,7 +253,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects();
+    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
     expect(objects).toHaveLength(1);
     expect(objects[0]!.kind.type).toBe("image");
 
@@ -284,7 +284,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    expect(app.getDrawingObjects()).toHaveLength(0);
+    expect(app.getDrawingObjects().filter((obj) => obj.kind.type === "image")).toHaveLength(0);
     expect(toastSpy).toHaveBeenCalledWith("Image too large (>5MB). Choose a smaller file.", "warning");
 
     app.destroy();
@@ -312,7 +312,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    expect(app.getDrawingObjects()).toHaveLength(0);
+    expect(app.getDrawingObjects().filter((obj) => obj.kind.type === "image")).toHaveLength(0);
     expect(toastSpy).toHaveBeenCalledWith("Image dimensions too large (10001x1). Choose a smaller image.", "warning");
 
     app.destroy();
@@ -358,7 +358,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
     await app.pasteClipboardToSelection();
 
     expect(setSpy).not.toHaveBeenCalled();
-    expect(app.getDrawingObjects()).toHaveLength(0);
+    expect(app.getDrawingObjects().filter((obj) => obj.kind.type === "image")).toHaveLength(0);
 
     app.destroy();
     root.remove();
@@ -399,7 +399,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     await app.pasteClipboardToSelection();
 
-    const objects = app.getDrawingObjects();
+    const objects = app.getDrawingObjects().filter((obj) => obj.kind.type === "image");
     expect(objects).toHaveLength(1);
     expect(objects[0]!.kind.type).toBe("image");
 

@@ -166,6 +166,9 @@ describe("Selection Pane panel", () => {
     ];
 
     const sheetId = app.getCurrentSheetId();
+    const demoChart = app.listCharts().find((c) => c.sheetId === sheetId) ?? null;
+    expect(demoChart).not.toBeNull();
+    const demoChartDrawingId = chartIdToDrawingId(demoChart!.id);
     // Seed drawings via the DocumentController drawing layer so SpreadsheetApp's drawing caches update.
     (app.getDocument() as any).setSheetDrawings(sheetId, drawings);
 
@@ -202,11 +205,12 @@ describe("Selection Pane panel", () => {
     });
 
     const itemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(itemEls.length).toBe(3);
+    expect(itemEls.length).toBe(4);
     // Topmost first (highest z-order -> id=3). Within ties, reverse render order (id=2 before id=1).
-    expect(itemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
-    expect(itemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
-    expect(itemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+    expect(itemEls[0]?.getAttribute("data-testid")).toBe(`selection-pane-item-${demoChartDrawingId}`);
+    expect(itemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
+    expect(itemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
+    expect(itemEls[3]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
 
     // Topmost object cannot be brought forward; backmost object cannot be sent backward.
     const bringForward3 = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-bring-forward-3"]');
@@ -217,11 +221,11 @@ describe("Selection Pane panel", () => {
     expect(sendBackward1!.disabled).toBe(true);
 
     await act(async () => {
-      (itemEls[2] as HTMLElement).click();
+      (itemEls[3] as HTMLElement).click();
     });
 
     expect(app.getSelectedDrawingId()).toBe(1);
-    expect(itemEls[2]?.getAttribute("aria-selected")).toBe("true");
+    expect(itemEls[3]?.getAttribute("aria-selected")).toBe("true");
 
     // Bring Forward should update z-order and re-render the list (Picture 1 moves one step forward,
     // swapping above Picture 2 while still staying below the topmost drawing).
@@ -231,10 +235,11 @@ describe("Selection Pane panel", () => {
       bringForwardBtn!.click();
     });
     const reorderedItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(reorderedItemEls.length).toBe(3);
-    expect(reorderedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
-    expect(reorderedItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
-    expect(reorderedItemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
+    expect(reorderedItemEls.length).toBe(4);
+    expect(reorderedItemEls[0]?.getAttribute("data-testid")).toBe(`selection-pane-item-${demoChartDrawingId}`);
+    expect(reorderedItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
+    expect(reorderedItemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+    expect(reorderedItemEls[3]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
 
     // Adding a drawing should update the panel list via subscribeDrawings.
     const currentDrawings = (app.getDocument() as any).getSheetDrawings(sheetId);
@@ -253,8 +258,9 @@ describe("Selection Pane panel", () => {
     });
 
     const updatedItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(updatedItemEls.length).toBe(4);
-    expect(updatedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-4");
+    expect(updatedItemEls.length).toBe(5);
+    expect(updatedItemEls[0]?.getAttribute("data-testid")).toBe(`selection-pane-item-${demoChartDrawingId}`);
+    expect(updatedItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-4");
 
     await act(async () => {
       unmountRibbon?.();
@@ -303,6 +309,8 @@ describe("Selection Pane panel", () => {
     ];
 
     const sheetId = app.getCurrentSheetId();
+    const demoChart = app.listCharts().find((c) => c.sheetId === sheetId) ?? null;
+    expect(demoChart).not.toBeNull();
     (app.getDocument() as any).setSheetDrawings(sheetId, drawings);
 
     const panelBody = document.createElement("div");
@@ -342,10 +350,10 @@ describe("Selection Pane panel", () => {
     paneRoot!.focus();
 
     const itemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(itemEls.length).toBe(3);
+    expect(itemEls.length).toBe(4);
 
     await act(async () => {
-      (itemEls[2] as HTMLElement).click();
+      (itemEls[3] as HTMLElement).click();
     });
     expect(app.getSelectedDrawingId()).toBe(1);
 
@@ -361,7 +369,7 @@ describe("Selection Pane panel", () => {
     });
 
     const remainingItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(remainingItemEls.length).toBe(2);
+    expect(remainingItemEls.length).toBe(3);
     expect(Array.from(remainingItemEls).map((el) => el.getAttribute("data-testid"))).not.toContain("selection-pane-item-2");
 
     const raw = (app.getDocument() as any).getSheetDrawings(sheetId);
@@ -412,6 +420,8 @@ describe("Selection Pane panel", () => {
     ];
 
     const sheetId = app.getCurrentSheetId();
+    const demoChart = app.listCharts().find((c) => c.sheetId === sheetId) ?? null;
+    expect(demoChart).not.toBeNull();
     (app.getDocument() as any).setSheetDrawings(sheetId, drawings);
 
     const panelBody = document.createElement("div");
@@ -508,6 +518,9 @@ describe("Selection Pane panel", () => {
     ];
 
     const sheetId = app.getCurrentSheetId();
+    const demoChart = app.listCharts().find((c) => c.sheetId === sheetId) ?? null;
+    expect(demoChart).not.toBeNull();
+    const demoChartDrawingId = chartIdToDrawingId(demoChart!.id);
     (app.getDocument() as any).setSheetDrawings(sheetId, drawings);
 
     const panelBody = document.createElement("div");
@@ -549,8 +562,9 @@ describe("Selection Pane panel", () => {
     });
 
     const remainingItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(remainingItemEls.length).toBe(1);
-    expect(remainingItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+    expect(remainingItemEls.length).toBe(2);
+    expect(remainingItemEls[0]?.getAttribute("data-testid")).toBe(`selection-pane-item-${demoChartDrawingId}`);
+    expect(remainingItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
 
     const raw = (app.getDocument() as any).getSheetDrawings(sheetId);
     expect(Array.isArray(raw)).toBe(true);
