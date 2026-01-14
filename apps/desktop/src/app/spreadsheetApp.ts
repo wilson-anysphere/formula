@@ -13408,13 +13408,39 @@ export class SpreadsheetApp {
           // interactions do not steal clicks from resize/rotate gestures.
           const selectedId = this.selectedDrawingId;
           if (selectedId != null) {
+            const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+            const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+            const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+            const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+            const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
+            const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? (viewport.frozenHeightPx as number) : headerOffsetY;
+            const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+            const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
             const selectedIndex = index.byId.get(selectedId);
             const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
-            if (selected) {
-              const rect = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
-              if (hitTestRotationHandle(rect, x, y, selected.transform)) return;
-              const handle = hitTestResizeHandle(rect, x, y, selected.transform);
-              if (handle) return;
+            if (selected && x >= headerOffsetX && y >= headerOffsetY) {
+              const anchor = selected.anchor;
+              const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+              const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+              // Selection handles are clipped to the pane that owns the drawing; only treat them as hits when the
+              // pointer is in that same pane (avoids phantom handle hits across frozen boundaries).
+              if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
+                const sheetRect = index.bounds[selectedIndex!]!;
+                const scrollX = anchor.type === "absolute" ? viewport.scrollX : objInFrozenCols ? 0 : viewport.scrollX;
+                const scrollY = anchor.type === "absolute" ? viewport.scrollY : objInFrozenRows ? 0 : viewport.scrollY;
+                drawingBounds.x = sheetRect.x - scrollX + headerOffsetX;
+                drawingBounds.y = sheetRect.y - scrollY + headerOffsetY;
+                drawingBounds.width = sheetRect.width;
+                drawingBounds.height = sheetRect.height;
+                // Rotation handles are only rendered by DrawingOverlay (shared-grid mode or when the dedicated
+                // interaction controller is enabled). In legacy grid mode without that controller, rotation
+                // handles are not shown, so don't let their hit region block chart selection.
+                const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
+                const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
+                if (canRotate && hitTestRotationHandle(drawingBounds, x, y, selected.transform)) return;
+                const handle = hitTestResizeHandle(drawingBounds, x, y, selected.transform);
+                if (handle) return;
+              }
             }
           }
         }

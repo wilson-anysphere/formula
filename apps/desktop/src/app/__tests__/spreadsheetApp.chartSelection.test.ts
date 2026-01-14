@@ -712,6 +712,78 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("does not let clipped drawing handles (frozen-pane mismatch) block chart selection", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // Disable the dedicated drawing interaction controller so `onChartPointerDownCapture` must
+    // correctly arbitrate between charts and (selected) drawing selection handles.
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+
+    // Freeze the first column so drawings anchored in the scrollable pane are clipped away from the
+    // frozen pane (including selection handles).
+    const docAny = (app as any).document as any;
+    docAny.setFrozen?.(app.getCurrentSheetId(), 0, 1, { label: "Freeze first column" });
+    (app as any).syncFrozenPanes?.();
+    expect(app.getFrozen().frozenCols).toBe(1);
+
+    const viewport = app.getDrawingInteractionViewport();
+    const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+    const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+    const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
+
+    // Place a drawing so its top-left handle lies in the frozen pane, but the drawing itself
+    // belongs to the scrollable pane (absolute anchors always scroll).
+    const posX = viewport.scrollX + (frozenBoundaryX - headerOffsetX) - 10;
+    const posY = viewport.scrollY + 80;
+    app.setDrawingObjects([
+      {
+        id: 1,
+        kind: { type: "shape", label: "Clipped" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(posX), yEmu: pxToEmu(posY) },
+          size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      },
+    ]);
+    app.selectDrawingById(1);
+
+    const result = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Chart Under Clipped Handle",
+      position: "A1:H10",
+    });
+    const chart = app.listCharts().find((c) => c.id === result.chart_id);
+    expect(chart).toBeTruthy();
+
+    const clickX = frozenBoundaryX - 10;
+    const clickY = headerOffsetY + (posY - viewport.scrollY);
+
+    // Sanity: the drawing hit-test should treat this as a miss (it's clipped out of the active pane),
+    // but the chart hit-test should see the chart at this coordinate.
+    expect(app.hitTestDrawingAtClientPoint(clickX, clickY)).toBeNull();
+    expect((app as any).hitTestChartAtClientPoint(clickX, clickY)?.chart?.id).toBe(chart!.id);
+
+    const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    expect(selectionCanvas).not.toBeNull();
+
+    dispatchPointerEvent(selectionCanvas!, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 122 });
+    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 122 });
+
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+    expect(app.getSelectedDrawingId()).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("canvas charts mode: when a drawing overlaps a chart, clicking selects the chart (charts are above drawings)", () => {
     const prior = process.env.CANVAS_CHARTS;
     process.env.CANVAS_CHARTS = "1";
