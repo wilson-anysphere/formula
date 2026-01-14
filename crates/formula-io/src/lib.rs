@@ -1564,6 +1564,27 @@ fn read_stream_bytes_case_insensitive<R: std::io::Read + std::io::Write + std::i
 }
 
 #[cfg(feature = "encrypted-workbooks")]
+fn zip_contains_workbook_bin(zip_bytes: &[u8]) -> bool {
+    use std::io::Cursor;
+
+    let Ok(archive) = zip::ZipArchive::new(Cursor::new(zip_bytes)) else {
+        return false;
+    };
+    for name in archive.file_names() {
+        let mut normalized = name.trim_start_matches('/');
+        let replaced;
+        if normalized.contains('\\') {
+            replaced = normalized.replace('\\', "/");
+            normalized = &replaced;
+        }
+        if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(feature = "encrypted-workbooks")]
 fn try_decrypt_ooxml_encrypted_package_from_path(
     path: &Path,
     password: Option<&str>,
