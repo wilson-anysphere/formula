@@ -2,7 +2,7 @@
 
 use formula_engine::Value as EngineValue;
 use formula_format::cell_format_code;
-use formula_model::{Protection, Style, Workbook};
+use formula_model::{Alignment, HorizontalAlignment, Protection, Style, Workbook};
 use formula_wasm::{WasmWorkbook, DEFAULT_SHEET};
 
 #[test]
@@ -11,6 +11,10 @@ fn from_xlsx_bytes_imports_style_only_cells_for_cell_metadata_functions() {
 
     let style_id = workbook.styles.intern(Style {
         number_format: Some("0.00".to_string()),
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Left),
+            ..Alignment::default()
+        }),
         protection: Some(Protection {
             locked: false,
             hidden: false,
@@ -29,6 +33,9 @@ fn from_xlsx_bytes_imports_style_only_cells_for_cell_metadata_functions() {
     sheet
         .set_formula_a1("B2", Some(r#"CELL("protect",A1)"#.to_string()))
         .unwrap();
+    sheet
+        .set_formula_a1("B3", Some(r#"CELL("prefix",A1)"#.to_string()))
+        .unwrap();
 
     let bytes = formula_xlsx::XlsxDocument::new(workbook)
         .save_to_vec()
@@ -45,6 +52,10 @@ fn from_xlsx_bytes_imports_style_only_cells_for_cell_metadata_functions() {
         wb.debug_get_engine_value(DEFAULT_SHEET, "B2"),
         EngineValue::Number(0.0)
     );
+    assert_eq!(
+        wb.debug_get_engine_value(DEFAULT_SHEET, "B3"),
+        EngineValue::Text("'".to_string())
+    );
 
     // Keep `toJson` sparse: style-only cells should not appear in the input map.
     let json = wb.to_json().unwrap();
@@ -60,4 +71,3 @@ fn from_xlsx_bytes_imports_style_only_cells_for_cell_metadata_functions() {
         "toJson should not include an explicit A1 entry: {json}"
     );
 }
-
