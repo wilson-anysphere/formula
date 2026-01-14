@@ -468,5 +468,6 @@ function extractFormulaFromOp(op) {
   else if (op.kind === "edit" || op.kind === "delete") cell = op.after ?? null;
   if (!cell || typeof cell !== "object") return null;
   const formula = cell.formula;
-  return typeof formula === "string" && formula.trim() ? formula : null;
+  const trimmed = typeof formula === "string" ? formula.trim() : "";
+  return trimmed ? trimmed : null;
 }

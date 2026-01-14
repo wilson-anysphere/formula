@@ -291,8 +291,8 @@ describe("StructuralConflictUiController", () => {
       sheetId: "Sheet1",
       cell: "A1",
       cellKey: "Sheet1:0:0",
-      local: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { formula: "=A1" } },
-      remote: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { formula: "=A2" } },
+      local: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { formula: "  =A1  " } },
+      remote: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { formula: "  =A2  " } },
       remoteUserId: "u2",
       detectedAt: 0,
     });
@@ -303,6 +303,9 @@ describe("StructuralConflictUiController", () => {
     expect(diff).not.toBeNull();
     expect(diff!.querySelector(".formula-diff-op--delete")).not.toBeNull();
     expect(diff!.querySelector(".formula-diff-op--insert")).not.toBeNull();
+    const code = diff!.querySelector("code");
+    expect(code?.textContent?.startsWith("=")).toBe(true);
+    expect(code?.textContent).toBe(code?.textContent?.trim());
 
     ui.destroy();
     container.remove();
