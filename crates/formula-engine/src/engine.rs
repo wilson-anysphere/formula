@@ -10775,7 +10775,33 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_origin_cell(&self, sheet_id: usize) -> Option<CellAddr> {
-        self.sheet_origin_cells.get(sheet_id).copied().flatten()
+        // Prefer explicit per-sheet view metadata configured via `Engine::set_sheet_origin`. When
+        // unset, fall back to the host-provided `EngineInfo.origin` values (workbook-level or
+        // per-sheet overrides) so `set_engine_info` / `set_info_origin_for_sheet` can drive
+        // `INFO("origin")` without requiring sheet state mutations.
+        self.sheet_origin_cells
+            .get(sheet_id)
+            .copied()
+            .flatten()
+            .or_else(|| {
+                let origin = self
+                    .info
+                    .origin_by_sheet
+                    .get(&sheet_id)
+                    .map(|s| s.as_str())
+                    .or(self.info.origin.as_deref())?;
+
+                let addr = parse_a1(origin).ok()?;
+
+                // Reject out-of-bounds origin coordinates to keep `INFO("origin")` deterministic
+                // and consistent with `Engine::set_sheet_origin` validation.
+                let (rows, cols) = self.sheet_dimensions(sheet_id);
+                if addr.row < rows && addr.col < cols {
+                    Some(addr)
+                } else {
+                    None
+                }
+            })
     }
 
     fn get_cell_formula(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
