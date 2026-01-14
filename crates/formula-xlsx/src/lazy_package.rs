@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use zip::ZipArchive;
 
-use crate::package::{MacroPresence, WorkbookKind, XlsxError};
+use crate::package::{MacroPresence, WorkbookKind, XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
 use crate::streaming::PartOverride;
+use crate::zip_util::read_zip_file_bytes_with_limit;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
@@ -173,8 +174,8 @@ impl XlsxLazyPackage {
             Err(zip::result::ZipError::FileNotFound) => return Ok(None),
             Err(err) => return Err(err.into()),
         };
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
+        let buf =
+            read_zip_file_bytes_with_limit(&mut file, &canonical, MAX_XLSX_PACKAGE_PART_BYTES)?;
         Ok(Some(buf))
     }
 
