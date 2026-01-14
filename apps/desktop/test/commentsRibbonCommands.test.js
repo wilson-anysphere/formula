@@ -57,9 +57,18 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
   // comments.* ids so command palette recents + keybindings share the same path.
   assert.match(main, /\bcreateRibbonActions\(/);
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
-  assert.doesNotMatch(router, /\btoggleOverrides\s*(?:(?::\s*[^=]+\s*)?=|:)\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m);
-  assert.doesNotMatch(router, /\bcommandOverrides\s*(?:(?::\s*[^=]+\s*)?=|:)\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m);
-  assert.doesNotMatch(router, /\bcommandOverrides\s*(?:(?::\s*[^=]+\s*)?=|:)\s*\{[\s\S]*?["']comments\.addComment["']\s*:/m);
+  assert.doesNotMatch(
+    router,
+    /\btoggleOverrides\s*(?:(?::\s*(?:[^=]|=(?!\s*\{))+\s*)?=|:)\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m,
+  );
+  assert.doesNotMatch(
+    router,
+    /\bcommandOverrides\s*(?:(?::\s*(?:[^=]|=(?!\s*\{))+\s*)?=|:)\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m,
+  );
+  assert.doesNotMatch(
+    router,
+    /\bcommandOverrides\s*(?:(?::\s*(?:[^=]|=(?!\s*\{))+\s*)?=|:)\s*\{[\s\S]*?["']comments\.addComment["']\s*:/m,
+  );
   assert.doesNotMatch(
     router,
     /\bcommandId\.startsWith\(\s*["']comments\./,

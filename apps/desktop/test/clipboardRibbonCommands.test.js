@@ -98,7 +98,9 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
     );
     assert.doesNotMatch(
       router,
-      new RegExp(`\\bcommandOverrides\\s*(?:(?::\\s*[^=]+\\s*)?=|:)\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      new RegExp(
+        `\\bcommandOverrides\\s*(?:(?::\\s*(?:[^=]|=(?!\\s*\\{))+\\s*)?=|:)\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`,
+      ),
       `Expected ribbonCommandRouter.ts to not special-case ${id} via commandOverrides (should dispatch via CommandRegistry)`,
     );
   }
