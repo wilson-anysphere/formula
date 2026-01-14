@@ -427,7 +427,10 @@ main() {
     # integration tools (e.g. AppImageLauncher) install into the user's desktop database.
     if command -v python3 >/dev/null 2>&1; then
       echo "::group::check-appimage: desktop integration (.desktop MimeType/Exec)"
-      python3 scripts/ci/verify_linux_desktop_integration.py --package-root "$squashfs_root"
+      python3 scripts/ci/verify_linux_desktop_integration.py \
+        --package-root "$squashfs_root" \
+        --expected-main-binary "$FORMULA_APPIMAGE_MAIN_BINARY" \
+        --doc-package-name "$FORMULA_APPIMAGE_MAIN_BINARY"
       echo "::endgroup::"
     else
       die "python3 is required to validate AppImage desktop integration (missing on PATH)"
