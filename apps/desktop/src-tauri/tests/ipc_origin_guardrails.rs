@@ -126,6 +126,17 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         "read_binary_file_range",
         "stat_file",
         "list_dir",
+        // Collaboration secrets (encrypted-at-rest).
+        "collab_token_get",
+        "collab_token_set",
+        "collab_token_delete",
+        "collab_encryption_key_get",
+        "collab_encryption_key_set",
+        "collab_encryption_key_delete",
+        "collab_encryption_key_list",
+        // Workbook-origin bytes extraction helpers (defense-in-depth against exfil if navigated).
+        "list_imported_chart_models",
+        "list_imported_chart_objects",
         // Clipboard (command wrappers in commands.rs; `clipboard/mod.rs` has its own coverage).
         "read_clipboard",
         "write_clipboard",

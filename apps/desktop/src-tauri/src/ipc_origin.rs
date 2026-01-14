@@ -37,7 +37,7 @@ pub fn is_trusted_app_origin(url: &Url) -> bool {
                 // On Windows, WebView2 maps custom schemes (like `tauri:`) onto
                 // `http(s)://<scheme>.localhost`. Restrict this to the specific host we expect
                 // (Tauri's internal scheme is `tauri:` => `tauri.localhost`).
-                || host == "tauri.localhost"
+                || (cfg!(target_os = "windows") && host == "tauri.localhost")
         }
         Some(url::Host::Ipv4(ip)) => ip == std::net::Ipv4Addr::LOCALHOST,
         Some(url::Host::Ipv6(ip)) => ip == std::net::Ipv6Addr::LOCALHOST,
@@ -216,9 +216,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn allows_windows_tauri_localhost() {
         let url = Url::parse("https://tauri.localhost/").unwrap();
         assert!(is_trusted_app_origin(&url));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn denies_tauri_localhost_on_non_windows() {
+        let url = Url::parse("https://tauri.localhost/").unwrap();
+        assert!(!is_trusted_app_origin(&url));
     }
 
     #[test]

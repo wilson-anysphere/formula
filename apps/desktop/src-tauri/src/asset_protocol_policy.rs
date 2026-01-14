@@ -27,10 +27,6 @@ pub fn is_asset_protocol_allowed(
         return false;
     };
 
-    if !ipc_origin::is_trusted_app_origin(window_url) {
-        return false;
-    }
-
     ipc_origin::matches_webview_origin(window_url, stable_origin, use_https_scheme, platform)
 }
 
