@@ -327,6 +327,113 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 
+  it("patches flattened oneCell offsets (dxEmu/dyEmu on from) when committing move interactions", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "oneCell",
+        from: { cell: { row: 0, col: 0 }, dxEmu: pxToEmu(0), dyEmu: pxToEmu(0) },
+        ext: { cx: pxToEmu(120), cy: pxToEmu(80) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("oneCell");
+    if (before.anchor.type !== "oneCell") {
+      throw new Error("Expected oneCell anchor for test drawing");
+    }
+
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        from: {
+          ...before.anchor.from,
+          offset: { xEmu: pxToEmu(10), yEmu: pxToEmu(5) },
+        },
+      },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "move", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.anchor?.type).toBe("oneCell");
+    // Preserve the flattened schema while updating the values.
+    expect(updated?.anchor?.from?.dxEmu).toBe(pxToEmu(10));
+    expect(updated?.anchor?.from?.dyEmu).toBe(pxToEmu(5));
+    expect(Object.prototype.hasOwnProperty.call(updated?.anchor?.from ?? {}, "offset")).toBe(false);
+
+    app.dispose();
+    root.remove();
+  });
+
+  it("patches root size fields on oneCell anchors (cx/cy) when committing resize interactions", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "oneCell",
+        from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) } },
+        // Size stored directly on the anchor payload (no `ext`/`size` object).
+        cx: pxToEmu(120),
+        cy: pxToEmu(80),
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("oneCell");
+    if (before.anchor.type !== "oneCell") {
+      throw new Error("Expected oneCell anchor for test drawing");
+    }
+
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        size: { cx: pxToEmu(200), cy: pxToEmu(150) },
+      },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "resize", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.anchor?.type).toBe("oneCell");
+    expect(updated?.anchor?.cx).toBe(pxToEmu(200));
+    expect(updated?.anchor?.cy).toBe(pxToEmu(150));
+
+    app.dispose();
+    root.remove();
+  });
+
   it("persists size for legacy cell-anchored drawings even when the size field was missing (resize commit)", () => {
     const root = createRoot();
     const status = {
