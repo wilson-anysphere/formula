@@ -352,7 +352,7 @@ Desktop encryption commands (Command Palette):
   - If multiple ranges overlap, the desktop UI can remove a single chosen range or all overlaps.
   - Uses stable sheet ids when possible; name-based matching is best-effort and avoids sheet id/name ambiguity.
 - `collab.listEncryptedRanges` — list all encrypted ranges in the workbook and jump to one (selects it).
-  - Resolves legacy ranges stored with a sheet display name (instead of a stable `sheetId`) when possible, and avoids sheet id/name ambiguity.
+  - Resolves legacy ranges stored with a sheet display name (instead of a stable `sheetId`) when possible, and avoids sheet id/name ambiguity (also canonicalizes stable ids via their display name to tolerate case-mismatched legacy ids).
 - `collab.exportEncryptionKey` — export the key for the active cell’s encrypted range.
   - Prefers the `keyId` embedded in an existing encrypted cell payload (if present), otherwise falls back to policy metadata.
   - If the key bytes are missing locally, it prompts to import the key first.
