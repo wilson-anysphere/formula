@@ -1451,6 +1451,26 @@ export class ContextManager {
     /** @type {any[]} */
     const chunkAudits = [];
 
+    /**
+     * Merge two heuristic classifications.
+     *
+     * We intentionally combine persisted (index-time) heuristics with runtime heuristics so:
+     * - we still remember that the *underlying* chunk content was sensitive even if the stored
+     *   `metadata.text` has since been replaced with a redacted placeholder
+     * - we don't miss newly-detected patterns (e.g. percent-encoded tokens) if an older index
+     *   stored an incomplete heuristic result
+     *
+     * @param {any} a
+     * @param {any} b
+     */
+    const mergeHeuristics = (a, b) => {
+      const aa = a && typeof a === "object" ? a : { level: "public", findings: [] };
+      const bb = b && typeof b === "object" ? b : { level: "public", findings: [] };
+      const findings = new Set([...(aa.findings ?? []), ...(bb.findings ?? [])].map((f) => String(f)));
+      const level = aa.level === "sensitive" || bb.level === "sensitive" ? "sensitive" : "public";
+      return { level, findings: [...findings] };
+    };
+
     // Evaluate policy for all retrieved chunks before returning any prompt context.
     for (const [idx, hit] of hits.entries()) {
       throwIfAborted(signal);
@@ -1461,7 +1481,8 @@ export class ContextManager {
       const text = meta.text ?? "";
       const raw = `${header}\n${text}`;
 
-      const heuristic = heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyTextForDlp(raw);
+      const storedHeuristic = heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic;
+      const heuristic = mergeHeuristics(storedHeuristic, classifyTextForDlp(raw));
       const heuristicClassification = heuristicToPolicyClassification(heuristic);
 
       // If the caller provided structured cell/range classifications, fold those in using the
@@ -1606,7 +1627,7 @@ export class ContextManager {
         score: hit.score,
         metadata: safeMeta,
         text: outText,
-        dlp: heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyTextForDlp(outText),
+        dlp: mergeHeuristics(heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic, classifyTextForDlp(outText)),
       };
     });
 
