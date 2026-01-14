@@ -272,10 +272,21 @@ describeWasm("EngineWorker null clear semantics", () => {
       const afterFilename = await engine.getCell("A2", "Sheet2");
       expect(afterFilename.value).toBe("[Book1.xlsx]Budget");
 
+      // Renaming to a name that requires quoting should update CELL("address") outputs to include
+      // the quoted sheet name while leaving CELL("filename") unquoted (Excel semantics).
+      expect(await engine.renameSheet("Budget", "Budget 2026")).toBe(true);
+      await engine.recalculate();
+
+      const afterQuotedAddress = await engine.getCell("A1", "Sheet2");
+      expect(afterQuotedAddress.value).toBe("'Budget 2026'!$A$1");
+
+      const afterQuotedFilename = await engine.getCell("A2", "Sheet2");
+      expect(afterQuotedFilename.value).toBe("[Book1.xlsx]Budget 2026");
+
       // Ensure stored formula inputs are also rewritten (toJson/getCell.input should match).
       const exported = JSON.parse(await engine.toJson());
-      expect(exported.sheets?.Sheet2?.cells?.A1).toContain("Budget!A1");
-      expect(exported.sheets?.Sheet2?.cells?.A2).toContain("Budget!A1");
+      expect(exported.sheets?.Sheet2?.cells?.A1).toContain("'Budget 2026'!A1");
+      expect(exported.sheets?.Sheet2?.cells?.A2).toContain("'Budget 2026'!A1");
     } finally {
       engine.terminate();
     }
