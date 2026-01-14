@@ -21,27 +21,28 @@ fn cell_format_code_text_builtin_49_and_at_literal() {
 
 #[test]
 fn cell_format_code_fraction_builtins_12_13() {
-    // Excel's CELL("format") does not have a dedicated "fraction" code; fraction formats are
-    // classified as fixed numbers with 0 decimal places.
+    // Excel's `CELL("format")` returns `N` for numeric formats that don't fit the standard
+    // fixed/currency/percent/scientific/date/time/text/general families. Fractions are one of
+    // these non-classifiable numeric families (built-ins 12/13: `# ?/?` and `# ??/??`).
     assert_eq!(builtin_format_code(12), Some("# ?/?"));
     assert_eq!(builtin_format_code(13), Some("# ??/??"));
 
     assert_eq!(
         cell_format_code(Some(builtin_format_code(12).unwrap())),
-        "F0"
+        "N"
     );
     assert_eq!(
         cell_format_code(Some(builtin_format_code(13).unwrap())),
-        "F0"
+        "N"
     );
 
     assert_eq!(
         cell_format_code(Some(&format!("{BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX}12"))),
-        "F0"
+        "N"
     );
     assert_eq!(
         cell_format_code(Some(&format!("{BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX}13"))),
-        "F0"
+        "N"
     );
 }
 

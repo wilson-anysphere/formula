@@ -13,6 +13,7 @@ use crate::{builtin_format_code, FormatCode, BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREF
 /// - `"D<n>"` for date formats (best-effort; Excel uses `D1`..`D9`)
 /// - `"T<n>"` for time formats (best-effort; Excel uses `T1`..`T9`)
 /// - `"@"` for text formats
+/// - `"N"` when the format does not match any of the recognized families (e.g. fractions)
 ///
 /// Currency detection accounts for:
 /// - common currency symbols (`$`, `€`, `£`, `¥`) outside quotes/escapes
@@ -38,6 +39,14 @@ pub fn cell_format_code(format_code: Option<&str>) -> String {
 
     if crate::number::pattern_is_text(pattern) {
         return "@".to_string();
+    }
+
+    // For number formats, Excel returns `N` for patterns that don't fit the standard
+    // fixed/currency/percent/scientific families. Examples include:
+    // - fractions (`# ?/?`, `# ??/??`)
+    // - patterns with no numeric placeholders (literal-only formats like `"foo"`)
+    if !pattern_has_number_placeholders(pattern) || is_fraction_format(pattern) {
+        return "N".to_string();
     }
 
     let decimals = count_decimal_places(pattern).min(9);
@@ -495,6 +504,77 @@ fn scan_outside_quotes(pattern: &str, pred: impl Fn(char) -> bool) -> bool {
     }
 
     false
+}
+
+fn pattern_has_number_placeholders(pattern: &str) -> bool {
+    scan_outside_quotes(pattern, |ch| matches!(ch, '0' | '#' | '?'))
+}
+
+fn is_fraction_format(pattern: &str) -> bool {
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut in_brackets = false;
+    let mut slash_idx: Option<usize> = None;
+
+    for (idx, ch) in pattern.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => in_brackets = true,
+            '/' => {
+                slash_idx = Some(idx);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let Some(slash_idx) = slash_idx else {
+        return false;
+    };
+
+    let left = &pattern[..slash_idx];
+    let right = &pattern[slash_idx + 1..];
+
+    // Fractions must have at least one numeric placeholder before the '/'.
+    if !scan_outside_quotes(left, |ch| matches!(ch, '0' | '#' | '?')) {
+        return false;
+    }
+
+    // Denominators can either be placeholder-driven (`??`) or fixed (`16`).
+    if scan_outside_quotes(right, |ch| matches!(ch, '0' | '#' | '?')) {
+        return true;
+    }
+
+    // Fixed denominator: parse a leading integer after trimming whitespace.
+    let trimmed = right.trim_start();
+    let mut saw_digit = false;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+            continue;
+        }
+        break;
+    }
+
+    saw_digit
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
