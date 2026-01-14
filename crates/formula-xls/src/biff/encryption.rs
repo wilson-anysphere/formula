@@ -443,7 +443,7 @@ fn apply_xor_obfuscation_in_place(
     key: u16,
     xor_array: &[u8; 16],
 ) -> Result<(), DecryptError> {
-    let key_bytes = key.to_le_bytes();
+    let mut key_bytes = key.to_le_bytes();
     let mut pos = 0usize;
 
     let mut offset = encrypted_start;
@@ -481,6 +481,7 @@ fn apply_xor_obfuscation_in_place(
 
         offset = data_end;
     }
+    key_bytes.zeroize();
     Ok(())
 }
 
@@ -507,7 +508,12 @@ fn decrypt_biff_xor_obfuscation(
     // This uses the legacy worksheet/workbook protection password hash as a verifier and applies
     // a repeating XOR keystream across record payload bytes.
     let expected = xor::xor_password_verifier(password);
-    if !ct_eq(&expected.to_le_bytes(), &verifier.to_le_bytes()) {
+    let mut expected_bytes = expected.to_le_bytes();
+    let mut verifier_bytes = verifier.to_le_bytes();
+    let ok = ct_eq(&expected_bytes, &verifier_bytes);
+    expected_bytes.zeroize();
+    verifier_bytes.zeroize();
+    if !ok {
         return Err(DecryptError::WrongPassword);
     }
     // Guard against accidentally treating a real Method-1 XOR-encrypted workbook as a simplified
