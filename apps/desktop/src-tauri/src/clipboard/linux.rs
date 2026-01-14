@@ -285,11 +285,11 @@ mod gtk_backend {
 
     fn wait_for_utf8_targets_with_source<'a>(
         clipboard: &gtk::Clipboard,
-        targets: &'a [&'a str],
+        targets: &[&'a str],
         max_bytes: usize,
     ) -> Option<(&'a str, String)> {
         let mut lossy_utf8_fallback: Option<(&'a str, Vec<u8>)> = None;
-        for target in targets {
+        for &target in targets {
             let atom = gdk::Atom::intern(target);
             let Some(data) = clipboard.wait_for_contents(&atom) else {
                 continue;
@@ -308,7 +308,7 @@ mod gtk_backend {
             }
             let bytes = data.data();
             if let Some(s) = decode_text_for_target(target, &bytes) {
-                return Some((*target, s));
+                return Some((target, s));
             }
             // As a last resort (only when no other target decodes successfully), allow lossy UTF-8
             // decoding for targets that are explicitly expected to be UTF-8.
@@ -316,7 +316,7 @@ mod gtk_backend {
                 && target_prefers_utf8(target)
                 && !super::trim_trailing_nuls(&bytes).is_empty()
             {
-                lossy_utf8_fallback = Some((*target, bytes));
+                lossy_utf8_fallback = Some((target, bytes));
             }
         }
         lossy_utf8_fallback.and_then(|(target, bytes)| {

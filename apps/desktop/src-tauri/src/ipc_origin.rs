@@ -2,6 +2,9 @@ use url::Url;
 
 use crate::tauri_origin::{self, DesktopPlatform};
 
+#[cfg(feature = "desktop")]
+use tauri::Manager as _;
+
 /// Returns whether a WebView origin is considered trusted for privileged IPC commands.
 ///
 /// This is a defense-in-depth guard: even though Tauri's security model should prevent remote

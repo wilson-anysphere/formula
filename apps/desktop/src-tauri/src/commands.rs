@@ -6351,6 +6351,7 @@ pub fn check_for_updates(
     window: tauri::WebviewWindow,
     source: crate::updater::UpdateCheckSource,
 ) -> Result<(), String> {
+    use tauri::Manager as _;
     ipc_origin::ensure_main_window_and_stable_origin(
         &window,
         "update checks",
@@ -6403,6 +6404,7 @@ pub fn quit_app(window: tauri::WebviewWindow) -> Result<(), String> {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn restart_app(window: tauri::WebviewWindow) -> Result<(), String> {
+    use tauri::Manager as _;
     ipc_origin::ensure_main_window_and_stable_origin(&window, "app lifecycle", ipc_origin::Verb::Is)?;
 
     let app = window.app_handle();

@@ -397,6 +397,14 @@ struct CloseRequestedPayload {
     updates: Vec<commands::CellUpdate>,
 }
 
+fn current_window_url<R: tauri::Runtime>(window: &tauri::Window<R>) -> Result<Url, String> {
+    let label = window.label();
+    let Some(webview_window) = window.app_handle().get_webview_window(label) else {
+        return Err(format!("missing webview window for label {label}"));
+    };
+    webview_window.url().map_err(|err| err.to_string())
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -816,7 +824,6 @@ async fn oauth_loopback_listen(
         let addr = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
         let listener = (|| -> std::io::Result<TcpListener> {
             let socket = TcpSocket::new_v6()?;
-            socket.set_only_v6(true)?;
             socket.bind(addr)?;
             socket.listen(1024)
         })();
@@ -1518,7 +1525,7 @@ fn main() {
                     .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8");
 
                 if let Some(csp) = _ctx.app_handle().config().app.security.csp.as_ref() {
-                    builder = builder.header("Content-Security-Policy", csp.as_str());
+                    builder = builder.header("Content-Security-Policy", csp.to_string());
                 }
 
                 let mut response = builder
@@ -1616,7 +1623,10 @@ fn main() {
             }
 
             // Only record once, and only when the page load finished.
-            let finished = matches!(payload.event(), tauri::PageLoadEvent::Finished);
+            let finished = matches!(
+                payload.event(),
+                tauri::webview::PageLoadEvent::Finished
+            );
             if !finished {
                 return;
             }
@@ -1826,12 +1836,22 @@ fn main() {
                 // delegate the close flow to the frontend (which would leak workbook-derived
                 // state via the `close-requested` payload) and do not run privileged
                 // `Workbook_BeforeClose` automation.
+                let Some(webview_window) = window
+                    .app_handle()
+                    .get_webview_window(window.label())
+                else {
+                    eprintln!("[close] blocked close-requested flow (missing webview window)");
+                    let _ = window.hide();
+                    CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    return;
+                };
+
                 if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
-                    window,
+                    &webview_window,
                     "close-requested flow",
                     desktop::ipc_origin::Verb::Is,
                 ) {
-                    let url_for_log = window
+                    let url_for_log = webview_window
                         .url()
                         .ok()
                         .map(|url| url.to_string())
@@ -1869,12 +1889,18 @@ fn main() {
                     // Double-check the current webview URL inside the async task so a navigation
                     // between the sync window-event handler and this task being scheduled cannot
                     // leak workbook state to an untrusted origin.
-                    if desktop::ipc_origin::ensure_stable_origin(
-                        &window,
-                        "close-requested flow",
-                        desktop::ipc_origin::Verb::Is,
-                    )
-                    .is_err()
+                    let stable_origin_ok = window
+                        .app_handle()
+                        .get_webview_window(window.label())
+                        .is_some_and(|webview_window| {
+                            desktop::ipc_origin::ensure_stable_origin(
+                                &webview_window,
+                                "close-requested flow",
+                                desktop::ipc_origin::Verb::Is,
+                            )
+                            .is_ok()
+                        });
+                    if !stable_origin_ok
                     {
                         let _ = window.hide();
                         return;
@@ -1910,12 +1936,18 @@ fn main() {
 
                     // Do not run the macro if the webview navigated away from the trusted app
                     // origin while we were waiting for the close-prep handshake.
-                    if desktop::ipc_origin::ensure_stable_origin(
-                        &window,
-                        "close-requested flow",
-                        desktop::ipc_origin::Verb::Is,
-                    )
-                    .is_err()
+                    let stable_origin_ok = window
+                        .app_handle()
+                        .get_webview_window(window.label())
+                        .is_some_and(|webview_window| {
+                            desktop::ipc_origin::ensure_stable_origin(
+                                &webview_window,
+                                "close-requested flow",
+                                desktop::ipc_origin::Verb::Is,
+                            )
+                            .is_ok()
+                        });
+                    if !stable_origin_ok
                     {
                         let _ = window.hide();
                         return;
@@ -1982,12 +2014,18 @@ fn main() {
                     };
 
                     // Do not emit workbook-derived updates to untrusted origins.
-                    if desktop::ipc_origin::ensure_stable_origin(
-                        &window,
-                        "close-requested flow",
-                        desktop::ipc_origin::Verb::Is,
-                    )
-                    .is_err()
+                    let stable_origin_ok = window
+                        .app_handle()
+                        .get_webview_window(window.label())
+                        .is_some_and(|webview_window| {
+                            desktop::ipc_origin::ensure_stable_origin(
+                                &webview_window,
+                                "close-requested flow",
+                                desktop::ipc_origin::Verb::Is,
+                            )
+                            .is_ok()
+                        });
+                    if !stable_origin_ok
                     {
                         let _ = window.hide();
                         return;
@@ -2025,12 +2063,19 @@ fn main() {
                     // SECURITY: only allow `file-dropped` to reach trusted app origins. This
                     // prevents local filesystem path leakage if the webview navigates to a remote
                     // (untrusted) origin.
+                    let Some(webview_window) = window
+                        .app_handle()
+                        .get_webview_window(window.label())
+                    else {
+                        eprintln!("[file-dropped] blocked drop event (missing webview window)");
+                        return;
+                    };
                     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
-                        window,
+                        &webview_window,
                         "file-dropped events",
                         desktop::ipc_origin::Verb::Are,
                     ) {
-                        let url = window
+                        let url = webview_window
                             .url()
                             .ok()
                             .map(|u| u.to_string())

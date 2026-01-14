@@ -302,6 +302,7 @@ fn patch_sheet_bin_rejects_inserting_formula_that_requires_rgcb_without_rgcb() {
             row: 5,
             col: 3,
             new_value: CellValue::Number(9.0),
+            clear_formula: false,
             new_formula: Some(encoded.rgce.clone()),
             new_rgcb: None,
             new_formula_flags: None,
