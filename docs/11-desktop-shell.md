@@ -142,6 +142,7 @@ Notes:
   For on-demand PR runs (same-repo PRs only), maintainers can apply the `desktop-perf-matrix` / `run-desktop-perf` label to trigger:
   - `.github/workflows/desktop-perf-platform-matrix-pr.yml`
     - runs the same matrix on the PR head SHA and posts a summary comment to the PR
+    - uploads the same artifact set as the scheduled workflow (per-OS `desktop-perf-<os>` + merged `desktop-perf-platform-matrix`)
     - optional gating: set the GitHub Actions variable `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=1` (and tune the existing startup/memory target variables)
 
 ### Idle memory benchmark (desktop process RSS)
