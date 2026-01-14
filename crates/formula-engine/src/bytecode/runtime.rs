@@ -5282,7 +5282,7 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 // workbook references (e.g. `"[Book.xlsx]Sheet1"`), but reject external 3D spans
                 // like `"[Book.xlsx]Sheet1:Sheet3"`.
                 crate::eval::is_valid_external_sheet_key(key)
-                    .then_some(SheetId::External(Arc::from(key.clone())))
+                    .then_some(SheetId::External(Arc::from(key.as_str())))
             }
         }
     }

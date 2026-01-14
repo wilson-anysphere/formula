@@ -47,7 +47,7 @@ fn indirect_r1c1_relative_is_resolved_against_formula_cell() {
 }
 
 #[test]
-fn indirect_external_workbook_refs_resolve_via_provider() {
+fn indirect_external_workbook_refs_resolve_via_provider_with_bytecode() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
     }
@@ -77,6 +77,15 @@ fn indirect_external_workbook_refs_resolve_via_provider() {
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback) so this test covers bytecode INDIRECT.
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
@@ -94,7 +103,7 @@ fn indirect_external_workbook_refs_resolve_via_provider() {
 }
 
 #[test]
-fn indirect_path_qualified_external_workbook_refs_resolve_via_provider() {
+fn indirect_path_qualified_external_workbook_refs_resolve_via_provider_with_bytecode() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
     }
@@ -130,6 +139,14 @@ fn indirect_path_qualified_external_workbook_refs_resolve_via_provider() {
         )
         .unwrap();
 
+    // Ensure we compile to bytecode (no AST fallback) so this test covers bytecode INDIRECT.
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected INDIRECT path-qualified external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
