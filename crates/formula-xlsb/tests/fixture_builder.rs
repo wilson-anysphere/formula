@@ -94,6 +94,27 @@ impl XlsbFixtureBuilder {
         idx
     }
 
+    pub fn add_shared_string_with_rich_runs(&mut self, s: &str, runs: Vec<u8>) -> u32 {
+        const STR_RUN_LEN: usize = 8;
+        assert!(
+            runs.len() % STR_RUN_LEN == 0,
+            "rich runs must be a concatenated array of 8-byte StrRun entries"
+        );
+
+        let idx = self.shared_strings.len() as u32;
+        let c_run = (runs.len() / STR_RUN_LEN) as u32;
+        let mut extra = Vec::with_capacity(4 + runs.len());
+        extra.extend_from_slice(&c_run.to_le_bytes());
+        extra.extend_from_slice(&runs);
+
+        self.shared_strings.push(SharedStringSpec {
+            text: s.to_string(),
+            flags: 0x01,
+            extra,
+        });
+        idx
+    }
+
     /// Override the generated `xl/sharedStrings.bin` part bytes.
     pub fn set_shared_strings_bin_override(&mut self, bytes: Vec<u8>) {
         self.shared_strings_bin_override = Some(bytes);
