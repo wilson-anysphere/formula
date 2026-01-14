@@ -5783,6 +5783,55 @@ mod tests {
     }
 
     #[test]
+    fn record_cells_fall_back_to_display_when_display_field_is_missing() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        let sheet_name = workbook.sheets[0].name.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut record = formula_engine::Record::new("Fallback");
+        record.display_field = Some("Name".to_string());
+
+        state
+            .engine
+            .set_cell_value(&sheet_name, "A1", EngineValue::Record(record))
+            .expect("set engine record value");
+
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("read A1");
+        assert_eq!(cell.value, CellScalar::Text("Fallback".to_string()));
+        assert_eq!(cell.display_value, "Fallback");
+    }
+
+    #[test]
+    fn record_cells_resolve_display_field_case_insensitively() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        let sheet_name = workbook.sheets[0].name.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut record = formula_engine::Record::new("Fallback").field(
+            "Name",
+            EngineValue::Text("Apple".to_string()),
+        );
+        record.display_field = Some("name".to_string());
+
+        state
+            .engine
+            .set_cell_value(&sheet_name, "A1", EngineValue::Record(record))
+            .expect("set engine record value");
+
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("read A1");
+        assert_eq!(cell.value, CellScalar::Text("Apple".to_string()));
+        assert_eq!(cell.display_value, "Apple");
+    }
+
+    #[test]
     fn add_sheet_inserts_after_middle_sheet() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
