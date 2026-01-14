@@ -330,8 +330,11 @@ restrictions (notably: no `]`), so this split is unambiguous.
     `ExternalValueProvider::sheet_order`.
   * The bytecode backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a
     multi-area reference) when all referenced sheets exist.
-* **External structured references:** structured refs cannot be workbook/sheet-qualified today
-  (e.g. `[Book.xlsx]Sheet1!Table1[Col]` evaluates to `#REF!`).
+* **External structured references:** supported when the host implements
+  `ExternalValueProvider::workbook_table(workbook, table_name)` to supply table metadata
+  (range + column names), e.g. `=SUM([Book.xlsx]Sheet1!Table1[Col])`.
+  * Row-context selectors like `[@ThisRow]` / `[@Col]` are not currently supported for external
+    workbooks and evaluate to `#REF!`.
 * **External workbook defined names:** name references cannot be qualified to an external workbook
   (e.g. `[Book.xlsx]!MyName` currently evaluates to `#REF!`). Hosts can still define *local* names
   that expand to external references via `Engine::define_name(...)`.
@@ -556,22 +559,25 @@ the current workbook. To resolve structured refs like:
 
 - `[Book.xlsx]Sheet1!Table1[Col]`
 
-the engine would need to ask the host for the external table definition (e.g. via a future
-`ExternalValueProvider::workbook_table(workbook, table_name)` API). The returned metadata would need to include:
+the engine asks the host for the external table definition via:
+
+- `ExternalValueProvider::workbook_table(workbook, table_name) -> Option<(sheet_name, Table)>`
+
+The returned metadata should include:
 
 - the table’s worksheet name (within the external workbook)
 - the table’s absolute range
 - the table’s column headers / display names (for case-insensitive column matching)
 
-This metadata can then be used to expand the structured reference into one or more concrete external
-ranges, which are evaluated by calling `get("[Book.xlsx]Sheet…", addr)` (or `get_external_value(...)`) for
-each referenced cell.
+The engine uses that metadata to expand the structured reference into one or more concrete external ranges,
+which are evaluated by calling `get("[Book.xlsx]Sheet…", addr)` (or `get_external_value(...)`) for each
+referenced cell.
 
-Current behavior: workbook- or sheet-qualified structured references are rejected and evaluate to `#REF!`
-(see “External structured references” in the “Current limitations / behavior notes” section above).
+Failure semantics:
 
-If/when external structured refs are supported, missing table metadata (including an unknown table name)
-will evaluate to `#REF!`.
+- Missing table metadata (including an unknown table name) evaluates to `#REF!`.
+- External structured refs that depend on row context (e.g. `Table1[@Col]` / `[@ThisRow]`) currently
+  evaluate to `#REF!` because the engine does not model the external “current row” context.
 
 ### Provider API responsibilities
 
@@ -584,9 +590,12 @@ To support external workbook links (cells/ranges and external 3D spans), integra
   (required for external 3D spans).
   - Conceptually (in other host bindings), this can be thought of as `workbook_sheet_names(workbook)`.
 
-To support **external structured references** like `[Book.xlsx]Sheet1!Table1[Col]`, the engine will need an
-additional host API to provide external table metadata (for example a future
-`ExternalValueProvider::workbook_table(workbook, table_name)` method), but this is not implemented yet.
+To support **external structured references** like `[Book.xlsx]Sheet1!Table1[Col]`, implement:
+
+- `ExternalValueProvider::workbook_table(workbook, table_name)` — return table metadata for `table_name`
+  in the external workbook.
+  - When embedding the evaluator directly via `ValueResolver`, this is exposed as
+    `ValueResolver::external_workbook_table(workbook, table_name)`.
 
 Failure semantics:
 
