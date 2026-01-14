@@ -730,12 +730,17 @@ export function registerBuiltinCommands(params: {
     () => {
       // Always call openPanel so we activate docked panels and also trigger a layout re-render
       // even when the panel is already floating (useful for refreshing panel-local state).
-      const placement = getPanelPlacement(layoutController.layout, PanelIds.PIVOT_BUILDER);
+      const layout = (layoutController as any)?.layout ?? null;
+      const placement = layout ? getPanelPlacement(layout, PanelIds.PIVOT_BUILDER) : { kind: "closed" as const };
       layoutController.openPanel(PanelIds.PIVOT_BUILDER);
 
       // Floating panels can be minimized; opening should restore them.
-      if (placement.kind === "floating" && (layoutController.layout as any)?.floating?.[PanelIds.PIVOT_BUILDER]?.minimized) {
-        layoutController.setFloatingPanelMinimized(PanelIds.PIVOT_BUILDER, false);
+      if (
+        placement.kind === "floating" &&
+        (layout as any)?.floating?.[PanelIds.PIVOT_BUILDER]?.minimized &&
+        typeof (layoutController as any).setFloatingPanelMinimized === "function"
+      ) {
+        (layoutController as any).setFloatingPanelMinimized(PanelIds.PIVOT_BUILDER, false);
       }
       // If the panel is already open, we still want to refresh its source range from
       // the latest selection.
