@@ -4,6 +4,8 @@ import { getStyleFontSizePt, getStyleNumberFormat, getStyleWrapText } from "../f
 
 export type SelectionHorizontalAlign = "left" | "center" | "right" | "mixed";
 
+export type SelectionVerticalAlign = "top" | "center" | "bottom" | "mixed";
+
 export type SelectionNumberFormat = string | "mixed" | null;
 
 export type SelectionFontName = string | "mixed" | null;
@@ -20,6 +22,7 @@ export type SelectionFormatState = {
   fontVariantPosition: SelectionFontVariantPosition;
   wrapText: boolean;
   align: SelectionHorizontalAlign;
+  verticalAlign: SelectionVerticalAlign;
   numberFormat: SelectionNumberFormat;
 };
 
@@ -101,6 +104,7 @@ type AggregationState = {
   fontVariantPosition: "subscript" | "superscript" | "mixed" | null | undefined;
   wrapText: boolean;
   align: "left" | "center" | "right" | "mixed" | null;
+  verticalAlign: "top" | "center" | "bottom" | "mixed" | null;
   numberFormat: string | null | "mixed" | undefined;
   inspected: number;
   exhaustive: boolean;
@@ -137,6 +141,7 @@ export function computeSelectionFormatState(
       fontVariantPosition: null,
       wrapText: false,
       align: "left",
+      verticalAlign: "bottom",
       numberFormat: null,
     };
   }
@@ -160,6 +165,7 @@ export function computeSelectionFormatState(
     fontVariantPosition: undefined,
     wrapText: true,
     align: null,
+    verticalAlign: null,
     numberFormat: undefined,
     inspected: 0,
     exhaustive,
@@ -171,6 +177,15 @@ export function computeSelectionFormatState(
     const value = raw === "center" || raw === "right" || raw === "left" ? (raw as "left" | "center" | "right") : "left";
     if (state.align == null) state.align = value;
     else if (state.align !== "mixed" && state.align !== value) state.align = "mixed";
+  };
+
+  const mergeVerticalAlign = (raw: unknown) => {
+    const normalized = typeof raw === "string" ? raw.toLowerCase() : "";
+    // Excel/OOXML uses `center` for the vertical "middle" alignment option.
+    const value: "top" | "center" | "bottom" =
+      normalized === "top" ? "top" : normalized === "center" || normalized === "middle" ? "center" : "bottom";
+    if (state.verticalAlign == null) state.verticalAlign = value;
+    else if (state.verticalAlign !== "mixed" && state.verticalAlign !== value) state.verticalAlign = "mixed";
   };
 
   const mergeNumberFormat = (raw: unknown) => {
@@ -291,6 +306,14 @@ export function computeSelectionFormatState(
       style?.horizontalAlignment ??
       style?.horizontal_alignment;
     mergeAlign(horizontal);
+
+    const vertical =
+      alignment?.vertical ??
+      style?.verticalAlign ??
+      style?.vertical_align ??
+      style?.verticalAlignment ??
+      style?.vertical_alignment;
+    mergeVerticalAlign(vertical);
     mergeNumberFormat(getStyleNumberFormat(style));
   };
 
@@ -324,6 +347,7 @@ export function computeSelectionFormatState(
     fontVariantPosition: state.fontVariantPosition === undefined ? null : state.fontVariantPosition,
     wrapText: state.wrapText,
     align: state.align ?? "left",
+    verticalAlign: state.verticalAlign ?? "bottom",
     numberFormat: state.numberFormat === undefined ? null : state.numberFormat,
   };
 }

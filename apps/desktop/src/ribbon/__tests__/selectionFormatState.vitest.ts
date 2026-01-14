@@ -17,6 +17,7 @@ describe("computeSelectionFormatState", () => {
       fontVariantPosition: null,
       wrapText: false,
       align: "left",
+      verticalAlign: "bottom",
       numberFormat: null,
     });
   });
@@ -69,6 +70,23 @@ describe("computeSelectionFormatState", () => {
     const state = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 1 }]);
     expect(state.align).toBe("mixed");
     expect(state.numberFormat).toBe("mixed");
+  });
+
+  it("detects vertical alignment and reports mixed when selection differs", () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { vertical: "top" } });
+    doc.setRangeFormat("Sheet1", "B1", { alignment: { vertical: "bottom" } });
+
+    const single = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+    expect(single.verticalAlign).toBe("top");
+
+    const mixed = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 1 }]);
+    expect(mixed.verticalAlign).toBe("mixed");
+
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { vertical: "center" } });
+    doc.setRangeFormat("Sheet1", "B1", { alignment: { vertical: "center" } });
+    const centered = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 1 }]);
+    expect(centered.verticalAlign).toBe("center");
   });
 
   it("samples large selections and still reports uniform formatting", () => {
