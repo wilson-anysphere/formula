@@ -271,6 +271,29 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    // DAX identifiers can be used without quotes when they are "simple" identifiers
+    // (letters/digits/underscore) and don't start with a digit.
+    //
+    // Everything else should be quoted as `'identifier'` with `''` escaping.
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return true;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return true;
+    }
+    false
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // In DAX, single quotes are escaped as `''` inside a quoted identifier.
+    format!("'{}'", raw.replace('\'', "''"))
+}
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
