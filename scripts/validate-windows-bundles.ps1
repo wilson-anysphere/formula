@@ -1303,15 +1303,19 @@ try {
     if ([string]::IsNullOrWhiteSpace($scheme)) { $scheme = "formula" }
     $scheme = $scheme.TrimEnd("/").TrimEnd(":")
  
-      $markers = @(
-        "URL Protocol",
-        "URL protocol",
-        # Token-delimited marker to avoid prefix false-positives (e.g. avoid treating
-        # x-scheme-handler/<scheme>-extra as satisfying x-scheme-handler/<scheme>).
-        "x-scheme-handler/$scheme;",
-        "\$scheme\shell\open\command",
-        "$scheme\shell\open\command"
-      )
+    $markers = @(
+      # Token-delimited marker to avoid prefix false-positives (e.g. avoid treating
+      # x-scheme-handler/<scheme>-extra as satisfying x-scheme-handler/<scheme>).
+      "x-scheme-handler/$scheme;",
+      "Software\\Classes\\$scheme\\shell\\open\\command",
+      "Software\Classes\$scheme\shell\open\command",
+      "HKEY_CLASSES_ROOT\\$scheme\\shell\\open\\command",
+      "HKEY_CLASSES_ROOT\$scheme\shell\open\command",
+      "HKCR\\$scheme\\shell\\open\\command",
+      "HKCR\$scheme\shell\open\command",
+      "\$scheme\shell\open\command",
+      "$scheme\shell\open\command"
+    )
  
     return Find-BinaryMarkerInFile -File $Exe -MarkerStrings $markers
   }
@@ -1508,25 +1512,25 @@ try {
         } catch {
           $msg = $_.Exception.Message
           if ($msg -match 'Failed to open MSI for inspection') {
-              Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
-              # Best-effort mode: validate only the primary scheme, since string scanning can be brittle.
-              $needles = @(
-                "URL Protocol",
-                "URL protocol",
-                "Software\\Classes\\$primaryScheme",
-                "Software\Classes\$primaryScheme",
-                "HKEY_CLASSES_ROOT\\$primaryScheme",
-                "HKEY_CLASSES_ROOT$primaryScheme",
-                "HKCR\\$primaryScheme",
-                "HKCR $primaryScheme",
-                "\$primaryScheme\shell\open\command",
-                "$primaryScheme\shell\open\command"
-              )
-            $marker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $needles
-            if ([string]::IsNullOrWhiteSpace($marker)) {
+            Write-Warning "MSI inspection tooling is unavailable; falling back to best-effort string scan for URL protocol metadata. Details: $msg"
+            # Best-effort mode: validate only the primary scheme, since string scanning can be brittle.
+            $schemeNeedles = @(
+              # Prefer scheme-specific paths that include a separator after the scheme name to
+              # avoid prefix false-positives (e.g. don't treat "formula-extra" as satisfying "formula").
+              "\$primaryScheme\shell\open\command",
+              "$primaryScheme\shell\open\command",
+              "Software\\Classes\\$primaryScheme\\shell\\open\\command",
+              "Software\Classes\$primaryScheme\shell\open\command",
+              "HKEY_CLASSES_ROOT\\$primaryScheme\\shell\\open\\command",
+              "HKEY_CLASSES_ROOT\$primaryScheme\shell\open\command",
+              "HKCR\\$primaryScheme\\shell\\open\\command",
+              "HKCR\$primaryScheme\shell\open\command"
+            )
+            $schemeMarker = Find-BinaryMarkerInFile -File $msi -MarkerStrings $schemeNeedles
+            if ([string]::IsNullOrWhiteSpace($schemeMarker)) {
               throw "Unable to inspect MSI tables AND did not find URL-protocol-related strings for '$primaryScheme://' in the MSI binary: $($msi.FullName)"
             }
-            Write-Warning "MSI table inspection failed, but the MSI contained marker '$marker' related to '$primaryScheme://'. Assuming URL protocol metadata is present (best-effort)."
+            Write-Warning "MSI table inspection failed, but the MSI contained marker '$schemeMarker' related to '$primaryScheme://'. Assuming URL protocol metadata is present (best-effort)."
             break
           } else {
             throw
@@ -1559,7 +1563,7 @@ try {
  
       $protocolMarker = Find-ExeUrlProtocolMarker -Exe $exe -UrlScheme $primaryScheme
       if ([string]::IsNullOrWhiteSpace($protocolMarker)) {
-        $msg = "EXE installer did not contain obvious markers for '$primaryScheme://' URL protocol registration (e.g. 'URL Protocol'). This validation is heuristic for NSIS installers."
+        $msg = "EXE installer did not contain obvious markers for '$primaryScheme://' URL protocol registration (e.g. '$primaryScheme\\shell\\open\\command'). This validation is heuristic for NSIS installers."
         if ($msiInstallers.Count -gt 0) {
           Write-Warning "$msg MSI validation passed, so this is non-fatal. If users rely on the EXE installer, investigate NSIS URL protocol wiring."
         } else {
