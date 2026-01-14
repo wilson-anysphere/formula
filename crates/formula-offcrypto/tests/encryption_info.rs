@@ -1,6 +1,6 @@
 use formula_offcrypto::{
-    parse_encryption_info, EncryptionInfo, OffcryptoError, StandardEncryptionHeader,
-    StandardEncryptionVerifier,
+    inspect_encryption_info, parse_encryption_info, EncryptionInfo, EncryptionType, OffcryptoError,
+    StandardAlgId, StandardEncryptionHeader, StandardEncryptionVerifier,
 };
 
 const CALG_AES_128: u32 = 0x0000_660E;
@@ -167,6 +167,56 @@ fn parse_synthetic_standard_encryption_info_accepts_major_4_minor_2() {
 }
 
 #[test]
+fn inspect_encryption_info_accepts_major_2_minor_2() {
+    let bytes = build_standard_encryption_info_with_version(
+        2,
+        2,
+        &utf16le_bytes("Test CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let summary = inspect_encryption_info(&bytes).expect("inspect");
+    assert_eq!(summary.encryption_type, EncryptionType::Standard);
+    assert_eq!(
+        summary.standard,
+        Some(formula_offcrypto::StandardEncryptionInfoSummary {
+            alg_id: StandardAlgId::Aes128,
+            key_size: 128,
+        })
+    );
+    assert_eq!(summary.agile, None);
+}
+
+#[test]
+fn inspect_encryption_info_accepts_major_4_minor_2() {
+    let bytes = build_standard_encryption_info_with_version(
+        4,
+        2,
+        &utf16le_bytes("Test CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let summary = inspect_encryption_info(&bytes).expect("inspect");
+    assert_eq!(summary.encryption_type, EncryptionType::Standard);
+    assert_eq!(
+        summary.standard,
+        Some(formula_offcrypto::StandardEncryptionInfoSummary {
+            alg_id: StandardAlgId::Aes128,
+            key_size: 128,
+        })
+    );
+    assert_eq!(summary.agile, None);
+}
+
+#[test]
 fn truncation_missing_header_size() {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&3u16.to_le_bytes());
@@ -189,10 +239,7 @@ fn truncation_header_shorter_than_fixed_fields() {
     bytes.extend_from_slice(&[0u8; 16]);
 
     let err = parse_encryption_info(&bytes).unwrap_err();
-    assert!(matches!(
-        err,
-        OffcryptoError::InvalidEncryptionInfo { .. }
-    ));
+    assert!(matches!(err, OffcryptoError::InvalidEncryptionInfo { .. }));
 }
 
 #[test]
@@ -223,16 +270,30 @@ fn truncation_missing_verifier_fields() {
 
 #[test]
 fn csp_name_accepts_terminated_and_non_terminated_utf16le() {
-    let bytes_term =
-        build_standard_encryption_info(&utf16le_bytes("CSP", true), CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
+    let bytes_term = build_standard_encryption_info(
+        &utf16le_bytes("CSP", true),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
     let info = parse_encryption_info(&bytes_term).expect("terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");
     };
     assert_eq!(header.csp_name, "CSP");
 
-    let bytes_no_term =
-        build_standard_encryption_info(&utf16le_bytes("CSP", false), CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
+    let bytes_no_term = build_standard_encryption_info(
+        &utf16le_bytes("CSP", false),
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
     let info = parse_encryption_info(&bytes_no_term).expect("non-terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");
