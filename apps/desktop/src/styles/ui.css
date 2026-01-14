@@ -9,8 +9,8 @@
   font-family: var(--font-sans);
 }
 
-.formula-app a,
-.formula-app a:visited {
+a,
+a:visited {
   color: var(--link);
 }
 
