@@ -874,7 +874,12 @@ fn build_parts(
                 },
             )?;
 
-            let orig_has_conditional_formatting = orig_xml.contains("conditionalFormatting");
+            // Conditional formatting blocks are only meaningful when they contain `<cfRule>`
+            // children. Some producers (or corrupted files) may contain an empty
+            // `<conditionalFormatting/>` element. Treat those as "no conditional formatting" so
+            // callers can still insert conditional formatting rules via the streaming patcher.
+            let orig_has_conditional_formatting =
+                orig_xml.contains("<cfRule") || orig_xml.contains(":cfRule");
 
             (
                 orig_tab_color,
@@ -1123,10 +1128,11 @@ fn build_parts(
             let cols_xml = render_cols(sheet, worksheet_prefix.as_deref(), &style_to_xf);
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
         }
-        // `write_worksheet_xml` may have already serialized conditional formatting when
-        // synthesizing new sheet XML. Only run the streaming rewriter when the current XML still
-        // lacks conditional formatting blocks.
-        if conditional_formatting_changed && !sheet_xml.contains("conditionalFormatting") {
+        // Insert conditional formatting rules into preserved worksheet XML when the model contains
+        // conditional formatting rules but the source XML didn't have any `<cfRule>` nodes (for
+        // example, the sheet had no conditional formatting at all, or it contained an empty
+        // `<conditionalFormatting/>` placeholder).
+        if conditional_formatting_changed {
             let rules: Cow<'_, [CfRule]> = if sheet
                 .conditional_formatting_rules
                 .iter()

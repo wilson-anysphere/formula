@@ -318,6 +318,43 @@ fn roundtrip_preserves_unmodeled_empty_conditional_formatting_blocks() {
 }
 
 #[test]
+fn can_insert_conditional_formatting_when_source_has_empty_conditional_formatting_block() {
+    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+  <conditionalFormatting sqref="A1"/>
+</worksheet>"#;
+    let input = build_minimal_xlsx_with_sheet1(sheet1_xml);
+
+    let mut doc = crate::load_from_bytes(&input).expect("load minimal xlsx");
+    let sheet_id = doc.workbook.sheets[0].id;
+    {
+        let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
+        sheet.add_conditional_formatting_rule(formula_model::CfRule {
+            schema: formula_model::CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![formula_model::Range::from_a1("A1").unwrap()],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: formula_model::CfRuleKind::Expression {
+                formula: "TRUE".to_string(),
+            },
+            dependencies: Vec::new(),
+        });
+    }
+
+    let out = write_to_vec(&doc).expect("write patched xlsx");
+    let xml = zip_part_to_string(&out, "xl/worksheets/sheet1.xml");
+    assert!(
+        xml.contains("<cfRule") && xml.contains("<formula>TRUE</formula>"),
+        "expected new conditional formatting rule to be inserted:\n{xml}"
+    );
+}
+
+#[test]
 fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
