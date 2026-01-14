@@ -10,7 +10,12 @@ use formula_engine::functions::{
 
 fn recalc_tick_test(ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
     // Use only 53 bits so the f64 conversion is exact and comparisons remain deterministic.
-    Value::Number((ctx.volatile_rand_u64() >> 11) as f64)
+    //
+    // Prefer the low bits via a mask (instead of `>> 11`): it preserves exactness while making
+    // collisions across consecutive recalc ticks astronomically unlikely (important because the
+    // regression tests compare values for equality/inequality across ticks).
+    let bits = ctx.volatile_rand_u64() & ((1u64 << 53) - 1);
+    Value::Number(bits as f64)
 }
 
 inventory::submit! {
