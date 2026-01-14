@@ -1797,18 +1797,31 @@ fn main() {
             | tauri::WindowEvent::Focused(true) => {
                 if window.label() == "main" {
                     let startup = window.state::<SharedStartupMetrics>().inner().clone();
-                    let should_spawn_post_window_visible_init = {
+                    let (should_emit_window_visible, window_visible_ms, snapshot, should_spawn_post_window_visible_init) = {
                         let mut metrics = startup.lock().unwrap();
                         // This is the authoritative "window became visible" signal; overwrite any
                         // provisional timestamp that might have been recorded by early frontend
                         // startup reporting.
-                        metrics.record_window_visible_from_window_event();
+                        let should_emit_window_visible =
+                            !metrics.window_visible_recorded_from_window_event;
+                        let window_visible_ms =
+                            metrics.record_window_visible_from_window_event();
+                        let snapshot = metrics.snapshot();
                         let should_spawn = !metrics.post_window_visible_init_spawned;
                         if should_spawn {
                             metrics.post_window_visible_init_spawned = true;
                         }
-                        should_spawn
+                        (
+                            should_emit_window_visible,
+                            window_visible_ms,
+                            snapshot,
+                            should_spawn,
+                        )
                     };
+                    if should_emit_window_visible {
+                        let _ = window.emit("startup:window-visible", window_visible_ms);
+                        let _ = window.emit("startup:metrics", snapshot);
+                    }
                     if should_spawn_post_window_visible_init {
                         spawn_post_window_visible_init(window.app_handle());
                     }
