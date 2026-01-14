@@ -125,9 +125,10 @@ describe("SpreadsheetApp undo/redo edit-mode guards", () => {
     const app = new SpreadsheetApp(root, status);
     const sheetId = app.getCurrentSheetId();
     const doc: any = app.getDocument() as any;
-    const cell = { row: 0, col: 0 };
+    // Avoid the SpreadsheetApp constructor's seeded navigation/demo cells.
+    const cell = { row: 10, col: 10 };
 
-    doc.setCellInput(sheetId, cell, "Hello", { label: "Seed" });
+    doc.setCellInput(sheetId, cell, "Hello", { label: "Edit" });
     expect(app.getUndoRedoState().canUndo).toBe(true);
 
     const undoDepthBefore = doc.getStackDepths().undo;
@@ -150,4 +151,3 @@ describe("SpreadsheetApp undo/redo edit-mode guards", () => {
     root.remove();
   });
 });
-
