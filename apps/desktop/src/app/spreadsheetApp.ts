@@ -7046,6 +7046,10 @@ export class SpreadsheetApp {
   selectDrawing(id: number | null): void {
     const prev = this.selectedDrawingId;
     this.selectedDrawingId = id;
+    // Keep all drawing interaction controllers in sync so keyboard-driven selection changes
+    // (e.g. Escape to deselect) don't leave pointer interactions thinking an object is still
+    // selected (which could enable invisible resize/rotate handles).
+    this.drawingsInteraction?.setSelectedId(id);
     this.drawingInteractionController?.setSelectedId(id);
     this.drawingOverlay.setSelectedId(id);
     if (prev !== id) {
