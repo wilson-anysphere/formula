@@ -168,6 +168,25 @@ const RECORD_SCL: u16 = 0x00A0;
 const RECORD_PANE: u16 = 0x0041;
 const RECORD_SELECTION: u16 = 0x001D;
 
+/// Hard cap on the number of selection ranges decoded from a single `SELECTION` record.
+///
+/// The `SELECTION` record can declare up to 65k ranges (`cref: u16`). Without a cap a crafted file
+/// can force large `Vec<Range>` allocations during the best-effort worksheet view-state scan.
+#[cfg(not(test))]
+const MAX_SELECTION_RANGES_PER_RECORD: usize = 4_096;
+// Keep unit tests fast by using a smaller cap.
+#[cfg(test)]
+const MAX_SELECTION_RANGES_PER_RECORD: usize = 64;
+
+/// Hard cap on the number of distinct `SELECTION` records retained during view-state scanning.
+///
+/// Excel typically emits at most one selection per pane, but malformed files can include an
+/// unbounded number of `SELECTION` records. We only need a small set to pick the active selection.
+#[cfg(not(test))]
+const MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE: usize = 16;
+#[cfg(test)]
+const MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE: usize = 8;
+
 // Manual page breaks (worksheet substream).
 // - VERTICALPAGEBREAKS: [MS-XLS 2.4.349]
 // - HORIZONTALPAGEBREAKS: [MS-XLS 2.4.115]
@@ -689,6 +708,7 @@ pub(crate) fn parse_biff_sheet_view_state(
     let mut window2_frozen: Option<bool> = None;
     let mut active_pane: Option<u16> = None;
     let mut selections: Vec<(u16, SheetSelection)> = Vec::new();
+    let mut warned_selection_records_capped = false;
 
     while let Some(next) = iter.next() {
         let record = match next {
@@ -735,7 +755,37 @@ pub(crate) fn parse_biff_sheet_view_state(
                 ),
             },
             RECORD_SELECTION => match parse_selection_record_best_effort(data) {
-                Ok((pane, selection)) => selections.push((pane, selection)),
+                Ok((pane, selection, summary)) => {
+                    if summary.declared_refs > summary.parsed_refs {
+                        push_sheet_metadata_warning(
+                            &mut out.warnings,
+                            format!(
+                                "SELECTION record at offset {} declares cref={} refs; parsed {} (available {}, cap={})",
+                                record.offset,
+                                summary.declared_refs,
+                                summary.parsed_refs,
+                                summary.available_refs,
+                                MAX_SELECTION_RANGES_PER_RECORD
+                            ),
+                        );
+                    }
+
+                    // Deduplicate by pane id; for well-formed files we expect at most one selection
+                    // per pane. Stop retaining new pane ids once we hit the cap.
+                    if let Some(existing) = selections.iter_mut().find(|(p, _)| *p == pane) {
+                        existing.1 = selection;
+                    } else if selections.len() < MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE {
+                        selections.push((pane, selection));
+                    } else if !warned_selection_records_capped {
+                        push_sheet_metadata_warning(
+                            &mut out.warnings,
+                            format!(
+                                "too many SELECTION records (cap={MAX_SELECTION_RECORDS_PER_SHEET_VIEW_STATE}); additional selections ignored"
+                            ),
+                        );
+                        warned_selection_records_capped = true;
+                    }
+                }
                 Err(err) => push_sheet_metadata_warning(
                     &mut out.warnings,
                     format!("failed to parse SELECTION record: {err}"),
@@ -1004,25 +1054,24 @@ fn select_active_selection(
     selections.into_iter().next().map(|(_, sel)| sel)
 }
 
-fn parse_selection_record_best_effort(data: &[u8]) -> Result<(u16, SheetSelection), String> {
+fn parse_selection_record_best_effort(
+    data: &[u8],
+) -> Result<(u16, SheetSelection, SelectionRecordSummary), String> {
     // Try a small set of plausible BIFF8 layouts.
-    let mut last_err: Option<String> = None;
-
-    // Layout A: pnn:u8 (1 byte), no padding, refs are RefU (6 bytes).
+    //
+    // Different producers (and BIFF versions) vary in whether the pane id is stored as u8 vs u16
+    // and whether the selection refs use the 6-byte RefU vs 8-byte Ref8 encoding.
     if let Ok(v) = parse_selection_record(data, SelectionLayout::PnnU8NoPadRefU) {
         return Ok(v);
     }
-    // Layout B: pnn:u8 (1 byte) + 1 byte padding, refs are RefU (6 bytes).
     if let Ok(v) = parse_selection_record(data, SelectionLayout::PnnU8PadRefU) {
         return Ok(v);
     }
-    // Layout C: pnn:u16, refs are Ref8 (8 bytes).
     if let Ok(v) = parse_selection_record(data, SelectionLayout::PnnU16Ref8) {
         return Ok(v);
     }
 
-    last_err.get_or_insert_with(|| "unrecognized SELECTION record layout".to_string());
-    Err(last_err.unwrap())
+    Err("unrecognized SELECTION record layout".to_string())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1032,10 +1081,17 @@ enum SelectionLayout {
     PnnU16Ref8,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SelectionRecordSummary {
+    declared_refs: usize,
+    parsed_refs: usize,
+    available_refs: usize,
+}
+
 fn parse_selection_record(
     data: &[u8],
     layout: SelectionLayout,
-) -> Result<(u16, SheetSelection), String> {
+) -> Result<(u16, SheetSelection, SelectionRecordSummary), String> {
     let (pane, rw_active, col_active, cref, refs_start, ref_len) = match layout {
         SelectionLayout::PnnU8NoPadRefU => {
             if data.len() < 9 {
@@ -1071,15 +1127,11 @@ fn parse_selection_record(
     };
 
     let cref_usize = cref as usize;
-    let needed = refs_start
-        .checked_add(cref_usize.checked_mul(ref_len).ok_or("cref overflow")?)
-        .ok_or("SELECTION refs length overflow")?;
-    if data.len() < needed {
-        return Err(format!(
-            "SELECTION record too short for {cref} refs (need {needed} bytes, got {})",
-            data.len()
-        ));
-    }
+    let payload_len = data.len().saturating_sub(refs_start);
+    let available_refs = payload_len / ref_len;
+    let parsed_refs = cref_usize
+        .min(available_refs)
+        .min(MAX_SELECTION_RANGES_PER_RECORD);
 
     let active_row_u32 = rw_active as u32;
     let active_col_u32 = col_active as u32;
@@ -1090,9 +1142,9 @@ fn parse_selection_record(
     }
     let active_cell = CellRef::new(active_row_u32, active_col_u32);
 
-    let mut ranges = Vec::with_capacity(cref_usize);
+    let mut ranges = Vec::with_capacity(parsed_refs);
     let mut off = refs_start;
-    for _ in 0..cref_usize {
+    for _ in 0..parsed_refs {
         let range = match layout {
             SelectionLayout::PnnU16Ref8 => {
                 let rw_first = u16::from_le_bytes([data[off], data[off + 1]]) as u32;
@@ -1114,7 +1166,15 @@ fn parse_selection_record(
         ranges.push(range);
     }
 
-    Ok((pane, SheetSelection::new(active_cell, ranges)))
+    Ok((
+        pane,
+        SheetSelection::new(active_cell, ranges),
+        SelectionRecordSummary {
+            declared_refs: cref_usize,
+            parsed_refs,
+            available_refs,
+        },
+    ))
 }
 
 fn make_range(rw_first: u32, rw_last: u32, col_first: u32, col_last: u32) -> Result<Range, String> {
@@ -4069,6 +4129,65 @@ mod tests {
             parsed.warnings.last().map(String::as_str),
             Some(SHEET_METADATA_WARNINGS_SUPPRESSED),
             "expected suppression warning to be the final warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_view_state_selection_ranges_are_capped() {
+        let cap = MAX_SELECTION_RANGES_PER_RECORD;
+        assert!(cap >= 2, "test requires cap >= 2");
+
+        // Build a SELECTION record using the PnnU8NoPadRefU layout (pane id u8, RefU ranges).
+        let pane: u8 = 0;
+        let active_row: u16 = 0;
+        let active_col: u16 = 0;
+
+        let declared = cap + 10;
+        let declared_u16 = u16::try_from(declared).expect("test selection cref should fit in u16");
+
+        let mut selection_payload = Vec::new();
+        selection_payload.push(pane);
+        selection_payload.extend_from_slice(&active_row.to_le_bytes());
+        selection_payload.extend_from_slice(&active_col.to_le_bytes());
+        selection_payload.extend_from_slice(&0u16.to_le_bytes()); // irefActive (ignored)
+        selection_payload.extend_from_slice(&declared_u16.to_le_bytes());
+
+        for idx in 0..declared {
+            let row = u16::try_from(idx).expect("row should fit in u16");
+            selection_payload.extend_from_slice(&row.to_le_bytes()); // rwFirst
+            selection_payload.extend_from_slice(&row.to_le_bytes()); // rwLast
+            selection_payload.push(0); // colFirst
+            selection_payload.push(0); // colLast
+        }
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SELECTION, &selection_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_view_state(&stream, 0).expect("parse");
+        let selection = parsed.selection.expect("selection missing");
+
+        assert_eq!(selection.active_cell, CellRef::new(0, 0));
+        assert_eq!(selection.ranges.len(), cap);
+        assert_eq!(
+            selection.ranges.first().copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(0, 0)))
+        );
+        assert_eq!(
+            selection.ranges.last().copied(),
+            Some(Range::new(
+                CellRef::new((cap - 1) as u32, 0),
+                CellRef::new((cap - 1) as u32, 0)
+            ))
+        );
+
+        assert!(
+            parsed.warnings.iter().any(|w| w.contains("SELECTION record") && w.contains("cap=")),
+            "expected selection cap warning, got {:?}",
             parsed.warnings
         );
     }
