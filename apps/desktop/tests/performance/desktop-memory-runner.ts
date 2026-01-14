@@ -20,8 +20,6 @@ type Summary = {
   enforce: boolean;
 };
 
-const perfHome = resolvePerfHome();
-
 function usage(): string {
   return [
     'Desktop idle memory benchmark runner (real Tauri binary).',
@@ -344,6 +342,7 @@ async function main(): Promise<void> {
   }
 
   const memoryKind = process.platform === 'win32' ? 'Working Set' : 'RSS';
+  const perfHome = resolvePerfHome();
   const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
   // eslint-disable-next-line no-console
   console.log(

@@ -32,9 +32,6 @@ import {
   shouldUseXvfb,
 } from './desktopStartupUtil.ts';
 
-// Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
-const perfHome = resolvePerfHome();
-
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
     const timer = setTimeout(() => {
@@ -152,6 +149,8 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
     );
   }
 
+  // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
+  const perfHome = resolvePerfHome();
   const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
 
   // eslint-disable-next-line no-console
