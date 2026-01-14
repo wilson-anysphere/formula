@@ -133,8 +133,9 @@ function findPlatformsObject(root) {
 // the platform key naming, we want this validator to fail loudly with an expected vs actual
 // diff so we can update the docs + verification logic together.
 const EXPECTED_PLATFORMS = [
-  // macOS universal builds are published as a single `*.app.tar.gz`, but tauri-action writes it
-  // under both arch keys so the updater can resolve updates on both Intel and Apple Silicon.
+  // macOS universal builds are published as a single updater tarball (typically `*.app.tar.gz`,
+  // but we allow other `*.tar.gz`/`*.tgz` archives). tauri-action writes it under both arch keys so
+  // the updater can resolve updates on both Intel and Apple Silicon.
   {
     key: "darwin-x86_64",
     label: "macOS (x86_64)",
