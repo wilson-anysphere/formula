@@ -4,7 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -81,43 +81,7 @@ export function extractPinnedCliVersionsFromWorkflow(workflowText) {
 }
 
 function yamlLinesOutsideBlockScalars(yamlText) {
-  // GitHub Actions YAML uses block scalars (`run: |`, `script: >-`, etc) which can contain arbitrary
-  // text. When scanning workflow configuration we must ignore the *contents* of block scalars so
-  // YAML-ish strings inside scripts cannot satisfy or fail guardrails.
-  //
-  // We keep this YAML handling intentionally lightweight (no YAML parser dependency).
-  const rawLines = stripHashComments(String(yamlText ?? "")).split(/\r?\n/);
-  let inBlock = false;
-  let blockIndent = 0;
-  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
-
-  for (let i = 0; i < rawLines.length; i += 1) {
-    const detect = rawLines[i] ?? "";
-
-    const indentMatch = detect.match(/^[ \t]*/);
-    const indentLen = indentMatch ? indentMatch[0].length : 0;
-
-    if (inBlock) {
-      // Blank lines can appear inside block scalars at any indentation; treat them as part of the scalar.
-      if (detect.trim() === "") {
-        rawLines[i] = "";
-        continue;
-      }
-      if (indentLen > blockIndent) {
-        rawLines[i] = "";
-        continue;
-      }
-      inBlock = false;
-    }
-
-    const detectTrimmedEnd = detect.trimEnd();
-    if (blockRe.test(detectTrimmedEnd)) {
-      inBlock = true;
-      blockIndent = indentLen;
-    }
-  }
-
-  return rawLines;
+  return stripYamlBlockScalarBodies(stripHashComments(String(yamlText ?? ""))).split(/\r?\n/);
 }
 
 export function findTauriActionScriptIssues(workflowText) {
