@@ -983,9 +983,11 @@ fn decode_rgce_impl(
                 let name_index = u16::from_le_bytes([rgce[i + 2], rgce[i + 3]]);
                 i = i.saturating_add(4);
 
-                // Best-effort: emit a stable placeholder identifier. Avoid characters like `:` and
-                // `{}` which would be treated as operators / invalid names by Excel formula
-                // parsers.
+                // Best-effort: emit a stable placeholder identifier for the extern name.
+                //
+                // Excel add-in / UDF calls typically reference extern names via `PtgNameX`
+                // followed by `PtgFuncVar(0x00FF)`. Keep the format stable for tests and
+                // downstream diagnostics, and ensure it stays parseable as an Excel identifier.
                 let is_value_class = (ptg & 0x60) == 0x40;
                 let mut text = String::new();
                 let mut precedence = 100;
