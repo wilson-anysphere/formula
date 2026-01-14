@@ -132,16 +132,16 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 );
             }
 
-            // Providing a password should surface an "invalid password" style error. Even though
-            // this fixture is malformed (it does not contain a valid encrypted payload), the
-            // password-aware APIs treat "can't decrypt" as `InvalidPassword` for supported OOXML
-            // encryption versions so UIs can prompt/retry without exposing internal format details.
+            // Providing a password should attempt to decrypt and surface a distinct error from
+            // `PasswordRequired`. Because this fixture is intentionally malformed (it does not
+            // contain a valid `EncryptedPackage` payload), we surface an "unsupported/malformed
+            // encryption container" style error rather than `InvalidPassword`.
             let err = open_workbook_with_password(&path, Some("wrong"))
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(err, Error::InvalidPassword { .. }),
-                    "expected Error::InvalidPassword, got {err:?}"
+                    matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
+                    "expected Error::UnsupportedOoxmlEncryption, got {err:?}"
                 );
             } else {
                 assert!(
@@ -154,8 +154,8 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(err, Error::InvalidPassword { .. }),
-                    "expected Error::InvalidPassword, got {err:?}"
+                    matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
+                    "expected Error::UnsupportedOoxmlEncryption, got {err:?}"
                 );
             } else {
                 assert!(
