@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
 
@@ -41,8 +43,9 @@ test("Desktop CSS should not use brightness() filters (use tokens instead)", () 
 
   for (const target of targets) {
     const css = fs.readFileSync(target, "utf8");
+    const stripped = stripCssNonSemanticText(css);
     assert.ok(
-      !/\bbrightness\s*\(/i.test(css),
+      !/\bbrightness\s*\(/i.test(stripped),
       `Expected ${path.relative(desktopRoot, target)} to avoid brightness(...) (use tokens instead)`,
     );
   }
