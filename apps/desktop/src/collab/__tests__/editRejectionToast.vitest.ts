@@ -125,6 +125,18 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("insert pictures");
   });
 
+  it("shows a background image toast for rejected sheet background changes", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "backgroundImage",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("sheet background");
+  });
+
   it("shows a drawing toast for rejected drawing edits", () => {
     showCollabEditRejectedToast([
       {

@@ -6437,6 +6437,10 @@ export class SpreadsheetApp {
   setSheetBackgroundImageId(sheetId: string, imageId: string | null): void {
     const key = String(sheetId ?? "").trim();
     if (!key) return;
+    if (this.isReadOnly()) {
+      showCollabEditRejectedToast([{ rejectionKind: "backgroundImage", rejectionReason: "permission" }]);
+      return;
+    }
     const normalized = imageId ? String(imageId).trim() : null;
     const doc: any = this.document as any;
     if (typeof doc.setSheetBackgroundImageId === "function") {

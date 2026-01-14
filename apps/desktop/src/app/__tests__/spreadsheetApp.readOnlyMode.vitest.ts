@@ -253,6 +253,14 @@ describe("SpreadsheetApp read-only collab UX", () => {
     app.freezeTopRow();
     expect(app.getFrozen()).toEqual({ frozenRows: 1, frozenCols: 0 });
 
+    // Sheet background images are persisted in sheet view state and should be blocked in read-only
+    // roles (otherwise the viewer's local UI can diverge from the authoritative remote state).
+    vi.mocked(showToast).mockClear();
+    expect(app.getSheetBackgroundImageId(sheetId)).toBe(null);
+    app.setSheetBackgroundImageId(sheetId, "bg.png");
+    expect(app.getSheetBackgroundImageId(sheetId)).toBe(null);
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("background"), "warning");
+
     // Hide/unhide rows/cols are also sheet-view mutations and must no-op in read-only.
     vi.mocked(showToast).mockClear();
     const provider = (app as any).usedRangeProvider();
