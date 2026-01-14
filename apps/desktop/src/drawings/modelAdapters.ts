@@ -855,8 +855,9 @@ export function convertModelWorksheetDrawingsToUiDrawingObjects(modelWorksheetJs
 }
 
 function convertDocumentDrawingSizeToEmu(sizeJson: unknown): EmuSize | undefined {
-  if (!isRecord(sizeJson)) return undefined;
-  const record = sizeJson as JsonRecord;
+  const unwrapped = unwrapSingletonId(sizeJson);
+  if (!isRecord(unwrapped)) return undefined;
+  const record = unwrapped as JsonRecord;
 
   const readFirstNumeric = (keys: string[]): number | undefined => {
     for (const key of keys) {
@@ -882,8 +883,9 @@ function convertDocumentDrawingSizeToEmu(sizeJson: unknown): EmuSize | undefined
 }
 
 function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSize | undefined): Anchor | null {
-  if (!isRecord(anchorJson)) return null;
-  const outer = anchorJson as JsonRecord;
+  const unwrappedAnchorJson = unwrapSingletonId(anchorJson);
+  if (!isRecord(unwrappedAnchorJson)) return null;
+  const outer = unwrappedAnchorJson as JsonRecord;
   // Support DocumentController anchors (simple `{ type: "absolute", ... }`) as well as
   // formula-model/Rust enum encodings (externally tagged `{ Absolute: {...} }` and
   // internally tagged `{ type: "Absolute", value: {...} }`).
@@ -892,8 +894,9 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
   try {
     const unwrapped = unwrapPossiblyTaggedEnum(outer, "Drawing.anchor", { tagKeys: ["kind", "type"] });
     tag = unwrapped.tag;
-    if (!isRecord(unwrapped.value)) return null;
-    payload = unwrapped.value as JsonRecord;
+    const value = unwrapSingletonId(unwrapped.value);
+    if (!isRecord(value)) return null;
+    payload = value as JsonRecord;
   } catch {
     // ignore; fall back to treating `anchorJson` as a plain DocumentController anchor object.
   }
@@ -920,6 +923,9 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
   if (anchorType.endsWith("anchor")) anchorType = anchorType.slice(0, -"anchor".length);
 
   const resolveOffsetEmuMaybeFrom = (record: JsonRecord, axis: "x" | "y"): number | undefined => {
+    const unwrappedRecord = unwrapSingletonId(record);
+    if (!isRecord(unwrappedRecord)) return undefined;
+    const resolvedRecord = unwrappedRecord as JsonRecord;
     const emuKeys =
       axis === "x"
         ? ["xEmu", "x_emu", "dxEmu", "offsetXEmu", "offset_x_emu"]
@@ -927,11 +933,11 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
     const pxKeys = axis === "x" ? ["x", "dx", "offsetX", "offsetXPx", "offset_x"] : ["y", "dy", "offsetY", "offsetYPx", "offset_y"];
 
     for (const key of emuKeys) {
-      const candidate = readOptionalNumber((record as any)[key]);
+      const candidate = readOptionalNumber((resolvedRecord as any)[key]);
       if (candidate != null) return candidate;
     }
     for (const key of pxKeys) {
-      const candidate = readOptionalNumber((record as any)[key]);
+      const candidate = readOptionalNumber((resolvedRecord as any)[key]);
       if (candidate != null) return pxToEmu(candidate);
     }
 
@@ -967,13 +973,13 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
     }
     // Back-compat: accept UI-like anchors persisted in a DocumentController snapshot.
     case "onecell": {
-      const fromValue = pick(payload, ["from"]);
+      const fromValue = unwrapSingletonId(pick(payload, ["from"]));
       if (!isRecord(fromValue)) return null;
-      const cellValue = pick(fromValue, ["cell"]);
+      const cellValue = unwrapSingletonId(pick(fromValue, ["cell"]));
       if (!isRecord(cellValue)) return null;
       const row = readNumber(pick(cellValue, ["row"]), "Drawing.anchor.from.cell.row");
       const col = readNumber(pick(cellValue, ["col"]), "Drawing.anchor.from.cell.col");
-      const offsetValue = pick(fromValue, ["offset"]);
+      const offsetValue = unwrapSingletonId(pick(fromValue, ["offset"]));
       const offset: CellOffset = {
         xEmu:
           (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "x") : undefined) ??
@@ -990,25 +996,36 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
       // Support both DocumentController-style anchors (which may store `xEmu/yEmu` on the root)
       // and UI-like anchors (which store `pos: { xEmu, yEmu }`).
       const posValue = pick(payload, ["pos"]);
-      const pos = isRecord(posValue) ? posValue : null;
+      const pos = (() => {
+        const unwrapped = unwrapSingletonId(posValue);
+        return isRecord(unwrapped) ? unwrapped : null;
+      })();
       const xEmu = (pos ? resolveOffsetEmuMaybeFrom(pos, "x") : undefined) ?? resolveOffsetEmu("x");
       const yEmu = (pos ? resolveOffsetEmuMaybeFrom(pos, "y") : undefined) ?? resolveOffsetEmu("y");
       return { type: "absolute", pos: { xEmu, yEmu }, size: resolvedSize };
     }
     case "twocell": {
-      const fromValue = pick(payload, ["from"]);
-      const toValue = pick(payload, ["to"]);
+      const fromValue = unwrapSingletonId(pick(payload, ["from"]));
+      const toValue = unwrapSingletonId(pick(payload, ["to"]));
       if (!isRecord(fromValue) || !isRecord(toValue)) return null;
 
       const parsePoint = (point: JsonRecord, context: string): AnchorPoint | null => {
-        const cellValue = pick(point, ["cell"]);
+        const unwrappedPoint = unwrapSingletonId(point);
+        if (!isRecord(unwrappedPoint)) return null;
+        const cellValue = unwrapSingletonId(pick(unwrappedPoint, ["cell"]));
         if (!isRecord(cellValue)) return null;
         const row = readNumber(pick(cellValue, ["row"]), `${context}.cell.row`);
         const col = readNumber(pick(cellValue, ["col"]), `${context}.cell.col`);
-        const offsetValue = pick(point, ["offset"]);
+        const offsetValue = unwrapSingletonId(pick(unwrappedPoint, ["offset"]));
         const offset: CellOffset = {
-          xEmu: (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "x") : undefined) ?? resolveOffsetEmuMaybeFrom(point, "x") ?? 0,
-          yEmu: (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "y") : undefined) ?? resolveOffsetEmuMaybeFrom(point, "y") ?? 0,
+          xEmu:
+            (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "x") : undefined) ??
+            resolveOffsetEmuMaybeFrom(unwrappedPoint, "x") ??
+            0,
+          yEmu:
+            (isRecord(offsetValue) ? resolveOffsetEmuMaybeFrom(offsetValue, "y") : undefined) ??
+            resolveOffsetEmuMaybeFrom(unwrappedPoint, "y") ??
+            0,
         };
         return { cell: { row, col }, offset };
       };

@@ -70,3 +70,23 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects accepts mixed schema: exter
   assert.equal(ui[0]?.kind?.rawXml ?? ui[0]?.kind?.raw_xml, rawXml);
   assert.equal(ui[0]?.transform?.rotationDeg, 1);
 });
+
+test("convertDocumentSheetDrawingsToUiDrawingObjects unwraps singleton-wrapped model anchor objects (pos/ext) when stored in DocumentController drawings (interop)", () => {
+  const drawings = [
+    {
+      id: "1",
+      zOrder: 0,
+      kind: { type: "shape", rawXml: "<xdr:sp/>" },
+      anchor: {
+        Absolute: {
+          pos: { 0: { x_emu: 5, y_emu: 6 } },
+          ext: { 0: { cx: 10, cy: 20 } },
+        },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 5, yEmu: 6 }, size: { cx: 10, cy: 20 } });
+});
