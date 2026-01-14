@@ -18,6 +18,7 @@ release_workflow=".github/workflows/release.yml"
 windows_arm64_smoke_workflow=".github/workflows/windows-arm64-smoke.yml"
 bundle_size_workflow=".github/workflows/desktop-bundle-size.yml"
 desktop_perf_platform_matrix_workflow=".github/workflows/desktop-perf-platform-matrix.yml"
+desktop_perf_platform_matrix_pr_workflow=".github/workflows/desktop-perf-platform-matrix-pr.yml"
 dry_run_workflow=".github/workflows/desktop-bundle-dry-run.yml"
 
 extract_package_manager_pnpm_version() {
@@ -157,6 +158,7 @@ check_workflow_pnpm_pins "$release_workflow"
 check_workflow_pnpm_pins "$windows_arm64_smoke_workflow"
 check_workflow_pnpm_pins "$bundle_size_workflow"
 check_workflow_pnpm_pins "$desktop_perf_platform_matrix_workflow"
+check_workflow_pnpm_pins "$desktop_perf_platform_matrix_pr_workflow"
 check_workflow_pnpm_pins "$dry_run_workflow"
 
 echo "pnpm version pins match package.json (pnpm@${expected_pnpm_version})."
