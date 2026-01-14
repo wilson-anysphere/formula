@@ -95,6 +95,10 @@ test("CellStructuralConflictMonitor caps age-prune work per pass and schedules f
   // Follow-up prune should be scheduled to clear the remaining backlog.
   assert.equal(monitor._agePruneTimer != null, true);
 
+  // Manual forced pass clears the remaining backlog (incremental cleanup).
+  monitor._pruneOpLogByAge({ force: true });
+  assert.equal(ops.size, 0);
+
   monitor.dispose();
   assert.equal(monitor._agePruneTimer, null);
   doc.destroy();
