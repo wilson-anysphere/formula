@@ -160,7 +160,6 @@ import {
   CollaboratorsListUiController,
   type CollaboratorListEntry,
 } from "../collab/presence-ui/collaborators-list-ui-controller.js";
-import { DrawingInteractionController } from "../drawings/interaction.js";
 
 type FormulaBarCommit = Parameters<ConstructorParameters<typeof FormulaBarView>[1]["onCommit"]>[1];
 
