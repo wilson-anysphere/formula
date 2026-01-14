@@ -255,6 +255,11 @@ def _tool_env(repo_root: Path) -> dict[str, str]:
     """
 
     env = dict(os.environ)
+    # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml`. Some environments set it
+    # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift
+    # when running `cargo` directly.
+    if env.get("RUSTUP_TOOLCHAIN") and (repo_root / "rust-toolchain.toml").is_file():
+        env.pop("RUSTUP_TOOLCHAIN", None)
 
     default_global_cargo_home = Path.home() / ".cargo"
     cargo_home = env.get("CARGO_HOME")

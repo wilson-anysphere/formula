@@ -432,6 +432,11 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = _repo_root()
+    # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml`. Some environments set it
+    # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift
+    # for any cargo/rustc subprocess calls in this report.
+    if os.environ.get("RUSTUP_TOOLCHAIN") and (repo_root / "rust-toolchain.toml").is_file():
+        os.environ.pop("RUSTUP_TOOLCHAIN", None)
     package = _desktop_package_name(repo_root)
     bin_name = DEFAULT_BIN_NAME
     features = args.features

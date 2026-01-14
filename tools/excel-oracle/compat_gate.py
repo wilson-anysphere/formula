@@ -584,6 +584,11 @@ def main() -> int:
         and (repo_root / "scripts" / "cargo_agent.sh").is_file()
     )
     env = os.environ.copy()
+    # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml`. Some environments set it
+    # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce
+    # drift when running `cargo` fallbacks.
+    if env.get("RUSTUP_TOOLCHAIN") and (repo_root / "rust-toolchain.toml").is_file():
+        env.pop("RUSTUP_TOOLCHAIN", None)
     default_global_cargo_home = Path.home() / ".cargo"
     cargo_home = env.get("CARGO_HOME")
     cargo_home_path = Path(cargo_home).expanduser() if cargo_home else None
