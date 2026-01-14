@@ -10136,56 +10136,68 @@ fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
 }
 
 fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
-    fn text_like_str(v: &Value) -> Option<&str> {
-        match v {
-            Value::Text(s) => Some(s.as_ref()),
-            Value::Entity(v) => Some(v.display.as_str()),
-            Value::Record(v) => Some(v.display.as_str()),
-            _ => None,
-        }
-    }
-
     match (lookup_value, candidate) {
         (Value::Number(a), Value::Number(b)) => a == b,
-        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-            cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
-                == Ordering::Equal
-        }
-        (Value::Bool(a), Value::Bool(b)) => a == b,
-        (Value::Error(a), Value::Error(b)) => a == b,
-        (Value::Empty | Value::Missing, Value::Empty | Value::Missing) => true,
-        (Value::Number(a), b) if text_like_str(b).is_some() => {
-            let trimmed = text_like_str(b).unwrap().trim();
-            if trimmed.is_empty() {
-                false
-            } else {
-                crate::coercion::datetime::parse_value_text(
-                    trimmed,
-                    thread_value_locale(),
-                    thread_now_utc(),
-                    thread_date_system(),
-                )
-                .is_ok_and(|parsed| parsed == *a)
+        (a, b) => {
+            fn text_like_str(v: &Value) -> Option<Cow<'_, str>> {
+                match v {
+                    Value::Text(s) => Some(Cow::Borrowed(s.as_ref())),
+                    Value::Entity(v) => Some(Cow::Borrowed(v.display.as_str())),
+                    Value::Record(record) => match coerce_to_cow_str(v) {
+                        Ok(s) => Some(s),
+                        // If record display_field coercion fails (e.g. display field points at an
+                        // error/reference/etc), fall back to the raw display string.
+                        Err(_) => Some(Cow::Borrowed(record.display.as_str())),
+                    },
+                    _ => None,
+                }
+            }
+
+            match (a, b) {
+                (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
+                    let a = text_like_str(a).unwrap();
+                    let b = text_like_str(b).unwrap();
+                    cmp_case_insensitive(a.as_ref(), b.as_ref()) == Ordering::Equal
+                }
+                (Value::Bool(a), Value::Bool(b)) => a == b,
+                (Value::Error(a), Value::Error(b)) => a == b,
+                (Value::Empty | Value::Missing, Value::Empty | Value::Missing) => true,
+                (Value::Number(a), b) if text_like_str(b).is_some() => {
+                    let b = text_like_str(b).unwrap();
+                    let trimmed = b.trim();
+                    if trimmed.is_empty() {
+                        false
+                    } else {
+                        crate::coercion::datetime::parse_value_text(
+                            trimmed,
+                            thread_value_locale(),
+                            thread_now_utc(),
+                            thread_date_system(),
+                        )
+                        .is_ok_and(|parsed| parsed == *a)
+                    }
+                }
+                (a, Value::Number(b)) if text_like_str(a).is_some() => {
+                    let a = text_like_str(a).unwrap();
+                    let trimmed = a.trim();
+                    if trimmed.is_empty() {
+                        false
+                    } else {
+                        crate::coercion::datetime::parse_value_text(
+                            trimmed,
+                            thread_value_locale(),
+                            thread_now_utc(),
+                            thread_date_system(),
+                        )
+                        .is_ok_and(|parsed| parsed == *b)
+                    }
+                }
+                (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
+                    (*b == 0.0 && !*a) || (*b == 1.0 && *a)
+                }
+                _ => false,
             }
         }
-        (a, Value::Number(b)) if text_like_str(a).is_some() => {
-            let trimmed = text_like_str(a).unwrap().trim();
-            if trimmed.is_empty() {
-                false
-            } else {
-                crate::coercion::datetime::parse_value_text(
-                    trimmed,
-                    thread_value_locale(),
-                    thread_now_utc(),
-                    thread_date_system(),
-                )
-                .is_ok_and(|parsed| parsed == *b)
-            }
-        }
-        (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
-            (*b == 0.0 && !*a) || (*b == 1.0 && *a)
-        }
-        _ => false,
     }
 }
 

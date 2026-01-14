@@ -77,39 +77,45 @@ fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
 }
 
 fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate: &Value) -> bool {
+    // Excel compares text case-insensitively. Rich values (entities/records) behave like text by
+    // using their display string; for records, this includes `display_field` semantics.
+    fn text_like_str<'a>(ctx: &LookupContext, v: &'a Value) -> Option<Cow<'a, str>> {
+        match v {
+            Value::Text(s) => Some(Cow::Borrowed(s.as_str())),
+            Value::Entity(entity) => Some(Cow::Borrowed(entity.display.as_str())),
+            Value::Record(record) => {
+                // Fast path: if no display_field is present, we can borrow the stored display.
+                if record.display_field.is_none() {
+                    return Some(Cow::Borrowed(record.display.as_str()));
+                }
+
+                match coerce_to_string_with_general_options(
+                    v,
+                    ctx.value_locale.separators,
+                    ctx.date_system,
+                ) {
+                    Ok(s) => Some(Cow::Owned(s)),
+                    // Be conservative: if display_field coercion fails (e.g. display field points
+                    // at an error/reference/etc), fall back to the raw display string.
+                    Err(_) => Some(Cow::Borrowed(record.display.as_str())),
+                }
+            }
+            _ => None,
+        }
+    }
+
     match (lookup_value, candidate) {
         (Value::Number(a), Value::Number(b)) => a == b,
-        (Value::Text(a), Value::Text(b)) => text_eq_case_insensitive(a, b),
-        (Value::Entity(a), Value::Entity(b)) => text_eq_case_insensitive(&a.display, &b.display),
-        (Value::Record(a), Value::Record(b)) => text_eq_case_insensitive(&a.display, &b.display),
-        (Value::Text(a), Value::Entity(b)) => text_eq_case_insensitive(a, &b.display),
-        (Value::Text(a), Value::Record(b)) => text_eq_case_insensitive(a, &b.display),
-        (Value::Entity(a), Value::Text(b)) => text_eq_case_insensitive(&a.display, b),
-        (Value::Record(a), Value::Text(b)) => text_eq_case_insensitive(&a.display, b),
-        (Value::Entity(a), Value::Record(b)) => text_eq_case_insensitive(&a.display, &b.display),
-        (Value::Record(a), Value::Entity(b)) => text_eq_case_insensitive(&a.display, &b.display),
+        (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
+            let a = text_like_str(ctx, a).unwrap();
+            let b = text_like_str(ctx, b).unwrap();
+            text_eq_case_insensitive(a.as_ref(), b.as_ref())
+        }
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
-        (Value::Number(a), Value::Text(b)) | (Value::Text(b), Value::Number(a)) => {
+        (Value::Number(a), b) | (b, Value::Number(a)) if text_like_str(ctx, b).is_some() => {
+            let b = text_like_str(ctx, b).unwrap();
             let trimmed = b.trim();
-            if trimmed.is_empty() {
-                false
-            } else {
-                parse_value_text(trimmed, ctx.value_locale, ctx.now_utc, ctx.date_system)
-                    .is_ok_and(|parsed| parsed == *a)
-            }
-        }
-        (Value::Number(a), Value::Entity(b)) | (Value::Entity(b), Value::Number(a)) => {
-            let trimmed = b.display.trim();
-            if trimmed.is_empty() {
-                false
-            } else {
-                parse_value_text(trimmed, ctx.value_locale, ctx.now_utc, ctx.date_system)
-                    .is_ok_and(|parsed| parsed == *a)
-            }
-        }
-        (Value::Number(a), Value::Record(b)) | (Value::Record(b), Value::Number(a)) => {
-            let trimmed = b.display.trim();
             if trimmed.is_empty() {
                 false
             } else {

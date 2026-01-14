@@ -2486,43 +2486,63 @@ fn cmp_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
-    fn text_like_str(v: &Value) -> Option<&str> {
-        match v {
-            Value::Text(s) => Some(s.as_str()),
-            Value::Entity(v) => Some(v.display.as_str()),
-            Value::Record(v) => Some(v.display.as_str()),
-            _ => None,
-        }
-    }
-
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x == y,
-        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-            text_eq_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
-        }
-        (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Blank, Value::Blank) => true,
-        (Value::Error(x), Value::Error(y)) => x == y,
-        (Value::Number(num), other) | (other, Value::Number(num))
-            if text_like_str(other).is_some() =>
-        {
-            let trimmed = text_like_str(other).unwrap().trim();
-            if trimmed.is_empty() {
-                false
-            } else {
-                parse_value_text(
-                    trimmed,
-                    ctx.value_locale(),
-                    ctx.now_utc(),
-                    ctx.date_system(),
-                )
-                .is_ok_and(|parsed| parsed == *num)
+        (a, b) => {
+            fn text_like_str<'a>(
+                ctx: &dyn FunctionContext,
+                value: &'a Value,
+            ) -> Option<std::borrow::Cow<'a, str>> {
+                match value {
+                    Value::Text(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+                    Value::Entity(entity) => {
+                        Some(std::borrow::Cow::Borrowed(entity.display.as_str()))
+                    }
+                    Value::Record(record) => match value.coerce_to_string_with_ctx(ctx) {
+                        Ok(s) => Some(std::borrow::Cow::Owned(s)),
+                        // Be conservative: if the record's `display_field` points at an invalid
+                        // value (error/reference/etc), fall back to the stored display string so
+                        // lookups still behave deterministically.
+                        Err(_) => Some(std::borrow::Cow::Borrowed(record.display.as_str())),
+                    },
+                    _ => None,
+                }
+            }
+
+            match (a, b) {
+                (Value::Bool(x), Value::Bool(y)) => x == y,
+                (Value::Blank, Value::Blank) => true,
+                (Value::Error(x), Value::Error(y)) => x == y,
+                (Value::Number(num), other) | (other, Value::Number(num))
+                    if text_like_str(ctx, other).is_some() =>
+                {
+                    let other = text_like_str(ctx, other).unwrap();
+                    let trimmed = other.trim();
+                    if trimmed.is_empty() {
+                        false
+                    } else {
+                        parse_value_text(
+                            trimmed,
+                            ctx.value_locale(),
+                            ctx.now_utc(),
+                            ctx.date_system(),
+                        )
+                        .is_ok_and(|parsed| parsed == *num)
+                    }
+                }
+                (Value::Bool(b), Value::Number(n)) | (Value::Number(n), Value::Bool(b)) => {
+                    (*n == 0.0 && !b) || (*n == 1.0 && *b)
+                }
+                (a, b)
+                    if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() =>
+                {
+                    let a = text_like_str(ctx, a).unwrap();
+                    let b = text_like_str(ctx, b).unwrap();
+                    text_eq_case_insensitive(a.as_ref(), b.as_ref())
+                }
+                _ => false,
             }
         }
-        (Value::Bool(b), Value::Number(n)) | (Value::Number(n), Value::Bool(b)) => {
-            (*n == 0.0 && !b) || (*n == 1.0 && *b)
-        }
-        _ => false,
     }
 }
 
