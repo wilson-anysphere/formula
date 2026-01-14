@@ -27,14 +27,14 @@ function runGenerateChecksums(assetsDir, outputPath) {
 /**
  * Minimal set of files the script expects, plus a macOS updater tarball.
  * @param {string} dir
- * @param {{ macUpdaterTarball: string }} opts
+ * @param {{ macUpdaterTarball: string, windowsExe?: string, windowsMsi?: string }} opts
  */
-function writeFixture(dir, { macUpdaterTarball }) {
+function writeFixture(dir, { macUpdaterTarball, windowsExe = "Formula_x64.exe", windowsMsi = "Formula_x64.msi" }) {
   touch(path.join(dir, "Formula.dmg"));
   touch(path.join(dir, macUpdaterTarball));
 
-  touch(path.join(dir, "Formula_x64.msi"));
-  touch(path.join(dir, "Formula_x64.exe"));
+  touch(path.join(dir, windowsMsi));
+  touch(path.join(dir, windowsExe));
 
   touch(path.join(dir, "Formula_x86_64.AppImage"));
   touch(path.join(dir, "Formula_amd64.deb"));
@@ -51,6 +51,24 @@ test("generate-release-checksums accepts a standard macOS updater archive (*.app
     const outPath = path.join(tmp, "SHA256SUMS.txt");
     const proc = runGenerateChecksums(tmp, outPath);
     assert.equal(proc.status, 0, proc.stderr);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("generate-release-checksums ignores WebView2 helper installers when validating Windows artifacts", { skip: process.platform === "win32" }, () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "formula-checksums-"));
+  try {
+    writeFixture(tmp, {
+      macUpdaterTarball: "Formula.app.tar.gz",
+      // Only include the embedded helper installer; this should not satisfy the `*.exe` requirement.
+      windowsExe: "MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+    });
+    const outPath = path.join(tmp, "SHA256SUMS.txt");
+    const proc = runGenerateChecksums(tmp, outPath);
+    assert.notEqual(proc.status, 0);
+    assert.match(proc.stderr, /\*\.exe/i);
+    assert.match(proc.stderr, /webview2/i);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

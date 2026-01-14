@@ -91,11 +91,34 @@ fi
 # Windows: installer(s)
 win_msi=( "$assets_dir"/*.msi )
 win_exe=( "$assets_dir"/*.exe )
+# Exclude embedded helper installers (notably WebView2 runtime/bootstrapper installers) which are
+# not the Formula installer artifacts we ship on GitHub Releases.
+filtered_win_msi=()
+for f in "${win_msi[@]}"; do
+  base="$(basename "$f")"
+  base_lower="${base,,}"
+  if [[ "$base_lower" == *microsoftedgewebview2* ]]; then
+    continue
+  fi
+  filtered_win_msi+=( "$f" )
+done
+win_msi=( "${filtered_win_msi[@]}" )
+
+filtered_win_exe=()
+for f in "${win_exe[@]}"; do
+  base="$(basename "$f")"
+  base_lower="${base,,}"
+  if [[ "$base_lower" == *microsoftedgewebview2* ]]; then
+    continue
+  fi
+  filtered_win_exe+=( "$f" )
+done
+win_exe=( "${filtered_win_exe[@]}" )
 if [ ${#win_msi[@]} -eq 0 ]; then
-  missing+=("*.msi")
+  missing+=("*.msi (excluding MicrosoftEdgeWebView2*)")
 fi
 if [ ${#win_exe[@]} -eq 0 ]; then
-  missing+=("*.exe")
+  missing+=("*.exe (excluding MicrosoftEdgeWebView2*)")
 fi
 
 # Linux: AppImage + package formats
