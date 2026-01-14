@@ -6631,16 +6631,18 @@ export class SpreadsheetApp {
       // Excel-style semantics: move the drawing forward one step in the render stack.
       // `ordered` is back-to-front (ascending); swapping with the next item moves it forward.
       if (index >= ordered.length - 1) return;
+      const swapIndex = index + 1;
       nextOrder = ordered.slice();
       const tmp = nextOrder[index]!;
-      nextOrder[index] = nextOrder[index + 1]!;
-      nextOrder[index + 1] = tmp;
+      nextOrder[index] = nextOrder[swapIndex]!;
+      nextOrder[swapIndex] = tmp;
     } else if (direction === "backward") {
       if (index <= 0) return;
+      const swapIndex = index - 1;
       nextOrder = ordered.slice();
       const tmp = nextOrder[index]!;
-      nextOrder[index] = nextOrder[index - 1]!;
-      nextOrder[index - 1] = tmp;
+      nextOrder[index] = nextOrder[swapIndex]!;
+      nextOrder[swapIndex] = tmp;
     } else if (direction === "front") {
       if (index >= ordered.length - 1) return;
       nextOrder = ordered.slice();
@@ -6674,7 +6676,7 @@ export class SpreadsheetApp {
 
     this.document.beginBatch({ label });
     try {
-      docAny.setSheetDrawings(sheetId, next);
+      docAny.setSheetDrawings(sheetId, next, { source: "drawings" });
       this.document.endBatch();
     } catch (err) {
       this.document.cancelBatch();

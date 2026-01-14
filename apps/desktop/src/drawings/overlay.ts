@@ -763,6 +763,10 @@ export class DrawingOverlay {
         screenRectScratch.y = rect.y - scrollY + headerOffsetY;
         screenRectScratch.width = rect.width;
         screenRectScratch.height = rect.height;
+        // Avoid decoding images that have no visible area (zero-sized anchors show nothing, and
+        // some unit tests use 0x0 drawings as lightweight fixtures).
+        if (screenRectScratch.width <= 0 || screenRectScratch.height <= 0) continue;
+
         const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
@@ -834,6 +838,8 @@ export class DrawingOverlay {
         }
 
         if (obj.kind.type === "image") {
+          if (screenRectScratch.width <= 0 || screenRectScratch.height <= 0) continue;
+
           const imageId = obj.kind.imageId;
           const entry = this.images.get(imageId);
 

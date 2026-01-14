@@ -257,7 +257,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     const app = new SpreadsheetApp(root, status);
     const sheetId = app.getCurrentSheetId();
     const doc = app.getDocument();
-    const editedCell = { row: 0, col: 0 };
+    const editedCell = { row: 0, col: 2 };
     const initialValue = doc.getCell(sheetId, editedCell).value;
 
     const bytes = new Uint8Array([1, 2, 3, 4]);
@@ -283,7 +283,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     await insertPromise;
 
     expect((doc as any).getSheetDrawings(sheetId)).toHaveLength(1);
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("hello");
+    expect(doc.getCell(sheetId, editedCell).value).toBe("hello");
 
     // Undo should first remove the inserted drawing, leaving the cell edit intact.
     doc.undo();
