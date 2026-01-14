@@ -310,10 +310,12 @@ impl DrawingPart {
                         }
                     }
                     Err(_) => {
+                        let id = extract_drawing_object_id(&pic)
+                            .unwrap_or_else(|| DrawingObjectId((z + 1) as u32));
                         let size =
                             size_from_anchor(anchor).or_else(|| extract_size_from_transform(&pic));
                         objects.push(DrawingObject {
-                            id: DrawingObjectId((z + 1) as u32),
+                            id,
                             kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
                             anchor,
                             z_order: z as i32,
@@ -438,10 +440,12 @@ impl DrawingPart {
             }
 
             // Unknown anchor type: preserve the entire anchor subtree.
+            let id = extract_drawing_object_id(&anchor_node)
+                .unwrap_or_else(|| DrawingObjectId((z + 1) as u32));
             let size =
                 size_from_anchor(anchor).or_else(|| extract_size_from_transform(&anchor_node));
             objects.push(DrawingObject {
-                id: DrawingObjectId((z + 1) as u32),
+                id,
                 kind: DrawingObjectKind::Unknown {
                     raw_xml: raw_anchor,
                 },
@@ -555,8 +559,10 @@ impl DrawingPart {
                     }
                     Err(_) => {
                         let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                        let id = extract_drawing_object_id(&pic)
+                            .unwrap_or_else(|| DrawingObjectId((z + 1) as u32));
                         objects.push(DrawingObject {
-                            id: DrawingObjectId((z + 1) as u32),
+                            id,
                             kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
                             anchor,
                             z_order: z as i32,
@@ -691,10 +697,12 @@ impl DrawingPart {
 
             // Unknown anchor type: preserve the entire anchor subtree.
             let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+            let id = extract_drawing_object_id(&anchor_node)
+                .unwrap_or_else(|| DrawingObjectId((z + 1) as u32));
             let size =
                 size_from_anchor(anchor).or_else(|| extract_size_from_transform(&anchor_node));
             objects.push(DrawingObject {
-                id: DrawingObjectId((z + 1) as u32),
+                id,
                 kind: DrawingObjectKind::Unknown {
                     raw_xml: raw_anchor,
                 },
@@ -1100,6 +1108,18 @@ fn parse_named_node(
 
     let xml = slice_node_xml(node, doc_xml).unwrap_or_default();
     Ok((DrawingObjectId(id), xml))
+}
+
+fn extract_drawing_object_id(node: &roxmltree::Node<'_, '_>) -> Option<DrawingObjectId> {
+    let nv_id = node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "cNvPr")?
+        .attribute("id")?;
+    let id = nv_id.trim().parse::<u32>().ok()?;
+    if id == 0 {
+        return None;
+    }
+    Some(DrawingObjectId(id))
 }
 
 fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {

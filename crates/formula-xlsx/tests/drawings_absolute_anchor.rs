@@ -502,7 +502,7 @@ fn parse_absolute_anchor_unknown_object_preserves_size_in_archive() {
             ext: EmuSize::new(30, 40),
         }
     );
-    assert_eq!(drawing.objects[0].id, DrawingObjectId(1));
+    assert_eq!(drawing.objects[0].id, DrawingObjectId(2));
     assert_eq!(drawing.objects[0].size, Some(EmuSize::new(30, 40)));
     assert!(matches!(
         &drawing.objects[0].kind,
