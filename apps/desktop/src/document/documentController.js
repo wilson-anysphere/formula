@@ -1373,7 +1373,19 @@ function unwrapSingletonId(value) {
  * @returns {any[] | null}
  */
 function normalizeDrawings(raw) {
-  if (!Array.isArray(raw)) return null;
+  if (!Array.isArray(raw)) {
+    // Support `{0: [...]}` wrappers produced by some interop layers.
+    if (
+      isJsonObject(raw) &&
+      Object.keys(raw).length === 1 &&
+      Object.prototype.hasOwnProperty.call(raw, "0") &&
+      Array.isArray(raw[0])
+    ) {
+      raw = raw[0];
+    } else {
+      return null;
+    }
+  }
   // Some interop layers may wrap arrays as singleton arrays-of-arrays.
   // Only unwrap when the single element is itself an array, so normal single-drawing lists
   // (`[{...}]`) are preserved.
@@ -6711,13 +6723,30 @@ export class DocumentController {
 
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
       const viewRaw = sheet?.view && typeof sheet.view === "object" ? sheet.view : null;
-      const rawDrawings = Array.isArray(sheet?.drawings)
-        ? sheet.drawings
-        : Array.isArray(viewRaw?.drawings)
-          ? viewRaw.drawings
-          : Array.isArray(legacyDrawingsBySheet?.[sheetId])
-            ? legacyDrawingsBySheet[sheetId]
-            : null;
+      const unwrapDrawingsArray = (value) => {
+        if (Array.isArray(value)) {
+          // Some interop layers wrap arrays as singleton arrays-of-arrays.
+          if (value.length === 1 && Array.isArray(value[0])) return value[0];
+          return value;
+        }
+        // Some interop layers wrap arrays as `{0: [...]}` objects.
+        if (
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          Object.keys(value).length === 1 &&
+          Object.prototype.hasOwnProperty.call(value, "0") &&
+          Array.isArray(value[0])
+        ) {
+          return value[0];
+        }
+        return null;
+      };
+      const rawDrawings =
+        unwrapDrawingsArray(sheet?.drawings) ??
+        unwrapDrawingsArray(viewRaw?.drawings) ??
+        unwrapDrawingsArray(legacyDrawingsBySheet?.[sheetId]) ??
+        null;
       const view = normalizeSheetViewState({
         frozenRows: sheet?.frozenRows ?? viewRaw?.frozenRows,
         frozenCols: sheet?.frozenCols ?? viewRaw?.frozenCols,
@@ -7120,10 +7149,21 @@ export class DocumentController {
 
       const before = this.model.getSheetView(sheetId);
       const after = cloneSheetViewState(before);
-      if (Array.isArray(delta.after) && delta.after.length > 0) {
+      const unwrappedAfter =
+        Array.isArray(delta.after) && delta.after.length === 1 && Array.isArray(delta.after[0])
+          ? delta.after[0]
+          : delta.after &&
+              typeof delta.after === "object" &&
+              !Array.isArray(delta.after) &&
+              Object.keys(delta.after).length === 1 &&
+              Object.prototype.hasOwnProperty.call(delta.after, "0") &&
+              Array.isArray(delta.after[0])
+            ? delta.after[0]
+            : delta.after;
+      if (Array.isArray(unwrappedAfter) && unwrappedAfter.length > 0) {
         // Store drawings in sheet view state so the update is visible to undo/redo + snapshot
         // consumers and so SpreadsheetApp can treat the controller as the source of truth.
-        after.drawings = delta.after;
+        after.drawings = unwrappedAfter;
       } else {
         delete after.drawings;
       }

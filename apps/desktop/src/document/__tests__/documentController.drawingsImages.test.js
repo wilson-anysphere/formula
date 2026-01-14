@@ -629,6 +629,39 @@ test("applyState accepts singleton-wrapped sheet.view.drawings arrays (interop)"
   assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
 });
 
+test("applyState accepts singleton object-wrapped sheet.view.drawings arrays (interop)", () => {
+  const drawing = {
+    id: "d_view",
+    zOrder: 4,
+    kind: { type: "image", imageId: "img_view" },
+    anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+  };
+
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          cells: [],
+          view: {
+            frozenRows: 0,
+            frozenCols: 0,
+            drawings: { 0: [drawing] },
+          },
+        },
+      ],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+});
+
 test("applyExternalDrawingDeltas updates sheet drawings without creating undo history", () => {
   const doc = new DocumentController();
   let lastChange = null;
@@ -689,6 +722,20 @@ test("applyExternalDrawingDeltas accepts singleton-wrapped drawings arrays (inte
   };
 
   doc.applyExternalDrawingDeltas([{ sheetId: "Sheet1", before: [], after: [[drawing]] }], { source: "collab" });
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+});
+
+test("applyExternalDrawingDeltas accepts singleton object-wrapped drawings arrays (interop)", () => {
+  const doc = new DocumentController();
+
+  const drawing = {
+    id: "d_external",
+    zOrder: 0,
+    kind: { type: "image", imageId: "img_external.png" },
+    anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+  };
+
+  doc.applyExternalDrawingDeltas([{ sheetId: "Sheet1", before: [], after: { 0: [drawing] } }], { source: "collab" });
   assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
 });
 
