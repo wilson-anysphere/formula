@@ -49,7 +49,6 @@ export async function insertImageFromFile(
   if (typeof file.size === "number" && file.size > MAX_INSERT_IMAGE_BYTES) {
     throw new Error(`insertImageFromFile: image too large (${file.size} bytes)`);
   }
-
   const bytes = await readFileBytes(file);
   const mimeType = file.type || guessMimeType(file.name);
   const image: ImageEntry = { id: opts.imageId, bytes, mimeType };

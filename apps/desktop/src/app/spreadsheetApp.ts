@@ -6071,12 +6071,27 @@ export class SpreadsheetApp {
     // (e.g. a batched `setCells` update queued after an engine apply). Loop until both
     // chains stabilize so callers (notably Playwright) can reliably await the
     // "no more background work pending" condition.
-    while (true) {
+    // In some environments (notably unit tests with very eager `requestAnimationFrame` stubs),
+    // we can observe a steady stream of microtask-scheduled follow-up work that repeatedly
+    // extends one of these promise chains. In that case the `===` stability check below can
+    // livelock even though the app is otherwise "idle enough" for deterministic tests.
+    //
+    // Cap the stabilization loop so `whenIdle()` always terminates, while still preferring the
+    // strict "no more work appended" semantics under normal conditions.
+    const maxStabilizationAttempts = 50;
+    for (let attempt = 0; attempt < maxStabilizationAttempts; attempt += 1) {
       const wasm = this.wasmSyncPromise;
       const auditing = this.auditingIdlePromise;
       await Promise.all([this.idle.whenIdle(), wasm.catch(() => {}), auditing.catch(() => {})]);
       if (this.wasmSyncPromise === wasm && this.auditingIdlePromise === auditing) return;
     }
+
+    // Fallback: wait once more for whatever is currently pending, then return even if more
+    // work is appended concurrently. This prevents pathological hangs in tests while still
+    // ensuring callers observe a mostly-stable idle state.
+    const wasm = this.wasmSyncPromise;
+    const auditing = this.auditingIdlePromise;
+    await Promise.all([this.idle.whenIdle(), wasm.catch(() => {}), auditing.catch(() => {})]);
   }
 
   /**

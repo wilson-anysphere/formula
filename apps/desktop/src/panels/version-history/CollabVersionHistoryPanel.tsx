@@ -199,7 +199,6 @@ export function CollabVersionHistoryPanel({
           {t("versionHistory.panel.loading")}
         </div>
       ) : null}
-
       {error ? <div className="collab-version-history__error">{error}</div> : null}
 
       <div className="collab-version-history__create">

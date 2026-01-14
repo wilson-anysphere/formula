@@ -718,7 +718,6 @@ fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
 
     format!(r#"<sheetFormatPr{attrs}/>"#)
 }
-
 fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> String {
     let mut s = String::new();
     s.push_str(&format!(r#"<col min="{start_col_1}" max="{end_col_1}""#));
@@ -1573,7 +1572,6 @@ fn render_sheet_format_pr_xml(sheet: &Worksheet) -> String {
 
     format!(r#"<sheetFormatPr{attrs}/>"#)
 }
-
 fn sheet_protection_xml(sheet: &Worksheet) -> String {
     let prot = &sheet.sheet_protection;
     if !prot.enabled {

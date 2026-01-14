@@ -284,6 +284,31 @@ fn parse_plot_area_chart(
         let subplot_kind = map_chart_kind(raw_chart_type);
         let subplot_plot_area = parse_plot_area_model(chart_node, &subplot_kind, diagnostics);
 
+        // Combo charts can include multiple plot types, but the renderer only supports a subset
+        // today (bar/line/pie/scatter). Preserve unsupported subplots as `ComboChartEntry::Unknown`
+        // and emit a warning so callers can surface "best-effort" rendering diagnostics.
+        //
+        // Important: do not warn merely because multiple chart types exist (Excel combo charts are
+        // common); only warn for the specific unsupported subplot(s).
+        let combo_supported = matches!(
+            subplot_plot_area,
+            PlotAreaModel::Bar(_)
+                | PlotAreaModel::Line(_)
+                | PlotAreaModel::Pie(_)
+                | PlotAreaModel::Scatter(_)
+        );
+        if !combo_supported {
+            if !matches!(subplot_kind, ChartKind::Unknown { .. }) {
+                warn(
+                    diagnostics,
+                    format!(
+                        "unsupported chart type {}; rendering may be incomplete",
+                        chart_node.tag_name().name()
+                    ),
+                );
+            }
+        }
+
         let start = series.len();
         for ser in chart_node
             .children()

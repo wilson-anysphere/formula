@@ -307,7 +307,7 @@ export function cursorForRotationHandle(active?: boolean): string {
   return active ? "grabbing" : "grab";
 }
 
-export function cursorForResizeHandle(handle: ResizeHandle): string {
+function cursorForResizeHandleUntransformed(handle: ResizeHandle): string {
   switch (handle) {
     case "nw":
     case "se":
@@ -331,9 +331,21 @@ const SNAP_CURSOR_BY_45_DEG: readonly [string, string, string, string] = [
   "nesw-resize",
 ];
 
+/**
+ * Cursor shape for a resize handle, optionally accounting for a drawing transform.
+ *
+ * NOTE: This function historically accepted an (ignored) second argument at many
+ * call sites. We keep the optional `transform` parameter for compatibility so
+ * unit tests and older callers can pass it without needing a separate import.
+ */
+export function cursorForResizeHandle(handle: ResizeHandle, transform?: DrawingTransform): string {
+  if (hasNonIdentityTransform(transform)) return cursorForResizeHandleWithTransform(handle, transform);
+  return cursorForResizeHandleUntransformed(handle);
+}
+
 export function cursorForResizeHandleWithTransform(handle: ResizeHandle, transform?: DrawingTransform): string {
   // Match the legacy mapping for the common "no transform" case.
-  if (!hasNonIdentityTransform(transform)) return cursorForResizeHandle(handle);
+  if (!hasNonIdentityTransform(transform)) return cursorForResizeHandleUntransformed(handle);
 
   let dx = 0;
   let dy = 0;
@@ -384,7 +396,7 @@ export function cursorForResizeHandleWithTransform(handle: ResizeHandle, transfo
   const normalized = ((angleDeg % 180) + 180) % 180;
   // Snap to nearest 45° (0, 45, 90, 135) modulo 180.
   const rawIndex = Math.round(normalized / 45);
-  if (!Number.isFinite(rawIndex)) return cursorForResizeHandle(handle);
+  if (!Number.isFinite(rawIndex)) return cursorForResizeHandleUntransformed(handle);
   const snappedIndex = ((rawIndex % 4) + 4) % 4;
   return SNAP_CURSOR_BY_45_DEG[snappedIndex];
 }

@@ -902,7 +902,6 @@ export class DrawingOverlay {
           // tests that stub `createImageBitmap` deterministic).
           if (!Number.isFinite(screenRectScratch.width) || !Number.isFinite(screenRectScratch.height)) continue;
           if (screenRectScratch.width <= 0 || screenRectScratch.height <= 0) continue;
-
           const imageId = obj.kind.imageId;
           const entry = this.images.get(imageId);
           if (!entry) {
