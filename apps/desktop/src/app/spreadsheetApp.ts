@@ -13205,22 +13205,40 @@ export class SpreadsheetApp {
     if (cached !== undefined) return cached;
 
     this.ensureViewportMappingCurrent();
-    return this.selectionRenderer.getFillHandleRect(
-      this.selection,
-      {
-        getCellRect: (cell) => this.getCellRect(cell),
-        visibleRows: this.frozenVisibleRows.length ? [...this.frozenVisibleRows, ...this.visibleRows] : this.visibleRows,
-        visibleCols: this.frozenVisibleCols.length ? [...this.frozenVisibleCols, ...this.visibleCols] : this.visibleCols,
-      },
-      {
-        clipRect: {
-          x: this.rowHeaderWidth,
-          y: this.colHeaderHeight,
-          width: this.viewportWidth(),
-          height: this.viewportHeight(),
-        },
-      }
-    );
+    const metrics = this.selectionRendererMetricsScratch;
+
+    const frozenRows = this.frozenVisibleRows;
+    const frozenCols = this.frozenVisibleCols;
+
+    let visibleRows: readonly number[] = this.visibleRows;
+    let visibleCols: readonly number[] = this.visibleCols;
+    if (frozenRows.length > 0) {
+      const out = this.selectionVisibleRowsScratch;
+      out.length = 0;
+      for (let i = 0; i < frozenRows.length; i += 1) out.push(frozenRows[i]!);
+      const scroll = this.visibleRows;
+      for (let i = 0; i < scroll.length; i += 1) out.push(scroll[i]!);
+      visibleRows = out;
+    }
+    if (frozenCols.length > 0) {
+      const out = this.selectionVisibleColsScratch;
+      out.length = 0;
+      for (let i = 0; i < frozenCols.length; i += 1) out.push(frozenCols[i]!);
+      const scroll = this.visibleCols;
+      for (let i = 0; i < scroll.length; i += 1) out.push(scroll[i]!);
+      visibleCols = out;
+    }
+
+    metrics.visibleRows = visibleRows;
+    metrics.visibleCols = visibleCols;
+
+    const clipRect = this.selectionClipRectScratch;
+    clipRect.x = this.rowHeaderWidth;
+    clipRect.y = this.colHeaderHeight;
+    clipRect.width = this.viewportWidth();
+    clipRect.height = this.viewportHeight();
+
+    return this.selectionRenderer.getFillHandleRect(this.selection, metrics, this.selectionRendererOptionsScratch);
   }
 
   private invalidateDrawingHitTestIndexCaches(): void {
@@ -18592,8 +18610,15 @@ export class SpreadsheetApp {
 
     const frozenRowCount = this.lowerBound(this.rowIndexByVisual, this.frozenRows);
     const frozenColCount = this.lowerBound(this.colIndexByVisual, this.frozenCols);
-    this.frozenVisibleRows = this.rowIndexByVisual.slice(0, frozenRowCount);
-    this.frozenVisibleCols = this.colIndexByVisual.slice(0, frozenColCount);
+    // Avoid allocating new arrays on every scroll tick by rebuilding these slices into
+    // reusable arrays. This is on the hot path during scroll/drag auto-scroll.
+    const frozenVisibleRows = this.frozenVisibleRows;
+    frozenVisibleRows.length = frozenRowCount;
+    for (let i = 0; i < frozenRowCount; i += 1) frozenVisibleRows[i] = this.rowIndexByVisual[i]!;
+
+    const frozenVisibleCols = this.frozenVisibleCols;
+    frozenVisibleCols.length = frozenColCount;
+    for (let i = 0; i < frozenColCount; i += 1) frozenVisibleCols[i] = this.colIndexByVisual[i]!;
     this.frozenHeight = frozenRowCount * this.cellHeight;
     this.frozenWidth = frozenColCount * this.cellWidth;
 
@@ -18612,8 +18637,16 @@ export class SpreadsheetApp {
 
     this.visibleRowStart = firstRow;
     this.visibleColStart = firstCol;
-    this.visibleRows = this.rowIndexByVisual.slice(firstRow, lastRow);
-    this.visibleCols = this.colIndexByVisual.slice(firstCol, lastCol);
+    const visibleRowsLen = Math.max(0, lastRow - firstRow);
+    const visibleColsLen = Math.max(0, lastCol - firstCol);
+
+    const visibleRows = this.visibleRows;
+    visibleRows.length = visibleRowsLen;
+    for (let i = 0; i < visibleRowsLen; i += 1) visibleRows[i] = this.rowIndexByVisual[firstRow + i]!;
+
+    const visibleCols = this.visibleCols;
+    visibleCols.length = visibleColsLen;
+    for (let i = 0; i < visibleColsLen; i += 1) visibleCols[i] = this.colIndexByVisual[firstCol + i]!;
   }
 
   private ensureViewportMappingCurrent(): void {
