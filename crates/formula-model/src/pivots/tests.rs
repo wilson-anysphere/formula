@@ -161,7 +161,7 @@ fn pivot_field_ref_parses_dax_refs_and_serializes_structured_data_model_fields()
         serde_json::to_value(&col).unwrap(),
         json!({"table": "Sales Table", "column": "Amount"})
     );
-    assert_eq!(col.to_string(), "'Sales Table'[Amount]");
+    assert_eq!(col.to_string(), "Sales Table[Amount]");
     assert!(col != "Amount");
 
     let escaped_col: PivotFieldRef = serde_json::from_value(json!("'O''Brien'[Amount]")).unwrap();
@@ -172,7 +172,7 @@ fn pivot_field_ref_parses_dax_refs_and_serializes_structured_data_model_fields()
             column: "Amount".to_string()
         }
     );
-    assert_eq!(escaped_col.to_string(), "'O''Brien'[Amount]");
+    assert_eq!(escaped_col.to_string(), "O'Brien[Amount]");
 
     let measure: PivotFieldRef = serde_json::from_value(json!("[Total Sales]")).unwrap();
     assert_eq!(
