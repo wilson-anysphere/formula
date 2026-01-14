@@ -57,6 +57,32 @@ runner images (recommended: run the workflow via `workflow_dispatch` with `uploa
 CI enforces this policy via `scripts/ci/check-gha-runner-pins.sh`, so PRs that reintroduce
 `macos-latest` / `windows-latest` / `ubuntu-latest` into the release workflow will fail.
 
+## GitHub Actions action pinning (supply-chain hardening)
+
+The Desktop Release workflow pins **all** third-party GitHub Actions to immutable **commit SHAs**
+instead of floating tags/branches (`@v4`, `@main`, `@stable`, etc).
+
+Why:
+
+- Reduces the risk of compromised/malicious action updates affecting signed release artifacts.
+- Makes tagged releases more reproducible (the workflow always runs the same action code).
+
+Update guidance:
+
+- When updating a pinned action, keep the ref as a full 40-character SHA and keep a trailing comment
+  with the upstream version tag for maintainability.
+- To resolve a tag to a commit SHA (handles annotated tags), run:
+
+  ```bash
+  git ls-remote https://github.com/<owner>/<repo> <tag> '<tag>^{}'
+  ```
+
+CI enforces this policy via `scripts/ci/check-gha-action-sha-pins.sh` (run on every PR), and the
+release workflow also runs it as an early guardrail.
+
+To keep pins fresh, `.github/dependabot.yml` enables weekly Dependabot PRs for the
+`github-actions` ecosystem.
+
 ## Testing the release pipeline (workflow_dispatch)
 
 To test packaging/signing changes without creating a git tag, run the **Desktop Release** workflow
