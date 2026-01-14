@@ -305,7 +305,8 @@ In addition (legacy / composition):
 
 - `canReadCell(cell) -> boolean` and `canEditCell(cell) -> boolean` can also be provided as separate callbacks.
 - If both `permissions` *and* `canReadCell`/`canEditCell` are provided, they are **ANDed** (all checks must allow).
-  This is used by `bindCollabSessionToDocumentController` to combine role/range rules with encryption invariants.
+  This is used by `bindCollabSessionToDocumentController` as defense-in-depth: it provides role/range metadata via
+  `permissions`, while `session.canReadCell` / `session.canEditCell` also incorporate encryption invariants.
 
 Note the naming difference:
 
