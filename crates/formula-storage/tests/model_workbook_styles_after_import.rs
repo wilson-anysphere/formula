@@ -17,6 +17,7 @@ fn export_model_workbook_includes_styles_added_after_import() {
             CellRef::new(0, 0),
             Cell {
                 value: CellValue::Number(1.0),
+                phonetic: None,
                 formula: None,
                 phonetic: None,
                 style_id: existing_style_id,

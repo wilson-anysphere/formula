@@ -35,6 +35,7 @@ const RECORD_BOUNDSHEET: u16 = 0x0085;
 const RECORD_SUPBOOK: u16 = 0x01AE;
 const RECORD_EXTERNNAME: u16 = 0x0023;
 const RECORD_EXTERNSHEET: u16 = 0x0017;
+const RECORD_SST: u16 = 0x00FC;
 const RECORD_SAVERECALC: u16 = 0x005F;
 const RECORD_SHEETEXT: u16 = 0x0862;
 const RECORD_FEATHEADR: u16 = 0x0867;
@@ -59,6 +60,7 @@ const RECORD_NUMBER: u16 = 0x0203;
 const RECORD_FORMULA: u16 = 0x0006;
 /// SHRFMLA [MS-XLS 2.4.277] stores a shared formula (rgce) for a range.
 const RECORD_SHRFMLA: u16 = 0x04BC;
+const RECORD_LABELSST: u16 = 0x00FD;
 const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 const RECORD_SORT: u16 = 0x0090;
@@ -90,6 +92,9 @@ const XF_FLAG_STYLE: u16 = 0x0004;
 
 const COLOR_AUTOMATIC: u16 = 0x7FFF;
 
+// ExtRst "rt" type for phonetic blocks inside BIFF8 `XLUnicodeRichExtendedString.ExtRst`.
+const EXT_RST_TYPE_PHONETIC: u16 = 0x0001;
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Formats`.
 ///
 /// The goal is not to be a complete `.xls` writer; it's just enough BIFF8 + CFB
@@ -115,6 +120,22 @@ pub fn build_number_format_fixture_xls(date_1904: bool) -> Vec<u8> {
 /// record header even after decrypting the remaining stream bytes.
 pub fn build_number_format_workbook_stream_with_filepass(date_1904: bool) -> Vec<u8> {
     build_workbook_stream(date_1904, true)
+}
+
+/// Build a minimal BIFF8 `.xls` fixture that stores phonetic (furigana) metadata in the workbook
+/// shared string table (SST `ExtRst`) and references it from a worksheet `LABELSST` cell.
+pub fn build_sst_phonetic_fixture_xls(phonetic_text: &str) -> Vec<u8> {
+    let workbook_stream = build_sst_phonetic_workbook_stream(phonetic_text);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
 }
 
 /// Build a minimal BIFF8 `.xls` fixture whose workbook globals include a `FILEPASS` record.
@@ -10365,6 +10386,15 @@ fn blank_cell(row: u16, col: u16, xf: u16) -> [u8; 6] {
     out
 }
 
+fn labelsst_cell(row: u16, col: u16, xf: u16, sst_index: u32) -> [u8; 10] {
+    let mut out = [0u8; 10];
+    out[0..2].copy_from_slice(&row.to_le_bytes());
+    out[2..4].copy_from_slice(&col.to_le_bytes());
+    out[4..6].copy_from_slice(&xf.to_le_bytes());
+    out[6..10].copy_from_slice(&sst_index.to_le_bytes());
+    out
+}
+
 fn row_record(row: u16, hidden: bool, outline_level: u8, collapsed: bool) -> [u8; 16] {
     // ROW record payload (BIFF8, 16 bytes).
     let mut out = [0u8; 16];
@@ -10702,5 +10732,104 @@ fn palette_record_with_override(idx: u16, r: u8, g: u8, b: u8) -> Vec<u8> {
     for entry in entries {
         out.extend_from_slice(&entry);
     }
+    out
+}
+
+fn build_sst_phonetic_workbook_stream(phonetic_text: &str) -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (16 style XFs + 1 cell XF).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // SST with one string that carries an ExtRst phonetic block.
+    let sst = sst_record_single_string_with_phonetic("Base", phonetic_text);
+    push_record(&mut globals, RECORD_SST, &sst);
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_sst_phonetic_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_sst_phonetic_sheet_stream(xf_general: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: LABELSST referencing the first SST entry (index 0).
+    push_record(&mut sheet, RECORD_LABELSST, &labelsst_cell(0, 0, xf_general, 0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn sst_record_single_string_with_phonetic(base_text: &str, phonetic_text: &str) -> Vec<u8> {
+    // SST record payload [MS-XLS 2.4.261]:
+    //   [cstTotal:u32][cstUnique:u32][rgb: XLUnicodeRichExtendedString[]]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&1u32.to_le_bytes()); // cstTotal
+    out.extend_from_slice(&1u32.to_le_bytes()); // cstUnique
+
+    // ExtRst: TLV stream containing a single phonetic block.
+    let mut phonetic_string = Vec::<u8>::new();
+    write_unicode_string(&mut phonetic_string, phonetic_text);
+
+    let mut ext = Vec::<u8>::new();
+    ext.extend_from_slice(&EXT_RST_TYPE_PHONETIC.to_le_bytes());
+    ext.extend_from_slice(&(phonetic_string.len() as u16).to_le_bytes());
+    ext.extend_from_slice(&phonetic_string);
+
+    // XLUnicodeRichExtendedString [MS-XLS 2.5.296]:
+    //   [cch:u16][flags:u8][cbExtRst:u32][chars...][ExtRst bytes...]
+    let utf16: Vec<u16> = base_text.encode_utf16().collect();
+    let cch: u16 = utf16
+        .len()
+        .try_into()
+        .expect("base string too long for u16 length");
+
+    // Use compressed 8-bit storage for ASCII base strings.
+    // flags: fHighByte=0, fExtSt=1.
+    out.extend_from_slice(&cch.to_le_bytes());
+    out.push(0x04); // STR_FLAG_EXT
+    out.extend_from_slice(&(ext.len() as u32).to_le_bytes());
+
+    // Character bytes (compressed).
+    out.extend_from_slice(base_text.as_bytes());
+    out.extend_from_slice(&ext);
     out
 }

@@ -420,6 +420,7 @@ fn import_xls_path_with_biff_reader(
     // parsing of sheet-local metadata like AutoFilter criteria.
     let mut sheet_stream_offsets_by_sheet_id: HashMap<formula_model::WorksheetId, usize> =
         HashMap::new();
+    let mut sst_phonetics: Option<Vec<Option<String>>> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let detected_biff_version =
@@ -428,6 +429,19 @@ fn import_xls_path_with_biff_reader(
         biff_version.get_or_insert(detected_biff_version);
         biff_codepage.get_or_insert(codepage);
         out.codepage = codepage;
+
+        if detected_biff_version == biff::BiffVersion::Biff8 {
+            match biff::sst::parse_biff8_sst_phonetics(workbook_stream, codepage) {
+                Ok(phonetics) => {
+                    if !phonetics.is_empty() {
+                        sst_phonetics = Some(phonetics);
+                    }
+                }
+                Err(err) => warnings.push(ImportWarning::new(format!(
+                    "failed to parse `.xls` shared string phonetics: {err}"
+                ))),
+            }
+        }
 
         if let Some(mut globals) = biff_globals.take() {
             out.date_system = globals.date_system;
@@ -1114,6 +1128,64 @@ fn import_xls_path_with_biff_reader(
                 sheet.set_value(anchor, value);
                 if let Some(style_id) = style_id {
                     sheet.set_style_id(anchor, style_id);
+                }
+            }
+        }
+
+        // Populate per-cell phonetic guide text (furigana) from the workbook SST `ExtRst` blocks.
+        //
+        // BIFF stores the phonetic metadata on the *shared string* entry (SST) and references it
+        // from the worksheet via `LABELSST.isst`. We apply the extracted phonetic string to the
+        // corresponding model cell, anchored to merged regions like other cell metadata.
+        if let (Some(workbook_stream), Some(biff_idx), Some(sst_phonetics)) = (
+            workbook_stream.as_deref(),
+            biff_idx,
+            sst_phonetics.as_ref(),
+        ) {
+            if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
+                if sheet_info.offset >= workbook_stream.len() {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` phonetic guides for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                        sheet_info.offset
+                    )));
+                } else {
+                    match biff::parse_biff_sheet_labelsst_indices(workbook_stream, sheet_info.offset)
+                    {
+                        Ok(map) => {
+                            // Deterministic merge/anchor preference: apply anchor cells first.
+                            let mut entries: Vec<(CellRef, u32)> = map.into_iter().collect();
+                            entries.sort_by_key(|(cell, _)| {
+                                let anchor = sheet.merged_regions.resolve_cell(*cell);
+                                // (is_non_anchor, row, col)
+                                (anchor != *cell, cell.row, cell.col)
+                            });
+
+                            for (cell_ref, isst) in entries {
+                                let Some(phonetic) =
+                                    sst_phonetics.get(isst as usize).and_then(|p| p.as_ref())
+                                else {
+                                    continue;
+                                };
+
+                                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+
+                                // Do not create new cells purely for phonetic metadata.
+                                let Some(cell) = sheet.cell_mut(anchor) else {
+                                    continue;
+                                };
+
+                                // Prefer the anchor's own record over non-anchor cells inside a merge.
+                                if anchor != cell_ref && cell.phonetic.is_some() {
+                                    continue;
+                                }
+
+                                cell.phonetic = Some(phonetic.clone());
+                            }
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` phonetic guides for sheet `{sheet_name}`: {err}"
+                        ))),
+                    }
                 }
             }
         }

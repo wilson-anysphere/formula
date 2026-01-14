@@ -47,6 +47,7 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
             CellRef::new(0, 0),
             Cell {
                 value: formula_model::CellValue::Empty,
+                phonetic: None,
                 formula: Some("Data!A1".to_string()),
                 phonetic: None,
                 style_id: 0,

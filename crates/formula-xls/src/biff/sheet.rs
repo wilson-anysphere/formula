@@ -79,6 +79,51 @@ const RECORD_MULBLANK: u16 = 0x00BE;
 /// HLINK [MS-XLS 2.4.110]
 const RECORD_HLINK: u16 = 0x01B8;
 
+/// Scan a worksheet BIFF substream for string cell records (`LABELSST`, id `0x00FD`) and return a
+/// mapping from cell address to SST index.
+///
+/// This is used to associate workbook-global SST metadata (e.g. phonetic guides stored in
+/// `XLUnicodeRichExtendedString.ExtRst`) with individual worksheet cells.
+///
+/// `LABELSST` payload layout ([MS-XLS] 2.4.148):
+/// - `rw: u16`
+/// - `col: u16`
+/// - `ixfe: u16` (ignored)
+/// - `isst: u32` (SST index)
+///
+/// Best-effort: malformed/truncated records are skipped.
+pub(crate) fn parse_biff_sheet_labelsst_indices(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<HashMap<CellRef, u32>, String> {
+    let mut out: HashMap<CellRef, u32> = HashMap::new();
+
+    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
+        match record.record_id {
+            RECORD_LABELSST => {
+                let data = record.data;
+                if data.len() < 10 {
+                    continue;
+                }
+
+                let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+                let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+                let isst = u32::from_le_bytes([data[6], data[7], data[8], data[9]]);
+
+                if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+                    continue;
+                }
+
+                out.insert(CellRef::new(row, col), isst);
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    Ok(out)
+}
+
 // Sheet protection records (worksheet substream).
 // See [MS-XLS] sections:
 // - PROTECT: 2.4.203
