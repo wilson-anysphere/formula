@@ -123,10 +123,22 @@ impl ValueLocaleConfig {
                 _ => Some(Self::en_us()),
             },
             "ja" => Some(Self::ja_jp()),
-            "zh" => match parts.region {
-                Some("tw") | Some("hk") | Some("mo") => Some(Self::zh_tw()),
-                _ => Some(Self::zh_cn()),
-            },
+            "zh" => {
+                // Prefer explicit region codes when present.
+                //
+                // Otherwise, use the BCP-47 script subtag:
+                // - `zh-Hant` is Traditional Chinese, commonly associated with `zh-TW`.
+                // - `zh-Hans` is Simplified Chinese, commonly associated with `zh-CN`.
+                match parts.region {
+                    Some("tw") | Some("hk") | Some("mo") => Some(Self::zh_tw()),
+                    Some(_) => Some(Self::zh_cn()),
+                    None => match parts.script {
+                        Some("hant") => Some(Self::zh_tw()),
+                        Some("hans") => Some(Self::zh_cn()),
+                        _ => Some(Self::zh_cn()),
+                    },
+                }
+            }
             "ko" => Some(Self::ko_kr()),
             "de" => Some(Self::de_de()),
             "fr" => Some(Self::fr_fr()),

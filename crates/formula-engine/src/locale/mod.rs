@@ -12,6 +12,7 @@ pub use value_locale::{DateOrder, ValueLocaleConfig};
 #[derive(Debug, Clone, Copy)]
 struct LocaleKeyParts<'a> {
     lang: &'a str,
+    script: Option<&'a str>,
     region: Option<&'a str>,
 }
 
@@ -50,12 +51,14 @@ fn normalize_locale_key(id: &str) -> Option<String> {
 
 fn parse_locale_key(key: &str) -> Option<LocaleKeyParts<'_>> {
     // Parse BCP-47 tags and variants such as `de-CH-1996` or `fr-Latn-FR-u-nu-latn`. We only care
-    // about the language + optional region, ignoring script/variants/extensions.
+    // about the language + optional script/region, ignoring variants/extensions.
     let mut parts = key.split('-').filter(|p| !p.is_empty());
     let lang = parts.next()?;
     let mut next = parts.next();
     // Optional script subtag (4 alpha characters) comes before the region.
-    if next.is_some_and(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphabetic())) {
+    let script = next
+        .filter(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphabetic()));
+    if script.is_some() {
         next = parts.next();
     }
 
@@ -64,7 +67,11 @@ fn parse_locale_key(key: &str) -> Option<LocaleKeyParts<'_>> {
             || (p.len() == 3 && p.chars().all(|c| c.is_ascii_digit()))
     });
 
-    Some(LocaleKeyParts { lang, region })
+    Some(LocaleKeyParts {
+        lang,
+        script,
+        region,
+    })
 }
 
 fn normalize_locale_id(id: &str) -> Option<&'static str> {
@@ -76,10 +83,22 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
     match parts.lang {
         "en" => Some("en-US"),
         "ja" => Some("ja-JP"),
-        "zh" => match parts.region {
-            Some("tw") | Some("hk") | Some("mo") => Some("zh-TW"),
-            _ => Some("zh-CN"),
-        },
+        "zh" => {
+            // Prefer explicit region codes when present.
+            //
+            // Otherwise, use the BCP-47 script subtag:
+            // - `zh-Hant` is Traditional Chinese, commonly associated with `zh-TW`.
+            // - `zh-Hans` is Simplified Chinese, commonly associated with `zh-CN`.
+            match parts.region {
+                Some("tw") | Some("hk") | Some("mo") => Some("zh-TW"),
+                Some(_) => Some("zh-CN"),
+                None => match parts.script {
+                    Some("hant") => Some("zh-TW"),
+                    Some("hans") => Some("zh-CN"),
+                    _ => Some("zh-CN"),
+                },
+            }
+        }
         "ko" => Some("ko-KR"),
         "de" => Some("de-DE"),
         "fr" => Some("fr-FR"),

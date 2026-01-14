@@ -1,7 +1,7 @@
 use formula_engine::locale::{self, ValueLocaleConfig};
 
 #[test]
-fn get_locale_normalizes_locale_ids() {
+fn locale_id_normalization_get_locale_normalizes_locale_ids() {
     for (input, expected) in [
         // Exact IDs still work.
         ("en-US", &locale::EN_US),
@@ -57,10 +57,27 @@ fn get_locale_normalizes_locale_ids() {
             "expected None for {input:?}"
         );
     }
+
+    // Chinese script subtags should influence the default region when none is provided.
+    assert_eq!(
+        locale::get_locale("zh-Hant").expect("expected locale").id,
+        "zh-TW"
+    );
+    assert_eq!(
+        locale::get_locale("zh-Hans").expect("expected locale").id,
+        "zh-CN"
+    );
+    // Script subtags should still work when the tag includes extensions.
+    assert_eq!(
+        locale::get_locale("zh-Hant-u-nu-latn")
+            .expect("expected locale")
+            .id,
+        "zh-TW"
+    );
 }
 
 #[test]
-fn value_locale_config_for_locale_id_normalizes_locale_ids() {
+fn locale_id_normalization_value_locale_config_for_locale_id_normalizes_locale_ids() {
     for (input, expected) in [
         // Exact IDs still work.
         ("en-US", ValueLocaleConfig::en_us()),
@@ -109,4 +126,19 @@ fn value_locale_config_for_locale_id_normalizes_locale_ids() {
             "expected None for {input:?}"
         );
     }
+
+    // Chinese script subtags should influence the default region when none is provided.
+    assert_eq!(
+        ValueLocaleConfig::for_locale_id("zh-Hant"),
+        Some(ValueLocaleConfig::zh_tw())
+    );
+    assert_eq!(
+        ValueLocaleConfig::for_locale_id("zh-Hans"),
+        Some(ValueLocaleConfig::zh_cn())
+    );
+    // Script subtags should still work when the tag includes extensions.
+    assert_eq!(
+        ValueLocaleConfig::for_locale_id("zh-Hant-u-nu-latn"),
+        Some(ValueLocaleConfig::zh_tw())
+    );
 }
