@@ -1476,18 +1476,22 @@ where
 
                 let mut rows = Vec::new();
                 let mut total_cells = 0usize;
-                while let Some(row) =
-                    seq.next_element_seed(RowSeed::<T, MAX_DIM, MAX_CELLS> {
+                while rows.len() < MAX_DIM {
+                    match seq.next_element_seed(RowSeed::<T, MAX_DIM, MAX_CELLS> {
                         total_cells: &mut total_cells,
                         marker: PhantomData,
-                    })?
-                {
-                    if rows.len() >= MAX_DIM {
-                        return Err(de::Error::custom(format!(
-                            "range values payload is too large (max {MAX_DIM} rows)"
-                        )));
+                    })? {
+                        Some(row) => rows.push(row),
+                        None => return Ok(LimitedMatrix(rows)),
                     }
-                    rows.push(row);
+                }
+
+                // Reject extra rows without fully deserializing them (which could allocate large
+                // values/formulas for a payload we are going to reject anyway).
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "range values payload is too large (max {MAX_DIM} rows)"
+                    )));
                 }
                 Ok(LimitedMatrix(rows))
             }
