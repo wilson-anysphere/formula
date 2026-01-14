@@ -2325,12 +2325,7 @@ export class SpreadsheetApp {
               if (rowsVersion !== this.sharedGridRowsVersion || colsVersion !== this.sharedGridColsVersion) {
                 this.sharedGridRowsVersion = rowsVersion;
                 this.sharedGridColsVersion = colsVersion;
-                const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
-                overlay?.invalidateSpatialIndex();
-                this.invalidateDrawingHitTestIndexCaches();
-                this.chartDrawingInteraction?.invalidateHitTestIndex();
-                this.drawingsInteraction?.invalidateHitTestIndex();
-                this.drawingInteractionController?.invalidateHitTestIndex();
+                this.invalidateDrawingGeometryCaches();
               }
             }
             this.clearSharedHoverCellCache();
@@ -5668,14 +5663,7 @@ export class SpreadsheetApp {
     // `drawingGeom` is stable by reference but reads live shared-grid scroll state.
     // Row/col size overrides change `cellOriginPx` / `cellSizePx`, so any cached
     // drawings bounds must be recomputed.
-    const drawingOverlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
-    drawingOverlay?.invalidateSpatialIndex();
-
-    // Hit test indices cache sheet-space bounds too; clear so hover/interaction logic stays aligned.
-    this.invalidateDrawingHitTestIndexCaches();
-    this.drawingsInteraction?.invalidateHitTestIndex();
-    this.chartDrawingInteraction?.invalidateHitTestIndex();
-    this.drawingInteractionController?.invalidateHitTestIndex();
+    this.invalidateDrawingGeometryCaches();
   }
 
   freezePanes(): void {
@@ -9355,15 +9343,7 @@ export class SpreadsheetApp {
     // Keep drawings spatial indices in sync with axis size changes (row/col resize,
     // auto-fit, etc). The drawing geometry is backed by live shared-grid scroll
     // state, so cached sheet-space bounds must be recomputed.
-    const drawingOverlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
-    drawingOverlay?.invalidateSpatialIndex();
-    // Invalidate hit-test caches too: like the overlay spatial index, these indices
-    // store sheet-space bounds derived from `drawingGeom`, which is stable by reference
-    // but depends on live CanvasGridRenderer axis sizes.
-    this.invalidateDrawingHitTestIndexCaches();
-    this.drawingsInteraction?.invalidateHitTestIndex();
-    this.chartDrawingInteraction?.invalidateHitTestIndex();
-    this.drawingInteractionController?.invalidateHitTestIndex();
+    this.invalidateDrawingGeometryCaches();
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
     // (cell editor, formula bar, inline edit). This keeps edit state isolated from unrelated
@@ -9968,6 +9948,19 @@ export class SpreadsheetApp {
     this.splitViewDrawingHitTestIndexGrid = null;
     this.splitViewDrawingHitTestIndexRowsVersion = null;
     this.splitViewDrawingHitTestIndexColsVersion = null;
+  }
+
+  private invalidateDrawingGeometryCaches(): void {
+    const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+    overlay?.invalidateSpatialIndex();
+    this.invalidateDrawingHitTestIndexCaches();
+    const controller = this.drawingInteractionController;
+    // `drawingsInteraction` is a back-compat alias; avoid double invalidation when they are the same instance.
+    this.chartDrawingInteraction?.invalidateHitTestIndex();
+    this.drawingsInteraction?.invalidateHitTestIndex();
+    if (controller && controller !== this.drawingsInteraction) {
+      controller.invalidateHitTestIndex();
+    }
   }
 
   private getDrawingHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
