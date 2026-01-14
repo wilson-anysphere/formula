@@ -1773,6 +1773,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
             part_overrides,
             RecalcPolicy::PRESERVE,
         )?;
