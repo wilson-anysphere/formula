@@ -219,3 +219,73 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
             self.assertEqual(report["limits_mb"]["dist"], 1.0)
             self.assertEqual(report["dist"]["size_bytes"], 2_000_000)
             self.assertTrue(report["dist"]["over_limit"])
+
+    def test_default_binary_auto_detects_cargo_target_dir(self) -> None:
+        """
+        CI runs the size report without `--binary`. Ensure it can find the binary
+        in a custom CARGO_TARGET_DIR when `target/release/formula-desktop` is absent.
+        """
+        repo_root = self._repo_root()
+        target_dir = repo_root / "target"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        exe = "formula-desktop.exe" if sys.platform == "win32" else "formula-desktop"
+        default_bin = repo_root / "target" / "release" / exe
+        default_bin_backup = default_bin.with_name(default_bin.name + ".bak")
+        tauri_bin = repo_root / "apps" / "desktop" / "src-tauri" / "target" / "release" / exe
+        tauri_bin_backup = tauri_bin.with_name(tauri_bin.name + ".bak")
+
+        moved: list[tuple[Path, Path]] = []
+        try:
+            # Ensure any existing binaries don't short-circuit the probe logic.
+            for src, dst in ((default_bin, default_bin_backup), (tauri_bin, tauri_bin_backup)):
+                if src.is_file():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    if dst.exists():
+                        dst.unlink()
+                    src.rename(dst)
+                    moved.append((src, dst))
+
+            with tempfile.TemporaryDirectory(dir=target_dir) as tmp:
+                tmp_dir = Path(tmp)
+                cargo_target = tmp_dir / "custom-target"
+                release_dir = cargo_target / "release"
+                release_dir.mkdir(parents=True, exist_ok=True)
+                bin_path = release_dir / exe
+
+                with open(bin_path, "wb") as f:
+                    f.truncate(1234)
+
+                dist_dir = tmp_dir / "dist"
+                dist_dir.mkdir(parents=True, exist_ok=True)
+                (dist_dir / "a.txt").write_bytes(b"hello\n")
+
+                json_path = tmp_dir / "desktop-size.json"
+
+                proc = self._run(
+                    repo_root,
+                    [
+                        "--dist",
+                        dist_dir.relative_to(repo_root).as_posix(),
+                        "--no-gzip",
+                        "--json-out",
+                        str(json_path),
+                    ],
+                    extra_env={
+                        # Intentionally provide a relative path to exercise repo-root resolution.
+                        "CARGO_TARGET_DIR": cargo_target.relative_to(repo_root).as_posix(),
+                    },
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+                report = self._read_report(json_path)
+                self._assert_basic_schema(report)
+                self.assertEqual(report["binary"]["path"], bin_path.relative_to(repo_root).as_posix())
+                self.assertEqual(report["binary"]["size_bytes"], 1234)
+        finally:
+            for src, dst in moved:
+                if src.exists():
+                    # Shouldn't happen, but avoid clobbering.
+                    continue
+                if dst.exists():
+                    dst.rename(src)
