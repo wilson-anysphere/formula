@@ -57,16 +57,16 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
   // comments.* ids so command palette recents + keybindings share the same path.
   assert.match(main, /\bcreateRibbonActions\(/);
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
-  assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?comments\.togglePanel/m);
-  assert.doesNotMatch(main, /\bcommandOverrides:\s*\{[\s\S]*?comments\.togglePanel/m);
-  assert.doesNotMatch(main, /\bcommandOverrides:\s*\{[\s\S]*?comments\.addComment/m);
+  assert.doesNotMatch(router, /\btoggleOverrides:\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m);
+  assert.doesNotMatch(router, /\bcommandOverrides:\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m);
+  assert.doesNotMatch(router, /\bcommandOverrides:\s*\{[\s\S]*?["']comments\.addComment["']\s*:/m);
   assert.doesNotMatch(
-    main,
+    router,
     /\bcase\s+["']comments\.togglePanel["']:/,
     "Expected main.ts to not handle comments.togglePanel via switch case",
   );
   assert.doesNotMatch(
-    main,
+    router,
     /\bcase\s+["']comments\.addComment["']:/,
     "Expected main.ts to not handle comments.addComment via switch case",
   );

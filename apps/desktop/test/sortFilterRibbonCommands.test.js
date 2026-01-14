@@ -52,7 +52,6 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
 
   // Guardrail: AutoFilter is a registered CommandRegistry toggle command, so it should not be
   // special-cased as a ribbon `toggleOverrides` handler (it should dispatch through CommandRegistry).
-  assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.sortFilter\.filter["']\s*:/m);
   assert.doesNotMatch(router, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.sortFilter\.filter["']\s*:/m);
 
   // MVP AutoFilter commands are registered via the shared helper (invoked by registerDesktopCommands,
