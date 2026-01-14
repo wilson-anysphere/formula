@@ -6,7 +6,8 @@ Key files:
 
 - Ribbon schema entrypoint (types + tab assembly): `apps/desktop/src/ribbon/ribbonSchema.ts`
 - Ribbon tab definitions: `apps/desktop/src/ribbon/schema/*.ts`
-- Ribbon mount + wiring: `apps/desktop/src/main.ts` (`mountRibbon(...)`)
+- Ribbon mount: `apps/desktop/src/main.ts` (`mountRibbon(...)`)
+- Ribbon command router (CommandRegistry bridge + overrides): `apps/desktop/src/ribbon/ribbonCommandRouter.ts` (`createRibbonActions(...)`)
 - Commands: `apps/desktop/src/extensions/commandRegistry.ts`
 - Built-in command registration:
   - `apps/desktop/src/commands/registerBuiltinCommands.ts` (edit/clipboard/view/audit/etc.)
@@ -130,18 +131,20 @@ Do **not** rely on `id`/`data-command-id` for E2E. `id`s may change as commands 
 
 ### Guideline: RibbonActions should route to `CommandRegistry.executeCommand`
 
-In `apps/desktop/src/main.ts`, the ribbon is mounted with:
+In `apps/desktop/src/main.ts`, the ribbon is mounted via the ribbon command router:
 
 ```ts
-mountRibbon(ribbonReactRoot, {
-  onCommand: (commandId) => { /* ... */ },
-  onToggle: (commandId, pressed) => { /* ... */ },
+const ribbonActions = createRibbonActions({
+  app,
+  commandRegistry,
+  // ...host deps (dialogs, toasts, etc)
 });
+mountRibbon(ribbonReactRoot, ribbonActions);
 ```
 
 Prefer:
 
-- `commandRegistry.executeCommand(commandId)` (or the `executeCommand(...)` helper in `apps/desktop/src/main.ts`)
+- `commandRegistry.executeCommand(commandId)`
 
 So keyboard shortcuts (`KeybindingService`) and ribbon share behavior.
 
@@ -280,11 +283,11 @@ E2E should select this control via `data-testid="ribbon-strikethrough"`.
 
 ### 4) Wire RibbonActions to execute the command
 
-In `apps/desktop/src/main.ts`, the ribbon is mounted via `createRibbonActionsFromCommands(...)`. Ensure that activations call:
+Ribbon wiring lives in `apps/desktop/src/ribbon/ribbonCommandRouter.ts` (`createRibbonActions(...)`), which bridges ribbon activations to `CommandRegistry` via `createRibbonActionsFromCommands(...)`.
 
-- `commandRegistry.executeCommand(commandId)` (or the existing `executeCommand(commandId)` helper)
+If your ribbon schema `id` matches a registered CommandRegistry command id, there is usually nothing else to do — `createRibbonActions(...)` will dispatch it automatically.
 
-If the `onCommand` handler still uses a large switch statement, add a case for the new command id and route it through `CommandRegistry` rather than duplicating formatting logic.
+If you need special-case behavior (File-tab aliases, pressed-state reconciliation for toggles, host-owned dialogs), add it to `commandOverrides` / `toggleOverrides` in `ribbonCommandRouter.ts` rather than wiring bespoke logic in `main.ts`.
 
 ### 5) Keep toggle state in sync (RibbonUiState)
 
