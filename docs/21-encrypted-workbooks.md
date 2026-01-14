@@ -51,7 +51,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
       - Note: encrypted `.xlsb` workbooks decrypt to an OOXML ZIP containing `xl/workbook.bin` and
         are opened as `Workbook::Xlsb` (or converted to a model workbook via the password APIs).
         - If you need to open an encrypted `.xlsb` from bytes directly, use
-          `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(..)`.
+          `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(&bytes, password, formula_io::xlsb::OpenOptions::default())`.
 - Legacy **`.xls`** with BIFF `FILEPASS` yields:
   - `formula_io::Error::EncryptedWorkbook` via `open_workbook(..)` / `open_workbook_model(..)` (prompt
     callers to retry via the password-capable APIs).
