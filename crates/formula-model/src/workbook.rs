@@ -687,6 +687,10 @@ impl Workbook {
                 // If the duplicated pivot's source was rewritten to point at duplicated data
                 // (range/table on the new sheet), allocate a distinct cache so the original and
                 // duplicated pivots can be refreshed independently (Excel-like).
+                //
+                // Only duplicate caches when the original pivot already had a cache id; pivots
+                // without a cache should keep `cache_id = None` and allow the host/engine to
+                // materialize one later.
                 let cache_id: PivotCacheId = crate::new_uuid();
                 duplicated.cache_id = Some(cache_id);
                 self.pivot_caches.push(PivotCacheModel {

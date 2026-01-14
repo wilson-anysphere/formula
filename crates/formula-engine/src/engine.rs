@@ -6233,6 +6233,7 @@ impl Engine {
                     compiled.ast(),
                     key,
                     &self.workbook,
+                    self.external_value_provider.as_deref(),
                 ));
             }
         }
@@ -6376,6 +6377,7 @@ impl Engine {
                                 compiled.ast(),
                                 key,
                                 &self.workbook,
+                                self.external_value_provider.as_deref(),
                             ));
                         }
                     }
@@ -11898,6 +11900,7 @@ fn analyze_external_precedents(
     expr: &CompiledExpr,
     current_cell: CellKey,
     workbook: &Workbook,
+    external_value_provider: Option<&dyn ExternalValueProvider>,
 ) -> Vec<PrecedentNode> {
     let mut out: HashSet<PrecedentNode> = HashSet::new();
     let mut visiting_names = HashSet::new();
@@ -11906,6 +11909,7 @@ fn analyze_external_precedents(
         expr,
         current_cell,
         workbook,
+        external_value_provider,
         &mut out,
         &mut visiting_names,
         &mut lexical_scopes,
@@ -11913,10 +11917,58 @@ fn analyze_external_precedents(
     out.into_iter().collect()
 }
 
+/// Expands an external workbook 3D sheet span key like `[Book.xlsx]Sheet1:Sheet3`
+/// into per-sheet external keys like `[Book.xlsx]Sheet2`.
+///
+/// Returns `None` when expansion is not possible (e.g. missing provider, missing sheet order,
+/// or unknown boundary sheets).
+fn expand_external_sheet_span_key(
+    key: &str,
+    provider: Option<&dyn ExternalValueProvider>,
+) -> Option<Vec<String>> {
+    let provider = provider?;
+    let (workbook, start, end) = crate::eval::split_external_sheet_span_key(key)?;
+    let sheet_names = provider.sheet_order(workbook)?;
+
+    let start_key = crate::value::casefold(start);
+    let end_key = crate::value::casefold(end);
+
+    let mut start_idx: Option<usize> = None;
+    let mut end_idx: Option<usize> = None;
+    for (idx, name) in sheet_names.iter().enumerate() {
+        let name_key = crate::value::casefold(name);
+        if start_idx.is_none() && name_key == start_key {
+            start_idx = Some(idx);
+        }
+        if end_idx.is_none() && name_key == end_key {
+            end_idx = Some(idx);
+        }
+        if start_idx.is_some() && end_idx.is_some() {
+            break;
+        }
+    }
+
+    let start_idx = start_idx?;
+    let end_idx = end_idx?;
+    let (lo, hi) = if start_idx <= end_idx {
+        (start_idx, end_idx)
+    } else {
+        (end_idx, start_idx)
+    };
+
+    Some(
+        sheet_names[lo..=hi]
+            .iter()
+            .map(|name| format!("[{workbook}]{name}"))
+            .collect(),
+    )
+}
+
 fn walk_external_expr(
     expr: &CompiledExpr,
     current_cell: CellKey,
     workbook: &Workbook,
+    external_value_provider: Option<&dyn ExternalValueProvider>,
     precedents: &mut HashSet<PrecedentNode>,
     visiting_names: &mut HashSet<(SheetId, String)>,
     lexical_scopes: &mut Vec<HashSet<String>>,
@@ -11945,6 +11997,25 @@ fn walk_external_expr(
                         sheet: key.clone(),
                         addr,
                     });
+                } else if crate::eval::split_external_sheet_span_key(key).is_some() {
+                    let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                        return;
+                    };
+                    if let Some(expanded) =
+                        expand_external_sheet_span_key(key, external_value_provider)
+                    {
+                        for sheet_key in expanded {
+                            precedents.insert(PrecedentNode::ExternalCell {
+                                sheet: sheet_key,
+                                addr,
+                            });
+                        }
+                    } else {
+                        precedents.insert(PrecedentNode::ExternalCell {
+                            sheet: key.clone(),
+                            addr,
+                        });
+                    }
                 }
             }
         }
@@ -11962,6 +12033,32 @@ fn walk_external_expr(
                         start: clamp_addr_to_excel_dimensions(start),
                         end: clamp_addr_to_excel_dimensions(end),
                     });
+                } else if crate::eval::split_external_sheet_span_key(key).is_some() {
+                    let Some(start) = r.start.resolve(current_cell.addr) else {
+                        return;
+                    };
+                    let Some(end) = r.end.resolve(current_cell.addr) else {
+                        return;
+                    };
+                    let start = clamp_addr_to_excel_dimensions(start);
+                    let end = clamp_addr_to_excel_dimensions(end);
+                    if let Some(expanded) =
+                        expand_external_sheet_span_key(key, external_value_provider)
+                    {
+                        for sheet_key in expanded {
+                            precedents.insert(PrecedentNode::ExternalRange {
+                                sheet: sheet_key,
+                                start,
+                                end,
+                            });
+                        }
+                    } else {
+                        precedents.insert(PrecedentNode::ExternalRange {
+                            sheet: key.clone(),
+                            start,
+                            end,
+                        });
+                    }
                 }
             }
         }
@@ -11996,6 +12093,7 @@ fn walk_external_expr(
                             addr: current_cell.addr,
                         },
                         workbook,
+                        external_value_provider,
                         precedents,
                         visiting_names,
                         lexical_scopes,
@@ -12008,6 +12106,7 @@ fn walk_external_expr(
             base,
             current_cell,
             workbook,
+            external_value_provider,
             precedents,
             visiting_names,
             lexical_scopes,
@@ -12019,6 +12118,7 @@ fn walk_external_expr(
             expr,
             current_cell,
             workbook,
+            external_value_provider,
             precedents,
             visiting_names,
             lexical_scopes,
@@ -12028,6 +12128,7 @@ fn walk_external_expr(
                 left,
                 current_cell,
                 workbook,
+                external_value_provider,
                 precedents,
                 visiting_names,
                 lexical_scopes,
@@ -12036,6 +12137,7 @@ fn walk_external_expr(
                 right,
                 current_cell,
                 workbook,
+                external_value_provider,
                 precedents,
                 visiting_names,
                 lexical_scopes,
@@ -12059,6 +12161,7 @@ fn walk_external_expr(
                                 &pair[1],
                                 current_cell,
                                 workbook,
+                                external_value_provider,
                                 precedents,
                                 visiting_names,
                                 lexical_scopes,
@@ -12073,6 +12176,7 @@ fn walk_external_expr(
                             &args[args.len() - 1],
                             current_cell,
                             workbook,
+                            external_value_provider,
                             precedents,
                             visiting_names,
                             lexical_scopes,
@@ -12100,6 +12204,7 @@ fn walk_external_expr(
                             &args[args.len() - 1],
                             current_cell,
                             workbook,
+                            external_value_provider,
                             precedents,
                             visiting_names,
                             lexical_scopes,
@@ -12125,6 +12230,7 @@ fn walk_external_expr(
                                         addr: current_cell.addr,
                                     },
                                     workbook,
+                                    external_value_provider,
                                     precedents,
                                     visiting_names,
                                     lexical_scopes,
@@ -12141,6 +12247,7 @@ fn walk_external_expr(
                     a,
                     current_cell,
                     workbook,
+                    external_value_provider,
                     precedents,
                     visiting_names,
                     lexical_scopes,
@@ -12152,6 +12259,7 @@ fn walk_external_expr(
                 callee,
                 current_cell,
                 workbook,
+                external_value_provider,
                 precedents,
                 visiting_names,
                 lexical_scopes,
@@ -12161,6 +12269,7 @@ fn walk_external_expr(
                     a,
                     current_cell,
                     workbook,
+                    external_value_provider,
                     precedents,
                     visiting_names,
                     lexical_scopes,
@@ -12173,6 +12282,7 @@ fn walk_external_expr(
                     el,
                     current_cell,
                     workbook,
+                    external_value_provider,
                     precedents,
                     visiting_names,
                     lexical_scopes,

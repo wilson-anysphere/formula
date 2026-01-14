@@ -1974,7 +1974,6 @@ fn fn_fieldaccess(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if field_key.trim().is_empty() {
         return Value::Error(ErrorKind::Value);
     }
-
     match base_val {
         Value::Error(e) => Value::Error(e),
         Value::Array(arr) => {

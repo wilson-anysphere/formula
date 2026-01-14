@@ -247,6 +247,59 @@ fn precedents_include_external_refs() {
 }
 
 #[test]
+fn precedents_expand_external_3d_sheet_span_when_sheet_order_available() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
+        .unwrap();
+
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet2".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet3".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+        ]
+    );
+}
+
+#[test]
+fn precedents_include_external_3d_sheet_span_when_sheet_order_unavailable() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
+        .unwrap();
+
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalCell {
+            sheet: "[Book.xlsx]Sheet1:Sheet3".to_string(),
+            addr: CellAddr { row: 0, col: 0 },
+        }]
+    );
+}
+
+#[test]
 fn external_refs_are_volatile() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set(
