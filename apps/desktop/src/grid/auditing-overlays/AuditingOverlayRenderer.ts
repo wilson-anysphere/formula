@@ -51,6 +51,7 @@ export class AuditingOverlayRenderer {
 
     const strokeWidth = this.strokeWidth;
     const halfStroke = strokeWidth / 2;
+    const parsedScratch = { row: 0, col: 0 };
 
     ctx.save();
     ctx.lineWidth = strokeWidth;
@@ -58,7 +59,7 @@ export class AuditingOverlayRenderer {
     ctx.fillStyle = this.precedentFill;
     ctx.strokeStyle = this.precedentStroke;
     for (const addr of highlights.precedents) {
-      const parsed = parseCellAddress(addr);
+      const parsed = parseCellAddress(addr, parsedScratch);
       if (!parsed) continue;
       const rect = getCellRect(parsed.row, parsed.col);
       if (!rect) continue;
@@ -71,7 +72,7 @@ export class AuditingOverlayRenderer {
     ctx.fillStyle = this.dependentFill;
     ctx.strokeStyle = this.dependentStroke;
     for (const addr of highlights.dependents) {
-      const parsed = parseCellAddress(addr);
+      const parsed = parseCellAddress(addr, parsedScratch);
       if (!parsed) continue;
       const rect = getCellRect(parsed.row, parsed.col);
       if (!rect) continue;

@@ -18,10 +18,16 @@ export function nameToCol(name: string): number | null {
   }
 }
 
-export function parseCellAddress(addr: CellAddress): { row: number; col: number } | null {
-  const noSheet = addr.includes("!") ? addr.split("!").slice(-1)[0] : addr;
+export function parseCellAddress(addr: CellAddress, out?: { row: number; col: number }): { row: number; col: number } | null {
+  const sheetSeparator = addr.lastIndexOf("!");
+  const noSheet = sheetSeparator === -1 ? addr : addr.slice(sheetSeparator + 1);
   try {
     const { row0, col0 } = fromA1(noSheet);
+    if (out) {
+      out.row = row0;
+      out.col = col0;
+      return out;
+    }
     return { row: row0, col: col0 };
   } catch {
     return null;
@@ -35,7 +41,8 @@ export function formatCellAddress(row: number, col: number): CellAddress {
 export const DEFAULT_MAX_EXPAND_RANGE_CELLS = 200_000;
 
 export function expandRange(range: string, options: { maxCells?: number } = {}): CellAddress[] {
-  const noSheet = range.includes("!") ? range.split("!").slice(-1)[0] : range;
+  const sheetSeparator = range.lastIndexOf("!");
+  const noSheet = sheetSeparator === -1 ? range : range.slice(sheetSeparator + 1);
   const parts = noSheet.split(":");
   if (parts.length === 1) return [noSheet];
   if (parts.length !== 2) return [];
