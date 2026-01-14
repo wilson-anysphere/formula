@@ -213,11 +213,26 @@ jobs:
           
           const merged = {
             generatedAt: new Date().toISOString(),
+            ci: {
+              workflow: process.env.GITHUB_WORKFLOW || null,
+              runId: process.env.GITHUB_RUN_ID || null,
+              runNumber: process.env.GITHUB_RUN_NUMBER || null,
+              attempt: process.env.GITHUB_RUN_ATTEMPT || null,
+              job: process.env.GITHUB_JOB || null,
+            },
             git: { sha: process.env.GITHUB_SHA || null, ref: process.env.GITHUB_REF || null },
             runner: {
               os: process.env.RUNNER_OS || null,
               arch: process.env.RUNNER_ARCH || null,
               name: process.env.RUNNER_NAME || null,
+            },
+            image: {
+              os: process.env.ImageOS || null,
+              version: process.env.ImageVersion || null,
+              name: process.env.ImageName || null,
+            },
+            toolchain: {
+              node: process.version,
             },
             startupCold,
             startupWarm,
@@ -240,6 +255,9 @@ jobs:
           
           const lines = [];
           lines.push(`## Desktop perf summary (${process.env.RUNNER_OS ?? "unknown"})`);
+          if (process.env.ImageOS || process.env.ImageVersion) {
+            lines.push(`Runner image: \`${process.env.ImageOS ?? "n/a"}\` \`${process.env.ImageVersion ?? ""}\``);
+          }
           lines.push("");
           lines.push("| Metric | p50 | p95 | Notes |");
           lines.push("|---|---:|---:|---|");
