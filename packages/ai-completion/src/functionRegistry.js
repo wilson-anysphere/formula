@@ -1590,6 +1590,45 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "BINOM.DIST",
+    description: "Returns the individual term binomial distribution probability.",
+    args: [
+      { name: "number_s", type: "value" },
+      { name: "trials", type: "value" },
+      { name: "probability_s", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "BINOMDIST",
+    description: "Returns the individual term binomial distribution probability (legacy).",
+    args: [
+      { name: "number_s", type: "value" },
+      { name: "trials", type: "value" },
+      { name: "probability_s", type: "value" },
+      { name: "cumulative", type: "boolean" },
+    ],
+  },
+  {
+    name: "BINOM.DIST.RANGE",
+    description: "Returns the probability of a trial result using a binomial distribution.",
+    args: [
+      { name: "trials", type: "value" },
+      { name: "probability_s", type: "value" },
+      { name: "number_s", type: "value" },
+      { name: "number_s2", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "BINOM.INV",
+    description: "Returns the smallest value for which the cumulative binomial distribution is less than or equal to a criterion value.",
+    args: [
+      { name: "trials", type: "value" },
+      { name: "probability_s", type: "value" },
+      { name: "alpha", type: "value" },
+    ],
+  },
+  {
     name: "NORMDIST",
     description: "Returns the normal cumulative distribution for the specified mean and standard deviation (legacy).",
     args: [
