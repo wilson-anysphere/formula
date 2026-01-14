@@ -1402,7 +1402,7 @@ jobs:
 
           # Require both installer formats (MSI + NSIS EXE) so we don't publish a
           # partial Windows release.
-          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
       - name: Verify Windows ARM64 binary architecture (AA64)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
         shell: pwsh
