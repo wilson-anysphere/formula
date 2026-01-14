@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { stripComments, stripRustComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { stripComments, stripHtmlComments, stripRustComments } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -140,7 +140,8 @@ test("vite build strips dist/pyodide unless FORMULA_BUNDLE_PYODIDE_ASSETS is set
 });
 
 test("desktop Pyodide version + required assets stay in sync (ensure script / Rust / python-runtime)", () => {
-  const ensureSrc = readText("apps/desktop/scripts/ensure-pyodide-assets.mjs");
+  // Strip comments so commented-out constants/entries can't satisfy these guardrails.
+  const ensureSrc = stripComments(readText("apps/desktop/scripts/ensure-pyodide-assets.mjs"));
   const rustSrc = stripRustComments(readText("apps/desktop/src-tauri/src/pyodide_assets.rs"));
 
   const ensureVersion = extractPyodideVersionFromEnsureScript(ensureSrc);
@@ -151,8 +152,8 @@ test("desktop Pyodide version + required assets stay in sync (ensure script / Ru
     "Expected apps/desktop/src-tauri/src/pyodide_assets.rs PYODIDE_VERSION to match apps/desktop/scripts/ensure-pyodide-assets.mjs",
   );
 
-  const pythonMainThreadSrc = readText("packages/python-runtime/src/pyodide-main-thread.js");
-  const pythonWorkerSrc = readText("packages/python-runtime/src/pyodide-worker.js");
+  const pythonMainThreadSrc = stripComments(readText("packages/python-runtime/src/pyodide-main-thread.js"));
+  const pythonWorkerSrc = stripComments(readText("packages/python-runtime/src/pyodide-worker.js"));
   const pythonMainThreadVersion = extractPyodideVersionFromCdnUrl(
     pythonMainThreadSrc,
     "packages/python-runtime/src/pyodide-main-thread.js",
@@ -174,7 +175,7 @@ test("desktop Pyodide version + required assets stay in sync (ensure script / Ru
 
   // E2E harness uses a self-hosted `/pyodide/...` URL; keep it aligned so tests don't silently
   // pin a different version than the runtime downloader.
-  const e2eHtml = readText("apps/desktop/python-runtime-test.html");
+  const e2eHtml = stripHtmlComments(readText("apps/desktop/python-runtime-test.html"));
   const e2eVersion = extractPyodideVersionFromLocalPyodideUrl(
     e2eHtml,
     "apps/desktop/python-runtime-test.html",
