@@ -1339,6 +1339,9 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     `provenance-*.intoto.jsonl` are missing from the draft release, check the workflow artifacts for
     `sbom-*` / `provenance-*` bundles and the workflow logs for upload warnings.
 
+    Optional: to enforce SBOM/provenance presence on tagged releases, set the GitHub Actions variable
+    `FORMULA_ENFORCE_SUPPLY_CHAIN_ASSETS=1`.
+
     Build provenance: the release workflow also generates **build provenance attestations** for the
     uploaded desktop artifacts. You can view them in GitHub’s **Attestations** UI for the workflow
     run, and the raw attestation bundles are attached to the draft GitHub Release as

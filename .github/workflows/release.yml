@@ -2464,6 +2464,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.preflight.outputs.release_tag }}
+          # Optional strict mode: set this as a GitHub Actions Variable to make missing
+          # SBOM/provenance assets fail the workflow (off by default).
+          FORMULA_ENFORCE_SUPPLY_CHAIN_ASSETS: ${{ vars.FORMULA_ENFORCE_SUPPLY_CHAIN_ASSETS }}
         shell: bash
         run: |
           set -euo pipefail
@@ -2855,6 +2858,25 @@ jobs:
             for missing in "${missing_provenance_assets[@]}"; do
               echo "::warning:: - ${missing}"
             done
+          fi
+
+          enforce_supply_chain="${FORMULA_ENFORCE_SUPPLY_CHAIN_ASSETS:-}"
+          if [[ "${enforce_supply_chain}" == "1" || "${enforce_supply_chain,,}" == "true" ]]; then
+            if [[ "${sbom_present}" != "true" ]]; then
+              echo "::error::SBOM asset sbom.spdx.json missing (FORMULA_ENFORCE_SUPPLY_CHAIN_ASSETS=1)"
+              exit 1
+            fi
+            if [[ "${provenance_count}" -eq 0 ]]; then
+              echo "::error::No provenance-*.intoto.jsonl attestation bundles found (FORMULA_ENFORCE_SUPPLY_CHAIN_ASSETS=1)"
+              exit 1
+            fi
+            if ((${#missing_provenance_assets[@]} > 0)); then
+              echo "::error::Missing expected provenance bundle asset(s) (FORMULA_ENFORCE_SUPPLY_CHAIN_ASSETS=1):" >&2
+              for missing in "${missing_provenance_assets[@]}"; do
+                echo "::error:: - ${missing}" >&2
+              done
+              exit 1
+            fi
           fi
 
           bucket_for() {
