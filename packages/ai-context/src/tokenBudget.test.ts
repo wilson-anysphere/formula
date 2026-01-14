@@ -97,6 +97,16 @@ describe("tokenBudget", () => {
     expect(stableJsonStringify(obj)).toBe('{"a":1,"self":"[Circular]"}');
   });
 
+  it("stableJsonStringify handles cyclic Map/Set structures without crashing", () => {
+    const map: any = new Map();
+    map.set("self", map);
+    expect(stableJsonStringify(map)).toBe('[["self","[Circular]"]]');
+
+    const set: any = new Set();
+    set.add(set);
+    expect(stableJsonStringify(set)).toBe('["[Circular]"]');
+  });
+
   it("packSectionsToTokenBudgetWithReport reports token usage, trims, and drops", () => {
     const charEstimator = {
       estimateTextTokens: (text: string) => String(text ?? "").length,
