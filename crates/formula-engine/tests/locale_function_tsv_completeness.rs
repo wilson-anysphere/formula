@@ -894,6 +894,7 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_alias(&es_es.entries, "#DIV/0!", "#DIV/0!");
     assert_error_preferred(&es_es.entries, "#FIELD!", "#¡CAMPO!");
     assert_error_alias(&es_es.entries, "#FIELD!", "#CAMPO!");
+    assert_error_preferred(&es_es.entries, "#GETTING_DATA", "#OBTENIENDO_DATOS");
     assert_error_preferred(&es_es.entries, "#NULL!", "#¡NULO!");
     assert_error_alias(&es_es.entries, "#NULL!", "#NULO!");
     assert_error_preferred(&es_es.entries, "#NUM!", "#¡NUM!");
@@ -918,12 +919,20 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
         Some("#¡VALOR!")
     );
     assert_eq!(
+        es_es_locale.localized_error_literal("#GETTING_DATA"),
+        Some("#OBTENIENDO_DATOS")
+    );
+    assert_eq!(
         es_es_locale.canonical_error_literal("#¡VALOR!"),
         Some("#VALUE!")
     );
     assert_eq!(
         es_es_locale.canonical_error_literal("#VALOR!"),
         Some("#VALUE!")
+    );
+    assert_eq!(
+        es_es_locale.canonical_error_literal("#OBTENIENDO_DATOS"),
+        Some("#GETTING_DATA")
     );
     assert_eq!(
         es_es_locale.localized_error_literal("#NAME?"),
