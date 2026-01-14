@@ -41,10 +41,12 @@ impl<T: Read + std::io::Seek> ReadSeek for T {}
 
 const FORMULA_POWER_QUERY_PART: &str = "xl/formula/power-query.xml";
 /// Maximum uncompressed size to preserve for optional workbook parts that we round-trip
-/// opportunistically (macros + Power Query).
+/// opportunistically (e.g. Power Query XML, VBA signatures).
 ///
 /// These parts are not required to open the workbook in Formula, so if they're larger than this
 /// limit we skip preserving them instead of risking backend OOM on crafted ZIP bombs.
+///
+/// Note: some macro-related parts (e.g. `xl/vbaProject.bin`) have larger dedicated limits.
 const MAX_OPTIONAL_PRESERVE_PART_BYTES: u64 = 32 * 1024 * 1024; // 32MiB
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PASSWORD_REQUIRED_PREFIX: &str = "PASSWORD_REQUIRED:";
