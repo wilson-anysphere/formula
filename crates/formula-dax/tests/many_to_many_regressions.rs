@@ -2081,6 +2081,11 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
         model.evaluate_measure("Total Amount", &physical_blank).unwrap(),
         Value::Blank
     );
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        12.0.into()
+    );
 
     let physical_blank_row = 1;
     let mut ctx = RowContext::default();
@@ -2096,6 +2101,21 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
             )
             .unwrap(),
         Value::Blank
+    );
+
+    let blank_row = model.table("Dim").unwrap().row_count();
+    let mut blank_ctx = RowContext::default();
+    blank_ctx.push("Dim", blank_row);
+    assert_eq!(
+        DaxEngine::new()
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &blank_ctx,
+            )
+            .unwrap(),
+        12.0.into()
     );
 }
 
@@ -2166,6 +2186,11 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
         model.evaluate_measure("Total Amount", &physical_blank).unwrap(),
         Value::Blank
     );
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        12.0.into()
+    );
 
     let physical_blank_row = 1;
     let mut ctx = RowContext::default();
@@ -2181,6 +2206,21 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
             )
             .unwrap(),
         Value::Blank
+    );
+
+    let blank_row = model.table("Dim").unwrap().row_count();
+    let mut blank_ctx = RowContext::default();
+    blank_ctx.push("Dim", blank_row);
+    assert_eq!(
+        DaxEngine::new()
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &blank_ctx,
+            )
+            .unwrap(),
+        12.0.into()
     );
 }
 
@@ -2256,6 +2296,11 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
         model.evaluate_measure("Total Amount", &physical_blank).unwrap(),
         Value::Blank
     );
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        12.0.into()
+    );
 
     let physical_blank_row = 1;
     let mut ctx = RowContext::default();
@@ -2271,6 +2316,21 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
             )
             .unwrap(),
         Value::Blank
+    );
+
+    let blank_row = model.table("Dim").unwrap().row_count();
+    let mut blank_ctx = RowContext::default();
+    blank_ctx.push("Dim", blank_row);
+    assert_eq!(
+        DaxEngine::new()
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &blank_ctx,
+            )
+            .unwrap(),
+        12.0.into()
     );
 }
 
@@ -2372,6 +2432,11 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
         model.evaluate_measure("Total Amount", &physical_blank).unwrap(),
         Value::Blank
     );
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        12.0.into()
+    );
 
     let physical_blank_row = 1;
     let mut ctx = RowContext::default();
@@ -2387,6 +2452,21 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
             )
             .unwrap(),
         Value::Blank
+    );
+
+    let blank_row = model.table("Dim").unwrap().row_count();
+    let mut blank_ctx = RowContext::default();
+    blank_ctx.push("Dim", blank_row);
+    assert_eq!(
+        DaxEngine::new()
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &blank_ctx,
+            )
+            .unwrap(),
+        12.0.into()
     );
 }
 
