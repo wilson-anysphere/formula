@@ -5964,11 +5964,29 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
+                // Like XOR: preserve AST-like error precedence within each union area, even when
+                // overlap subtraction yields multiple disjoint rectangles that must be interleaved
+                // row-by-row for true row-major ordering.
+                let mut current_area_idx: Option<usize> = None;
+                let mut best_error_in_area: Option<(i32, i32, ErrorKind)> = None;
+
                 for area in multirange_unique_areas(r, grid, base) {
-                    match sum_range_on_sheet(grid, &area.sheet, area.range) {
-                        Ok(v) => sum += v,
-                        Err(e) => return Value::Error(e),
+                    if current_area_idx != Some(area.area_idx) {
+                        if let Some((_, _, err)) = best_error_in_area {
+                            return Value::Error(err);
+                        }
+                        current_area_idx = Some(area.area_idx);
+                        best_error_in_area = None;
                     }
+
+                    match sum_range_on_sheet_with_coord(grid, &area.sheet, area.range) {
+                        Ok(v) => sum += v,
+                        Err((coord, err)) => record_error_row_major(&mut best_error_in_area, coord, err),
+                    }
+                }
+
+                if let Some((_, _, err)) = best_error_in_area {
+                    return Value::Error(err);
                 }
             }
             Value::Empty | Value::Missing => {}
@@ -6087,16 +6105,32 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
+                // Preserve AST-like error precedence within each union area (see fn_sum/xor).
+                let mut current_area_idx: Option<usize> = None;
+                let mut best_error_in_area: Option<(i32, i32, ErrorKind)> = None;
+
                 for area in multirange_unique_areas(r, grid, base) {
-                    match sum_count_range_on_sheet(grid, &area.sheet, area.range) {
+                    if current_area_idx != Some(area.area_idx) {
+                        if let Some((_, _, err)) = best_error_in_area {
+                            return Value::Error(err);
+                        }
+                        current_area_idx = Some(area.area_idx);
+                        best_error_in_area = None;
+                    }
+
+                    match sum_count_range_on_sheet_with_coord(grid, &area.sheet, area.range) {
                         Ok((s, c)) => {
                             if !saw_nan {
                                 sum += s;
                                 count += c;
                             }
                         }
-                        Err(e) => return Value::Error(e),
+                        Err((coord, err)) => record_error_row_major(&mut best_error_in_area, coord, err),
                     }
+                }
+
+                if let Some((_, _, err)) = best_error_in_area {
+                    return Value::Error(err);
                 }
             }
             Value::Empty | Value::Missing => {}
@@ -6222,12 +6256,28 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
+                // Preserve AST-like error precedence within each union area (see fn_sum/xor).
+                let mut current_area_idx: Option<usize> = None;
+                let mut best_error_in_area: Option<(i32, i32, ErrorKind)> = None;
+
                 for area in multirange_unique_areas(r, grid, base) {
-                    match min_range_on_sheet(grid, &area.sheet, area.range) {
+                    if current_area_idx != Some(area.area_idx) {
+                        if let Some((_, _, err)) = best_error_in_area {
+                            return Value::Error(err);
+                        }
+                        current_area_idx = Some(area.area_idx);
+                        best_error_in_area = None;
+                    }
+
+                    match min_range_on_sheet_with_coord(grid, &area.sheet, area.range) {
                         Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
                         Ok(None) => {}
-                        Err(e) => return Value::Error(e),
+                        Err((coord, err)) => record_error_row_major(&mut best_error_in_area, coord, err),
                     }
+                }
+
+                if let Some((_, _, err)) = best_error_in_area {
+                    return Value::Error(err);
                 }
             }
             Value::Empty | Value::Missing => out = Some(out.map_or(0.0, |prev| prev.min(0.0))),
@@ -6348,12 +6398,28 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Err(e) => return Value::Error(e),
             },
             Value::MultiRange(r) => {
+                // Preserve AST-like error precedence within each union area (see fn_sum/xor).
+                let mut current_area_idx: Option<usize> = None;
+                let mut best_error_in_area: Option<(i32, i32, ErrorKind)> = None;
+
                 for area in multirange_unique_areas(r, grid, base) {
-                    match max_range_on_sheet(grid, &area.sheet, area.range) {
+                    if current_area_idx != Some(area.area_idx) {
+                        if let Some((_, _, err)) = best_error_in_area {
+                            return Value::Error(err);
+                        }
+                        current_area_idx = Some(area.area_idx);
+                        best_error_in_area = None;
+                    }
+
+                    match max_range_on_sheet_with_coord(grid, &area.sheet, area.range) {
                         Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.max(m))),
                         Ok(None) => {}
-                        Err(e) => return Value::Error(e),
+                        Err((coord, err)) => record_error_row_major(&mut best_error_in_area, coord, err),
                     }
+                }
+
+                if let Some((_, _, err)) = best_error_in_area {
+                    return Value::Error(err);
                 }
             }
             Value::Empty | Value::Missing => out = Some(out.map_or(0.0, |prev| prev.max(0.0))),
@@ -11029,14 +11095,19 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
     }
     Ok(sum)
 }
-
-fn sum_range_on_sheet(
+fn sum_range_on_sheet_with_coord(
     grid: &dyn Grid,
     sheet: &SheetId,
     range: ResolvedRange,
-) -> Result<f64, ErrorKind> {
+) -> Result<f64, (CellCoord, ErrorKind)> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
-        return Err(ErrorKind::Ref);
+        return Err((
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            ErrorKind::Ref,
+        ));
     }
 
     if let SheetId::Local(sheet_id) = sheet {
@@ -11077,8 +11148,8 @@ fn sum_range_on_sheet(
                     | Value::Lambda(_) => {}
                 }
             }
-            if let Some((_, _, err)) = best_error {
-                return Err(err);
+            if let Some((row, col, err)) = best_error {
+                return Err((CellCoord { row, col }, err));
             }
             return Ok(sum);
         }
@@ -11087,8 +11158,7 @@ fn sum_range_on_sheet(
     let mut sum = 0.0;
     let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
-        {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
             sum += simd::sum_ignore_nan_f64(slice);
         } else {
             scan_cols.push(col);
@@ -11100,7 +11170,7 @@ fn sum_range_on_sheet(
         for &col in &scan_cols {
             match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
                 Value::Number(v) => sum += v,
-                Value::Error(e) => return Err(e),
+                Value::Error(e) => return Err((CellCoord { row, col }, e)),
                 // SUM ignores text/logicals/blanks in references.
                 Value::Bool(_)
                 | Value::Text(_)
@@ -11209,13 +11279,19 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
     Ok((sum, count))
 }
 
-fn sum_count_range_on_sheet(
+fn sum_count_range_on_sheet_with_coord(
     grid: &dyn Grid,
     sheet: &SheetId,
     range: ResolvedRange,
-) -> Result<(f64, usize), ErrorKind> {
+) -> Result<(f64, usize), (CellCoord, ErrorKind)> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
-        return Err(ErrorKind::Ref);
+        return Err((
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            ErrorKind::Ref,
+        ));
     }
 
     if let SheetId::Local(sheet_id) = sheet {
@@ -11260,8 +11336,8 @@ fn sum_count_range_on_sheet(
                     | Value::Lambda(_) => {}
                 }
             }
-            if let Some((_, _, err)) = best_error {
-                return Err(err);
+            if let Some((row, col, err)) = best_error {
+                return Err((CellCoord { row, col }, err));
             }
             return Ok((sum, count));
         }
@@ -11271,8 +11347,7 @@ fn sum_count_range_on_sheet(
     let mut count = 0usize;
     let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
-        {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
             let (s, c) = simd::sum_count_ignore_nan_f64(slice);
             sum += s;
             count += c;
@@ -11289,7 +11364,7 @@ fn sum_count_range_on_sheet(
                     sum += v;
                     count += 1;
                 }
-                Value::Error(e) => return Err(e),
+                Value::Error(e) => return Err((CellCoord { row, col }, e)),
                 // Ignore non-numeric values in references.
                 Value::Bool(_)
                 | Value::Text(_)
@@ -11730,13 +11805,19 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     Ok(out)
 }
 
-fn min_range_on_sheet(
+fn min_range_on_sheet_with_coord(
     grid: &dyn Grid,
     sheet: &SheetId,
     range: ResolvedRange,
-) -> Result<Option<f64>, ErrorKind> {
+) -> Result<Option<f64>, (CellCoord, ErrorKind)> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
-        return Err(ErrorKind::Ref);
+        return Err((
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            ErrorKind::Ref,
+        ));
     }
 
     if let SheetId::Local(sheet_id) = sheet {
@@ -11776,8 +11857,8 @@ fn min_range_on_sheet(
                     | Value::Lambda(_) => {}
                 }
             }
-            if let Some((_, _, err)) = best_error {
-                return Err(err);
+            if let Some((row, col, err)) = best_error {
+                return Err((CellCoord { row, col }, err));
             }
             return Ok(out);
         }
@@ -11786,8 +11867,7 @@ fn min_range_on_sheet(
     let mut out: Option<f64> = None;
     let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
-        {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
             if let Some(m) = simd::min_ignore_nan_f64(slice) {
                 out = Some(out.map_or(m, |prev| prev.min(m)));
             }
@@ -11801,7 +11881,7 @@ fn min_range_on_sheet(
         for &col in &scan_cols {
             match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
                 Value::Number(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
-                Value::Error(e) => return Err(e),
+                Value::Error(e) => return Err((CellCoord { row, col }, e)),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
@@ -11899,13 +11979,19 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     Ok(out)
 }
 
-fn max_range_on_sheet(
+fn max_range_on_sheet_with_coord(
     grid: &dyn Grid,
     sheet: &SheetId,
     range: ResolvedRange,
-) -> Result<Option<f64>, ErrorKind> {
+) -> Result<Option<f64>, (CellCoord, ErrorKind)> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
-        return Err(ErrorKind::Ref);
+        return Err((
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            ErrorKind::Ref,
+        ));
     }
 
     if let SheetId::Local(sheet_id) = sheet {
@@ -11945,8 +12031,8 @@ fn max_range_on_sheet(
                     | Value::Lambda(_) => {}
                 }
             }
-            if let Some((_, _, err)) = best_error {
-                return Err(err);
+            if let Some((row, col, err)) = best_error {
+                return Err((CellCoord { row, col }, err));
             }
             return Ok(out);
         }
@@ -11955,8 +12041,7 @@ fn max_range_on_sheet(
     let mut out: Option<f64> = None;
     let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
-        {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
             if let Some(m) = simd::max_ignore_nan_f64(slice) {
                 out = Some(out.map_or(m, |prev| prev.max(m)));
             }
@@ -11970,7 +12055,7 @@ fn max_range_on_sheet(
         for &col in &scan_cols {
             match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
                 Value::Number(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
-                Value::Error(e) => return Err(e),
+                Value::Error(e) => return Err((CellCoord { row, col }, e)),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
