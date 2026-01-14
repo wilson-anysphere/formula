@@ -5345,7 +5345,6 @@ export class SpreadsheetApp {
     // Hit test indices cache sheet-space bounds too; clear so hover/interaction logic stays aligned.
     this.drawingHitTestIndex = null;
     this.drawingHitTestIndexObjects = null;
-    this.drawingsInteraction?.invalidateHitTestIndex();
     this.drawingInteractionController?.invalidateHitTestIndex();
   }
 
@@ -8532,7 +8531,6 @@ export class SpreadsheetApp {
     // but depends on live CanvasGridRenderer axis sizes.
     this.drawingHitTestIndex = null;
     this.drawingHitTestIndexObjects = null;
-    this.drawingsInteraction?.invalidateHitTestIndex();
     this.drawingInteractionController?.invalidateHitTestIndex();
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing

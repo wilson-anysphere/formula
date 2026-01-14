@@ -168,7 +168,6 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect((app as any).selectedDrawingId).toBeNull();
       expect(((app as any).drawingOverlay as any).selectedId).toBe(null);
-      expect(((app as any).drawingsInteraction as any).selectedId).toBe(null);
       expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
       expect(app.getActiveCell()).toEqual(activeBefore);
 
@@ -246,7 +245,6 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect((app as any).selectedDrawingId).toBeNull();
-      expect(((app as any).drawingsInteraction as any).selectedId).toBe(null);
       expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
       expect(app.getActiveCell()).toEqual(activeBefore);
 
