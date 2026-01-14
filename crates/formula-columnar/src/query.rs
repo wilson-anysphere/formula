@@ -386,6 +386,11 @@ fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Re
     let rhs_is_zero = rhs == 0.0;
     let rhs_is_nan = rhs.is_nan();
 
+    if rhs_is_nan && matches!(op, CmpOp::Lt | CmpOp::Lte | CmpOp::Gt | CmpOp::Gte) {
+        // All comparisons with NaN (other than =/!= which we special-case) are false.
+        return Ok(BitVec::with_len_all_false(rows));
+    }
+
     if let Some(stats) = table.stats(col) {
         let nulls = stats.null_count as usize;
         if nulls == rows {
