@@ -758,6 +758,7 @@ Supported expression forms:
 - Bracket identifiers:
   - measures: `[Total]`
   - column names: `Fact[Amount]` (column part is bracketed)
+  - escape `]` inside bracket identifiers as `]]` (e.g. `Table[Col]]Name]`)
 - Function calls: `NAME(arg1, arg2, ...)` (comma- or semicolon-separated arguments)
 - Unary minus: `-expr`
 - Binary operators:
