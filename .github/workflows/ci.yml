@@ -61,6 +61,12 @@ jobs:
       - name: Run manifest unit tests (fast, dependency-free)
         run: node --test scripts/__tests__/release-manifest.test.mjs
 
+      - name: "Guard: desktop Linux packaging compliance config (LICENSE/NOTICE/MIME)"
+        run: node scripts/ci/check-desktop-compliance-artifacts.mjs
+
+      - name: "Guard: Linux runtime dependency metadata in tauri.conf.json"
+        run: node --test scripts/ci/tauri-linux-runtime-deps.test.js
+
   xlsx-roundtrip:
     name: XLSX round-trip fixtures
     needs: conflict-marker-guard
