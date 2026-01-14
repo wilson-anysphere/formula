@@ -2312,21 +2312,14 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "clipboard.paste": true,
             "clipboard.pasteSpecial": true,
             "clipboard.pasteSpecial.values": true,
-             "clipboard.pasteSpecial.formulas": true,
-             "clipboard.pasteSpecial.formats": true,
-             "clipboard.pasteSpecial.transpose": true,
-             // Structural edits should not be available in read-only mode.
-             "home.cells.insert.insertSheetRows": true,
-             "home.cells.insert.insertSheetColumns": true,
-             "home.cells.delete.deleteSheetRows": true,
-             "home.cells.delete.deleteSheetColumns": true,
-             // Sheet-view mutations (freeze panes) should not be available in read-only mode,
-              // since they would only apply locally and never sync to the shared document.
-              "view.window.freezePanes": true,
-              "view.freezePanes": true,
-            "view.freezeTopRow": true,
-            "view.freezeFirstColumn": true,
-            "view.unfreezePanes": true,
+            "clipboard.pasteSpecial.formulas": true,
+            "clipboard.pasteSpecial.formats": true,
+            "clipboard.pasteSpecial.transpose": true,
+            // Structural edits should not be available in read-only mode.
+            "home.cells.insert.insertSheetRows": true,
+            "home.cells.insert.insertSheetColumns": true,
+            "home.cells.delete.deleteSheetRows": true,
+            "home.cells.delete.deleteSheetColumns": true,
           }
         : null),
       ...(printExportAvailable
@@ -5473,19 +5466,22 @@ if (
     return { area: "cell", row: picked.row - headerRows, col: picked.col - headerCols };
   };
 
-  const applyRowHeight = () =>
-    promptAndApplyAxisSizing(app, "rowHeight", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
-  const applyColWidth = () => promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
+  const applyRowHeight = () => promptAndApplyAxisSizing(app, "rowHeight", { isEditing: () => isSpreadsheetEditing() });
+  const applyColWidth = () => promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() });
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
     const allowEditCommands = !isSpreadsheetEditing();
+    // View-only mutations (row/col sizing) are allowed in read-only collab roles (viewer/commenter),
+    // but must remain local-only (collab binders prevent persisting these into shared Yjs state).
+    const allowViewMutations = allowEditCommands;
+    // Workbook/cell mutations should remain disabled in read-only roles.
     const allowSheetMutations = allowEditCommands && !app.isReadOnly();
     const canComment = app.getCollabSession()?.canComment() ?? true;
 
     let menuItems: ContextMenuItem[] = [];
     if (currentGridArea === "rowHeader") {
       menuItems = [
-        { type: "item", label: "Row Height…", enabled: allowSheetMutations, onSelect: applyRowHeight },
+        { type: "item", label: "Row Height…", enabled: allowViewMutations, onSelect: applyRowHeight },
         {
           type: "item",
           label: "Hide",
@@ -5529,7 +5525,7 @@ if (
       ];
     } else if (currentGridArea === "colHeader") {
       menuItems = [
-        { type: "item", label: "Column Width…", enabled: allowSheetMutations, onSelect: applyColWidth },
+        { type: "item", label: "Column Width…", enabled: allowViewMutations, onSelect: applyColWidth },
         {
           type: "item",
           label: "Hide",
@@ -8518,17 +8514,17 @@ function handleRibbonCommand(commandId: string): void {
         // to fire when the menu is present. Keep this as a fallback.
         return;
       case "home.cells.format.rowHeight":
-        void promptAndApplyAxisSizing(app, "rowHeight", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
+        void promptAndApplyAxisSizing(app, "rowHeight", { isEditing: () => isSpreadsheetEditing() });
         return;
       case "home.cells.format.columnWidth":
-        void promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
+        void promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() });
         return;
       case "home.cells.format.organizeSheets":
         openOrganizeSheets();
         return;
       case "home.number.moreFormats.custom":
         void promptAndApplyCustomNumberFormat({
-          isEditing: () => isSpreadsheetEditing() || app.isReadOnly(),
+          isEditing: () => isSpreadsheetEditing(),
           showInputBox,
           getActiveCellNumberFormat: activeCellNumberFormat,
           applyFormattingToSelection,
