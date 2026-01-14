@@ -321,6 +321,100 @@ pub enum AggregationType {
     VarP,
 }
 
+/// Layout style for pivot table output.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    /// Compact form (Excel default) where nested row fields are shown in a single column.
+    Compact,
+    /// Outline form where each row field is shown in its own column, but items may be indented.
+    Outline,
+    /// Tabular form where each row field gets its own column.
+    #[default]
+    Tabular,
+}
+
+/// Where subtotals should appear for row fields.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    /// Do not display subtotals.
+    #[default]
+    None,
+    /// Display subtotals at the top of each group.
+    Top,
+    /// Display subtotals at the bottom of each group.
+    Bottom,
+}
+
+/// Whether to display grand totals for rows/columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    pub rows: bool,
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        // Match Excel's default: show grand totals for both rows and columns.
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+/// Configuration for a pivot table report filter field (a "page" field in Excel).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// When set, restricts the field to the provided allowed items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+/// Canonical (IPC/persistence-friendly) pivot table configuration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotConfig {
+    #[serde(default)]
+    pub row_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub column_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub value_fields: Vec<ValueField>,
+    #[serde(default)]
+    pub filter_fields: Vec<FilterField>,
+    #[serde(default)]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default)]
+    pub calculated_items: Vec<CalculatedItem>,
+    #[serde(default)]
+    pub layout: Layout,
+    #[serde(default)]
+    pub subtotals: SubtotalPosition,
+    #[serde(default)]
+    pub grand_totals: GrandTotals,
+}
+
+impl Default for PivotConfig {
+    fn default() -> Self {
+        Self {
+            row_fields: Vec::new(),
+            column_fields: Vec::new(),
+            value_fields: Vec::new(),
+            filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
+            layout: Layout::default(),
+            subtotals: SubtotalPosition::default(),
+            grand_totals: GrandTotals::default(),
+        }
+    }
+}
+
 /// Excel-style "Show Values As" transformations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
