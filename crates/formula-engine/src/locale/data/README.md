@@ -83,10 +83,9 @@ Locale-specific error literal spellings are tracked in TSV files in this directo
 These TSVs are **committed artifacts** that are kept in sync with the engine’s canonical error set
 ([`ErrorKind`]) via the generator below.
 
-**Runtime behavior:** today, [`FormulaLocale`] stores a small hand-maintained `error_literal_map` in
-`src/locale/registry.rs` (typically only for non-identity mappings). A Rust test
-(`tests/locale_parsing.rs`) asserts that the runtime map round-trips exactly according to the
-generated `*.errors.tsv` files, so updates to the TSVs must be reflected in the runtime map.
+**Runtime behavior:** [`FormulaLocale`] references an [`ErrorTranslations`] table backed by the
+committed `*.errors.tsv` files (wired up via `include_str!()` in `src/locale/registry.rs`). The
+engine parses these TSVs at runtime to translate between canonical and localized error literals.
 
 Upstream localized spellings (used to (re)generate the committed TSVs) live under:
 
@@ -254,7 +253,7 @@ Treating bracket content as opaque is also important for correctness because it 
      - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
        in `crates/formula-engine/src/locale/registry.rs`.
      - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
-       error translations (`error_literal_map`).
+       error translations (`errors: &<LOCALE>_ERRORS`).
      - Add the locale to `get_locale()` in `registry.rs`.
      - Re-export the new constant from `crates/formula-engine/src/locale/mod.rs` if it should be
        accessible as `locale::<LOCALE>`.
