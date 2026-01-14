@@ -385,6 +385,15 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
       start: { row: 2, col: 0 },
       end: { row: 2, col: 1 },
     });
+    // Bracketed column-range shorthand inside `@[...]` should also resolve.
+    expect(bar?.model?.resolveReferenceText?.("[@[Amount]:[Total Amount]]")).toEqual({
+      start: { row: 2, col: 0 },
+      end: { row: 2, col: 1 },
+    });
+    expect(bar?.model?.resolveReferenceText?.("TableThisRow[@[Amount]:[Total Amount]]")).toEqual({
+      start: { row: 2, col: 0 },
+      end: { row: 2, col: 1 },
+    });
     expect(bar?.model?.resolveReferenceText?.("[@]")).toEqual({ start: { row: 2, col: 0 }, end: { row: 2, col: 1 } });
     expect(bar?.model?.resolveReferenceText?.("TableThisRow[@]")).toEqual({
       start: { row: 2, col: 0 },

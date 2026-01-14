@@ -533,6 +533,20 @@ function createPreviewEvaluator(params: {
       const lower = trimmed.toLowerCase();
       if (!(lower.includes("@") || lower.includes("#this row"))) return null;
 
+      // Bracketed this-row shorthand forms like `[@[Col1]:[Col3]]` are equivalent to
+      // `[[#This Row],[Col1]:[Col3]]`. Rewrite them so we can reuse the existing `#This Row`
+      // multi-column resolver (which delegates column span parsing to the shared table resolver).
+      const firstBracket = trimmed.indexOf("[");
+      if (firstBracket >= 0) {
+        const prefix = trimmed.slice(0, firstBracket);
+        const suffix = trimmed.slice(firstBracket);
+        if (suffix.startsWith("[@[") && suffix.endsWith("]]") && suffix.length > 5) {
+          const columnExpr = suffix.slice(3, -2);
+          const rewritten = `${prefix}[[#This Row],[${columnExpr}]]`;
+          return resolveThisRowStructuredRefRange(rewritten);
+        }
+      }
+
       const unescapeStructuredRefItem = (value: string): string => value.replaceAll("]]", "]");
       const normalizeSelector = (value: string): string => value.trim().replace(/\s+/g, " ").toLowerCase();
       const normalizeSheetName = (value: string): string => normalizeSheetNameToken(value).toLowerCase();

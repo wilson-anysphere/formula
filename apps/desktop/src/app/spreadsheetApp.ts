@@ -22528,6 +22528,30 @@ export class SpreadsheetApp {
     const unescapeStructuredRefItem = (value: string): string => value.replaceAll("]]", "]");
     const normalizeSelector = (value: string): string => value.trim().replace(/\s+/g, " ").toLowerCase();
 
+    // Excel supports bracketed this-row shorthand forms where the column token itself is a
+    // nested expression, e.g.:
+    //   [@[Col1]:[Col3]]
+    //   Table1[@[Col1]:[Col3]]
+    //
+    // Rewrite these to the selector-qualified form so the existing multi-column `#This Row`
+    // resolver can handle them (including contiguity checks).
+    const rewriteBracketedThisRowColumnExpr = (value: string): string | null => {
+      const candidate = String(value ?? "").trim();
+      const firstBracket = candidate.indexOf("[");
+      if (firstBracket < 0) return null;
+      const prefix = candidate.slice(0, firstBracket);
+      const suffix = candidate.slice(firstBracket);
+      if (!suffix.startsWith("[@[") || !suffix.endsWith("]]") || suffix.length <= 5) return null;
+      const columnExpr = suffix.slice(3, -2);
+      return `${prefix}[[#This Row],[${columnExpr}]]`;
+    };
+
+    const bracketedRewrite = rewriteBracketedThisRowColumnExpr(trimmed);
+    if (bracketedRewrite) {
+      // Delegate to the existing `#This Row` resolver (no recursion loop: rewritten text does not contain `[@[`).
+      return this.resolveStructuredRefForFormulaBarHighlights(bracketedRewrite);
+    }
+
     // Resolve the sheet/cell currently associated with formula-bar editing.
     const editTarget = (() => {
       if (this.formulaEditCell) return this.formulaEditCell;
