@@ -323,6 +323,26 @@ test("validate-linux-deb accepts when Debian Package name is overridden for vali
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("validate-linux-deb accepts when extracted .desktop Exec= wraps the binary in quotes", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    desktopExecLine: `Exec=\"/usr/bin/${expectedMainBinary}\" %U`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("validate-linux-deb fails when shared-mime-info is missing from Depends", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
   const binDir = join(tmp, "bin");
