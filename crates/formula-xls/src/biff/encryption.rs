@@ -22,6 +22,10 @@ use crate::ct::ct_eq;
 
 use super::{records, BiffVersion};
 
+// CryptoAPI RC4 key derivation helpers are currently used only for deterministic, in-repo
+// fixture/encryption generation in tests. Production `.xls` CryptoAPI decryption lives in
+// `crates/formula-xls/src/decrypt.rs`.
+#[cfg(test)]
 pub(crate) mod cryptoapi;
 pub(crate) mod rc4;
 pub(crate) mod xor;
