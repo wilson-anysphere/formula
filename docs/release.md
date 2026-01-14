@@ -1350,8 +1350,10 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
    ```bash
    # Dependency metadata (ensure the runtime deps are present)
    # (Pick the package files matching the architecture you're validating: amd64/x86_64 vs arm64/aarch64.)
-   deb="$(ls *.deb | head -n 1)"
-   rpm="$(ls *.rpm | head -n 1)"
+   deb="$(ls *.deb 2>/dev/null | head -n 1 || true)"
+   rpm="$(ls *.rpm 2>/dev/null | head -n 1 || true)"
+   test -n "$deb" || { echo "No .deb file found in the current directory" >&2; exit 1; }
+   test -n "$rpm" || { echo "No .rpm file found in the current directory" >&2; exit 1; }
 
    dpkg -I "$deb"
    rpm -qpR "$rpm"
