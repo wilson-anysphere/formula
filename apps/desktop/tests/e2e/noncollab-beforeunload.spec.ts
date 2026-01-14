@@ -16,9 +16,13 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
 
     let beforeUnloadDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
-      await dialog.accept();
+    page.on("dialog", (dialog) => {
+      void (async () => {
+        if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
+        await dialog.accept();
+      })().catch(() => {
+        // Best-effort: don't surface unhandled rejections from Playwright event handlers.
+      });
     });
 
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -45,9 +49,13 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
 
     let beforeUnloadDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
-      await dialog.accept();
+    page.on("dialog", (dialog) => {
+      void (async () => {
+        if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
+        await dialog.accept();
+      })().catch(() => {
+        // Best-effort: don't surface unhandled rejections from Playwright event handlers.
+      });
     });
 
     await page.reload({ waitUntil: "domcontentloaded" });

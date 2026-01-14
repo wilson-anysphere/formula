@@ -25,9 +25,13 @@ test.describe("collab: beforeunload unsaved-changes prompt", () => {
     await installCollabSessionStub(page);
 
     let beforeUnloadDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
-      await dialog.accept();
+    page.on("dialog", (dialog) => {
+      void (async () => {
+        if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
+        await dialog.accept();
+      })().catch(() => {
+        // Best-effort: don't surface unhandled rejections from Playwright event handlers.
+      });
     });
 
     await page.reload({ waitUntil: "domcontentloaded" });

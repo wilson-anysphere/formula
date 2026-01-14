@@ -236,14 +236,18 @@ test("scripting: forwards ctx.confirm/prompt/alert via RPC", async ({ page }) =>
   await gotoScriptingTestPage(page);
 
   const dialogs: Array<{ type: string; message: string }> = [];
-  page.on("dialog", async (dialog) => {
-    dialogs.push({ type: dialog.type(), message: dialog.message() });
-    if (dialog.type() === "prompt") {
-      await dialog.accept("Alice");
-      return;
-    }
-    // confirm + alert
-    await dialog.accept();
+  page.on("dialog", (dialog) => {
+    void (async () => {
+      dialogs.push({ type: dialog.type(), message: dialog.message() });
+      if (dialog.type() === "prompt") {
+        await dialog.accept("Alice");
+        return;
+      }
+      // confirm + alert
+      await dialog.accept();
+    })().catch(() => {
+      // Best-effort: don't surface unhandled rejections from Playwright event handlers.
+    });
   });
 
   const result = await page.evaluate(async () => {
