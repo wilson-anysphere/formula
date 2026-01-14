@@ -1718,8 +1718,18 @@ fn main() {
   };
 
    let started = false;
+   const onTickError = () => {
+     started = false;
+     if (Date.now() > deadline) return;
+     scheduleTick(50);
+   };
+   const scheduleTick = (ms) =>
+     setTimeout(() => {
+       tick().catch(onTickError);
+     }, Math.max(0, ms));
+ 
    const tick = async () => {
-      if (started) return;
+     if (started) return;
 
     // Some hardened environments (or tests) may define `__TAURI__` with a throwing getter. Treat
     // that as "unavailable" and keep polling rather than aborting the startup benchmark.
@@ -1738,12 +1748,12 @@ fn main() {
         invoke = internalsInvoke;
         invokeOwner = internals;
       }
-    }
-    if (typeof invoke !== "function") {
-      if (Date.now() > deadline) return;
-      setTimeout(tick, 10);
-      return;
-    }
+     }
+     if (typeof invoke !== "function") {
+       if (Date.now() > deadline) return;
+      scheduleTick(10);
+       return;
+     }
 
      started = true;
      const invokeCall = (cmd) => invoke.call(invokeOwner, cmd);
@@ -1802,9 +1812,7 @@ fn main() {
      // `report_startup_tti` is required for the `[startup] ...` log line. If it fails (e.g. due to a
      // transient IPC issue), retry until the deadline so the benchmark harness doesn't hang.
      if (!ttiOk) {
-      started = false;
-      if (Date.now() > deadline) return;
-      setTimeout(tick, 50);
+      onTickError();
       return;
     }
 
@@ -1815,13 +1823,9 @@ fn main() {
         Promise.resolve(invokeCall("quit_app")).catch(() => {});
       } catch {}
     }, 25);
-  };
+   };
  
-   tick().catch(() => {
-     started = false;
-     if (Date.now() > deadline) return;
-     setTimeout(tick, 50);
-   });
+   scheduleTick(0);
  })();
  "#,
                      )
