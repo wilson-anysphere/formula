@@ -2414,6 +2414,22 @@ impl WorkbookState {
         })
     }
 
+    fn set_workbook_file_metadata_internal(
+        &mut self,
+        directory: Option<&str>,
+        filename: Option<&str>,
+    ) -> Result<(), JsValue> {
+        // Prevent automatic recalculation when the workbook calc mode is `Automatic`.
+        //
+        // The WASM worker protocol expects callers to invoke `recalculate()` explicitly so value
+        // change deltas can be surfaced over RPC; if we allow an automatic recalc here, JS would
+        // miss those notifications.
+        self.with_manual_calc_mode(|this| {
+            this.engine.set_workbook_file_metadata(directory, filename);
+            Ok(())
+        })
+    }
+
     fn get_sheet_dimensions_internal(&self, name: &str) -> Result<(u32, u32), JsValue> {
         let sheet = self.require_sheet(name)?;
         self.engine
@@ -5392,16 +5408,8 @@ impl WasmWorkbook {
             )
         };
 
-        // Prevent automatic recalculation when the workbook calc mode is `Automatic`.
-        //
-        // The WASM worker protocol expects callers to invoke `recalculate()` explicitly so value
-        // change deltas can be surfaced over RPC; if we allow an automatic recalc here, JS would
-        // miss those notifications.
-        self.inner.with_manual_calc_mode(|this| {
-            this.engine
-                .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
-            Ok(())
-        })
+        self.inner
+            .set_workbook_file_metadata_internal(directory.as_deref(), filename.as_deref())
     }
 
     /// Set the style id for a cell.
@@ -6367,6 +6375,17 @@ impl WasmWorkbook {
         self.inner
             .recalculate_internal(None)
             .expect("recalculate should succeed")
+    }
+
+    #[doc(hidden)]
+    pub fn debug_set_workbook_file_metadata(
+        &mut self,
+        directory: Option<&str>,
+        filename: Option<&str>,
+    ) {
+        self.inner
+            .set_workbook_file_metadata_internal(directory, filename)
+            .expect("set_workbook_file_metadata should succeed");
     }
 }
 
@@ -7547,6 +7566,56 @@ mod tests {
         assert!((settings.iterative.max_change - 0.123).abs() < 1e-12);
         assert!(!settings.full_precision);
         assert!(settings.full_calc_on_load);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_workbook_file_metadata_does_not_trigger_automatic_recalc() {
+        // Even if callers configure the engine to use automatic calculation mode, the WASM worker
+        // protocol relies on explicit `recalculate()` calls to surface value-change deltas back to
+        // JS. Metadata setters must therefore avoid triggering an implicit recalc (which would
+        // update cell values without reporting them as deltas).
+
+        let mut wb = WasmWorkbook::new();
+        wb.inner.engine.set_calc_settings(CalcSettings {
+            calculation_mode: CalculationMode::Automatic,
+            ..CalcSettings::default()
+        });
+
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A1", json!("=CELL(\"filename\")"))
+            .unwrap();
+        wb.debug_recalculate();
+        assert_eq!(
+            wb.debug_get_engine_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Text(String::new())
+        );
+
+        wb.debug_set_workbook_file_metadata(Some("/tmp/"), Some("book.xlsx"));
+
+        // The setter should not have triggered an automatic recalc.
+        assert_eq!(
+            wb.inner.engine.calc_settings().calculation_mode,
+            CalculationMode::Automatic
+        );
+        assert_eq!(
+            wb.debug_get_engine_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Text(String::new())
+        );
+
+        let changes = wb.debug_recalculate();
+        assert!(
+            changes.iter().any(|change| {
+                change.sheet == DEFAULT_SHEET
+                    && change.address == "A1"
+                    && change.value == json!("/tmp/[book.xlsx]Sheet1")
+            }),
+            "expected a value-change delta for A1 after recalc, got {changes:?}"
+        );
+        assert_eq!(
+            wb.debug_get_engine_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Text("/tmp/[book.xlsx]Sheet1".to_string())
+        );
     }
 
     #[test]
