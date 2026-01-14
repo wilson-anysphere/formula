@@ -5260,3 +5260,25 @@ fn virtual_blank_row_exists(
 
     Ok(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{DataModel, Table};
+
+    #[test]
+    fn resolve_table_rows_multi_column_filters() {
+        let mut model = DataModel::new();
+        let mut t = Table::new("T", vec!["A", "B"]);
+        t.push_row(vec![1.into(), Value::from("x")]).unwrap();
+        t.push_row(vec![1.into(), Value::from("y")]).unwrap();
+        t.push_row(vec![2.into(), Value::from("x")]).unwrap();
+        model.add_table(t).unwrap();
+
+        let filter = FilterContext::empty()
+            .with_column_equals("T", "A", 1.into())
+            .with_column_equals("T", "B", Value::from("x"));
+        let rows = resolve_table_rows(&model, &filter, "T").unwrap();
+        assert_eq!(rows, vec![0]);
+    }
+}
