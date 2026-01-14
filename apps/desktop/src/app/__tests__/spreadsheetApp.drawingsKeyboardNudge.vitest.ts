@@ -206,6 +206,52 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
     }
   });
 
+  it("nudges twoCell anchors by shifting both points", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument() as any;
+
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: 1,
+          kind: { type: "unknown", label: "twoCell" },
+          anchor: {
+            type: "twoCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+            to: { cell: { row: 1, col: 1 }, offset: { xEmu: 0, yEmu: 0 } },
+          },
+          zOrder: 0,
+        },
+      ]);
+
+      app.selectDrawing(1);
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+      const updated = doc.getSheetDrawings(sheetId)[0];
+      expect(updated.anchor.type).toBe("twoCell");
+      expect(updated.anchor.from.offset.xEmu).toBe(pxToEmu(1));
+      expect(updated.anchor.to.offset.xEmu).toBe(pxToEmu(1));
+      expect(updated.anchor.from.offset.yEmu).toBe(0);
+      expect(updated.anchor.to.offset.yEmu).toBe(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("accounts for zoom when nudging absolute anchors (shared grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
@@ -247,6 +293,47 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       expect(app.getSelectedDrawingId()).toBeNull();
       expect(((app as any).drawingInteractionController as any).selectedId).toBe(null);
       expect(app.getActiveCell()).toEqual(activeBefore);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("uses 10px screen steps with Shift when nudging (shared grid zoom)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      app.setZoom(2);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument() as any;
+
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: 1,
+          kind: { type: "unknown", label: "picture" },
+          anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(10), cy: pxToEmu(10) } },
+          zOrder: 0,
+        },
+      ]);
+
+      app.selectDrawing(1);
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true }));
+      const updated = doc.getSheetDrawings(sheetId)[0];
+      expect(updated.anchor.type).toBe("absolute");
+      // 10px screen movement at 2x zoom => 5px in sheet space.
+      expect(updated.anchor.pos.xEmu).toBeCloseTo(pxToEmu(5));
 
       app.destroy();
       root.remove();
