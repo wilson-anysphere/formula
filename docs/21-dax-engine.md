@@ -622,11 +622,23 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    - The second argument must be a target column reference
 
 9. Table expressions (row filters): any supported **physical** table expression (including a bare
-    `TableName`)  
-    The table expression is evaluated and must produce a **physical** table result (`TableResult::Physical`,
-    `TableResult::PhysicalAll`, or `TableResult::PhysicalMask`) — i.e. a base table plus a set of visible
-    rows. Its resulting row set becomes an explicit `row_filter` for that table (intersected with any
-    existing row filter).
+     `TableName`)  
+     The table expression is evaluated and must produce a **physical** table result (`TableResult::Physical`,
+     `TableResult::PhysicalAll`, or `TableResult::PhysicalMask`) — i.e. a base table plus a set of visible
+     rows. How it is interpreted depends on whether the table result is **projected**:
+ 
+     - If `visible_cols == None` (a full-row physical table), its resulting row set becomes an explicit
+       `row_filter` for that table (intersected with any existing row filter).
+     - If `visible_cols == Some([col_idx])` (a **projected physical table** like `VALUES(Table[Col])`),
+       `CALCULATE` treats it as a **column filter** on that one visible column, applying the set of
+       visible values (rather than filtering by representative physical rows).
+ 
+     This preserves expected DAX patterns like:
+ 
+     - `CALCULATE([Measure], FILTER(VALUES(T[Col]), ...))`
+ 
+     Current limitation: projected physical table filters support **only one visible column** (otherwise
+     the engine errors).
 
    Examples:
    - `FILTER(Fact, Fact[Amount] > 0)`
