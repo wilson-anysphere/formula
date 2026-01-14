@@ -169,6 +169,10 @@ GITHUB_TOKEN=... node scripts/check-tag-ci-status.mjs --repo owner/repo --sha <c
 # - apps/desktop/src-tauri/Cargo.toml [package].version
 node scripts/check-desktop-version.mjs vX.Y.Z
 
+# Ensures packaging config includes compliance artifacts (LICENSE/NOTICE) in the
+# distributed bundles (bundle.resources + Linux doc install paths).
+node scripts/ci/check-desktop-compliance-artifacts.mjs
+
 # Ensures plugins.updater.pubkey/endpoints are not placeholders and the pubkey is a valid minisign key
 # when the updater is active.
 node scripts/check-updater-config.mjs
