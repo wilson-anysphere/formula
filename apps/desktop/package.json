@@ -14,6 +14,7 @@
     "preview": "vite preview --port 4174 --strictPort",
     "report:bundle-stats": "node scripts/bundle-stats-report.mjs",
     "check:coi": "node scripts/check-cross-origin-isolation.mjs",
+    "check:tauri-permissions": "node ../../scripts/check-tauri-permissions.mjs",
     "check:clipboard": "node scripts/check-clipboard.mjs",
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
     "report:dist-assets": "node ../../scripts/desktop_dist_asset_report.mjs",
