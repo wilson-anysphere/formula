@@ -256,3 +256,46 @@ fn decode_ptgarray_inside_memfunc_with_ptgtbl_advances_rgcb_cursor() {
     let text = decode_rgce_with_rgcb(&rgce, &rgcb).expect("decode");
     assert_eq!(text, "{222}");
 }
+
+#[test]
+fn decode_ptgarray_inside_memfunc_with_prefixed_ptgextend_list_advances_rgcb_cursor() {
+    // Like `decode_ptgarray_inside_memfunc_advances_rgcb_cursor`, but with a prefixed structured
+    // reference token (`PtgExtend` + `etpg=0x19`, a.k.a. `PtgList`) before the nested `PtgArray`.
+    //
+    // Some producers appear to insert 2/4 bytes of padding before the canonical 12-byte PtgList
+    // payload. Ensure the mem-subexpression scanner can skip the full payload (prefix + core) so
+    // it still finds and consumes the nested array constant.
+    let ptg_array = [0x20u8, 0, 0, 0, 0, 0, 0, 0]; // PtgArray + 7 unused bytes
+
+    // PtgExtend (structured ref): [ptg=0x18][etpg=0x19][payload...]
+    // Include a 2-byte prefix before the 12-byte core payload.
+    let mut mem_subexpr = vec![0x18, 0x19];
+    mem_subexpr.extend_from_slice(&[0u8; 2]); // prefix padding
+    mem_subexpr.extend_from_slice(&[
+        0x01, 0x00, 0x00, 0x00, // table_id = 1
+        0x00, 0x00, 0x10, 0x00, // col_first_raw = flags<<16 (flags=0x0010, col_first=0)
+        0x00, 0x00, 0x00, 0x00, // col_last_raw = 0
+    ]);
+    mem_subexpr.extend_from_slice(&ptg_array);
+
+    // rgce = [PtgMemFunc][cce][subexpr...][PtgArray (visible)]
+    let mut rgce = vec![0x29];
+    rgce.extend_from_slice(&u16::try_from(mem_subexpr.len()).unwrap().to_le_bytes());
+    rgce.extend_from_slice(&mem_subexpr);
+    rgce.extend_from_slice(&ptg_array);
+
+    let mut rgcb = Vec::new();
+    // {111}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&111f64.to_le_bytes());
+    // {222}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&222f64.to_le_bytes());
+
+    let text = decode_rgce_with_rgcb(&rgce, &rgcb).expect("decode");
+    assert_eq!(text, "{222}");
+}

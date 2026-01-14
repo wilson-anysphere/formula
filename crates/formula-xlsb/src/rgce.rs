@@ -1228,7 +1228,13 @@ fn decode_rgce_impl(
                 // Advance the `rgcb` cursor through any array-constant blocks referenced by the
                 // nested stream so later `PtgArray` tokens stay aligned.
                 if !rgcb.is_empty() {
-                    consume_rgcb_arrays_in_subexpression(&rgce[i..i + cce], rgcb, &mut rgcb_pos, i)?;
+                    consume_rgcb_arrays_in_subexpression(
+                        &rgce[i..i + cce],
+                        rgcb,
+                        &mut rgcb_pos,
+                        i,
+                        ctx,
+                    )?;
                 }
                 i += cce;
             }
@@ -1930,6 +1936,7 @@ fn consume_rgcb_arrays_in_subexpression(
     rgcb: &[u8],
     rgcb_pos: &mut usize,
     rgce_base_offset: usize,
+    ctx: Option<&WorkbookContext>,
 ) -> Result<(), DecodeError> {
     fn has_remaining(buf: &[u8], i: usize, needed: usize) -> bool {
         buf.len().saturating_sub(i) >= needed
@@ -2020,17 +2027,36 @@ fn consume_rgcb_arrays_in_subexpression(
                 let etpg = rgce[i];
                 i += 1;
                 match etpg {
-                    // etpg=0x19 is the structured reference payload (PtgList): fixed 12 bytes.
+                    // etpg=0x19 is the structured reference payload (PtgList).
+                    //
+                    // MS-XLSB documents a fixed 12-byte payload, but some producers emit extra
+                    // prefix bytes (e.g. 2/4 bytes). Use the same best-effort alignment heuristic
+                    // as the main decoder so we can keep scanning aligned and still find later
+                    // nested `PtgArray` tokens.
                     0x19 => {
-                        if !has_remaining(rgce, i, 12) {
+                        let default_ctx = WorkbookContext::default();
+                        let ctx_for_scoring = Some(ctx.unwrap_or(&default_ctx));
+
+                        let remaining = rgce.len().saturating_sub(i);
+                        let Some(payload_len) =
+                            ptg_list_payload_len_best_effort(&rgce[i..], ctx_for_scoring)
+                        else {
                             return Err(DecodeError::UnexpectedEof {
                                 offset: ptg_offset,
                                 ptg,
                                 needed: 12,
-                                remaining: rgce.len().saturating_sub(i),
+                                remaining,
+                            });
+                        };
+                        if remaining < payload_len {
+                            return Err(DecodeError::UnexpectedEof {
+                                offset: ptg_offset,
+                                ptg,
+                                needed: payload_len,
+                                remaining,
                             });
                         }
-                        i += 12;
+                        i += payload_len;
                     }
                     // Unknown extend subtype: stop scanning to avoid desync/false positives.
                     _ => break,
@@ -2204,6 +2230,7 @@ fn consume_rgcb_arrays_in_subexpression(
                     rgcb,
                     rgcb_pos,
                     rgce_base_offset.saturating_add(i),
+                    ctx,
                 )?;
                 i += cce;
             }
