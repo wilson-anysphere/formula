@@ -74,6 +74,10 @@ const WORKSHEET_CONTENT_TYPE: &str =
 const DRAWING_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
 const DRAWING_CONTENT_TYPE: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
+const CHART_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";
+const CHART_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 
 #[derive(Debug)]
 struct SheetStructurePlan {
@@ -742,11 +746,15 @@ fn build_parts(
         let orig = parts.get(&sheet_meta.path).map(|b| b.as_slice());
         let is_new_sheet = orig.is_none();
         let rels_part = rels_for_part(&sheet_meta.path);
-        let orig_rels = parts.get(&rels_part).map(|b| b.as_slice());
-        let rels_xml = orig_rels
-            .map(std::str::from_utf8)
-            .transpose()
-            .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+        let rels_xml: Option<String> = match parts.get(&rels_part) {
+            Some(bytes) => Some(
+                std::str::from_utf8(bytes).map_err(|e| {
+                    WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })?
+                .to_string(),
+            ),
+            None => None,
+        };
 
         let (
             orig_tab_color,
@@ -780,7 +788,8 @@ fn build_parts(
                     crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
                 })?;
 
-            let orig_hyperlinks = crate::parse_worksheet_hyperlinks(orig_xml, rels_xml)?;
+            let orig_hyperlinks =
+                crate::parse_worksheet_hyperlinks(orig_xml, rels_xml.as_deref())?;
 
             let orig_autofilter = crate::autofilter::parse_worksheet_autofilter(orig_xml).map_err(
                 |err| match err {
@@ -823,8 +832,10 @@ fn build_parts(
         let merges_changed = current_merges != orig_merges;
         let tab_color_changed = sheet.tab_color != orig_tab_color;
 
-        let current_hyperlinks =
-            normalize_hyperlinks(&assign_hyperlink_rel_ids(&sheet.hyperlinks, rels_xml));
+        let current_hyperlinks = normalize_hyperlinks(&assign_hyperlink_rel_ids(
+            &sheet.hyperlinks,
+            rels_xml.as_deref(),
+        ));
         let orig_hyperlinks = normalize_hyperlinks(&orig_hyperlinks);
         let hyperlinks_changed = current_hyperlinks != orig_hyperlinks;
 
@@ -885,8 +896,8 @@ fn build_parts(
         // This is important for chart-heavy fixtures where a no-op round-trip is expected to
         // preserve `xl/drawings/*` and `.rels` parts byte-for-byte.
         let existing_drawing_target = if has_drawings {
-            match orig_rels {
-                Some(rels_bytes) => relationship_target_by_type(rels_bytes, DRAWING_REL_TYPE)?,
+            match rels_xml.as_deref() {
+                Some(xml) => relationship_target_by_type(xml.as_bytes(), DRAWING_REL_TYPE)?,
                 None => None,
             }
         } else {
@@ -907,7 +918,13 @@ fn build_parts(
             });
         let drawings_need_emit =
             has_drawings && (!has_existing_drawing_part || missing_drawing_media);
-        if orig.is_some()
+
+        if has_drawings && !drawings_need_emit {
+            if let Some(drawing_part_path) = existing_drawing_part_path.as_deref() {
+                ensure_drawing_part_content_types(&mut parts, drawing_part_path)?;
+            }
+        }
+        if !is_new_sheet
             && !tab_color_changed
             && !merges_changed
             && !hyperlinks_changed
@@ -947,7 +964,7 @@ fn build_parts(
             sheet_xml = crate::update_worksheet_xml(&sheet_xml, &current_hyperlinks)?;
 
             let updated_rels =
-                crate::update_worksheet_relationships(rels_xml, &current_hyperlinks)?;
+                crate::update_worksheet_relationships(rels_xml.as_deref(), &current_hyperlinks)?;
             match updated_rels {
                 Some(xml) => {
                     parts.insert(rels_part.clone(), xml.into_bytes());
@@ -976,9 +993,17 @@ fn build_parts(
             let (drawing_rel_id, drawing_part_path) = match existing_sheet_drawing_rel {
                 Some((rid, target)) => (Some(rid), resolve_target(&sheet_meta.path, &target)),
                 None => {
-                    let n = next_drawing_part;
-                    next_drawing_part += 1;
-                    (None, format!("xl/drawings/drawing{n}.xml"))
+                    // If the expected per-sheet drawing part already exists (e.g. a workbook with
+                    // a missing/corrupt worksheet `.rels`), reuse it instead of synthesizing a new
+                    // `drawing{n}.xml` part and leaving the existing part orphaned.
+                    let fallback = format!("xl/drawings/drawing{}.xml", sheet_index.saturating_add(1));
+                    if parts.contains_key(&fallback) {
+                        (None, fallback)
+                    } else {
+                        let n = next_drawing_part;
+                        next_drawing_part += 1;
+                        (None, format!("xl/drawings/drawing{n}.xml"))
+                    }
                 }
             };
 
@@ -1033,25 +1058,7 @@ fn build_parts(
                 existing_drawing_rels_xml,
             )?;
             drawing_part.write_into_parts(&mut parts, &doc.workbook)?;
-
-            ensure_content_types_override(
-                &mut parts,
-                &format!("/{drawing_part_path}"),
-                DRAWING_CONTENT_TYPE,
-            )?;
-            for object in &sheet.drawings {
-                let DrawingObjectKind::Image { image_id } = &object.kind else {
-                    continue;
-                };
-                let Some((_, ext)) = image_id.as_str().rsplit_once('.') else {
-                    continue;
-                };
-                ensure_content_types_default(
-                    &mut parts,
-                    ext,
-                    crate::drawings::content_type_for_extension(ext),
-                )?;
-            }
+            ensure_drawing_part_content_types(&mut parts, &drawing_part_path)?;
         } else if has_drawings && existing_drawing_target.is_some() {
             // We have an existing drawing relationship/part in the source package. Avoid touching
             // any `.rels` / `xl/drawings/*` parts unless we need to add new media. Still ensure the
@@ -6326,6 +6333,111 @@ fn ensure_content_types_default(
 
     if inserted {
         parts.insert("[Content_Types].xml".to_string(), writer.into_inner());
+    }
+
+    Ok(())
+}
+
+fn relationship_targets_by_type(rels_xml: &[u8], rel_type: &str) -> Result<Vec<String>, WriteError> {
+    let mut reader = Reader::from_reader(rels_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                let mut type_ = None;
+                let mut target = None;
+                let mut target_mode = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let key = local_name(attr.key.as_ref());
+                    if key.eq_ignore_ascii_case(b"Type") {
+                        type_ = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"Target") {
+                        target = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"TargetMode") {
+                        target_mode = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+
+                if target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                {
+                    continue;
+                }
+
+                if type_.as_deref() == Some(rel_type) {
+                    if let Some(target) = target {
+                        out.push(target);
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+fn ensure_drawing_part_content_types(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    drawing_part_path: &str,
+) -> Result<(), WriteError> {
+    if !parts.contains_key(drawing_part_path) {
+        return Ok(());
+    }
+
+    ensure_content_types_override(
+        parts,
+        &format!("/{drawing_part_path}"),
+        DRAWING_CONTENT_TYPE,
+    )?;
+
+    let drawing_rels_path = crate::drawings::DrawingPart::rels_path_for(drawing_part_path);
+    let Some(drawing_rels_bytes) = parts.get(&drawing_rels_path) else {
+        return Ok(());
+    };
+
+    let image_targets =
+        relationship_targets_by_type(drawing_rels_bytes, crate::drawings::REL_TYPE_IMAGE)?;
+    let chart_targets = relationship_targets_by_type(drawing_rels_bytes, CHART_REL_TYPE)?;
+
+    // Ensure image media extensions referenced from this drawing have Default content types.
+    for target in image_targets {
+        let media_part = resolve_target(drawing_part_path, &target);
+        if !media_part.starts_with("xl/media/") {
+            continue;
+        }
+        let Some((_, ext)) = media_part.rsplit_once('.') else {
+            continue;
+        };
+        let ext = ext.trim().to_ascii_lowercase();
+        if ext.is_empty() {
+            continue;
+        }
+        let content_type = crate::drawings::content_type_for_extension(&ext);
+        if content_type == "application/octet-stream" {
+            continue;
+        }
+        ensure_content_types_default(parts, &ext, content_type)?;
+    }
+
+    // Ensure chart parts referenced from this drawing have Overrides.
+    for target in chart_targets {
+        let chart_part = resolve_target(drawing_part_path, &target);
+        if !parts.contains_key(&chart_part) {
+            continue;
+        }
+        ensure_content_types_override(
+            parts,
+            &format!("/{chart_part}"),
+            CHART_CONTENT_TYPE,
+        )?;
     }
 
     Ok(())
