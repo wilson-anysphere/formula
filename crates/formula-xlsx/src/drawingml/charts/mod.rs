@@ -139,16 +139,16 @@ pub fn extract_chart_object_refs(
             // subtree, so prefer the canonical `nvGraphicFramePr/cNvPr` path and fall back to any
             // descendant match for compatibility.
             let (drawing_object_id, drawing_object_name) = frame
-                .children()
+                // Prefer the canonical non-visual properties container.
+                //
+                // Some producers wrap `nvGraphicFramePr` in `mc:AlternateContent`, so search the
+                // full subtree rather than only direct children.
+                .descendants()
                 .find(|n| n.is_element() && n.tag_name().name() == "nvGraphicFramePr")
-                // `cNvPr` can occasionally be wrapped in `mc:AlternateContent`, so search descendants
-                // of the canonical container before falling back to a whole-subtree search.
+                // `cNvPr` can also be wrapped in `mc:AlternateContent`, so search descendants of
+                // the canonical container before falling back to a whole-subtree search.
                 .and_then(|nv| nv.descendants().find(|n| n.is_element() && n.tag_name().name() == "cNvPr"))
-                .or_else(|| {
-                    frame
-                        .descendants()
-                        .find(|n| n.is_element() && n.tag_name().name() == "cNvPr")
-                })
+                .or_else(|| frame.descendants().find(|n| n.is_element() && n.tag_name().name() == "cNvPr"))
                 .map(|c_nv_pr| {
                     let id = c_nv_pr
                         .attribute("id")
@@ -208,16 +208,21 @@ mod tests {
             <c:chart r:id="rId42"/>
           </a:graphicData>
         </a:graphic>
-        <xdr:nvGraphicFramePr>
-          <!-- Some producers wrap the canonical `cNvPr` in markup-compat blocks; ensure we still
-               prefer it over non-canonical matches elsewhere in the subtree. -->
-          <mc:AlternateContent>
-            <mc:Choice Requires="xdr">
-              <xdr:cNvPr id="7" name="Chart 7"/>
-            </mc:Choice>
-          </mc:AlternateContent>
-          <xdr:cNvGraphicFramePr/>
-        </xdr:nvGraphicFramePr>
+        <!-- Some producers wrap `nvGraphicFramePr` (and its children) in markup-compat blocks;
+             ensure we still prefer the canonical cNvPr over non-canonical matches elsewhere in
+             the subtree. -->
+        <mc:AlternateContent>
+          <mc:Choice Requires="xdr">
+            <xdr:nvGraphicFramePr>
+              <mc:AlternateContent>
+                <mc:Choice Requires="xdr">
+                  <xdr:cNvPr id="7" name="Chart 7"/>
+                </mc:Choice>
+              </mc:AlternateContent>
+              <xdr:cNvGraphicFramePr/>
+            </xdr:nvGraphicFramePr>
+          </mc:Choice>
+        </mc:AlternateContent>
         <xdr:xfrm/>
       </xdr:graphicFrame>
     </xdr:grpSp>
