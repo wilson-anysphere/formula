@@ -44,6 +44,12 @@ This `view` object contains (at minimum) the same fields as the desktop
 - `frozenCols: number`
 - `colWidths?: Record<string, number>` (sparse overrides keyed by 0-based col index)
 - `rowHeights?: Record<string, number>` (sparse overrides keyed by 0-based row index)
+- `mergedRanges?: Array<{ startRow, endRow, startCol, endCol }>` (Excel-style merged cells; inclusive end coords)
+
+In addition, desktop clients may store other sheet-level layout metadata under
+`sheets[].view` when it is intended to be **shared workbook state**, e.g.:
+
+- `drawings?: any[]` (pictures/shapes/charts placement metadata; stable-sorted by `zOrder`)
 
 **These fields are globally shared across collaborators.**
 
