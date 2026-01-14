@@ -119,11 +119,12 @@ run_gitleaks() {
 
   local log_file="${REPORT_DIR}/gitleaks.log"
   local report_file="${REPORT_DIR}/gitleaks.json"
+  local log_opts="${FORMULA_GITLEAKS_LOG_OPTS:---max-count=1}"
 
   set +e
   gitleaks detect \
     --source . \
-    --no-git \
+    --log-opts "${log_opts}" \
     --redact \
     --report-format json \
     --report-path "$report_file" \

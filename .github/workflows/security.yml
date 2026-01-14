@@ -38,8 +38,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          # Secret scanning is configured to scan the working tree (not git history),
-          # but we still fetch full history to support future extensions.
+          # Secret scanning uses gitleaks in git mode (bounded log opts) to avoid slow full-tree
+          # scans once build output directories exist, but we still fetch full history to support
+          # future extensions.
           fetch-depth: 0
 
       - name: Setup Node

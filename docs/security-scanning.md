@@ -42,7 +42,12 @@ The security workflow will enforce these expectations once the monorepo includes
 ### 3) Secret scanning
 
 - Tool: `gitleaks`
-- Scope: scans the working tree (files in the PR), and fails if any secrets are detected.
+- Scope: scans the *git commit diff* for the checked out HEAD commit (PR merge commit or branch tip),
+  and fails if any secrets are detected.
+  - Rationale: scanning the full working tree (`--no-git`) can be very slow once build output
+    directories like `target/` or `node_modules/` exist.
+  - Override: set `FORMULA_GITLEAKS_LOG_OPTS` in CI/local runs to widen the scan range (passed through
+    to `git log`, e.g. `--max-count=50` or `origin/main..HEAD`).
 
 ### 4) Configuration hardening checks
 
