@@ -480,7 +480,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         stackBySheet.set(sheetId, next);
         return next;
       })();
-      if (stack.has(key)) return "#VALUE!";
+      if (stack.has(key)) return "#REF!";
       stack.add(key);
       try {
         const cellState = controller.getCell(sheetId, coord) as any;
