@@ -98,6 +98,17 @@ function looksLikeExcelInCellImageValue(value: unknown): boolean {
   const imageId = obj.imageId ?? obj.image_id;
   if (typeof imageId === "string" && imageId.trim().length > 0) return true;
 
+  // Some backends use `id` instead of `imageId` for the direct payload shape; only treat this
+  // as an image when there is at least one additional image-like hint to avoid misclassifying
+  // generic `{ id: "..." }` objects.
+  const directId = obj.id;
+  if (typeof directId === "string" && directId.trim().length > 0) {
+    const hasAltText = formatAltTextOrFallback(obj.altText ?? obj.alt_text ?? obj.alt) !== null;
+    const hasDimensions =
+      (typeof obj.width === "number" && Number.isFinite(obj.width)) || (typeof obj.height === "number" && Number.isFinite(obj.height));
+    if (hasAltText || hasDimensions) return true;
+  }
+
   // Envelope shape: `{ type: "image", value: { imageId: string, altText?: string } }`
   const type = obj.type;
   if (typeof type === "string" && type.toLowerCase() === "image") {

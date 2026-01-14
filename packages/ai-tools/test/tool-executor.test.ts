@@ -546,10 +546,18 @@ describe("ToolExecutor", () => {
     workbook.setCell(parseA1Cell("Sheet1!A6"), {
       value: { type: "image", value: { id: "img_6", altText: "Alt (id)" } } as any,
     });
+    workbook.setCell(parseA1Cell("Sheet1!A7"), {
+      // Some adapters may use `id` for the direct payload shape.
+      value: { id: "img_7", altText: "Alt (direct id)" } as any,
+    });
+    workbook.setCell(parseA1Cell("Sheet1!A8"), {
+      // Ensure we do not misclassify generic objects with `id` as images.
+      value: { id: "not-image", foo: "bar" } as any,
+    });
 
     const result = await executor.execute({
       name: "read_range",
-      parameters: { range: "Sheet1!A1:A6" },
+      parameters: { range: "Sheet1!A1:A8" },
     });
 
     expect(result.ok).toBe(true);
@@ -563,6 +571,8 @@ describe("ToolExecutor", () => {
       ["[Image]"],
       ["Alt (snake_case)"],
       ["Alt (id)"],
+      ["Alt (direct id)"],
+      ['{"id":"not-image","foo":"bar"}'],
     ]);
     expect(() => JSON.stringify(result)).not.toThrow();
   });
