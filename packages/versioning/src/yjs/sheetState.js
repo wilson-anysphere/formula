@@ -271,9 +271,10 @@ function parseUnsignedInt(value, start, end) {
  * Parse a versioning-internal `cellKey(row, col)` string: `r{row}c{col}`.
  *
  * @param {string} key
+ * @param {{ row: number, col: number }} [out]
  * @returns {{ row: number, col: number } | null}
  */
-function parseVersioningCellKey(key) {
+function parseVersioningCellKey(key, out) {
   if (typeof key !== "string" || key.length < 3) return null;
   if (key.charCodeAt(0) !== 114) return null; // 'r'
   const cIdx = key.indexOf("c", 1);
@@ -282,6 +283,11 @@ function parseVersioningCellKey(key) {
   if (row == null) return null;
   const col = parseUnsignedInt(key, cIdx + 1, key.length);
   if (col == null) return null;
+  if (out) {
+    out.row = row;
+    out.col = col;
+    return out;
+  }
   return { row, col };
 }
 
@@ -376,7 +382,7 @@ export function parseSpreadsheetCellKey(key, opts, out) {
   }
 
   // Unit-test convenience `r{row}c{col}` encoding.
-  const rxc = parseVersioningCellKey(key);
+  const rxc = parseVersioningCellKey(key, out);
   if (rxc) {
     if (out) {
       out.sheetId = defaultSheetId;
@@ -553,10 +559,13 @@ export function applyLayeredFormatsToCells(cells, layers) {
     return null;
   };
 
+  /** @type {{ row: number, col: number }} */
+  const addrScratch = { row: 0, col: 0 };
   for (const [key, cell] of cells.entries()) {
-    const addr = parseVersioningCellKey(key);
+    const addr = parseVersioningCellKey(key, addrScratch);
     if (!addr) continue;
-    const { row, col } = addr;
+    const row = addr.row;
+    const col = addr.col;
 
     const cellFormat = extractStyleObject(yjsValueToJson(cell?.format ?? cell?.style));
     let merged = deepMerge(
