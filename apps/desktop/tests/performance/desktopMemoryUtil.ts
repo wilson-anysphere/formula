@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 
 import { repoRoot } from './desktopStartupRunnerShared.ts';
+import { findPidForExecutableLinux, getProcessTreeRssBytesLinux } from './linuxProcUtil.ts';
 
 export type DesktopMemoryBenchEnv = {
   runs: number;
@@ -76,4 +77,30 @@ export function buildDesktopMemoryProfileRoot(options: {
   const now = options.now ?? Date.now();
   const pid = options.pid ?? process.pid;
   return resolve(options.perfHome, `desktop-memory-${now}-${pid}`);
+}
+
+/**
+ * Sample desktop process-tree RSS on Linux in MB.
+ *
+ * The desktop binary can be wrapped (e.g. under Xvfb), so callers typically pass the wrapper PID
+ * and we resolve the actual desktop PID by executable path before reading `/proc` RSS.
+ */
+export async function sampleDesktopProcessTreeRssMbLinux(options: {
+  wrapperPid: number;
+  binPath: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<number> {
+  const { wrapperPid, binPath, timeoutMs, signal } = options;
+  const resolvedPid = await findPidForExecutableLinux(wrapperPid, binPath, Math.min(2000, timeoutMs), signal);
+  if (!resolvedPid) {
+    throw new Error('Failed to resolve desktop PID for RSS sampling');
+  }
+
+  const rssBytes = await getProcessTreeRssBytesLinux(resolvedPid);
+  if (rssBytes <= 0) {
+    throw new Error('Failed to sample desktop RSS (process may have exited)');
+  }
+
+  return rssBytes / (1024 * 1024);
 }

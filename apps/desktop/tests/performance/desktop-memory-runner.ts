@@ -6,13 +6,12 @@ import {
   buildBenchmarkResultFromValues,
   defaultDesktopBinPath,
   buildDesktopMemoryProfileRoot,
-  findPidForExecutableLinux,
   formatPerfPath,
-  getProcessTreeRssBytesLinux,
   repoRoot,
   resolveDesktopMemoryBenchEnv,
   resolvePerfHome,
   runOnce as runDesktopOnce,
+  sampleDesktopProcessTreeRssMbLinux,
   sleep,
 } from './desktopStartupUtil.ts';
 
@@ -214,13 +213,7 @@ async function processTreeMemoryMb(options: {
   }
 
   if (process.platform === 'linux') {
-    const resolvedPid = await findPidForExecutableLinux(rootPid, binPath, Math.min(2000, timeoutMs), signal);
-    if (!resolvedPid) {
-      throw new Error('Failed to resolve desktop PID for RSS sampling');
-    }
-
-    const bytes = await getProcessTreeRssBytesLinux(resolvedPid);
-    return bytes / (1024 * 1024);
+    return await sampleDesktopProcessTreeRssMbLinux({ wrapperPid: rootPid, binPath, timeoutMs, signal });
   }
 
   return processTreeRssKb(rootPid) / 1024;

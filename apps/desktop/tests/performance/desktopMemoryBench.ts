@@ -25,10 +25,9 @@ import {
   type BenchmarkResult,
   buildDesktopMemoryProfileRoot,
   defaultDesktopBinPath,
-  findPidForExecutableLinux,
   formatPerfPath,
-  getProcessTreeRssBytesLinux,
   resolveDesktopMemoryBenchEnv,
+  sampleDesktopProcessTreeRssMbLinux,
   sleep,
   resolvePerfHome,
   runOnce as runDesktopOnce,
@@ -60,22 +59,12 @@ async function sampleIdleRssMbLinux(options: {
           throw new Error('Failed to spawn desktop process (missing pid)');
         }
 
-        const resolvedPid = await findPidForExecutableLinux(
+        sampledRssMb = await sampleDesktopProcessTreeRssMbLinux({
           wrapperPid,
           binPath,
-          Math.min(2000, timeoutMs),
+          timeoutMs,
           signal,
-        );
-        if (!resolvedPid) {
-          throw new Error('Failed to resolve desktop PID for RSS sampling');
-        }
-
-        const rssBytes = await getProcessTreeRssBytesLinux(resolvedPid);
-        if (rssBytes <= 0) {
-          throw new Error('Failed to sample desktop RSS (process may have exited)');
-        }
-
-        sampledRssMb = rssBytes / (1024 * 1024);
+        });
       } catch (err) {
         sampleError = err instanceof Error ? err : new Error(String(err));
       }

@@ -2,7 +2,11 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { buildDesktopMemoryProfileRoot, resolveDesktopMemoryBenchEnv } from './desktopStartupUtil.ts';
+import {
+  buildDesktopMemoryProfileRoot,
+  resolveDesktopMemoryBenchEnv,
+  sampleDesktopProcessTreeRssMbLinux,
+} from './desktopStartupUtil.ts';
 import { repoRoot } from './desktopStartupUtil.ts';
 
 describe('desktopMemoryUtil resolveDesktopMemoryBenchEnv', () => {
@@ -77,5 +81,9 @@ describe('desktopMemoryUtil resolveDesktopMemoryBenchEnv', () => {
     expect(buildDesktopMemoryProfileRoot({ perfHome, now: 123, pid: 456 })).toBe(
       resolve(perfHome, 'desktop-memory-123-456'),
     );
+  });
+
+  it('exports sampleDesktopProcessTreeRssMbLinux', () => {
+    expect(typeof sampleDesktopProcessTreeRssMbLinux).toBe('function');
   });
 });
