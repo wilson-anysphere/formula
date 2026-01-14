@@ -326,4 +326,35 @@ describe("ImageBitmapCache", () => {
       vi.useRealTimers();
     }
   });
+
+  it("prunes expired negative cache entries so failure metadata cannot grow unbounded", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const createImageBitmapMock = vi.fn().mockRejectedValue(new Error("decode failed"));
+      vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+      const cache = new ImageBitmapCache({ maxEntries: 10, negativeCacheMs: 100 });
+
+      await expect(cache.get(createEntry("a"))).rejects.toThrow("decode failed");
+      await expect(cache.get(createEntry("b"))).rejects.toThrow("decode failed");
+
+      const negativeCache = (cache as any).negativeCache as Map<string, unknown>;
+      expect(negativeCache.size).toBe(2);
+
+      // Move time forward past the expiry window and trigger a new `get()` call,
+      // which should prune old failures.
+      vi.advanceTimersByTime(200);
+      vi.setSystemTime(200);
+
+      await expect(cache.get(createEntry("c"))).rejects.toThrow("decode failed");
+      // Flush the internal `.then` handlers that populate negative cache entries.
+      await Promise.resolve();
+
+      expect([...negativeCache.keys()]).toEqual(["c"]);
+      expect(createImageBitmapMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
