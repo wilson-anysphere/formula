@@ -91,6 +91,17 @@ fn errors_on_encrypted_xls_fixtures() {
             "biff8_rc4_cryptoapi_pw_open.xls",
             &[0x01, 0x00, 0x02, 0x00][..],
         ),
+        // Empty-password variants should still require callers to explicitly pass `Some("")` rather
+        // than `None`.
+        (
+            "biff8_rc4_cryptoapi_pw_open_empty_password.xls",
+            &[0x01, 0x00, 0x02, 0x00][..],
+        ),
+        // Legacy FILEPASS CryptoAPI layout uses `wEncryptionInfo=0x0004` rather than subtype 0x0002.
+        (
+            "biff8_rc4_cryptoapi_legacy_pw_open_empty_password.xls",
+            &[0x01, 0x00, 0x04, 0x00][..],
+        ),
     ];
 
     for (filename, expected_filepass_prefix) in fixtures {
@@ -183,4 +194,3 @@ fn opens_encrypted_rc4_cryptoapi_xls_fixture_with_unicode_password() {
         "expected decrypted workbook to contain at least one sheet"
     );
 }
-
