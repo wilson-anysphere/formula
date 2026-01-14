@@ -227,6 +227,7 @@ export class DrawingInteractionController {
     const viewport = this.callbacks.getViewport();
     const zoom = sanitizeZoom(viewport.zoom);
     const objects = this.callbacks.getObjects();
+    const startObjects = ensureZOrderSorted(objects);
     const index = this.getHitTestIndex(objects, zoom);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
     const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
@@ -261,19 +262,19 @@ export class DrawingInteractionController {
           this.trySetPointerCapture(e.pointerId);
           this.callbacks.beginBatch?.({ label: "Rotate Picture" });
           this.attachEscapeListener();
-          this.rotating = {
-            id: selectedObject.id,
-            startAngleRad,
-            centerX,
-            centerY,
-            startRotationDeg,
-            startObjects: objects,
-            pointerId: e.pointerId,
-            transform: selectedObject.transform,
-          };
-          this.element.style.cursor = cursorForRotationHandle(true);
-          return;
-        }
+           this.rotating = {
+             id: selectedObject.id,
+             startAngleRad,
+             centerX,
+             centerY,
+             startRotationDeg,
+             startObjects,
+             pointerId: e.pointerId,
+             transform: selectedObject.transform,
+           };
+           this.element.style.cursor = cursorForRotationHandle(true);
+           return;
+         }
 
         const handle = hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform);
         if (handle && !isNonPrimaryMouseButton) {
@@ -282,17 +283,17 @@ export class DrawingInteractionController {
           this.trySetPointerCapture(e.pointerId);
           this.callbacks.beginBatch?.({ label: "Resize Picture" });
           this.attachEscapeListener();
-          this.resizing = {
-            id: selectedObject.id,
-            handle,
-            startX: x,
-            startY: y,
-            startObjects: objects,
-            pointerId: e.pointerId,
-            transform: selectedObject.transform,
-            startWidthPx: selectedBounds.width,
-            startHeightPx: selectedBounds.height,
-            aspectRatio:
+           this.resizing = {
+             id: selectedObject.id,
+             handle,
+             startX: x,
+             startY: y,
+             startObjects,
+             pointerId: e.pointerId,
+             transform: selectedObject.transform,
+             startWidthPx: selectedBounds.width,
+             startHeightPx: selectedBounds.height,
+             aspectRatio:
               selectedObject.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
                 ? selectedBounds.width / selectedBounds.height
                 : null,
@@ -336,7 +337,7 @@ export class DrawingInteractionController {
         handle,
         startX: x,
         startY: y,
-        startObjects: objects,
+        startObjects,
         pointerId: e.pointerId,
         transform: hit.object.transform,
         startWidthPx: hit.bounds.width,
@@ -354,7 +355,7 @@ export class DrawingInteractionController {
         id: hit.object.id,
         startX: x,
         startY: y,
-        startObjects: objects,
+        startObjects,
         pointerId: e.pointerId,
       };
       this.element.style.cursor = "move";
@@ -638,6 +639,16 @@ export class DrawingInteractionController {
 
 function sanitizeZoom(zoom: number | undefined): number {
   return typeof zoom === "number" && Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+
+function ensureZOrderSorted(objects: DrawingObject[]): DrawingObject[] {
+  if (objects.length <= 1) return objects;
+  for (let i = 1; i < objects.length; i += 1) {
+    if (objects[i - 1]!.zOrder > objects[i]!.zOrder) {
+      return [...objects].sort((a, b) => a.zOrder - b.zOrder);
+    }
+  }
+  return objects;
 }
 
 function anchorTopLeftEmu(

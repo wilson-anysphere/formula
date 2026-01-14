@@ -534,6 +534,7 @@ export function convertModelWorksheetDrawingsToUiDrawingObjects(modelWorksheetJs
       // ignore
     }
   }
+  out.sort((a, b) => a.zOrder - b.zOrder);
   return out;
 }
 
@@ -731,6 +732,7 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
     }
   }
 
+  out.sort((a, b) => a.zOrder - b.zOrder);
   return out;
 }
 

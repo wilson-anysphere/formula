@@ -10269,8 +10269,21 @@ export class SpreadsheetApp {
         return [];
       })();
 
-      this.drawingObjectsCache = { sheetId, objects, source: drawingsGetter };
-      docObjects = objects;
+      const ordered = (() => {
+        if (objects.length <= 1) return objects;
+        for (let i = 1; i < objects.length; i += 1) {
+          // Treat missing/invalid zOrder as 0; this keeps the adapter resilient to older callers.
+          const prev = typeof (objects[i - 1] as any)?.zOrder === "number" ? (objects[i - 1] as any).zOrder : 0;
+          const curr = typeof (objects[i] as any)?.zOrder === "number" ? (objects[i] as any).zOrder : 0;
+          if (prev > curr) {
+            return [...objects].sort((a, b) => ((a as any).zOrder ?? 0) - ((b as any).zOrder ?? 0));
+          }
+        }
+        return objects;
+      })();
+
+      this.drawingObjectsCache = { sheetId, objects: ordered, source: drawingsGetter };
+      docObjects = ordered;
     }
 
     const finalObjects: DrawingObject[] =
