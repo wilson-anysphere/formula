@@ -81,6 +81,8 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   const builtins = fs.readFileSync(builtinsPath, "utf8");
   const dropdownPath = path.join(__dirname, "..", "src", "commands", "registerFormatFontDropdownCommands.ts");
   const dropdown = fs.readFileSync(dropdownPath, "utf8");
+  const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
+  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
   const keybindingsPath = path.join(__dirname, "..", "src", "commands", "builtinKeybindings.ts");
   const keybindings = fs.readFileSync(keybindingsPath, "utf8");
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
@@ -95,6 +97,11 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
     builtins,
     /\bregisterBuiltinCommand\(\s*["']edit\.clearContents["']/,
     "Expected registerBuiltinCommands.ts to register edit.clearContents",
+  );
+  assert.doesNotMatch(
+    builtins,
+    /\bregisterBuiltinCommand\(\s*["']format\.clearContents["']/,
+    "Expected registerBuiltinCommands.ts to not register legacy format.clearContents",
   );
 
   // Ribbon "Clear" menu uses canonical formatting ids for Clear Formats / Clear All.
@@ -114,6 +121,11 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
     dropdown,
     /\bregisterBuiltinCommand\(\s*["']format\.clearContents["']/,
     "Expected registerFormatFontDropdownCommands.ts to not register format.clearContents",
+  );
+  assert.doesNotMatch(
+    desktopCommands,
+    /\bregisterBuiltinCommand\(\s*["']format\.clearContents["']/,
+    "Expected registerDesktopCommands.ts to not register legacy format.clearContents",
   );
 
   // Delete key should dispatch through the canonical edit command.
