@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use formula_model::autofilter::{FilterColumn, FilterCriterion, FilterJoin, FilterValue};
 use formula_model::Range;
 
@@ -8,9 +6,7 @@ mod common;
 use common::xls_fixture_builder;
 
 fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
-    let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
-    tmp.write_all(bytes).expect("write xls bytes");
-    formula_xls::import_xls_path(tmp.path()).expect("import xls")
+    formula_xls::import_xls_bytes(bytes).expect("import xls bytes")
 }
 
 #[test]
@@ -38,4 +34,3 @@ fn imports_biff8_autofilter_criteria_from_autofilter_records() {
         result.warnings
     );
 }
-

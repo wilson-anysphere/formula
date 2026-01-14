@@ -120,12 +120,11 @@ const AUTOFILTER_OP_NONE: u8 = 0;
 const AUTOFILTER_OP_EQUAL: u8 = 3;
 const AUTOFILTER_OP_GREATER_THAN: u8 = 5;
 
-// DOPER "vt" values are not exhaustively specified here; we pick values that the
-// importer’s best-effort decoder treats as the intended type.
+// DOPER "vt" values are based on [MS-XLS] / VARIANT type tags. The importer is
+// tolerant, but we aim to emit the canonical values.
 const AUTOFILTER_VT_EMPTY: u8 = 0;
-const AUTOFILTER_VT_STRING: u8 = 4;
-// Any vt not explicitly handled as empty/bool/string is treated as a number.
-const AUTOFILTER_VT_NUMBER: u8 = 0x1F;
+const AUTOFILTER_VT_NUMBER: u8 = 5; // VT_R8 (stored as RK by some producers)
+const AUTOFILTER_VT_STRING: u8 = 8; // VT_BSTR (string stored as trailing XLUnicodeString)
 
 // AUTOFILTER.grbit flag: combine DOPER1/DOPER2 with AND when set, else OR.
 const AUTOFILTER_GRBIT_AND: u16 = 0x0001;
@@ -14332,18 +14331,9 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
     push_record(&mut sheet, RECORD_FILTERMODE, &[]);
 
     // AUTOFILTER record: simple text equality filter on column A for "Alice".
-    let mut autofilter = Vec::<u8>::new();
-    autofilter.extend_from_slice(&0u16.to_le_bytes()); // iEntry = 0 (column A, relative)
-    autofilter.extend_from_slice(&0u16.to_le_bytes()); // grbit
-
-    // DOPER1: vt=8 (string), wOper=3 (Equal), value payload unused for strings.
-    autofilter.extend_from_slice(&[8u8, 0u8, 3u8, 0u8]);
-    autofilter.extend_from_slice(&0u32.to_le_bytes());
-    // DOPER2: unused.
-    autofilter.extend_from_slice(&[0u8; 8]);
-    // String payload (XLUnicodeString).
-    write_unicode_string(&mut autofilter, "Alice");
-
+    let doper1 = autofilter_doper_string(AUTOFILTER_OP_EQUAL, "Alice");
+    let doper2 = autofilter_doper_none();
+    let autofilter = autofilter_record(0, false, &doper1, &doper2);
     push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
@@ -15504,7 +15494,7 @@ fn autofilter_doper_none() -> AutoFilterDoper {
     // DOPER with op=None (no criterion).
     let mut bytes = [0u8; 8];
     bytes[0] = AUTOFILTER_VT_EMPTY;
-    bytes[1] = AUTOFILTER_OP_NONE;
+    bytes[2..4].copy_from_slice(&(AUTOFILTER_OP_NONE as u16).to_le_bytes());
     AutoFilterDoper {
         bytes,
         trailing_string: None,
@@ -15514,7 +15504,7 @@ fn autofilter_doper_none() -> AutoFilterDoper {
 fn autofilter_doper_number(operator: u8, value: f64) -> AutoFilterDoper {
     let mut bytes = [0u8; 8];
     bytes[0] = AUTOFILTER_VT_NUMBER;
-    bytes[1] = operator;
+    bytes[2..4].copy_from_slice(&(operator as u16).to_le_bytes());
     bytes[4..8].copy_from_slice(&rk_number(value).to_le_bytes());
     AutoFilterDoper {
         bytes,
@@ -15525,7 +15515,7 @@ fn autofilter_doper_number(operator: u8, value: f64) -> AutoFilterDoper {
 fn autofilter_doper_string(operator: u8, value: &str) -> AutoFilterDoper {
     let mut bytes = [0u8; 8];
     bytes[0] = AUTOFILTER_VT_STRING;
-    bytes[1] = operator;
+    bytes[2..4].copy_from_slice(&(operator as u16).to_le_bytes());
     AutoFilterDoper {
         bytes,
         trailing_string: Some(value.to_string()),
