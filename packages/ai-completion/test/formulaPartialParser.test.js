@@ -109,6 +109,18 @@ test("parsePartialFormula ignores ';' after escaped brackets inside structured r
   assert.equal(parsed.currentArg?.text, "A");
 });
 
+test("parsePartialFormula ignores separators inside external workbook prefixes even when workbook names contain '[' characters", () => {
+  const registry = new FunctionRegistry();
+  const input = "=SUM([A1[Name.xlsx]Sheet1!A1; A";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, true);
+  assert.equal(parsed.functionName, "SUM");
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "A");
+});
+
 test("parsePartialFormula ignores ';' inside nested function calls (depth > baseDepth)", () => {
   const registry = new FunctionRegistry();
   const input = "=SUM(IF(A1>0;A1;0); A";

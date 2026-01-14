@@ -74,6 +74,19 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("ignores commas inside external workbook prefixes even when the workbook name contains '[' characters", () => {
+    // Workbook name contains a literal `[`, which does not introduce nesting in workbook prefixes.
+    // The bracket skipper must still find the closing `]` so the comma after the reference is
+    // treated as the argument separator.
+    const formula = "=SUM([A1[Name.xlsx]Sheet1!A1, 1)";
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+  });
+
   it("ignores commas inside structured refs with escaped closing brackets", () => {
     // Regression: `]]` escapes inside column names should not cause us to treat internal
     // structured-ref commas as argument separators.

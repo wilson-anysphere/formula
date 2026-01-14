@@ -148,6 +148,22 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.currentArg?.text).toBe("A");
   });
 
+  it("does not treat separators inside external workbook prefixes as function args (semicolon locales)", async () => {
+    setLocale("de-DE");
+
+    const parser = createLocaleAwarePartialFormulaParser({});
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=SUMME([A1[Name.xlsx]Sheet1!A1; 1";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    expect(result.functionName).toBe("SUM");
+    expect(result.argIndex).toBe(1);
+    expect(result.currentArg?.text).toBe("1");
+  });
+
   it("does not treat decimal commas as argument separators for A1-like function names (LOG10)", async () => {
     setLocale("de-DE");
 

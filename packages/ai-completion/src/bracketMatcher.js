@@ -7,6 +7,11 @@
  * This matcher prefers treating `]]` as an escaped `]` but will backtrack if that interpretation
  * makes it impossible to close all brackets before `limit`.
  *
+ * Workbook prefixes (`[Book.xlsx]Sheet1!A1`) are not nested: `[` is treated as a plain character
+ * inside the workbook name, so we fall back to a non-nesting scan when the structured-ref matcher
+ * fails. The fallback is gated by a heuristic that checks for an unquoted `Sheet!` suffix so we
+ * don't accidentally treat incomplete structured references as workbook prefixes.
+ *
  * This is intentionally a small, dependency-free helper that can be reused by the lightweight
  * formula partial parser and completion utilities without pulling in the full formula tokenizer.
  *
@@ -17,10 +22,83 @@
  */
 export function findMatchingBracketEnd(src, startIndex, limit) {
   if (typeof src !== "string") return null;
-  const max = typeof limit === "number" && Number.isFinite(limit) ? Math.max(0, Math.min(src.length, limit)) : src.length;
+  const max =
+    typeof limit === "number" && Number.isFinite(limit) ? Math.max(0, Math.min(src.length, Math.trunc(limit))) : src.length;
   if (startIndex < 0 || startIndex >= max) return null;
   if (src[startIndex] !== "[") return null;
 
+  // Prefer structured-ref-style matching (supports nested `[[...]]`). If that fails, fall back to
+  // workbook-prefix matching which treats `[` as a literal character.
+  return findMatchingStructuredRefBracketEnd(src, startIndex, max) ?? findWorkbookPrefixEndIfValid(src, startIndex, max);
+}
+
+const UNICODE_LETTER_RE = (() => {
+  try {
+    return new RegExp("^\\p{Alphabetic}$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+const UNICODE_ALNUM_RE = (() => {
+  try {
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+function isUnicodeAlphabetic(ch) {
+  if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+  return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z");
+}
+
+function isUnicodeAlphanumeric(ch) {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return isUnicodeAlphabetic(ch) || (ch >= "0" && ch <= "9");
+}
+
+function findWorkbookPrefixEnd(src, startIndex, max) {
+  // External workbook prefixes escape closing brackets by doubling: `]]` -> literal `]`.
+  //
+  // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+  if (src[startIndex] !== "[") return null;
+  let i = startIndex + 1;
+  while (i < max) {
+    if (src[i] === "]") {
+      if (i + 1 < max && src[i + 1] === "]") {
+        i += 2;
+        continue;
+      }
+      return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+function findWorkbookPrefixEndIfValid(src, startIndex, max) {
+  const end = findWorkbookPrefixEnd(src, startIndex, max);
+  if (!end) return null;
+  if (end >= max) return null;
+
+  const first = src[end] ?? "";
+  if (!(first === "_" || isUnicodeAlphabetic(first))) return null;
+
+  let i = end + 1;
+  while (i < max) {
+    const ch = src[i] ?? "";
+    if (ch === "!") return end;
+    if (ch === "_" || ch === "." || ch === ":" || isUnicodeAlphanumeric(ch)) {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
+function findMatchingStructuredRefBracketEnd(src, startIndex, max) {
   let i = startIndex;
   let depth = 0;
   /** @type {Array<{ i: number, depth: number }>} */
@@ -70,4 +148,3 @@ export function findMatchingBracketEnd(src, startIndex, limit) {
     i += 1;
   }
 }
-

@@ -60,7 +60,50 @@ function isWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
 }
 
-function findMatchingBracketEnd(formulaText: string, start: number): number | null {
+function findWorkbookPrefixEnd(formulaText: string, start: number): number | null {
+  // External workbook prefixes escape closing brackets by doubling: `]]` -> literal `]`.
+  //
+  // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+  if (formulaText[start] !== "[") return null;
+  let i = start + 1;
+  while (i < formulaText.length) {
+    if (formulaText[i] === "]") {
+      if (formulaText[i + 1] === "]") {
+        i += 2;
+        continue;
+      }
+      return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+function findWorkbookPrefixEndIfValid(formulaText: string, start: number): number | null {
+  const end = findWorkbookPrefixEnd(formulaText, start);
+  if (!end) return null;
+
+  // Heuristic: only treat this as an external workbook prefix if it is immediately followed by
+  // an unquoted sheet name and `!` (e.g. `[Book.xlsx]Sheet1!A1`). This avoids incorrectly treating
+  // incomplete structured references as workbook prefixes.
+  if (end >= formulaText.length) return null;
+  const first = formulaText[end] ?? "";
+  if (!(first === "_" || isUnicodeAlphabetic(first))) return null;
+
+  let i = end + 1;
+  while (i < formulaText.length) {
+    const ch = formulaText[i] ?? "";
+    if (ch === "!") return end;
+    if (ch === "_" || ch === "." || ch === ":" || isUnicodeAlphanumeric(ch)) {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
+function findMatchingStructuredRefBracketEnd(formulaText: string, start: number): number | null {
   // Structured references escape closing brackets inside items by doubling: `]]` -> literal `]`.
   // That makes naive depth counting incorrect (it will pop twice for an escaped bracket).
   //
@@ -124,6 +167,15 @@ function findMatchingBracketEnd(formulaText: string, start: number): number | nu
 
     i += 1;
   }
+}
+
+function findMatchingBracketEnd(formulaText: string, start: number): number | null {
+  // Prefer structured-ref matching (supports nested `[[...]]`). If that fails, fall back to
+  // workbook-prefix scanning which treats `[` as a literal character.
+  return (
+    findMatchingStructuredRefBracketEnd(formulaText, start) ??
+    findWorkbookPrefixEndIfValid(formulaText, start)
+  );
 }
 
 function popUntilKind(stack: StackFrame[], kind: StackFrame["kind"]): void {

@@ -239,7 +239,16 @@ function localizeStarter(starter: string, localeId: string): string {
   return `${localizedName}${suffix}`;
 }
 
-const UNICODE_ALNUM_RE = (() => {
+const UNICODE_LETTER_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^\\p{Alphabetic}$", "u");
+  } catch {
+    // Older JS engines may not support Unicode property escapes.
+    return null;
+  }
+})();
+
+const UNICODE_ALNUM_RE: RegExp | null = (() => {
   try {
     // Match the Rust backend's `char::is_alphanumeric` (Alphabetic || Number).
     return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
@@ -248,6 +257,16 @@ const UNICODE_ALNUM_RE = (() => {
     return null;
   }
 })();
+
+function isUnicodeAlphabetic(ch: string): boolean {
+  if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+  return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z");
+}
+
+function isUnicodeAlphanumeric(ch: string): boolean {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return isUnicodeAlphabetic(ch) || (ch >= "0" && ch <= "9");
+}
 
 /**
  * True when `ch` is a valid identifier character for function names / name prefixes.
@@ -505,9 +524,50 @@ function getArgContextWithSeparator(
   return { argIndex, currentArg };
 }
 
-function findMatchingBracketEnd(src: string, startIndex: number, limit: number): number | null {
-  const max = Number.isFinite(limit) ? Math.max(0, Math.min(src.length, Math.trunc(limit))) : src.length;
-  if (startIndex < 0 || startIndex >= max) return null;
+function findWorkbookPrefixEnd(src: string, startIndex: number, max: number): number | null {
+  // External workbook prefixes escape closing brackets by doubling: `]]` -> literal `]`.
+  //
+  // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+  if (src[startIndex] !== "[") return null;
+  let i = startIndex + 1;
+  while (i < max) {
+    if (src[i] === "]") {
+      if (i + 1 < max && src[i + 1] === "]") {
+        i += 2;
+        continue;
+      }
+      return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+function findWorkbookPrefixEndIfValid(src: string, startIndex: number, max: number): number | null {
+  const end = findWorkbookPrefixEnd(src, startIndex, max);
+  if (!end) return null;
+
+  // Heuristic: only treat this as an external workbook prefix if it is immediately followed by
+  // an unquoted sheet name and `!` (e.g. `[Book.xlsx]Sheet1!A1`). This avoids incorrectly treating
+  // incomplete structured references as workbook prefixes.
+  if (end >= max) return null;
+  const first = src[end] ?? "";
+  if (!(first === "_" || isUnicodeAlphabetic(first))) return null;
+
+  let i = end + 1;
+  while (i < max) {
+    const ch = src[i] ?? "";
+    if (ch === "!") return end;
+    if (ch === "_" || ch === "." || ch === ":" || isUnicodeAlphanumeric(ch)) {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
+function findMatchingStructuredRefBracketEnd(src: string, startIndex: number, max: number): number | null {
   if (src[startIndex] !== "[") return null;
 
   let i = startIndex;
@@ -556,6 +616,14 @@ function findMatchingBracketEnd(src: string, startIndex: number, limit: number):
 
     i += 1;
   }
+}
+
+function findMatchingBracketEnd(src: string, startIndex: number, limit: number): number | null {
+  const max = Number.isFinite(limit) ? Math.max(0, Math.min(src.length, Math.trunc(limit))) : src.length;
+  if (startIndex < 0 || startIndex >= max) return null;
+  if (src[startIndex] !== "[") return null;
+
+  return findMatchingStructuredRefBracketEnd(src, startIndex, max) ?? findWorkbookPrefixEndIfValid(src, startIndex, max);
 }
 
 function canonicalizeInCallContext(
