@@ -18,6 +18,14 @@ const STANDARD_PLAINTEXT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/encrypted/ooxml/plaintext.xlsx"
 ));
+const AGILE_UNICODE_EXCEL_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/agile-unicode-excel.xlsx"
+));
+const AGILE_UNICODE_EXCEL_PLAINTEXT: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/encrypted/ooxml/plaintext-excel.xlsx"
+));
 
 fn assert_decrypted_zip_contains_workbook(decrypted: &[u8]) {
     assert!(
@@ -62,6 +70,36 @@ fn wrong_password_returns_invalid_password() {
     );
 
     let err = decrypt_encrypted_package(STANDARD_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+
+    let err =
+        decrypt_encrypted_package(AGILE_UNICODE_EXCEL_FIXTURE, "wrong").expect_err("expected error");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+}
+
+#[test]
+fn decrypts_agile_unicode_excel_fixture() {
+    let decrypted =
+        decrypt_encrypted_package(AGILE_UNICODE_EXCEL_FIXTURE, "pässwörd🔒").expect("decrypt agile");
+    assert_eq!(decrypted.as_slice(), AGILE_UNICODE_EXCEL_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn agile_unicode_excel_password_different_normalization_fails() {
+    // NFC password is "pässwörd🔒" (U+00E4, U+00F6). NFD decomposes those into combining marks, but
+    // leaves the non-BMP emoji alone.
+    let nfd = "pa\u{0308}sswo\u{0308}rd🔒";
+    assert_ne!(nfd, "pässwörd🔒");
+
+    let err = decrypt_encrypted_package(AGILE_UNICODE_EXCEL_FIXTURE, nfd)
+        .expect_err("expected different normalization to fail");
     assert!(
         matches!(err, OfficeCryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
