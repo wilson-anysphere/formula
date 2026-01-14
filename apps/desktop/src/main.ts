@@ -2467,15 +2467,12 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "data.outline.ungroup": true,
             "data.outline.subtotal": true,
             "data.outline.showDetail": true,
-            "data.outline.hideDetail": true,
-            // MVP ribbon AutoFilter uses outline.hidden.filter, which isn't implemented in shared-grid mode yet.
-            "home.editing.sortFilter.filter": true,
-            "home.editing.sortFilter.clear": true,
-            "home.editing.sortFilter.reapply": true,
-            "data.sortFilter.filter": true,
-            "data.sortFilter.clear": true,
-            "data.sortFilter.reapply": true,
-            "data.sortFilter.advanced.clearFilter": true,
+             "data.outline.hideDetail": true,
+             // MVP ribbon AutoFilter uses outline.hidden.filter, which isn't implemented in shared-grid mode yet.
+             "data.sortFilter.filter": true,
+             "data.sortFilter.clear": true,
+             "data.sortFilter.reapply": true,
+             "data.sortFilter.advanced.clearFilter": true,
           }
         : null),
     };

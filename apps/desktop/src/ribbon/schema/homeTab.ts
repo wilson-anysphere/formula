@@ -486,9 +486,10 @@ export const homeTab: RibbonTabDefinition = {
             { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", iconId: "sort" },
             { id: "data.sortFilter.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
             { id: "home.editing.sortFilter.customSort", label: "Custom Sort…", ariaLabel: "Custom Sort", iconId: "settings" },
-            { id: "home.editing.sortFilter.filter", label: "Filter", ariaLabel: "Filter", iconId: "filter" },
-            { id: "home.editing.sortFilter.clear", label: "Clear", ariaLabel: "Clear", iconId: "close" },
-            { id: "home.editing.sortFilter.reapply", label: "Reapply", ariaLabel: "Reapply", iconId: "refresh" },
+            // Canonical ids shared with the Data tab.
+            { id: "data.sortFilter.filter", label: "Filter", ariaLabel: "Filter", iconId: "filter" },
+            { id: "data.sortFilter.clear", label: "Clear", ariaLabel: "Clear", iconId: "close" },
+            { id: "data.sortFilter.reapply", label: "Reapply", ariaLabel: "Reapply", iconId: "refresh" },
           ],
         },
       ],
