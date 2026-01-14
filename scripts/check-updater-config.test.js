@@ -20,7 +20,7 @@ function runWithConfig(config) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      FORMULA_TAURI_CONFIG_PATH: configPath,
+      FORMULA_TAURI_CONF_PATH: configPath,
     },
   });
   if (proc.error) throw proc.error;
