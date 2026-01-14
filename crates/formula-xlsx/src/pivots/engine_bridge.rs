@@ -40,12 +40,19 @@ pub fn pivot_cache_to_engine_source(
             .collect(),
     );
 
+    let field_count = def.cache_fields.len();
     for record in records {
-        let mut row = Vec::with_capacity(def.cache_fields.len());
-        let mut record_values = record.into_iter();
-        for field_idx in 0..def.cache_fields.len() {
-            let value = record_values.next().unwrap_or(PivotCacheValue::Missing);
-            row.push(pivot_cache_value_to_engine(def, field_idx, value));
+        let mut row = Vec::with_capacity(field_count);
+        // Pivot caches can encode record values via a per-field "shared items" table (written as
+        // `<x v="..."/>` indices in `pivotCacheRecords*.xml`). Resolve those indices using the
+        // field position in the record (not the field name).
+        row.extend(
+            def.resolve_record_values(record)
+                .take(field_count)
+                .map(pivot_cache_value_to_engine_inner),
+        );
+        if row.len() < field_count {
+            row.resize(field_count, PivotValue::Blank);
         }
         out.push(row);
     }
@@ -59,8 +66,8 @@ fn pivot_cache_value_to_engine(
     value: PivotCacheValue,
 ) -> PivotValue {
     // Pivot caches can encode record values via a per-field "shared items" table (written as
-    // `<x v="..."/>` indices in `pivotCacheRecords*.xml`). Resolve those indices using the *field
-    // position* in the record (not the field name).
+    // `<x v="..."/>` indices in `pivotCacheRecords*.xml`). Resolve those indices using the field
+    // position in the record (not the field name).
     let value = def.resolve_record_value(field_idx, value);
     pivot_cache_value_to_engine_inner(value)
 }
