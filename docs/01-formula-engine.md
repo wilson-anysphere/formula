@@ -374,10 +374,12 @@ restrictions (notably: no `]`), so this split is unambiguous.
     * `Engine::mark_external_sheet_dirty("[Book.xlsx]Sheet1")` (canonical external sheet key)
     * `Engine::mark_external_workbook_dirty("Book.xlsx")` (workbook id inside `[...]`)
   * The engine does not track dependencies to individual external cells; invalidation is coarse
-    (external sheet key / workbook id). When a provider is configured and `sheet_order(...)` is
-    available, external 3D spans (e.g. `[Book.xlsx]Sheet1:Sheet3!A1`) are expanded for invalidation
-    so `mark_external_sheet_dirty("[Book.xlsx]Sheet2")` will refresh dependents. Without `sheet_order`
-    (or when span endpoints are missing), invalidating the whole workbook may still be required.
+    (external sheet key / workbook id). When a provider is configured and external workbook sheet
+    order is available (via `ExternalValueProvider::workbook_sheet_names` /
+    `ExternalValueProvider::sheet_order`), external 3D spans (e.g. `[Book.xlsx]Sheet1:Sheet3!A1`) are
+    expanded for invalidation so `mark_external_sheet_dirty("[Book.xlsx]Sheet2")` will refresh
+    dependents. Without external sheet order (or when span endpoints are missing), invalidating the
+    whole workbook may still be required.
   * External structured refs (table refs) respect `set_external_refs_volatile(...)` and participate
     in explicit invalidation. Workbook-only structured refs like `[Book.xlsx]Table1[Col]` are
     indexed at the workbook level (since there is no explicit sheet key).
@@ -394,8 +396,10 @@ restrictions (notably: no `]`), so this split is unambiguous.
     captured during evaluation (not parse time), so they appear in `precedents(...)` after the cell
     has been evaluated.
   * For external-workbook 3D spans (`[Book.xlsx]Sheet1:Sheet3!A1`), `precedents(...)` expands into
-    per-sheet precedents when a provider is configured and `sheet_order(...)` is available.
-  * If no provider is configured (or `sheet_order(...)` is unavailable/missing endpoints),
+    per-sheet precedents when a provider is configured and external workbook sheet order is
+    available (via `ExternalValueProvider::workbook_sheet_names` /
+    `ExternalValueProvider::sheet_order`).
+  * If no provider is configured (or external workbook sheet order is unavailable/missing endpoints),
     `precedents(...)` cannot expand the span and therefore **omits** it (it does not report a single
     external precedent for the raw span key).
 * **External 3D spans as formula results:** `=[Book.xlsx]Sheet1:Sheet3!A1` is a multi-area reference
