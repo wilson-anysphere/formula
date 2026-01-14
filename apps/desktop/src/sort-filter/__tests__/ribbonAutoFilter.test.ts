@@ -86,6 +86,27 @@ describe("Ribbon AutoFilter row computation", () => {
     ).toEqual(["1", "2", "10"]);
   });
 
+  it("supports early-exit when maxValues is set (returns maxValues+1 sentinel)", () => {
+    const values = [
+      ["Header"],
+      ["a"],
+      ["b"],
+      ["c"],
+      ["d"],
+    ];
+    const getValue = (row: number, col: number) => values[row]?.[col] ?? "";
+
+    const out = computeUniqueFilterValues({
+      range: { startRow: 0, endRow: 4, startCol: 0, endCol: 0 },
+      headerRows: 1,
+      colId: 0,
+      getValue,
+      maxValues: 2,
+    });
+    // We stop scanning once we observe more than maxValues distinct values.
+    expect(out.length).toBe(3);
+  });
+
   it("hides rows that do not match selected values", () => {
     const values = [
       ["Header"],
