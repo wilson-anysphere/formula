@@ -6,6 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+function getChartModel(app: SpreadsheetApp, chartId: string): any {
+  const anyApp = app as any;
+  if (anyApp.useCanvasCharts) {
+    return anyApp.chartCanvasStoreAdapter.getChartModel(chartId);
+  }
+  return (anyApp.chartModels as Map<string, any>).get(chartId);
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -133,14 +141,13 @@ describe("SpreadsheetApp shared-grid chart external recalc refresh", () => {
         position: `${sheetToken}!C1`,
       });
 
-      const models = (app as any).chartModels as Map<string, any>;
-      expect(models.get(chart.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(10);
+      expect(getChartModel(app, chart.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(10);
 
       // Simulate a collaborative edit (external source) to A1 which is outside the chart range.
       // The formula cell B1 should update and therefore the chart cache should refresh.
       doc.setCellValue(sheetId, { row: 0, col: 0 }, 7, { source: "collab" });
 
-      expect(models.get(chart.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(14);
+      expect(getChartModel(app, chart.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(14);
 
       app.destroy();
       root.remove();
@@ -150,4 +157,3 @@ describe("SpreadsheetApp shared-grid chart external recalc refresh", () => {
     }
   });
 });
-

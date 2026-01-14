@@ -8,6 +8,14 @@ import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
 
+function getChartModel(app: SpreadsheetApp, chartId: string): any {
+  const anyApp = app as any;
+  if (anyApp.useCanvasCharts) {
+    return anyApp.chartCanvasStoreAdapter.getChartModel(chartId);
+  }
+  return (anyApp.chartModels as Map<string, any>).get(chartId);
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -346,8 +354,7 @@ describe("SpreadsheetApp collab repaint", () => {
     expect(charts.length).toBeGreaterThan(0);
     const chartId = charts[0]!.id;
 
-    const chartModels = (app as any).chartModels as Map<string, any>;
-    const beforeModel = chartModels.get(chartId);
+    const beforeModel = getChartModel(app, chartId);
     expect(beforeModel).toBeTruthy();
     const beforeValues = [...(beforeModel?.series?.[0]?.values?.cache ?? [])];
 
@@ -369,7 +376,7 @@ describe("SpreadsheetApp collab repaint", () => {
       { source: "collab" },
     );
 
-    const afterModel = chartModels.get(chartId);
+    const afterModel = getChartModel(app, chartId);
     expect(afterModel).toBeTruthy();
     const afterValues = [...(afterModel?.series?.[0]?.values?.cache ?? [])];
     expect(afterValues).not.toEqual(beforeValues);

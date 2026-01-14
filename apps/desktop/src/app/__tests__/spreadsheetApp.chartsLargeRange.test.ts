@@ -8,6 +8,14 @@ import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
 
+function getChartModel(app: SpreadsheetApp, chartId: string): any {
+  const anyApp = app as any;
+  if (anyApp.useCanvasCharts) {
+    return anyApp.chartCanvasStoreAdapter.getChartModel(chartId);
+  }
+  return (anyApp.chartModels as Map<string, any>).get(chartId);
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -137,7 +145,7 @@ describe("SpreadsheetApp charts large ranges", () => {
     // (e.g. header detection / type sniffing), but it must stay bounded as the range grows.
     expect(getCellSpy.mock.calls.length).toBeLessThanOrEqual(20);
 
-    const model = ((app as any).chartModels as Map<string, any>).get(result.chart_id);
+    const model = getChartModel(app, result.chart_id);
     expect(model).toBeTruthy();
     expect(String(model?.options?.placeholder ?? "")).toContain("Chart range too large");
 

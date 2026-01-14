@@ -8,6 +8,14 @@ import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
 
+function getChartModel(app: SpreadsheetApp, chartId: string): any {
+  const anyApp = app as any;
+  if (anyApp.useCanvasCharts) {
+    return anyApp.chartCanvasStoreAdapter.getChartModel(chartId);
+  }
+  return (anyApp.chartModels as Map<string, any>).get(chartId);
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -136,7 +144,7 @@ describe("SpreadsheetApp chart formula evaluation", () => {
       position: `${sheetToken}!C1`,
     });
 
-    const model = ((app as any).chartModels as Map<string, any>).get(result.chart_id);
+    const model = getChartModel(app, result.chart_id);
     expect(model).toBeTruthy();
     expect(model?.series?.[0]?.values?.cache?.[0]).toBe(5);
 
@@ -167,15 +175,14 @@ describe("SpreadsheetApp chart formula evaluation", () => {
       position: `${sheetToken}!C1`,
     });
 
-    const models = (app as any).chartModels as Map<string, any>;
-    expect(models.get(result.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(10);
+    expect(getChartModel(app, result.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(10);
 
     // Change a referenced cell that is *outside* the chart range. The chart values cache
     // should refresh after a normal app redraw.
     doc.setCellValue(sheetId, { row: 0, col: 0 }, 7);
     app.refresh();
 
-    expect(models.get(result.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(14);
+    expect(getChartModel(app, result.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(14);
 
     app.destroy();
     root.remove();

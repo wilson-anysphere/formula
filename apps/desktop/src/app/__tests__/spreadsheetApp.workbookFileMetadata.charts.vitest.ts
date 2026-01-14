@@ -8,6 +8,14 @@ import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
 
+function getChartModel(app: SpreadsheetApp, chartId: string): any {
+  const anyApp = app as any;
+  if (anyApp.useCanvasCharts) {
+    return anyApp.chartCanvasStoreAdapter.getChartModel(chartId);
+  }
+  return (anyApp.chartModels as Map<string, any>).get(chartId);
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -136,12 +144,11 @@ describe("SpreadsheetApp chart refresh on workbook metadata changes", () => {
       position: `${sheetToken}!C1`,
     });
 
-    const models = (app as any).chartModels as Map<string, any>;
-    expect(models.get(chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe("");
+    expect(getChartModel(app, chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe("");
 
     await app.setWorkbookFileMetadata("/tmp", "Book.xlsx");
     const sheetName = app.getCurrentSheetDisplayName();
-    expect(models.get(chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe(`/tmp/[Book.xlsx]${sheetName}`);
+    expect(getChartModel(app, chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe(`/tmp/[Book.xlsx]${sheetName}`);
 
     app.destroy();
     root.remove();
@@ -173,15 +180,13 @@ describe("SpreadsheetApp chart refresh on workbook metadata changes", () => {
       position: `${sheetToken}!C1`,
     });
 
-    const models = (app as any).chartModels as Map<string, any>;
-    expect(models.get(chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe("");
+    expect(getChartModel(app, chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe("");
 
     await app.setWorkbookFileMetadata("/tmp", "Book.xlsx");
     const sheetName = app.getCurrentSheetDisplayName();
-    expect(models.get(chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe(`/tmp/[Book.xlsx]${sheetName}`);
+    expect(getChartModel(app, chart.chart_id)?.series?.[0]?.categories?.cache?.[0]).toBe(`/tmp/[Book.xlsx]${sheetName}`);
 
     app.destroy();
     root.remove();
   });
 });
-
