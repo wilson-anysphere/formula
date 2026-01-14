@@ -459,6 +459,8 @@ fn parse_absolute_anchor_unknown_object_preserves_id_in_parts() {
     <xdr:pos x="10" y="20"/>
     <xdr:ext cx="30" cy="40"/>
     <xdr:cxnSp>
+      <!-- non-canonical a:cNvPr before the canonical xdr:cNvPr -->
+      <a:cNvPr id="999" name="Wrong"/>
       <xdr:nvCxnSpPr>
         <xdr:cNvPr id="2" name="Connector 1"/>
         <xdr:cNvCxnSpPr/>
@@ -515,6 +517,8 @@ fn parse_absolute_anchor_unknown_object_preserves_size_in_archive() {
     <xdr:pos x="10" y="20"/>
     <xdr:ext cx="30" cy="40"/>
     <xdr:cxnSp>
+      <!-- non-canonical a:cNvPr before the canonical xdr:cNvPr -->
+      <a:cNvPr id="999" name="Wrong"/>
       <xdr:nvCxnSpPr>
         <xdr:cNvPr id="2" name="Connector 1"/>
         <xdr:cNvCxnSpPr/>

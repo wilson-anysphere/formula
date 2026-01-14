@@ -1111,9 +1111,17 @@ fn parse_named_node(
 }
 
 fn extract_drawing_object_id(node: &roxmltree::Node<'_, '_>) -> Option<DrawingObjectId> {
+    // Prefer `xdr:cNvPr` (canonical drawing object id) over any stray `a:cNvPr` nodes that might
+    // appear in the subtree (some producers emit non-canonical non-visual properties inside
+    // `a:graphicData`, etc.).
     let nv_id = node
         .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "cNvPr")?
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "cNvPr"
+                && n.tag_name().namespace() == Some(XDR_NS)
+        })
+        .or_else(|| node.descendants().find(|n| n.is_element() && n.tag_name().name() == "cNvPr"))?
         .attribute("id")?;
     let id = nv_id.trim().parse::<u32>().ok()?;
     if id == 0 {
