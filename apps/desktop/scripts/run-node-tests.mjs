@@ -573,7 +573,9 @@ async function filterExternalDependencyTests(files, opts) {
   const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
-  const requireResolveRe = /\brequire\.resolve\(\s*["']([^"']+)["']\s*\)/g;
+  // Support `require.resolve("pkg")` and `require.resolve("pkg", { ... })` (options arg).
+  const requireResolveRe = /\brequire\.resolve\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
+  const createRequireAssignRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*createRequire\s*\(/g;
   // Some modules are loaded indirectly via Worker thread entrypoints:
   //   const WORKER_URL = new URL("./sandbox-worker.node.js", import.meta.url)
   // These should be treated as dependencies when deciding which node:test files can run
@@ -862,6 +864,29 @@ async function filterExternalDependencyTests(files, opts) {
 
     /** @type {string[]} */
     const specifiers = [];
+
+    /**
+     * `createRequire(...)` returns a CommonJS-style `require` function that can be named
+     * arbitrarily (e.g. `const requireFromHere = createRequire(...)`). If a test file uses
+     * that alias to resolve/import an external dep, we still need to detect it so we can
+     * skip the suite when `node_modules` is unavailable.
+     *
+     * Keep this as a lightweight heuristic (regex) rather than pulling in a parser.
+     *
+     * @param {string} ident
+     */
+    function escapeIdent(ident) {
+      return ident.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    /** @type {Set<string>} */
+    const requireAliases = new Set();
+    if (text.includes("createRequire")) {
+      for (const match of text.matchAll(createRequireAssignRe)) {
+        const name = match[1];
+        if (name) requireAliases.add(name);
+      }
+    }
     for (const match of text.matchAll(importFromRe)) {
       const typeOnly = Boolean(match[1]);
       const specifier = match[2];
@@ -883,6 +908,16 @@ async function filterExternalDependencyTests(files, opts) {
     }
     for (const match of text.matchAll(requireResolveRe)) {
       specifiers.push(match[1]);
+    }
+    for (const alias of requireAliases) {
+      const escaped = escapeIdent(alias);
+      const aliasRequireCallRe = new RegExp(`\\b${escaped}\\s*\\(\\s*["']([^"']+)["']\\s*\\)`, "g");
+      const aliasRequireResolveRe = new RegExp(
+        `\\b${escaped}\\s*\\.\\s*resolve\\(\\s*["']([^"']+)["']\\s*(?:\\)|,)`,
+        "g",
+      );
+      for (const match of text.matchAll(aliasRequireCallRe)) specifiers.push(match[1]);
+      for (const match of text.matchAll(aliasRequireResolveRe)) specifiers.push(match[1]);
     }
     for (const match of text.matchAll(importMetaUrlRe)) {
       const specifier = match[1];
