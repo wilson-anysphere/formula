@@ -1031,6 +1031,130 @@ fn cell_filename_without_reference_does_not_create_self_edge_in_dynamic_dep_trac
 }
 
 #[test]
+fn formulatext_records_dynamic_dependencies_for_indirect_reference_arg() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
+    engine.set_cell_formula("Sheet1", "A2", "=2+2").unwrap();
+    engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=FORMULATEXT(INDIRECT(D1))")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("=1+1".to_string())
+    );
+
+    let precedents_a1 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a1,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }, // A1
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 3 }, // D1
+            },
+        ]
+    );
+
+    // Switch the target.
+    engine.set_cell_value("Sheet1", "D1", "A2").unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("=2+2".to_string())
+    );
+
+    let precedents_a2 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a2,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 3 }, // D1
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }, // A2
+            },
+        ]
+    );
+
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert_eq!(
+        engine.dependents("Sheet1", "A2").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 2 } // C1
+        }]
+    );
+}
+
+#[test]
+fn isformula_records_dynamic_dependencies_for_indirect_reference_arg() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
+    engine.set_cell_value("Sheet1", "A2", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=ISFORMULA(INDIRECT(D1))")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Bool(true));
+
+    let precedents_a1 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a1,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }, // A1
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 3 }, // D1
+            },
+        ]
+    );
+
+    // Switch the target.
+    engine.set_cell_value("Sheet1", "D1", "A2").unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Bool(false));
+
+    let precedents_a2 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a2,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 3 }, // D1
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }, // A2
+            },
+        ]
+    );
+
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert_eq!(
+        engine.dependents("Sheet1", "A2").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 2 } // C1
+        }]
+    );
+}
+
+#[test]
 fn cell_format_without_reference_does_not_create_self_edge_in_dynamic_dep_tracing() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
