@@ -1383,6 +1383,84 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
 }
 
 #[wasm_bindgen_test]
+fn null_inputs_preserve_cell_style_metadata_in_engine() {
+    let mut wb = WasmWorkbook::new();
+
+    // Use a fixed 2-decimal number format so `CELL("format")` returns a stable, Excel-like
+    // classification code ("F2"). Also mark the cell as unlocked so `CELL("protect")` returns 0.
+    let style = formula_model::Style {
+        number_format: Some("0.00".to_string()),
+        protection: Some(formula_model::Protection {
+            locked: false,
+            hidden: false,
+        }),
+        ..Default::default()
+    };
+    let style_id = wb.intern_style(to_js_value(&style)).unwrap();
+    wb.set_cell_style_id("A1".to_string(), style_id, None).unwrap();
+
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+    wb.set_cell(
+        "B1".to_string(),
+        JsValue::from_str(r#"=CELL("format",A1)"#),
+        None,
+    )
+    .unwrap();
+    wb.set_cell(
+        "C1".to_string(),
+        JsValue::from_str(r#"=CELL("protect",A1)"#),
+        None,
+    )
+    .unwrap();
+    wb.set_cell(
+        "D1".to_string(),
+        JsValue::from_str(r#"=ISBLANK(A1)"#),
+        None,
+    )
+    .unwrap();
+
+    wb.recalculate(None).unwrap();
+    let cell_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.value, JsonValue::String("F2".to_string()));
+
+    let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_json_number(&cell.value, 0.0);
+
+    let cell_js = wb.get_cell("D1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.value, JsonValue::Bool(false));
+
+    // Clear A1 by setting it to `null` (empty cell in the JS protocol). Formatting should remain
+    // intact so `CELL("format",A1)`/`CELL("protect",A1)` continue to observe style metadata.
+    wb.set_cell("A1".to_string(), JsValue::NULL, None).unwrap();
+    wb.recalculate(None).unwrap();
+
+    let cell_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.value, JsonValue::String("F2".to_string()));
+
+    let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_json_number(&cell.value, 0.0);
+
+    let cell_js = wb.get_cell("D1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.value, JsonValue::Bool(true));
+
+    // `toJson()` should remain sparse: clearing a value should not serialize an explicit blank,
+    // even if the engine preserved formatting metadata.
+    let exported = wb.to_json().unwrap();
+    let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
+    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"]
+        .as_object()
+        .unwrap();
+    assert!(!cells.contains_key("A1"));
+}
+
+#[wasm_bindgen_test]
 fn from_json_treats_null_cells_as_absent() {
     let json_str = r#"{
         "sheets": {
