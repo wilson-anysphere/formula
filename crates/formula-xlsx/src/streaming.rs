@@ -2919,6 +2919,16 @@ fn plan_package_repair_overrides<R: Read + Seek>(
     part_overrides: &HashMap<String, PartOverride>,
     recalc_policy: RecalcPolicy,
 ) -> Result<HashMap<String, PartOverride>, StreamingPatchError> {
+    fn find_part_name<'a>(part_names: &'a BTreeSet<String>, candidate: &str) -> Option<&'a str> {
+        if let Some(name) = part_names.get(candidate) {
+            return Some(name.as_str());
+        }
+        part_names
+            .iter()
+            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
+            .map(String::as_str)
+    }
+
     fn effective_part_bytes<R: Read + Seek>(
         archive: &mut ZipArchive<R>,
         name: &str,
@@ -2927,7 +2937,13 @@ fn plan_package_repair_overrides<R: Read + Seek>(
         part_overrides: &HashMap<String, PartOverride>,
         recalc_policy: RecalcPolicy,
     ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
-        if let Some(op) = part_overrides.get(name) {
+        let override_op = part_overrides.get(name).or_else(|| {
+            part_overrides
+                .iter()
+                .find(|(k, _)| crate::zip_util::zip_part_names_equivalent(k.as_str(), name))
+                .map(|(_, op)| op)
+        });
+        if let Some(op) = override_op {
             match op {
                 PartOverride::Remove => return Ok(None),
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
@@ -2966,7 +2982,7 @@ fn plan_package_repair_overrides<R: Read + Seek>(
     }
 
     // Determine the effective part name set after applying part overrides.
-    let mut part_names: HashSet<String> = HashSet::new();
+    let mut part_names: BTreeSet<String> = BTreeSet::new();
     for name in archive.file_names() {
         // `file_names()` includes directory entries; ignore them for content detection.
         if name.ends_with('/') {
@@ -2987,19 +3003,37 @@ fn plan_package_repair_overrides<R: Read + Seek>(
         }
     }
 
-    let has_vba_project = part_names.contains("xl/vbaProject.bin");
-    let has_vba_signature = part_names.contains("xl/vbaProjectSignature.bin");
-    let has_vba_data = part_names.contains("xl/vbaData.xml");
-
     // Detect whether the package contains image payloads that require `<Default>` entries in
     // `[Content_Types].xml`. This matches the conservative behavior of
     // `XlsxPackage::write_to(...)`: only add defaults for extensions that appear in the package.
+    let mut has_vba_project = false;
+    let mut has_vba_signature = false;
+    let mut has_vba_data = false;
     let mut needs_png = false;
     let mut needs_jpg = false;
     let mut needs_jpeg = false;
     let mut needs_gif = false;
     let mut needs_webp = false;
     for name in &part_names {
+        if !has_vba_project
+            && crate::zip_util::zip_part_names_equivalent(name.as_str(), "xl/vbaProject.bin")
+        {
+            has_vba_project = true;
+        }
+        if !has_vba_signature
+            && crate::zip_util::zip_part_names_equivalent(
+                name.as_str(),
+                "xl/vbaProjectSignature.bin",
+            )
+        {
+            has_vba_signature = true;
+        }
+        if !has_vba_data
+            && crate::zip_util::zip_part_names_equivalent(name.as_str(), "xl/vbaData.xml")
+        {
+            has_vba_data = true;
+        }
+
         let lower = name.to_ascii_lowercase();
         if lower.ends_with(".png") {
             needs_png = true;
@@ -3017,6 +3051,14 @@ fn plan_package_repair_overrides<R: Read + Seek>(
     if !has_vba_project && !(needs_png || needs_jpg || needs_jpeg || needs_gif || needs_webp) {
         return Ok(HashMap::new());
     }
+
+    let content_types_key = find_part_name(&part_names, "[Content_Types].xml").map(ToString::to_string);
+    let workbook_rels_key = has_vba_project
+        .then(|| find_part_name(&part_names, "xl/_rels/workbook.xml.rels").map(ToString::to_string))
+        .flatten();
+    let vba_project_rels_key = (has_vba_project && has_vba_signature)
+        .then(|| find_part_name(&part_names, "xl/_rels/vbaProject.bin.rels").map(ToString::to_string))
+        .flatten();
 
     let content_types_original = effective_part_bytes(
         archive,
@@ -3101,7 +3143,7 @@ fn plan_package_repair_overrides<R: Read + Seek>(
         if let Some(updated) = parts.get("[Content_Types].xml") {
             if updated.as_slice() != original.as_slice() {
                 overrides.insert(
-                    "[Content_Types].xml".to_string(),
+                    content_types_key.unwrap_or_else(|| "[Content_Types].xml".to_string()),
                     PartOverride::Replace(updated.clone()),
                 );
             }
@@ -3112,7 +3154,7 @@ fn plan_package_repair_overrides<R: Read + Seek>(
         if let Some(updated) = parts.get("xl/_rels/workbook.xml.rels") {
             if updated.as_slice() != original.as_slice() {
                 overrides.insert(
-                    "xl/_rels/workbook.xml.rels".to_string(),
+                    workbook_rels_key.unwrap_or_else(|| "xl/_rels/workbook.xml.rels".to_string()),
                     PartOverride::Replace(updated.clone()),
                 );
             }
@@ -3124,7 +3166,7 @@ fn plan_package_repair_overrides<R: Read + Seek>(
             let original = vba_project_rels_original.as_deref();
             if original != Some(updated.as_slice()) {
                 overrides.insert(
-                    "xl/_rels/vbaProject.bin.rels".to_string(),
+                    vba_project_rels_key.unwrap_or_else(|| "xl/_rels/vbaProject.bin.rels".to_string()),
                     PartOverride::Replace(updated.clone()),
                 );
             }
