@@ -89,8 +89,36 @@ pub(crate) fn decrypt_encrypted_package_with_h(
     }
     let hash_alg = hash_algorithm_from_alg_id_hash(info.header.alg_id_hash)?;
 
-    let header = parse_encrypted_package_header(encrypted_package_stream)?;
-    let total_size = header.original_size;
+    // MS-OFFCRYPTO describes `EncryptedPackage.original_size` as a `u64le`, but some
+    // producers/libraries treat it as `(u32 totalSize, u32 reserved)` and may leave the high DWORD
+    // non-zero. Mirror the heuristic used by the AES decryptors: when the high DWORD is non-zero
+    // and the combined 64-bit size is not plausible for the available ciphertext, fall back to the
+    // low DWORD (only when it is non-zero, so true 64-bit sizes that are exact multiples of 2^32
+    // are not misinterpreted).
+    parse_encrypted_package_header(encrypted_package_stream)?;
+    let header_bytes: [u8; 8] = encrypted_package_stream
+        .get(..8)
+        .ok_or(OffcryptoError::Truncated {
+            context: "EncryptedPackageHeader.original_size",
+        })?
+        .try_into()
+        .map_err(|_| OffcryptoError::Truncated {
+            context: "EncryptedPackageHeader.original_size",
+        })?;
+    let len_lo =
+        u32::from_le_bytes([header_bytes[0], header_bytes[1], header_bytes[2], header_bytes[3]])
+            as u64;
+    let len_hi =
+        u32::from_le_bytes([header_bytes[4], header_bytes[5], header_bytes[6], header_bytes[7]])
+            as u64;
+    let total_size_u64 = len_lo | (len_hi << 32);
+    let ciphertext_len_u64 = encrypted_package_stream.len().saturating_sub(8) as u64;
+    let total_size =
+        if len_lo != 0 && len_hi != 0 && total_size_u64 > ciphertext_len_u64 && len_lo <= ciphertext_len_u64 {
+            len_lo
+        } else {
+            total_size_u64
+        };
 
     let output_len = usize::try_from(total_size)
         .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
@@ -214,6 +242,66 @@ mod tests {
             ),
             "expected EncryptedPackageSizeMismatch({total_size}, 16), got {err:?}"
         );
+
+        let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
+        assert!(
+            max_alloc < 10 * 1024 * 1024,
+            "expected no large allocations, observed max allocation request: {max_alloc} bytes"
+        );
+    }
+
+    #[test]
+    fn rc4_decrypt_falls_back_to_low_dword_when_high_dword_is_reserved() {
+        // Some producers treat the 8-byte size prefix as `(u32 totalSize, u32 reserved)`. When the
+        // high DWORD is non-zero but implausible for the ciphertext length, fall back to the low
+        // DWORD (compatibility).
+
+        let plaintext_len: usize = 1000;
+        let plaintext: Vec<u8> = (0..plaintext_len).map(|i| (i % 256) as u8).collect();
+
+        let info = StandardEncryptionInfo {
+            header: StandardEncryptionHeader {
+                flags: StandardEncryptionHeaderFlags::from_raw(0),
+                size_extra: 0,
+                alg_id: CALG_RC4,
+                alg_id_hash: CALG_SHA1,
+                key_size_bits: 128,
+                provider_type: 0,
+                reserved1: 0,
+                reserved2: 0,
+                csp_name: String::new(),
+            },
+            verifier: StandardEncryptionVerifier {
+                salt: vec![0u8; 16],
+                encrypted_verifier: [0u8; 16],
+                verifier_hash_size: 20,
+                encrypted_verifier_hash: vec![0u8; 20],
+            },
+        };
+
+        // SHA1 digest length for the CryptoAPI base hash `H`.
+        let h = vec![0u8; 20];
+
+        // Encrypt the plaintext using the same per-block RC4 scheme (RC4 is symmetric).
+        let mut ciphertext = plaintext.clone();
+        for (block, chunk) in ciphertext.chunks_mut(cryptoapi::RC4_BLOCK_LEN).enumerate() {
+            let key = cryptoapi::rc4_key_for_block(&h, block as u32, info.header.key_size_bits, HashAlgorithm::Sha1)
+                .expect("rc4 key");
+            let mut rc4 = Rc4::new(key.as_slice());
+            rc4.apply_keystream(chunk);
+        }
+
+        // Build `EncryptedPackage` with a non-zero high DWORD.
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&(plaintext_len as u32).to_le_bytes());
+        encrypted_package.extend_from_slice(&1u32.to_le_bytes()); // reserved/high DWORD
+        encrypted_package.extend_from_slice(&ciphertext);
+
+        MAX_ALLOC.store(0, Ordering::Relaxed);
+
+        let decrypted = decrypt_encrypted_package_with_h(&info, &encrypted_package, &h)
+            .expect("decrypt with reserved high DWORD");
+        assert_eq!(decrypted, plaintext);
 
         let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
         assert!(
