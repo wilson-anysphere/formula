@@ -509,6 +509,99 @@ fn countblank_virtual_blank_row_respects_bidirectional_filter_context_columnar_f
 }
 
 #[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context() {
+    let model = build_model_blank_row_bidirectional();
+    let engine = DaxEngine::new();
+
+    // Unfiltered: East, West, BLANK (unknown member).
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    // Filter fact to a matched key: only East should remain (no BLANK).
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    // Filter fact to an unmatched key: only the virtual blank member remains.
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context_columnar_fact() {
+    let model = build_model_blank_row_bidirectional_columnar_fact();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
 fn values_virtual_blank_row_respects_bidirectional_filter_context_columnar_fact() {
     let model = build_model_blank_row_bidirectional_columnar_fact();
     let engine = DaxEngine::new();
