@@ -168,7 +168,7 @@ describe("SpreadsheetApp drawings header clipping", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
       expect(app.getGridMode()).toBe("legacy");
 
       const doc: any = app.getDocument();
@@ -252,7 +252,7 @@ describe("SpreadsheetApp drawings header clipping", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
       expect(app.getGridMode()).toBe("legacy");
 
       const doc: any = app.getDocument();
@@ -408,7 +408,7 @@ describe("SpreadsheetApp drawings header clipping", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
       expect(app.getGridMode()).toBe("shared");
 
       const doc: any = app.getDocument();

@@ -178,7 +178,7 @@ export function decodeBase64ToBytes(base64: string, opts: { maxBytes?: number } 
   return null;
 }
 
-async function readFileBytes(file: File): Promise<Uint8Array> {
+async function readFileBytes(file: Blob): Promise<Uint8Array> {
   const anyFile = file as any;
   if (typeof anyFile?.arrayBuffer === "function") {
     const buffer: ArrayBuffer = await anyFile.arrayBuffer();
