@@ -108,6 +108,7 @@ extract_mise_node_major() {
 require_env_pin_usage() {
   local file="$1"
   local fail=0
+  local validated_any=0
 
   # Fail fast if a workflow uses node-version-file (that would bypass the explicit env pin).
   set +e
@@ -121,7 +122,7 @@ require_env_pin_usage() {
   fi
   if [ -n "$file_pins" ]; then
     echo "Node workflow pin check failed: ${file} uses node-version-file (unsupported in this repo)." >&2
-    echo "Use: node-version: \${{ env.NODE_VERSION }} (and keep NODE_VERSION in sync between CI and release)." >&2
+    echo "Use: node-version: \${{ env.NODE_VERSION }} (and keep NODE_VERSION in sync across workflows)." >&2
     echo "" >&2
     echo "$file_pins" >&2
     exit 1
@@ -157,6 +158,8 @@ require_env_pin_usage() {
       \#*) continue ;;
     esac
 
+    validated_any=1
+
     if [[ "$content" != *"node-version: \${{ env.NODE_VERSION }}"* ]]; then
       echo "Node version pin mismatch in ${file}:"
       echo "  Expected: node-version: \${{ env.NODE_VERSION }}"
@@ -167,6 +170,12 @@ require_env_pin_usage() {
   done <<<"$matches"
 
   if [ "$fail" -ne 0 ]; then
+    exit 1
+  fi
+
+  if [ "$validated_any" -eq 0 ]; then
+    echo "Node workflow pin check failed: ${file} contains only commented-out node-version pins." >&2
+    echo "Expected actions/setup-node to use: node-version: \${{ env.NODE_VERSION }}" >&2
     exit 1
   fi
 }
