@@ -2,6 +2,10 @@ import { createDrawingObjectId, type Anchor, type DrawingObject } from "./types"
 import { pxToEmu } from "./overlay";
 import { duplicateDrawingObject } from "./duplicate";
 
+function compareDrawingId(a: number, b: number): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /**
  * Normalize drawing z-order to a dense 0..n-1 range.
  *
@@ -14,7 +18,14 @@ import { duplicateDrawingObject } from "./duplicate";
 export function normalizeZOrder(objects: DrawingObject[]): DrawingObject[] {
   if (objects.length <= 1) return objects;
 
-  const ordered = [...objects].sort((a, b) => a.zOrder - b.zOrder || a.id - b.id);
+  // Avoid numeric subtraction for id comparisons: drawing ids can span the full JS safe-integer
+  // range (including large-magnitude negative ids for hashed snapshots), and subtraction can lose
+  // precision when values are far apart. A stable comparator keeps z-order normalization
+  // deterministic across runtimes.
+  const ordered = [...objects].sort((a, b) => {
+    if (a.zOrder !== b.zOrder) return a.zOrder - b.zOrder;
+    return compareDrawingId(a.id, b.id);
+  });
   const zOrderById = new Map<number, number>();
   for (let i = 0; i < ordered.length; i += 1) {
     zOrderById.set(ordered[i]!.id, i);
@@ -87,7 +98,10 @@ function reorderZOrder(objects: DrawingObject[], id: number, mode: ReorderMode):
   if (objects.length <= 1) return objects;
 
   const normalized = normalizeZOrder(objects);
-  const stack = [...normalized].sort((a, b) => a.zOrder - b.zOrder || a.id - b.id);
+  const stack = [...normalized].sort((a, b) => {
+    if (a.zOrder !== b.zOrder) return a.zOrder - b.zOrder;
+    return compareDrawingId(a.id, b.id);
+  });
   const index = stack.findIndex((o) => o.id === id);
   if (index === -1) return objects;
 

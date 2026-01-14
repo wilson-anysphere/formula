@@ -995,6 +995,32 @@ frozen panes + row/col size overrides (and, in desktop, merged ranges + drawings
 
 `colWidths` / `rowHeights` values are **base CSS pixels** (zoom-independent, i.e. the size at `zoom = 1`).
 
+### Drawing IDs (namespaces + safety)
+
+Drawing entries in `view.drawings` (and the desktop `DocumentController` sheet view state) are stored as **JSON-serializable objects**. For compatibility with historical snapshots, `drawing.id` is allowed to be either:
+
+- a **string** (preferred for document snapshots / Yjs payloads), or
+- a **number** (must be a JS safe integer).
+
+The UI drawing overlay requires a stable numeric key (`DrawingObject.id: number`). Adapters normalize ids as follows:
+
+- **Positive safe integers** (`> 0`) are passed through unchanged.
+- Any other id (missing, non-numeric, non-positive, or unsafe integer) is mapped into a **reserved hashed namespace**: `id <= -2^33`.
+
+In addition, ChartStore “canvas charts” are rendered as drawing objects with ids in a separate negative namespace:
+
+- **Canvas chart ids**: `-2^32 <= id < 0` (see `chartIdToDrawingId` / `isChartStoreDrawingId`).
+
+Important: do **not** treat “negative id” as synonymous with “chart”. Workbook drawings can also have negative ids (hashed ids).
+
+Implementation references:
+
+- UI id generation for new drawings: `apps/desktop/src/drawings/types.ts` (`createDrawingObjectId`, random 53-bit safe integer)
+- Snapshot id parsing + hashing: `apps/desktop/src/drawings/modelAdapters.ts` (`parseDrawingObjectId`)
+- Canvas chart id mapping: `apps/desktop/src/charts/chartDrawingAdapter.ts` (`chartIdToDrawingId`, `isChartStoreDrawingId`)
+
+XLSX/export note: DrawingML’s `<xdr:cNvPr id="...">` is an `xsd:unsignedInt` (u32). UI-layer ids may exceed u32, so any future “export UI-created drawings to XLSX” pipeline must **remap ids at write time** instead of writing the UI id verbatim.
+
 Compatibility note:
 
 - Some historical/experimental docs stored `frozenRows` / `frozenCols` as **top-level** fields directly on the sheet map.
