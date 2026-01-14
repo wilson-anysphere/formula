@@ -637,7 +637,8 @@ pub fn pivot(
 
 - `columns`: group-by columns formatted as `"Table[Column]"`, followed by `PivotMeasure.name`
 - `rows`: one row per group, sorted lexicographically by group keys using an Excel-like cross-type
-  ordering (`Number` < `Text` < `Boolean` < `BLANK`)
+  ordering (`Number` < `Text` < `Boolean` < `BLANK`). Text keys are sorted case-insensitively (Unicode-aware
+  uppercasing) with a deterministic case-sensitive tiebreak so the ordering remains total.
 
 ### Performance paths
 
