@@ -550,6 +550,53 @@ test("buildWorkbookContext: promptContext does not leak heuristic-sensitive shee
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: does not redact heuristic-sensitive schema tokens when policy allows Restricted", async () => {
+  const workbook = {
+    id: "wb-dlp-allow-restricted",
+    sheets: [
+      {
+        name: "Contacts",
+        cells: [
+          // Header row contains heuristic-sensitive strings; should be allowed when maxAllowed=Restricted.
+          [{ v: "alice@example.com" }, { v: "123-45-6789" }, { v: "Amount" }],
+          [{ v: "Alice" }, { v: "foo" }, { v: 100 }],
+        ],
+      },
+    ],
+    tables: [{ name: "SensitiveHeaders", sheetName: "Contacts", rect: { r0: 0, c0: 0, r1: 1, c1: 2 } }],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1600,
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Restricted", redactDisallowed: true }),
+    },
+  });
+
+  assert.match(out.promptContext, /## workbook_schema/i);
+  const schemaSection =
+    out.promptContext.match(/## workbook_schema\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+  assert.match(schemaSection, /alice@example\.com/);
+  assert.match(schemaSection, /123-45-6789/);
+  assert.doesNotMatch(schemaSection, /\[REDACTED\]/);
+
+  const joined = embedder.seen.join("\n");
+  assert.match(joined, /alice@example\.com/);
+  assert.match(joined, /123-45-6789/);
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });

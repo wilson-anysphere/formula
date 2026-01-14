@@ -1147,7 +1147,14 @@ export class ContextManager {
     const dlp = normalizeDlpOptions(params.dlp);
     const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
     const policyAllowsRestrictedContent = Boolean(dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
-    const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
+    // Restricted content can be allowed in two ways:
+    // - the policy's maxAllowed threshold is >= Restricted (then it's allowed without overrides)
+    // - the caller opts into includeRestrictedContent and the policy explicitly allows that override
+    const maxAllowed = dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.maxAllowed ?? null;
+    const maxAllowedRank = maxAllowed === null ? null : classificationRank(maxAllowed);
+    const thresholdAllowsRestricted = maxAllowedRank !== null && maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
+    const overrideAllowsRestricted = includeRestrictedContent && policyAllowsRestrictedContent && maxAllowedRank !== null;
+    const restrictedAllowed = thresholdAllowsRestricted || overrideAllowsRestricted;
     const classificationRecords =
       dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp.documentId) ?? [];
 
