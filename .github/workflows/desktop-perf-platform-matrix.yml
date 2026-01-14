@@ -483,3 +483,135 @@ jobs:
             failed=1
           fi
           exit "$failed"
+
+  merge:
+    name: Desktop perf summary (all OS)
+    needs: desktop-perf
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download per-OS perf artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: desktop-perf-*
+          path: artifacts/desktop-perf
+
+      - name: Merge metrics + write summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p merged
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          
+          function readJsonMaybe(p) {
+            try {
+              return JSON.parse(fs.readFileSync(p, "utf8"));
+            } catch {
+              return null;
+            }
+          }
+          
+          function fmt(n, digits = 1) {
+            if (typeof n !== "number" || !Number.isFinite(n)) return "n/a";
+            return n.toFixed(digits);
+          }
+          
+          const artifactsRoot = path.resolve("artifacts/desktop-perf");
+          const entries = fs.existsSync(artifactsRoot)
+            ? fs.readdirSync(artifactsRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+            : [];
+          
+          /** @type {Record<string, any>} */
+          const byArtifact = {};
+          for (const name of entries) {
+            const p = path.join(artifactsRoot, name, "perf-artifacts", "desktop-perf-metrics.json");
+            byArtifact[name] = readJsonMaybe(p);
+          }
+          
+          const merged = {
+            generatedAt: new Date().toISOString(),
+            ci: {
+              workflow: process.env.GITHUB_WORKFLOW ?? null,
+              runId: process.env.GITHUB_RUN_ID ?? null,
+              runNumber: process.env.GITHUB_RUN_NUMBER ?? null,
+              attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+            },
+            git: { sha: process.env.GITHUB_SHA ?? null, ref: process.env.GITHUB_REF ?? null },
+            artifacts: byArtifact,
+          };
+          
+          fs.writeFileSync(path.resolve("merged/desktop-perf-platform-matrix.json"), JSON.stringify(merged, null, 2), "utf8");
+          
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          if (!summaryPath) process.exit(0);
+          
+          const rows = [
+            { label: "Linux", artifact: "desktop-perf-ubuntu-24.04" },
+            { label: "Windows", artifact: "desktop-perf-windows-latest" },
+            { label: "macOS", artifact: "desktop-perf-macos-latest" },
+          ].map((r) => ({ ...r, data: byArtifact[r.artifact] ?? null }));
+          
+          const lines = [];
+          lines.push("## Desktop perf summary (all OS)");
+          lines.push("");
+          lines.push(`- Commit: \`${process.env.GITHUB_SHA ?? "n/a"}\``);
+          lines.push(`- Run: https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`);
+          lines.push("");
+          
+          lines.push("### WebView runtime");
+          lines.push("");
+          lines.push("| OS | engine | version |");
+          lines.push("|---|---|---|");
+          for (const row of rows) {
+            const w = row.data?.webview ?? null;
+            lines.push(`| ${row.label} | \`${w?.engine ?? "n/a"}\` | \`${w?.version ?? "n/a"}\` |`);
+          }
+          lines.push("");
+          
+          lines.push("### Startup (p95, ms)");
+          lines.push("");
+          lines.push("| OS | cold windowVisible | cold tti | warm windowVisible | warm tti |");
+          lines.push("|---|---:|---:|---:|---:|");
+          for (const row of rows) {
+            const cold = row.data?.startupCold?.summary ?? null;
+            const warm = row.data?.startupWarm?.summary ?? null;
+            lines.push(
+              `| ${row.label} | ${fmt(cold?.windowVisible?.p95, 0)} | ${fmt(cold?.tti?.p95, 0)} | ${fmt(warm?.windowVisible?.p95, 0)} | ${fmt(warm?.tti?.p95, 0)} |`,
+            );
+          }
+          lines.push("");
+          
+          lines.push("### Idle memory (p95, MB)");
+          lines.push("");
+          lines.push("| OS | kind | idle memory |");
+          lines.push("|---|---|---:|");
+          for (const row of rows) {
+            const mem = row.data?.idleMemory ?? null;
+            const kind = mem?.measurement ?? "rss";
+            const p95 = mem?.summary?.rssMb?.p95;
+            lines.push(`| ${row.label} | \`${kind}\` | ${fmt(p95, 1)} |`);
+          }
+          lines.push("");
+          
+          fs.appendFileSync(summaryPath, lines.join("\n") + "\n", "utf8");
+          NODE
+
+      - name: Upload merged desktop perf metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-perf-platform-matrix
+          if-no-files-found: warn
+          path: |
+            merged/desktop-perf-platform-matrix.json

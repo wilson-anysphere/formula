@@ -781,13 +781,13 @@ jobs:
             lines.push(`- Commit: \`${headSha}\``);
             lines.push(`- Enforcement: \`${enforce ? "on" : "off"}\` (\`FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=${process.env.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX || ""}\`)`);
             lines.push(`- Run: ${runUrl}`);
-            lines.push("");
-            lines.push("#### Startup (p95 / target, ms)");
-            lines.push("");
-            lines.push("| OS | cold windowVisible | cold tti | cold webviewLoaded | warm windowVisible | warm tti | warm webviewLoaded |");
-            lines.push("|---|---:|---:|---:|---:|---:|---:|");
-            
-            for (const row of byOs) {
+             lines.push("");
+             lines.push("#### Startup (p95 / target, ms)");
+             lines.push("");
+             lines.push("| OS | cold windowVisible | cold tti | cold webviewLoaded | warm windowVisible | warm tti | warm webviewLoaded |");
+             lines.push("|---|---:|---:|---:|---:|---:|---:|");
+             
+             for (const row of byOs) {
               const cold = row.data?.startupCold?.summary ?? null;
               const warm = row.data?.startupWarm?.summary ?? null;
               const coldWv = fmtMetric(cold?.windowVisible?.p95, cold?.windowVisible?.targetMs, 0);
@@ -796,14 +796,27 @@ jobs:
               const warmWv = fmtMetric(warm?.windowVisible?.p95, warm?.windowVisible?.targetMs, 0);
               const warmTti = fmtMetric(warm?.tti?.p95, warm?.tti?.targetMs, 0);
               const warmWeb = fmtMetric(warm?.webviewLoaded?.p95, warm?.webviewLoaded?.targetMs, 0);
-              lines.push(`| ${row.label} | ${coldWv} | ${coldTti} | ${coldWeb} | ${warmWv} | ${warmTti} | ${warmWeb} |`);
-            }
-            
-            lines.push("");
-            lines.push("#### Idle memory (p95 / target, MB)");
-            lines.push("");
-            lines.push("| OS | kind | idle memory |");
-            lines.push("|---|---|---:|");
+               lines.push(`| ${row.label} | ${coldWv} | ${coldTti} | ${coldWeb} | ${warmWv} | ${warmTti} | ${warmWeb} |`);
+             }
+             
+             lines.push("");
+             lines.push("#### WebView runtime");
+             lines.push("");
+             lines.push("| OS | engine | version |");
+             lines.push("|---|---|---|");
+             
+             for (const row of byOs) {
+               const w = row.data?.webview ?? null;
+               const engine = w?.engine ?? "n/a";
+               const version = w?.version ?? "n/a";
+               lines.push(`| ${row.label} | \`${engine}\` | \`${version}\` |`);
+             }
+             
+             lines.push("");
+             lines.push("#### Idle memory (p95 / target, MB)");
+             lines.push("");
+             lines.push("| OS | kind | idle memory |");
+             lines.push("|---|---|---:|");
             
             for (const row of byOs) {
               const mem = row.data?.idleMemory ?? null;
