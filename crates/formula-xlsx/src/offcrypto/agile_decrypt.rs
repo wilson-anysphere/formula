@@ -743,6 +743,12 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
     }
 
     // 3) Stream-decrypt the ciphertext while optionally computing the HMAC over the encrypted bytes.
+    let encrypted_package_len = encrypted_package_stream
+        .seek(SeekFrom::End(0))
+        .map_err(|source| OffCryptoError::Io {
+            context: "seeking EncryptedPackage to end",
+            source,
+        })?;
     encrypted_package_stream
         .seek(SeekFrom::Start(0))
         .map_err(|source| OffCryptoError::Io {
@@ -760,7 +766,21 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
     if let Some(mac) = ciphertext_mac.as_mut() {
         mac.update(&header);
     }
-    let declared_len = u64::from_le_bytes(header);
+    // `original_package_size` is an 8-byte plaintext prefix. While MS-OFFCRYPTO describes it as a
+    // `u64le`, some producers/libraries treat it as `u32 totalSize` + `u32 reserved` (often 0).
+    //
+    // For compatibility, parse as two DWORDs and fall back to the low DWORD when the combined
+    // 64-bit value is not plausible for the available ciphertext.
+    let len_lo = u32::from_le_bytes(header[..4].try_into().expect("slice length checked")) as u64;
+    let len_hi = u32::from_le_bytes(header[4..].try_into().expect("slice length checked")) as u64;
+    let declared_len_u64 = len_lo | (len_hi << 32);
+    let ciphertext_len = encrypted_package_len.saturating_sub(8);
+    let declared_len =
+        if len_hi != 0 && declared_len_u64 > ciphertext_len && len_lo <= ciphertext_len {
+            len_lo
+        } else {
+            declared_len_u64
+        };
 
     let mut remaining_to_write = declared_len;
     let mut written: u64 = 0;
