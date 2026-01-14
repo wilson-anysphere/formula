@@ -68,6 +68,9 @@ function writeParquetMimeDefinition(
     xmlContent = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+      '  <mime-type type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">',
+      '    <glob pattern="*.xlsx" />',
+      "  </mime-type>",
       '  <mime-type type="application/vnd.apache.parquet">',
         '    <glob pattern="*.parquet" />',
       "  </mime-type>",
@@ -502,6 +505,9 @@ test(
       xmlContent: [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+        '  <mime-type type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">',
+        '    <glob pattern="*.xlsx" />',
+        "  </mime-type>",
         '  <mime-type type="application/vnd.apache.parquet">',
         // Intentionally omit the *.parquet glob mapping.
         "  </mime-type>",

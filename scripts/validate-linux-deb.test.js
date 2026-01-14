@@ -55,6 +55,40 @@ const expectedSchemeMimes = expectedDeepLinkSchemes.map((scheme) => `x-scheme-ha
 const defaultDesktopMimeValue = `${expectedFileAssociationMimeTypes.join(";")};${expectedSchemeMimes.join(";")};`;
 const defaultDesktopMimeValueNoScheme = `${expectedFileAssociationMimeTypes.join(";")};`;
 
+function buildSharedMimeInfoXml({ omitGlobsForExts = new Set() } = {}) {
+  const groups = new Map();
+  const associations = Array.isArray(tauriConf?.bundle?.fileAssociations) ? tauriConf.bundle.fileAssociations : [];
+  for (const assoc of associations) {
+    const mimeType = typeof assoc?.mimeType === "string" ? assoc.mimeType.trim() : "";
+    if (!mimeType) continue;
+    const rawExts = assoc?.ext;
+    const exts = Array.isArray(rawExts) ? rawExts : typeof rawExts === "string" ? [rawExts] : [];
+    for (const raw of exts) {
+      if (typeof raw !== "string") continue;
+      const ext = raw.trim().replace(/^\./, "").toLowerCase();
+      if (!ext) continue;
+      if (!groups.has(mimeType)) groups.set(mimeType, new Set());
+      groups.get(mimeType).add(ext);
+    }
+  }
+
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+  ];
+  for (const mimeType of Array.from(groups.keys()).sort()) {
+    lines.push(`  <mime-type type="${mimeType}">`);
+    const exts = Array.from(groups.get(mimeType)).sort();
+    for (const ext of exts) {
+      if (omitGlobsForExts.has(ext)) continue;
+      lines.push(`    <glob pattern="*.${ext}" />`);
+    }
+    lines.push("  </mime-type>");
+  }
+  lines.push("</mime-info>");
+  return lines.join("\n");
+}
+
 const hasBash = (() => {
   if (process.platform === "win32") return false;
   const probe = spawnSync("bash", ["-lc", "exit 0"], { stdio: "ignore" });
@@ -75,6 +109,7 @@ test("validate-linux-deb --help prints usage and mentions key env vars", { skip:
 });
 
 function writeFakeDpkgDebTool(binDir) {
+  const defaultMimeXml = buildSharedMimeInfoXml();
   const script = `#!/usr/bin/env bash
  set -euo pipefail
 
@@ -157,11 +192,7 @@ BIN
       printf '%s\n' "$FAKE_MIME_XML_CONTENT" > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml"
     else
       cat > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml" <<'XML'
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <mime-type type="application/vnd.apache.parquet">
-    <glob pattern="*.parquet" />
-  </mime-type>
-</mime-info>
+${defaultMimeXml}
 XML
     fi
     exit 0
@@ -691,7 +722,10 @@ test("validate-linux-deb fails when Parquet shared-mime-info definition is missi
   // When python3 is present, the strict verifier reports no packaged shared-mime-info definition
   // matching the expected MIME + glob; otherwise the bash fallback emits a "missing expected content"
   // error. Match either so the test remains hermetic across environments.
-  assert.match(proc.stderr, /(missing expected content|missing required content|no packaged shared-mime-info definition)/i);
+  assert.match(
+    proc.stderr,
+    /(missing expected content|missing required content|missing required glob mappings|no packaged shared-mime-info definition)/i,
+  );
 });
 
 test("validate-linux-deb fails when extracted .desktop is missing MimeType=", { skip: !hasBash }, () => {

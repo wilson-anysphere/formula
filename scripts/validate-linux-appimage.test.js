@@ -53,6 +53,40 @@ function collectDeepLinkSchemes(config) {
 const expectedDeepLinkSchemes = collectDeepLinkSchemes(tauriConfig);
 const expectedSchemeMimes = expectedDeepLinkSchemes.map((scheme) => `x-scheme-handler/${scheme}`);
 
+function buildSharedMimeInfoXml({ omitGlobsForExts = new Set() } = {}) {
+  const groups = new Map();
+  const associations = Array.isArray(tauriConfig?.bundle?.fileAssociations) ? tauriConfig.bundle.fileAssociations : [];
+  for (const assoc of associations) {
+    const mimeType = typeof assoc?.mimeType === "string" ? assoc.mimeType.trim() : "";
+    if (!mimeType) continue;
+    const rawExts = assoc?.ext;
+    const exts = Array.isArray(rawExts) ? rawExts : typeof rawExts === "string" ? [rawExts] : [];
+    for (const raw of exts) {
+      if (typeof raw !== "string") continue;
+      const ext = raw.trim().replace(/^\./, "").toLowerCase();
+      if (!ext) continue;
+      if (!groups.has(mimeType)) groups.set(mimeType, new Set());
+      groups.get(mimeType).add(ext);
+    }
+  }
+
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+  ];
+  for (const mimeType of Array.from(groups.keys()).sort()) {
+    lines.push(`  <mime-type type="${mimeType}">`);
+    const exts = Array.from(groups.get(mimeType)).sort();
+    for (const ext of exts) {
+      if (omitGlobsForExts.has(ext)) continue;
+      lines.push(`    <glob pattern="*.${ext}"/>`);
+    }
+    lines.push("  </mime-type>");
+  }
+  lines.push("</mime-info>");
+  return lines.join("\n");
+}
+
 const hasBash = (() => {
   if (process.platform === "win32") return false;
   const probe = spawnSync("bash", ["-lc", "exit 0"], { stdio: "ignore" });
@@ -116,15 +150,7 @@ function writeFakeAppImage(
       ].join("\n")
     : "mkdir -p squashfs-root/usr/share/applications";
 
-  const defaultParquetMimeDefinitionContents = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
-    '  <mime-type type="application/vnd.apache.parquet">',
-    "    <comment>Parquet File</comment>",
-    '    <glob pattern="*.parquet"/>',
-    "  </mime-type>",
-    "</mime-info>",
-  ].join("\n");
+  const defaultParquetMimeDefinitionContents = buildSharedMimeInfoXml();
   const parquetMimeContents = parquetMimeDefinitionContents || defaultParquetMimeDefinitionContents;
 
   const script = `#!/usr/bin/env bash

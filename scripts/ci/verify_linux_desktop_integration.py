@@ -172,7 +172,57 @@ def verify_compliance_artifacts(package_root: Path, package_name: str) -> None:
         )
 
 
-def verify_parquet_mime_definition(package_root: Path, identifier: str) -> None:
+def load_expected_extension_mime_pairs(tauri_config_path: Path) -> list[tuple[str, str]]:
+    """
+    Load `(extension, mimeType)` pairs from `bundle.fileAssociations`.
+
+    On Linux, `.desktop` entries advertise MIME types rather than file extensions, so we ship a
+    shared-mime-info definition under `/usr/share/mime/packages/<identifier>.xml` to ensure the
+    system can resolve `*.ext` → `mime/type` consistently. This helper provides the expected
+    extension→MIME mapping for that definition file.
+    """
+
+    config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
+    associations = config.get("bundle", {}).get("fileAssociations", [])
+    pairs: list[tuple[str, str]] = []
+
+    for assoc in associations:
+        if not isinstance(assoc, dict):
+            continue
+        mime = assoc.get("mimeType")
+        if isinstance(mime, str):
+            mime_type = mime.strip().lower()
+        else:
+            continue
+        if not mime_type:
+            continue
+        exts_raw = assoc.get("ext")
+        exts: list[str] = []
+        if isinstance(exts_raw, str):
+            exts = [exts_raw]
+        elif isinstance(exts_raw, list):
+            exts = [str(e) for e in exts_raw]
+
+        for ext in exts:
+            normalized = str(ext).strip().lower().lstrip(".")
+            if not normalized:
+                continue
+            pairs.append((normalized, mime_type))
+
+    # De-dupe while keeping stable ordering for readable error messages.
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[str, str]] = []
+    for pair in pairs:
+        if pair in seen:
+            continue
+        seen.add(pair)
+        unique.append(pair)
+    return unique
+
+
+def verify_shared_mime_definition(
+    package_root: Path, identifier: str, expected_pairs: list[tuple[str, str]]
+) -> None:
     """
     Parquet is not consistently defined in shared-mime-info across distros.
 
@@ -190,8 +240,6 @@ def verify_parquet_mime_definition(package_root: Path, identifier: str) -> None:
             "and map it into Linux packages via bundle.linux.(deb|rpm|appimage).files in tauri.conf.json."
         )
 
-    expected_mime = "application/vnd.apache.parquet"
-    expected_glob = "*.parquet"
     identifier = identifier.strip()
 
     if not identifier:
@@ -221,32 +269,53 @@ def verify_parquet_mime_definition(package_root: Path, identifier: str) -> None:
             "(where <identifier> comes from tauri.conf.json identifier)."
         )
 
-    candidates = [expected_xml]
-    for xml_path in candidates:
-        try:
-            tree = ET.parse(xml_path)
-        except ET.ParseError as e:
-            raise SystemExit(
-                "[linux] ERROR: failed to parse expected Parquet shared-mime-info definition XML.\n"
-                f"File: {xml_path}\n"
-                f"Error: {e}"
-            )
-        root = tree.getroot()
-        for mime_type in root.findall(".//{http://www.freedesktop.org/standards/shared-mime-info}mime-type"):
-            if mime_type.get("type") != expected_mime:
-                continue
-            for glob in mime_type.findall("{http://www.freedesktop.org/standards/shared-mime-info}glob"):
-                if glob.get("pattern") == expected_glob:
-                    print(
-                        f"[linux] Parquet MIME definition OK: {xml_path} defines {expected_mime} ({expected_glob})"
-                    )
-                    return
+    try:
+        tree = ET.parse(expected_xml)
+    except ET.ParseError as e:
+        raise SystemExit(
+            "[linux] ERROR: failed to parse expected shared-mime-info definition XML.\n"
+            f"File: {expected_xml}\n"
+            f"Error: {e}"
+        )
 
-    raise SystemExit(
-        "[linux] ERROR: Parquet file association configured but the expected shared-mime-info definition file is missing required content.\n"
-        f"Expected: {mime_packages_dir}/{identifier}.xml\n"
-        f"Expected to define:\n  - {expected_mime} with glob {expected_glob}\n"
-        "Hint: ensure the packaged shared-mime-info XML includes a <glob pattern=\"*.parquet\" /> entry."
+    namespace = "{http://www.freedesktop.org/standards/shared-mime-info}"
+    root = tree.getroot()
+    globs_by_mime: dict[str, set[str]] = {}
+    for mime_type_el in root.findall(f".//{namespace}mime-type"):
+        mt_raw = mime_type_el.get("type")
+        if not mt_raw:
+            continue
+        mt = mt_raw.strip().lower()
+        if not mt:
+            continue
+        patterns = globs_by_mime.setdefault(mt, set())
+        for glob_el in mime_type_el.findall(f"{namespace}glob"):
+            pat = glob_el.get("pattern")
+            if not pat:
+                continue
+            patterns.add(pat.strip().lower())
+
+    missing: list[tuple[str, str, str]] = []
+    for ext, mime_type in expected_pairs:
+        expected_glob = f"*.{ext}"
+        patterns = globs_by_mime.get(mime_type, set())
+        if expected_glob.lower() not in patterns:
+            missing.append((ext, mime_type, expected_glob))
+
+    if missing:
+        formatted = "\n".join(f"- .{ext} → {mime} (expected glob {glob})" for ext, mime, glob in missing)
+        raise SystemExit(
+            "[linux] ERROR: shared-mime-info definition file is missing required glob mappings for configured file associations.\n"
+            f"File: {expected_xml}\n"
+            "Missing:\n"
+            f"{formatted}\n"
+            "Hint: ensure the packaged shared-mime-info XML defines <glob pattern=\"*.ext\" /> entries for each "
+            "extension in bundle.fileAssociations so the file manager can resolve extensions to the advertised "
+            "MimeType= entries in the app's .desktop file."
+        )
+
+    print(
+        f"[linux] shared-mime-info definition OK: {expected_xml} defines glob mappings for {len(expected_pairs)} configured file association(s)"
     )
 
 
@@ -353,6 +422,7 @@ def main() -> int:
     args = parser.parse_args()
 
     expected_mime_types = load_expected_mime_types(args.tauri_config)
+    expected_extension_pairs = load_expected_extension_mime_pairs(args.tauri_config)
     expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
     default_name = load_expected_doc_package_name(args.tauri_config)
     expected_identifier = load_expected_identifier(args.tauri_config)
@@ -492,9 +562,11 @@ def main() -> int:
     # Finally, validate that the built package ships OSS/compliance artifacts.
     verify_compliance_artifacts(args.package_root, expected_doc_pkg)
 
-    # Parquet file association requires a shared-mime-info definition on many distros.
+    # Parquet file association requires a shared-mime-info definition on many distros. While validating
+    # that definition file, we also ensure it includes glob mappings for all configured file
+    # associations so the system can resolve extensions to the MIME types advertised in `.desktop`.
     if "application/vnd.apache.parquet" in expected_mime_types:
-        verify_parquet_mime_definition(args.package_root, expected_identifier)
+        verify_shared_mime_definition(args.package_root, expected_identifier, expected_extension_pairs)
 
     return 0
 
