@@ -179,6 +179,32 @@ describeWasm("EngineWorker encrypted workbook load (wasm)", () => {
     }
   });
 
+  it("decrypts and opens an encrypted XLSM fixture via loadWorkbookFromEncryptedXlsxBytes", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel,
+    });
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const repoRoot = path.resolve(__dirname, "../../../..");
+    const encryptedPath = path.join(repoRoot, "fixtures", "encrypted", "ooxml", "agile-basic.xlsm");
+    const bytes = new Uint8Array(readFileSync(encryptedPath));
+
+    try {
+      await engine.loadWorkbookFromEncryptedXlsxBytes(bytes, "password");
+      await engine.recalculate();
+
+      const a1 = (await engine.getCell("A1", "Sheet1")) as any;
+      expect(a1.value).toBe(null);
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("decrypts and opens an encrypted XLSB fixture via loadWorkbookFromEncryptedXlsxBytes", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
