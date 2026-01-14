@@ -34,6 +34,7 @@ export class EngineCellCache {
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly maxEntries: number;
   private generation = 0;
+  private supportsRangeCompact: boolean | null = null;
 
   constructor(engine: EngineClient, options?: EngineCellCacheOptions) {
     this.engine = engine;
@@ -91,15 +92,41 @@ export class EngineCellCache {
 
     const generation = this.generation;
     const task = (async () => {
-      const rows = await this.engine.getRange(rangeA1, sheetName);
+      const getRangeCompact = (this.engine as EngineClient).getRangeCompact;
+
+      let rows: any[][] | null = null;
+      let usedCompact = false;
+      if (this.supportsRangeCompact !== false && typeof getRangeCompact === "function") {
+        try {
+          rows = (await getRangeCompact(rangeA1, sheetName)) as any[][];
+          this.supportsRangeCompact = true;
+          usedCompact = true;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const isMissingCompactApi =
+            message.includes("unknown method: getRangeCompact") ||
+            (message.toLowerCase().includes("getrangecompact") && message.toLowerCase().includes("not available"));
+          if (!isMissingCompactApi) {
+            throw err;
+          }
+          this.supportsRangeCompact = false;
+        }
+      }
+
+      if (!rows) {
+        rows = (await this.engine.getRange(rangeA1, sheetName)) as any[][];
+      }
+
       if (generation !== this.generation) {
         return;
       }
+
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r] ?? [];
         for (let c = 0; c < row.length; c++) {
           const cell = row[c];
-          const value = normalizeCellValue(cell.value);
+          const rawValue = usedCompact ? cell?.[1] : cell?.value;
+          const value = normalizeCellValue(rawValue ?? null);
           const cellRow0 = range.startRow0 + r;
           const cellCol0 = range.startCol0 + c;
           this.setValue(cacheKey(sheetName, cellRow0, cellCol0), value);
