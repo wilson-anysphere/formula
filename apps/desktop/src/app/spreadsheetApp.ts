@@ -1486,6 +1486,79 @@ export class SpreadsheetApp {
   private editState = false;
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
   private focusTargetProvider: (() => HTMLElement | null) | null = null;
+  /**
+   * Window-level keydown capture handler to ensure selected drawing/chart keyboard shortcuts
+   * take precedence over global keybindings (KeybindingService) and work from split-view
+   * secondary pane focus (which is not a descendant of `this.root`).
+   */
+  private readonly onSelectedObjectKeyDownCapture = (e: KeyboardEvent): void => {
+    if (this.disposed) return;
+    // Fast path: if no object is selected, never intercept.
+    if (this.selectedDrawingId == null && this.selectedChartId == null) return;
+
+    // Only intercept the subset of keys that are meaningful for object manipulation and
+    // would otherwise conflict with global spreadsheet keybindings (Delete, Ctrl/Cmd+D).
+    const key = e.key;
+    const code = e.code;
+    const primary = e.ctrlKey || e.metaKey;
+    const isArrow = key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown";
+    const isDelete = key === "Delete" || key === "Backspace";
+    const isDuplicate = primary && !e.altKey && !e.shiftKey && (key === "d" || key === "D");
+    const isArrange = primary && !e.altKey && (code === "BracketLeft" || code === "BracketRight");
+    if (!(isArrow || isDelete || isDuplicate || isArrange)) return;
+
+    // Never hijack key events originating from text inputs/contenteditable nodes.
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+
+    // Only handle when the keyboard target lives inside the spreadsheet grid surfaces.
+    // (This avoids stealing arrow keys from other UI like the Selection Pane.)
+    const inPrimaryGrid = Boolean(target && this.root.contains(target));
+    const secondaryRoot = this.splitViewSecondaryGrid?.container ?? null;
+    const inSecondaryGrid = Boolean(target && secondaryRoot && secondaryRoot.contains(target));
+    if (!inPrimaryGrid && !inSecondaryGrid) return;
+
+    // Do not handle while editing text (cell editor, formula bar, inline edit).
+    if (this.isEditing()) return;
+
+    let handled = false;
+
+    // Workbook drawings (pictures/shapes/imported charts).
+    if (this.selectedDrawingId != null) {
+      handled = this.handleDrawingKeyDown(e);
+    }
+
+    // ChartStore charts (canvas charts mode) have their own selection state.
+    if (!handled && this.selectedChartId != null) {
+      handled = this.handleSelectedChartKeyDown(e);
+      // Chart deletion is handled outside `handleSelectedChartKeyDown` (historical).
+      if (!handled && isDelete) {
+        e.preventDefault();
+        if (this.isReadOnly()) {
+          const cell = this.selection.active;
+          showCollabEditRejectedToast([
+            { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+          ]);
+          handled = true;
+        } else {
+          const chartId = this.selectedChartId;
+          this.setSelectedChartId(null);
+          this.chartStore.deleteChart(chartId);
+          this.focus();
+          handled = true;
+        }
+      }
+    }
+
+    if (handled) {
+      // Critical: KeybindingService runs built-in shortcuts in window capture phase. Stop the
+      // event here so object shortcuts (Delete/Ctrl+D/arrows) don't also trigger grid commands
+      // like Clear Contents / Fill Down.
+      e.stopImmediatePropagation();
+    }
+  };
 
   private editor: CellEditorOverlay;
   private suppressFocusRestoreOnNextCommandCommit = false;
@@ -3150,6 +3223,13 @@ export class SpreadsheetApp {
         passive: false,
         signal: this.domAbort.signal
       });
+    }
+
+    // Drawings/charts selection shortcuts (Delete/Ctrl+D/arrows) should work even when focus is
+    // on the split-view secondary pane (which lives outside `this.root`) and should take
+    // precedence over the global KeybindingService shortcuts (installed on `window` capture).
+    if (typeof window !== "undefined") {
+      window.addEventListener("keydown", this.onSelectedObjectKeyDownCapture, { capture: true, signal: this.domAbort.signal });
     }
 
     if (this.useCanvasCharts) {
