@@ -1824,7 +1824,17 @@ export class CollabSession {
   whenSynced(timeoutMs: number = 10_000): Promise<void> {
     const provider = this.provider;
     if (!provider || typeof provider.on !== "function") return Promise.resolve();
-    if (provider.synced) return Promise.resolve();
+    // Some lightweight provider mocks emit `sync=true` events without updating a
+    // `.synced` property. Prefer the session's observed sync state when
+    // available, and fall back to `provider.synced` for real providers like
+    // y-websocket.
+    const alreadySynced =
+      this.providerSyncListener != null
+        ? this.syncState.synced
+        : typeof (provider as any)?.synced === "boolean"
+          ? Boolean((provider as any).synced)
+          : false;
+    if (alreadySynced) return Promise.resolve();
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -1842,7 +1852,15 @@ export class CollabSession {
 
       provider.on("sync", handler);
 
-      if (provider.synced) handler(true);
+      // After registering, double-check whether the provider has already synced
+      // (either via the `.synced` property or our observed event-based state).
+      const syncedNow =
+        this.providerSyncListener != null
+          ? this.syncState.synced
+          : typeof (provider as any)?.synced === "boolean"
+            ? Boolean((provider as any).synced)
+            : false;
+      if (syncedNow) handler(true);
     });
   }
 

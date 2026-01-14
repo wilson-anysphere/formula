@@ -337,6 +337,44 @@ test("CollabSession schema init waits for provider sync even if provider.synced 
   doc.destroy();
 });
 
+test("CollabSession.whenSynced resolves even if provider.synced is unset (sync event already fired)", async () => {
+  const doc = new Y.Doc();
+  /** @type {Map<string, Set<(...args: any[]) => void>>} */
+  const events = new Map();
+
+  const provider = {
+    on(event, cb) {
+      let listeners = events.get(event);
+      if (!listeners) {
+        listeners = new Set();
+        events.set(event, listeners);
+      }
+      listeners.add(cb);
+    },
+    off(event, cb) {
+      const listeners = events.get(event);
+      if (!listeners) return;
+      listeners.delete(cb);
+      if (listeners.size === 0) events.delete(event);
+    },
+    destroy() {},
+  };
+
+  const session = createCollabSession({
+    doc,
+    provider,
+  });
+
+  // Provider doesn't expose `.synced`, but it emits `sync=true` once hydrated.
+  for (const cb of events.get("sync") ?? []) cb(true);
+
+  // `whenSynced` should treat the prior sync event as authoritative and resolve.
+  await session.whenSynced(50);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession schema.autoInit=false does not create workbook roots eagerly", () => {
   const session = createCollabSession({ doc: new Y.Doc(), schema: { autoInit: false } });
   assert.equal(session.sheets.length, 0);
