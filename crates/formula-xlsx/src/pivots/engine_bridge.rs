@@ -105,6 +105,24 @@ fn slicer_cache_field_idx_best_effort(
     cache: &PivotCache,
 ) -> Option<usize> {
     // Prefer explicit field metadata when present.
+    if let Some(field_name) = slicer.field_name.as_deref() {
+        if let Some(idx) = cache_def.cache_fields.iter().position(|f| f.name == field_name) {
+            return Some(idx);
+        }
+
+        // Some producers differ in case; try a case-insensitive match.
+        let folded = field_name.trim().to_ascii_lowercase();
+        if !folded.is_empty() {
+            if let Some(idx) = cache_def
+                .cache_fields
+                .iter()
+                .position(|f| f.name.to_ascii_lowercase() == folded)
+            {
+                return Some(idx);
+            }
+        }
+    }
+
     if let Some(source_name) = slicer.source_name.as_deref() {
         if let Some(idx) = cache_def
             .cache_fields
@@ -134,14 +152,16 @@ fn slicer_cache_field_idx_best_effort(
     // field mapping (especially in simplified fixtures), but the item values typically
     // correspond to one cache field. When multiple fields share the same items (or the
     // slicer uses index keys), we may not be able to infer the correct field.
-    if slicer.selection.available_items.is_empty() {
-        return None;
-    }
+    let item_iter: Box<dyn Iterator<Item = &String> + '_> =
+        if !slicer.selection.available_items.is_empty() {
+            Box::new(slicer.selection.available_items.iter())
+        } else if let Some(items) = &slicer.selection.selected_items {
+            Box::new(items.iter())
+        } else {
+            return None;
+        };
 
-    let items = slicer
-        .selection
-        .available_items
-        .iter()
+    let items = item_iter
         .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>();
@@ -209,6 +229,22 @@ fn timeline_cache_field_name_best_effort(
     if let Some(idx) = timeline.base_field {
         if let Some(field) = cache_def.cache_fields.get(idx as usize) {
             return Some(field.name.clone());
+        }
+    }
+
+    if let Some(field_name) = timeline.field_name.as_deref() {
+        if cache.unique_values.contains_key(field_name) {
+            return Some(field_name.to_string());
+        }
+        let folded = field_name.trim().to_ascii_lowercase();
+        if !folded.is_empty() {
+            if let Some(name) = cache
+                .unique_values
+                .keys()
+                .find(|k| k.to_ascii_lowercase() == folded)
+            {
+                return Some(name.clone());
+            }
         }
     }
 
