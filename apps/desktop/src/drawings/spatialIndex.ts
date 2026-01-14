@@ -74,15 +74,29 @@ function hasNonIdentityTransform(transform: DrawingTransform | undefined): boole
   return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
 }
 
+type CachedTrig = { rotationDeg: number; cos: number; sin: number };
+
+const trigCache = new WeakMap<DrawingTransform, CachedTrig>();
+
+function getTransformTrig(transform: DrawingTransform): CachedTrig {
+  const cached = trigCache.get(transform);
+  const rot = transform.rotationDeg;
+  if (cached && cached.rotationDeg === rot) return cached;
+  const radians = (rot * Math.PI) / 180;
+  const next: CachedTrig = { rotationDeg: rot, cos: Math.cos(radians), sin: Math.sin(radians) };
+  trigCache.set(transform, next);
+  return next;
+}
+
 function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
   const hw = rect.width / 2;
   const hh = rect.height / 2;
 
-  const radians = (transform.rotationDeg * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
+  const trig = getTransformTrig(transform);
+  const cos = trig.cos;
+  const sin = trig.sin;
 
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -121,9 +135,9 @@ function pointInTransformedRect(x: number, y: number, rect: Rect, transform: Dra
   const dy = y - cy;
   // Inverse transform of: scale(flip) then rotate(theta).
   // Apply rotate(-theta) then scale(flip).
-  const radians = (transform.rotationDeg * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
+  const trig = getTransformTrig(transform);
+  const cos = trig.cos;
+  const sin = trig.sin;
   let lx = dx * cos + dy * sin;
   let ly = -dx * sin + dy * cos;
   if (transform.flipH) lx = -lx;
