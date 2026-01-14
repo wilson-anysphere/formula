@@ -1559,6 +1559,27 @@ export class SpreadsheetApp {
     | null = null;
   private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
+  private chartOverlayLayoutMemo:
+    | {
+        mode: "shared" | "legacy";
+        sig1: number;
+        sig2: number;
+        sig3: number;
+        sig4: number;
+        sig5: number;
+        sig6: number;
+        layout: {
+          originX: number;
+          originY: number;
+          frozenBoundaryX: number;
+          frozenBoundaryY: number;
+          paneRects: Record<
+            "topLeft" | "topRight" | "bottomLeft" | "bottomRight",
+            { x: number; y: number; width: number; height: number }
+          >;
+        };
+      }
+    | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
   private chartSelectionViewportMemo: { width: number; height: number; dpr: number } | null = null;
   private chartSelectionCanvas: HTMLCanvasElement | null = null;
@@ -13647,6 +13668,20 @@ export class SpreadsheetApp {
       const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
       const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
 
+      const memo = this.chartOverlayLayoutMemo;
+      if (
+        memo &&
+        memo.mode === "shared" &&
+        memo.sig1 === viewport.width &&
+        memo.sig2 === viewport.height &&
+        memo.sig3 === headerWidthClamped &&
+        memo.sig4 === headerHeightClamped &&
+        memo.sig5 === frozenWidthClamped &&
+        memo.sig6 === frozenHeightClamped
+      ) {
+        return memo.layout;
+      }
+
       const frozenContentWidth = Math.max(0, frozenWidthClamped - headerWidthClamped);
       const frozenContentHeight = Math.max(0, frozenHeightClamped - headerHeightClamped);
 
@@ -13656,7 +13691,7 @@ export class SpreadsheetApp {
       const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
       const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
 
-      return {
+      const layout = {
         originX: headerWidthClamped,
         originY: headerHeightClamped,
         frozenBoundaryX: frozenWidthClamped,
@@ -13668,17 +13703,43 @@ export class SpreadsheetApp {
           bottomRight: { x: frozenContentWidth, y: frozenContentHeight, width: scrollableWidth, height: scrollableHeight },
         },
       };
+      this.chartOverlayLayoutMemo = {
+        mode: "shared",
+        sig1: viewport.width,
+        sig2: viewport.height,
+        sig3: headerWidthClamped,
+        sig4: headerHeightClamped,
+        sig5: frozenWidthClamped,
+        sig6: frozenHeightClamped,
+        layout,
+      };
+      return layout;
     }
 
     const originX = this.rowHeaderWidth;
     const originY = this.colHeaderHeight;
+    const memo = this.chartOverlayLayoutMemo;
+    if (
+      memo &&
+      memo.mode === "legacy" &&
+      memo.sig1 === this.width &&
+      memo.sig2 === this.height &&
+      memo.sig3 === originX &&
+      memo.sig4 === originY &&
+      memo.sig5 === this.frozenWidth &&
+      memo.sig6 === this.frozenHeight
+    ) {
+      return memo.layout;
+    }
+
     const cellAreaWidth = Math.max(0, this.width - originX);
     const cellAreaHeight = Math.max(0, this.height - originY);
     const frozenContentWidth = Math.min(cellAreaWidth, this.frozenWidth);
     const frozenContentHeight = Math.min(cellAreaHeight, this.frozenHeight);
     const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
     const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
-    return {
+
+    const layout = {
       originX,
       originY,
       frozenBoundaryX: originX + frozenContentWidth,
@@ -13690,6 +13751,17 @@ export class SpreadsheetApp {
         bottomRight: { x: frozenContentWidth, y: frozenContentHeight, width: scrollableWidth, height: scrollableHeight },
       },
     };
+    this.chartOverlayLayoutMemo = {
+      mode: "legacy",
+      sig1: this.width,
+      sig2: this.height,
+      sig3: originX,
+      sig4: originY,
+      sig5: this.frozenWidth,
+      sig6: this.frozenHeight,
+      layout,
+    };
+    return layout;
   }
 
   private chartPointPxToAnchorPoint(point: { x: number; y: number }): {
