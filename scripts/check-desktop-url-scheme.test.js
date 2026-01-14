@@ -188,6 +188,15 @@ test("fails when Parquet association is configured but identifier is missing", (
   assert.match(proc.stderr, /identifier is missing/i);
 });
 
+test("fails when Parquet association is configured but identifier contains a path separator", () => {
+  const config = baseConfig();
+  // Backslash is a path separator on Windows and should be rejected even when tests run on Linux/macOS.
+  config.identifier = "app\\formula.desktop";
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /identifier is not a valid filename/i);
+});
+
 test("fails when Parquet shared-mime-info file mapping does not match identifier (Linux bundle files)", () => {
   const config = baseConfig();
   config.bundle.linux.deb.files[parquetMimeDest] = "mime/wrong.xml";

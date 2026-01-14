@@ -439,6 +439,18 @@ function validateParquetMimeDefinition(config) {
     return;
   }
 
+  // `identifier` is used as a filename for Linux shared-mime-info packaging:
+  //   usr/share/mime/packages/<identifier>.xml
+  // Guard against path separators to avoid surprising path traversal or broken file mappings.
+  if (identifier.includes("/") || identifier.includes("\\")) {
+    errBlock("Parquet file association configured, but identifier is not a valid filename (tauri.conf.json)", [
+      `identifier=${JSON.stringify(identifier)}`,
+      "Expected identifier to be a reverse-DNS string (no '/' or '\\\\' path separators).",
+      "Fix: update the top-level `identifier` field in apps/desktop/src-tauri/tauri.conf.json.",
+    ]);
+    return;
+  }
+
   const linux = config?.bundle?.linux;
   if (!linux || typeof linux !== "object") {
     errBlock("Parquet file association configured, but bundle.linux is missing (tauri.conf.json)", [
