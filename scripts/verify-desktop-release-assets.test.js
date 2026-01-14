@@ -122,7 +122,7 @@ test("validateLatestJson rejects Linux AppImage tarballs for macOS updater keys"
     (err) =>
       err instanceof ActionableError &&
       err.message.includes("darwin-x86_64") &&
-      /appimage tarball/i.test(err.message),
+      /appimage tarballs?/i.test(err.message),
   );
 });
 
@@ -341,6 +341,71 @@ test("validateLatestJson accepts a macOS updater archive ending with .tgz", () =
   ]);
 
   assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
+});
+
+test("validateLatestJson rejects macOS .pkg updater URLs (even if asset exists)", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.pkg", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.pkg",
+    "Formula.app.tar.gz",
+  ]);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assets),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("darwin-x86_64") &&
+      err.message.includes("Formula.pkg") &&
+      err.message.includes("Expected file extensions"),
+  );
+});
+
+test("validateLatestJson rejects macOS updater keys pointing at Linux AppImage tarballs (.AppImage.tgz)", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      // This would otherwise match the macOS \"*.tar.gz\" rule, but should be rejected.
+      "darwin-x86_64": { url: "https://example.com/Formula.AppImage.tgz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.AppImage.tgz",
+    "Formula.app.tar.gz",
+  ]);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assets),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("darwin-x86_64") &&
+      err.message.includes("Formula.AppImage.tgz") &&
+      /appimage tarballs?/i.test(err.message),
+  );
 });
 
 test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exists)", () => {
