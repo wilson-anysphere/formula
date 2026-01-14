@@ -40,6 +40,11 @@ export async function bindDocumentControllerWithCollabUndo(options: {
   if (!session) throw new Error("bindDocumentControllerWithCollabUndo requires { session }");
   if (!documentController) throw new Error("bindDocumentControllerWithCollabUndo requires { documentController }");
 
+  // If the binder is destroyed before provider sync (e.g. user closes a file
+  // while offline), avoid keeping the session/provider reachable via lingering
+  // event listeners.
+  let destroyed = false;
+
   // Intentionally distinct from `session.origin`. Collab conflict detection uses `session.origin`,
   // and those writes must still propagate through the binder (i.e. must *not* be treated as binder-local).
   const binderOrigin = { type: "document-controller:binder" };
@@ -92,14 +97,16 @@ export async function bindDocumentControllerWithCollabUndo(options: {
   })();
 
   const ensureCommentsUndoScope = () => {
+    if (destroyed) return;
     if (!undoManager) return;
 
     // Avoid clobbering legacy docs by instantiating a Map root before the provider
     // has hydrated the document.
     const provider = session.provider;
-    const providerSynced =
-      provider && typeof (provider as any).on === "function" ? Boolean((provider as any).synced) : true;
-    if (!providerSynced && !session.doc.share.get("comments")) return;
+    const providerUsesSyncEvents = Boolean(provider && typeof (provider as any).on === "function");
+    // Treat the `sync=true` event as authoritative rather than relying on `provider.synced`
+    // (some provider mocks don't update it).
+    if (providerUsesSyncEvents && !providerHydrated && !session.doc.share.get("comments")) return;
 
     try {
       const root = getCommentsRoot(session.doc);
@@ -110,12 +117,21 @@ export async function bindDocumentControllerWithCollabUndo(options: {
   };
 
   const provider = session.provider;
+  const providerUsesSyncEvents = Boolean(provider && typeof (provider as any).on === "function");
+  let providerHydrated = !providerUsesSyncEvents;
+  if (providerUsesSyncEvents) {
+    providerHydrated = Boolean((provider as any).synced);
+  }
+  let commentsSyncHandler: ((isSynced: boolean) => void) | null = null;
   if (provider && typeof provider.on === "function") {
     const onSync = (isSynced: boolean) => {
+      providerHydrated = Boolean(isSynced);
       if (!isSynced) return;
       provider.off?.("sync", onSync);
+      if (commentsSyncHandler === onSync) commentsSyncHandler = null;
       ensureCommentsUndoScope();
     };
+    commentsSyncHandler = onSync;
     provider.on("sync", onSync);
     if ((provider as any).synced) onSync(true);
 
@@ -157,6 +173,21 @@ export async function bindDocumentControllerWithCollabUndo(options: {
     defaultSheetId,
     userId,
   });
+
+  // Ensure we detach any provider listeners when the binder is destroyed to avoid leaks.
+  const destroyBinder = binder.destroy.bind(binder);
+  binder.destroy = () => {
+    destroyed = true;
+    if (provider && commentsSyncHandler && typeof provider.off === "function") {
+      try {
+        provider.off("sync", commentsSyncHandler);
+      } catch {
+        // ignore
+      }
+    }
+    commentsSyncHandler = null;
+    destroyBinder();
+  };
 
   return { binder, undoService, binderOrigin };
 }

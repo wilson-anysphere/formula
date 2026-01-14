@@ -16,6 +16,25 @@ async function flushBinderWork(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+function createMockProvider() {
+  const listeners = new Map<string, Set<(...args: any[]) => void>>();
+  return {
+    on: (event: string, cb: (...args: any[]) => void) => {
+      const set = listeners.get(event) ?? new Set();
+      set.add(cb);
+      listeners.set(event, set);
+    },
+    off: (event: string, cb: (...args: any[]) => void) => {
+      listeners.get(event)?.delete(cb);
+    },
+    emit: (event: string, ...args: any[]) => {
+      for (const cb of Array.from(listeners.get(event) ?? [])) {
+        cb(...args);
+      }
+    },
+  };
+}
+
 describe("collaboration-safe undo/redo (desktop)", () => {
   it("undo/redo updates the DocumentController via the binder", async () => {
     const session = createCollabSession({ doc: new Y.Doc() });
@@ -178,5 +197,45 @@ describe("collaboration-safe undo/redo (desktop)", () => {
     expect(get()?.resolved ?? null).toBe(true);
 
     binder.destroy();
+  });
+
+  it("captures comment edits after provider sync even if provider.synced is unset", async () => {
+    const provider = createMockProvider();
+    const session = createCollabSession({ doc: new Y.Doc(), provider });
+    session.setPermissions({ role: "editor", userId: "u1", rangeRestrictions: [] });
+    const document = new DocumentController();
+
+    const { binder, undoService } = await bindDocumentControllerWithCollabUndo({
+      session,
+      documentController: document,
+      defaultSheetId: "Sheet1",
+    });
+
+    // Fresh doc: no comments root yet.
+    expect(session.doc.share.get("comments")).toBe(undefined);
+
+    // Some providers/mocks emit sync without updating `.synced`. The binder undo helper
+    // should still treat the event as authoritative and add the comments root to scope.
+    (provider as any).emit("sync", true);
+    await flushBinderWork();
+
+    const comments = createCommentManagerForDoc({ doc: session.doc, transact: undoService.transact! });
+    const commentId = comments.addComment({
+      id: "c1",
+      cellRef: "Sheet1:0:0",
+      kind: "threaded",
+      content: "hello",
+      author: { id: "u1", name: "Alice" },
+      now: 1,
+    });
+    undoService.stopCapturing();
+
+    expect(comments.listAll().find((c) => c.id === commentId)?.content ?? null).toBe("hello");
+    expect(undoService.canUndo()).toBe(true);
+    undoService.undo();
+    expect(comments.listAll().find((c) => c.id === commentId) ?? null).toBe(null);
+
+    binder.destroy();
+    session.destroy();
   });
 });
