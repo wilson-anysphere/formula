@@ -2437,13 +2437,16 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
                             source,
                         })
                     }
-                    _ => {
-                        return Err(Error::UnsupportedOoxmlEncryption {
-                            path: path.to_path_buf(),
-                            version_major,
-                            version_minor,
-                        })
-                    }
+                    _ => match try_decrypt_ooxml_encrypted_package_from_path(path, Some(password))? {
+                        Some(bytes) => bytes,
+                        None => {
+                            return Err(Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            })
+                        }
+                    },
                 },
             }
         } else {
@@ -2916,6 +2919,9 @@ fn decrypt_encrypted_ooxml_package(
             } else {
                 format
             };
+
+            // Avoid copying when the EncryptedPackage stream is already a ZIP file (rare, but useful
+            // for synthetic fixtures and already-decrypted pipelines).
             let reuse_full_buffer = package_bytes.as_ptr() == encrypted_package.as_ptr()
                 && package_bytes.len() == encrypted_package.len();
             if reuse_full_buffer {
@@ -3193,7 +3199,7 @@ fn decrypt_encrypted_ooxml_package(
             // range of hash algorithms (and performs verifier validation). However, some producers
             // omit or mis-set `EncryptionHeader.Flags` (e.g. missing `fCryptoAPI`/`fAES`). When we
             // see a non-password error from the strict decryptor, patch the flags to match `algId`
-            // and retry before falling back to `formula-xlsx`'s legacy Standard decryptor.
+            // and retry before falling back to more lenient / legacy decryptors.
             let mut patched_info: Option<Vec<u8>> = None;
             let mut enc_info = encryption_info.as_slice();
             let mut res = formula_office_crypto::decrypt_standard_encrypted_package(
@@ -3204,7 +3210,10 @@ fn decrypt_encrypted_ooxml_package(
 
             if matches!(
                 res,
-                Err(formula_office_crypto::OfficeCryptoError::InvalidPassword)
+                Err(
+                    formula_office_crypto::OfficeCryptoError::InvalidPassword
+                        | formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed
+                )
             ) {
                 return Err(Error::InvalidPassword {
                     path: path.to_path_buf(),
@@ -3239,7 +3248,10 @@ fn decrypt_encrypted_ooxml_package(
 
                 if matches!(
                     res,
-                    Err(formula_office_crypto::OfficeCryptoError::InvalidPassword)
+                    Err(
+                        formula_office_crypto::OfficeCryptoError::InvalidPassword
+                            | formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed
+                    )
                 ) {
                     return Err(Error::InvalidPassword {
                         path: path.to_path_buf(),
@@ -3249,35 +3261,211 @@ fn decrypt_encrypted_ooxml_package(
 
             match res {
                 Ok(bytes) => bytes,
-                Err(_err) => match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
-                    enc_info,
-                    &encrypted_package,
-                    password,
-                ) {
-                    Ok(bytes) => bytes,
-                    Err(err) => match err {
-                        xlsx::OffCryptoError::WrongPassword
-                        | xlsx::OffCryptoError::IntegrityMismatch => {
-                            return Err(Error::InvalidPassword {
-                                path: path.to_path_buf(),
-                            });
-                        }
-                        xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
-                            return Err(Error::UnsupportedOoxmlEncryption {
-                                path: path.to_path_buf(),
-                                version_major: major,
-                                version_minor: minor,
-                            });
-                        }
-                        _ => {
+                Err(_err) => {
+                    let decrypt_lenient = || -> Result<Vec<u8>, Error> {
+                        use crate::offcrypto::cryptoapi::{
+                            crypt_derive_key, final_hash, hash_password_fixed_spin,
+                            password_to_utf16le, HashAlg as CryptoHashAlg,
+                        };
+                        use crate::offcrypto::{
+                            decrypt_standard_encrypted_package_stream, EncryptionHeader,
+                            EncryptionVerifier, StandardEncryptionInfo, CALG_AES_128, CALG_AES_192,
+                            CALG_AES_256,
+                        };
+
+                        if !matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256) {
                             return Err(Error::UnsupportedOoxmlEncryption {
                                 path: path.to_path_buf(),
                                 version_major,
                                 version_minor,
                             });
                         }
-                    },
-                },
+
+                        // Validate key size against the algorithm.
+                        match alg_id {
+                            CALG_AES_128 if key_size_bits != 128 => {
+                                return Err(Error::UnsupportedOoxmlEncryption {
+                                    path: path.to_path_buf(),
+                                    version_major,
+                                    version_minor,
+                                });
+                            }
+                            CALG_AES_192 if key_size_bits != 192 => {
+                                return Err(Error::UnsupportedOoxmlEncryption {
+                                    path: path.to_path_buf(),
+                                    version_major,
+                                    version_minor,
+                                });
+                            }
+                            CALG_AES_256 if key_size_bits != 256 => {
+                                return Err(Error::UnsupportedOoxmlEncryption {
+                                    path: path.to_path_buf(),
+                                    version_major,
+                                    version_minor,
+                                });
+                            }
+                            _ => {}
+                        }
+                        if key_size_bits == 0 || key_size_bits % 8 != 0 {
+                            return Err(Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            });
+                        }
+                        let key_len = (key_size_bits / 8) as usize;
+
+                        let hash_alg = CryptoHashAlg::from_calg_id(alg_id_hash).map_err(|_| {
+                            Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            }
+                        })?;
+                        let hash_len = hash_alg.hash_len();
+                        if key_len > hash_len.saturating_mul(2) {
+                            return Err(Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            });
+                        }
+
+                        // Derive candidate keys.
+                        let pw_utf16le = password_to_utf16le(password);
+                        let h = hash_password_fixed_spin(&pw_utf16le, &salt, hash_alg);
+                        let h_block0 = final_hash(&h, 0, hash_alg);
+                        let key_cryptoapi = crypt_derive_key(&h_block0, key_len, hash_alg);
+                        let key_trunc = if key_len <= h_block0.len() {
+                            Some(h_block0[..key_len].to_vec())
+                        } else {
+                            None
+                        };
+
+                        // Construct a minimal Standard encryption descriptor for password verification.
+                        let header_flags_raw =
+                            u32::from_le_bytes(header_bytes[0..4].try_into().unwrap());
+                        let size_extra = u32::from_le_bytes(header_bytes[4..8].try_into().unwrap());
+                        let provider_type =
+                            u32::from_le_bytes(header_bytes[20..24].try_into().unwrap());
+                        let reserved1 =
+                            u32::from_le_bytes(header_bytes[24..28].try_into().unwrap());
+                        let reserved2 =
+                            u32::from_le_bytes(header_bytes[28..32].try_into().unwrap());
+                        let encrypted_verifier: [u8; 16] = encrypted_verifier
+                            .as_slice()
+                            .try_into()
+                            .expect("slice length checked to be 16 bytes");
+
+                        let info = StandardEncryptionInfo {
+                            header: EncryptionHeader {
+                                flags: crate::offcrypto::standard::EncryptionHeaderFlags::from_raw(
+                                    header_flags_raw,
+                                ),
+                                size_extra,
+                                alg_id,
+                                alg_id_hash,
+                                key_size: key_size_bits,
+                                provider_type,
+                                reserved1,
+                                reserved2,
+                                csp_name: String::new(),
+                            },
+                            verifier: EncryptionVerifier {
+                                salt: salt.clone(),
+                                encrypted_verifier,
+                                verifier_hash_size,
+                                encrypted_verifier_hash: encrypted_verifier_hash.clone(),
+                            },
+                        };
+
+                        let verify_key = |key: &[u8]| -> Result<bool, Error> {
+                            crate::offcrypto::standard::verify_password_standard_with_key(&info, key)
+                                .map_err(|_| Error::UnsupportedOoxmlEncryption {
+                                    path: path.to_path_buf(),
+                                    version_major,
+                                    version_minor,
+                                })
+                        };
+
+                        // Pick the first key that verifies.
+                        let mut key = key_cryptoapi;
+                        if !verify_key(&key)? {
+                            if let Some(key_trunc) = key_trunc {
+                                if key_trunc != key && verify_key(&key_trunc)? {
+                                    key = key_trunc;
+                                } else {
+                                    return Err(Error::InvalidPassword {
+                                        path: path.to_path_buf(),
+                                    });
+                                }
+                            } else {
+                                return Err(Error::InvalidPassword {
+                                    path: path.to_path_buf(),
+                                });
+                            }
+                        }
+
+                        let decrypted = decrypt_standard_encrypted_package_stream(
+                            &encrypted_package,
+                            &key,
+                            &salt,
+                        )
+                        .map_err(|_| Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major,
+                            version_minor,
+                        })?;
+                        if !decrypted.starts_with(b"PK") {
+                            return Err(Error::InvalidPassword {
+                                path: path.to_path_buf(),
+                            });
+                        }
+                        Ok(decrypted)
+                    };
+
+                    match decrypt_lenient() {
+                        Ok(bytes) => bytes,
+                        Err(err) => match err {
+                            Error::InvalidPassword { .. } => return Err(err),
+                            _ => {
+                                // Last-resort compatibility fallback: `formula-xlsx`'s legacy decryptor.
+                                match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                                    enc_info,
+                                    &encrypted_package,
+                                    password,
+                                ) {
+                                    Ok(bytes) => bytes,
+                                    Err(err) => match err {
+                                        xlsx::OffCryptoError::WrongPassword
+                                        | xlsx::OffCryptoError::IntegrityMismatch => {
+                                            return Err(Error::InvalidPassword {
+                                                path: path.to_path_buf(),
+                                            });
+                                        }
+                                        xlsx::OffCryptoError::UnsupportedEncryptionVersion {
+                                            major,
+                                            minor,
+                                        } => {
+                                            return Err(Error::UnsupportedOoxmlEncryption {
+                                                path: path.to_path_buf(),
+                                                version_major: major,
+                                                version_minor: minor,
+                                            });
+                                        }
+                                        _ => {
+                                            return Err(Error::UnsupportedOoxmlEncryption {
+                                                path: path.to_path_buf(),
+                                                version_major,
+                                                version_minor,
+                                            });
+                                        }
+                                    },
+                                }
+                            }
+                        },
+                    }
+                }
             }
         }
     };
