@@ -169,6 +169,10 @@ Implementation notes:
 * When the engine is configured for multi-threaded recalculation, these methods may be called
   concurrently from multiple threads; implementations should be thread-safe and keep lookups fast
   (e.g. internal caching, lock-free reads, etc.).
+* The engine currently resolves ranges by calling `get(sheet, addr)` **per-cell** (there is no
+  bulk/range API). This is especially important for whole-row/whole-column references: for external
+  sheets the engine assumes Excel’s default grid size (1,048,576 rows × 16,384 columns), so ranges
+  like `[Book.xlsx]Sheet1!A:A` can result in **a very large number** of `get` calls.
 
 #### External 3D sheet spans (workbook sheet order)
 

@@ -8273,6 +8273,11 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// The engine may call [`ExternalValueProvider::get`] (and [`ExternalValueProvider::sheet_order`])
 /// many times when evaluating range functions (e.g. `SUM([Book.xlsx]Sheet1!A:A)`).
 ///
+/// The engine currently resolves ranges by calling `get(sheet, addr)` per-cell (there is no
+/// bulk/range API). For external sheets, whole-row/whole-column references are resolved against
+/// Excel’s default sheet bounds (1,048,576 rows × 16,384 columns), which can result in a very large
+/// number of provider calls.
+///
 /// When multi-threaded recalculation is enabled, provider methods may also be called concurrently
 /// from multiple threads. Implementations should be thread-safe and keep lookups fast (e.g. by
 /// caching results internally or minimizing lock contention).
