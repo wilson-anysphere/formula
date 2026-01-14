@@ -2727,8 +2727,6 @@ export function bindYjsToDocumentController(options) {
      *
      * - DocumentController → Yjs writes are serialized through `writeChain`/`sheetWriteChain`
      *   (encryption can be async).
-     * - Yjs → DocumentController applications are serialized through `applyChain`
-     *   (decryption can be async).
      *
      * This helper is best-effort and primarily intended for teardown flows (e.g. flushing
      * local persistence before a hard process exit).
@@ -2745,7 +2743,6 @@ export function bindYjsToDocumentController(options) {
       await Promise.all([
         waitForChain(() => writeChain),
         waitForChain(() => sheetWriteChain),
-        waitForChain(() => applyChain),
       ]);
     },
     destroy() {

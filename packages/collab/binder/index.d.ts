@@ -207,6 +207,10 @@ export interface BindYjsToDocumentControllerBinding {
   /**
    * Wait for any pending binder work to settle.
    *
+   * Note: this waits for DocumentController → Yjs writes (which can be async due to
+   * encryption). It does not wait for Yjs → DocumentController apply work, since
+   * that does not affect the shared document snapshot used for local persistence.
+   *
    * Useful for teardown flows (e.g. flushing local persistence before a hard
    * process exit).
    */
