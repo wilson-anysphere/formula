@@ -1504,6 +1504,73 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("commits the typed draft (not the AI suggestion) when clicking ✓ with a suggestion present", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.setAiSuggestion("=1+2");
+    expect(view.model.aiSuggestion()).toBe("=1+2");
+
+    expect(commit.hidden).toBe(false);
+    expect(cancel.hidden).toBe(false);
+
+    commit.click();
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=1+", { reason: "command", shift: false });
+    expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("=1+");
+    expect(document.activeElement).not.toBe(view.textarea);
+    expect(commit.hidden).toBe(true);
+    expect(cancel.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("clears AI suggestion state when canceling via ✕", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.setAiSuggestion("=1+2");
+    expect(view.model.aiSuggestion()).toBe("=1+2");
+    expect(view.model.aiGhostText()).toBe("2");
+
+    cancel.click();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("orig");
+    expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiGhostText()).toBe("");
+    expect(commit.hidden).toBe(true);
+    expect(cancel.hidden).toBe(true);
+
+    host.remove();
+  });
+
   it("clears AI suggestion state when canceling", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
