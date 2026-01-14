@@ -2799,6 +2799,10 @@ impl Engine {
     /// Explicitly mark all formulas that reference the given external sheet key as dirty.
     ///
     /// `sheet_key` must be in canonical external sheet form, e.g. `"[Book.xlsx]Sheet1"`.
+    ///
+    /// External-workbook 3D span references like `"[Book.xlsx]Sheet1:Sheet3"` are expanded to their
+    /// component per-sheet keys for invalidation when sheet order is available; when it is not, the
+    /// raw span key is tracked as a single dependency and can be invalidated directly.
     pub fn mark_external_sheet_dirty(&mut self, sheet_key: &str) {
         let sheet_key = sheet_key.trim();
         let mut cells: HashSet<CellKey> = HashSet::new();
@@ -3843,8 +3847,12 @@ impl Engine {
                     self.external_refs_volatile,
                 );
             self.set_cell_name_refs(key, names);
-            let (external_sheets, external_workbooks) =
-                analyze_external_dependencies(&ast, key, &self.workbook, self.external_value_provider.as_deref());
+            let (external_sheets, external_workbooks) = analyze_external_dependencies(
+                &ast,
+                key,
+                &self.workbook,
+                self.external_value_provider.as_deref(),
+            );
             self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents =
@@ -4143,13 +4151,12 @@ impl Engine {
                     self.external_refs_volatile,
                 );
             self.set_cell_name_refs(key, names);
-            let (external_sheets, external_workbooks) =
-                analyze_external_dependencies(
-                    &compiled_ast,
-                    key,
-                    &self.workbook,
-                    self.external_value_provider.as_deref(),
-                );
+            let (external_sheets, external_workbooks) = analyze_external_dependencies(
+                &compiled_ast,
+                key,
+                &self.workbook,
+                self.external_value_provider.as_deref(),
+            );
             self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents = analyze_calc_precedents(
@@ -4449,15 +4456,14 @@ impl Engine {
                 &tables_by_sheet,
                 &self.workbook,
                 self.external_refs_volatile,
-            );
+        );
         self.set_cell_name_refs(key, names);
-        let (external_sheets, external_workbooks) =
-            analyze_external_dependencies(
-                &compiled,
-                key,
-                &self.workbook,
-                self.external_value_provider.as_deref(),
-            );
+        let (external_sheets, external_workbooks) = analyze_external_dependencies(
+            &compiled,
+            key,
+            &self.workbook,
+            self.external_value_provider.as_deref(),
+        );
         self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
         // Optimized precedents for calculation ordering (range nodes are not expanded).
@@ -7900,10 +7906,14 @@ impl Engine {
                     &tables_by_sheet,
                     &self.workbook,
                     self.external_refs_volatile,
-                );
+            );
             self.set_cell_name_refs(key, names);
-            let (external_sheets, external_workbooks) =
-                analyze_external_dependencies(&ast, key, &self.workbook, self.external_value_provider.as_deref());
+            let (external_sheets, external_workbooks) = analyze_external_dependencies(
+                &ast,
+                key,
+                &self.workbook,
+                self.external_value_provider.as_deref(),
+            );
             self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents =
@@ -11541,8 +11551,12 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// [`Engine::mark_external_workbook_dirty`].
 ///
 /// The engine does not track dependencies to individual external cells; invalidation is coarse
-/// (sheet key / workbook id). External-workbook 3D spans are expanded to per-sheet keys for
-/// invalidation when the provider supplies `sheet_order(workbook)`.
+/// (sheet key / workbook id).
+///
+/// For external-workbook 3D spans like `"[Book.xlsx]Sheet1:Sheet3"`, the engine will expand the
+/// span to its component per-sheet keys for invalidation **when sheet order is available**. When
+/// sheet order is unavailable, the raw span key is tracked as a single dependency (and callers can
+/// fall back to workbook-level invalidation).
 ///
 /// Note: Excel compares sheet names case-insensitively across Unicode and applies compatibility
 /// normalization (NFKC). The engine preserves the formula's casing in the sheet key for single-sheet
@@ -14806,6 +14820,8 @@ fn walk_external_dependencies(
                         for sheet_key in expanded {
                             external_sheets.insert(sheet_key);
                         }
+                    } else {
+                        external_sheets.insert(key.clone());
                     }
                 }
             }
@@ -14824,6 +14840,8 @@ fn walk_external_dependencies(
                         for sheet_key in expanded {
                             external_sheets.insert(sheet_key);
                         }
+                    } else {
+                        external_sheets.insert(key.clone());
                     }
                 }
             }

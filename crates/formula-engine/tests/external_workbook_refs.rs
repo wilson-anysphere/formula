@@ -224,6 +224,9 @@ fn indirect_external_cell_ref_resolves_via_provider() {
         .unwrap();
     engine.recalculate();
 
+    // INDIRECT parses its text argument as a standalone reference. When the engine has an
+    // `ExternalValueProvider` configured, external workbook references can resolve via the
+    // provider.
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
 }
 
@@ -629,10 +632,9 @@ fn external_sheet_invalidation_dirties_external_3d_span_dependents() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(111.0));
 
+    // Mutate one sheet inside the span without invalidation; the value should not change because
+    // external refs are non-volatile.
     provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 20.0);
-
-    // Without invalidation, the 3D span should not be refreshed because external refs are
-    // configured as non-volatile.
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(111.0));
 
