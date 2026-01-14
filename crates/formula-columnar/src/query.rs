@@ -176,6 +176,7 @@ pub enum QueryError {
         column_type: ColumnType,
         operation: &'static str,
     },
+    MismatchedJoinKeyCount { left: usize, right: usize },
     MismatchedJoinKeyTypes {
         left_type: ColumnType,
         right_type: ColumnType,
@@ -206,6 +207,11 @@ impl std::fmt::Display for QueryError {
                 f,
                 "unsupported column type {:?} for column {} in {}",
                 column_type, col, operation
+            ),
+            Self::MismatchedJoinKeyCount { left, right } => write!(
+                f,
+                "join requires the same number of key columns on both sides (left_keys={}, right_keys={})",
+                left, right
             ),
             Self::MismatchedJoinKeyTypes {
                 left_type,
@@ -3049,9 +3055,10 @@ fn plan_join_keys(
         return Err(QueryError::EmptyKeys);
     }
     if left_keys.len() != right_keys.len() {
-        return Err(QueryError::InternalInvariant(
-            "join key column counts must match",
-        ));
+        return Err(QueryError::MismatchedJoinKeyCount {
+            left: left_keys.len(),
+            right: right_keys.len(),
+        });
     }
 
     let mut plans = Vec::with_capacity(left_keys.len());

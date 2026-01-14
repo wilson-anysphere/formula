@@ -1149,6 +1149,38 @@ fn hash_join_multi_errors_on_mismatched_key_types() {
 }
 
 #[test]
+fn hash_join_multi_errors_on_mismatched_key_count() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![vec![
+            Value::String(Arc::<str>::from("A")),
+            Value::DateTime(1),
+        ]],
+    );
+    let right = build_table(
+        schema,
+        vec![vec![
+            Value::String(Arc::<str>::from("A")),
+            Value::DateTime(1),
+        ]],
+    );
+
+    let err = left.hash_join_multi(&right, &[0], &[0, 1]).unwrap_err();
+    assert!(matches!(err, QueryError::MismatchedJoinKeyCount { .. }));
+}
+
+#[test]
 fn hash_full_outer_join_multi_includes_unmatched_right_rows_and_respects_nulls() {
     let schema = vec![
         ColumnSchema {
