@@ -716,7 +716,8 @@ export function registerDesktopCommands(params: {
     "data.sortFilter.filter",
     "Filter",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      // Ribbon AutoFilter MVP is view-local; allow it in read-only collab roles as well.
+      if (isEditingFn()) return;
       const handlers = getAutoFilterHandlers();
       if (!handlers) return;
       await handlers.toggle();
@@ -732,7 +733,7 @@ export function registerDesktopCommands(params: {
     "data.sortFilter.clear",
     "Clear",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      if (isEditingFn()) return;
       const handlers = getAutoFilterHandlers();
       if (!handlers) return;
       await handlers.clear();
@@ -748,7 +749,7 @@ export function registerDesktopCommands(params: {
     "data.sortFilter.reapply",
     "Reapply",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      if (isEditingFn()) return;
       const handlers = getAutoFilterHandlers();
       if (!handlers) return;
       await handlers.reapply();
@@ -764,7 +765,7 @@ export function registerDesktopCommands(params: {
     "data.sortFilter.advanced.clearFilter",
     "Clear Filter",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      if (isEditingFn()) return;
       const handlers = getAutoFilterHandlers();
       if (!handlers) return;
       await handlers.clear();

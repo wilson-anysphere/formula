@@ -2283,6 +2283,29 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   delete out["format.toggleSuperscript"];
   delete out["home.number.moreFormats.custom"];
   delete out["format.clearFormats"];
+  // Home → Styles commands are formatting surfaces; keep them conditionally enabled (band selections only)
+  // so they match the same read-only "formatting defaults" policy as other formatting controls.
+  delete out["home.styles.formatAsTable"];
+  delete out[HOME_STYLES_COMMAND_IDS.formatAsTable.light];
+  delete out[HOME_STYLES_COMMAND_IDS.formatAsTable.medium];
+  delete out[HOME_STYLES_COMMAND_IDS.formatAsTable.dark];
+  delete out["home.styles.formatAsTable.newStyle"];
+  delete out["home.styles.cellStyles"];
+  delete out[HOME_STYLES_COMMAND_IDS.cellStyles.goodBadNeutral];
+  delete out["home.styles.cellStyles.dataModel"];
+  delete out["home.styles.cellStyles.titlesHeadings"];
+  delete out["home.styles.cellStyles.numberFormat"];
+  delete out["home.styles.cellStyles.newStyle"];
+  // Conditional formatting is not implemented yet (CommandRegistry disables it), but keep the ids aligned
+  // with the same read-only formatting-defaults gating for future implementations.
+  delete out["home.styles.conditionalFormatting"];
+  delete out["home.styles.conditionalFormatting.highlightCellsRules"];
+  delete out["home.styles.conditionalFormatting.topBottomRules"];
+  delete out["home.styles.conditionalFormatting.dataBars"];
+  delete out["home.styles.conditionalFormatting.colorScales"];
+  delete out["home.styles.conditionalFormatting.iconSets"];
+  delete out["home.styles.conditionalFormatting.manageRules"];
+  delete out["home.styles.conditionalFormatting.clearRules"];
 
   // Clipboard + find/replace are non-mutating and should remain enabled in read-only mode.
   delete out["clipboard.copy"];
