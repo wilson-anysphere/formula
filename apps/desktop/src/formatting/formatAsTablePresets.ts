@@ -145,5 +145,15 @@ function applyTableBorders(doc: DocumentController, sheetId: string, table: Cell
     if (okInner === false) applied = false;
   }
 
+  // Interior vertical separators.
+  if (endCol > startCol) {
+    const interiorCols: CellRange = {
+      start: { row: startRow, col: startCol },
+      end: { row: endRow, col: endCol - 1 },
+    };
+    const okInner = doc.setRangeFormat(sheetId, interiorCols, { border: { right: innerEdge } }, { label });
+    if (okInner === false) applied = false;
+  }
+
   return applied;
 }
