@@ -271,7 +271,8 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
         if (kind === "array") {
           const source = getArrayRoot(doc, name);
           const target = snapshotDoc.getArray(name);
-          for (const value of source.toArray()) {
+          for (let i = 0; i < source.length; i++) {
+            const value = source.get(i);
             target.push([cloneYjsValue(value, snapshotConstructors)]);
           }
           continue;
@@ -414,7 +415,8 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
               target.delete(0, target.length);
             }
 
-            for (const value of source.toArray()) {
+            for (let i = 0; i < source.length; i++) {
+              const value = source.get(i);
               target.push([cloneYjsValue(value, docConstructors)]);
             }
             continue;
