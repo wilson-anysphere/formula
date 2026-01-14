@@ -57,6 +57,54 @@ fn sum_sales_by_region_config() -> PivotConfig {
 }
 
 #[test]
+fn rename_sheet_updates_pivot_definition_and_refresh_uses_new_name() {
+    let mut engine = Engine::new();
+    seed_sales_data(&mut engine);
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D1"),
+        Value::Text("Region".to_string())
+    );
+
+    let sheet1_id = engine.sheet_id("Sheet1").expect("Sheet1 id");
+    engine.rename_sheet_by_id(sheet1_id, "Data").unwrap();
+
+    let pivot = engine.pivot_table(pivot_id).unwrap();
+    assert_eq!(pivot.destination.sheet, "Data");
+    assert_eq!(
+        pivot.source,
+        PivotSource::Range {
+            sheet: "Data".to_string(),
+            range: Some(range("A1:B5")),
+        }
+    );
+
+    // Refresh should use the updated sheet names and must not recreate the old sheet name via
+    // `set_cell_value` / `ensure_sheet`.
+    engine.refresh_pivot_table(pivot_id).unwrap();
+    assert_eq!(engine.sheet_id("Sheet1"), None);
+    assert_eq!(engine.get_cell_value("Data", "E4"), Value::Number(700.0));
+}
+
+#[test]
 fn insert_rows_shifts_pivot_definition_and_refresh_uses_updated_addresses() {
     let mut engine = Engine::new();
     seed_sales_data(&mut engine);

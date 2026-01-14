@@ -1155,6 +1155,7 @@ impl Engine {
         if old_name == new_name {
             return Ok(());
         }
+        let new_name_owned = new_name.to_string();
 
         // Rewrite stored formulas so future recompiles don't treat references as external.
         let mut any_formula_rewritten = false;
@@ -1261,11 +1262,11 @@ impl Engine {
         // recreate the *old* sheet name via `ensure_sheet`.
         for pivot in self.workbook.pivots.values_mut() {
             if formula_model::sheet_name_eq_case_insensitive(&pivot.destination.sheet, &old_name) {
-                pivot.destination.sheet = new_name.to_string();
+                pivot.destination.sheet = new_name_owned.clone();
             }
             if let crate::pivot::PivotSource::Range { sheet, .. } = &mut pivot.source {
                 if formula_model::sheet_name_eq_case_insensitive(sheet, &old_name) {
-                    *sheet = new_name.to_string();
+                    *sheet = new_name_owned.clone();
                 }
             }
         }
@@ -1881,6 +1882,25 @@ impl Engine {
             sheet_state.col_properties.clear();
             sheet_state.format_runs_by_col.clear();
         }
+
+        // Drop any pivots that referenced the deleted sheet name (either as source or destination).
+        //
+        // Keeping these definitions around can cause surprising behavior: if a caller later refreshes
+        // a pivot whose destination sheet was deleted, `refresh_pivot` will write output using
+        // `Engine::set_cell_value`, which calls `ensure_sheet` and would implicitly recreate a new
+        // sheet under the old name.
+        self.workbook.pivots.retain(|_, pivot| {
+            if formula_model::sheet_name_eq_case_insensitive(&pivot.destination.sheet, &deleted_sheet_name)
+            {
+                return false;
+            }
+            match &pivot.source {
+                PivotSource::Range { sheet, .. } => {
+                    !formula_model::sheet_name_eq_case_insensitive(sheet, &deleted_sheet_name)
+                }
+                PivotSource::Table { .. } => true,
+            }
+        });
 
         // Rewrite formulas stored in remaining sheets.
         let remaining_sheet_ids = self.workbook.sheet_ids_in_order().to_vec();
