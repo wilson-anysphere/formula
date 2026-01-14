@@ -3152,6 +3152,32 @@ impl DaxEngine {
                                     }
                                     out
                                 }
+                                TableResult::PhysicalMask {
+                                    table,
+                                    mask,
+                                    visible_cols,
+                                } => {
+                                    let table_ref = model
+                                        .table(&table)
+                                        .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                    let (col_count, col_idx) = match visible_cols.as_deref() {
+                                        Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                        None => (table_ref.columns().len(), 0),
+                                    };
+                                    if col_count != 1 {
+                                        return Err(DaxError::Eval(
+                                            "IN currently only supports one-column tables".into(),
+                                        ));
+                                    }
+                                    let mut out = HashSet::new();
+                                    for row in BitVecOnesIter::new(mask.as_ref()) {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        out.insert(value);
+                                    }
+                                    out
+                                }
                                 TableResult::Virtual { columns, rows } => {
                                     if columns.len() != 1 {
                                         return Err(DaxError::Eval(
