@@ -382,6 +382,25 @@ fn canonicalize_and_localize_unions_for_fr_fr_and_es_es() {
 }
 
 #[test]
+fn canonicalize_and_localize_unions_inside_function_args_for_comma_decimal_locales() {
+    // A union expression inside a function argument must be parenthesized in the source formula,
+    // otherwise the list separator would be interpreted as an argument separator.
+    let canonical = "=SUM((A1,B1),C1)";
+
+    for (loc, expected_fn) in [
+        (&locale::DE_DE, "SUMME"),
+        (&locale::FR_FR, "SOMME"),
+        (&locale::ES_ES, "SUMA"),
+    ] {
+        let localized = locale::localize_formula(canonical, loc).unwrap();
+        assert_eq!(localized, format!("={expected_fn}((A1;B1);C1)"));
+
+        let roundtrip = locale::canonicalize_formula(&localized, loc).unwrap();
+        assert_eq!(roundtrip, canonical);
+    }
+}
+
+#[test]
 fn translates_xlfn_prefixed_functions() {
     let localized = "=_xlfn.SEQUENZ(1;2)";
     let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();
