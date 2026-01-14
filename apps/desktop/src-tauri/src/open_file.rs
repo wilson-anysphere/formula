@@ -155,17 +155,24 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
     if path.is_relative() {
         // Prefer a caller-provided cwd (single-instance plugin supplies one), but fall back to
         // the process cwd if needed so cold-start CLI invocations work.
-        let base = cwd
-            .map(PathBuf::from)
-            .or_else(|| std::env::current_dir().ok())?;
-        path = base.join(path);
+        //
+        // Avoid cloning the base path twice (`PathBuf::from(cwd)` then `base.join(...)`) since OS
+        // payloads can contain long path strings.
+        if let Some(cwd) = cwd {
+            path = cwd.join(path);
+        } else {
+            let mut base = std::env::current_dir().ok()?;
+            base.push(path);
+            path = base;
+        }
     }
 
     if !path.is_absolute() {
         // Shouldn't happen (cwd join above), but keep a best-effort fallback so we never emit
         // relative paths to the frontend.
-        let base = std::env::current_dir().ok()?;
-        path = base.join(path);
+        let mut base = std::env::current_dir().ok()?;
+        base.push(path);
+        path = base;
     }
 
     if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
