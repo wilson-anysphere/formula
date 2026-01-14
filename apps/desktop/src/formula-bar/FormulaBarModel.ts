@@ -107,7 +107,8 @@ export class FormulaBarModel {
   #referenceHighlightsCacheActiveIndex: number | null = null;
   #engineHighlightSpans: HighlightSpan[] | null = null;
   #engineLexTokens: EngineFormulaToken[] | null = null;
-  #engineHighlightErrorSpanKey: string | null = null;
+  #engineHighlightErrorSpanStart: number | null = null;
+  #engineHighlightErrorSpanEnd: number | null = null;
   #engineFunctionContext: EngineFunctionContext | null = null;
   #engineSyntaxError: FormulaParseError | null = null;
   #engineToolingFormula: string | null = null;
@@ -467,13 +468,15 @@ export class FormulaBarModel {
     this.#engineSyntaxError = error;
 
     const errorSpan = error?.span ?? null;
-    const errorSpanKey =
-      errorSpan && errorSpan.end > errorSpan.start ? `${errorSpan.start}:${errorSpan.end}` : null;
+    const highlightableErrorSpan = errorSpan && errorSpan.end > errorSpan.start ? errorSpan : null;
+    const errorSpanStart = highlightableErrorSpan?.start ?? null;
+    const errorSpanEnd = highlightableErrorSpan?.end ?? null;
 
     const highlightStable =
       this.#engineHighlightSpans != null &&
       this.#engineLexTokens === args.lexResult.tokens &&
-      this.#engineHighlightErrorSpanKey === errorSpanKey;
+      this.#engineHighlightErrorSpanStart === errorSpanStart &&
+      this.#engineHighlightErrorSpanEnd === errorSpanEnd;
 
     if (!highlightStable) {
       // Reuse the already-computed reference extraction metadata so applying engine results
@@ -481,10 +484,11 @@ export class FormulaBarModel {
       const referenceTokens = this.#coloredReferences;
       const engineSpans = highlightFromEngineTokens(args.formula, args.lexResult.tokens);
       const withRefs = spliceReferenceSpans(args.formula, engineSpans, referenceTokens);
-      const withError = applyErrorSpan(args.formula, withRefs, errorSpan && errorSpan.end > errorSpan.start ? errorSpan : null);
+      const withError = applyErrorSpan(args.formula, withRefs, highlightableErrorSpan);
       this.#engineHighlightSpans = withError;
       this.#engineLexTokens = args.lexResult.tokens;
-      this.#engineHighlightErrorSpanKey = errorSpanKey;
+      this.#engineHighlightErrorSpanStart = errorSpanStart;
+      this.#engineHighlightErrorSpanEnd = errorSpanEnd;
     }
   }
 
@@ -784,7 +788,8 @@ export class FormulaBarModel {
   #clearEditorTooling(): void {
     this.#engineHighlightSpans = null;
     this.#engineLexTokens = null;
-    this.#engineHighlightErrorSpanKey = null;
+    this.#engineHighlightErrorSpanStart = null;
+    this.#engineHighlightErrorSpanEnd = null;
     this.#engineFunctionContext = null;
     this.#engineSyntaxError = null;
     this.#engineToolingFormula = null;
