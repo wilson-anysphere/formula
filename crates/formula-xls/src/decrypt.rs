@@ -2,6 +2,7 @@ use sha1::{Digest as _, Sha1};
 use thiserror::Error;
 use zeroize::Zeroizing;
 
+use crate::biff::encryption::rc4::Rc4;
 use crate::ct::ct_eq;
 
 /// Errors returned while decrypting password-protected `.xls` BIFF8 workbooks.
@@ -432,6 +433,18 @@ fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<
     }
 }
 
+fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
+    // Advance the internal RC4 state without caring about the output bytes. This is used by the
+    // absolute-offset BIFF8 CryptoAPI RC4 variant to jump to `pos_in_block` within a 1024-byte
+    // rekey segment.
+    let mut scratch = [0u8; 64];
+    while n > 0 {
+        let take = n.min(scratch.len());
+        rc4.apply_keystream(&mut scratch[..take]);
+        n -= take;
+    }
+}
+
 fn decrypt_range_by_offset(
     bytes: &mut [u8],
     start_offset: usize,
@@ -448,7 +461,7 @@ fn decrypt_range_by_offset(
 
         let key = derive_block_key(key_material, block, key_len);
         let mut rc4 = Rc4::new(&key);
-        rc4.discard(in_block);
+        rc4_discard(&mut rc4, in_block);
         rc4.apply_keystream(&mut bytes[pos..pos + take]);
 
         stream_pos += take;
@@ -890,53 +903,6 @@ mod filepass_tests {
             ct_eq_call_count() > 0,
             "expected constant-time compare helper to be invoked"
         );
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Rc4 {
-    s: [u8; 256],
-    i: u8,
-    j: u8,
-}
-
-impl Rc4 {
-    fn new(key: &[u8]) -> Self {
-        let mut s = [0u8; 256];
-        for (i, v) in s.iter_mut().enumerate() {
-            *v = i as u8;
-        }
-
-        let mut j: u8 = 0;
-        for i in 0..256usize {
-            j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
-            s.swap(i, j as usize);
-        }
-
-        Self { s, i: 0, j: 0 }
-    }
-
-    fn apply_keystream(&mut self, data: &mut [u8]) {
-        for b in data.iter_mut() {
-            self.i = self.i.wrapping_add(1);
-            self.j = self.j.wrapping_add(self.s[self.i as usize]);
-            self.s.swap(self.i as usize, self.j as usize);
-            let t = self.s[self.i as usize].wrapping_add(self.s[self.j as usize]);
-            let k = self.s[t as usize];
-            *b ^= k;
-        }
-    }
-
-    fn discard(&mut self, mut n: usize) {
-        // Advance the internal RC4 state without caring about the output bytes. This is used by
-        // the absolute-offset BIFF8 CryptoAPI RC4 variant to jump to `pos_in_block` within a
-        // 1024-byte rekey segment.
-        let mut scratch = [0u8; 64];
-        while n > 0 {
-            let take = n.min(scratch.len());
-            self.apply_keystream(&mut scratch[..take]);
-            n -= take;
-        }
     }
 }
 
