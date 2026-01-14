@@ -251,7 +251,9 @@ Useful entrypoints when working on encrypted workbook support:
       - legacy `.xls` `FILEPASS`:
         - without a password: `Error::EncryptedWorkbook`
         - with a password (via `open_workbook_with_password` / `open_workbook_model_with_password`):
-          routed to `formula-xls` and surfaced as `Error::OpenXls { source: ImportError::Decrypt(..) }`
+          routed to `formula-xls` and surfaced as:
+          - `Error::InvalidPassword` when the password is incorrect
+          - `Error::UnsupportedEncryption` for unsupported/invalid `FILEPASS` encryption metadata
 - **Standard (CryptoAPI) helpers:**
   - End-to-end decrypt (OLE wrapper → decrypted ZIP bytes):
     - `crates/formula-office-crypto` (Agile decrypt + writer; plus some Standard/CryptoAPI variants)
