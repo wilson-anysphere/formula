@@ -8762,6 +8762,15 @@ function handleRibbonCommand(commandId: string): void {
       }
     }
 
+    // Sort/filter commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
+    // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
+    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
+    if (commandId === "home.editing.sortFilter.customSort" || commandId === "data.sortFilter.sort.customSort") {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+        return;
+      }
+    }
+
     if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
       return;
     }
