@@ -1081,6 +1081,10 @@ Validation + edge cases (Rust behavior):
 - Side effects:
   - `applyScenario` mutates the workbook state (writes scenario values and recalculates) and leaves that scenario active until `restoreBase()` is called.
   - `generateSummaryReport(...)` restores the base state before returning (it calls `restore_base` internally at the start and end).
+- Additional in-tree behavior (useful for bindings / UX):
+  - `ScenarioManager::current_scenario()` returns the currently-applied scenario id (or `None` if the base state is active).
+  - Deleting the current scenario (`delete_scenario`) clears `current_scenario`.
+  - `ScenarioManager` itself is in-memory and does not implement `Serialize`. If a host wants persistence, it should persist the `Scenario` objects (which are `Serialize`/`Deserialize`) and recreate scenarios on load.
 
 ### Monte Carlo Simulation
 
@@ -1207,6 +1211,7 @@ Validation + edge cases (Rust behavior):
 - `iterations` must be `> 0` → `WhatIfError::InvalidParams("iterations must be > 0")`.
 - `histogramBins` must be `> 0` → `WhatIfError::InvalidParams("histogram_bins must be > 0")`.
 - `outputCells` must be non-empty → `WhatIfError::InvalidParams("output_cells must not be empty")`.
+- `inputDistributions` may be empty (in which case the simulation simply re-evaluates outputs each iteration without changing any inputs).
 - Every `Distribution` is validated up-front:
   - normal/lognormal: `stdDev >= 0`
   - uniform: `min <= max`
