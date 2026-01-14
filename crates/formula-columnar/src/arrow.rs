@@ -256,6 +256,10 @@ pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowI
         | DataType::Decimal128(_, _) => ColumnType::Number,
         DataType::Boolean => ColumnType::Boolean,
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
+        // When a column is entirely null, Arrow may use the dedicated `Null` type.
+        // The logical column type is ambiguous; default to String for compatibility
+        // (values will still be imported as `Value::Null`).
+        DataType::Null => ColumnType::String,
         DataType::Date32 | DataType::Date64 | DataType::Timestamp(_, _) => ColumnType::DateTime,
         DataType::Dictionary(_, value) => match value.as_ref() {
             DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
@@ -279,6 +283,12 @@ pub(crate) fn value_from_array(
     column_type: ColumnType,
 ) -> Result<Value, ArrowInteropError> {
     if array.is_null(row) {
+        return Ok(Value::Null);
+    }
+    if array.data_type() == &DataType::Null {
+        // `NullArray` is a special Arrow array where `null_count()` is 0 (no null
+        // bitmap) but all values are logically null. Handle it explicitly so
+        // we don't attempt to interpret it as any concrete physical type.
         return Ok(Value::Null);
     }
 

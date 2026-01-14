@@ -434,3 +434,23 @@ fn record_batch_to_columnar_accepts_large_utf8_and_dictionary_large_utf8(
     assert_eq!(table.get_cell(2, 1), Value::Null);
     Ok(())
 }
+
+#[test]
+fn record_batch_to_columnar_accepts_null_type_columns() -> Result<(), Box<dyn std::error::Error>> {
+    use arrow_array::NullArray;
+
+    let arr: ArrayRef = Arc::new(NullArray::new(3));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "all_null",
+        DataType::Null,
+        true,
+    )]));
+    let batch = RecordBatch::try_new(schema, vec![arr])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.schema()[0].column_type, ColumnType::String);
+    assert_eq!(table.get_cell(0, 0), Value::Null);
+    assert_eq!(table.get_cell(1, 0), Value::Null);
+    assert_eq!(table.get_cell(2, 0), Value::Null);
+    Ok(())
+}
