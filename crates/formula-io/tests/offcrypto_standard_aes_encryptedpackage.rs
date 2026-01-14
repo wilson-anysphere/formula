@@ -1,7 +1,10 @@
 use std::path::Path;
+use std::io::Cursor;
 
 use formula_offcrypto::{parse_encryption_info, EncryptionInfo};
-use formula_io::offcrypto::decrypt_standard_encrypted_package_stream;
+use formula_io::offcrypto::{
+    decrypt_encrypted_package_standard_aes_to_writer, decrypt_standard_encrypted_package_stream,
+};
 
 const KEY: [u8; 16] = [
     0x0b, 0x9d, 0x2f, 0xab, 0xa2, 0xd8, 0xe6, 0xe7, 0xac, 0x2e, 0xc2, 0xc5, 0xa1, 0xfc,
@@ -53,4 +56,17 @@ fn decrypts_real_excel_standard_aes_encryptedpackage_fixture() {
     assert_eq!(decrypted.len(), expected.len());
     assert_eq!(decrypted, expected);
     assert!(decrypted.starts_with(b"PK\x03\x04"), "expected ZIP magic");
+
+    // Also validate the streaming decryptor (which exercises 0x1000 segment sizing + orig_size
+    // truncation rules without allocating a ciphertext-sized buffer).
+    let mut streamed = Vec::new();
+    let written = decrypt_encrypted_package_standard_aes_to_writer(
+        Cursor::new(encrypted_package.as_slice()),
+        &KEY,
+        &SALT,
+        &mut streamed,
+    )
+    .expect("stream decrypt");
+    assert_eq!(written as usize, expected.len());
+    assert_eq!(streamed, expected);
 }
