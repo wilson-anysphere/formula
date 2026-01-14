@@ -3,9 +3,20 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 const EMU_PER_PX = 914_400 / 96;
+const DEFAULT_DRAWING_ANCHOR = {
+  type: "oneCell",
+  from: { cell: { row: 0, col: 0 }, offset: { xEmu: EMU_PER_PX * 18, yEmu: EMU_PER_PX * 18 } },
+  size: { cx: EMU_PER_PX * 240, cy: EMU_PER_PX * 120 },
+} as const;
 
 async function getDrawingObjects(page: import("@playwright/test").Page): Promise<any[]> {
-  return await page.evaluate(() => (window.__formulaApp as any).getDrawingObjects());
+  return await page.evaluate(() => {
+    const app = window.__formulaApp as any;
+    const objects = Array.isArray(app?.getDrawingObjects?.()) ? (app.getDrawingObjects() as any[]) : [];
+    // Canvas charts are enabled by default; ChartStore charts are surfaced as drawing objects.
+    // This suite focuses on workbook drawings, so filter out ChartStore chart objects.
+    return objects.filter((obj) => obj?.kind?.type !== "chart");
+  });
 }
 
 async function getSelectedDrawingId(page: import("@playwright/test").Page): Promise<number | null> {
@@ -39,23 +50,63 @@ async function openContextMenuAt(page: import("@playwright/test").Page, pos: { x
   );
 }
 
+async function seedSingleShapeDrawing(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate((anchor) => {
+    const app = window.__formulaApp as any;
+    if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+    const doc = app.getDocument?.();
+    if (!doc) throw new Error("Missing __formulaApp.getDocument()");
+    const sheetId = app.getCurrentSheetId?.();
+    if (!sheetId) throw new Error("Missing __formulaApp.getCurrentSheetId()");
+    if (typeof doc.setSheetDrawings !== "function") {
+      throw new Error("Missing DocumentController.setSheetDrawings()");
+    }
+
+    // Replace the drawings list with a single deterministic shape so this suite does not rely on
+    // the `?drawings=1` demo fallback (which is intentionally non-persisted).
+    doc.setSheetDrawings(
+      sheetId,
+      [
+        {
+          id: "1",
+          kind: { type: "shape", label: "E2E Drawing" },
+          anchor,
+          zOrder: 0,
+        },
+      ],
+      { label: "Seed Drawing" },
+    );
+
+    // Clear SpreadsheetApp caches + re-render so hit testing sees the new object immediately.
+    app.syncSheetDrawings?.();
+    app.focus?.();
+  }, DEFAULT_DRAWING_ANCHOR);
+}
+
 test.describe("Drawing object commands", () => {
   test("duplicate (Ctrl/Cmd+D) and delete (Del) operate on selected drawing", async ({ page }) => {
-    await gotoDesktop(page, "/?grid=shared&drawings=1");
+    // `drawingInteractions=1` enables the interactions controller without opting into the
+    // `?drawings=1` demo mode (which seeds non-persisted drawings + ChartStore charts).
+    await gotoDesktop(page, "/?grid=shared&drawingInteractions=1");
+    await seedSingleShapeDrawing(page);
 
     await expect.poll(() => getDrawingObjects(page)).toHaveLength(1);
     const [initial] = await getDrawingObjects(page);
     const initialId = initial?.id as number;
     expect(typeof initialId).toBe("number");
 
-    // Click inside the seeded demo drawing (oneCell anchor near A1).
+    // Click inside the seeded drawing (oneCell anchor near A1).
     await clickGridAt(page, { x: 100, y: 100 });
     await expect.poll(() => getSelectedDrawingId(page)).toBe(initialId);
 
-    await page.keyboard.press("Control+D");
+    // Ensure keyboard focus is on the grid root so the window-level selected-object
+    // shortcut handler can see the event target inside `#grid` (required for Ctrl/Cmd+D).
+    await page.evaluate(() => (window as any).__formulaApp.focus());
 
+    await page.keyboard.press("ControlOrMeta+D");
+
+    await expect.poll(() => getDrawingObjects(page)).toHaveLength(2);
     const afterDup = await getDrawingObjects(page);
-    expect(afterDup).toHaveLength(2);
     const ids = afterDup.map((o) => o.id as number);
     // Duplicates should get a new globally-unique id (not necessarily `max+1`), so assert only
     // uniqueness + inclusion of the original id.
@@ -95,7 +146,8 @@ test.describe("Drawing object commands", () => {
   });
 
   test("right-clicking a drawing opens a drawing context menu", async ({ page }) => {
-    await gotoDesktop(page, "/?grid=shared&drawings=1");
+    await gotoDesktop(page, "/?grid=shared&drawingInteractions=1");
+    await seedSingleShapeDrawing(page);
 
     await expect.poll(() => getDrawingObjects(page)).toHaveLength(1);
 
