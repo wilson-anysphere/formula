@@ -328,6 +328,30 @@ fn structured_reference_items_are_not_translated() {
 }
 
 #[test]
+fn structured_reference_items_are_not_translated_in_fr_fr() {
+    // Structured-reference internals (`Table1[[...],[...]]`) must always stay canonical: we
+    // localize only the surrounding formula syntax (function names + argument separators).
+    let canonical = "=SUM(Table1[[#All],[Col1],[Col2]],1)";
+    let localized = locale::localize_formula(canonical, &locale::FR_FR).unwrap();
+    assert_eq!(localized, "=SOMME(Table1[[#All],[Col1],[Col2]];1)");
+
+    let canonical_roundtrip = locale::canonicalize_formula(&localized, &locale::FR_FR).unwrap();
+    assert_eq!(canonical_roundtrip, canonical);
+}
+
+#[test]
+fn structured_reference_items_are_not_translated_in_es_es() {
+    // Structured-reference internals (`Table1[[...],[...]]`) must always stay canonical: we
+    // localize only the surrounding formula syntax (function names + argument separators).
+    let canonical = "=SUM(Table1[[#All],[Col1],[Col2]],1)";
+    let localized = locale::localize_formula(canonical, &locale::ES_ES).unwrap();
+    assert_eq!(localized, "=SUMA(Table1[[#All],[Col1],[Col2]];1)");
+
+    let canonical_roundtrip = locale::canonicalize_formula(&localized, &locale::ES_ES).unwrap();
+    assert_eq!(canonical_roundtrip, canonical);
+}
+
+#[test]
 fn structured_reference_escaped_brackets_are_not_translated() {
     // Excel escapes `]` inside structured references as `]]` (e.g. column name `A]B` is written
     // as `A]]B`). Locale translation must preserve these escapes by treating `[...]` as opaque.
