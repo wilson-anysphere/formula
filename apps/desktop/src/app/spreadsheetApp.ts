@@ -1269,7 +1269,7 @@ export class SpreadsheetApp {
   );
   private readonly document = new DocumentController({ engine: this.engine });
   private readonly imageStore = new DesktopImageStore();
-  private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => this.document.getImageBlob(imageId);
+  private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => this.document.getImage(imageId)?.bytes ?? null;
   /**
    * In collaborative mode, keyboard undo/redo must use Yjs UndoManager semantics
    * (see `@formula/collab-undo`) so we never overwrite newer remote edits.

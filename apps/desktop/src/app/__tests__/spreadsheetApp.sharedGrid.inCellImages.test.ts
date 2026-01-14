@@ -116,7 +116,7 @@ describe("SpreadsheetApp shared grid (in-cell images)", () => {
   });
 
   it("hydrates embedded cell images from an XLSX snapshot and attempts to resolve them during render", async () => {
-    const resolverSpy = vi.spyOn(DocumentController.prototype as any, "getImageBlob");
+    const resolverSpy = vi.spyOn(DocumentController.prototype as any, "getImage");
 
     const root = createRoot();
     const status = {

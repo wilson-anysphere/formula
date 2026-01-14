@@ -246,13 +246,33 @@ function assertPngNotTooLarge(dims: { width: number; height: number }): void {
   }
 }
 
-function guardPngBytes(bytes: Uint8Array): void {
+function mimeTypeForHeaderFormat(format: string): string | null {
+  switch (format) {
+    case "png":
+      return "image/png";
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "bmp":
+      return "image/bmp";
+    case "svg":
+      return "image/svg+xml";
+    default:
+      return null;
+  }
+}
+
+function guardPngBytes(bytes: Uint8Array): ReturnType<typeof readImageDimensions> | null {
   const dims = readImageDimensions(bytes);
-  if (!dims) return;
+  if (!dims) return null;
   assertPngNotTooLarge(dims);
   if (dims.format === "png" && bytes.byteLength < MIN_PNG_BYTES) {
     throw new Error("Invalid PNG: truncated IHDR");
   }
+  return dims;
 }
 
 async function guardPngBlob(blob: Blob): Promise<void> {
@@ -1419,17 +1439,26 @@ export class CanvasGridRenderer {
 
     if (source instanceof ArrayBuffer) {
       if (typeof create !== "function") return null;
-      guardPngBytes(new Uint8Array(source));
-      return await create(new Blob([source]));
+      const bytes = new Uint8Array(source);
+      const dims = guardPngBytes(bytes);
+      const mimeType = dims ? mimeTypeForHeaderFormat(dims.format) : null;
+      return await create(mimeType ? new Blob([source], { type: mimeType }) : new Blob([source]));
     }
 
     if (source instanceof Uint8Array) {
       if (typeof create !== "function") return null;
-      guardPngBytes(source);
+      const dims = guardPngBytes(source);
+      const mimeType = dims ? mimeTypeForHeaderFormat(dims.format) : null;
       // Copy into a standalone buffer to avoid retaining oversized backing stores.
-      const buffer = new ArrayBuffer(source.byteLength);
-      new Uint8Array(buffer).set(source);
-      return await create(new Blob([buffer]));
+      const buffer =
+        source.byteOffset === 0 && source.byteLength === source.buffer.byteLength && source.buffer instanceof ArrayBuffer
+          ? source.buffer
+          : (() => {
+              const out = new ArrayBuffer(source.byteLength);
+              new Uint8Array(out).set(source);
+              return out;
+            })();
+      return await create(mimeType ? new Blob([buffer], { type: mimeType }) : new Blob([buffer]));
     }
 
     // For drawable sources, prefer `createImageBitmap` when available for performance.
