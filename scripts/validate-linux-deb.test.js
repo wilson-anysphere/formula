@@ -525,3 +525,24 @@ test("validate-linux-deb fails when Parquet shared-mime-info definition is missi
   // error. Match either so the test remains hermetic across environments.
   assert.match(proc.stderr, /(missing expected content|no packaged shared-mime-info definition)/i);
 });
+
+test("validate-linux-deb fails when extracted .desktop Exec= lacks a file placeholder", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    desktopExecLine: `Exec=${expectedMainBinary}`,
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /placeholder/i);
+});
