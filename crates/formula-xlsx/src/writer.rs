@@ -1133,6 +1133,7 @@ fn sheet_xml(
 
     let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
     let sheet_protection_xml = sheet_protection_xml(sheet);
+    let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
     let data_validations_xml = sheet_data_validations_xml(sheet);
 
     let mut page_margins_xml = String::new();
