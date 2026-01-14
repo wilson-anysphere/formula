@@ -4420,7 +4420,17 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
         EngineValue::Number(n) => CellScalar::Number(n),
         EngineValue::Text(s) => CellScalar::Text(s),
         EngineValue::Entity(v) => CellScalar::Text(v.display),
-        EngineValue::Record(v) => CellScalar::Text(v.display),
+        EngineValue::Record(v) => {
+            if let Some(display_field) = v.display_field.as_deref() {
+                if let Some(value) = v.get_field_case_insensitive(display_field) {
+                    let text = value
+                        .coerce_to_string()
+                        .unwrap_or_else(|e| e.as_code().to_string());
+                    return CellScalar::Text(text);
+                }
+            }
+            CellScalar::Text(v.display)
+        }
         EngineValue::Bool(b) => CellScalar::Bool(b),
         EngineValue::Error(e) => CellScalar::Error(e.as_code().to_string()),
         // Reference values are not meant to be stored directly in cells; when they
@@ -4648,6 +4658,32 @@ mod tests {
     };
     use formula_xlsx::pivots::preserve::PreservedSheetPivotTables;
     use formula_xlsx::{PreservedPivotParts, RelationshipStub};
+
+    #[test]
+    fn record_cells_use_display_field_when_degrading_to_text() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        let sheet_name = workbook.sheets[0].name.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut record = formula_engine::Record::new("Fallback").field(
+            "Name",
+            EngineValue::Text("Apple".to_string()),
+        );
+        record.display_field = Some("Name".to_string());
+
+        state
+            .engine
+            .set_cell_value(&sheet_name, "A1", EngineValue::Record(record))
+            .expect("set engine record value");
+
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("read A1");
+        assert_eq!(cell.value, CellScalar::Text("Apple".to_string()));
+        assert_eq!(cell.display_value, "Apple");
+    }
 
     #[test]
     fn add_sheet_inserts_after_middle_sheet() {
