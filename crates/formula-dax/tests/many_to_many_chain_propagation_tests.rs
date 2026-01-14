@@ -1,7 +1,7 @@
 use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use formula_dax::{
     Cardinality, CrossFilterDirection, DataModel, DaxEngine, FilterContext, Relationship,
-    RowContext, Table,
+    RowContext, Table, Value,
 };
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -175,6 +175,170 @@ fn build_m2m_chain_model_columnar(cross_filter_direction: CrossFilterDirection) 
             cross_filter_direction,
             is_active: true,
             enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+}
+
+fn build_m2m_chain_model_with_unmatched_keys(
+    cross_filter_direction: CrossFilterDirection,
+) -> DataModel {
+    let mut model = DataModel::new();
+
+    let mut a = Table::new("A", vec!["Key", "AAttr"]);
+    a.push_row(vec![1.into(), "a1".into()]).unwrap();
+    a.push_row(vec![999.into(), "a999".into()]).unwrap();
+    model.add_table(a).unwrap();
+
+    let mut b = Table::new("B", vec!["Key", "BAttr"]);
+    b.push_row(vec![1.into(), "b1".into()]).unwrap();
+    b.push_row(vec![999.into(), "b999".into()]).unwrap();
+    model.add_table(b).unwrap();
+
+    let mut c = Table::new("C", vec!["Key", "CAttr"]);
+    c.push_row(vec![1.into(), "c1".into()]).unwrap();
+    model.add_table(c).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "A_B".into(),
+            from_table: "A".into(),
+            from_column: "Key".into(),
+            to_table: "B".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "B_C".into(),
+            from_table: "B".into(),
+            from_column: "Key".into(),
+            to_table: "C".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction,
+            is_active: true,
+            // Allow B keys that do not exist in C so they flow to C's virtual blank member.
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+}
+
+fn build_m2m_chain_model_with_unmatched_keys_columnar(
+    cross_filter_direction: CrossFilterDirection,
+) -> DataModel {
+    let mut model = DataModel::new();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+    let a_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "AAttr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let mut a_builder = ColumnarTableBuilder::new(a_schema, options);
+    a_builder.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("a1")),
+    ]);
+    a_builder.append_row(&[
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::String(Arc::<str>::from("a999")),
+    ]);
+    model
+        .add_table(Table::from_columnar("A", a_builder.finalize()))
+        .unwrap();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+    let b_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "BAttr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let mut b_builder = ColumnarTableBuilder::new(b_schema, options);
+    b_builder.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("b1")),
+    ]);
+    b_builder.append_row(&[
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::String(Arc::<str>::from("b999")),
+    ]);
+    model
+        .add_table(Table::from_columnar("B", b_builder.finalize()))
+        .unwrap();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+    let c_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CAttr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let mut c_builder = ColumnarTableBuilder::new(c_schema, options);
+    c_builder.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("c1")),
+    ]);
+    model
+        .add_table(Table::from_columnar("C", c_builder.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "A_B".into(),
+            from_table: "A".into(),
+            from_column: "Key".into(),
+            to_table: "B".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "B_C".into(),
+            from_table: "B".into(),
+            from_column: "Key".into(),
+            to_table: "C".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction,
+            is_active: true,
+            enforce_referential_integrity: false,
         })
         .unwrap();
 
@@ -598,6 +762,51 @@ fn three_hop_single_direction_chain_propagates_to_a_columnar() {
             .evaluate(&model, "COUNTROWS(B)", &filter, &RowContext::default(),)
             .unwrap(),
         2.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(A)", &filter, &RowContext::default(),)
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn blank_member_propagates_unmatched_keys_across_chain() {
+    let model = build_m2m_chain_model_with_unmatched_keys(CrossFilterDirection::Single);
+    let engine = DaxEngine::new();
+
+    // Filter C to its blank/unknown member. There is no physical blank row in C, but since the
+    // relationship B_C allows unmatched keys, the B row with Key=999 belongs to C's virtual blank
+    // member and should become visible, then propagate further to A.
+    let filter = FilterContext::empty().with_column_equals("C", "CAttr", Value::Blank);
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(B)", &filter, &RowContext::default(),)
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(A)", &filter, &RowContext::default(),)
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn blank_member_propagates_unmatched_keys_across_chain_columnar() {
+    let model = build_m2m_chain_model_with_unmatched_keys_columnar(CrossFilterDirection::Single);
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty().with_column_equals("C", "CAttr", Value::Blank);
+
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(B)", &filter, &RowContext::default(),)
+            .unwrap(),
+        1.into()
     );
     assert_eq!(
         engine
