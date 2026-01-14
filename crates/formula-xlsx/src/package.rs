@@ -1530,7 +1530,20 @@ fn ensure_workbook_content_type(
     workbook_content_type: &str,
 ) -> Result<(), XlsxError> {
     let ct_name = "[Content_Types].xml";
-    let Some(existing) = parts.get(ct_name).cloned() else {
+    let ct_key = if parts.contains_key(ct_name) {
+        ct_name.to_string()
+    } else {
+        let Some(found) = parts
+            .keys()
+            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), ct_name))
+            .cloned()
+        else {
+            return Ok(());
+        };
+        found
+    };
+
+    let Some(existing) = parts.get(&ct_key).cloned() else {
         return Ok(());
     };
 
@@ -1638,7 +1651,7 @@ fn ensure_workbook_content_type(
     }
 
     if changed {
-        parts.insert(ct_name.to_string(), writer.into_inner());
+        parts.insert(ct_key, writer.into_inner());
     }
     Ok(())
 }
@@ -1649,7 +1662,22 @@ pub(crate) fn ensure_content_types_default(
     content_type: &str,
 ) -> Result<(), XlsxError> {
     let ct_name = "[Content_Types].xml";
-    let Some(existing) = parts.get(ct_name).cloned() else {
+    let ct_key = if parts.contains_key(ct_name) {
+        ct_name.to_string()
+    } else {
+        let Some(found) = parts
+            .keys()
+            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), ct_name))
+            .cloned()
+        else {
+            // Match `ensure_workbook_content_type` behavior: we don't synthesize a full content types
+            // file for existing packages.
+            return Ok(());
+        };
+        found
+    };
+
+    let Some(existing) = parts.get(&ct_key).cloned() else {
         // Match `ensure_workbook_content_type` behavior: we don't synthesize a full content types
         // file for existing packages.
         return Ok(());
@@ -1749,7 +1777,7 @@ pub(crate) fn ensure_content_types_default(
     }
 
     if changed {
-        parts.insert(ct_name.to_string(), writer.into_inner());
+        parts.insert(ct_key, writer.into_inner());
     }
     Ok(())
 }
@@ -2288,6 +2316,79 @@ mod tests {
                     && n.attribute("ContentType") == Some("image/png")
             }),
             "expected png Default to be inserted, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn ensure_content_types_default_updates_slashed_content_types_key_in_place() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let mut parts = BTreeMap::new();
+        parts.insert(
+            "/[Content_Types].xml".to_string(),
+            content_types.as_bytes().to_vec(),
+        );
+
+        ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
+
+        assert!(
+            parts.contains_key("/[Content_Types].xml"),
+            "expected content types to be patched in-place (preserving leading slash key)"
+        );
+        assert!(
+            !parts.contains_key("[Content_Types].xml"),
+            "expected ensure_content_types_default to not create a new canonical content types key"
+        );
+
+        let updated = std::str::from_utf8(parts.get("/[Content_Types].xml").unwrap()).expect("utf8");
+        let doc = Document::parse(updated).expect("parse content types");
+        assert!(
+            doc.descendants().any(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Default"
+                    && n.attribute("Extension") == Some("png")
+                    && n.attribute("ContentType") == Some("image/png")
+            }),
+            "expected png Default to be inserted, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn ensure_workbook_content_type_updates_slashed_content_types_key_in_place() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+        let mut parts = BTreeMap::new();
+        parts.insert(
+            "/[Content_Types].xml".to_string(),
+            content_types.as_bytes().to_vec(),
+        );
+
+        ensure_workbook_content_type(
+            &mut parts,
+            WorkbookKind::MacroEnabledWorkbook.workbook_content_type(),
+        )
+        .expect("ensure workbook content type");
+
+        assert!(
+            parts.contains_key("/[Content_Types].xml"),
+            "expected content types to be patched in-place (preserving leading slash key)"
+        );
+        assert!(
+            !parts.contains_key("[Content_Types].xml"),
+            "expected ensure_workbook_content_type to not create a new canonical content types key"
+        );
+
+        let updated = std::str::from_utf8(parts.get("/[Content_Types].xml").unwrap()).expect("utf8");
+        assert!(
+            updated.contains("application/vnd.ms-excel.sheet.macroEnabled.main+xml"),
+            "expected workbook content type to be updated, got:\n{updated}"
         );
     }
 
