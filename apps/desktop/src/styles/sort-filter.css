@@ -262,6 +262,7 @@
 
 .formula-table-filter-dropdown .formula-sort-filter__button:focus-visible {
   border-color: var(--formula-grid-selection-border, var(--selection-border));
+  box-shadow: 0 0 0 2px var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
 }
 
 @supports selector(:has(*)) {

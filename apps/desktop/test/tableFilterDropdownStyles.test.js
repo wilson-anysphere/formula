@@ -39,10 +39,13 @@ test("AutoFilterDropdown uses grid-scoped --formula-grid-* tokens in sort-filter
       /\.formula-table-filter-dropdown\s+\.formula-sort-filter__button:not\(\.formula-sort-filter__button--primary\):active:not\(:disabled\)\s*\{[\s\S]*?--formula-grid-scrollbar-track\b/,
       "Expected table filter dropdown secondary buttons to use --formula-grid-scrollbar-track for active",
     ],
+    [
+      /\.formula-table-filter-dropdown\s+\.formula-sort-filter__button:focus-visible\s*\{[\s\S]*?--formula-grid-selection-fill\b/,
+      "Expected table filter dropdown button focus ring to use --formula-grid-selection-fill",
+    ],
   ];
 
   for (const [pattern, message] of expectations) {
     assert.match(css, pattern, message);
   }
 });
-
