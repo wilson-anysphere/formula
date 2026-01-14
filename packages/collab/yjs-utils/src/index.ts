@@ -400,16 +400,15 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
     const MapCtor = constructors?.Map ?? (map as any).constructor;
     const out = new (MapCtor as any)();
     const prelim = (map as any)?.doc == null ? (map as any)?._prelimContent : null;
-    const keys =
-      prelim instanceof Map ? Array.from(prelim.keys()).sort() : Array.from(map.keys()).sort();
+    const keys = prelim instanceof Map ? Array.from(prelim.keys()).sort() : Array.from(map.keys()).sort();
     for (const key of keys) {
       const nextValue = prelim instanceof Map ? prelim.get(key) : map.get(key);
       out.set(key, cloneYjsValue(nextValue, constructors));
     }
 
-    // Yjs intentionally warns on reading unintegrated types (doc=null) via `get()`. For cloning
-    // and test usage we want the returned value to behave like a normal map before insertion,
-    // so fall back to `_prelimContent` while the type is unintegrated.
+    // Yjs warns on reading unintegrated types (doc=null) via `get()`. For cloning and test usage we
+    // want the returned value to be inspectable before insertion, so fall back to `_prelimContent`
+    // while the type is unintegrated.
     const outPrelim = (out as any)?._prelimContent;
     if ((out as any)?.doc == null && outPrelim instanceof Map && typeof (out as any).get === "function") {
       const originalGet = (out as any).get as (key: any) => any;
@@ -432,9 +431,7 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
     const ArrayCtor = constructors?.Array ?? (array as any).constructor;
     const out = new (ArrayCtor as any)();
     const prelim = (array as any)?.doc == null && Array.isArray((array as any)?._prelimContent) ? (array as any)._prelimContent : null;
-    for (const item of prelim ?? array.toArray()) {
-      out.push([cloneYjsValue(item, constructors)]);
-    }
+    for (const item of prelim ?? array.toArray()) out.push([cloneYjsValue(item, constructors)]);
     return out;
   }
 
@@ -442,7 +439,6 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
   if (text) {
     const TextCtor = constructors?.Text ?? (text as any).constructor;
     const out = new (TextCtor as any)();
-
     const cloneDelta = (delta: any[]): any[] => {
       const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
       return delta.map((op) => {
@@ -476,29 +472,20 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
 
     // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
     // Note: unintegrated Y.Text instances store edits in `_pending`; calling `toDelta()` returns
-    // an empty delta until the text is integrated into a Doc. For cloning we best-effort
-    // materialize pending ops via a temporary local Doc.
+    // an empty delta until the text is integrated into a Doc. To clone prelim values (including
+    // ones from a different Yjs module instance), materialize pending ops in a temporary doc first.
     let delta: any[] = [];
     if ((text as any)?.doc != null) {
       delta = text.toDelta();
-    } else {
+    } else if (typeof (text as any)._integrate === "function") {
       try {
-        // Ensure the value is insertable into the local Y.Doc so pending ops can be applied.
-        if (!(text instanceof Y.AbstractType)) {
-          try {
-            Object.setPrototypeOf(text, Y.Text.prototype);
-          } catch {
-            // ignore
-          }
-        }
-
         const doc = new Y.Doc();
-        const root = doc.getMap("__clone_yjs_value_text");
-        root.set("t", text as any);
-        const integrated = root.get("t");
-        const integratedText = getYText(integrated) ?? integrated;
-        delta = typeof integratedText?.toDelta === "function" ? integratedText.toDelta() : [];
-        doc.destroy?.();
+        try {
+          (text as any)._integrate(doc, null);
+          delta = text.toDelta();
+        } finally {
+          doc.destroy?.();
+        }
       } catch {
         delta = [];
       }

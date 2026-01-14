@@ -155,9 +155,9 @@ function writeFakeRpmExtractTools(
   } = {},
 ) {
   const rpm2cpioScript = `#!/usr/bin/env bash
-set -euo pipefail
-# The validator only uses rpm2cpio as part of a pipe into cpio; the test fakes
-# extraction by implementing a fake cpio that writes the desired files.
+ set -euo pipefail
+  # The validator only uses rpm2cpio as part of a pipe into cpio; the test fakes
+  # extraction by implementing a fake cpio that writes the desired files.
 exit 0
 `;
   const rpm2cpioPath = join(binDir, "rpm2cpio");
