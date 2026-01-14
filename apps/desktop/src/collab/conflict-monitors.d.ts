@@ -1,6 +1,3 @@
-export const VERSIONING_RESTORE_ORIGIN: string;
-export const BRANCHING_APPLY_ORIGIN: string;
-
 import type * as Y from "yjs";
 import type {
   CellStructuralConflict,
@@ -8,6 +5,9 @@ import type {
   FormulaConflict,
   FormulaConflictMonitor,
 } from "../../../../packages/collab/conflicts/index.js";
+
+export const VERSIONING_RESTORE_ORIGIN: string;
+export const BRANCHING_APPLY_ORIGIN: string;
 
 export function createDesktopFormulaConflictMonitor(opts: {
   doc: Y.Doc;
