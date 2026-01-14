@@ -334,6 +334,8 @@ $excelBuild = $null
 
 $translations = @{}
 $skipped = New-Object System.Collections.Generic.List[string]
+$localizedToCanonical = @{}
+$duplicates = New-Object System.Collections.Generic.List[string]
 
 try {
   try {
@@ -415,6 +417,17 @@ try {
         throw "Unexpected FormulaLocal (appears to be an error literal): $local"
       }
 
+      $localizedKey = $localizedName.ToUpperInvariant()
+      if ($localizedToCanonical.ContainsKey($localizedKey)) {
+        $existing = [string]$localizedToCanonical[$localizedKey]
+        if ($existing -ne $canonicalName) {
+          $duplicates.Add("$existing,$canonicalName -> $localizedName") | Out-Null
+          Write-Warning ("Duplicate localized function name detected: {0} and {1} both map to {2}" -f $existing, $canonicalName, $localizedName)
+        }
+      } else {
+        $localizedToCanonical[$localizedKey] = $canonicalName
+      }
+
       $translations[$canonicalName] = $localizedName
     } catch {
       $skipped.Add($canonicalName) | Out-Null
@@ -444,6 +457,10 @@ try {
   [System.IO.File]::WriteAllText($outFilePath, $json + "`n", [System.Text.UTF8Encoding]::new($false))
 
   Write-Host "Wrote $($orderedTranslations.Count) translations to: $outFilePath"
+  if ($duplicates.Count -gt 0) {
+    $dupsSorted = @($duplicates | Sort-Object)
+    Write-Warning ("Detected {0} duplicate localized spellings (generator may fail): {1}" -f $duplicates.Count, ($dupsSorted -join "; "))
+  }
   if ($skipped.Count -gt 0) {
     $skippedSorted = @($skipped | Sort-Object)
     Write-Warning ("Skipped {0} functions rejected by Excel: {1}" -f $skipped.Count, ($skippedSorted -join ", "))
