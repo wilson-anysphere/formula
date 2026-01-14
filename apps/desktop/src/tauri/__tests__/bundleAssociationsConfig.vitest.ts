@@ -22,17 +22,18 @@ function collectDeepLinkSchemes(config: any): string[] {
   const desktop = deepLink?.desktop;
 
   const schemes: string[] = [];
+  const normalizeScheme = (raw: string): string => raw.trim().toLowerCase().replace(/[:/]+$/, "");
   const addSchemesFromProtocol = (protocol: any) => {
     const raw = protocol?.schemes;
     if (typeof raw === "string") {
-      const v = raw.trim().toLowerCase();
+      const v = normalizeScheme(raw);
       if (v) schemes.push(v);
       return;
     }
     if (Array.isArray(raw)) {
       for (const item of raw) {
         if (typeof item !== "string") continue;
-        const v = item.trim().toLowerCase();
+        const v = normalizeScheme(item);
         if (v) schemes.push(v);
       }
     }

@@ -268,6 +268,14 @@ def main() -> int:
         registered_via_utis |= uti_map.get(uti, set())
     registered_exts = document_type_exts | registered_via_utis
     registered_schemes = extract_url_schemes(plist)
+    invalid_schemes = {s for s in registered_schemes if ":" in s or "/" in s}
+    if invalid_schemes:
+        print(
+            "[macos] ERROR: Info.plist declares invalid CFBundleURLSchemes value(s) (expected scheme names only, no ':' or '/')",
+            file=sys.stderr,
+        )
+        print(f"[macos] Invalid scheme value(s): {_format_set(invalid_schemes)}", file=sys.stderr)
+        return 1
 
     print(f"[macos] Info.plist: {args.info_plist}")
     print(f"[macos] Expected file extensions ({len(expected_exts)}): {_format_set(expected_exts)}")

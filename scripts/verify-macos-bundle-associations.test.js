@@ -254,8 +254,9 @@ test(
 
     const proc = runValidator({ configPath, infoPlistPath });
     assert.notEqual(proc.status, 0, "expected non-zero exit status");
-    assert.match(proc.stderr, /Missing URL schemes/i);
-    assert.match(proc.stderr, /formula/);
+    assert.match(proc.stderr, /invalid/i);
+    assert.match(proc.stderr, /CFBundleURLSchemes/i);
+    assert.match(proc.stderr, /formula:\/\//i);
   },
 );
 
