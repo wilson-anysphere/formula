@@ -80,6 +80,56 @@ fn cell_contents_returns_formula_text_or_value() {
 }
 
 #[test]
+fn cell_format_color_and_parentheses_use_number_format_style() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+
+    // Fixed decimals.
+    let fixed2 = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine.set_cell_style_id("Sheet1", "A1", fixed2).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"parentheses\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("F2".to_string()));
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 0.0);
+
+    // Built-in placeholder id 6 is currency with red parentheses negatives.
+    let currency_red = engine.intern_style(Style {
+        number_format: Some("__builtin_numFmtId:6".to_string()),
+        ..Style::default()
+    });
+    engine.set_cell_style_id("Sheet1", "A1", currency_red).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("C0".to_string()));
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
+
+    // Row/column style fallback: if the cell style is the default (id 0), it should inherit the
+    // row's number format.
+    let row_fmt = engine.intern_style(Style {
+        number_format: Some("0.0%".to_string()),
+        ..Style::default()
+    });
+    engine.set_row_style_id("Sheet1", 0, Some(row_fmt));
+    engine.set_cell_style_id("Sheet1", "A1", 0).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("P1".to_string()));
+}
+
+#[test]
 fn info_recalc_defaults_to_manual_and_unknown_keys() {
     let mut sheet = TestSheet::new();
 
