@@ -73,6 +73,14 @@ require_cmd curl
 require_cmd javac
 require_cmd java
 
+CURL_BIN="$(command -v curl)"
+# Default curl flags:
+# -sS:    silent but show errors
+# -L:     follow redirects (Maven Central / CDN)
+# --fail: non-200 => non-zero exit
+# --retry: be resilient to transient network issues
+CURL_FLAGS=(-sS -L --fail --retry 3 --retry-delay 1)
+
 hash_cmd() {
   if command -v sha256sum >/dev/null 2>&1; then
     echo "sha256sum"
@@ -125,7 +133,7 @@ download_jar() {
   fi
 
   echo "Downloading ${filename}..." >&2
-  curl -sSL --fail -o "${dest}.tmp" "${url}"
+  "${CURL_BIN}" "${CURL_FLAGS[@]}" -o "${dest}.tmp" "${url}"
 
   local actual_sha
   actual_sha="$(sha256_file "${dest}.tmp")"
