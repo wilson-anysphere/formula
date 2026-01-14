@@ -967,6 +967,8 @@ export class DrawingOverlay {
     this.themeObserver = null;
     this.bitmapCache.clear();
     this.shapeTextCache.clear();
+    // Release any cached drawing object references (spatial index stores objects + rects).
+    this.spatialIndex.rebuild([], this.geom, 1);
     this.cssVarStyle = undefined;
     this.colorTokens = null;
     this.orderedObjects = [];

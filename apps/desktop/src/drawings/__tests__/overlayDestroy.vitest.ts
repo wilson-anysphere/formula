@@ -230,6 +230,34 @@ describe("DrawingOverlay destroy()", () => {
     expect((overlay as any).shapeTextCache.size).toBe(0);
   });
 
+  it("clears the spatial index on destroy so drawing objects are not retained", async () => {
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const images: ImageStore = {
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p/>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    await overlay.render([createShapeObject(123, rawXml)], viewport);
+    expect((overlay as any).spatialIndex.getObject(123)).not.toBeNull();
+
+    overlay.destroy();
+    expect((overlay as any).spatialIndex.getObject(123)).toBeNull();
+  });
+
   it("calls chartRenderer.destroy() when provided", () => {
     const ctx = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
