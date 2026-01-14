@@ -994,9 +994,9 @@ fn decrypt_biff8_rc4_standard(
     while offset < workbook_stream.len() {
         let remaining = workbook_stream.len() - offset;
         if remaining < 4 {
-            return Err(DecryptError::InvalidFilePass(
-                "truncated BIFF record header while decrypting".to_string(),
-            ));
+            // Some writers include trailing padding bytes after the final record. Those bytes are
+            // not part of any record header/payload and should be ignored.
+            break;
         }
 
         let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
@@ -1896,6 +1896,42 @@ mod tests {
         // Decrypt and assert we recover the original bytes.
         decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
         assert_eq!(encrypted, plain);
+    }
+
+    #[test]
+    fn rc4_decrypt_ignores_trailing_padding_bytes_after_last_record() {
+        let password = "secret";
+        let salt: [u8; 16] = (0..16u8).collect::<Vec<_>>()[..].try_into().unwrap();
+        let key_len = 16;
+
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&record(RECORD_BOF, &[0u8; 16]));
+        let filepass_record = make_filepass_rc4_record(password, salt, key_len);
+        let filepass_offset = plain.len();
+        plain.extend_from_slice(&filepass_record);
+        plain.extend_from_slice(&record(RECORD_DUMMY, &dummy_payload(64, 0xAA)));
+        plain.extend_from_slice(&record(RECORD_EOF, &[]));
+
+        // Encrypt record payloads after FILEPASS.
+        let mut encrypted = plain.clone();
+        let filepass_len = u16::from_le_bytes([
+            encrypted[filepass_offset + 2],
+            encrypted[filepass_offset + 3],
+        ]) as usize;
+        let encrypted_start = filepass_offset + 4 + filepass_len;
+        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
+            .expect("encrypt");
+
+        // Append trailing bytes that do not form a full BIFF record header. Some writers include
+        // such padding after the final EOF record.
+        let padding = [0xDEu8, 0xADu8, 0xBEu8];
+        encrypted.extend_from_slice(&padding);
+        let mut expected = plain.clone();
+        expected.extend_from_slice(&padding);
+
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, expected);
     }
 
     fn filepass_payload_range(stream: &[u8]) -> std::ops::Range<usize> {
