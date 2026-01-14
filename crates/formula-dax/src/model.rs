@@ -225,39 +225,53 @@ impl Table {
                     column_type,
                 };
 
-                // The columnar backend is stored behind an `Arc`. Try to unwrap it to avoid a
-                // clone when uniquely owned, then fall back to cloning the table when shared.
-                let options = backend.table.options();
-                let placeholder =
-                    formula_columnar::ColumnarTable::from_encoded(Vec::new(), Vec::new(), 0, options);
-                let table_arc = std::mem::replace(&mut backend.table, Arc::new(placeholder));
-                let table = match Arc::try_unwrap(table_arc) {
-                    Ok(table) => table,
-                    Err(shared) => (*shared).clone(),
-                };
-
-                let updated = table
-                    .with_appended_column(schema, column_values)
-                    .map_err(|err| match err {
-                        formula_columnar::ColumnAppendError::LengthMismatch { expected, actual } => {
-                            DaxError::ColumnLengthMismatch {
+                // The columnar backend is stored behind an `Arc`.
+                //
+                // When the `Arc` is uniquely owned, try to unwrap it to avoid cloning the existing
+                // columns. When shared, operate on a clone so errors (though unexpected after
+                // pre-validation) leave the original table unchanged.
+                let updated = if Arc::strong_count(&backend.table) == 1 {
+                    let options = backend.table.options();
+                    let placeholder = formula_columnar::ColumnarTable::from_encoded(
+                        Vec::new(),
+                        Vec::new(),
+                        0,
+                        options,
+                    );
+                    let table_arc = std::mem::replace(&mut backend.table, Arc::new(placeholder));
+                    let table = Arc::try_unwrap(table_arc)
+                        .expect("Arc::strong_count == 1 but Arc::try_unwrap failed");
+                    table
+                        .with_appended_column(schema, column_values)
+                        .expect("column append should succeed after pre-validation")
+                } else {
+                    backend
+                        .table
+                        .as_ref()
+                        .clone()
+                        .with_appended_column(schema, column_values)
+                        .map_err(|err| match err {
+                            formula_columnar::ColumnAppendError::LengthMismatch {
+                                expected,
+                                actual,
+                            } => DaxError::ColumnLengthMismatch {
                                 table: self.name.clone(),
                                 column: name.clone(),
                                 expected,
                                 actual,
+                            },
+                            formula_columnar::ColumnAppendError::DuplicateColumn { name: column } => {
+                                DaxError::DuplicateColumn {
+                                    table: self.name.clone(),
+                                    column,
+                                }
                             }
-                        }
-                        formula_columnar::ColumnAppendError::DuplicateColumn { name: column } => {
-                            DaxError::DuplicateColumn {
-                                table: self.name.clone(),
-                                column,
-                            }
-                        }
-                        other => DaxError::Eval(format!(
-                            "failed to append column {}[{}] to columnar table: {other}",
-                            self.name, name
-                        )),
-                    })?;
+                            other => DaxError::Eval(format!(
+                                "failed to append column {}[{}] to columnar table: {other}",
+                                self.name, name
+                            )),
+                        })?
+                };
 
                 backend.table = Arc::new(updated);
                 backend.columns = backend
@@ -643,8 +657,6 @@ pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
     /// Column index of `rel.from_column` in the `from_table`.
     pub(crate) from_idx: usize,
-    /// Column index of `rel.to_column` in the `to_table`.
-    pub(crate) to_idx: usize,
     pub(crate) to_index: HashMap<Value, RowSet>,
     /// Relationship index for the fact-side (from_table) foreign key.
     ///
@@ -1188,7 +1200,6 @@ impl DataModel {
         self.relationships.push(RelationshipInfo {
             rel: relationship,
             from_idx,
-            to_idx,
             to_index,
             from_index,
             unmatched_fact_rows,
