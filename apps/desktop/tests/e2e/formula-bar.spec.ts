@@ -21,6 +21,20 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   }
 }
 
+async function dragInLocator(
+  page: import("@playwright/test").Page,
+  locator: import("@playwright/test").Locator,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  // Locator-relative coordinates are resilient to layout shifts (e.g. formula bar resizing while
+  // entering edit / range selection modes).
+  await locator.hover({ position: from });
+  await page.mouse.down();
+  await locator.hover({ position: to });
+  await page.mouse.up();
+}
+
 test.describe("formula bar editing + range insertion", () => {
   const modes = ["legacy", "shared"] as const;
 
@@ -55,13 +69,13 @@ test.describe("formula bar editing + range insertion", () => {
       await input.fill("=SUM(");
 
       // Drag select A1:A2 to insert a range reference.
-      const gridBox = await page.locator("#grid").boundingBox();
-      if (!gridBox) throw new Error("Missing grid bounding box");
-
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
-      await page.mouse.down();
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
-      await page.mouse.up();
+      if (mode === "shared") {
+        await expect
+          .poll(() => page.evaluate(() => (window as any).__formulaApp?.sharedGrid?.interactionMode ?? null))
+          .toBe("rangeSelection");
+      }
+      const grid = page.locator("#grid");
+      await dragInLocator(page, grid, { x: 60, y: 40 }, { x: 60, y: 64 });
 
       await expect(input).toHaveValue("=SUM(A1:A2");
 
@@ -123,7 +137,8 @@ test.describe("formula bar editing + range insertion", () => {
       await waitForIdle(page);
 
       await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
-      await expect(page.getByTestId("active-cell")).toHaveText("C1");
+      // Formula-bar commit (Enter) advances selection to the next cell (Excel-like).
+      await expect(page.getByTestId("active-cell")).toHaveText("C2");
 
       const { sheet1Formula, sheet2Formula, sheet2Value } = await page.evaluate(() => {
         const app = (window as any).__formulaApp;
@@ -327,6 +342,10 @@ test.describe("formula bar editing + range insertion", () => {
       await input.fill("=1/A1");
       await page.keyboard.press("Enter");
       await waitForIdle(page);
+
+      // Formula-bar commit advances selection, so re-select the formula cell before asserting UI state.
+      await page.click("#grid", { position: { x: 160, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("B1");
 
       // Error button should appear and panel should explain.
       const errorButton = page.getByTestId("formula-error-button");

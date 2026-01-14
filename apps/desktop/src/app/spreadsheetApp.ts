@@ -4347,6 +4347,11 @@ export class SpreadsheetApp {
         onReferenceHighlights: (highlights) => {
           this.referenceHighlightsSource = highlights;
           this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+          // The shared-grid renderer needs to enter/exit "range selection" mode based on whether the
+          // formula bar is currently editing a formula. `onBeginEdit` fires before the user has
+          // typed `=`, so rely on overlay emissions (which update as the draft changes) to keep the
+          // interaction mode in sync.
+          this.syncSharedGridInteractionMode();
           if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
           this.renderReferencePreview();
           // Keep other views (e.g. split-view secondary pane) in sync with formula-bar reference

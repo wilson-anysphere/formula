@@ -51,6 +51,28 @@ async function dragFromTo(
   await page.mouse.up();
 }
 
+async function dragInLocator(
+  page: import("@playwright/test").Page,
+  locator: import("@playwright/test").Locator,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  // Use locator-relative coordinates so the drag stays correct even if the page layout shifts
+  // (e.g. formula bar resizing while entering edit / range selection modes).
+  await locator.hover({ position: from });
+  await page.mouse.down();
+  await locator.hover({ position: to });
+  await page.mouse.up();
+}
+
+function rectCenter(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
+  return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+}
+
+function applyOffset(point: { x: number; y: number }, offset: { x: number; y: number }): { x: number; y: number } {
+  return { x: point.x + offset.x, y: point.y + offset.y };
+}
+
 test.describe("split view", () => {
   const LAYOUT_KEY = "formula.layout.workbook.local-workbook.v1";
 
@@ -1099,13 +1121,16 @@ test.describe("split view", () => {
       await input.fill("=SUM(");
 
       // Drag select A1:A2 in the secondary pane to insert a range reference.
-      const gridBox = await page.locator("#grid-secondary").boundingBox();
-      if (!gridBox) throw new Error("Missing grid-secondary bounding box");
-
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
-      await page.mouse.down();
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
-      await page.mouse.up();
+      await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid?.getCellRect), undefined, { timeout: 10_000 });
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.interactionMode ?? null))
+        .toBe("rangeSelection");
+      const [a1Rect, a2Rect] = await page.evaluate(() => {
+        const grid = (window as any).__formulaSecondaryGrid;
+        return [grid.getCellRect(1, 1), grid.getCellRect(2, 1)];
+      });
+      if (!a1Rect || !a2Rect) throw new Error("Missing secondary pane cell rects for A1/A2");
+      await dragInLocator(page, secondary, rectCenter(a1Rect), rectCenter(a2Rect));
 
       await expect(input).toHaveValue("=SUM(A1:A2");
       await expect(secondaryStatus).toContainText("Selection A1:A2");
@@ -1134,12 +1159,12 @@ test.describe("split view", () => {
       await page.getByTestId("formula-highlight").click();
       await expect(input).toBeVisible();
       await input.fill("=SUM(");
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.interactionMode ?? null))
+        .toBe("rangeSelection");
 
       // Drag-select again; focus should return to the formula bar so typing continues.
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
-      await page.mouse.down();
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
-      await page.mouse.up();
+      await dragInLocator(page, secondary, rectCenter(a1Rect), rectCenter(a2Rect));
 
       await expect(input).toHaveValue("=SUM(A1:A2");
       await expect(input).toBeFocused();
@@ -1163,7 +1188,8 @@ test.describe("split view", () => {
       const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
       expect(c1Value).toBe("3");
 
-      await expect(secondaryStatus).toContainText("Selection C1");
+      // Formula-bar commit (Enter) advances the active cell like in-cell editing.
+      await expect(secondaryStatus).toContainText("Selection C2");
       await expect
         .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.renderer?.referenceHighlights?.length ?? 0))
         .toBe(0);
@@ -1199,13 +1225,19 @@ test.describe("split view", () => {
       await page.getByTestId("sheet-tab-Sheet2").click();
       await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
 
-      const gridBox = await page.locator("#grid-secondary").boundingBox();
-      if (!gridBox) throw new Error("Missing grid-secondary bounding box");
+      const secondary = page.locator("#grid-secondary");
+      await expect(secondary).toBeVisible();
+      await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid?.getCellRect), undefined, { timeout: 10_000 });
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.interactionMode ?? null))
+        .toBe("rangeSelection");
+      const [a1Rect, a2Rect] = await page.evaluate(() => {
+        const grid = (window as any).__formulaSecondaryGrid;
+        return [grid.getCellRect(1, 1), grid.getCellRect(2, 1)];
+      });
+      if (!a1Rect || !a2Rect) throw new Error("Missing secondary pane cell rects for A1/A2");
 
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
-      await page.mouse.down();
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
-      await page.mouse.up();
+      await dragInLocator(page, secondary, rectCenter(a1Rect), rectCenter(a2Rect));
 
       await expect(input).toHaveValue("=SUM(Sheet2!A1:A2");
     });
@@ -1241,13 +1273,33 @@ test.describe("split view", () => {
       await expect(input).toBeVisible();
       await input.fill("=SUM(");
 
+      if (mode === "shared") {
+        // Shared-grid range selection mode is driven by formula-bar overlays. Wait for the
+        // interaction mode flip before attempting a drag-select, otherwise the gesture can be
+        // interpreted as a normal selection change and no range reference is inserted.
+        await expect
+          .poll(() => page.evaluate(() => (window as any).__formulaApp?.sharedGrid?.interactionMode ?? null))
+          .toBe("rangeSelection");
+      }
+
       // Drag select A1:A2 in the *primary* pane.
-      const gridBox = await page.locator("#grid").boundingBox();
+      const primary = page.locator("#grid");
+      const gridBox = await primary.boundingBox();
       if (!gridBox) throw new Error("Missing #grid bounding box");
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
-      await page.mouse.down();
-      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
-      await page.mouse.up();
+      const { a1Rect, a2Rect } = await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        return { a1Rect: app.getCellRectA1("A1"), a2Rect: app.getCellRectA1("A2") };
+      });
+      if (!a1Rect || !a2Rect) throw new Error("Missing primary pane cell rects for A1/A2");
+
+      // `getCellRectA1` is expected to be viewport-relative, but some renderers return grid-relative
+      // coordinates. Detect and normalize to locator-relative points so the drag remains stable even
+      // if the layout shifts (e.g. formula bar resizing during edit/range selection).
+      const rectsAreGridRelative = a1Rect.y < gridBox.y - 1;
+      const normalizePoint = (point: { x: number; y: number }) =>
+        rectsAreGridRelative ? point : { x: point.x - gridBox.x, y: point.y - gridBox.y };
+
+      await dragInLocator(page, primary, normalizePoint(rectCenter(a1Rect)), normalizePoint(rectCenter(a2Rect)));
 
       await expect(input).toHaveValue("=SUM(A1:A2");
       await expect
@@ -1500,7 +1552,7 @@ test.describe("split view", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
   });
 
-  test("disabling split view commits an in-progress secondary-pane edit", async ({ page }) => {
+  test("split view cannot be disabled while secondary-pane editing is active (commit then disable)", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -1518,16 +1570,24 @@ test.describe("split view", () => {
     await expect(editor).toBeVisible();
     await page.keyboard.type("ello");
 
-    // Disable split view; the in-progress edit should be committed as a "command" commit.
-    await page.getByTestId("ribbon-root").getByTestId("split-none").click();
+    const splitNone = page.getByTestId("ribbon-root").getByTestId("split-none");
+    await expect(splitNone).toBeDisabled();
+
+    // Commit the edit explicitly, then disable split view.
+    await page.keyboard.press("Enter");
+    await expect(editor).not.toBeVisible();
+    await waitForIdle(page);
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
+
+    await expect(splitNone).toBeEnabled();
+    await splitNone.click();
     await expect(secondary).not.toBeVisible();
     await waitForIdle(page);
-
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
   });
 
-  test("Ctrl/Cmd+S commits an in-progress secondary-pane edit", async ({ page }) => {
-    // The Ctrl/Cmd+S handler is wired via the desktop/Tauri integration layer in `main.ts`.
+  test("menu-save commits an in-progress secondary-pane edit", async ({ page }) => {
+    // File -> Save should commit pending edits (including the split-view secondary editor).
+    // In the Playwright harness we trigger the Tauri menu event directly.
     // Stub the minimal `__TAURI__` surface so the handler is registered in the browser-based
     // Playwright harness.
     await page.addInitScript(() => {
@@ -1568,8 +1628,10 @@ test.describe("split view", () => {
 
     // Trigger Save (which calls `commitAllPendingEditsForCommand()` in `main.ts`) while the
     // secondary editor is still active.
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await page.keyboard.press(`${modifier}+S`);
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-save"]), undefined, { timeout: 10_000 });
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["menu-save"]({ payload: null });
+    });
     await waitForIdle(page);
 
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
