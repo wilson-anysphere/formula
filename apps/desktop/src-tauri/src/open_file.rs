@@ -87,10 +87,6 @@ pub fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
             continue;
         }
 
-        if seen.contains(&path) {
-            continue;
-        }
-
         let len = path.len();
         if len > MAX_OPEN_FILE_PENDING_BYTES {
             // Single oversized entry; skip rather than exceeding the deterministic cap.
@@ -104,6 +100,12 @@ pub fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
         if bytes.saturating_add(len) > MAX_OPEN_FILE_PENDING_BYTES {
             // Adding this (older) entry would exceed the byte cap; keep scanning older entries in
             // case smaller ones still fit.
+            continue;
+        }
+
+        // Only hash/dedupe entries that could actually be included. This avoids spending time
+        // hashing extremely long strings that are rejected by the size caps.
+        if seen.contains(&path) {
             continue;
         }
 
