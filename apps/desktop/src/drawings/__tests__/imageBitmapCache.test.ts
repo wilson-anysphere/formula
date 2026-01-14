@@ -133,6 +133,9 @@ describe("ImageBitmapCache", () => {
       resolveDecode = resolve;
     });
 
+    const close = vi.fn();
+    const decoded = { close } as unknown as ImageBitmap;
+
     const createImageBitmapMock = vi.fn().mockReturnValueOnce(inflightDecode).mockResolvedValueOnce({} as ImageBitmap);
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
 
@@ -143,11 +146,15 @@ describe("ImageBitmapCache", () => {
     await expect(inflight).rejects.toMatchObject({ name: "AbortError" });
 
     // Let the underlying decode complete to ensure there are no unhandled promise rejections.
-    resolveDecode({} as ImageBitmap);
+    resolveDecode(decoded);
     // `ImageBitmapCache.decode` is async and may schedule multiple microtasks before the
     // cache's internal `.then` handlers run; flush a couple of turns so cleanup completes.
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
+
+    // Since the only waiter was aborted, the decoded bitmap should be closed (otherwise it would leak).
+    expect(close).toHaveBeenCalledTimes(1);
 
     await cache.get(entry);
     expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
