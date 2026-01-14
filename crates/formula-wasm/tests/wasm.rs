@@ -582,6 +582,24 @@ fn get_locale_info_accepts_chinese_script_locale_ids() {
 }
 
 #[wasm_bindgen_test]
+fn canonicalize_formula_accepts_posix_locale_id_variants_at_api_boundary() {
+    // JS callers may supply POSIX locale ids that include encoding/modifier suffixes, as well as
+    // case/whitespace variants. Ensure these are accepted by the public wasm API.
+    assert_eq!(
+        canonicalize_formula("=SUMME(1;2)", "de_DE.UTF-8", None).unwrap(),
+        "=SUM(1,2)"
+    );
+    assert_eq!(
+        canonicalize_formula("=SUMME(1;2)", "de_DE@euro", None).unwrap(),
+        "=SUM(1,2)"
+    );
+    assert_eq!(
+        canonicalize_formula("=SUMME(1;2)", "  DE-de  ", None).unwrap(),
+        "=SUM(1,2)"
+    );
+}
+
+#[wasm_bindgen_test]
 fn canonicalize_formula_rejects_unknown_locale_id_with_supported_list() {
     let err = canonicalize_formula("=1+2", "xx-XX", None).unwrap_err();
     let message = err
