@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import {
   defaultDesktopBinPath,
   percentile,
+  buildDesktopStartupProfileRoot,
   runDesktopStartupIterations,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupArgv,
@@ -227,7 +228,7 @@ async function main(): Promise<void> {
   const argv = resolveDesktopStartupArgv(benchKind);
 
   const perfHome = resolvePerfHome();
-  const profileRoot = resolve(perfHome, `desktop-startup-${benchKind}-${mode}-${Date.now()}-${process.pid}`);
+  const profileRoot = buildDesktopStartupProfileRoot({ perfHome, benchKind, mode });
 
   // eslint-disable-next-line no-console
   console.log(

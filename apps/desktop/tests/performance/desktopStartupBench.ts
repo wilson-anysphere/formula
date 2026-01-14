@@ -56,6 +56,7 @@ import {
   mean,
   median,
   percentile,
+  buildDesktopStartupProfileRoot,
   runDesktopStartupIterations,
   resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
@@ -347,11 +348,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   const rssTargetMb = Number(process.env.FORMULA_DESKTOP_RSS_TARGET_MB ?? '100') || 100;
 
   const perfHome = resolvePerfHome();
-
-  const profileRoot = resolve(
-    perfHome,
-    `desktop-startup-${benchKind}-${startupMode}-${Date.now()}-${process.pid}`,
-  );
+  const profileRoot = buildDesktopStartupProfileRoot({ perfHome, benchKind, mode: startupMode });
 
   const metrics: StartupMetrics[] = [];
   const rssSamples: number[] = [];

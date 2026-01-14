@@ -36,6 +36,18 @@ export function resolveDesktopStartupArgv(benchKind: DesktopStartupBenchKind): s
   return benchKind === 'shell' ? ['--startup-bench'] : [];
 }
 
+export function buildDesktopStartupProfileRoot(options: {
+  perfHome: string;
+  benchKind: DesktopStartupBenchKind;
+  mode: DesktopStartupMode;
+  now?: number;
+  pid?: number;
+}): string {
+  const now = options.now ?? Date.now();
+  const pid = options.pid ?? process.pid;
+  return resolve(options.perfHome, `desktop-startup-${options.benchKind}-${options.mode}-${now}-${pid}`);
+}
+
 export function parseDesktopStartupMode(raw: string): DesktopStartupMode | null {
   const normalized = raw.trim().toLowerCase();
   if (normalized === 'cold' || normalized === 'warm') return normalized;
