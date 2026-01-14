@@ -3174,6 +3174,8 @@ impl WasmWorkbook {
 
     #[wasm_bindgen(js_name = "goalSeek")]
     pub fn goal_seek(&mut self, request: JsValue) -> Result<JsValue, JsValue> {
+        ensure_rust_constructors_run();
+
         let obj = request
             .dyn_into::<Object>()
             .map_err(|_| js_err("goalSeek request must be an object"))?;
@@ -3285,7 +3287,13 @@ impl WasmWorkbook {
                 .ok_or_else(|| js_err("recalcMode must be \"singleThreaded\" | \"multiThreaded\""))?;
             match mode.as_str() {
                 "singleThreaded" => Some(RecalcMode::SingleThreaded),
-                "multiThreaded" => Some(RecalcMode::MultiThreaded),
+                "multiThreaded" => Some(if cfg!(target_arch = "wasm32") {
+                    // WASM builds are typically single-threaded; treat "multiThreaded" as a
+                    // best-effort hint and fall back to single-threaded recalculation.
+                    RecalcMode::SingleThreaded
+                } else {
+                    RecalcMode::MultiThreaded
+                }),
                 _ => {
                     return Err(js_err(
                         "recalcMode must be \"singleThreaded\" | \"multiThreaded\"",

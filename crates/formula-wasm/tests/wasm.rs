@@ -2125,6 +2125,12 @@ fn goal_seek_solves_quadratic_and_updates_workbook_state() {
     Reflect::set(&req, &JsValue::from_str("targetValue"), &JsValue::from_f64(25.0)).unwrap();
     Reflect::set(&req, &JsValue::from_str("changingCell"), &JsValue::from_str("A1")).unwrap();
     Reflect::set(&req, &JsValue::from_str("tolerance"), &JsValue::from_f64(1e-9)).unwrap();
+    Reflect::set(
+        &req,
+        &JsValue::from_str("recalcMode"),
+        &JsValue::from_str("multiThreaded"),
+    )
+    .unwrap();
 
     let result_js = wb.goal_seek(req.into()).unwrap();
     let result: JsonValue = serde_wasm_bindgen::from_value(result_js).unwrap();
