@@ -21,9 +21,17 @@ function buildIndexMap(start: number, count: number, value: number): Map<number,
   return out;
 }
 
-function withAllocationGuards<T>(fn: () => T): { result: T; elapsedMs: number; mapSetCalls: number } {
+function withAllocationGuards<T>(fn: () => T): {
+  result: T;
+  elapsedMs: number;
+  mapSetCalls: number;
+  mapGetCalls: number;
+  mapHasCalls: number;
+} {
   const originalArray = globalThis.Array;
   const originalMapSet = Map.prototype.set;
+  const originalMapGet = Map.prototype.get;
+  const originalMapHas = Map.prototype.has;
   const originalArrayPush = originalArray.prototype.push;
   const originalArrayBuffer = globalThis.ArrayBuffer;
   const typedArrayNames = [
@@ -46,6 +54,8 @@ function withAllocationGuards<T>(fn: () => T): { result: T; elapsedMs: number; m
   const MAX_ARRAY_LENGTH = 200_000;
   const MAX_ARRAY_BUFFER_BYTES = 200_000;
   let mapSetCalls = 0;
+  let mapGetCalls = 0;
+  let mapHasCalls = 0;
   let pushedElements = 0;
 
   const GuardedArray = new Proxy(originalArray, {
@@ -85,6 +95,20 @@ function withAllocationGuards<T>(fn: () => T): { result: T; elapsedMs: number; m
     mapSetCalls += 1;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (originalMapSet as any).apply(this, args);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  Map.prototype.get = function (this: Map<unknown, unknown>, ...args: [unknown]) {
+    mapGetCalls += 1;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalMapGet as any).apply(this, args);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  Map.prototype.has = function (this: Map<unknown, unknown>, ...args: [unknown]) {
+    mapHasCalls += 1;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalMapHas as any).apply(this, args);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 
@@ -136,7 +160,7 @@ function withAllocationGuards<T>(fn: () => T): { result: T; elapsedMs: number; m
   const start = performance.now();
   try {
     const result = fn();
-    return { result, elapsedMs: performance.now() - start, mapSetCalls };
+    return { result, elapsedMs: performance.now() - start, mapSetCalls, mapGetCalls, mapHasCalls };
   } finally {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).Array = originalArray;
@@ -147,6 +171,8 @@ function withAllocationGuards<T>(fn: () => T): { result: T; elapsedMs: number; m
       (globalThis as any)[name] = originalTypedArrays[name];
     }
     Map.prototype.set = originalMapSet;
+    Map.prototype.get = originalMapGet;
+    Map.prototype.has = originalMapHas;
     originalArray.prototype.push = originalArrayPush;
   }
 }
@@ -228,6 +254,10 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
     // These are intentionally generous and rely on the allocation guards above for determinism.
     expect(hideRun.mapSetCalls).toBeLessThan(250_000);
     expect(unhideRun.mapSetCalls).toBeLessThan(250_000);
+    expect(hideRun.mapGetCalls).toBeLessThan(250_000);
+    expect(unhideRun.mapGetCalls).toBeLessThan(250_000);
+    expect(hideRun.mapHasCalls).toBeLessThan(250_000);
+    expect(unhideRun.mapHasCalls).toBeLessThan(250_000);
 
     if (!process.env.CI) {
       expect(hideRun.elapsedMs).toBeLessThan(1_000);
