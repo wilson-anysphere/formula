@@ -214,7 +214,9 @@ function main() {
   // ---- All platforms: bundler must know about formula:// so installers register it.
   const deepLinkConfig = config?.plugins?.["deep-link"];
   const schemes = extractDeepLinkSchemes(deepLinkConfig);
-  const normalizedSchemes = schemes.map((s) => String(s).trim()).filter(Boolean);
+  const normalizedSchemes = schemes
+    .map((s) => String(s).trim().replace(/[:/]+$/, "").toLowerCase())
+    .filter(Boolean);
 
   if (!normalizedSchemes.includes(REQUIRED_SCHEME)) {
     const found = normalizedSchemes.length > 0 ? normalizedSchemes.join(", ") : "(none)";
