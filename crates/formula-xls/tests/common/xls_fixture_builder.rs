@@ -537,6 +537,33 @@ pub fn build_shared_formula_shrfmla_only_ptgarray_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that exercises ambiguity in SHRFMLA range-header parsing when a
+/// `RefU` header is followed by a small non-zero `cUse` value.
+///
+/// Some decoders (including older versions of this crate) would mistakenly treat the first 8 bytes
+/// of `RefU + cUse` as a `Ref8` range header when the shared range is `A..A`, causing the decoded
+/// range to spuriously include additional columns.
+///
+/// This fixture constructs two SHRFMLA records:
+/// - `A1:A2` (RefU + `cUse=2`), shared rgce is `"LEFT"`
+/// - `B1:B10`, shared rgce is `C(row)+1`
+///
+/// Cell `B2` stores `PtgExp(B2)` (self-reference), forcing shared-formula resolution to rely on
+/// range containment rather than an exact master-cell key match. Correct behaviour is to resolve
+/// `B2` against the `B1:B10` SHRFMLA (producing `C2+1`), not the `A1:A2` record.
+pub fn build_shared_formula_shrfmla_range_cuse_ambiguity_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_shrfmla_range_cuse_ambiguity_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2`:
 /// - `B1`: `SUM(A1,1)`
 /// - `B2`: `SUM(A2,1)` via `PtgExp` referencing `B1`
@@ -8268,6 +8295,84 @@ fn build_shared_formula_shrfmla_only_ptgarray_sheet_stream(xf_cell: u16) -> Vec<
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_shrfmla_range_cuse_ambiguity_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_shrfmla_range_cuse_ambiguity_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ShrfmlaCuseAmbiguity", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_shrfmla_range_cuse_ambiguity_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 10) cols [0, 3) => A1:C10.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&10u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in C1/C2 so the shared formula `C(row)+1` has in-range references.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 2, xf_cell, 1.0)); // C1
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 2, xf_cell, 2.0)); // C2
+
+    // -- SHRFMLA #1 --------------------------------------------------------------
+    // Range A1:A2 encoded as RefU + cUse + cce, with a *non-zero* cUse value to trigger the RefU vs
+    // Ref8 ambiguity (when interpreted incorrectly as Ref8, `cUse` can be treated as colLast).
+    let rgce_left: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x17); // PtgStr
+        v.push(4); // cch
+        v.push(0); // flags (compressed)
+        v.extend_from_slice(b"LEFT");
+        v
+    };
+
+    let mut shrfmla_left = Vec::<u8>::new();
+    shrfmla_left.extend_from_slice(&0u16.to_le_bytes()); // rwFirst = 0
+    shrfmla_left.extend_from_slice(&1u16.to_le_bytes()); // rwLast = 1
+    shrfmla_left.push(0); // colFirst = A
+    shrfmla_left.push(0); // colLast = A
+    shrfmla_left.extend_from_slice(&2u16.to_le_bytes()); // cUse = 2 (non-zero)
+    shrfmla_left.extend_from_slice(&(rgce_left.len() as u16).to_le_bytes()); // cce
+    shrfmla_left.extend_from_slice(&rgce_left);
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_left);
+
+    // -- SHRFMLA #2 --------------------------------------------------------------
+    // Shared formula range B1:B10 whose body is `C(row)+1`.
+    // PtgRefN(row_off=0,col_off=+1) + PtgInt(1) + PtgAdd
+    let rgce_right: Vec<u8> = vec![
+        0x2C, // PtgRefN
+        0x00, 0x00, // row_off = 0
+        0x01, 0xC0, // col_off = +1 with row+col relative flags
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 9, 1, 1, &rgce_right),
+    );
+
+    // B2 FORMULA record: PtgExp(B2) (self-reference).
+    let ptgexp_b2 = ptg_exp(1, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp_b2),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);

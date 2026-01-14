@@ -372,6 +372,155 @@ fn parse_ref_any_best_effort(data: &[u8]) -> Option<(CellRef, CellRef)> {
     Some((start, end))
 }
 
+fn parse_shrfmla_range_best_effort(data: &[u8], expected_cce: usize) -> Option<(CellRef, CellRef)> {
+    // SHRFMLA stores the shared formula range using either:
+    // - RefU: [rwFirst:u16][rwLast:u16][colFirst:u8][colLast:u8]
+    // - Ref8: [rwFirst:u16][rwLast:u16][colFirst:u16][colLast:u16]
+    //
+    // Many producers include the `cUse` field after the range header, but some omit it. This makes
+    // the header ambiguous in certain byte patterns. In particular:
+    //   RefU(A..A) + cUse + cce
+    // can be misread as:
+    //   Ref8(A..?) + cce
+    // when `cUse` is small, because `cce` then appears at the same offset.
+    //
+    // To disambiguate, match the stored `cce` against the parsed rgce length (`expected_cce`) and
+    // prefer layouts whose `cUse` matches the range area.
+
+    #[derive(Clone, Copy)]
+    struct RangeHeader {
+        rw_first: u16,
+        rw_last: u16,
+        col_first: u16,
+        col_last: u16,
+    }
+
+    fn valid_range(h: RangeHeader) -> bool {
+        h.rw_first <= h.rw_last && h.col_first <= h.col_last
+    }
+
+    fn range_area(h: RangeHeader) -> u64 {
+        let rows = (h.rw_last.saturating_sub(h.rw_first) as u64).saturating_add(1);
+        let cols = (h.col_last.saturating_sub(h.col_first) as u64).saturating_add(1);
+        rows.saturating_mul(cols)
+    }
+
+    fn parse_refu_range(data: &[u8]) -> Option<RangeHeader> {
+        let chunk = data.get(0..6)?;
+        let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+        let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+        let col_first = chunk[4] as u16;
+        let col_last = chunk[5] as u16;
+        Some(RangeHeader {
+            rw_first,
+            rw_last,
+            col_first,
+            col_last,
+        })
+    }
+
+    fn parse_ref8_range(data: &[u8]) -> Option<RangeHeader> {
+        let chunk = data.get(0..8)?;
+        let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]);
+        let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]);
+        let col_first = u16::from_le_bytes([chunk[4], chunk[5]]) & REF8_COL_MASK;
+        let col_last = u16::from_le_bytes([chunk[6], chunk[7]]) & REF8_COL_MASK;
+        Some(RangeHeader {
+            rw_first,
+            rw_last,
+            col_first,
+            col_last,
+        })
+    }
+
+    #[derive(Clone, Copy)]
+    struct Candidate {
+        header: RangeHeader,
+        uses_ref8: bool,
+        cuse: Option<u16>,
+    }
+
+    let expected_cce_u16 = u16::try_from(expected_cce).ok()?;
+    let mut candidates: Vec<Candidate> = Vec::new();
+    let mut push_candidate = |header: Option<RangeHeader>,
+                              uses_ref8: bool,
+                              cuse: Option<u16>,
+                              cce_offset: usize| {
+        let Some(header) = header else {
+            return;
+        };
+        if !valid_range(header) {
+            return;
+        }
+        let cce_bytes = match data.get(cce_offset..cce_offset + 2) {
+            Some(v) => v,
+            None => return,
+        };
+        let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]);
+        if cce == expected_cce_u16 {
+            candidates.push(Candidate {
+                header,
+                uses_ref8,
+                cuse,
+            });
+        }
+    };
+
+    // Match the parsing order used by `parse_biff8_shrfmla_record`.
+    // Layout A: RefU (6) + cUse (2) + cce (2).
+    let cuse_a = data
+        .get(6..8)
+        .map(|v| u16::from_le_bytes([v[0], v[1]]));
+    push_candidate(parse_refu_range(data), false, cuse_a, 8);
+    // Layout B: Ref8 (8) + cUse (2) + cce (2).
+    let cuse_b = data
+        .get(8..10)
+        .map(|v| u16::from_le_bytes([v[0], v[1]]));
+    push_candidate(parse_ref8_range(data), true, cuse_b, 10);
+    // Layout C: RefU (6) + cce (2) (cUse omitted).
+    push_candidate(parse_refu_range(data), false, None, 6);
+    // Layout D: Ref8 (8) + cce (2) (cUse omitted).
+    push_candidate(parse_ref8_range(data), true, None, 8);
+
+    let selected = if candidates.is_empty() {
+        None
+    } else {
+        candidates
+            .into_iter()
+            .min_by_key(|c| {
+                let area = range_area(c.header);
+                let cuse_rank: u8 = match c.cuse {
+                    Some(cuse) if cuse != 0 && (cuse as u64) == area => 0,
+                    Some(0) | None => 1,
+                    Some(_) => 2,
+                };
+                (
+                    cuse_rank,
+                    if c.uses_ref8 { 0u8 } else { 1u8 },
+                    area,
+                    c.header.rw_first,
+                    c.header.rw_last,
+                    c.header.col_first,
+                    c.header.col_last,
+                )
+            })
+            .map(|c| c.header)
+    };
+
+    let header = match selected {
+        Some(h) => h,
+        None => {
+            // Fallback: parse without disambiguation (matches prior behaviour).
+            let (start, end) = parse_ref_any_best_effort(data)?;
+            return Some((start, end));
+        }
+    };
+
+    let start = parse_cell_ref_u16(header.rw_first, header.col_first)?;
+    let end = parse_cell_ref_u16(header.rw_last, header.col_last)?;
+    Some((start, end))
+}
+
 /// Best-effort parsing of a BIFF8 worksheet substream's formula-related records.
 ///
 /// This collects:
@@ -436,20 +585,23 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                 ),
             },
             RECORD_SHRFMLA => {
-                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
-                    warn(
-                        &mut out.warnings,
-                        format!(
-                            "failed to parse SHRFMLA range at offset {} (len={})",
-                            record.offset,
-                            record.data.len()
-                        ),
-                    );
-                    continue;
-                };
-                let anchor = range.0;
                 match parse_biff8_shrfmla_record(&record) {
                     Ok(parsed) => {
+                        let Some(range) = parse_shrfmla_range_best_effort(
+                            record.data.as_ref(),
+                            parsed.rgce.len(),
+                        ) else {
+                            warn(
+                                &mut out.warnings,
+                                format!(
+                                    "failed to parse SHRFMLA range at offset {} (len={})",
+                                    record.offset,
+                                    record.data.len()
+                                ),
+                            );
+                            continue;
+                        };
+                        let anchor = range.0;
                         out.shrfmla.insert(
                             anchor,
                             Biff8ShrFmlaRecord {
@@ -466,7 +618,7 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                             record.offset
                         ),
                     ),
-                }
+                };
             }
             RECORD_ARRAY => {
                 let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
@@ -1406,20 +1558,22 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
 
         match record.record_id {
             RECORD_SHRFMLA => {
-                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
-                    warn_string(
-                        &mut out.warnings,
-                        format!(
-                            "failed to parse SHRFMLA range at offset {} (len={})",
-                            record.offset,
-                            record.data.len()
-                        ),
-                    );
-                    continue;
-                };
-                let anchor = range.0;
                 match parse_biff8_shrfmla_record_with_rgcb(&record) {
                     Ok((rgce, rgcb)) => {
+                        let Some(range) =
+                            parse_shrfmla_range_best_effort(record.data.as_ref(), rgce.len())
+                        else {
+                            warn_string(
+                                &mut out.warnings,
+                                format!(
+                                    "failed to parse SHRFMLA range at offset {} (len={})",
+                                    record.offset,
+                                    record.data.len()
+                                ),
+                            );
+                            continue;
+                        };
+                        let anchor = range.0;
                         shrfmla.insert(anchor, Biff8ShrFmlaRecord { range, rgce, rgcb });
                     }
                     Err(err) => warn_string(
@@ -1429,7 +1583,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             record.offset
                         ),
                     ),
-                }
+                };
             }
             RECORD_ARRAY => {
                 let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
