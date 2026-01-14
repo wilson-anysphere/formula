@@ -175,12 +175,21 @@ fn parse_error_tsv(
             continue;
         }
 
-        let (canon, loc) = raw_line.split_once('\t').unwrap_or_else(|| {
+        let mut parts = raw_line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let loc = parts.next().unwrap_or_else(|| {
             panic!(
                 "invalid error TSV entry in {locale_id} ({path}) (expected `Canonical<TAB>Localized`) at line {line_no}: {raw_line:?}",
                 path = path.display()
             )
         });
+        if parts.next().is_some() {
+            panic!(
+                "invalid error TSV entry in {locale_id} ({path}) (too many columns) at line {line_no}: {raw_line:?}",
+                path = path.display()
+            );
+        }
+
         let canon = canon.trim();
         let loc = loc.trim();
         if canon.is_empty() || loc.is_empty() {

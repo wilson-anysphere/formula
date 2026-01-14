@@ -165,21 +165,24 @@ impl ErrorTranslations {
                     continue;
                 }
 
-                let (canon, loc) = raw_line.split_once('\t').unwrap_or_else(|| {
+                let mut parts = raw_line.split('\t');
+                let canon = parts.next().unwrap_or("");
+                let loc = parts.next().unwrap_or_else(|| {
                     panic!(
                         "invalid error translation line (expected TSV) at line {line_no}: {raw_line:?}"
                     )
                 });
+                if parts.next().is_some() {
+                    panic!(
+                        "invalid error translation line (too many columns) at line {line_no}: {raw_line:?}"
+                    );
+                }
+
                 let canon = canon.trim();
                 let loc = loc.trim();
                 if canon.is_empty() || loc.is_empty() {
                     panic!(
                         "invalid error translation line (empty entry) at line {line_no}: {raw_line:?}"
-                    );
-                }
-                if canon.contains('\t') || loc.contains('\t') {
-                    panic!(
-                        "invalid error translation line (too many columns) at line {line_no}: {raw_line:?}"
                     );
                 }
                 if !canon.starts_with('#') || !loc.starts_with('#') {
@@ -599,6 +602,19 @@ AVERAGE\tSOMME
         assert!(msg.contains("too many columns"));
         assert!(msg.contains("line 1"));
         assert!(msg.contains("#VALUE!\\t#WERT!\\tEXTRA"));
+    }
+
+    #[test]
+    fn error_translation_rejects_trailing_empty_column() {
+        let translations = ErrorTranslations::new("#VALUE!\t#WERT!\t\n");
+        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            translations.maps();
+        }))
+        .expect_err("expected trailing empty TSV columns to panic");
+        let msg = panic_message(&*err);
+        assert!(msg.contains("too many columns"));
+        assert!(msg.contains("line 1"));
+        assert!(msg.contains("#VALUE!\\t#WERT!\\t"));
     }
 
     #[test]

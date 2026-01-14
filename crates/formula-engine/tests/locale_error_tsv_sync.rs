@@ -60,29 +60,31 @@ fn parse_error_tsv(path: &Path) -> Vec<(String, String)> {
         }
 
         let trimmed = raw_line.trim();
+
         // Match the Node generator's parsing behavior by splitting the *raw* line on tabs (so
-        // leading tabs still count as an empty column). We still use `trimmed` for error messages
-        // and comment detection.
-        let (canon, loc) = raw_line.split_once('\t').unwrap_or_else(|| {
+        // leading/trailing tabs still count as empty columns).
+        let mut parts = raw_line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let loc = parts.next().unwrap_or_else(|| {
             panic!(
                 "invalid error TSV line (expected Canonical<TAB>Localized) at {}:{}: {trimmed:?}",
                 path.display(),
                 line_no
             )
         });
+        if parts.next().is_some() {
+            panic!(
+                "invalid error TSV line (too many columns) at {}:{}: {trimmed:?}",
+                path.display(),
+                line_no
+            );
+        }
 
         let canon = canon.trim();
         let loc = loc.trim();
         if canon.is_empty() || loc.is_empty() {
             panic!(
                 "invalid error TSV line (empty entry) at {}:{}: {trimmed:?}",
-                path.display(),
-                line_no
-            );
-        }
-        if loc.contains('\t') {
-            panic!(
-                "invalid error TSV line (too many columns) at {}:{}: {trimmed:?}",
                 path.display(),
                 line_no
             );

@@ -143,13 +143,16 @@ function Read-ExistingErrorTsv {
     if (Is-ErrorTsvCommentLine -TrimmedLine $trimmed) { continue }
 
     $parts = $rawLine -split "`t", 3
-    if ($parts.Count -lt 2) {
-      throw "Invalid TSV line in existing error mapping: $Path:$lineNo (expected 2 columns): $rawLine"
+    if ($parts.Count -ne 2) {
+      throw "Invalid TSV line in existing error mapping: $Path:$lineNo (expected exactly 2 columns): $rawLine"
     }
     $canonical = $parts[0].Trim()
     $localized = $parts[1].Trim()
     if (-not $canonical -or -not $localized) {
       throw "Invalid TSV line in existing error mapping: $Path:$lineNo (empty field): $rawLine"
+    }
+    if (-not $canonical.StartsWith("#") -or -not $localized.StartsWith("#")) {
+      throw "Invalid TSV line in existing error mapping: $Path:$lineNo (expected error literals to start with '#'): $rawLine"
     }
 
     if (-not $map.ContainsKey($canonical)) {
