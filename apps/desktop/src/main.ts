@@ -87,7 +87,7 @@ import type { DocumentControllerWorkbookAdapter } from "./scripting/documentCont
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "./formatting/selectionSizeGuard.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t, tWithVars } from "./i18n/index.js";
-import { getOpenFileFilters } from "./file_dialog_filters.js";
+import { getOpenFileFilters, isOpenWorkbookPath } from "./file_dialog_filters.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import type { CollabSession } from "@formula/collab-session";
@@ -10832,6 +10832,9 @@ try {
     const paths = (event as any)?.payload;
     const first = Array.isArray(paths) ? paths[0] : null;
     if (typeof first !== "string" || first.trim() === "") return;
+    // Ignore non-spreadsheet drops (e.g. images) so drag/drop picture insertion doesn't trigger
+    // a spurious "open workbook" flow.
+    if (!isOpenWorkbookPath(first)) return;
     queueOpenWorkbook(first);
   });
 

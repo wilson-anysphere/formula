@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getOpenFileFilters } from "./file_dialog_filters.js";
+import { getOpenFileFilters, isOpenWorkbookPath } from "./file_dialog_filters.js";
 
 describe("getOpenFileFilters", () => {
   it("includes all supported spreadsheet extensions", () => {
@@ -23,5 +23,15 @@ describe("getOpenFileFilters", () => {
     for (const ext of expected) {
       expect(extensions.has(ext)).toBe(true);
     }
+  });
+
+  it("matches openable workbook paths by extension", () => {
+    expect(isOpenWorkbookPath("/tmp/book.xlsx")).toBe(true);
+    expect(isOpenWorkbookPath("C:\\Users\\me\\Book1.XLSM")).toBe(true);
+    expect(isOpenWorkbookPath("/tmp/book.csv")).toBe(true);
+    expect(isOpenWorkbookPath("/tmp/book.parquet")).toBe(true);
+    expect(isOpenWorkbookPath("/tmp/book.png")).toBe(false);
+    expect(isOpenWorkbookPath("/tmp/book")).toBe(false);
+    expect(isOpenWorkbookPath("")).toBe(false);
   });
 });
