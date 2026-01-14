@@ -75,6 +75,26 @@ fn roundtrip_standard_rc4_40bit_encryption() {
 }
 
 #[test]
+fn roundtrip_standard_rc4_keysize_zero_encryption() {
+    // MS-OFFCRYPTO specifies that a `keySize` of 0 must be interpreted as 40-bit RC4.
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes =
+        encrypt_standard_rc4_ooxml_ole_with_key_bits(plaintext, password, Rc4HashAlgorithm::Sha1, 0);
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
 fn roundtrip_standard_rc4_56bit_encryption() {
     let password = "password";
     let plaintext = include_bytes!(concat!(
@@ -423,6 +443,8 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
 ) -> Vec<u8> {
     // Deterministic parameters (not intended to be secure).
     let salt: Vec<u8> = (0u8..=0x0F).collect();
+    let raw_key_bits = key_bits;
+    let key_bits = if raw_key_bits == 0 { 40 } else { raw_key_bits };
     assert_eq!(key_bits % 8, 0, "key_bits must be byte-aligned");
     let key_len = (key_bits / 8) as usize;
 
@@ -543,7 +565,9 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     header_bytes.extend_from_slice(&size_extra.to_le_bytes());
     header_bytes.extend_from_slice(&alg_id.to_le_bytes());
     header_bytes.extend_from_slice(&alg_id_hash.to_le_bytes());
-    header_bytes.extend_from_slice(&key_bits.to_le_bytes());
+    // Persist the raw keyBits value; some producers set this to 0, which must be interpreted as
+    // 40-bit RC4.
+    header_bytes.extend_from_slice(&raw_key_bits.to_le_bytes());
     header_bytes.extend_from_slice(&provider_type.to_le_bytes());
     header_bytes.extend_from_slice(&reserved1.to_le_bytes());
     header_bytes.extend_from_slice(&reserved2.to_le_bytes());

@@ -357,11 +357,13 @@ fn verify_password_standard_with_key_and_mode(
             buf.extend_from_slice(&verifier.encrypted_verifier);
             buf.extend_from_slice(&verifier.encrypted_verifier_hash);
 
-            if header.key_bits == 40 {
+            // MS-OFFCRYPTO: a keySize of 0 must be interpreted as 40-bit RC4.
+            let effective_key_bits = if header.key_bits == 0 { 40 } else { header.key_bits };
+            if effective_key_bits == 40 {
                 if key0.len() != 5 {
                     return Err(OfficeCryptoError::InvalidFormat(format!(
                         "derived RC4 key for keySize=40 must be 5 bytes (got {})",
-                        key0.len()
+                        key0.len(),
                     )));
                 }
                 let mut padded = [0u8; 16];
@@ -641,13 +643,20 @@ fn decrypt_standard_encrypted_package_rc4(
     // Standard/CryptoAPI RC4 uses 0x200-byte blocks with per-block keys derived from the password
     // hash + block index.
 
-    if info.header.key_bits % 8 != 0 {
+    // MS-OFFCRYPTO: a keySize of 0 must be interpreted as 40-bit RC4.
+    let effective_key_bits = if info.header.key_bits == 0 {
+        40
+    } else {
+        info.header.key_bits
+    };
+
+    if effective_key_bits % 8 != 0 {
         return Err(OfficeCryptoError::InvalidFormat(format!(
             "EncryptionHeader keyBits must be divisible by 8 (got {})",
             info.header.key_bits
         )));
     }
-    let key_len = (info.header.key_bits / 8) as usize;
+    let key_len = (effective_key_bits / 8) as usize;
     if !matches!(key_len, 5 | 7 | 16) {
         return Err(OfficeCryptoError::UnsupportedEncryption(format!(
             "unsupported RC4 key length {key_len} bytes (keyBits={})",
@@ -689,7 +698,7 @@ fn decrypt_standard_encrypted_package_rc4(
     let mut block_index: u32 = 0;
     for chunk in out.chunks_mut(RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE) {
         let key = deriver.derive_key_for_block(block_index)?;
-        if info.header.key_bits == 40 {
+        if effective_key_bits == 40 {
             if key.len() != 5 {
                 return Err(OfficeCryptoError::InvalidFormat(format!(
                     "derived RC4 key for keySize=40 must be 5 bytes (got {})",
@@ -1033,6 +1042,12 @@ pub(crate) mod tests {
         buf.extend_from_slice(&block_index.to_le_bytes());
         let h = hash_alg.digest(&buf);
 
+        // MS-OFFCRYPTO: for Standard/CryptoAPI RC4, a keyBits of 0 must be interpreted as 40.
+        let key_bits = match derivation {
+            StandardKeyDerivation::Rc4 if key_bits == 0 => 40,
+            _ => key_bits,
+        };
+
         let key_len = (key_bits as usize) / 8;
         match derivation {
             StandardKeyDerivation::Rc4 => h[..key_len].to_vec(),
@@ -1073,7 +1088,8 @@ pub(crate) mod tests {
             (HashAlgorithm::Sha1, 0x0000_8004u32), // CALG_SHA1
             (HashAlgorithm::Md5, 0x0000_8003u32),  // CALG_MD5
         ] {
-            for key_bits in [40u32, 56u32, 128u32] {
+            for key_bits in [0u32, 40u32, 56u32, 128u32] {
+                let effective_key_bits = if key_bits == 0 { 40 } else { key_bits };
                 // Derive the expected key for block 0 and validate truncation.
                 let key_ref = derive_key_ref(
                     hash_alg,
@@ -1098,7 +1114,7 @@ pub(crate) mod tests {
                 );
                 assert_eq!(
                     key_ref.len(),
-                    (key_bits / 8) as usize,
+                    (effective_key_bits / 8) as usize,
                     "derived key length should be keySize/8"
                 );
                 assert!(
@@ -1113,7 +1129,7 @@ pub(crate) mod tests {
                     Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
                 verifier_buf.extend_from_slice(&verifier_plain);
                 verifier_buf.extend_from_slice(&verifier_hash);
-                if key_bits == 40 {
+                if effective_key_bits == 40 {
                     // For 40-bit RC4, Office uses a 16-byte key with the high bytes set to 0.
                     let mut padded = [0u8; 16];
                     padded[..5].copy_from_slice(&key_ref[..5]);

@@ -552,6 +552,17 @@ impl StandardKeyDeriver {
         derivation: StandardKeyDerivation,
         spin_count: u32,
     ) -> Self {
+        // MS-OFFCRYPTO specifies that Standard/CryptoAPI RC4 uses `EncryptionHeader.keySize` in bits,
+        // and that a key size of 0 must be interpreted as 40-bit RC4.
+        //
+        // We normalize this here so callers don't have to special-case it when deriving per-block
+        // keys, but note that callers may still need to special-case `key_bits == 0` when deciding
+        // whether to pad the RC4 key bytes to 16 bytes for the RC4 KSA.
+        let key_bits = match derivation {
+            StandardKeyDerivation::Rc4 if key_bits == 0 => 40,
+            _ => key_bits,
+        };
+
         let pw = password_to_utf16le(password);
         let password_hash = hash_password(hash_alg, salt, &pw, spin_count);
         let key_bytes = (key_bits as usize) / 8;
