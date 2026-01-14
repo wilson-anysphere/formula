@@ -2572,6 +2572,8 @@ export function bindYjsToDocumentController(options) {
 
     let existingEnc = false;
     let existingEncPayload = undefined;
+    /** @type {string | null} */
+    let existingEncKeyId = null;
     for (const rawKey of targets) {
       const cellData = cells.get(rawKey);
       const cell = getYMapCell(cellData);
@@ -2580,6 +2582,9 @@ export function bindYjsToDocumentController(options) {
       if (encRaw !== undefined) {
         existingEnc = true;
         existingEncPayload = encRaw;
+        if (isEncryptedCellPayload(encRaw)) {
+          existingEncKeyId = encRaw.keyId;
+        }
         break;
       }
     }
@@ -2592,22 +2597,22 @@ export function bindYjsToDocumentController(options) {
       : false;
 
     const wantsEncryption = existingEnc || shouldEncryptByConfig;
-    if (!wantsEncryption) return true;
+    if (!wantsEncryption) return { allowed: true, existingEncKeyId };
 
     // If the cell is encrypted (or must be encrypted by config) we need a key to
     // avoid writing plaintext into the shared CRDT.
-    if (!key) return false;
+    if (!key) return { allowed: false, existingEncKeyId };
 
     // If a cell already contains an `enc` payload, require that the key resolver returns
     // a *matching* key id (and reject unknown payload schemas). This prevents an older
     // client from overwriting encrypted content it cannot decrypt (including newer
     // encryption versions) just because it happens to have *some* key material.
     if (existingEnc) {
-      if (!isEncryptedCellPayload(existingEncPayload)) return false;
-      if (key.keyId !== existingEncPayload.keyId) return false;
+      if (!isEncryptedCellPayload(existingEncPayload)) return { allowed: false, existingEncKeyId };
+      if (key.keyId !== existingEncPayload.keyId) return { allowed: false, existingEncKeyId };
     }
 
-    return true;
+    return { allowed: true, existingEncKeyId };
   }
 
   /**
@@ -3000,11 +3005,13 @@ export function bindYjsToDocumentController(options) {
     for (const delta of deltas) {
       const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };
       const allowedByPermissions = editGuard ? editGuard(cellRef) : true;
-      const allowedByEncryption = needsEncryptionGuard ? canWriteCellWithEncryption(cellRef) : true;
+      const encryptionCheck = needsEncryptionGuard ? canWriteCellWithEncryption(cellRef) : { allowed: true, existingEncKeyId: null };
+      const allowedByEncryption = Boolean(encryptionCheck.allowed);
 
       if (allowedByPermissions && allowedByEncryption) {
         allowed.push(delta);
       } else {
+        const existingEncKeyId = typeof encryptionCheck?.existingEncKeyId === "string" ? encryptionCheck.existingEncKeyId : null;
         rejected.push({
           ...delta,
           rejectionKind: "cell",
@@ -3015,6 +3022,7 @@ export function bindYjsToDocumentController(options) {
           // (e.g. `CollabSession.canEditCell`). In those cases we still want the UI to
           // surface "missing encryption key" rather than a generic permission error.
           rejectionReason: !allowedByEncryption ? "encryption" : !allowedByPermissions ? "permission" : "unknown",
+          ...(existingEncKeyId ? { encryptionKeyId: existingEncKeyId } : {}),
         });
         if (!allowedByEncryption) {
           console.warn(

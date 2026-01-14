@@ -115,6 +115,14 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
   return null;
 }
 
+function inferEncryptionKeyId(rejected: any[]): string | null {
+  for (const delta of rejected) {
+    const keyId = typeof (delta as any)?.encryptionKeyId === "string" ? String((delta as any).encryptionKeyId).trim() : "";
+    if (keyId) return keyId;
+  }
+  return null;
+}
+
 /**
  * Best-effort UX for binder edit rejections.
  *
@@ -151,10 +159,14 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
   const reason = inferRejectionReason(rejected);
   const kind = inferRejectionKind(rejected);
   const target = describeRejectedTarget(kind, rejected);
+  const encryptionKeyId = reason === "encryption" ? inferEncryptionKeyId(rejected) : null;
 
   const message = (() => {
     if (reason === "encryption") {
-      return target ? `Missing encryption key for protected cell (${target})` : "Missing encryption key for protected cell";
+      const suffix = encryptionKeyId ? ` (key id: ${encryptionKeyId})` : "";
+      return target
+        ? `Missing encryption key for protected cell (${target})${suffix}`
+        : `Missing encryption key for protected cell${suffix}`;
     }
 
     if (kind === "format" || kind === "rangeRun") {
