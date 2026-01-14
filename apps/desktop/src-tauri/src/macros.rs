@@ -508,6 +508,7 @@ struct AppStateSpreadsheet<'a> {
     output_truncated: bool,
     updates: Vec<CellUpdateData>,
     update_index_by_cell: HashMap<(String, usize, usize), usize>,
+    undo_entries_added: usize,
 }
 
 impl<'a> AppStateSpreadsheet<'a> {
@@ -532,6 +533,7 @@ impl<'a> AppStateSpreadsheet<'a> {
             output_truncated: false,
             updates: Vec::new(),
             update_index_by_cell: HashMap::new(),
+            undo_entries_added: 0,
         })
     }
 
@@ -622,6 +624,10 @@ impl<'a> AppStateSpreadsheet<'a> {
             return Ok(());
         }
 
+        // `state.set_cell` pushed an undo entry for this edit (the no-op early return path yields
+        // an empty updates vector, which we handled above).
+        self.undo_entries_added = self.undo_entries_added.saturating_add(1);
+
         // Count the number of *new* distinct cells this batch would add. Existing cells are updated
         // in-place and do not increase the total update cardinality.
         let mut new_keys = HashSet::<(String, usize, usize)>::new();
@@ -635,15 +641,17 @@ impl<'a> AppStateSpreadsheet<'a> {
 
         let remaining = MAX_MACRO_UPDATES.saturating_sub(self.updates.len());
         if new_keys.len() > remaining {
-            // `state.set_cell` has already applied the change and computed `updates`. If we simply
-            // return an error here we would leave the backend workbook mutated without returning
-            // the corresponding updates, which would desync the frontend from backend state.
-            //
-            // Best-effort rollback the last edit via the undo stack before aborting macro
-            // execution. This keeps macro failures deterministic and avoids returning a partial /
-            // inconsistent update payload.
-            let _ = self.state.undo();
-            // Clear the redo stack so the rejected change can't be "redone" later.
+            // The workbook has already been mutated by the macro. Roll back *all* edits applied
+            // during this macro invocation so we don't return a partial update payload or leave the
+            // frontend/backend out of sync.
+            for _ in 0..self.undo_entries_added {
+                let _ = self.state.undo();
+            }
+            self.undo_entries_added = 0;
+            self.updates.clear();
+            self.update_index_by_cell.clear();
+
+            // Clear redo history so the rolled-back macro changes can't be "redone" later.
             self.state.mark_dirty();
             return Err(formula_vba_runtime::VbaError::Runtime(format!(
                 "macro produced too many cell updates (limit {MAX_MACRO_UPDATES})"
