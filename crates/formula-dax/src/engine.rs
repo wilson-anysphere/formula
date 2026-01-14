@@ -2603,7 +2603,11 @@ impl DaxEngine {
         Ok(Value::from(out.len() as i64))
     }
 
-    fn distinct_column_values(
+    /// Returns the set of distinct values visible for a column under the provided filter context.
+    ///
+    /// This includes the relationship-generated virtual BLANK member when applicable (matching
+    /// `VALUES(Table[Column])` semantics).
+    pub fn distinct_column_values(
         &self,
         model: &DataModel,
         expr: &Expr,

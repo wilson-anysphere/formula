@@ -6,10 +6,10 @@ use wasm_bindgen::JsCast;
 
 use formula_dax::{
     dax_value_to_pivot_value, pivot, pivot_crosstab, Cardinality, CrossFilterDirection, DataModel,
-    DaxEngine, DaxError, FilterContext, GroupByColumn, PivotMeasure, Relationship, RowContext, Table,
-    Value,
+    DaxEngine, DaxError, Expr, FilterContext, GroupByColumn, PivotMeasure, Relationship, RowContext,
+    Table, Value,
 };
-use formula_model::pivots::PivotValue;
+use formula_model::pivots::{PivotKeyPart, PivotValue};
 
 fn js_error(message: impl AsRef<str>) -> JsValue {
     js_sys::Error::new(message.as_ref()).into()
@@ -45,6 +45,15 @@ fn dax_value_to_js(value: Value) -> JsValue {
         Value::Number(n) => JsValue::from_f64(n.0),
         Value::Text(s) => JsValue::from_str(&s),
         Value::Boolean(b) => JsValue::from_bool(b),
+    }
+}
+
+fn dax_value_to_sort_key(value: &Value) -> PivotKeyPart {
+    match value {
+        Value::Blank => PivotKeyPart::Blank,
+        Value::Number(n) => PivotKeyPart::Number(n.0.to_bits()),
+        Value::Text(s) => PivotKeyPart::Text(s.to_string()),
+        Value::Boolean(b) => PivotKeyPart::Bool(*b),
     }
 }
 
@@ -257,6 +266,65 @@ impl DaxModel {
                 .map_err(dax_error_to_js),
             Err(err) => Err(dax_error_to_js(err)),
         }
+    }
+
+    /// Returns the distinct values for `table[column]` under the provided filter context.
+    ///
+    /// This includes the relationship-generated virtual BLANK member when present.
+    #[wasm_bindgen(js_name = "getDistinctColumnValues")]
+    pub fn get_distinct_column_values(
+        &self,
+        table: &str,
+        column: &str,
+        filter_context: Option<DaxFilterContext>,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context
+            .map(|ctx| ctx.ctx)
+            .unwrap_or_else(FilterContext::empty);
+        self.get_distinct_column_values_inner(table, column, &filter)
+    }
+
+    /// Like [`get_distinct_column_values`](Self::get_distinct_column_values), but borrows the
+    /// provided filter context instead of consuming it.
+    #[wasm_bindgen(js_name = "getDistinctColumnValuesWithFilter")]
+    pub fn get_distinct_column_values_with_filter(
+        &self,
+        table: &str,
+        column: &str,
+        filter_context: &DaxFilterContext,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context.ctx.clone();
+        self.get_distinct_column_values_inner(table, column, &filter)
+    }
+
+    fn get_distinct_column_values_inner(
+        &self,
+        table: &str,
+        column: &str,
+        filter: &FilterContext,
+    ) -> Result<JsValue, JsValue> {
+        let expr = Expr::ColumnRef {
+            table: table.to_string(),
+            column: column.to_string(),
+        };
+        let values = DaxEngine::new()
+            .distinct_column_values(&self.model, &expr, filter)
+            .map_err(dax_error_to_js)?;
+
+        let mut values: Vec<(PivotKeyPart, Value)> = values
+            .into_iter()
+            .map(|v| {
+                let key = dax_value_to_sort_key(&v);
+                (key, v)
+            })
+            .collect();
+        values.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let out = Array::new();
+        for (_, value) in values {
+            out.push(&dax_value_to_js(value));
+        }
+        Ok(out.into())
     }
 
     #[wasm_bindgen(js_name = "pivot")]

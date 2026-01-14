@@ -215,6 +215,17 @@ fn dax_model_apply_calculate_filters_supports_boolean_filter_args() {
 
     model.add_measure("Total", "SUM(Orders[Amount])").unwrap();
 
+    // Distinct values should include the relationship-generated BLANK member when unmatched fact
+    // rows exist.
+    let region_values = model
+        .get_distinct_column_values("Customers", "Region", None)
+        .unwrap();
+    let region_values: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(region_values).unwrap();
+    assert_eq!(
+        region_values,
+        vec![json!("East"), json!("West"), serde_json::Value::Null]
+    );
+
     // Multi-value filters should support selecting BLANK (null) so pivot field items can include
     // the relationship-generated "(blank)" member.
     let mut blank_filter = DaxFilterContext::new();
@@ -250,8 +261,13 @@ fn dax_model_apply_calculate_filters_supports_boolean_filter_args() {
     let non_blank_filter = model
         .apply_calculate_filters(None, vec!["Customers[Region] <> BLANK()".to_string()])
         .unwrap();
+    let region_values = model
+        .get_distinct_column_values_with_filter("Customers", "Region", &non_blank_filter)
+        .unwrap();
+    let region_values: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(region_values).unwrap();
+    assert_eq!(region_values, vec![json!("East"), json!("West")]);
     let pivot_js = model
-        .pivot("Orders", group_by, measures, Some(non_blank_filter))
+        .pivot("Orders", group_by, measures, Some(non_blank_filter.clone_js()))
         .unwrap();
     let pivot: PivotResultDto = serde_wasm_bindgen::from_value(pivot_js).unwrap();
     assert_eq!(pivot.rows.len(), 2);
