@@ -1898,6 +1898,17 @@ mod tests {
     }
 
     #[test]
+    fn read_part_from_reader_supports_backslash_separated_entry_names() {
+        let workbook = b"workbook-bytes";
+        let bytes = build_package(&[("xl\\workbook.xml", workbook.as_slice())]);
+
+        let extracted =
+            read_part_from_reader(Cursor::new(bytes), "xl/workbook.xml").expect("read workbook.xml");
+
+        assert_eq!(extracted, Some(workbook.to_vec()));
+    }
+
+    #[test]
     fn extract_cell_images_resolves_media_relationships() {
         let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
