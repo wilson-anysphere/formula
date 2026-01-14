@@ -583,6 +583,110 @@ class ComparePrivacyModeTests(unittest.TestCase):
             self.assertNotIn(udf_tag, tag_abs_tol)
             self.assertEqual(tag_abs_tol.get(f"sha256={udf_hash}"), 1e-6)
 
+    def test_privacy_mode_hashes_unknown_uppercase_tags(self) -> None:
+        compare_py = Path(__file__).resolve().parents[1] / "compare.py"
+        self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            udf_tag = "MYUDF"
+            cases_payload = {
+                "schemaVersion": 1,
+                "cases": [
+                    {"id": "case-sum", "formula": "=SUM(1,2)", "outputCell": "C1", "inputs": [], "tags": ["SUM"]},
+                    {
+                        "id": "case-udf",
+                        "formula": f"={udf_tag}(1)",
+                        "outputCell": "C1",
+                        "inputs": [],
+                        "tags": [udf_tag],
+                    },
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel"},
+                "caseSet": {"path": str(cases_path), "count": 2},
+                "results": [
+                    {"caseId": "case-sum", "result": {"t": "n", "v": 3}},
+                    {"caseId": "case-udf", "result": {"t": "n", "v": 1}},
+                ],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            actual_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "engine"},
+                "caseSet": {"path": str(cases_path), "count": 2},
+                "results": [
+                    {"caseId": "case-sum", "result": {"t": "e", "v": "#NAME?"}},
+                    {"caseId": "case-udf", "result": {"t": "e", "v": "#NAME?"}},
+                ],
+            }
+            actual_path.write_text(
+                json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--privacy-mode",
+                    "private",
+                    "--max-mismatch-rate",
+                    "1.0",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                self.fail(
+                    f"compare.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            mismatches = report.get("mismatches")
+            self.assertIsInstance(mismatches, list)
+            by_id = {m.get("caseId"): m for m in mismatches if isinstance(m, dict)}
+
+            udf_hash = hashlib.sha256(udf_tag.encode("utf-8")).hexdigest()
+            self.assertEqual(by_id["case-sum"]["tags"], ["SUM"])
+            self.assertEqual(by_id["case-udf"]["tags"], [f"sha256={udf_hash}"])
+
+            tag_summary = report.get("summary", {}).get("tagSummary")
+            self.assertIsInstance(tag_summary, list)
+            tags = {row.get("tag") for row in tag_summary if isinstance(row, dict)}
+            self.assertIn("SUM", tags)
+            self.assertNotIn(udf_tag, tags)
+            self.assertIn(f"sha256={udf_hash}", tags)
+
     def test_privacy_mode_hashes_path_like_string_values(self) -> None:
         compare_py = Path(__file__).resolve().parents[1] / "compare.py"
         self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")

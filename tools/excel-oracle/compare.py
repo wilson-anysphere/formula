@@ -85,14 +85,20 @@ def _redact_tag_name(tag: str, *, privacy_mode: str) -> str:
         return tag
 
     raw = tag.strip()
-    if "." not in raw:
-        return tag
-
     normalized = raw.upper()
     if normalized.startswith("_XLFN."):
         normalized = normalized[len("_XLFN.") :]
+
+    # Heuristic:
+    # - Category tags are typically lowercase (`arith`, `spill`, `odd_coupon`); keep them readable.
+    # - Function-like tags are typically uppercase (`SUM`, `XLOOKUP`). Hash unknown ones in private
+    #   mode so custom/UDF tags don't leak internal identifiers.
+    if "." not in raw and any(ch.islower() for ch in raw):
+        return tag
+
     if normalized in _load_known_function_names():
         return tag
+
     return f"sha256={_sha256_text(normalized)}"
 
 
