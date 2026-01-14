@@ -9254,6 +9254,13 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
 
   const formatValue = (raw: unknown): string => {
     if (raw == null) return "";
+    if (typeof raw === "object" && raw && "text" in raw && typeof (raw as any).text === "string") {
+      return String((raw as any).text);
+    }
+
+    const image = parseImageCellValue(raw);
+    if (image) return image.altText ?? "[Image]";
+
     if (typeof raw === "boolean") return raw ? "TRUE" : "FALSE";
 
     if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -9273,12 +9280,14 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
       return state?.formula ?? "";
     }
     const computed = app.getCellComputedValueForSheet(sheetId, cell);
+    if ((computed == null || computed === "") && state?.value != null) {
+      const image = parseImageCellValue(state.value);
+      if (image) return image.altText ?? "[Image]";
+    }
     return formatValue(computed);
   }
 
   const value = state?.value ?? null;
-  const maybeText = typeof value === "object" && value != null ? (value as any)?.text : null;
-  if (typeof maybeText === "string") return maybeText;
   return formatValue(value);
 }
 

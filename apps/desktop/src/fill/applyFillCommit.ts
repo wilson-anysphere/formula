@@ -8,6 +8,7 @@ import {
 } from "@formula/fill-engine";
 
 import type { DocumentController } from "../document/documentController.js";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 export type RewriteFormulasForCopyDeltaRequest = { formula: string; deltaRow: number; deltaCol: number };
 
@@ -48,11 +49,21 @@ export function applyFillCommitToDocumentController(options: ApplyFillCommitOpti
   // Avoid allocating a fresh `{row,col}` object for every cell visit during fills.
   const coordScratch = { row: 0, col: 0 };
 
+  const escapeLiteralTextForCellInput = (text: string): string => {
+    if (text.trimStart().startsWith("=") || text.startsWith("'")) return `'${text}`;
+    return text;
+  };
+
   const toScalar = (value: unknown): CellScalar => {
     if (value == null) return null;
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+    if (typeof value === "string") return escapeLiteralTextForCellInput(value);
+    if (typeof value === "number" || typeof value === "boolean") return value;
     const maybeRich = value as { text?: unknown } | null;
-    if (maybeRich && typeof maybeRich.text === "string") return maybeRich.text;
+    if (maybeRich && typeof maybeRich.text === "string") return escapeLiteralTextForCellInput(maybeRich.text);
+
+    const image = parseImageCellValue(value);
+    if (image) return escapeLiteralTextForCellInput(image.altText ?? "[Image]");
+
     return String(value);
   };
 
@@ -65,7 +76,10 @@ export function applyFillCommitToDocumentController(options: ApplyFillCommitOpti
       const cell = doc.getCell(sheetId, coordScratch) as { value: unknown; formula: string | null };
       const formula = typeof cell?.formula === "string" && cell.formula.trim() !== "" ? cell.formula : null;
       if (formula) {
-        const computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
+        let computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
+        if (mode === "copy" && typeof computed === "string") {
+          computed = escapeLiteralTextForCellInput(computed);
+        }
         outRow.push({ input: formula, value: computed ?? null });
         continue;
       }
@@ -166,11 +180,21 @@ export async function computeFillEditsForDocumentControllerWithFormulaRewrite(
   // Avoid allocating a fresh `{row,col}` object for every cell visit during fills.
   const coordScratch = { row: 0, col: 0 };
 
+  const escapeLiteralTextForCellInput = (text: string): string => {
+    if (text.trimStart().startsWith("=") || text.startsWith("'")) return `'${text}`;
+    return text;
+  };
+
   const toScalar = (value: unknown): CellScalar => {
     if (value == null) return null;
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+    if (typeof value === "string") return escapeLiteralTextForCellInput(value);
+    if (typeof value === "number" || typeof value === "boolean") return value;
     const maybeRich = value as { text?: unknown } | null;
-    if (maybeRich && typeof maybeRich.text === "string") return maybeRich.text;
+    if (maybeRich && typeof maybeRich.text === "string") return escapeLiteralTextForCellInput(maybeRich.text);
+
+    const image = parseImageCellValue(value);
+    if (image) return escapeLiteralTextForCellInput(image.altText ?? "[Image]");
+
     return String(value);
   };
 
@@ -183,7 +207,10 @@ export async function computeFillEditsForDocumentControllerWithFormulaRewrite(
       const cell = doc.getCell(sheetId, coordScratch) as { value: unknown; formula: string | null };
       const formula = typeof cell?.formula === "string" && cell.formula.trim() !== "" ? cell.formula : null;
       if (formula) {
-        const computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
+        let computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
+        if (mode === "copy" && typeof computed === "string") {
+          computed = escapeLiteralTextForCellInput(computed);
+        }
         outRow.push({ input: formula, value: computed ?? null });
         continue;
       }
