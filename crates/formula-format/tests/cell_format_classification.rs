@@ -1,4 +1,5 @@
 use formula_format::cell_format_code;
+use formula_format::{builtin_format_code, classify_cell_format, CellFormatClassification};
 
 #[test]
 fn cell_format_code_detects_currency_symbols_and_bracket_tokens() {
@@ -44,15 +45,6 @@ fn cell_format_code_treats_day_first_dates_like_month_first_for_cell_classificat
 }
 
 #[test]
-fn cell_format_code_treats_hh_mm_like_h_mm_for_time_classification() {
-    let h = cell_format_code(Some("h:mm"));
-    let hh = cell_format_code(Some("hh:mm"));
-
-    assert!(h.starts_with('T'), "expected time classification, got {h:?}");
-    assert_eq!(hh, h);
-}
-
-#[test]
 fn cell_format_code_recognizes_year_first_iso_dates() {
     let mdy = cell_format_code(Some("m/d/yyyy"));
     let iso_dash = cell_format_code(Some("yyyy-mm-dd"));
@@ -61,6 +53,15 @@ fn cell_format_code_recognizes_year_first_iso_dates() {
     assert!(mdy.starts_with('D'), "expected date classification, got {mdy:?}");
     assert_eq!(iso_dash, mdy);
     assert_eq!(iso_slash, mdy);
+}
+
+#[test]
+fn cell_format_code_treats_hh_mm_like_h_mm_for_time_classification() {
+    let h = cell_format_code(Some("h:mm"));
+    let hh = cell_format_code(Some("hh:mm"));
+
+    assert!(h.starts_with('T'), "expected time classification, got {h:?}");
+    assert_eq!(hh, h);
 }
 
 #[test]
@@ -85,3 +86,160 @@ fn cell_format_code_ignores_locale_override_tokens_for_datetime_classification()
     assert!(base_time.starts_with('T'), "expected time classification, got {base_time:?}");
     assert_eq!(with_locale, base_time);
 }
+
+#[test]
+fn builtin_numeric_formats_0_11_map_to_expected_cell_format_codes() {
+    let cases: &[(u16, &str)] = &[
+        (0, "G"),
+        (1, "F0"),
+        (2, "F2"),
+        (3, "F0"),
+        (4, "F2"),
+        (5, "C0"),
+        (6, "C0"),
+        (7, "C2"),
+        (8, "C2"),
+        (9, "P0"),
+        (10, "P2"),
+        (11, "S2"),
+    ];
+
+    for &(id, expected_code) in cases {
+        let fmt = builtin_format_code(id).unwrap();
+        let info = classify_cell_format(Some(fmt));
+        assert_eq!(info.cell_format_code, expected_code, "id {id} ({fmt})");
+    }
+
+    // Currency formats: red + parentheses.
+    let fmt6 = builtin_format_code(6).unwrap();
+    let info6 = classify_cell_format(Some(fmt6));
+    assert!(info6.negative_in_color, "expected [Red] in negative section");
+    assert!(info6.negative_in_parentheses, "expected parentheses in negative section");
+
+    let fmt8 = builtin_format_code(8).unwrap();
+    let info8 = classify_cell_format(Some(fmt8));
+    assert!(info8.negative_in_color, "expected [Red] in negative section");
+    assert!(info8.negative_in_parentheses, "expected parentheses in negative section");
+}
+
+#[test]
+fn accounting_formats_detect_parentheses_and_negative_color() {
+    // Built-in accounting-style negatives (no currency symbol): 23–26.
+    let cases: &[(u16, &str, bool)] = &[
+        (23, "F0", false),
+        (24, "F0", true),
+        (25, "F2", false),
+        (26, "F2", true),
+    ];
+
+    for &(id, expected_code, expects_color) in cases {
+        let fmt = builtin_format_code(id).unwrap();
+        let info = classify_cell_format(Some(fmt));
+        assert_eq!(info.cell_format_code, expected_code, "id {id} ({fmt})");
+        assert!(
+            info.negative_in_parentheses,
+            "expected parentheses in negative section for id {id} ({fmt})"
+        );
+        assert_eq!(
+            info.negative_in_color, expects_color,
+            "id {id} ({fmt})"
+        );
+    }
+
+    // Accounting formats 41–44 (alignment underscores/fill).
+    for id in 41u16..=44u16 {
+        let fmt = builtin_format_code(id).unwrap();
+        let info = classify_cell_format(Some(fmt));
+        assert!(
+            info.negative_in_parentheses,
+            "expected parentheses in negative section for id {id} ({fmt})"
+        );
+        assert!(
+            !info.negative_in_color,
+            "did not expect a color token for id {id} ({fmt})"
+        );
+    }
+}
+
+#[test]
+fn builtin_placeholder_inputs_match_builtin_strings() {
+    for id in [0u16, 6u16, 9u16, 14u16, 41u16, 49u16] {
+        let fmt = builtin_format_code(id).unwrap();
+        let from_string = classify_cell_format(Some(fmt));
+        let from_placeholder = classify_cell_format(Some(&format!("__builtin_numFmtId:{id}")));
+        assert_eq!(
+            from_placeholder, from_string,
+            "placeholder should match built-in string for id {id}"
+        );
+    }
+}
+
+#[test]
+fn custom_numeric_formats_compute_decimal_counts() {
+    let cases: &[(&str, &str)] = &[
+        ("0.000", "F3"),
+        ("0.0%", "P1"),
+        ("0.0E+00", "S1"),
+    ];
+
+    for &(fmt, expected) in cases {
+        let info = classify_cell_format(Some(fmt));
+        assert_eq!(info.cell_format_code, expected, "fmt {fmt}");
+        assert!(!info.negative_in_color, "fmt {fmt}");
+        assert!(!info.negative_in_parentheses, "fmt {fmt}");
+    }
+}
+
+#[test]
+fn datetime_formats_map_to_cell_d_and_t_codes() {
+    let cases: &[(&str, &str)] = &[
+        ("m/d/yyyy", "D1"),
+        ("h:mm:ss", "T4"),
+        ("[h]:mm:ss", "T6"),
+        ("mm:ss.0", "T7"),
+    ];
+
+    for &(fmt, expected) in cases {
+        let info = classify_cell_format(Some(fmt));
+        assert_eq!(info.cell_format_code, expected, "fmt {fmt}");
+        assert!(!info.negative_in_color, "fmt {fmt}");
+        assert!(!info.negative_in_parentheses, "fmt {fmt}");
+    }
+}
+
+#[test]
+fn empty_or_whitespace_formats_are_general() {
+    let cases: &[Option<&str>] = &[None, Some(""), Some("   ")];
+    for &fmt in cases {
+        let info = classify_cell_format(fmt);
+        assert_eq!(info.cell_format_code, "G");
+    }
+}
+
+#[test]
+fn unknown_formats_return_n() {
+    // Fractions are not part of the fixed/currency/percent/scientific families for CELL("format").
+    let info = classify_cell_format(Some("# ?/?"));
+    assert_eq!(info.cell_format_code, "N");
+
+    // Non-placeholder, non-numeric literals.
+    let info = classify_cell_format(Some("\"hello\""));
+    assert_eq!(info.cell_format_code, "N");
+}
+
+// Ensure the classification struct remains cheap to compare for tests.
+#[test]
+fn cell_format_classification_is_eq() {
+    let a = CellFormatClassification {
+        cell_format_code: "G".to_string(),
+        negative_in_color: false,
+        negative_in_parentheses: false,
+    };
+    let b = CellFormatClassification {
+        cell_format_code: "G".to_string(),
+        negative_in_color: false,
+        negative_in_parentheses: false,
+    };
+    assert_eq!(a, b);
+}
+
