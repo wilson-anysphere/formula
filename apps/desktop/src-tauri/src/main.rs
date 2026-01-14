@@ -15,7 +15,7 @@ use desktop::commands;
 use desktop::ed25519_verifier;
 use desktop::ipc_limits::{
     LimitedString, MAX_IPC_NOTIFICATION_BODY_BYTES, MAX_IPC_NOTIFICATION_TITLE_BYTES,
-    MAX_OAUTH_REDIRECT_URI_BYTES,
+    MAX_IPC_URL_BYTES,
 };
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::{workbook_before_close_timeout_ms, MacroExecutionOptions};
@@ -782,7 +782,7 @@ async fn show_system_notification(
 async fn oauth_loopback_listen(
     window: tauri::WebviewWindow,
     state: State<'_, SharedOauthLoopbackState>,
-    redirect_uri: LimitedString<MAX_OAUTH_REDIRECT_URI_BYTES>,
+    redirect_uri: LimitedString<MAX_IPC_URL_BYTES>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     desktop::ipc_origin::ensure_main_window(
@@ -2015,26 +2015,37 @@ fn main() {
                     .get_webview_window(window.label())
                 else {
                     eprintln!("[close] blocked close-requested flow (missing webview window)");
+                    // Deterministic fallback: hide-to-tray without involving the webview.
                     let _ = window.hide();
                     CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
                     return;
                 };
 
-                let url = webview_window.url().ok();
-                let url_for_log = url
-                    .as_ref()
-                    .map(|url| url.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_string());
+                let url = match webview_window.url() {
+                    Ok(url) => url,
+                    Err(err) => {
+                        eprintln!(
+                            "[close] blocked close-requested flow: could not read webview url ({err})"
+                        );
 
-                if !url.is_some_and(|url| desktop::ipc_origin::is_trusted_app_origin(&url)) {
+                        // Deterministic fallback: hide-to-tray without involving the webview.
+                        let _ = window.hide();
+                        CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                };
+                let url_for_log = url.to_string();
+
+                if !desktop::ipc_origin::is_trusted_app_origin(&url) {
                     eprintln!(
                         "[close] blocked close-requested flow from untrusted origin: {url_for_log}"
                     );
+
+                    // Deterministic fallback: hide-to-tray without involving the webview.
                     let _ = window.hide();
                     CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
                     return;
                 }
-
                 if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
                     &webview_window,
                     "close-requested flow",
@@ -2271,18 +2282,18 @@ fn main() {
                         eprintln!("[file-dropped] blocked drop event (missing webview window)");
                         return;
                     };
-                    let url = match webview_window.url() {
+                    let window_url = match webview_window.url() {
                         Ok(url) => url,
                         Err(err) => {
                             eprintln!(
-                                "[file-dropped] blocked drop event: failed to read window URL ({err})"
+                                "[file-dropped] ignored drop event because window URL could not be read: {err}"
                             );
                             return;
                         }
                     };
-                    if !desktop::ipc_origin::is_trusted_app_origin(&url) {
+                    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
                         eprintln!(
-                            "[file-dropped] blocked drop event for untrusted origin: {url}"
+                            "[file-dropped] blocked drop event for untrusted origin: {window_url}"
                         );
                         return;
                     }
@@ -2292,7 +2303,7 @@ fn main() {
                         desktop::ipc_origin::Verb::Are,
                     ) {
                         eprintln!(
-                            "[file-dropped] blocked drop event for untrusted origin: {url} ({err})"
+                            "[file-dropped] blocked drop event for untrusted origin: {window_url} ({err})"
                         );
                         return;
                     }
@@ -2623,12 +2634,12 @@ fn main() {
                             handle_for_listener.unlisten(id);
                         }
 
-                        let Some(window) = handle_for_listener.get_webview_window("main") else {
-                            eprintln!(
-                                "[updater] received updater-ui-ready but main window is missing; skipping startup update check"
-                            );
-                            return;
-                        };
+                         let Some(window) = handle_for_listener.get_webview_window("main") else {
+                             eprintln!(
+                                 "[updater] received updater-ui-ready but main window is missing; skipping startup update check"
+                             );
+                             return;
+                         };
 
                         let window_url = match window.url() {
                             Ok(url) => url,
@@ -2656,7 +2667,7 @@ fn main() {
                             return;
                         }
 
-                        updater::spawn_update_check(
+                         updater::spawn_update_check(
                             &handle_for_listener,
                             updater::UpdateCheckSource::Startup,
                         );

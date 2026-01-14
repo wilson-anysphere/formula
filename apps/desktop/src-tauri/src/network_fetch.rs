@@ -172,7 +172,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    async fn spawn_server(body: Vec<u8>, include_content_length: bool) -> String {
+    async fn spawn_server(body: Vec<u8>, content_length: Option<usize>) -> String {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -203,8 +203,8 @@ mod tests {
             let mut headers = String::from("HTTP/1.1 200 OK\r\n");
             headers.push_str("Content-Type: text/plain\r\n");
             headers.push_str("Connection: close\r\n");
-            if include_content_length {
-                headers.push_str(&format!("Content-Length: {}\r\n", body.len()));
+            if let Some(len) = content_length {
+                headers.push_str(&format!("Content-Length: {len}\r\n"));
             }
             headers.push_str("\r\n");
 
@@ -370,7 +370,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_large_response_without_content_length() {
         let body = vec![b'a'; crate::network_limits::NETWORK_FETCH_MAX_BODY_BYTES + 1];
-        let url = spawn_server(body, false).await;
+        let url = spawn_server(body, None).await;
 
         let err = network_fetch_impl(&url, &JsonValue::Null).await.unwrap_err();
         assert!(
@@ -388,8 +388,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_large_response_with_content_length() {
+        // Use an exaggerated Content-Length without sending a giant body. The implementation should
+        // reject based on the header before downloading anything.
+        let limit = crate::network_limits::NETWORK_FETCH_MAX_BODY_BYTES;
+        let url = spawn_server(Vec::new(), Some(limit + 1)).await;
+
+        let err = network_fetch_impl(&url, &JsonValue::Null).await.unwrap_err();
+        assert!(
+            err.contains("Response body too large"),
+            "expected error to mention response too large; got: {err}"
+        );
+        assert!(
+            err.contains("Content-Length"),
+            "expected error to mention Content-Length; got: {err}"
+        );
+        assert!(
+            err.contains(&limit.to_string()),
+            "expected error to include byte limit; got: {err}"
+        );
+        assert!(
+            err.contains(&(limit + 1).to_string()),
+            "expected error to include advertised size; got: {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn returns_small_text_body() {
-        let url = spawn_server(b"hello".to_vec(), true).await;
+        let url = spawn_server(b"hello".to_vec(), Some(5)).await;
 
         let result = network_fetch_impl(&url, &JsonValue::Null).await.unwrap();
         assert!(result.ok);

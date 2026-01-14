@@ -3264,8 +3264,8 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
                         col: col_u32,
                         new_value,
                         new_style: None,
-                        // If the existing XLSB cell has a formula record, ensure it's removed when
-                        // the current workbook cell no longer has a formula (e.g. "paste values").
+                        // When a cell has no formula in our model, ensure any existing formula
+                        // record in the source XLSB is removed (\"paste values\" semantics).
                         clear_formula: baseline_had_formula,
                         new_formula: None,
                         new_rgcb: None,

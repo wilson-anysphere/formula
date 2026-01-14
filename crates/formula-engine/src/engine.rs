@@ -16307,8 +16307,8 @@ mod tests {
             .set_cell_formula("Sheet1", "B1", r#"=CELL("width", A1)"#)
             .unwrap();
         engine.recalculate_single_threaded();
-        // Excel's CELL("width") returns the integer part of the width, with a `0`/`1` in the first
-        // decimal place indicating whether the column uses the sheet default width.
+        // Excel returns the column width rounded down to whole characters, with a `0.0` fractional
+        // marker when the column uses the sheet default width.
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(8.0));
 
         // Column widths are stored in Excel "character" units (OOXML `col/@width`).
