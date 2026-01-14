@@ -11,31 +11,14 @@
 //!
 use std::io::{Read, Seek, SeekFrom};
 
+pub use crate::offcrypto::cryptoapi::HashAlg;
+use crate::offcrypto::cryptoapi::{CALG_MD5, CALG_SHA1};
 use md5::Md5;
 use sha1::{Digest as _, Sha1};
 use thiserror::Error;
 
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const RC4_BLOCK_SIZE: usize = 0x200;
-
-// CryptoAPI ALG_ID values for `EncryptionHeader.algIdHash` (MS-OFFCRYPTO).
-const CALG_MD5: u32 = 0x0000_8003;
-const CALG_SHA1: u32 = 0x0000_8004;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CryptoApiHashAlg {
-    Sha1,
-    Md5,
-}
-
-impl CryptoApiHashAlg {
-    fn digest_len(&self) -> usize {
-        match self {
-            CryptoApiHashAlg::Sha1 => 20,
-            CryptoApiHashAlg::Md5 => 16,
-        }
-    }
-}
 
 /// Errors returned when validating/constructing an RC4 CryptoAPI `EncryptedPackage` decryptor.
 #[derive(Debug, Error)]
@@ -128,7 +111,7 @@ pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
     h: Vec<u8>,
     /// RC4 key length in bytes (e.g. `keySize / 8` from EncryptionHeader).
     key_len: usize,
-    hash_alg: CryptoApiHashAlg,
+    hash_alg: HashAlg,
 
     rc4: Option<Rc4>,
     block_index: Option<u32>,
@@ -191,8 +174,8 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         }
 
         let hash_alg = match alg_id_hash {
-            CALG_SHA1 => CryptoApiHashAlg::Sha1,
-            CALG_MD5 => CryptoApiHashAlg::Md5,
+            CALG_SHA1 => HashAlg::Sha1,
+            CALG_MD5 => HashAlg::Md5,
             _ => {
                 return Err(
                     Rc4CryptoApiEncryptedPackageError::UnsupportedHashAlgorithm { alg_id_hash },
@@ -212,7 +195,7 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         }
 
         let key_len_u32 = key_size_bits / 8;
-        let hash_len = hash_alg.digest_len();
+        let hash_len = hash_alg.hash_len();
         if key_len_u32 as usize > hash_len {
             return Err(Rc4CryptoApiEncryptedPackageError::KeySizeTooLargeForHash {
                 key_size_bits,
@@ -247,21 +230,16 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
     /// This constructor assumes `algIdHash = CALG_SHA1` for per-block key derivation. Prefer
     /// [`Self::from_encrypted_package_stream`] when parsing real Office files so that the `algIdHash`
     /// and `keySize` parameters are validated.
-    pub fn new(
-        inner: R,
-        package_size: u64,
-        h: Vec<u8>,
-        key_len: usize,
-    ) -> std::io::Result<Self> {
-        Self::new_with_hash_alg(inner, package_size, h, key_len, CryptoApiHashAlg::Sha1)
+    pub fn new(inner: R, package_size: u64, h: Vec<u8>, key_len: usize) -> std::io::Result<Self> {
+        Self::new_with_hash_alg(inner, package_size, h, key_len, HashAlg::Sha1)
     }
 
-    fn new_with_hash_alg(
+    pub fn new_with_hash_alg(
         mut inner: R,
         package_size: u64,
         h: Vec<u8>,
         key_len: usize,
-        hash_alg: CryptoApiHashAlg,
+        hash_alg: HashAlg,
     ) -> std::io::Result<Self> {
         if key_len == 0 {
             return Err(std::io::Error::new(
@@ -272,7 +250,7 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
 
         // RC4 key bytes are derived by hashing and truncating, so key_len cannot exceed the hash
         // digest size.
-        let hash_len = hash_alg.digest_len();
+        let hash_len = hash_alg.hash_len();
         if key_len > hash_len {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -337,13 +315,13 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
 
         // Derive per-block RC4 key: Hash(H || LE32(block_index)) truncated to key_len.
         let digest = match self.hash_alg {
-            CryptoApiHashAlg::Sha1 => {
+            HashAlg::Sha1 => {
                 let mut hasher = Sha1::new();
                 hasher.update(&self.h);
                 hasher.update(block_index.to_le_bytes());
                 hasher.finalize().to_vec()
             }
-            CryptoApiHashAlg::Md5 => {
+            HashAlg::Md5 => {
                 let mut hasher = Md5::new();
                 hasher.update(&self.h);
                 hasher.update(block_index.to_le_bytes());
@@ -556,17 +534,32 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    fn encrypt_rc4_cryptoapi(plaintext: &[u8], h: &[u8], key_len: usize) -> Vec<u8> {
-        assert!(key_len <= 20);
+    fn encrypt_rc4_cryptoapi(
+        plaintext: &[u8],
+        h: &[u8],
+        key_len: usize,
+        hash_alg: HashAlg,
+    ) -> Vec<u8> {
+        assert!(key_len <= hash_alg.hash_len());
 
         let mut out = vec![0u8; plaintext.len()];
         let mut offset = 0usize;
         let mut block_index = 0u32;
         while offset < plaintext.len() {
-            let mut hasher = Sha1::new();
-            hasher.update(h);
-            hasher.update(block_index.to_le_bytes());
-            let digest = hasher.finalize();
+            let digest = match hash_alg {
+                HashAlg::Sha1 => {
+                    let mut hasher = Sha1::new();
+                    hasher.update(h);
+                    hasher.update(block_index.to_le_bytes());
+                    hasher.finalize().to_vec()
+                }
+                HashAlg::Md5 => {
+                    let mut hasher = Md5::new();
+                    hasher.update(h);
+                    hasher.update(block_index.to_le_bytes());
+                    hasher.finalize().to_vec()
+                }
+            };
             let mut rc4 = if key_len == 5 {
                 // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
                 let mut padded = [0u8; 16];
@@ -596,7 +589,7 @@ mod tests {
         for (i, b) in plaintext.iter_mut().enumerate() {
             *b = (i % 251) as u8;
         }
-        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len);
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Sha1);
 
         // Simulate EncryptedPackage stream layout: [u64 package_size] + ciphertext.
         let mut stream = Vec::new();
@@ -633,7 +626,7 @@ mod tests {
         for (i, b) in plaintext.iter_mut().enumerate() {
             *b = (i % 251) as u8;
         }
-        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len);
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Sha1);
 
         // Simulate EncryptedPackage stream layout: [u64 package_size] + ciphertext.
         let mut stream = Vec::new();
@@ -661,7 +654,7 @@ mod tests {
         for (i, b) in plaintext.iter_mut().enumerate() {
             *b = (i % 251) as u8;
         }
-        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len);
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Sha1);
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
@@ -692,7 +685,7 @@ mod tests {
         let key_len = 16;
 
         let plaintext = b"hello world".to_vec();
-        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len);
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Sha1);
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
@@ -713,6 +706,54 @@ mod tests {
         let mut buf = [0u8; 32];
         let n = reader.read(&mut buf).unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn md5_sequential_reads_and_seek_work() {
+        let h = b"0123456789ABCDEF".to_vec(); // 16 bytes
+        let key_len = 16;
+
+        let mut plaintext = vec![0u8; RC4_BLOCK_SIZE * 2 + 64];
+        for (i, b) in plaintext.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Md5);
+
+        // Simulate EncryptedPackage stream layout: [u64 package_size] + ciphertext.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+        stream.extend_from_slice(&ciphertext);
+
+        let cursor = Cursor::new(stream);
+        let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            cursor,
+            h.clone(),
+            (key_len as u32) * 8,
+            CALG_MD5,
+        )
+        .unwrap();
+
+        // Sequential read in small chunks to cross a 0x200 boundary.
+        let mut out = vec![0u8; plaintext.len()];
+        let out_len = out.len();
+        let mut read = 0usize;
+        while read < out_len {
+            let end = read + 33.min(out_len - read);
+            let n = reader.read(&mut out[read..end]).unwrap();
+            assert!(n > 0, "unexpected EOF while reading");
+            read += n;
+        }
+        assert_eq!(out, plaintext);
+
+        // Seek into the middle of a block and read.
+        let seek_pos = (RC4_BLOCK_SIZE as u64) + 0x10;
+        reader.seek(SeekFrom::Start(seek_pos)).unwrap();
+        let mut buf = [0u8; 64];
+        reader.read_exact(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..],
+            &plaintext[seek_pos as usize..seek_pos as usize + buf.len()]
+        );
     }
 
     #[test]

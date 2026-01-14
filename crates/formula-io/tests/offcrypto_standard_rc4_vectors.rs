@@ -211,16 +211,28 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     let key_len = 16usize;
 
     let h = standard_rc4_spun_password_hash_md5(password, &salt, spin_count);
+    assert_eq!(h.to_vec(), hex_decode("2079476089fda784c3a3cfeb98102c7e"));
 
     let key0 = standard_rc4_derive_block_key_md5(h, 0, key_len);
     let key1 = standard_rc4_derive_block_key_md5(h, 1, key_len);
     let key2 = standard_rc4_derive_block_key_md5(h, 2, key_len);
     let key3 = standard_rc4_derive_block_key_md5(h, 3, key_len);
 
+    // Sanity: different block indexes must yield different keys.
+    assert_ne!(key0, key1);
+
     assert_eq!(key0, hex_decode("69badcae244868e209d4e053ccd2a3bc"));
     assert_eq!(key1, hex_decode("6f4d502ab37700ffdab5704160455b47"));
     assert_eq!(key2, hex_decode("ac69022e396c7750872133f37e2c7afc"));
     assert_eq!(key3, hex_decode("1b056e7118ab8d35e9d67adee8b11104"));
+
+    let plaintext = b"Hello, RC4 CryptoAPI!";
+    let ciphertext = rc4_apply(&key0, plaintext);
+    assert_eq!(
+        ciphertext,
+        hex_decode("425dd9c8165e1216065e53eb586e897b5e85a07a6d")
+    );
+    assert_eq!(rc4_apply(&key0, &ciphertext), plaintext);
 
     // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
     let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);

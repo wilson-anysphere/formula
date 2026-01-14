@@ -13,7 +13,8 @@
 //!
 //! Note: MS-OFFCRYPTO Standard encryption also has an **RC4** variant ("CryptoAPI RC4") whose
 //! `EncryptedPackage` payload is decrypted in **0x200-byte** blocks with per-block keys derived from
-//! the password + salt + a 50000-iteration SHA-1 spin loop. That variant is documented in
+//! the password + salt + a 50000-iteration `Hash()` spin loop (commonly SHA-1, sometimes MD5). That
+//! variant is documented in
 //! `docs/offcrypto-standard-cryptoapi-rc4.md`.
 //!
 //! Separately, we keep small self-contained parsers/verifiers here that are intended to be safe on

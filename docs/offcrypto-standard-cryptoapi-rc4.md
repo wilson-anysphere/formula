@@ -152,8 +152,10 @@ Notes:
 ## Test vectors (used in unit tests)
 
 The unit test `crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs` uses the following
-deterministic vector to lock down the derivation details (UTF-16LE encoding, spin loop ordering,
-and LE32 block index encoding).
+deterministic vectors to lock down the derivation details (UTF-16LE encoding, spin loop ordering,
+and LE32 block index encoding) for multiple `EncryptionHeader.algIdHash` values.
+
+### SHA-1 (`CALG_SHA1`)
 
 Parameters:
 
@@ -176,6 +178,31 @@ block 1 rc4_key =
 
 RC4(key=block0, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   e7c9974140e69857dbdec656c7ccb4f9283d723236
+```
+
+### MD5 (`CALG_MD5`)
+
+Parameters:
+
+- password: `"password"`
+- salt (hex): `00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f`
+- spinCount: `50000` (`0x0000C350`)
+- keySize: `16` bytes (128-bit RC4)
+
+Expected values:
+
+```text
+spun password hash (H) =
+  2079476089fda784c3a3cfeb98102c7e
+
+block 0 rc4_key =
+  69badcae244868e209d4e053ccd2a3bc
+
+block 1 rc4_key =
+  6f4d502ab37700ffdab5704160455b47
+
+RC4(key=block0, plaintext="Hello, RC4 CryptoAPI!") ciphertext =
+  425dd9c8165e1216065e53eb586e897b5e85a07a6d
 ```
 
 ## CryptoAPI constants (for parsing `EncryptionHeader`)

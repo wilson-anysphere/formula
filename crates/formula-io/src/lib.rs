@@ -14,7 +14,7 @@ mod encryption_info;
 pub mod offcrypto;
 pub use encryption_info::{extract_agile_encryption_info_xml, EncryptionInfoXmlError};
 mod rc4_cryptoapi;
-pub use rc4_cryptoapi::{Rc4CryptoApiDecryptReader, Rc4CryptoApiEncryptedPackageError};
+pub use rc4_cryptoapi::{HashAlg, Rc4CryptoApiDecryptReader, Rc4CryptoApiEncryptedPackageError};
 mod ms_offcrypto;
 
 #[cfg(feature = "encrypted-workbooks")]
