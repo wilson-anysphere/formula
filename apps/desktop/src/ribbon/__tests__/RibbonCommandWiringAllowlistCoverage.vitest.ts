@@ -768,12 +768,12 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
   // Formatting-related ribbon ids are centralized in `ribbon/commandHandlers.ts`, which is invoked
   // by main.ts before falling back to the big `switch (commandId)` block. Include those ids here
   // so the test stays accurate even when the implementation lives outside main.ts.
-  const commandHandlersPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
-  const commandHandlersSource = readFileSync(commandHandlersPath, "utf8");
-  for (const match of commandHandlersSource.matchAll(/case\s+["']([^"']+)["']/g)) {
+  // NOTE: `combinedSource` already includes `commandHandlers.ts`; reuse `handlerSource` to avoid
+  // re-reading the file (and to keep the drift logic centralized).
+  for (const match of handlerSource.matchAll(/case\s+["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
-  for (const match of commandHandlersSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
+  for (const match of handlerSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
     addIfSchema(match[1]!);
   }
   const handlerPrefixes = [
@@ -784,7 +784,7 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
     "format.fontColor.",
     "format.borders.",
   ];
-  const presentHandlerPrefixes = handlerPrefixes.filter((prefix) => commandHandlersSource.includes(prefix));
+  const presentHandlerPrefixes = handlerPrefixes.filter((prefix) => handlerSource.includes(prefix));
   for (const id of schemaCommandIdSet) {
     if (presentHandlerPrefixes.some((prefix) => id.startsWith(prefix))) implemented.add(id);
   }

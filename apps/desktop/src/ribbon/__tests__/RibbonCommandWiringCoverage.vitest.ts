@@ -121,12 +121,6 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
   });
 });
 
-const IMPLEMENTED_COMMAND_PREFIXES = [
-  // Handled by `handleRibbonCommand` prefix logic (see `apps/desktop/src/main.ts`).
-  "home.styles.cellStyles.",
-  "home.styles.formatAsTable.",
-];
-
 function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCommandIds: Set<string>): string[] {
   const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
   const ribbonHandlersPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
@@ -155,13 +149,6 @@ function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCom
     if (!obj) continue;
     for (const overrideId of extractTopLevelStringKeys(obj)) {
       addIfSchema(overrideId);
-    }
-  }
-
-  const presentPrefixes = IMPLEMENTED_COMMAND_PREFIXES.filter((prefix) => combinedSource.includes(prefix));
-  for (const id of schemaCommandIds) {
-    if (presentPrefixes.some((prefix) => id.startsWith(prefix))) {
-      ids.add(id);
     }
   }
 
