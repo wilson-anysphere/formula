@@ -2203,10 +2203,19 @@ mod tests {
         let y_schema = col_table.schema().iter().find(|c| c.name == "Y").unwrap();
         assert_eq!(y_schema.column_type, ColumnType::Number);
 
+        // Hold a reference to the underlying `Arc<ColumnarTable>` to force the "shared Arc"
+        // clone-fallback path when appending another column.
+        let shared_before_b = table.columnar_table().unwrap().clone();
+        assert_eq!(shared_before_b.column_count(), 2);
+
         table
             .add_column("B", vec![Value::Boolean(true), Value::Blank])
             .unwrap();
         let col_table = table.columnar_table().unwrap();
+        assert_eq!(col_table.column_count(), 3);
+        assert_eq!(shared_before_b.column_count(), 2);
+        assert!(shared_before_b.schema().iter().all(|c| c.name != "B"));
+
         let b_schema = col_table.schema().iter().find(|c| c.name == "B").unwrap();
         assert_eq!(b_schema.column_type, ColumnType::Boolean);
         assert_eq!(table.value(0, "B"), Some(true.into()));
