@@ -311,6 +311,11 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     String.raw`\b(?:accentColor|backgroundColor|borderColor|caretColor|color|fill|stroke|stopColor|floodColor|lightingColor)\b\s*=\s*(["'])[^"']*${namedColorToken}[^"']*\1`,
     "gi",
   );
+  const jsxAttributeColorExpr = new RegExp(
+    // JSX/SVG attrs with string literal expressions (e.g. `<path fill={"red"} />`)
+    String.raw`\b(?:accentColor|backgroundColor|borderColor|caretColor|color|fill|stroke|stopColor|floodColor|lightingColor)\b\s*=\s*\{\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1\s*\}`,
+    "gi",
+  );
 
   /** @type {{ file: string, match: string }[]} */
   const violations = [];
@@ -344,12 +349,14 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         domStyleColor.exec(stripped) ??
         canvasStyleColor.exec(stripped) ??
         setAttributeColor.exec(stripped) ??
-        jsxAttributeColor.exec(stripped);
+        jsxAttributeColor.exec(stripped) ??
+        jsxAttributeColorExpr.exec(stripped);
       jsStyleColor.lastIndex = 0;
       domStyleColor.lastIndex = 0;
       canvasStyleColor.lastIndex = 0;
       setAttributeColor.lastIndex = 0;
       jsxAttributeColor.lastIndex = 0;
+      jsxAttributeColorExpr.lastIndex = 0;
       named = match?.groups?.color ?? null;
     }
     if (named && !allowedColorKeywords.has(named.toLowerCase())) {
