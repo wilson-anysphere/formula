@@ -273,8 +273,9 @@ jobs:
           tool: customSmallerIsBetter
           output-file-path: perf-artifacts/benchmark-results.desktop-memory.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Scheduled + manual runs on main should push to gh-pages for historical tracking.
-          auto-push: true
+          # Only scheduled runs should push to gh-pages for historical tracking.
+          # (Manual workflow_dispatch runs are typically for debugging and can be noisy.)
+          auto-push: ${{ github.event_name == 'schedule' }}
           alert-threshold: '120%'
           comment-on-alert: false
           fail-on-alert: false

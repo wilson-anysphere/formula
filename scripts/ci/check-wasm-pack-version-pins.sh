@@ -19,6 +19,7 @@ workflows=(
   ".github/workflows/desktop-bundle-size.yml"
   ".github/workflows/desktop-perf-platform-matrix.yml"
   ".github/workflows/desktop-perf-platform-matrix-pr.yml"
+  ".github/workflows/desktop-memory-perf.yml"
   ".github/workflows/perf.yml"
   ".github/workflows/windows-arm64-smoke.yml"
 )
