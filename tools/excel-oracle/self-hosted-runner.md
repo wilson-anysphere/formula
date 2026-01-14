@@ -98,8 +98,10 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
 
 Verification checklist (especially for `es-ES`):
 
-- Ensure extraction covers the full catalog (the extractor should write one mapping per canonical
-  function before normalization, and the script should not skip large numbers of functions).
+- Ensure extraction covers the full catalog:
+  - The extractor should print `Wrote <N> translations ...` where `<N>` matches the number of
+    functions in `shared/functionCatalog.json` (before normalization).
+  - It should not report skipped functions (skipped/missing entries silently fall back to English).
 - Normalize sources before committing (omits identity mappings + enforces stable casing):
   - `node scripts/normalize-locale-function-sources.js`
 - Run `node scripts/generate-locale-function-tsv.js --check`.

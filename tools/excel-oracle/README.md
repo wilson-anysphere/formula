@@ -124,6 +124,9 @@ Notes / caveats:
   English in the generated TSVs.
 - For `es-ES`, treat a “complete” extraction as the extractor writing **one translation per canonical
   function** (before normalization) and not reporting a large skipped set.
+  - If the script reports skipped functions, those functions will fall back to English in the
+    generated TSVs; use a newer Excel build / correct language pack rather than committing a partial
+    mapping.
 - Before committing, normalize the extracted JSON sources to omit identity mappings and ensure
   deterministic casing:
   - `node scripts/normalize-locale-function-sources.js`

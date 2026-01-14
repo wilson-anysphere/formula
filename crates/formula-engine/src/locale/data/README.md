@@ -118,9 +118,10 @@ node scripts/generate-locale-function-tsv.js --check
 
 Quick verification checklist (especially for `es-ES`):
 
-- If you re-extracted from Excel, confirm the extractor ran against the full catalog (it should
-  write one translation per catalog function before normalization, and should not report a large
-  skipped set).
+- If you re-extracted from Excel, confirm the extractor ran against the full catalog:
+  - It should print `Wrote <N> translations ...` where `<N>` matches the number of functions in
+    `shared/functionCatalog.json` (before normalization removes identity mappings).
+  - It should not report skipped functions (skipped/missing entries silently fall back to English).
 - `node scripts/generate-locale-function-tsv.js --check` passes.
   - Note: `--check` only verifies that the committed TSVs match what would be generated from the
     committed JSON sources; it does **not** prove that the sources are complete (missing entries are
