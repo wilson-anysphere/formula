@@ -383,7 +383,8 @@ fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Re
         .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
     let rows = table.row_count();
     let page = table.page_size_rows();
-    let rhs_bits = canonical_f64_bits(rhs);
+    let rhs_is_zero = rhs == 0.0;
+    let rhs_is_nan = rhs.is_nan();
 
     if let Some(stats) = table.stats(col) {
         let nulls = stats.null_count as usize;
@@ -446,29 +447,58 @@ fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Re
             });
         };
 
-        if c.validity.as_ref().is_some_and(|v| v.count_ones() == 0) {
-            // All-null chunk: comparisons evaluate to false.
-            out.extend_constant(false, chunk_rows);
-            continue;
-        }
-
-        for i in 0..chunk_rows {
-            if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
-                out.push(false);
-                continue;
-            }
-            let v = c.values[i];
-            let passed = match op {
-                // Canonicalize float equality so `-0.0 == 0.0` and all NaNs compare equal,
-                // matching group-by and distinct-count semantics.
-                CmpOp::Eq => canonical_f64_bits(v) == rhs_bits,
-                CmpOp::Ne => canonical_f64_bits(v) != rhs_bits,
+        let eval = |v: f64| -> bool {
+            match op {
+                CmpOp::Eq => {
+                    if rhs_is_zero {
+                        v == 0.0
+                    } else if rhs_is_nan {
+                        v.is_nan()
+                    } else {
+                        v == rhs
+                    }
+                }
+                CmpOp::Ne => {
+                    if rhs_is_zero {
+                        v != 0.0
+                    } else if rhs_is_nan {
+                        !v.is_nan()
+                    } else {
+                        v != rhs
+                    }
+                }
                 CmpOp::Lt => v < rhs,
                 CmpOp::Lte => v <= rhs,
                 CmpOp::Gt => v > rhs,
                 CmpOp::Gte => v >= rhs,
-            };
-            out.push(passed);
+            }
+        };
+
+        match c.validity.as_ref() {
+            None => {
+                for i in 0..chunk_rows {
+                    out.push(eval(c.values[i]));
+                }
+            }
+            Some(validity) => {
+                if validity.count_ones() == 0 {
+                    out.extend_constant(false, chunk_rows);
+                    continue;
+                }
+                if validity.all_true() {
+                    for i in 0..chunk_rows {
+                        out.push(eval(c.values[i]));
+                    }
+                } else {
+                    for i in 0..chunk_rows {
+                        if !validity.get(i) {
+                            out.push(false);
+                            continue;
+                        }
+                        out.push(eval(c.values[i]));
+                    }
+                }
+            }
         }
     }
 
@@ -680,15 +710,12 @@ fn eval_filter_string(
     let rows = table.row_count();
     let page = table.page_size_rows();
 
-    // Fast path: equality against a string not in the dictionary cannot match any non-null value.
-    if matches!(op, CmpOp::Eq) && target.is_none() {
-        return Ok(BitVec::with_len_all_false(rows));
-    }
-
-    // Fast path: inequality against a string not in the dictionary matches all non-null rows.
-    if matches!(op, CmpOp::Ne) && target.is_none() {
-        return eval_filter_is_null(table, col, false);
-    }
+    let target = match (op, target) {
+        (CmpOp::Eq, None) => return Ok(BitVec::with_len_all_false(rows)),
+        (CmpOp::Ne, None) => return eval_filter_is_null(table, col, false),
+        (_, Some(t)) => t,
+        _ => return Err(QueryError::InternalInvariant("unexpected string comparison op")),
+    };
 
     let mut out = BitVec::with_capacity_bits(rows);
     for (chunk_idx, chunk) in chunks.iter().enumerate() {
@@ -715,47 +742,58 @@ fn eval_filter_string(
         // When the chunk has no nulls and uses RLE indices we can preserve some compression
         // benefits by emitting whole runs at once.
         if c.validity.is_none() || c.validity.as_ref().is_some_and(|v| v.all_true()) {
-            if let Some(t) = target {
-                match &c.indices {
-                    U32SequenceEncoding::Rle(rle) => {
-                        let mut start: usize = 0;
-                        for (&run_value, &end) in rle.values.iter().zip(rle.ends.iter()) {
-                            let end = end as usize;
-                            if start >= chunk_rows {
-                                break;
-                            }
-                            let run_len = end.saturating_sub(start).min(chunk_rows - start);
-                            let passed = match op {
-                                CmpOp::Eq => run_value == t,
-                                CmpOp::Ne => run_value != t,
-                                _ => false,
-                            };
-                            out.extend_constant(passed, run_len);
-                            start = end;
+            match &c.indices {
+                U32SequenceEncoding::Rle(rle) => {
+                    let mut start: usize = 0;
+                    for (&run_value, &end) in rle.values.iter().zip(rle.ends.iter()) {
+                        let end = end as usize;
+                        if start >= chunk_rows {
+                            break;
                         }
-                        continue;
+                        let run_len = end.saturating_sub(start).min(chunk_rows - start);
+                        let passed = match op {
+                            CmpOp::Eq => run_value == target,
+                            CmpOp::Ne => run_value != target,
+                            _ => false,
+                        };
+                        out.extend_constant(passed, run_len);
+                        start = end;
                     }
-                    U32SequenceEncoding::Bitpacked { .. } => {}
+                    continue;
                 }
+                U32SequenceEncoding::Bitpacked { .. } => {}
             }
         }
 
         let mut cursor = U32SeqCursor::new(&c.indices);
-        for i in 0..chunk_rows {
-            let ix = cursor.next();
-            if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
-                out.push(false);
-                continue;
+        if c.validity.is_none() || c.validity.as_ref().is_some_and(|v| v.all_true()) {
+            for _i in 0..chunk_rows {
+                let ix = cursor.next();
+                let passed = match op {
+                    CmpOp::Eq => ix == target,
+                    CmpOp::Ne => ix != target,
+                    _ => false,
+                };
+                out.push(passed);
             }
-
-            let passed = match (op, target) {
-                (CmpOp::Eq, Some(t)) => ix == t,
-                (CmpOp::Ne, Some(t)) => ix != t,
-                (CmpOp::Ne, None) => true,
-                (CmpOp::Eq, None) => false,
-                _ => false,
-            };
-            out.push(passed);
+        } else {
+            let validity = c
+                .validity
+                .as_ref()
+                .ok_or(QueryError::InternalInvariant("missing validity"))?;
+            for i in 0..chunk_rows {
+                let ix = cursor.next();
+                if !validity.get(i) {
+                    out.push(false);
+                    continue;
+                }
+                let passed = match op {
+                    CmpOp::Eq => ix == target,
+                    CmpOp::Ne => ix != target,
+                    _ => false,
+                };
+                out.push(passed);
+            }
         }
     }
 
