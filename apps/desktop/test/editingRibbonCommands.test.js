@@ -44,17 +44,26 @@ test("Ribbon schema aligns Home → Editing AutoSum/Fill ids with CommandRegistr
   }
 });
 
-test("Desktop main.ts handles canonical Editing ribbon commands directly (no legacy mapping)", () => {
+test("Desktop main.ts routes canonical Editing ribbon commands through the CommandRegistry (no legacy mapping)", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
+  const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
+  const builtins = fs.readFileSync(builtinsPath, "utf8");
+
+  // Canonical editing ids should be registered as builtin commands so ribbon, command palette,
+  // and keybindings share the same execution path (via createRibbonActionsFromCommands).
   const expects = ["edit.autoSum", "edit.fillDown", "edit.fillRight"];
   for (const id of expects) {
-    assert.match(main, new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`), `Expected main.ts to handle ${id}`);
     assert.match(
+      builtins,
+      new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerBuiltinCommands.ts to register ${id}`,
+    );
+    assert.doesNotMatch(
       main,
-      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:[\\s\\S]*?\\bexecuteBuiltinCommand\\(commandId\\);`),
-      `Expected main.ts to execute builtin command for ${id}`,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
     );
   }
 
@@ -67,4 +76,7 @@ test("Desktop main.ts handles canonical Editing ribbon commands directly (no leg
       `Expected main.ts not to contain legacy case ${id}`,
     );
   }
+
+  // Sanity check: the ribbon should be mounted through the CommandRegistry bridge.
+  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
 });
