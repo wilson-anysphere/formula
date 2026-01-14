@@ -61,6 +61,10 @@ containing `tools/corpus/out/private/trend.json` for easy consumption.
 Trend retention note: `tools.corpus.dashboard --append-trend` caps the file to the last 90 entries by
 default. Override with `--trend-max-entries N` (set `0` for unlimited).
 
+Append idempotence note: if the last entry in `trend.json` already has the same `timestamp` as the current
+run, it is replaced instead of appended. This prevents duplicate points when regenerating dashboards from an
+existing triage output directory.
+
 To print a Markdown delta between the last two trend entries:
 
 ```bash

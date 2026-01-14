@@ -341,6 +341,10 @@ be cached in CI and plotted over time.
 
 Each entry includes a `schema_version` field so downstream tooling can evolve safely as new metrics are added.
 
+Appending is idempotent for a given triage run: if you re-run the dashboard on the same `--triage-dir` and the
+last trend entry already has the same `timestamp`, it will be replaced instead of appended (prevents accidental
+duplicate points when regenerating dashboards from artifacts).
+
 Key fields currently emitted include:
 
 - `open_rate`, `round_trip_rate`
