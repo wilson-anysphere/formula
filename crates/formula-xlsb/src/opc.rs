@@ -44,11 +44,11 @@ const MAX_XLSB_ZIP_PART_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
 /// This bounds memory usage when `preserve_unknown_parts=true` and a package contains many parts.
 const MAX_XLSB_PRESERVED_TOTAL_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 
-/// Maximum total bytes allowed when opening an XLSB package from a `Read`er.
+/// Maximum total bytes allowed when opening an XLSB package from an in-memory buffer.
 ///
-/// [`XlsbWorkbook::open_from_reader`] materializes the full ZIP container into memory so the
-/// workbook can lazily re-open parts later. Avoid unbounded reads / allocations for attacker
-/// controlled streams.
+/// Opening from bytes (including decrypted Office-encrypted payloads) materializes the full ZIP
+/// container in memory so the workbook can lazily re-open parts later. Avoid unbounded reads /
+/// allocations for attacker-controlled inputs.
 const MAX_XLSB_PACKAGE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 
 /// Maximum number of ZIP entries we will process when opening an XLSB file.
@@ -103,6 +103,13 @@ fn max_xlsb_package_bytes() -> u64 {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(MAX_XLSB_PACKAGE_BYTES)
+}
+
+fn xlsb_package_too_large_error(size: u64, max: u64) -> ParseError {
+    ParseError::Io(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("XLSB package too large: {size} bytes exceeds limit {max} bytes"),
+    ))
 }
 
 /// OLE/CFB file signature.
@@ -238,13 +245,24 @@ impl XlsbWorkbook {
 
         let mut header = [0u8; 8];
         let n = file.read(&mut header)?;
-        file.seek(SeekFrom::Start(0))?;
 
         if n >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
             // Office-encrypted `.xlsb` files are stored as an OLE/CFB wrapper containing
             // `EncryptionInfo` + `EncryptedPackage`. Decrypt to raw ZIP bytes in memory.
+            let max = max_xlsb_package_bytes();
+
+            file.seek(SeekFrom::Start(0))?;
+            let len = file.seek(SeekFrom::End(0))?;
+            if len > max {
+                return Err(xlsb_package_too_large_error(len, max));
+            }
+            file.seek(SeekFrom::Start(0))?;
+
             let mut ole_bytes = Vec::new();
-            file.read_to_end(&mut ole_bytes)?;
+            file.take(max.saturating_add(1)).read_to_end(&mut ole_bytes)?;
+            if ole_bytes.len() as u64 > max {
+                return Err(xlsb_package_too_large_error(ole_bytes.len() as u64, max));
+            }
 
             let zip_bytes = office_crypto::decrypt_encrypted_package(&ole_bytes, password)
                 .map_err(map_office_crypto_err)?;
@@ -293,23 +311,14 @@ impl XlsbWorkbook {
         reader.seek(SeekFrom::Start(0))?;
         let len = reader.seek(SeekFrom::End(0))?;
         if len > max {
-            return Err(ParseError::Io(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("XLSB package too large: {len} bytes exceeds limit {max} bytes"),
-            )));
+            return Err(xlsb_package_too_large_error(len, max));
         }
         reader.seek(SeekFrom::Start(0))?;
 
         let mut bytes = Vec::new();
         reader.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > max {
-            return Err(ParseError::Io(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "XLSB package too large: {} bytes exceeds limit {max} bytes",
-                    bytes.len()
-                ),
-            )));
+            return Err(xlsb_package_too_large_error(bytes.len() as u64, max));
         }
         let bytes: Arc<[u8]> = bytes.into();
         Self::open_from_owned_bytes(bytes, options)
@@ -351,6 +360,10 @@ impl XlsbWorkbook {
         bytes: &[u8],
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
+        let max = max_xlsb_package_bytes();
+        if bytes.len() as u64 > max {
+            return Err(xlsb_package_too_large_error(bytes.len() as u64, max));
+        }
         Self::open_from_owned_bytes(Arc::from(bytes), options)
     }
 
@@ -365,6 +378,10 @@ impl XlsbWorkbook {
         password: &str,
         options: OpenOptions,
     ) -> Result<Self, ParseError> {
+        let max = max_xlsb_package_bytes();
+        if bytes.len() as u64 > max {
+            return Err(xlsb_package_too_large_error(bytes.len() as u64, max));
+        }
         if bytes.starts_with(b"PK") {
             return Self::open_from_bytes_with_options(bytes, options);
         }
@@ -380,6 +397,10 @@ impl XlsbWorkbook {
     }
 
     fn open_from_owned_bytes(bytes: Arc<[u8]>, options: OpenOptions) -> Result<Self, ParseError> {
+        let max = max_xlsb_package_bytes();
+        if bytes.len() as u64 > max {
+            return Err(xlsb_package_too_large_error(bytes.len() as u64, max));
+        }
         let mut cursor = Cursor::new(bytes.clone());
         preflight_zip_entry_count(&mut cursor)?;
         cursor.seek(SeekFrom::Start(0))?;
@@ -2616,8 +2637,9 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
 #[cfg(test)]
 mod zip_guardrail_tests {
     use super::*;
-    use std::io::Cursor;
+    use std::io::{Cursor, Write};
     use std::sync::Mutex;
+    use tempfile::NamedTempFile;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2914,6 +2936,60 @@ mod zip_guardrail_tests {
             inner: Cursor::new(bytes),
         };
         let err = XlsbWorkbook::open_from_reader_with_options(reader, OpenOptions::default())
+            .err()
+            .expect("expected package too large error");
+
+        match err {
+            ParseError::Io(io_err) => {
+                assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidData);
+                assert!(
+                    io_err.to_string().contains("XLSB package too large"),
+                    "unexpected error message: {io_err}"
+                );
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_package_when_opening_from_bytes() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_pkg = EnvVarGuard::set(ENV_MAX_XLSB_PACKAGE_BYTES, "20");
+
+        // This does not need to be a valid ZIP. The size cap should fail fast before any parsing.
+        let bytes = vec![0u8; 21];
+        let err = XlsbWorkbook::open_from_bytes_with_options(&bytes, OpenOptions::default())
+            .err()
+            .expect("expected package too large error");
+
+        match err {
+            ParseError::Io(io_err) => {
+                assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidData);
+                assert!(
+                    io_err.to_string().contains("XLSB package too large"),
+                    "unexpected error message: {io_err}"
+                );
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_ole_wrapper_when_opening_with_password() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_pkg = EnvVarGuard::set(ENV_MAX_XLSB_PACKAGE_BYTES, "20");
+
+        // Construct an OLE header so `open_with_password` takes the decrypt path, but keep the
+        // bytes invalid (size check should trigger before decryption/parsing).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&OLE_MAGIC);
+        bytes.resize(21, 0);
+
+        let mut tmp = NamedTempFile::new().expect("tempfile");
+        tmp.write_all(&bytes).expect("write temp ole");
+        tmp.flush().expect("flush temp ole");
+
+        let err = XlsbWorkbook::open_with_password(tmp.path(), "password")
             .err()
             .expect("expected package too large error");
 
