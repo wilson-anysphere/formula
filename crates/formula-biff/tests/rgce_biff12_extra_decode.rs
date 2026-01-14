@@ -17,6 +17,11 @@ fn ptg_funcvar_udf(argc: u8) -> [u8; 4] {
     [0x22, argc, 0xFF, 0x00]
 }
 
+fn assert_parseable(formula: &str) {
+    formula_engine::parse_formula(formula, formula_engine::ParseOptions::default())
+        .expect("parse formula");
+}
+
 #[test]
 fn decodes_udf_call_via_namex_and_sentinel_funcvar() {
     // Excel add-in / UDF call pattern:
@@ -29,6 +34,7 @@ fn decodes_udf_call_via_namex_and_sentinel_funcvar() {
 
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "ExternName_IXTI1_N2(1,2)");
+    assert_parseable(&text);
 }
 
 #[test]
