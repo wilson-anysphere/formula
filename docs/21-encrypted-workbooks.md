@@ -120,7 +120,7 @@ In practice:
 Implementation notes:
 
 - `crates/formula-io/src/bin/ooxml-encryption-info.rs` prints a one-line scheme/version summary
-  based on the `(majorVersion, minorVersion)` header (e.g. `3.2` → Standard, `4.4` → Agile).
+  based on the `(majorVersion, minorVersion)` header (e.g. `2.2`/`3.2`/`4.2` → Standard, `4.4` → Agile).
   Run it with:
 
   ```bash
