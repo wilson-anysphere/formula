@@ -1799,14 +1799,23 @@ impl PivotEngine {
 
         match cfg.layout {
             Layout::Compact => {
-                // Compact: join row keys into one cell.
-                let s = row_key
-                    .display_strings()
-                    .into_iter()
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" / ");
-                row.push(label.unwrap_or_else(|| PivotValue::Text(s)));
+                if let Some(label) = label {
+                    row.push(label);
+                } else if row_key.0.len() == 1 {
+                    // Preserve typed values when the compact layout includes only a single row
+                    // field (Excel-like: the row label cell stores the underlying value rather than
+                    // the formatted display string).
+                    row.push(pivot_key_part_to_pivot_value(&row_key.0[0]));
+                } else {
+                    // Compact: join row keys into one cell.
+                    let s = row_key
+                        .display_strings()
+                        .into_iter()
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" / ");
+                    row.push(PivotValue::Text(s));
+                }
             }
             Layout::Outline | Layout::Tabular => {
                 for (idx, part) in row_key.0.iter().enumerate() {
