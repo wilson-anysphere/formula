@@ -587,25 +587,39 @@ fn scan_sheet_name_token(src: &str, start: usize) -> Option<usize> {
 fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
     let end = find_workbook_prefix_end(src, start)?;
 
-    // Heuristic: only treat this as an external workbook prefix if it is immediately followed by a
-    // sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`). This avoids incorrectly treating nested
-    // structured references (which *are* nested) as workbook prefixes.
-    let mut i = skip_ws(src, end);
-    i = scan_sheet_name_token(src, i)?;
-    i = skip_ws(src, i);
+    // Heuristic: only treat this as an external workbook prefix if it is immediately followed by:
+    // - a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`), OR
+    // - a defined name identifier (e.g. `[Book.xlsx]MyName`).
+    //
+    // This avoids incorrectly treating nested structured references (which *are* nested) as
+    // workbook prefixes while still supporting workbook names that contain `[` characters (Excel
+    // treats `[` as plain text within workbook ids).
+    let i = skip_ws(src, end);
+    if let Some(mut sheet_end) = scan_sheet_name_token(src, i) {
+        sheet_end = skip_ws(src, sheet_end);
 
-    if i < src.len() && src[i..].starts_with(':') {
-        i += 1;
-        i = skip_ws(src, i);
-        i = scan_sheet_name_token(src, i)?;
-        i = skip_ws(src, i);
+        // `[Book.xlsx]Sheet1:Sheet3!A1` (external 3D span)
+        if sheet_end < src.len() && src[sheet_end..].starts_with(':') {
+            sheet_end += 1;
+            sheet_end = skip_ws(src, sheet_end);
+            sheet_end = scan_sheet_name_token(src, sheet_end)?;
+            sheet_end = skip_ws(src, sheet_end);
+        }
+
+        if sheet_end < src.len() && src[sheet_end..].starts_with('!') {
+            return Some(end);
+        }
     }
 
-    if i < src.len() && src[i..].starts_with('!') {
-        Some(end)
-    } else {
-        None
+    // Workbook-scoped external defined name `[Book.xlsx]MyName`.
+    // Note: defined names are not quoted with `'` in formula text, so we only scan the unquoted
+    // identifier form here.
+    let name_start = skip_ws(src, end);
+    if scan_unquoted_sheet_name(src, name_start).is_some() {
+        return Some(end);
     }
+
+    None
 }
 
 impl<'a> Lexer<'a> {
@@ -4358,5 +4372,31 @@ mod tests {
         // The serializer prefers the fully-quoted token form for workbook-scoped external names.
         let rendered = ast.to_string(SerializeOptions::default()).unwrap();
         assert_eq!(rendered, "='[Book.xlsx]MyName'");
+    }
+
+    #[test]
+    fn unquoted_workbook_name_with_open_bracket_does_not_swallow_trailing_ops() {
+        // Workbook ids can contain `[` characters (Excel treats them as plain text within the
+        // `[workbook]` prefix). Ensure we don't treat this as a nested bracket expression and
+        // accidentally swallow trailing operators like `+1` into a single identifier token.
+        let ast = parse_formula("=[A1[Name.xlsx]MyName+1", ParseOptions::default()).unwrap();
+        match &ast.expr {
+            Expr::Binary(b) => {
+                assert_eq!(b.op, BinaryOp::Add);
+                assert_eq!(
+                    b.left.as_ref(),
+                    &Expr::NameRef(NameRef {
+                        workbook: Some("A1[Name.xlsx".to_string()),
+                        sheet: None,
+                        name: "MyName".to_string(),
+                    })
+                );
+                assert_eq!(b.right.as_ref(), &Expr::Number("1".to_string()));
+            }
+            other => panic!("expected Binary(Add), got {other:?}"),
+        }
+
+        let rendered = ast.to_string(SerializeOptions::default()).unwrap();
+        assert_eq!(rendered, "='[A1[Name.xlsx]MyName'+1");
     }
 }
