@@ -1999,8 +1999,8 @@ jobs:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         run: node scripts/ci/publish-updater-manifest.mjs "${{ needs.preflight.outputs.release_tag }}" updater-manifest
 
-  validate-updater-manifest:
-    name: Validate combined updater manifest (latest.json)
+  verify-updater-manifest:
+    name: Verify updater manifest (latest.json)
     needs: [publish-updater-manifest, preflight]
     # Validating the updater manifest requires updater signatures (`latest.json.sig`), which are
     # only produced when the TAURI_PRIVATE_KEY secret is configured. We always validate in the
@@ -2392,7 +2392,7 @@ jobs:
     needs:
       - build
       - preflight
-      - validate-updater-manifest
+      - verify-updater-manifest
       - verify-release-assets
     if: needs.preflight.outputs.upload == 'true'
     runs-on: ubuntu-24.04
