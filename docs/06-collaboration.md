@@ -936,7 +936,8 @@ When you bind two reactive systems, you must avoid doing this:
 2. Yjs observer fires (because the doc changed)
 3. Binder applies the same change back into DocumentController (wasted work + can cause feedback loops)
 
-The binder prevents feedback loops using two internal guards (not by filtering `transaction.origin`):
+The binder prevents feedback loops using internal guards (and a small amount of `payload.source` filtering),
+not by filtering `transaction.origin`:
 
 - While applying a local **DocumentController → Yjs** write, the binder sets an internal `applyingLocal` flag.
   The Yjs `observeDeep` handlers early-return when `applyingLocal` is true, so the deep observer event that
@@ -945,6 +946,13 @@ The binder prevents feedback loops using two internal guards (not by filtering `
   / `applyExternalFormatDeltas` / `applyExternalRangeRunDeltas`), the binder sets `applyingRemote`.
   The DocumentController `"change"` handler ignores changes while `applyingRemote` is true, so remote-applied
   deltas are not written back into Yjs.
+- In desktop, multiple binders can be attached to the same `DocumentController` (for example, the lightweight
+  sheet view binder used by `SpreadsheetApp` alongside the full binder). In that case, one binder may apply a
+  remote update into the `DocumentController` while the other binder’s `applyingRemote` flag is **false**.
+  To avoid echoing those **external** changes back into Yjs (and polluting collaborative undo with “remote”
+  edits), binders treat these sources as external and ignore them in their `"change"` handlers:
+  - `payload.source === "collab"` (remote Yjs → DocumentController apply)
+  - `payload.source === "applyState"` (snapshot restore / version history hydration)
 
 This is intentionally **not** implemented as “ignore all local origins”, because other parts of the stack
 often reuse the same origin token for programmatic mutations (e.g. branch checkout/merge apply, version
