@@ -223,3 +223,21 @@
   font-weight: 600;
   margin-bottom: var(--conflict-ui-gap-xs);
 }
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  /*
+    The app's high-contrast theme maps token colors to system colors (Canvas/CanvasText/etc).
+    In some forced-colors test environments, those system color keywords may not resolve through
+    custom properties, which can cause `border: 1px solid var(--dialog-border)` to be treated as
+    invalid and drop the border entirely (leaving shadow-only separation).
+
+    Use a `currentColor` fallback to guarantee a visible outline in forced-colors/high-contrast
+    modes while still honoring token-driven foreground color.
+  */
+  .conflict-ui-toast-root > div,
+  .structural-conflict-ui-toast-root > div,
+  .conflict-ui-dialog-root,
+  .structural-conflict-ui-dialog-root {
+    border: 1px solid currentColor;
+  }
+}
