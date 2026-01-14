@@ -57,6 +57,9 @@ type _WorkbookRetrievedShape = Assert<
 >;
 type _WorkbookChunkMetadataNotAny = Assert<IsAny<WorkbookChunkMetadata> extends false ? true : false>;
 type _WorkbookChunkMetadataTextIsUndefined = Assert<WorkbookChunkMetadata["text"] extends undefined ? true : false>;
+type _WorkbookChunkMetadataDlpSheetIdIsUndefined = Assert<
+  WorkbookChunkMetadata["dlpSheetId"] extends undefined ? true : false
+>;
 type _WorkbookIndexStatsNotAny = Assert<IsAny<BuildWorkbookContextResult["indexStats"]> extends false ? true : false>;
 type _WorkbookIndexStatsShape = Assert<
   BuildWorkbookContextResult["indexStats"] extends WorkbookIndexStats | null ? true : false

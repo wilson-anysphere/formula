@@ -171,6 +171,14 @@ export interface WorkbookChunkMetadata {
    * Use `RetrievedWorkbookChunk.text` instead.
    */
   text?: undefined;
+  /**
+   * Internal, non-prompt identifier used to preserve structured DLP matching even when sheet names
+   * are redacted in stored metadata.
+   *
+   * ContextManager strips this from returned chunk metadata (it is used only internally for policy
+   * enforcement). Use `sheetName` + `rect` for prompt-safe context.
+   */
+  dlpSheetId?: undefined;
   [key: string]: unknown;
 }
 
