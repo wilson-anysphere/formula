@@ -24,6 +24,7 @@ during ZIP parsing.
 fixtures/encrypted/
   ooxml/                # Encrypted OOXML spreadsheets used by targeted decryption tests
   encrypted_agile.xlsx  # Real-world encrypted XLSX (Agile)
+  encrypted_standard.xlsx  # Real-world encrypted XLSX (Standard/CryptoAPI)
   encrypted.xlsb        # Real-world encrypted XLSB (OOXML-in-OLE)
   encrypted.xls         # Real-world encrypted legacy XLS (BIFF8 FILEPASS)
 ```
@@ -55,6 +56,7 @@ that `formula-io` can decrypt and open **real-world** password-protected Excel f
 | File | Format | Encryption | Notes | Expected contents |
 |---|---|---|---|---|
 | `encrypted_agile.xlsx` | XLSX | ECMA-376 Agile (OOXML-in-OLE) | Sourced from `msoffcrypto-tool` test corpus | Password: `Password1234_` • `Sheet1!A1="lorem"`, `Sheet1!B1="ipsum"` |
+| `encrypted_standard.xlsx` | XLSX | ECMA-376 Standard/CryptoAPI (OOXML-in-OLE) | Apache POI output (copied from `fixtures/encrypted/ooxml/standard-4.2.xlsx`) | Password: `password` • `Sheet1!A1=1`, `Sheet1!B1="Hello"` |
 | `encrypted.xlsb` | XLSB | ECMA-376 Agile (OOXML-in-OLE) | Sourced from Apache POI test corpus (`protected_passtika.xlsb`) | Password: `tika` • `Sheet1!A1="You can't see me"` |
 | `encrypted.xls` | XLS | BIFF8 `FILEPASS` RC4 CryptoAPI | Copied from this repo’s `formula-xls` test fixtures | Password: `correct horse battery staple` • `Sheet1!A1=42` |
 
@@ -63,6 +65,10 @@ that `formula-io` can decrypt and open **real-world** password-protected Excel f
 `encrypted_agile.xlsx` is downloaded from the upstream `msoffcrypto-tool` repository:
 
 - https://github.com/nolze/msoffcrypto-tool
+
+`encrypted_standard.xlsx` is copied from the Apache POI-generated Standard fixture in this repo:
+
+- `fixtures/encrypted/ooxml/standard-4.2.xlsx`
 
 `encrypted.xlsb` is downloaded from the Apache POI repository:
 

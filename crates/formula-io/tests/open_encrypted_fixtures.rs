@@ -14,6 +14,8 @@ fn fixture_path(name: &str) -> PathBuf {
 fn fixture_password(name: &str) -> &'static str {
     match name {
         "encrypted_agile.xlsx" => "Password1234_",
+        // Standard/CryptoAPI encrypted XLSX (Apache POI output).
+        "encrypted_standard.xlsx" => "password",
         // Sourced from Apache POI test corpus (`protected_passtika.xlsb`).
         "encrypted.xlsb" => "tika",
         // Sourced from `crates/formula-xls/tests/fixtures/encrypted/biff8_rc4_cryptoapi_pw_open.xls`.
@@ -44,6 +46,27 @@ fn opens_encrypted_agile_xlsx_fixture() {
     assert_eq!(
         sheet.value_a1("B1").unwrap(),
         CellValue::String("ipsum".to_string())
+    );
+}
+
+#[test]
+fn opens_encrypted_standard_xlsx_fixture() {
+    let name = "encrypted_standard.xlsx";
+    let path = fixture_path(name);
+    let pw = fixture_password(name);
+
+    let wb = open_workbook_with_password(&path, Some(pw)).expect("decrypt + open");
+    assert!(
+        matches!(wb, Workbook::Xlsx(_)),
+        "expected Workbook::Xlsx, got {wb:?}"
+    );
+
+    let workbook = open_workbook_model_with_password(&path, Some(pw)).expect("decrypt + open");
+    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("Hello".to_string())
     );
 }
 
@@ -90,7 +113,12 @@ fn opens_encrypted_legacy_xls_fixture() {
 
 #[test]
 fn errors_with_wrong_password_for_all_fixtures() {
-    for name in ["encrypted_agile.xlsx", "encrypted.xlsb", "encrypted.xls"] {
+    for name in [
+        "encrypted_agile.xlsx",
+        "encrypted_standard.xlsx",
+        "encrypted.xlsb",
+        "encrypted.xls",
+    ] {
         let path = fixture_path(name);
         let err = open_workbook_model_with_password(&path, Some("wrong-password"))
             .expect_err("expected invalid password error");
