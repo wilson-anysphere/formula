@@ -112,6 +112,41 @@ describe("DrawingOverlay images", () => {
     expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("does not attempt bitmap decode for zero-size drawing anchors", () => {
+    const { ctx } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const entry: ImageEntry = {
+      id: "img_zero",
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png",
+    };
+    const images: ImageStore = {
+      get: (id) => (id === entry.id ? entry : undefined),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+
+    const createImageBitmapSpy = vi.fn(async () => ({ close: () => {} }) as unknown as ImageBitmap);
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const requestRender = vi.fn();
+    const overlay = new DrawingOverlay(canvas, images, geom, undefined, requestRender);
+
+    const obj: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: entry.id },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+
+    overlay.render([obj], viewport);
+
+    expect(createImageBitmapSpy).not.toHaveBeenCalled();
+    expect(requestRender).not.toHaveBeenCalled();
+  });
+
   it("caches decode failures to avoid infinite retries", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
