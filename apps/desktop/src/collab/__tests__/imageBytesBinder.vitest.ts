@@ -358,4 +358,42 @@ describe("imageBytesBinder", () => {
 
     binder.destroy();
   });
+
+  it("rehydrates when a nested Y.Map entry updates bytesBase64", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const imagesMap = new Y.Map();
+    metadata.set("drawingImages", imagesMap);
+
+    const entryMap = new Y.Map();
+    entryMap.set("mimeType", "image/png");
+    entryMap.set("bytesBase64", Buffer.from([1, 2, 3]).toString("base64"));
+    imagesMap.set("img-1", entryMap);
+
+    const store = createMemoryImageStore();
+    let sets = 0;
+    store.set = (entry: ImageEntry) => {
+      sets += 1;
+      store.map.set(entry.id, entry);
+    };
+
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    expect(sets).toBe(1);
+    expect(Array.from(store.get("img-1")?.bytes ?? [])).toEqual([1, 2, 3]);
+
+    doc.transact(
+      () => {
+        entryMap.set("bytesBase64", Buffer.from([9, 9, 9, 9]).toString("base64"));
+      },
+      { type: "remote" },
+    );
+
+    expect(sets).toBe(2);
+    expect(Array.from(store.get("img-1")?.bytes ?? [])).toEqual([9, 9, 9, 9]);
+
+    binder.destroy();
+  });
 });  
