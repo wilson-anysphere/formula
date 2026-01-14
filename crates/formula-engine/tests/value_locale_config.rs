@@ -92,20 +92,29 @@ fn bytecode_countif_respects_workbook_locale_for_dot_separated_date_criteria_str
 }
 
 #[test]
-fn set_value_locale_id_accepts_en_gb_and_uses_dmy_date_order() {
-    let mut engine = engine_manual();
-    assert!(
-        engine.set_value_locale_id("en-GB"),
-        "expected en-GB to be accepted as a value locale id"
-    );
-
-    engine
-        .set_cell_formula("Sheet1", "A1", r#"=DATEVALUE("1/2/2020")"#)
-        .unwrap();
-    engine.recalculate();
-
+fn set_value_locale_id_accepts_common_en_dmy_locales_and_uses_dmy_date_order() {
     let system = ExcelDateSystem::EXCEL_1900;
     let expected_serial =
         ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap() as f64;
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_serial));
+
+    // Many English-speaking regions use DMY date order (Excel-compatible parsing).
+    // Note: formula parsing locale still resolves to `en-US`; this only affects value parsing.
+    for locale_id in ["en-GB", "en-AU", "en-NZ", "en-IE", "en-ZA"] {
+        let mut engine = engine_manual();
+        assert!(
+            engine.set_value_locale_id(locale_id),
+            "expected {locale_id} to be accepted as a value locale id"
+        );
+
+        engine
+            .set_cell_formula("Sheet1", "A1", r#"=DATEVALUE("1/2/2020")"#)
+            .unwrap();
+        engine.recalculate();
+
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Number(expected_serial),
+            "unexpected DATEVALUE result for {locale_id}"
+        );
+    }
 }
