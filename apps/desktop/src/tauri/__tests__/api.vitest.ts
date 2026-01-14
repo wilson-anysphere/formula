@@ -71,6 +71,24 @@ describe("tauri/api dynamic accessors", () => {
       expect(() => getTauriWindowHandleOrThrow()).toThrowError("Tauri window API not available");
     });
 
+    it("treats throwing nested properties (e.g. dialog getter) as unavailable", () => {
+      const tauri: any = {};
+      Object.defineProperty(tauri, "dialog", {
+        configurable: true,
+        get() {
+          throw new Error("Blocked dialog access");
+        },
+      });
+      (globalThis as any).__TAURI__ = tauri;
+
+      expect(getTauriDialogOpenOrNull()).toBeNull();
+      expect(getTauriDialogSaveOrNull()).toBeNull();
+      expect(getTauriDialogConfirmOrNull()).toBeNull();
+      expect(getTauriDialogMessageOrNull()).toBeNull();
+      expect(getTauriDialogOrNull()).toBeNull();
+      expect(() => getTauriDialogOrThrow()).toThrowError("Tauri dialog API not available");
+    });
+
     it("detects the dialog API on __TAURI__.dialog (legacy shape)", () => {
       const open = vi.fn();
       const save = vi.fn();
@@ -177,6 +195,20 @@ describe("tauri/api dynamic accessors", () => {
       expect(api.listen).toBe(listen);
       expect(api.emit).toBe(emit);
     });
+
+    it("treats throwing nested properties (e.g. event getter) as unavailable", () => {
+      const tauri: any = {};
+      Object.defineProperty(tauri, "event", {
+        configurable: true,
+        get() {
+          throw new Error("Blocked event access");
+        },
+      });
+      (globalThis as any).__TAURI__ = tauri;
+
+      expect(getTauriEventApiOrNull()).toBeNull();
+      expect(() => getTauriEventApiOrThrow()).toThrowError("Tauri event API not available");
+    });
   });
 
   describe("getTauriWindowHandle*", () => {
@@ -252,6 +284,22 @@ describe("tauri/api dynamic accessors", () => {
 
       expect(getTauriWindowHandleOrNull()).toBeNull();
       expect(() => getTauriWindowHandleOrThrow()).toThrowError("Tauri window handle not available");
+    });
+
+    it("treats throwing nested properties (e.g. window getter) as unavailable", () => {
+      const tauri: any = {};
+      Object.defineProperty(tauri, "window", {
+        configurable: true,
+        get() {
+          throw new Error("Blocked window access");
+        },
+      });
+      (globalThis as any).__TAURI__ = tauri;
+
+      expect(hasTauriWindowApi()).toBe(false);
+      expect(hasTauriWindowHandleApi()).toBe(false);
+      expect(getTauriWindowHandleOrNull()).toBeNull();
+      expect(() => getTauriWindowHandleOrThrow()).toThrowError("Tauri window API not available");
     });
   });
 });

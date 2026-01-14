@@ -16,6 +16,15 @@ export type TauriEventApi = {
   emit: TauriEmit | null;
 };
 
+function safeGetProp(obj: any, prop: string): any | undefined {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 function getTauriGlobalOrNull(): any | null {
   try {
     return (globalThis as any).__TAURI__ ?? null;
@@ -32,30 +41,34 @@ export function hasTauri(): boolean {
 
 function getTauriDialogNamespaceOrNull(): any | null {
   const tauri = getTauriGlobalOrNull();
-  return tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  return safeGetProp(tauri, "dialog") ?? safeGetProp(plugin, "dialog") ?? safeGetProp(plugins, "dialog") ?? null;
 }
 
 export function getTauriDialogOpenOrNull(): TauriDialogOpen | null {
   const dialog = getTauriDialogNamespaceOrNull();
-  const open = dialog?.open as TauriDialogOpen | undefined;
+  const open = safeGetProp(dialog, "open") as TauriDialogOpen | undefined;
   return typeof open === "function" ? open : null;
 }
 
 export function getTauriDialogSaveOrNull(): TauriDialogSave | null {
   const dialog = getTauriDialogNamespaceOrNull();
-  const save = dialog?.save as TauriDialogSave | undefined;
+  const save = safeGetProp(dialog, "save") as TauriDialogSave | undefined;
   return typeof save === "function" ? save : null;
 }
 
 export function getTauriDialogConfirmOrNull(): TauriDialogConfirm | null {
   const dialog = getTauriDialogNamespaceOrNull();
-  const confirm = dialog?.confirm as TauriDialogConfirm | undefined;
+  const confirm = safeGetProp(dialog, "confirm") as TauriDialogConfirm | undefined;
   return typeof confirm === "function" ? confirm : null;
 }
 
 export function getTauriDialogMessageOrNull(): TauriDialogMessage | null {
   const dialog = getTauriDialogNamespaceOrNull();
-  const message = (dialog?.message ?? dialog?.alert) as TauriDialogMessage | undefined;
+  const message = (safeGetProp(dialog, "message") ?? safeGetProp(dialog, "alert")) as
+    | TauriDialogMessage
+    | undefined;
   return typeof message === "function" ? message : null;
 }
 
@@ -89,10 +102,12 @@ export function getTauriDialogOrThrow(): TauriDialogApi {
  */
 export function getTauriEventApiOrNull(): TauriEventApi | null {
   const tauri = getTauriGlobalOrNull();
-  const eventApi = tauri?.event ?? tauri?.plugin?.event ?? tauri?.plugins?.event ?? null;
-  const listen = eventApi?.listen as TauriListen | undefined;
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  const eventApi = safeGetProp(tauri, "event") ?? safeGetProp(plugin, "event") ?? safeGetProp(plugins, "event") ?? null;
+  const listen = safeGetProp(eventApi, "listen") as TauriListen | undefined;
   if (typeof listen !== "function") return null;
-  const emit = eventApi?.emit as TauriEmit | undefined;
+  const emit = safeGetProp(eventApi, "emit") as TauriEmit | undefined;
   return { listen, emit: typeof emit === "function" ? emit : null };
 }
 
@@ -105,7 +120,7 @@ export function getTauriEventApiOrThrow(): TauriEventApi {
 }
 
 export function hasTauriWindowApi(): boolean {
-  return Boolean(getTauriGlobalOrNull()?.window);
+  return Boolean(safeGetProp(getTauriGlobalOrNull(), "window"));
 }
 
 /**
@@ -115,7 +130,7 @@ export function hasTauriWindowApi(): boolean {
  * feature-detection without invoking the underlying bindings).
  */
 export function hasTauriWindowHandleApi(): boolean {
-  const winApi = getTauriGlobalOrNull()?.window as any;
+  const winApi = safeGetProp(getTauriGlobalOrNull(), "window") as any;
   if (!winApi) return false;
   const hasAppWindow = (() => {
     try {
@@ -133,7 +148,7 @@ export function hasTauriWindowHandleApi(): boolean {
 }
 
 export function getTauriWindowHandleOrNull(): any | null {
-  const winApi = getTauriGlobalOrNull()?.window as any;
+  const winApi = safeGetProp(getTauriGlobalOrNull(), "window") as any;
   if (!winApi) return null;
 
   // Tauri v2 exposes window handles via helper functions; keep this flexible since
@@ -163,7 +178,7 @@ export function getTauriWindowHandleOrNull(): any | null {
 }
 
 export function getTauriWindowHandleOrThrow(): any {
-  const winApi = getTauriGlobalOrNull()?.window as any;
+  const winApi = safeGetProp(getTauriGlobalOrNull(), "window") as any;
   if (!winApi) {
     throw new Error("Tauri window API not available");
   }
