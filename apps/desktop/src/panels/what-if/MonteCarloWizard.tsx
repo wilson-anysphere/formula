@@ -241,7 +241,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                 <input
                   className="what-if__input what-if__input--mono"
                   value={input.distributionJson}
-                  aria-invalid={input.distributionJsonValid ? undefined : true}
+                  aria-invalid={invalidDistributionJson && !input.distributionJsonValid ? true : undefined}
                   aria-describedby={invalidDistributionJson && !input.distributionJsonValid ? errorId : undefined}
                   onChange={(e) => {
                     const raw = e.target.value;
