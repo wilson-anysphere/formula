@@ -410,6 +410,7 @@ await invoke("check_for_updates", { source: "manual" });
 - macOS code signing uses `apps/desktop/src-tauri/entitlements.plist` (wired via `bundle.macOS.entitlements` in `tauri.conf.json`).
   - For Developer ID distribution with the hardened runtime, this file must include the WKWebView/JavaScriptCore JIT entitlements (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView.
   - `com.apple.security.network.client` is included so outbound network access (updater/HTTPS) keeps working if the App Sandbox is ever enabled.
+  - If we ever enable `com.apple.security.app-sandbox`, we will likely also need `com.apple.security.network.server` because the desktop shell runs an OAuth loopback redirect listener.
   - If we ever enable the App Sandbox in the future, this file is also where sandbox entitlements live.
   - Guardrail: `node scripts/check-macos-entitlements.mjs` (also validated in CI/release workflows).
 - Notarize for Gatekeeper
