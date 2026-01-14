@@ -871,20 +871,28 @@ function highlightFormula(input: string): HighlightSpan[] {
 }
 
 function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]): HighlightSpan[] {
-  const filtered = tokens.filter((t) => t.kind !== "Eof");
-  filtered.sort((a, b) => a.span.start - b.span.start);
+  const filtered: EngineFormulaToken[] = [];
+  let sorted = true;
+  let lastStart = -Infinity;
+  for (const token of tokens) {
+    if (token.kind === "Eof") continue;
+    filtered.push(token);
+    if (token.span.start < lastStart) sorted = false;
+    lastStart = token.span.start;
+  }
+  if (!sorted) filtered.sort((a, b) => a.span.start - b.span.start);
 
-  // Best-effort: treat an identifier immediately followed by "(" as a function name.
+  // Best-effort: treat an identifier immediately followed by "(" (ignoring whitespace) as a function name.
   const functionIdentStarts = new Set<number>();
-  for (let i = 0; i < filtered.length; i += 1) {
-    const token = filtered[i]!;
-    if (token.kind !== "Ident" && token.kind !== "QuotedIdent") continue;
-    for (let j = i + 1; j < filtered.length; j += 1) {
-      const next = filtered[j]!;
-      if (next.kind === "Whitespace") continue;
-      if (next.kind === "LParen") functionIdentStarts.add(token.span.start);
-      break;
+  let prevNonWs: EngineFormulaToken | null = null;
+  for (const token of filtered) {
+    if (token.kind === "Whitespace") continue;
+    if (token.kind === "LParen") {
+      if (prevNonWs?.kind === "Ident" || prevNonWs?.kind === "QuotedIdent") {
+        functionIdentStarts.add(prevNonWs.span.start);
+      }
     }
+    prevNonWs = token;
   }
 
   const spans: HighlightSpan[] = [];
@@ -1006,36 +1014,54 @@ function spliceReferenceSpans(
   const refs = [...referenceTokens].sort((a, b) => a.start - b.start);
   const out: HighlightSpan[] = [];
   let pos = 0;
+  let spanIndex = 0;
+
+  const emitSlice = (sliceStart: number, sliceEnd: number): void => {
+    if (sliceEnd <= sliceStart) return;
+    while (spanIndex < spans.length && spans[spanIndex]!.end <= sliceStart) spanIndex += 1;
+    while (spanIndex < spans.length) {
+      const span = spans[spanIndex]!;
+      if (span.start >= sliceEnd) break;
+      const s = Math.max(span.start, sliceStart);
+      const e = Math.min(span.end, sliceEnd);
+      if (e > s) {
+        out.push({
+          kind: span.kind,
+          start: s,
+          end: e,
+          text: formula.slice(s, e),
+          className: span.className,
+        });
+      }
+      if (span.end <= sliceEnd) {
+        spanIndex += 1;
+        continue;
+      }
+      break;
+    }
+  };
 
   for (const ref of refs) {
-    const start = Math.max(0, Math.min(ref.start, formula.length));
+    let start = Math.max(0, Math.min(ref.start, formula.length));
     const end = Math.max(0, Math.min(ref.end, formula.length));
     if (end <= start) continue;
+
+    // Defensive: `referenceTokens` should be non-overlapping and sorted, but clamp to
+    // a monotonic position so we never emit out-of-order spans.
+    if (start < pos) start = pos;
+
     if (start > pos) {
-      out.push(...sliceSpans(formula, spans, pos, start));
+      emitSlice(pos, start);
     }
     out.push({ kind: "reference", start, end, text: formula.slice(start, end) });
-    pos = end;
+    pos = Math.max(pos, end);
   }
 
   if (pos < formula.length) {
-    out.push(...sliceSpans(formula, spans, pos, formula.length));
+    emitSlice(pos, formula.length);
   }
 
   return mergeAdjacent(out);
-}
-
-function sliceSpans(formula: string, spans: HighlightSpan[], start: number, end: number): HighlightSpan[] {
-  const out: HighlightSpan[] = [];
-  for (const span of spans) {
-    if (span.end <= start) continue;
-    if (span.start >= end) break;
-    const s = Math.max(span.start, start);
-    const e = Math.min(span.end, end);
-    if (e <= s) continue;
-    out.push({ ...span, start: s, end: e, text: formula.slice(s, e) });
-  }
-  return out;
 }
 
 function mergeAdjacent(spans: HighlightSpan[]): HighlightSpan[] {
