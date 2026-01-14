@@ -2420,7 +2420,7 @@ jobs:
     name: Verify GitHub Release assets (multi-arch safe)
     # Wait for the combined updater manifest publish step so we don't race while `latest.json`
     # is being deleted/re-uploaded.
-    needs: [publish-updater-manifest, preflight]
+    needs: [publish-updater-manifest, preflight, upload-sbom]
     if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
     permissions:
@@ -2740,6 +2740,18 @@ jobs:
             echo "::error::Duplicate asset names found on the release (unexpected):"
             echo "${dup_names}"
             exit 1
+          fi
+
+          # Supply-chain metadata (SBOM + provenance) is uploaded by separate jobs/steps. These are
+          # initially warnings-only so releases can proceed even if the metadata generation/upload
+          # fails, but we still surface the absence loudly for visibility.
+          if ! printf '%s\n' "${asset_names[@]}" | grep -qx 'sbom.spdx.json'; then
+            echo "::warning::SBOM asset sbom.spdx.json not found on the draft release."
+          fi
+
+          provenance_count="$(printf '%s\n' "${asset_names[@]}" | grep -E '^provenance-.*\\.intoto\\.jsonl$' | wc -l | tr -d ' ')"
+          if [[ "${provenance_count}" -eq 0 ]]; then
+            echo "::warning::No provenance-*.intoto.jsonl attestation bundles found on the draft release."
           fi
 
           bucket_for() {
