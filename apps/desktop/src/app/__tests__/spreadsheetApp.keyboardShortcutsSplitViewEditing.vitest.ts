@@ -144,6 +144,36 @@ describe("SpreadsheetApp keyboard shortcuts respect split-view editing mode", ()
     root.remove();
   });
 
+  it("does not run workbook undo/redo while split-view editing is active", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    // Spy on the low-level undo/redo executor so the test remains independent of
+    // DocumentController history internals.
+    const applySpy = vi.spyOn(app as any, "applyUndoRedo").mockReturnValue(true);
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "z", code: "KeyZ", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(applySpy).toHaveBeenCalledTimes(1);
+
+    applySpy.mockClear();
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "z", code: "KeyZ", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(applySpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("no-ops formatting shortcuts while split-view editing is active", () => {
     const root = createRoot();
     const status = {
@@ -179,6 +209,35 @@ describe("SpreadsheetApp keyboard shortcuts respect split-view editing mode", ()
     );
     // Without the split-view guard, this would toggle bold back off.
     expect(Boolean(doc.getCellFormat(sheetId, cell)?.font?.bold)).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("does not delete selected charts while split-view editing is active", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const deleteSpy = vi.spyOn((app as any).chartStore, "deleteChart");
+    (app as any).selectedChartId = "chart-1";
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Delete", code: "Delete", bubbles: true, cancelable: true }),
+    );
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+
+    deleteSpy.mockClear();
+    (app as any).selectedChartId = "chart-2";
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Delete", code: "Delete", bubbles: true, cancelable: true }),
+    );
+    expect(deleteSpy).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
@@ -276,4 +335,3 @@ describe("SpreadsheetApp keyboard shortcuts respect split-view editing mode", ()
     root.remove();
   });
 });
-

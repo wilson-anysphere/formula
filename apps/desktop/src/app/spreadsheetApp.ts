@@ -18667,15 +18667,11 @@ export class SpreadsheetApp {
       if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
     }
 
-    // In read-only collab roles (viewer/commenter), we must not mutate local state via undo/redo.
-    // Those changes will not sync, and can leave the UI diverged from the authoritative remote doc.
-    if (this.isReadOnly()) {
-      e.preventDefault();
-      return true;
-    }
-
     e.preventDefault();
-    this.applyUndoRedo(undo ? "undo" : "redo");
+    // Route through the public wrappers so split-view secondary edit mode and read-only guards
+    // are consistently enforced across commands + direct keyboard handling.
+    if (undo) this.undo();
+    else this.redo();
     return true;
   }
 
@@ -22016,6 +22012,11 @@ export class SpreadsheetApp {
       // Chart deletion should not fire while the formula bar is editing (including
       // range-selection mode).
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      // Avoid chart deletion while any editor is active (including split-view secondary editors).
+      if (this.isSpreadsheetEditingIncludingSecondary()) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       if (this.isReadOnly()) {
         const cell = this.selection.active;
