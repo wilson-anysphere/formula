@@ -5,6 +5,37 @@ import { describe, expect, it } from "vitest";
 import { createDesktopPermissionPrompt } from "./permissionPrompt.js";
 
 describe("createDesktopPermissionPrompt", () => {
+  it("falls back to a non-modal open attribute when showModal throws", async () => {
+    document.body.innerHTML = "";
+
+    const proto = (globalThis as any).HTMLDialogElement?.prototype as any;
+    expect(proto).toBeTruthy();
+
+    const originalShowModal = proto.showModal;
+    proto.showModal = function showModal() {
+      throw new Error("showModal failed");
+    };
+
+    try {
+      const prompt = createDesktopPermissionPrompt();
+      const resultPromise = prompt({
+        extensionId: "acme.example",
+        displayName: "Acme Extension",
+        permissions: ["network"],
+        request: { network: { host: "api.example.com", url: "https://api.example.com/v1/hello" } },
+      });
+
+      const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="extension-permission-prompt"]');
+      expect(dialog).not.toBeNull();
+      expect(dialog?.hasAttribute("open")).toBe(true);
+
+      dialog?.querySelector<HTMLButtonElement>('button[data-testid="extension-permission-deny"]')?.click();
+      await expect(resultPromise).resolves.toBe(false);
+    } finally {
+      proto.showModal = originalShowModal;
+    }
+  });
+
   it("renders a dialog with permission details and resolves false when denied", async () => {
     document.body.innerHTML = "";
 

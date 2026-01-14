@@ -28,9 +28,17 @@ function nextPermissionPromptTitleId(): string {
 }
 
 function showModal(dialog: HTMLDialogElement): void {
-  if (typeof dialog.showModal === "function") {
-    dialog.showModal();
-    return;
+  // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
+  const showModalFn = (dialog as any).showModal as (() => void) | undefined;
+  if (typeof showModalFn === "function") {
+    try {
+      // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
+      showModalFn.call(dialog);
+      return;
+    } catch {
+      // `showModal()` can throw if another modal dialog is already open. Fall through to
+      // a best-effort non-modal `open` attribute so permission requests don't crash the UI.
+    }
   }
   // jsdom doesn't implement showModal(). Best-effort fallback so unit tests can
   // drive the DOM without a full dialog polyfill.
@@ -38,9 +46,16 @@ function showModal(dialog: HTMLDialogElement): void {
 }
 
 function closeDialog(dialog: HTMLDialogElement, returnValue: string): void {
-  if (typeof dialog.close === "function") {
-    dialog.close(returnValue);
-    return;
+  // @ts-expect-error - HTMLDialogElement.close() not implemented in jsdom.
+  const closeFn = (dialog as any).close as ((returnValue?: string) => void) | undefined;
+  if (typeof closeFn === "function") {
+    try {
+      // @ts-expect-error - HTMLDialogElement.close() not implemented in jsdom.
+      closeFn.call(dialog, returnValue);
+      return;
+    } catch {
+      // Fall through to manual close emulation.
+    }
   }
   // jsdom doesn't implement close()/returnValue. Emulate the close contract so
   // our prompt logic and tests can rely on the close event.
