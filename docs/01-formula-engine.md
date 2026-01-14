@@ -209,6 +209,13 @@ the external sheet key:
 'C:\path\[Book.xlsx]Sheet1'!A1  =>  sheet key "[C:\path\Book.xlsx]Sheet1"
 ```
 
+In most host code (Rust/TypeScript/etc), backslashes will be escaped inside string literals; the same
+canonicalization would appear as:
+
+```txt
+'C:\\path\\[Book.xlsx]Sheet1'!A1  =>  sheet key "[C:\\path\\Book.xlsx]Sheet1"
+```
+
 #### Current limitations / behavior notes
 
 * **Bytecode backend:** formulas that contain external workbook references currently do **not** compile
