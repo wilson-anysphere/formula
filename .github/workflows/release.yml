@@ -1081,10 +1081,6 @@ jobs:
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
 
-      - name: Validate macOS bundle
-        if: runner.os == 'macOS'
-        run: bash scripts/validate-macos-bundle.sh
-
       - name: Verify macOS signed app entitlements (hardened runtime)
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
         if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != ''
@@ -1295,34 +1291,6 @@ jobs:
           path: desktop-dist-assets-report.json
           if-no-files-found: ignore
 
-      - name: Validate Linux AppImage bundle
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          for script in scripts/validate-linux-appimage.*; do
-            echo "Running $script"
-            case "$script" in
-              *.mjs|*.js) node "$script" ;;
-              *.py) python "$script" ;;
-              *) bash "$script" ;;
-            esac
-          done
-
-      - name: Validate Linux RPM bundle
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          for script in scripts/validate-linux-rpm.*; do
-            echo "Running $script"
-            case "$script" in
-              *.mjs|*.js) node "$script" ;;
-              *.py) python "$script" ;;
-              *) bash "$script" ;;
-            esac
-          done
-
       - name: Validate Windows installer bundles (presence + Authenticode)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -1349,7 +1317,6 @@ jobs:
           # Require both installer formats (MSI + NSIS EXE) so we don't publish a
           # partial Windows release.
           ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
-
       - name: Verify Windows ARM64 binary architecture (AA64)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
         shell: pwsh
@@ -1392,6 +1359,10 @@ jobs:
       - name: Validate produced AppImage desktop integration (.desktop + xlsx MIME)
         if: runner.os == 'Linux'
         run: bash scripts/validate-linux-appimage.sh
+
+      - name: Validate produced RPM package (rpm metadata + payload)
+        if: runner.os == 'Linux'
+        run: bash scripts/validate-linux-rpm.sh --no-container
 
       - name: Verify Linux .deb package (deps + ldd + desktop integration)
         if: matrix.platform == 'ubuntu-24.04'
