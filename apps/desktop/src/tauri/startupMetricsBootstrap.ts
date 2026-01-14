@@ -13,6 +13,16 @@ const LISTENERS_KEY = "__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__";
 const hasTauri = (() => {
   if (hasTauriRuntime()) return true;
 
+  // If accessing `__TAURI__` throws (e.g. hardened environment or tests), treat that as "not Tauri"
+  // and skip all bootstrap work. We intentionally avoid falling back to the user-agent heuristic in
+  // this case to keep behavior a no-op outside of real desktop builds.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    (globalThis as any).__TAURI__;
+  } catch {
+    return false;
+  }
+
   // Fallback: some host environments can delay injecting `__TAURI__` until after the first JS tick.
   // Chromium-based Tauri WebViews typically include "Tauri" in the user agent; use that as a
   // low-risk heuristic so we can still retry listener installation without doing work in normal
