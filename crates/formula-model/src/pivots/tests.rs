@@ -1,10 +1,6 @@
 use super::*;
 use std::collections::HashSet;
-
-use std::collections::HashSet;
-
 use serde_json::json;
-use std::collections::HashSet;
 
 #[test]
 fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
