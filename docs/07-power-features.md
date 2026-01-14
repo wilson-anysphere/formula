@@ -1719,9 +1719,9 @@ describe("Monte Carlo Simulation", () => {
     const result = workbook.runMonteCarloSimulation({
       iterations: 10000,
       inputDistributions: [
-        { cell: A1, distribution: { type: "normal", mean: 100, stdDev: 10 } }
+        { cell: "A1", distribution: { type: "normal", mean: 100, stdDev: 10 } }
       ],
-      outputCells: [A1]
+      outputCells: ["A1"]
     });
     
     // Mean should be close to 100
