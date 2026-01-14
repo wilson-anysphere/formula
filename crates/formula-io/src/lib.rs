@@ -3195,7 +3195,7 @@ fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> 
 fn maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(
     path: &Path,
 ) -> Result<Option<Vec<u8>>, Error> {
-    use std::io::{Read as _, Seek as _, SeekFrom};
+    use std::io::{Cursor, Read as _, Seek as _, SeekFrom};
 
     let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
         path: path.to_path_buf(),
@@ -3257,6 +3257,12 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(
         })?;
 
     if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
+        // Avoid false positives on ciphertext that happens to start with `PK` (rare but possible).
+        // Only treat the stream as plaintext when it parses as a valid ZIP archive.
+        if zip::ZipArchive::new(Cursor::new(package_bytes)).is_err() {
+            return Ok(None);
+        }
+
         // Avoid copying when the EncryptedPackage stream is already a ZIP file (rare, but useful
         // for synthetic fixtures and already-decrypted pipelines).
         if package_bytes.as_ptr() == encrypted_package.as_ptr()
@@ -3282,7 +3288,7 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
     path: &Path,
     password: Option<&str>,
 ) -> Result<Option<Vec<u8>>, Error> {
-    use std::io::{Read as _, Seek as _, SeekFrom};
+    use std::io::{Cursor, Read as _, Seek as _, SeekFrom};
 
     let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
         path: path.to_path_buf(),
@@ -3354,14 +3360,18 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
         })?;
 
     if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
-        // Avoid copying when the EncryptedPackage stream is already a ZIP file (rare, but useful
-        // for synthetic fixtures and already-decrypted pipelines).
-        if package_bytes.as_ptr() == encrypted_package.as_ptr()
-            && package_bytes.len() == encrypted_package.len()
-        {
-            return Ok(Some(encrypted_package));
+        // Avoid false positives on ciphertext that happens to start with `PK` (rare but possible).
+        // Only treat the stream as plaintext when it parses as a valid ZIP archive.
+        if zip::ZipArchive::new(Cursor::new(package_bytes)).is_ok() {
+            // Avoid copying when the EncryptedPackage stream is already a ZIP file (rare, but useful
+            // for synthetic fixtures and already-decrypted pipelines).
+            if package_bytes.as_ptr() == encrypted_package.as_ptr()
+                && package_bytes.len() == encrypted_package.len()
+            {
+                return Ok(Some(encrypted_package));
+            }
+            return Ok(Some(package_bytes.to_vec()));
         }
-        return Ok(Some(package_bytes.to_vec()));
     }
 
     // Not a plaintext ZIP payload; surface the usual encryption-related error.
