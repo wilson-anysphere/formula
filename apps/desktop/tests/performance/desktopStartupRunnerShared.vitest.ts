@@ -191,3 +191,55 @@ describe('desktopStartupUtil.runOnce reset guardrails', () => {
     );
   });
 });
+
+describe('desktopStartupUtil.runOnce failure diagnostics', () => {
+  test('includes recent stdout/stderr when timing out waiting for metrics', async () => {
+    const code = [
+      "console.log('hello stdout');",
+      "console.error('hello stderr');",
+      'setInterval(() => {}, 1000);',
+    ].join(' ');
+
+    try {
+      await runOnce({
+        binPath: process.execPath,
+        timeoutMs: 2000,
+        xvfb: false,
+        argv: ['-e', code],
+      });
+      throw new Error('expected runOnce to time out');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(msg).toContain('Timed out after 2000ms waiting for startup metrics');
+      expect(msg).toContain('desktop process output');
+      expect(msg).toContain('hello stdout');
+      expect(msg).toContain('hello stderr');
+    }
+  });
+
+  test('includes recent stdout/stderr when the desktop process exits early', async () => {
+    const code = [
+      "console.log('goodbye stdout');",
+      "console.error('goodbye stderr');",
+      // Give stdout/stderr a moment to flush before exiting.
+      'setTimeout(() => process.exit(1), 50);',
+      'setInterval(() => {}, 1000);',
+    ].join(' ');
+
+    try {
+      await runOnce({
+        binPath: process.execPath,
+        timeoutMs: 5000,
+        xvfb: false,
+        argv: ['-e', code],
+      });
+      throw new Error('expected runOnce to reject');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(msg).toContain('Desktop process exited before reporting metrics');
+      expect(msg).toContain('desktop process output');
+      expect(msg).toContain('goodbye stdout');
+      expect(msg).toContain('goodbye stderr');
+    }
+  });
+});
