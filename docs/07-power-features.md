@@ -1118,6 +1118,9 @@ Validation + edge cases (Rust behavior):
   - The scenario’s `values` are stored in a `HashMap<CellRef, CellValue>`, so duplicates will be de-duplicated (last value wins).
   - The `Scenario.changing_cells` vector will still contain the duplicates, which can be surprising in reports/UX. This is not currently validated by Rust.
 - Scenario names are not required to be unique. **If two scenarios share a name**, `generate_summary_report` will overwrite the earlier entry in `results` (it’s a `HashMap<String, ...>` keyed by name).
+  - The summary report always includes a `"Base"` row. If a scenario is named `"Base"`, it will overwrite that row.
+- Map ordering:
+  - `Scenario.values` and `SummaryReport.results` are `HashMap`s; iteration/serialization order is **not stable**. Hosts should treat these as maps keyed by `CellRef`/scenario name, not as ordered lists.
 - `apply_scenario` / `generate_summary_report` with an unknown `ScenarioId` → `WhatIfError::InvalidParams("scenario not found")`.
 - `restore_base` is a no-op if no scenario has been applied yet (`base_values` empty).
 - Base snapshot semantics: applying multiple scenarios captures the **union** of their `changing_cells` in `base_values` so `restore_base` can fully return to the original state even if scenarios touch different inputs.
@@ -1496,6 +1499,10 @@ Validation + edge cases (Rust behavior):
 - Iteration limits:
   - `SolveOptions.max_iterations` is used by **GRG** and **Evolutionary**.
   - **Simplex** uses method-specific limits (`SimplexOptions.max_pivots`, `SimplexOptions.max_bnb_nodes`) rather than `SolveOptions.max_iterations`.
+  - `SolveOutcome.iterations` is method-dependent:
+    - `Simplex`: branch-and-bound nodes searched (includes the root LP relaxation).
+    - `GrgNonlinear`: optimization iterations executed.
+    - `Evolutionary`: generations executed.
 - Integer/binary normalization:
   - `VarType::Integer`: bounds are normalized to `ceil(lower)` / `floor(upper)`. If `lower > upper` after normalization → `SolverError("integer var {idx} has empty bounds [...]")`.
   - `VarType::Binary`: bounds are forced to `[0, 1]` regardless of input.
