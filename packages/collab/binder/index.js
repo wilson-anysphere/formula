@@ -655,11 +655,12 @@ export function bindYjsToDocumentController(options) {
     let fallbackFormat = undefined;
     let fallbackFormatKey = undefined;
     for (const { cell } of candidateCells) {
-      if (typeof cell.has === "function" ? cell.has("format") : cell.get("format") !== undefined) {
-        fallbackFormat = cell.get("format") ?? null;
-        fallbackFormatKey = stableStringify(fallbackFormat);
-        break;
-      }
+      const raw = cell.get("format");
+      const rawOrStyle = raw === undefined ? cell.get("style") : raw;
+      if (rawOrStyle === undefined) continue;
+      fallbackFormat = rawOrStyle ?? null;
+      fallbackFormatKey = stableStringify(fallbackFormat);
+      break;
     }
 
     if (encryptedCandidates.length > 0) {

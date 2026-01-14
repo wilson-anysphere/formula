@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 
 import { bindYjsToDocumentController } from "../index.js";
+import { encryptCellPlaintext } from "../../encryption/src/index.node.js";
 
 async function waitForCondition(fn, timeoutMs = 2000) {
   const start = Date.now();
@@ -131,3 +132,38 @@ test("binder reads legacy per-cell `style` key as a `format` alias", async (t) =
   });
 });
 
+test("binder preserves legacy `style` across duplicate key encodings even when the canonical cell is encrypted", async (t) => {
+  const ydoc = new Y.Doc({ guid: "binder-style-alias-encrypted-doc" });
+  const dc = new DocumentControllerStub();
+  const binder = bindYjsToDocumentController({ ydoc, documentController: dc });
+
+  t.after(() => {
+    binder.destroy();
+    ydoc.destroy();
+  });
+
+  const enc = await encryptCellPlaintext({
+    plaintext: { value: "top-secret", formula: null },
+    key: { keyId: "k1", keyBytes: new Uint8Array(32).fill(7) },
+    context: { docId: ydoc.guid, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+
+  const cells = ydoc.getMap("cells");
+  ydoc.transact(() => {
+    const canonical = new Y.Map();
+    canonical.set("enc", enc);
+    // No plaintext format on the canonical cell key.
+    cells.set("Sheet1:0:0", canonical);
+
+    const legacy = new Y.Map();
+    legacy.set("style", { font: { bold: true } });
+    // Legacy key encoding for the same cell coordinate.
+    cells.set("Sheet1:0,0", legacy);
+  });
+
+  await waitForCondition(() => {
+    const cell = dc.getCell("Sheet1", { row: 0, col: 0 });
+    const format = dc.styleTable.get(cell.styleId);
+    return cell.value === "###" && cell.styleId !== 0 && format?.font?.bold === true;
+  });
+});
