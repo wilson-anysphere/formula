@@ -62,6 +62,20 @@ test("Solver panel React components avoid inline styles (use solver.css classes)
     assert.ok(css.includes(`.${className}`), `Expected solver.css to define .${className}`);
   }
 
+  assert.equal(
+    /(ui-monospace|SFMono|SF Mono|Menlo|Consolas|monospace)/.test(css),
+    false,
+    "solver.css should not hardcode a monospace font stack; use var(--font-mono) instead",
+  );
+
+  assert.equal(
+    /\b(?:padding(?:-(?:top|right|bottom|left))?|margin(?:-(?:top|right|bottom|left))?|gap|row-gap|column-gap)\s*:\s*[^;]*\d+px\b/.test(
+      css,
+    ),
+    false,
+    "solver.css should not use raw px values for layout spacing; use --space-* tokens instead",
+  );
+
   const mainSrc = fs.readFileSync(mainPath, "utf8");
   assert.match(
     mainSrc,
@@ -69,4 +83,3 @@ test("Solver panel React components avoid inline styles (use solver.css classes)
     "apps/desktop/src/main.ts should import src/styles/solver.css so the Solver panel UI is styled in production builds",
   );
 });
-
