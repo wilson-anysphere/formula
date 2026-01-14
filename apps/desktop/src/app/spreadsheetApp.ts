@@ -19489,6 +19489,10 @@ export class SpreadsheetApp {
         button.className = "outline-toggle";
         button.type = "button";
         button.setAttribute("data-testid", `outline-toggle-row-${summaryIndex}`);
+        // Static styles: the row toggle always sits in the row header with fixed size.
+        button.style.left = `${padding}px`;
+        button.style.width = `${size}px`;
+        button.style.height = `${size}px`;
         button.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -19502,13 +19506,12 @@ export class SpreadsheetApp {
         this.outlineLayer.appendChild(button);
       }
 
-      button.textContent = entry.collapsed ? "+" : "-";
-      button.style.left = `${padding}px`;
+      const label = entry.collapsed ? "+" : "-";
+      if (button.textContent !== label) button.textContent = label;
       const visualIndex = this.visibleRowStart + visualRow;
       const rowTop = originY + visualIndex * this.cellHeight - this.scrollY;
-      button.style.top = `${rowTop + (this.cellHeight - size) / 2}px`;
-      button.style.width = `${size}px`;
-      button.style.height = `${size}px`;
+      const top = `${rowTop + (this.cellHeight - size) / 2}px`;
+      if (button.style.top !== top) button.style.top = top;
     }
 
     // Column group toggles live in the column header.
@@ -19527,6 +19530,10 @@ export class SpreadsheetApp {
         button.className = "outline-toggle";
         button.type = "button";
         button.setAttribute("data-testid", `outline-toggle-col-${summaryIndex}`);
+        // Static styles: the column toggle always sits in the column header with fixed size.
+        button.style.top = `${padding}px`;
+        button.style.width = `${size}px`;
+        button.style.height = `${size}px`;
         button.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -19540,13 +19547,12 @@ export class SpreadsheetApp {
         this.outlineLayer.appendChild(button);
       }
 
-      button.textContent = entry.collapsed ? "+" : "-";
+      const label = entry.collapsed ? "+" : "-";
+      if (button.textContent !== label) button.textContent = label;
       const visualIndex = this.visibleColStart + visualCol;
       const colLeft = originX + visualIndex * this.cellWidth - this.scrollX;
-      button.style.left = `${colLeft + (this.cellWidth - size) / 2}px`;
-      button.style.top = `${padding}px`;
-      button.style.width = `${size}px`;
-      button.style.height = `${size}px`;
+      const left = `${colLeft + (this.cellWidth - size) / 2}px`;
+      if (button.style.left !== left) button.style.left = left;
     }
 
     for (const [key, button] of this.outlineButtons) {
