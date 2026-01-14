@@ -50,7 +50,7 @@ dialog.goto-dialog {
   width: min(680px, 92vw);
   border: 1px solid var(--dialog-border);
   border-radius: var(--radius);
-  padding: var(--space-5);
+  padding: var(--space-4);
   background: var(--dialog-bg);
   color: var(--text-primary);
   box-shadow: var(--dialog-shadow);
@@ -128,16 +128,16 @@ dialog.print-preview-dialog::backdrop {
 .goto-dialog .row {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .find-replace-dialog__look-in-label {
-  margin-left: var(--space-4);
+  margin-left: var(--space-3);
 }
 
 .find-replace-dialog__whole-cell-label {
-  margin-left: var(--space-5);
+  margin-left: var(--space-4);
 }
 
 .find-replace-dialog__close {
@@ -145,7 +145,23 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .goto-dialog__cancel {
-  margin-left: var(--space-4);
+  margin-left: var(--space-3);
+}
+
+.find-replace-dialog input[type="checkbox"],
+.find-replace-dialog input[type="radio"],
+.page-setup-dialog input[type="checkbox"],
+.page-setup-dialog input[type="radio"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.find-replace-dialog input[type="checkbox"]:focus-visible,
+.find-replace-dialog input[type="radio"]:focus-visible,
+.page-setup-dialog input[type="checkbox"]:focus-visible,
+.page-setup-dialog input[type="radio"]:focus-visible {
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .find-replace-dialog input[type="text"],
