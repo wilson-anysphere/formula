@@ -2,14 +2,26 @@ use std::path::Path;
 
 use formula_xlsx::{load_from_bytes, XlsxPackage};
 
-#[test]
-fn clearing_conditional_formatting_removes_worksheet_blocks() -> Result<(), Box<dyn std::error::Error>>
-{
+fn assert_clearing_conditional_formatting_removes_worksheet_blocks(
+    fixture_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("conditional_formatting_2007.xlsx");
+        .join(fixture_name);
     let bytes = std::fs::read(&fixture_path)?;
+
+    // Sanity check: the fixture should actually have conditional formatting.
+    let fixture_pkg = XlsxPackage::from_bytes(&bytes)?;
+    let fixture_sheet_xml = std::str::from_utf8(
+        fixture_pkg
+            .part("xl/worksheets/sheet1.xml")
+            .expect("sheet1.xml exists"),
+    )?;
+    assert!(
+        fixture_sheet_xml.contains("conditionalFormatting"),
+        "fixture {fixture_name} should contain conditionalFormatting blocks, got: {fixture_sheet_xml}"
+    );
 
     let mut doc = load_from_bytes(&bytes)?;
     let sheet_id = doc.workbook.sheets[0].id;
@@ -38,3 +50,14 @@ fn clearing_conditional_formatting_removes_worksheet_blocks() -> Result<(), Box<
     Ok(())
 }
 
+#[test]
+fn clearing_conditional_formatting_removes_worksheet_blocks_2007(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_clearing_conditional_formatting_removes_worksheet_blocks("conditional_formatting_2007.xlsx")
+}
+
+#[test]
+fn clearing_conditional_formatting_removes_worksheet_blocks_x14(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_clearing_conditional_formatting_removes_worksheet_blocks("conditional_formatting_x14.xlsx")
+}
