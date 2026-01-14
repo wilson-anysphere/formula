@@ -1432,10 +1432,22 @@ jobs:
             throw "debug-symbols: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
           }
 
-          $candidatePdbs = @(
+          $candidatePdbs = @()
+          if ($env:CARGO_TARGET_DIR) {
+            $cargoTargetDir = $env:CARGO_TARGET_DIR
+            if (-not [System.IO.Path]::IsPathRooted($cargoTargetDir)) {
+              $cargoTargetDir = Join-Path $env:GITHUB_WORKSPACE $cargoTargetDir
+            }
+            $candidatePdbs += (Join-Path $cargoTargetDir "$target/release/formula-desktop.pdb")
+            $candidatePdbs += (Join-Path $cargoTargetDir "release/formula-desktop.pdb")
+          }
+          $candidatePdbs += @(
             (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/formula-desktop.pdb"),
             (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/formula-desktop.pdb"),
-            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/formula-desktop.pdb")
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/formula-desktop.pdb"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/formula-desktop.pdb"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/release/formula-desktop.pdb"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/release/formula-desktop.pdb")
           )
 
           $pdbPath = $candidatePdbs | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -1453,16 +1465,28 @@ jobs:
 
           # If any PDB files were emitted into `**/release/bundle/**`, remove them so they don't
           # bloat dry-run bundle artifacts or trip strip/symbol checks.
-          $bundleCandidates = @(
+          $bundleCandidates = @()
+          if ($env:CARGO_TARGET_DIR) {
+            $cargoTargetDir = $env:CARGO_TARGET_DIR
+            if (-not [System.IO.Path]::IsPathRooted($cargoTargetDir)) {
+              $cargoTargetDir = Join-Path $env:GITHUB_WORKSPACE $cargoTargetDir
+            }
+            $bundleCandidates += (Join-Path $cargoTargetDir "$target/release/bundle")
+            $bundleCandidates += (Join-Path $cargoTargetDir "release/bundle")
+          }
+          $bundleCandidates += @(
             (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
             (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/release/bundle")
           )
-          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if ($bundleDir) {
+          foreach ($bundleDir in $bundleCandidates) {
+            if (-not (Test-Path $bundleDir)) { continue }
             $bundlePdbs = Get-ChildItem -Path $bundleDir -Recurse -File -Filter "*.pdb" -ErrorAction SilentlyContinue
             if ($bundlePdbs -and $bundlePdbs.Count -gt 0) {
-              Write-Host "debug-symbols: removing bundle-local PDB(s):"
+              Write-Host "debug-symbols: removing bundle-local PDB(s) under $bundleDir:"
               $bundlePdbs | ForEach-Object {
                 Write-Host "- $($_.FullName)"
                 Remove-Item -Force $_.FullName
