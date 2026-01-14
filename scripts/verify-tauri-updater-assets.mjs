@@ -912,7 +912,11 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
 
   const windowsArches = groups.windows.map(inferArchFromTarget);
   const uniqueWindowsArches = [...new Set(windowsArches)];
-  const windowsExeAssets = assetNames.filter((n) => n.toLowerCase().endsWith(".exe"));
+  const windowsExeAssets = assetNames
+    .filter((n) => n.toLowerCase().endsWith(".exe"))
+    // Exclude embedded helper installers (notably WebView2 bootstrapper/runtime executables), which
+    // are not the Formula installer artifacts we ship on GitHub Releases.
+    .filter((n) => !n.toLowerCase().includes("microsoftedgewebview2"));
   const windowsMsiAssets = assetNames.filter((n) => n.toLowerCase().endsWith(".msi"));
 
   if (uniqueWindowsArches.length === 1) {
@@ -969,11 +973,17 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
     const signedKinds = [
       { label: "macOS installer (.dmg)", matches: (name) => name.toLowerCase().endsWith(".dmg") },
       {
-        label: "macOS updater archive (.tar.gz/.tgz)",
+        label: "macOS updater archive (.app.tar.gz preferred; allow .tar.gz/.tgz)",
         matches: isMacUpdaterArchiveAssetName,
       },
       { label: "Windows installer (.msi)", matches: (name) => name.toLowerCase().endsWith(".msi") },
-      { label: "Windows installer (.exe)", matches: (name) => name.toLowerCase().endsWith(".exe") },
+      {
+        label: "Windows installer (.exe)",
+        matches: (name) =>
+          name.toLowerCase().endsWith(".exe") &&
+          // Exclude embedded helper installers (notably WebView2 bootstrapper/runtime executables).
+          !name.toLowerCase().includes("microsoftedgewebview2"),
+      },
       { label: "Linux bundle (.AppImage)", matches: (name) => name.toLowerCase().endsWith(".appimage") },
       { label: "Linux package (.deb)", matches: (name) => name.toLowerCase().endsWith(".deb") },
       { label: "Linux package (.rpm)", matches: (name) => name.toLowerCase().endsWith(".rpm") },

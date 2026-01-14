@@ -2569,12 +2569,16 @@ jobs:
             require_min "latest.json.sig" '^latest\.json\.sig$' 1
             require_min "macOS DMG" '\.dmg$' 1
 
-            # Tauri's macOS updater artifact is a `*.app.tar.gz` archive (distinct from the `.dmg`).
+            # Tauri's macOS updater artifact is a tarball archive (distinct from the `.dmg`).
+            # The conventional filename ends with `*.app.tar.gz`, but some toolchains may produce
+            # `*.tar.gz` / `*.tgz`. Keep this permissive while excluding obvious non-mac tarballs
+            # like Linux AppImage archives.
             mac_archive_count="$(echo "$json" | jq -r '[.[].name
-              | select(test("\\.app\\.tar\\.gz$"; "i"))
+              | select(test("\\.(tar\\.gz|tgz)$"; "i"))
+              | select(test("\\.AppImage\\.(tar\\.gz|tgz)$"; "i") | not)
             ] | length')"
             if [[ "$mac_archive_count" -lt 1 ]]; then
-              echo "missing: macOS updater archive (expected >= 1 tarball: *.app.tar.gz). Found ${mac_archive_count}." >&2
+              echo "missing: macOS updater archive (expected >= 1 tarball: *.app.tar.gz preferred; allow *.tar.gz/*.tgz). Found ${mac_archive_count}." >&2
               missing=1
             fi
 
@@ -2764,7 +2768,7 @@ jobs:
             # one signature file. This catches partial uploads where the bundle exists but its `.sig`
             # was not attached to the GitHub Release.
             require_sigs_for_ext "macOS DMG" '\\.dmg$'
-            require_sigs_for_ext "macOS updater archive" '\\.app\\.tar\\.gz$'
+            require_sigs_for_ext "macOS updater archive" '\\.(tar\\.gz|tgz)$' '\\.AppImage\\.(tar\\.gz|tgz)$'
             require_sigs_for_ext "Linux AppImage" '\\.AppImage$'
             require_sigs_for_ext "Linux DEB" '\\.deb$'
             require_sigs_for_ext "Linux RPM" '\\.rpm$'

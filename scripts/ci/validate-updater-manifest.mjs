@@ -3,12 +3,12 @@
  * CI guard for the desktop release workflow:
  * - Downloads the combined Tauri updater manifest (latest.json + latest.json.sig) from the draft release.
  * - Ensures the manifest version matches the git tag.
- * - Ensures the manifest contains updater entries for all expected targets.
- * - Ensures each updater entry references an asset that exists on the GitHub Release.
- * - Ensures each target references the correct *self-updatable* artifact type:
- *   - macOS: updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (not the `.dmg`)
- *   - Windows: `.msi` (Windows Installer; updater runs this)
- *   - Linux: `.AppImage`
+  * - Ensures the manifest contains updater entries for all expected targets.
+  * - Ensures each updater entry references an asset that exists on the GitHub Release.
+  * - Ensures each target references the correct *self-updatable* artifact type:
+  *   - macOS: updater archive tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (not the `.dmg`)
+  *   - Windows: `.msi` (Windows Installer; updater runs this)
+  *   - Linux: `.AppImage`
  * - Ensures required `{os}-{arch}` targets do not unexpectedly collide on the same updater URL
  *   (macOS universal uses a single updater archive referenced by both `darwin-x86_64` and `darwin-aarch64`).
  *
