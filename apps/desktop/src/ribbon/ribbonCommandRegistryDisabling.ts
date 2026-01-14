@@ -124,6 +124,7 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "data.sortFilter.sort.customSort",
 
   // Home → Styles
+  "home.styles.cellStyles.goodBadNeutral",
   "home.styles.formatAsTable",
   "home.styles.formatAsTable.light",
   "home.styles.formatAsTable.medium",
@@ -141,8 +142,9 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
 
   // --- Pivot table (panel) ----------------------------------------------------
   "insert.tables.pivotTable",
-
-  // --- Insert pictures --------------------------------------------------------
+  // Insert → PivotTable dropdown variant; routed via `createRibbonActionsFromCommands.commandOverrides` in main.ts.
+  "insert.tables.pivotTable.fromTableRange",
+  // Insert → Pictures menu items are routed via `handleInsertPicturesRibbonCommand` in main.ts.
   "insert.illustrations.pictures",
   "insert.illustrations.pictures.thisDevice",
   "insert.illustrations.pictures.stockImages",
