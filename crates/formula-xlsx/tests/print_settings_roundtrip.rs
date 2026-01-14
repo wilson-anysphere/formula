@@ -3,6 +3,7 @@ use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, CellRange, ColRange, Orientation,
     PrintTitles, RowRange, Scaling,
 };
+use std::io::Cursor;
 
 fn load_fixture_xlsx() -> Vec<u8> {
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -93,4 +94,48 @@ fn preserves_print_settings_and_allows_updates() {
     assert_eq!(sheet.page_setup.scaling, Scaling::Percent(80));
     assert!(sheet.manual_page_breaks.row_breaks_after.contains(&3));
     assert!(!sheet.manual_page_breaks.row_breaks_after.contains(&5));
+}
+
+#[test]
+fn write_workbook_print_settings_matches_unicode_sheet_names_case_insensitive_like_excel(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workbook = formula_model::Workbook::new();
+    workbook.add_sheet("Straße")?;
+
+    let mut buf = Cursor::new(Vec::new());
+    formula_xlsx::write_workbook_to_writer(&workbook, &mut buf)?;
+    let original = buf.into_inner();
+
+    let baseline = read_workbook_print_settings(&original)?;
+    assert_eq!(baseline.sheets.len(), 1);
+    assert_eq!(baseline.sheets[0].sheet_name, "Straße");
+
+    let mut updated = baseline.clone();
+    let sheet = &mut updated.sheets[0];
+    // Excel sheet names are case-insensitive across Unicode (`Straße` == `STRASSE`).
+    sheet.sheet_name = "STRASSE".to_string();
+    sheet.print_area = Some(vec![CellRange {
+        start_row: 1,
+        end_row: 1,
+        start_col: 1,
+        end_col: 1,
+    }]);
+
+    let rewritten = write_workbook_print_settings(&original, &updated)?;
+    let reread = read_workbook_print_settings(&rewritten)?;
+    assert_eq!(reread.sheets.len(), 1);
+    assert_eq!(reread.sheets[0].sheet_name, "Straße");
+    assert_eq!(
+        reread.sheets[0].print_area.as_deref(),
+        Some(
+            &[CellRange {
+                start_row: 1,
+                end_row: 1,
+                start_col: 1,
+                end_col: 1
+            }][..]
+        )
+    );
+
+    Ok(())
 }

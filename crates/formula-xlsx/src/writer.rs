@@ -166,7 +166,7 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
             continue;
         }
         print_settings_by_sheet_name.insert(
-            sheet_settings.sheet_name.to_ascii_uppercase(),
+            formula_model::sheet_name_casefold(&sheet_settings.sheet_name),
             sheet_settings,
         );
     }
@@ -174,9 +174,8 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     for (idx, sheet) in workbook.sheets.iter().enumerate() {
         let sheet_number = idx + 1;
         let sheet_path = format!("xl/worksheets/sheet{sheet_number}.xml");
-        let sheet_print_settings = print_settings_by_sheet_name
-            .get(&sheet.name.to_ascii_uppercase())
-            .copied();
+        let sheet_name_key = formula_model::sheet_name_casefold(&sheet.name);
+        let sheet_print_settings = print_settings_by_sheet_name.get(&sheet_name_key).copied();
         let (sheet_xml, sheet_rels) = sheet_xml(
             sheet,
             sheet_print_settings,
@@ -433,17 +432,15 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
             continue;
         }
         settings_by_sheet_name.insert(
-            sheet_settings.sheet_name.to_ascii_uppercase(),
+            formula_model::sheet_name_casefold(&sheet_settings.sheet_name),
             sheet_settings,
         );
     }
 
     let mut print_defined_names: Vec<(String, u32, String)> = Vec::new();
     for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
-        let Some(settings) = settings_by_sheet_name
-            .get(&sheet.name.to_ascii_uppercase())
-            .copied()
-        else {
+        let sheet_name_key = formula_model::sheet_name_casefold(&sheet.name);
+        let Some(settings) = settings_by_sheet_name.get(&sheet_name_key).copied() else {
             continue;
         };
 

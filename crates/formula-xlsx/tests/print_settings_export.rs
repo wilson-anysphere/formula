@@ -114,3 +114,39 @@ fn exports_print_settings_from_model() -> Result<(), Box<dyn std::error::Error>>
 
     Ok(())
 }
+
+#[test]
+fn exports_print_settings_from_model_matches_unicode_sheet_names_case_insensitive_like_excel(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workbook = Workbook::new();
+    workbook.add_sheet("Straße")?;
+
+    // Users and producers may provide print settings keyed by a different casing than the actual
+    // sheet tab name. Excel compares sheet names case-insensitively across Unicode (e.g.
+    // `ß -> SS`), so accept that here too.
+    let mut sheet_settings = SheetPrintSettings::new("STRASSE");
+    sheet_settings.print_area = Some(vec![Range::from_a1("A1")?]);
+    workbook.print_settings.sheets = vec![sheet_settings];
+
+    let mut buf = Cursor::new(Vec::new());
+    formula_xlsx::write_workbook_to_writer(&workbook, &mut buf)?;
+    let bytes = buf.into_inner();
+
+    let read = read_workbook_print_settings(&bytes)?;
+    assert_eq!(read.sheets.len(), 1);
+    let sheet = &read.sheets[0];
+    assert_eq!(sheet.sheet_name, "Straße");
+    assert_eq!(
+        sheet.print_area.as_deref(),
+        Some(
+            &[CellRange {
+                start_row: 1,
+                end_row: 1,
+                start_col: 1,
+                end_col: 1
+            }][..]
+        )
+    );
+
+    Ok(())
+}

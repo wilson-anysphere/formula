@@ -7,6 +7,7 @@ use formula_xlsx::print::{
     CellRange, Orientation, SheetPrintSettings as XlsxSheetPrintSettings,
     WorkbookPrintSettings as XlsxWorkbookPrintSettings,
 };
+use std::io::Cursor;
 
 fn load_fixture_xlsx() -> Vec<u8> {
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -151,6 +152,40 @@ fn print_settings_xlsx_document_noop_roundtrip_has_no_diffs(
             .map(|d| d.to_string())
             .collect::<Vec<_>>()
             .join("\n")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn print_settings_xlsx_document_writeback_matches_unicode_sheet_names_case_insensitive_like_excel(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workbook = formula_model::Workbook::new();
+    workbook.add_sheet("Straße")?;
+
+    let mut buf = Cursor::new(Vec::new());
+    formula_xlsx::write_workbook_to_writer(&workbook, &mut buf)?;
+    let original = buf.into_inner();
+
+    let mut doc = formula_xlsx::load_from_bytes(&original)?;
+    let mut settings = formula_model::SheetPrintSettings::new("STRASSE");
+    settings.print_area = Some(vec![Range::from_a1("A1")?]);
+    doc.workbook.print_settings.sheets = vec![settings];
+
+    let saved = doc.save_to_vec()?;
+    let reread = formula_xlsx::print::read_workbook_print_settings(&saved)?;
+    assert_eq!(reread.sheets.len(), 1);
+    assert_eq!(reread.sheets[0].sheet_name, "Straße");
+    assert_eq!(
+        reread.sheets[0].print_area.as_deref(),
+        Some(
+            &[CellRange {
+                start_row: 1,
+                end_row: 1,
+                start_col: 1,
+                end_col: 1
+            }][..]
+        )
     );
 
     Ok(())

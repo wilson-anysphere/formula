@@ -11,6 +11,8 @@ use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+use formula_model::sheet_name_casefold;
+
 use crate::zip_util::open_zip_part;
 use crate::zip_util::read_zip_file_bytes_with_limit;
 
@@ -177,15 +179,16 @@ fn write_workbook_print_settings_impl(
     let workbook = parse_workbook_xml(&workbook_xml)?;
     let rels = parse_workbook_rels(&rels_xml)?;
 
-    // Excel sheet names are case-insensitive; accept settings keyed by any casing.
+    // Excel sheet names are case-insensitive across Unicode; accept settings keyed by any casing.
     let mut settings_by_sheet: HashMap<String, &SheetPrintSettings> = HashMap::new();
     for sheet in &settings.sheets {
-        settings_by_sheet.insert(sheet.sheet_name.to_ascii_uppercase(), sheet);
+        settings_by_sheet.insert(sheet_name_casefold(&sheet.sheet_name), sheet);
     }
 
     let mut defined_name_edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::new();
     for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
-        if let Some(sheet_settings) = settings_by_sheet.get(&sheet.name.to_ascii_uppercase()) {
+        let sheet_key = sheet_name_casefold(&sheet.name);
+        if let Some(sheet_settings) = settings_by_sheet.get(&sheet_key) {
             match sheet_settings.print_area {
                 Some(ref ranges) => {
                     defined_name_edits.insert(
@@ -222,7 +225,8 @@ fn write_workbook_print_settings_impl(
 
     let mut updated_sheets: HashMap<String, Vec<u8>> = HashMap::new();
     for sheet in &workbook.sheets {
-        let Some(sheet_settings) = settings_by_sheet.get(&sheet.name.to_ascii_uppercase()) else {
+        let sheet_key = sheet_name_casefold(&sheet.name);
+        let Some(sheet_settings) = settings_by_sheet.get(&sheet_key) else {
             continue;
         };
         let Some(sheet_target) = rels.get(&sheet.r_id) else {

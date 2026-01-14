@@ -1420,7 +1420,7 @@ fn apply_print_settings_patches(
             continue;
         };
         sheet_name_to_meta.insert(
-            sheet.name.to_ascii_uppercase(),
+            formula_model::sheet_name_casefold(&sheet.name),
             (idx, meta.path.clone(), sheet.name.clone()),
         );
     }
@@ -1428,20 +1428,20 @@ fn apply_print_settings_patches(
     // Track sheets with non-default print settings in either the original snapshot or the current model.
     let mut affected_sheets: HashSet<String> = HashSet::new();
     for sheet in &doc.workbook.print_settings.sheets {
-        affected_sheets.insert(sheet.sheet_name.to_ascii_uppercase());
+        affected_sheets.insert(formula_model::sheet_name_casefold(&sheet.sheet_name));
     }
     for sheet in &doc.meta.print_settings_snapshot.sheets {
-        affected_sheets.insert(sheet.sheet_name.to_ascii_uppercase());
+        affected_sheets.insert(formula_model::sheet_name_casefold(&sheet.sheet_name));
     }
 
     // Build per-sheet maps for diffing.
     let mut current_by_sheet: HashMap<String, &formula_model::SheetPrintSettings> = HashMap::new();
     for sheet in &doc.workbook.print_settings.sheets {
-        current_by_sheet.insert(sheet.sheet_name.to_ascii_uppercase(), sheet);
+        current_by_sheet.insert(formula_model::sheet_name_casefold(&sheet.sheet_name), sheet);
     }
     let mut snapshot_by_sheet: HashMap<String, &formula_model::SheetPrintSettings> = HashMap::new();
     for sheet in &doc.meta.print_settings_snapshot.sheets {
-        snapshot_by_sheet.insert(sheet.sheet_name.to_ascii_uppercase(), sheet);
+        snapshot_by_sheet.insert(formula_model::sheet_name_casefold(&sheet.sheet_name), sheet);
     }
 
     let mut defined_name_edits: HashMap<(String, usize), crate::print::xlsx::DefinedNameEdit> =

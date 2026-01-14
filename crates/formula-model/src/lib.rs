@@ -56,7 +56,7 @@ pub use display::{format_cell_display, format_cell_display_in_workbook, CellDisp
 pub use error::ErrorValue;
 pub use formula_rewrite::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
-    rewrite_table_names_in_formula, sheet_name_eq_case_insensitive,
+    rewrite_table_names_in_formula, sheet_name_casefold, sheet_name_eq_case_insensitive,
 };
 pub use formula_text::{display_formula_text, normalize_formula_text};
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};

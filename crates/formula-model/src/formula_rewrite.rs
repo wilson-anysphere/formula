@@ -11,6 +11,18 @@ pub fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
         .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
 }
 
+/// Returns a canonical "case folded" representation of a sheet name that matches
+/// [`sheet_name_eq_case_insensitive`].
+///
+/// This is useful when building hash map keys for sheet-name lookups that need
+/// to behave like Excel (e.g. treating `Straße` and `STRASSE` as equal).
+pub fn sheet_name_casefold(name: &str) -> String {
+    if name.is_ascii() {
+        return name.to_ascii_uppercase();
+    }
+    name.nfkc().flat_map(|c| c.to_uppercase()).collect()
+}
+
 fn looks_like_a1_cell_reference(name: &str) -> bool {
     // If an unquoted sheet name looks like a cell reference (e.g. "A1" or "XFD1048576"),
     // Excel requires quoting to disambiguate.
