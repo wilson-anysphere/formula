@@ -1,5 +1,4 @@
 use std::cmp::{max, min};
-
 use formula_model::sheet_name_eq_case_insensitive;
 
 use crate::{
@@ -249,9 +248,13 @@ fn rewrite_expr_for_structural_edit(
             rewrite_col_ref_for_structural_edit(r, ctx_sheet, edit, resolve_sheet_order_index)
         }
         Expr::Binary(b) if b.op == BinaryOp::Range => {
-            if let Some(result) =
-                rewrite_range_for_structural_edit(expr, b, ctx_sheet, edit, resolve_sheet_order_index)
-            {
+            if let Some(result) = rewrite_range_for_structural_edit(
+                expr,
+                b,
+                ctx_sheet,
+                edit,
+                resolve_sheet_order_index,
+            ) {
                 return result;
             }
             rewrite_expr_children(expr, |child| {
@@ -308,8 +311,12 @@ fn rewrite_expr_for_range_map(
 ) -> (Expr, bool) {
     match expr {
         Expr::FieldAccess(access) => {
-            let (base, changed) =
-                rewrite_expr_for_range_map(access.base.as_ref(), ctx_sheet, edit, resolve_sheet_order_index);
+            let (base, changed) = rewrite_expr_for_range_map(
+                access.base.as_ref(),
+                ctx_sheet,
+                edit,
+                resolve_sheet_order_index,
+            );
             if !changed {
                 return (expr.clone(), false);
             }
@@ -321,11 +328,17 @@ fn rewrite_expr_for_range_map(
                 true,
             )
         }
-        Expr::CellRef(r) => rewrite_cell_ref_for_range_map(r, ctx_sheet, edit, resolve_sheet_order_index),
+        Expr::CellRef(r) => {
+            rewrite_cell_ref_for_range_map(r, ctx_sheet, edit, resolve_sheet_order_index)
+        }
         Expr::Binary(b) if b.op == BinaryOp::Range => {
-            if let Some(result) =
-                rewrite_cell_range_for_range_map(expr, b, ctx_sheet, edit, resolve_sheet_order_index)
-            {
+            if let Some(result) = rewrite_cell_range_for_range_map(
+                expr,
+                b,
+                ctx_sheet,
+                edit,
+                resolve_sheet_order_index,
+            ) {
                 return result;
             }
             rewrite_expr_children(expr, |child| {
@@ -710,7 +723,9 @@ fn rewrite_expr_for_sheet_delete(
         Expr::RowRef(r) => rewrite_row_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
         Expr::ColRef(r) => rewrite_col_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
         Expr::NameRef(r) => rewrite_name_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
-        Expr::StructuredRef(r) => rewrite_structured_ref_for_sheet_delete(r, deleted_sheet, sheet_order),
+        Expr::StructuredRef(r) => {
+            rewrite_structured_ref_for_sheet_delete(r, deleted_sheet, sheet_order)
+        }
         Expr::Binary(b) if b.op == BinaryOp::Range => {
             let (left, left_changed) =
                 rewrite_expr_for_sheet_delete(&b.left, deleted_sheet, sheet_order);
@@ -759,8 +774,7 @@ fn rewrite_cell_ref_for_structural_edit(
         ctx_sheet,
         edit_sheet,
         resolve_sheet_order_index,
-    )
-    {
+    ) {
         return (expr_ref(r.clone()), false);
     }
 
@@ -835,8 +849,7 @@ fn rewrite_row_ref_for_structural_edit(
         ctx_sheet,
         edit_sheet,
         resolve_sheet_order_index,
-    )
-    {
+    ) {
         return (Expr::RowRef(r.clone()), false);
     }
 
@@ -892,8 +905,7 @@ fn rewrite_col_ref_for_structural_edit(
         ctx_sheet,
         edit_sheet,
         resolve_sheet_order_index,
-    )
-    {
+    ) {
         return (Expr::ColRef(r.clone()), false);
     }
 
@@ -1550,8 +1562,7 @@ fn rewrite_cell_ref_for_range_map(
         ctx_sheet,
         &edit.sheet,
         resolve_sheet_order_index,
-    )
-    {
+    ) {
         return (expr_ref(r.clone()), false);
     }
 
