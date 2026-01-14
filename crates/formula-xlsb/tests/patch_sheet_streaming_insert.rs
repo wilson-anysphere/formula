@@ -1947,6 +1947,68 @@ fn patch_sheet_bin_streaming_preserves_formula_header_varint_bytes_when_payload_
 }
 
 #[test]
+fn patch_sheet_bin_streaming_preserves_formula_header_varint_bytes_when_patching_rgcb_with_same_len(
+) {
+    const FORMULA_FLOAT: u32 = 0x0009;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    let rgce = fixture_builder::rgce::array_placeholder();
+    let rgcb = vec![0xAA, 0xBB, 0xCC, 0xDD];
+    builder.set_cell_formula_num(0, 0, 6.0, rgce.clone(), rgcb);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+    let tweaked = rewrite_cell_header_as_two_byte_varints(&sheet_bin, 0, 0);
+
+    let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(
+        id_raw,
+        vec![0x89, 0x00],
+        "expected non-canonical id varint for FORMULA_FLOAT"
+    );
+
+    let new_rgcb = vec![0x11, 0x22, 0x33, 0x44];
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(6.0),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: Some(new_rgcb.clone()),
+        new_formula_flags: None,
+        shared_string_index: None,
+        new_style: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let Some((patched_id_raw, patched_len_raw)) = cell_header_raw(&patched_in_mem, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(patched_id_raw, id_raw);
+    assert_eq!(patched_len_raw, len_raw);
+
+    let (id, payload) = find_cell_record(&patched_in_mem, 0, 0).expect("find patched cell");
+    assert_eq!(id, FORMULA_FLOAT);
+    let cce = u32::from_le_bytes(payload[18..22].try_into().unwrap()) as usize;
+    assert_eq!(
+        payload[22..22 + cce],
+        rgce,
+        "expected formula token stream to be preserved"
+    );
+    assert_eq!(
+        payload[22 + cce..],
+        new_rgcb,
+        "expected patched rgcb bytes to be present"
+    );
+}
+
+#[test]
 fn patch_sheet_bin_streaming_preserves_formula_header_varint_bytes_when_len_varint_is_multi_byte() {
     const FORMULA_FLOAT: u32 = 0x0009;
 
