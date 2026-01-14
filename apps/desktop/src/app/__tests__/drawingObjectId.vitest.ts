@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { insertImageFromFile } from "../../drawings/insertImage";
+import { insertImageFromBytes, insertImageFromFile } from "../../drawings/insertImage";
 import { createDrawingObjectId, type Anchor, type ImageStore } from "../../drawings/types";
 
 describe("DrawingObject ids", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("createDrawingObjectId generates unique safe integers", () => {
     const ids = new Set<number>();
     const count = 10_000;
@@ -50,5 +55,43 @@ describe("DrawingObject ids", () => {
     expect(result.objects).toHaveLength(1);
     expect(Number.isSafeInteger(result.objects[0]!.id)).toBe(true);
     expect(result.objects[0]!.id).not.toBe(unsafeCounterId);
+  });
+
+  it("insertion guarantees uniqueness even if crypto is deterministic", () => {
+    // Force createDrawingObjectId() to return a constant value (1) by stubbing WebCrypto.
+    vi.stubGlobal("crypto", {
+      getRandomValues: (arr: Uint32Array) => {
+        arr[0] = 0;
+        arr[1] = 1;
+        return arr;
+      },
+    } as any);
+
+    const store = new Map<string, any>();
+    const images: ImageStore = {
+      get: (id) => store.get(id),
+      set: (entry) => store.set(entry.id, entry),
+      delete: (id) => store.delete(id),
+      clear: () => store.clear(),
+    };
+
+    const anchor: Anchor = {
+      type: "absolute",
+      pos: { xEmu: 0, yEmu: 0 },
+      size: { cx: 10, cy: 10 },
+    };
+
+    const existing = [{ id: 1, kind: { type: "shape", label: "shape-1" }, anchor, zOrder: 0 }];
+
+    const result = insertImageFromBytes(new Uint8Array([1, 2, 3]), {
+      imageId: "img_2",
+      mimeType: "image/png",
+      anchor,
+      objects: existing,
+      images,
+    });
+
+    expect(result.objects).toHaveLength(2);
+    expect(result.objects[1]!.id).toBe(2);
   });
 });

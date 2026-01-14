@@ -7,6 +7,28 @@ const DEFAULT_MAX_BASE64_IMAGE_BYTES = 5 * 1024 * 1024; // 5MiB
 
 export { MAX_INSERT_IMAGE_BYTES };
 
+function nextUniqueDrawingObjectId(existing: Set<number>): number {
+  let max = 0;
+  for (const id of existing) {
+    if (id > max) max = id;
+  }
+
+  // Prefer collision-resistant ids for multi-user safety, but guarantee termination even if
+  // WebCrypto is stubbed/deterministic in tests.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = createDrawingObjectId();
+    if (!existing.has(candidate)) return candidate;
+  }
+
+  // Fallback: find a deterministic unused safe integer id.
+  const candidate = max + 1;
+  if (Number.isSafeInteger(candidate) && candidate > 0 && !existing.has(candidate)) return candidate;
+
+  let next = 1;
+  while (existing.has(next) && next < Number.MAX_SAFE_INTEGER) next += 1;
+  return next;
+}
+
 export async function insertImageFromFile(
   file: File,
   opts: {
@@ -47,8 +69,7 @@ export async function insertImageFromFile(
   // Random ids are collision-resistant across collaborators, but still ensure we don't collide
   // with existing objects within this sheet.
   const usedIds = new Set(opts.objects.map((o) => o.id));
-  let objectId = createDrawingObjectId();
-  while (usedIds.has(objectId)) objectId = createDrawingObjectId();
+  const objectId = nextUniqueDrawingObjectId(usedIds);
 
   const object: DrawingObject = {
     id: objectId,
@@ -90,8 +111,7 @@ export function insertImageFromBytes(
   })();
 
   const usedIds = new Set(opts.objects.map((o) => o.id));
-  let objectId = createDrawingObjectId();
-  while (usedIds.has(objectId)) objectId = createDrawingObjectId();
+  const objectId = nextUniqueDrawingObjectId(usedIds);
 
   const object: DrawingObject = {
     id: objectId,

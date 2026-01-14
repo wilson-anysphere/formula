@@ -6014,13 +6014,38 @@ export class SpreadsheetApp {
 
     // Allocate drawing ids ahead-of-time so we guarantee uniqueness within this insertion batch.
     const usedDrawingIds = new Set<number>();
-    for (const obj of existingObjects) usedDrawingIds.add(obj.id);
-    const drawingIds = accepted.map(() => {
-      let id = createDrawingObjectId();
-      while (usedDrawingIds.has(id)) id = createDrawingObjectId();
-      usedDrawingIds.add(id);
-      return id;
-    });
+    let maxDrawingId = 0;
+    for (const obj of existingObjects) {
+      usedDrawingIds.add(obj.id);
+      if (obj.id > maxDrawingId) maxDrawingId = obj.id;
+    }
+    const allocateDrawingId = (): number => {
+      // Prefer collision-resistant ids for multi-user safety, but guarantee termination even if
+      // WebCrypto is stubbed/deterministic in tests.
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const candidate = createDrawingObjectId();
+        if (!usedDrawingIds.has(candidate)) {
+          usedDrawingIds.add(candidate);
+          if (candidate > maxDrawingId) maxDrawingId = candidate;
+          return candidate;
+        }
+      }
+
+      // Deterministic fallback for the (unlikely) case we couldn't find a free random id.
+      const candidate = maxDrawingId + 1;
+      if (Number.isSafeInteger(candidate) && candidate > 0 && !usedDrawingIds.has(candidate)) {
+        usedDrawingIds.add(candidate);
+        maxDrawingId = candidate;
+        return candidate;
+      }
+
+      let next = 1;
+      while (usedDrawingIds.has(next) && next < Number.MAX_SAFE_INTEGER) next += 1;
+      usedDrawingIds.add(next);
+      if (next > maxDrawingId) maxDrawingId = next;
+      return next;
+    };
+    const drawingIds = accepted.map(() => allocateDrawingId());
 
     const prepared = await mapWithConcurrencyLimit(accepted, MAX_CONCURRENT_DECODES, async (file, i) => {
       const bytes = await readFileBytes(file);
@@ -18806,9 +18831,24 @@ export class SpreadsheetApp {
 
     const imageId = `image_${uuid()}.png`;
     const usedDrawingIds = new Set<number>();
-    for (const obj of this.listDrawingObjectsForSheet(this.sheetId)) usedDrawingIds.add(obj.id);
-    let drawingId = createDrawingObjectId();
-    while (usedDrawingIds.has(drawingId)) drawingId = createDrawingObjectId();
+    let maxDrawingId = 0;
+    for (const obj of this.listDrawingObjectsForSheet(this.sheetId)) {
+      usedDrawingIds.add(obj.id);
+      if (obj.id > maxDrawingId) maxDrawingId = obj.id;
+    }
+    const drawingId = (() => {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const candidate = createDrawingObjectId();
+        if (!usedDrawingIds.has(candidate)) return candidate;
+      }
+
+      const candidate = maxDrawingId + 1;
+      if (Number.isSafeInteger(candidate) && candidate > 0 && !usedDrawingIds.has(candidate)) return candidate;
+
+      let next = 1;
+      while (usedDrawingIds.has(next) && next < Number.MAX_SAFE_INTEGER) next += 1;
+      return next;
+    })();
     const drawing = {
       // Store as a string to keep drawing ids JSON-friendly and stable across JS↔Rust↔Yjs hops.
       // The UI adapters normalize ids back to numbers for rendering/interaction.
