@@ -30,7 +30,7 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 | Format | Scheme | Marker | Implemented crypto | Notes / entry points |
 |---|---|---|---|---|
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + standard key derivation + verifier; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + standard key derivation + verifier; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
 | Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
 Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors
@@ -63,16 +63,20 @@ Not implemented:
 - IRM / “DataSpaces” transforms
 
 ### OOXML: Standard encryption (CryptoAPI; `versionMinor == 2`)
-Supported subset (CryptoAPI AES):
+Supported subset (CryptoAPI AES + RC4):
 
-- Cipher: AES-128/192/256 (`CALG_AES_128/192/256`).
+- Cipher:
+  - AES-128/192/256 (`CALG_AES_128/192/256`).
+  - RC4 (`CALG_RC4`). (Note: Standard/CryptoAPI RC4 uses 0x200-byte blocks; see
+    `docs/offcrypto-standard-cryptoapi-rc4.md`.)
 - Hash (`AlgIDHash`) for password hashing / key derivation:
-  - `crates/formula-office-crypto` supports `CALG_SHA1`/`CALG_SHA_256`/`CALG_SHA_384`/`CALG_SHA_512`.
-  - `crates/formula-offcrypto` intentionally gates to **SHA-1** only (Excel default) and rejects
-    other hashes as “unsupported algorithm”.
+  - `crates/formula-office-crypto` supports `CALG_MD5`/`CALG_SHA1`/`CALG_SHA_256`/`CALG_SHA_384`/`CALG_SHA_512`.
+  - `crates/formula-offcrypto` intentionally gates to **AES + SHA-1** only (Excel default) and
+    rejects other algorithms/parameters as “unsupported”.
 - Salt size: file-provided (`EncryptionVerifier.saltSize`, typically 16).
 
-Other combinations (RC4, mismatched key sizes, etc.) are treated as unsupported by the current code.
+Other Standard combinations (mismatched key sizes, non-CryptoAPI flags, etc.) are treated as
+unsupported by the current code.
 
 Note on version gating in helper APIs:
 
