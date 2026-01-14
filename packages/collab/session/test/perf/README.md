@@ -13,7 +13,7 @@ Recommended (required in most environments because the session entrypoint is Typ
 FORMULA_RUN_COLLAB_SESSION_BINDER_PERF=1 \
 NODE_OPTIONS=--expose-gc \
 FORMULA_NODE_TEST_CONCURRENCY=1 \
-pnpm test:node session-binder-perf
+pnpm test:node packages/collab/session/test/perf/session-binder-perf.test.js
 ```
 
 ## Useful env vars

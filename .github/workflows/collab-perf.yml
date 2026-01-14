@@ -116,7 +116,7 @@ jobs:
           FORMULA_RUN_COLLAB_SESSION_BINDER_PERF: "1"
         run: |
           set -euo pipefail
-          pnpm test:node session-binder-perf | tee session-binder-perf.log
+          pnpm test:node packages/collab/session/test/perf/session-binder-perf.test.js | tee session-binder-perf.log
 
       - name: Upload perf logs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

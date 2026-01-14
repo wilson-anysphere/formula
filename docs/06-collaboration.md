@@ -59,7 +59,7 @@ These tests are **skipped by default** and only run when the relevant env var is
 FORMULA_RUN_COLLAB_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node packages/collab/binder/test/perf/binder-perf.test.js
 
 # Session + binder perf
-FORMULA_RUN_COLLAB_SESSION_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node session-binder-perf
+FORMULA_RUN_COLLAB_SESSION_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node packages/collab/session/test/perf/session-binder-perf.test.js
 ```
 
 Tip: set `PERF_JSON=1` to emit structured JSON metrics per scenario (useful for CI parsing), and optionally set `PERF_MAX_TOTAL_MS_*` / `PERF_MAX_PEAK_*` env vars to enforce budgets.

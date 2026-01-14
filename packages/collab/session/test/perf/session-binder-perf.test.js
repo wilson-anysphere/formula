@@ -13,7 +13,7 @@
  *     PERF_COLS=100 \
  *     NODE_OPTIONS=--expose-gc \
  *     FORMULA_NODE_TEST_CONCURRENCY=1 \
- *     pnpm test:node session-binder-perf
+ *     pnpm test:node packages/collab/session/test/perf/session-binder-perf.test.js
  *
  * Notes:
  * - This benchmark dynamically imports `@formula/collab-session`'s TypeScript entrypoint.
