@@ -1,6 +1,7 @@
 //! OOXML encrypted package support (`[MS-OFFCRYPTO]`).
 //!
-//! Excel's **Encrypt with Password** feature produces files that *look like* `.xlsx`, but they are
+//! Excel's **Encrypt with Password** feature produces files that *look like* `.xlsx`/`.xlsm`/`.xlsb`,
+//! but they are
 //! no longer ZIP-based Open Packaging Convention (OPC) archives. Instead, Office wraps the real
 //! workbook package in an **OLE Compound File Binary** (CFB) container with (at least) two streams:
 //!

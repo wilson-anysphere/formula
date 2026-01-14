@@ -1,8 +1,8 @@
 //! MS-OFFCRYPTO **Standard (CryptoAPI)** password verification for OOXML `EncryptedPackage`
 //! containers.
 //!
-//! Office "Encrypt with Password" for OOXML files stores the real `.xlsx` ZIP package inside an OLE
-//! compound file with:
+//! Office "Encrypt with Password" for OOXML workbooks stores the real `.xlsx`/`.xlsm`/`.xlsb` ZIP
+//! package inside an OLE compound file with:
 //! - `EncryptionInfo`: encryption parameters + verifier
 //! - `EncryptedPackage`: encrypted ZIP bytes
 //!

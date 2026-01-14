@@ -4001,7 +4001,8 @@ fn decrypt_agile_ooxml_encrypted_package(
     Ok(decrypted)
 }
 
-/// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.
+/// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`, `.xlsm`, `.xlsb`) from a raw
+/// OLE/CFB wrapper.
 ///
 /// This performs native MS-OFFCRYPTO Standard (CryptoAPI / AES) password verification and
 /// decryption and returns the decrypted OOXML ZIP bytes.
@@ -4023,7 +4024,8 @@ pub fn decrypt_standard_ooxml_from_bytes(
     Ok(decrypted)
 }
 
-/// Decrypt an Agile-encrypted OOXML package (e.g. `.xlsx`, `.docx`) from a raw OLE/CFB wrapper.
+/// Decrypt an Agile-encrypted OOXML package (e.g. `.xlsx`, `.xlsm`, `.xlsb`, `.docx`) from a raw
+/// OLE/CFB wrapper.
 ///
 /// `raw_ole` must be an OLE Compound File containing the `EncryptionInfo` and `EncryptedPackage`
 /// streams.

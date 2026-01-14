@@ -1,6 +1,7 @@
 //! Decrypt an OOXML `EncryptedPackage` container (password-protected `.xlsx` / `.xlsm` / `.xlsb`).
 //!
-//! Encrypted OOXML files are **not ZIP files on disk** even if they use a `.xlsx` extension. Excel
+//! Encrypted OOXML files are **not ZIP files on disk** even if they use a `.xlsx`/`.xlsm`/`.xlsb`
+//! extension. Excel
 //! wraps the real ZIP/OPC package in an OLE/CFB container with (at least) two streams:
 //!
 //! - `EncryptionInfo`
