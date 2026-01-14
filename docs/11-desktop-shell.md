@@ -1242,6 +1242,9 @@ exist in the pinned toolchain via `node scripts/check-tauri-permissions.mjs` (ru
 hood). If you upgrade Tauri/plugins and CI starts failing with “unknown permission identifier”, update the capability
 files to match the new toolchain output.
 
+Local shortcut: `pnpm -C apps/desktop check:tauri-permissions` runs the same validation (requires the Tauri CLI /
+WebView toolchain for your platform).
+
 ### Practical workflow
 
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `core:event:allow-listen` / `core:event:allow-emit`
