@@ -2372,6 +2372,7 @@ export class SpreadsheetApp {
           const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
           if (imageId) this.drawingOverlay.invalidateImage(imageId);
         }
+        this.handleWorkbookImageDeltasForBackground(payload);
         invalidateAndRenderDrawings();
       }),
     );
@@ -3706,20 +3707,51 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Update the in-memory workbook image store.
+   * Replace the workbook-scoped image store.
    *
    * This is currently used by:
    * - in-cell images (shared-grid mode via `CanvasGridImageResolver`)
    * - worksheet background images (tiled pattern behind the grid)
-   *
-   * Note: this is currently an app-local store (not persisted in DocumentController snapshots).
    */
   setWorkbookImages(images: ImageEntry[]): void {
-    this.imageStore.clear();
+    const doc: any = this.document as any;
+    const existingImages: unknown = doc?.images;
+    const existingIds = existingImages instanceof Map ? Array.from(existingImages.keys()).map((id) => String(id ?? "")) : [];
+
+    const nextById = new Map<string, ImageEntry>();
     for (const entry of images) {
-      if (!entry?.id) continue;
-      this.imageStore.set(entry.id, { bytes: entry.bytes, mimeType: entry.mimeType });
+      const id = typeof entry?.id === "string" ? entry.id.trim() : "";
+      if (!id) continue;
+      nextById.set(id, entry);
     }
+
+    // Batch so workbook image hydration becomes a single undo step.
+    this.document.beginBatch({ label: "Set workbook images" });
+    try {
+      for (const id of existingIds) {
+        if (!id) continue;
+        if (nextById.has(id)) continue;
+        try {
+          this.document.deleteImage(id, { source: "setWorkbookImages" });
+        } catch {
+          // ignore
+        }
+      }
+
+      for (const [id, entry] of nextById) {
+        try {
+          this.document.setImage(id, { bytes: entry.bytes, mimeType: entry.mimeType }, { source: "setWorkbookImages" });
+        } catch {
+          // ignore
+        }
+      }
+    } finally {
+      this.document.endBatch();
+    }
+
+    // ImageBitmap caches live inside individual CanvasGridRenderer instances. When the
+    // workbook image store changes, clear cached decoded bitmaps so reused image ids redraw.
+    this.sharedGrid?.renderer?.clearImageCache?.();
 
     // Image bytes may have changed; invalidate decoded bitmaps.
     this.activeSheetBackgroundAbort?.abort();
@@ -4037,9 +4069,9 @@ export class SpreadsheetApp {
 
     if (!desiredId) return;
 
-    const stored = this.imageStore.get(desiredId);
-    if (!stored) return;
-    const entry: ImageEntry = { id: desiredId, bytes: stored.bytes, mimeType: stored.mimeType };
+    const raw = (this.document as any).getImage?.(desiredId);
+    const entry = normalizeImageEntry(desiredId, raw);
+    if (!entry) return;
 
     const token = ++this.activeSheetBackgroundLoadToken;
     const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -4079,6 +4111,25 @@ export class SpreadsheetApp {
 
     // Track in the idle monitor so tests can deterministically await image decode + repaint.
     this.idle.track(promise);
+  }
+
+  private handleWorkbookImageDeltasForBackground(payload: any): void {
+    if (!payload || typeof payload !== "object") return;
+
+    const desiredId = this.sheetBackgroundImageIdBySheet.get(this.sheetId) ?? null;
+    if (!desiredId) return;
+
+    const deltas: unknown = (payload as any).imageDeltas ?? (payload as any).imagesDeltas;
+    if (!Array.isArray(deltas) || deltas.length === 0) return;
+
+    const touched = deltas.some((d) => String((d as any)?.imageId ?? "").trim() === desiredId);
+    if (!touched) return;
+
+    // Force a reload even when the background id itself is unchanged.
+    this.workbookImageBitmaps.invalidate(desiredId);
+    this.activeSheetBackgroundImageId = null;
+    this.activeSheetBackgroundBitmap = null;
+    this.syncActiveSheetBackgroundImage();
   }
 
   private syncSharedGridAxisSizesFromDocument(): void {
@@ -4428,10 +4479,6 @@ export class SpreadsheetApp {
       await this.wasmSyncPromise;
       this.clearComputedValuesByCoord();
       this.document.applyState(snapshot);
-      // The DocumentController snapshot format can include workbook-scoped image bytes
-      // (`snapshot.images`). Keep the UI-level in-cell image store aligned with the
-      // newly-restored workbook so `CellValue::Image` references can resolve.
-      this.syncInCellImageStoreFromDocument();
       // ImageBitmap caches live inside individual CanvasGridRenderer instances. When the
       // workbook changes (applyState), clear caches so we don't show stale images for
       // reused image ids across workbooks/versions.
@@ -4478,27 +4525,6 @@ export class SpreadsheetApp {
       }
     } finally {
       this.wasmSyncSuspended = false;
-    }
-  }
-
-  private syncInCellImageStoreFromDocument(): void {
-    this.imageStore.clear();
-    const doc: any = this.document as any;
-    const images: unknown = doc?.images;
-    if (!(images instanceof Map)) return;
-
-    for (const [id, raw] of images.entries()) {
-      const imageId = typeof id === "string" ? id : String(id ?? "");
-      if (!imageId) continue;
-      if (!raw || typeof raw !== "object") continue;
-      const entry = raw as any;
-      const bytes: unknown = entry.bytes;
-      if (!(bytes instanceof Uint8Array)) continue;
-
-      const mimeTypeRaw: unknown = entry.mimeType;
-      const mimeType = typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== "" ? mimeTypeRaw : "application/octet-stream";
-
-      this.imageStore.set(imageId, { bytes, mimeType });
     }
   }
 
