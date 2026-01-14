@@ -47,6 +47,7 @@ type ShapeTextCacheEntry = {
   rawXml: string;
   parsed: ShapeTextLayout | null;
   hasText: boolean;
+  spec: ShapeRenderSpec | null;
   // Cached line layout to avoid re-measuring/wrapping on every render.
   lines: RenderedLine[] | null;
   linesMaxWidth: number;
@@ -66,6 +67,13 @@ const DEFAULT_OVERLAY_COLOR_TOKENS: OverlayColorTokens = {
 
 const LINE_DASH_NONE: number[] = [];
 const LINE_DASH_PLACEHOLDER: number[] = [4, 2];
+
+const SHAPE_TEXT_INNER_RECT_SCRATCH: Rect = { x: 0, y: 0, width: 0, height: 0 };
+const SHAPE_TEXT_LAYOUT_OPTS_SCRATCH: { wrap: boolean; defaultColor: string; zoom: number } = {
+  wrap: true,
+  defaultColor: "",
+  zoom: 1,
+};
 
 function getRootCssStyle(root: unknown): CssVarStyle | null {
   if (!root || typeof getComputedStyle !== "function") return null;
@@ -966,7 +974,7 @@ export class DrawingOverlay {
           const rawXml = (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
           const rawXmlText = typeof rawXml === "string" ? rawXml : "";
 
-          // Parse `<xdr:txBody>` once and cache; avoid reparsing XML on every frame.
+          // Parse `<xdr:txBody>` / shape render spec once and cache; avoid reparsing XML on every frame.
           let cachedText = this.shapeTextCache.get(obj.id);
           if (!cachedText || cachedText.rawXml !== rawXmlText) {
             const parsed = parseDrawingMLShapeText(rawXmlText);
@@ -976,10 +984,17 @@ export class DrawingOverlay {
                 const text = run.text;
                 return typeof text === "string" && /\S/.test(text);
               });
+            let spec: ShapeRenderSpec | null = null;
+            try {
+              spec = rawXmlText ? parseShapeRenderSpec(rawXmlText) : null;
+            } catch {
+              spec = null;
+            }
             cachedText = {
               rawXml: rawXmlText,
               parsed,
               hasText,
+              spec,
               lines: null,
               linesMaxWidth: Number.NaN,
               linesWrap: true,
@@ -994,12 +1009,7 @@ export class DrawingOverlay {
           const canRenderText = hasText && typeof (ctx as any).measureText === "function";
 
           let rendered = false;
-          let spec: ShapeRenderSpec | null = null;
-          try {
-            spec = rawXmlText ? parseShapeRenderSpec(rawXmlText) : null;
-          } catch {
-            spec = null;
-          }
+          const spec = cachedText.spec;
 
           if (spec) {
             pushClipRect(ctx, clipRect);
@@ -1982,12 +1992,11 @@ function renderShapeText(
 ): void {
   const scale = Number.isFinite(opts.zoom) && opts.zoom > 0 ? opts.zoom : 1;
   const padding = 4 * scale;
-  const inner = {
-    x: bounds.x + padding,
-    y: bounds.y + padding,
-    width: Math.max(0, bounds.width - padding * 2),
-    height: Math.max(0, bounds.height - padding * 2),
-  };
+  const inner = SHAPE_TEXT_INNER_RECT_SCRATCH;
+  inner.x = bounds.x + padding;
+  inner.y = bounds.y + padding;
+  inner.width = Math.max(0, bounds.width - padding * 2);
+  inner.height = Math.max(0, bounds.height - padding * 2);
   if (inner.width <= 0 || inner.height <= 0) return;
   if (layout.textRuns.length === 0) return;
 
@@ -2001,7 +2010,11 @@ function renderShapeText(
     cache.linesZoom === scale &&
     cache.linesDefaultColor === opts.defaultColor;
   if (!cacheValid) {
-    lines = layoutShapeTextLines(ctx, layout.textRuns, inner.width, { wrap, defaultColor: opts.defaultColor, zoom: scale });
+    const layoutOpts = SHAPE_TEXT_LAYOUT_OPTS_SCRATCH;
+    layoutOpts.wrap = wrap;
+    layoutOpts.defaultColor = opts.defaultColor;
+    layoutOpts.zoom = scale;
+    lines = layoutShapeTextLines(ctx, layout.textRuns, inner.width, layoutOpts);
     if (cache) {
       cache.lines = lines;
       cache.linesMaxWidth = inner.width;
