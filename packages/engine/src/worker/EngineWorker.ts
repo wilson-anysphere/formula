@@ -16,8 +16,10 @@ import type {
   PivotCalculationResult,
   PivotConfig,
   PivotSchema,
+  WorkbookStyleDto,
   RewriteFormulaForCopyDeltaRequest,
   RpcCancel,
+  RpcMethod,
   RpcOptions,
   RpcRequest,
   RpcResponseErr,
@@ -292,6 +294,31 @@ export class EngineWorker {
   async setLocale(localeId: string, options?: RpcOptions): Promise<boolean> {
     await this.flush();
     return (await this.invoke("setLocale", { localeId }, options)) as boolean;
+  }
+
+  async setWorkbookFileMetadata(directory: string | null, filename: string | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setWorkbookFileMetadata", { directory, filename }, options);
+  }
+
+  async setCellStyleId(sheet: string, address: string, styleId: number, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setCellStyleId", { sheet, address, styleId }, options);
+  }
+
+  async setColWidth(sheet: string, col: number, width: number | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setColWidth", { sheet, col, width }, options);
+  }
+
+  async setColHidden(sheet: string, col: number, hidden: boolean, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setColHidden", { sheet, col, hidden }, options);
+  }
+
+  async internStyle(style: WorkbookStyleDto, options?: RpcOptions): Promise<number> {
+    await this.flush();
+    return (await this.invoke("internStyle", { style }, options)) as number;
   }
 
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
@@ -576,7 +603,7 @@ export class EngineWorker {
   }
 
   private invoke(
-    method: string,
+    method: RpcMethod,
     params: unknown,
     options?: RpcOptions,
     transfer?: Transferable[]

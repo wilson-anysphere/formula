@@ -117,6 +117,31 @@ class MockWorker implements WorkerLike {
           this.serverPort?.postMessage(response);
           return;
         }
+        if (req.method === "internStyle") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: 123
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
+        if (
+          req.method === "setWorkbookFileMetadata" ||
+          req.method === "setCellStyleId" ||
+          req.method === "setColWidth" ||
+          req.method === "setColHidden"
+        ) {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: null
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
 
         // Default: echo response.
         const response: WorkerOutboundMessage = {
@@ -648,5 +673,77 @@ describe("EngineWorker RPC", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ op });
+  });
+
+  it("sends setWorkbookFileMetadata RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.setWorkbookFileMetadata("/tmp", "book.xlsx");
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "setWorkbookFileMetadata"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ directory: "/tmp", filename: "book.xlsx" });
+  });
+
+  it("flushes pending setCell batches before setColWidth", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Fire-and-forget setCell leaves a pending microtask flush.
+    void engine.setCell("A1", 1);
+
+    await engine.setColWidth("Sheet1", 3, 120);
+
+    const methods = worker.received
+      .filter((msg): msg is RpcRequest => msg.type === "request")
+      .map((msg) => msg.method);
+
+    expect(methods).toEqual(["setCells", "setColWidth"]);
+  });
+
+  it("sends setCellStyleId RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.setCellStyleId("Sheet1", "A1", 7);
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "setCellStyleId"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ sheet: "Sheet1", address: "A1", styleId: 7 });
+  });
+
+  it("internStyle returns the style id from the worker", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const styleId = await engine.internStyle({ font: { bold: true } });
+    expect(styleId).toBe(123);
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "internStyle"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ style: { font: { bold: true } } });
   });
 });

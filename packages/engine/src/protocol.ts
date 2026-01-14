@@ -435,6 +435,54 @@ export interface RpcOptions {
   timeoutMs?: number;
 }
 
+/**
+ * RPC method names supported by the `packages/engine` Web Worker protocol.
+ *
+ * Keep this in sync with:
+ * - `packages/engine/src/worker/EngineWorker.ts` (client)
+ * - `packages/engine/src/engine.worker.ts` (worker dispatch)
+ */
+export type RpcMethod =
+  | "ping"
+  // Editor tooling (module-level; independent of workbook state)
+  | "lexFormula"
+  | "lexFormulaPartial"
+  | "parseFormulaPartial"
+  | "rewriteFormulasForCopyDelta"
+  // Workbook lifecycle
+  | "newWorkbook"
+  | "loadFromJson"
+  | "loadFromXlsxBytes"
+  // Workbook reads/writes
+  | "toJson"
+  | "getCell"
+  | "getCellRich"
+  | "getRange"
+  | "setCells"
+  | "setCellRich"
+  | "setRange"
+  | "setLocale"
+  | "recalculate"
+  | "applyOperation"
+  | "setSheetDimensions"
+  | "getSheetDimensions"
+  // Workbook metadata
+  | "setWorkbookFileMetadata"
+  | "setCellStyleId"
+  | "setColWidth"
+  | "setColHidden"
+  | "internStyle";
+
+/**
+ * Minimal JSON-friendly cell style payload used by `internStyle`.
+ *
+ * This type is intentionally kept flexible: different frontends may have
+ * different style encodings (e.g. snake_case formula-model styles vs
+ * camelCase OOXML-ish styles). The WASM boundary is responsible for validating
+ * and normalizing.
+ */
+export type WorkbookStyleDto = Record<string, unknown>;
+
 export interface InitMessage {
   type: "init";
   port: MessagePort;
@@ -462,7 +510,7 @@ export interface ReadyMessage {
 export interface RpcRequest {
   type: "request";
   id: number;
-  method: string;
+  method: RpcMethod;
   /**
    * Params are structured-cloned across the MessagePort.
    *

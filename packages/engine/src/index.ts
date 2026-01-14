@@ -37,6 +37,8 @@ export type {
   FormulaSpan,
   FormulaToken,
   FunctionContext,
+  RpcMethod,
+  WorkbookStyleDto,
   RewriteFormulaForCopyDeltaRequest,
   RpcOptions,
 } from "./protocol.ts";

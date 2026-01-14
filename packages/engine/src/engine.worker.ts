@@ -31,6 +31,11 @@ type WasmWorkbookInstance = {
   applyOperation?: (op: unknown) => unknown;
   setSheetDimensions?: (sheet: string, rows: number, cols: number) => void;
   getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
+  setWorkbookFileMetadata?: (directory: string | null, filename: string | null) => void;
+  setCellStyleId?: (sheet: string, address: string, styleId: number) => void;
+  setColWidth?: (sheet: string, col: number, width: number | null) => void;
+  setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
+  internStyle?: (style: unknown) => number;
   toJson(): string;
 };
 
@@ -441,6 +446,42 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               } else {
                 result = false;
               }
+              break;
+            case "setWorkbookFileMetadata":
+              if (typeof (wb as any).setWorkbookFileMetadata !== "function") {
+                throw new Error(
+                  "setWorkbookFileMetadata: WasmWorkbook.setWorkbookFileMetadata is not available in this WASM build"
+                );
+              }
+              (wb as any).setWorkbookFileMetadata(params.directory ?? null, params.filename ?? null);
+              result = null;
+              break;
+            case "setCellStyleId":
+              if (typeof (wb as any).setCellStyleId !== "function") {
+                throw new Error("setCellStyleId: WasmWorkbook.setCellStyleId is not available in this WASM build");
+              }
+              (wb as any).setCellStyleId(params.sheet, params.address, params.styleId);
+              result = null;
+              break;
+            case "setColWidth":
+              if (typeof (wb as any).setColWidth !== "function") {
+                throw new Error("setColWidth: WasmWorkbook.setColWidth is not available in this WASM build");
+              }
+              (wb as any).setColWidth(params.sheet, params.col, params.width ?? null);
+              result = null;
+              break;
+            case "setColHidden":
+              if (typeof (wb as any).setColHidden !== "function") {
+                throw new Error("setColHidden: WasmWorkbook.setColHidden is not available in this WASM build");
+              }
+              (wb as any).setColHidden(params.sheet, params.col, Boolean(params.hidden));
+              result = null;
+              break;
+            case "internStyle":
+              if (typeof (wb as any).internStyle !== "function") {
+                throw new Error("internStyle: WasmWorkbook.internStyle is not available in this WASM build");
+              }
+              result = (wb as any).internStyle(params.style);
               break;
             case "recalculate":
               result = normalizeCellChanges(wb.recalculate(params.sheet));

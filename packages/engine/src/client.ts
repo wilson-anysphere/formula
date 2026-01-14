@@ -4,6 +4,7 @@ import type {
   CellDataRich,
   CellScalar,
   CellValueRich,
+  WorkbookStyleDto,
   EditOp,
   EditResult,
   GoalSeekRequest,
@@ -75,6 +76,30 @@ export interface EngineClient {
     options?: RpcOptions
   ): Promise<void>;
   setRange(range: string, values: CellScalar[][], sheet?: string, options?: RpcOptions): Promise<void>;
+  /**
+   * Set workbook-level file metadata used by Excel-compatible functions like `CELL("filename")`.
+   */
+  setWorkbookFileMetadata(directory: string | null, filename: string | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Set a cell's style id (formatting metadata).
+   */
+  setCellStyleId(sheet: string, address: string, styleId: number, options?: RpcOptions): Promise<void>;
+  /**
+   * Set (or clear) a column width override.
+   *
+   * `col` is 0-indexed (engine coordinates). `width=null` clears the override.
+   */
+  setColWidth(sheet: string, col: number, width: number | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Set a column's hidden flag.
+   *
+   * `col` is 0-indexed (engine coordinates).
+   */
+  setColHidden(sheet: string, col: number, hidden: boolean, options?: RpcOptions): Promise<void>;
+  /**
+   * Intern (deduplicate) a style into the workbook's shared style table, returning its id.
+   */
+  internStyle(style: WorkbookStyleDto, options?: RpcOptions): Promise<number>;
   /**
    * Set the locale used by the WASM engine when interpreting user-entered formulas and when
    * parsing locale-sensitive strings at runtime (criteria, VALUE/DATE parsing, etc).
@@ -312,6 +337,15 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     setCells: async (updates, rpcOptions) => await withEngine((connected) => connected.setCells(updates, rpcOptions)),
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
+    setWorkbookFileMetadata: async (directory, filename, rpcOptions) =>
+      await withEngine((connected) => connected.setWorkbookFileMetadata(directory, filename, rpcOptions)),
+    setCellStyleId: async (sheet, address, styleId, rpcOptions) =>
+      await withEngine((connected) => connected.setCellStyleId(sheet, address, styleId, rpcOptions)),
+    setColWidth: async (sheet, col, width, rpcOptions) =>
+      await withEngine((connected) => connected.setColWidth(sheet, col, width, rpcOptions)),
+    setColHidden: async (sheet, col, hidden, rpcOptions) =>
+      await withEngine((connected) => connected.setColHidden(sheet, col, hidden, rpcOptions)),
+    internStyle: async (style, rpcOptions) => await withEngine((connected) => connected.internStyle(style, rpcOptions)),
     setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
     getPivotSchema: async (sheet, sourceRangeA1, sampleSize, rpcOptions) =>
