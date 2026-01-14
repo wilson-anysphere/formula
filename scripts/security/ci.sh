@@ -142,12 +142,16 @@ run_gitleaks() {
 
 find_files() {
   local name="$1"
-  find . -type f -name "$name" \
-    -not -path "./.git/*" \
-    -not -path "*/node_modules/*" \
-    -not -path "*/target/*" \
-    -not -path "./${REPORT_DIR}/*" \
-    2>/dev/null
+  # Use `-prune` to avoid descending into huge build directories. `-not -path` filters still
+  # traverse those trees and can be slow once `target/` or `node_modules/` exists.
+  find . \
+    \( \
+      -name '.git' -o \
+      -name 'node_modules' -o \
+      -name 'target' -o \
+      -path "./${REPORT_DIR}" \
+    \) -prune -o \
+    -type f -name "$name" -print 2>/dev/null
 }
 
 slugify_path() {

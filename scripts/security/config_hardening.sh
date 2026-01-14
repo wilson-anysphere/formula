@@ -23,12 +23,17 @@ while IFS= read -r -d '' f; do
 done < <(
   # Avoid traversing `target/` and `node_modules/` trees, which can be huge in CI (this script is
   # invoked from scripts/security/ci.sh after Rust clippy + Node installs).
-  find . -type f -name "tauri.conf.json" \
-    -not -path "./.git/*" \
-    -not -path "*/node_modules/*" \
-    -not -path "*/target/*" \
-    -not -path "./${REPORT_DIR}/*" \
-    -print0 2>/dev/null
+  #
+  # Note: `-not -path` filters do *not* prevent `find` from descending into directories. Use
+  # `-prune` so we don't walk large build trees just to ignore their matches.
+  find . \
+    \( \
+      -name '.git' -o \
+      -name 'node_modules' -o \
+      -name 'target' -o \
+      -path "./${REPORT_DIR}" \
+    \) -prune -o \
+    -type f -name "tauri.conf.json" -print0 2>/dev/null
 )
 
 if [ ${#tauri_files[@]} -eq 0 ]; then
