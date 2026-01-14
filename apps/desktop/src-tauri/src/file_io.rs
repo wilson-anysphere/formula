@@ -1021,30 +1021,83 @@ fn read_encrypted_ooxml_workbook_blocking(
         },
     };
 
-    // Mirror the non-encrypted XLSX open logic: only retain the decrypted ZIP bytes baseline when
-    // it is within the configured limit. This keeps memory usage bounded even if a user opens a
-    // large password-protected workbook.
-    let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
     let decrypted_zip = Arc::<[u8]>::from(decrypted_zip);
-    let origin_xlsx_bytes = if decrypted_zip.len() <= max_origin_bytes {
-        Some(decrypted_zip.clone())
-    } else {
-        None
+
+    // The decrypted payload is a normal ZIP/OPC package. Sniff whether it is XLSX (`workbook.xml`)
+    // or XLSB (`workbook.bin`) and route to the appropriate reader.
+    let workbook_format = {
+        let cursor = Cursor::new(decrypted_zip.as_ref());
+        let archive = zip::ZipArchive::new(cursor).ok();
+        archive.and_then(|archive| {
+            if zip_archive_has_entry(&archive, "xl/workbook.bin") {
+                Some(SniffedWorkbookFormat::Xlsb)
+            } else if zip_archive_has_entry(&archive, "xl/workbook.xml") {
+                Some(SniffedWorkbookFormat::Xlsx)
+            } else {
+                None
+            }
+        })
     };
 
-    let decrypted_zip_for_reader = decrypted_zip;
-    let open_reader = move || -> anyhow::Result<Box<dyn ReadSeek>> {
-        Ok(Box::new(Cursor::new(decrypted_zip_for_reader.clone())))
-    };
+    match workbook_format {
+        Some(SniffedWorkbookFormat::Xlsb) => {
+            // Open XLSB from in-memory ZIP bytes. Avoid preserving unknown parts to keep memory
+            // usage bounded.
+            let decrypted_zip_for_cols = decrypted_zip.clone();
+            let wb = XlsbWorkbook::from_bytes(
+                decrypted_zip,
+                XlsbOpenOptions {
+                    preserve_unknown_parts: false,
+                    preserve_parsed_parts: false,
+                    preserve_worksheets: false,
+                    decode_formulas: true,
+                },
+            )
+            .with_context(|| format!("open decrypted xlsb workbook {:?}", path))?;
 
-    read_xlsx_or_xlsm_from_open_reader(
-        path,
-        origin_xlsx_bytes,
-        open_reader,
-        MAX_VBA_PROJECT_BIN_BYTES as u64,
-        MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES as u64,
-        MAX_POWER_QUERY_XML_BYTES as u64,
-    )
+            read_xlsb_from_open_workbook(
+                path,
+                wb,
+                move |part_path| {
+                    read_xlsb_col_properties_for_sheet_from_bytes(
+                        decrypted_zip_for_cols.as_ref(),
+                        part_path,
+                    )
+                },
+                // This workbook is encrypted on disk (OLE container), so we don't have an on-disk XLSB
+                // ZIP package we can re-open for lossless `.xlsb` saves.
+                None,
+            )
+        }
+        Some(SniffedWorkbookFormat::Xlsx) => {
+            // Mirror the non-encrypted XLSX open logic: only retain the decrypted ZIP bytes baseline when
+            // it is within the configured limit. This keeps memory usage bounded even if a user opens a
+            // large password-protected workbook.
+            let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
+            let origin_xlsx_bytes = if decrypted_zip.len() <= max_origin_bytes {
+                Some(decrypted_zip.clone())
+            } else {
+                None
+            };
+
+            let decrypted_zip_for_reader = decrypted_zip;
+            let open_reader = move || -> anyhow::Result<Box<dyn ReadSeek>> {
+                Ok(Box::new(Cursor::new(decrypted_zip_for_reader.clone())))
+            };
+
+            read_xlsx_or_xlsm_from_open_reader(
+                path,
+                origin_xlsx_bytes,
+                open_reader,
+                MAX_VBA_PROJECT_BIN_BYTES as u64,
+                MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES as u64,
+                MAX_POWER_QUERY_XML_BYTES as u64,
+            )
+        }
+        _ => anyhow::bail!(
+            "encrypted workbook not supported: decrypted package is not a recognized XLSX/XLSB ZIP container"
+        ),
+    }
 }
 
 fn validate_workbook_open_size(path: &Path) -> anyhow::Result<u64> {
@@ -1639,8 +1692,8 @@ fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_mode
     Some((col_first, col_last, props))
 }
 
-fn read_xlsb_col_properties_for_sheet(
-    path: &Path,
+fn read_xlsb_col_properties_for_sheet_from_zip<R: Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
     part_path: &str,
 ) -> anyhow::Result<BTreeMap<u32, formula_model::ColProperties>> {
     // Stream the worksheet's BIFF12 record stream only until we hit the sheetData block.
@@ -1655,9 +1708,6 @@ fn read_xlsb_col_properties_for_sheet(
 
     const MAX_SCAN_PAYLOAD_BYTES: u64 = 8 * 1024 * 1024; // 8 MiB
     const MAX_COL_INFO_RECORD_BYTES: u32 = 1024; // Defensive; BrtColInfo records are tiny.
-
-    let file = std::fs::File::open(path)?;
-    let mut zip = zip::ZipArchive::new(file).with_context(|| format!("open xlsb zip {:?}", path))?;
 
     let Some(entry_name) = zip
         .file_names()
@@ -1737,23 +1787,33 @@ fn read_xlsb_col_properties_for_sheet(
     Ok(out)
 }
 
-fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
-    // Open XLSB with minimal preservation to reduce memory usage and exposure to
-    // potentially-large/unsupported OPC parts (e.g. embedded media). The desktop app's XLSB save
-    // path re-opens `Workbook::origin_xlsb_path` with preservation disabled as well, so we do not
-    // need to keep `formula-xlsb`'s `preserved_parts` in-memory during read.
-    let wb = XlsbWorkbook::open_with_options(
-        path,
-        XlsbOpenOptions {
-            preserve_unknown_parts: false,
-            preserve_parsed_parts: false,
-            preserve_worksheets: false,
-            // Keep formula decoding enabled to preserve historical behavior (UI-visible formulas).
-            decode_formulas: true,
-        },
-    )
-    .with_context(|| format!("open xlsb workbook {:?}", path))?;
+fn read_xlsb_col_properties_for_sheet(
+    path: &Path,
+    part_path: &str,
+) -> anyhow::Result<BTreeMap<u32, formula_model::ColProperties>> {
+    let file = std::fs::File::open(path)?;
+    let mut zip = zip::ZipArchive::new(file).with_context(|| format!("open xlsb zip {:?}", path))?;
+    read_xlsb_col_properties_for_sheet_from_zip(&mut zip, part_path)
+}
 
+fn read_xlsb_col_properties_for_sheet_from_bytes(
+    bytes: &[u8],
+    part_path: &str,
+) -> anyhow::Result<BTreeMap<u32, formula_model::ColProperties>> {
+    let cursor = Cursor::new(bytes);
+    let mut zip = zip::ZipArchive::new(cursor).context("open xlsb zip from bytes")?;
+    read_xlsb_col_properties_for_sheet_from_zip(&mut zip, part_path)
+}
+
+fn read_xlsb_from_open_workbook<F>(
+    path: &Path,
+    wb: XlsbWorkbook,
+    mut read_col_properties: F,
+    origin_xlsb_path: Option<String>,
+) -> anyhow::Result<Workbook>
+where
+    F: FnMut(&str) -> anyhow::Result<BTreeMap<u32, formula_model::ColProperties>>,
+{
     let date_system = if wb.workbook_properties().date_system_1904 {
         WorkbookDateSystem::Excel1904
     } else {
@@ -1765,7 +1825,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
         power_query_xml: None,
-        origin_xlsb_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsb_path,
         vba_project_bin: None,
         vba_project_signature_bin: None,
         macro_fingerprint: None,
@@ -1796,7 +1856,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         sheet.origin_ordinal = Some(idx);
         // Best-effort: extract per-column metadata (width/hidden) without materializing the full
         // worksheet part. This enables Excel-compatible `CELL("width")` behavior for XLSB inputs.
-        if let Ok(props) = read_xlsb_col_properties_for_sheet(path, &sheet_meta.part_path) {
+        if let Ok(props) = read_col_properties(&sheet_meta.part_path) {
             sheet.col_properties = props;
         }
         let styles = wb.styles();
@@ -1892,6 +1952,10 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     if !missing_formulas.is_empty() {
         // Best-effort: if Calamine can't open the workbook (or doesn't expose formulas), fall back
         // to the cached values only, matching the previous behavior.
+        //
+        // Note: this intentionally uses the on-disk `path` even when the workbook was opened from
+        // decrypted in-memory bytes (encrypted `.xlsb`). In that case Calamine will fail to open
+        // the OLE container and we'll fall back to cached values only.
         let mut calamine_wb = open_workbook_auto(path).ok();
         let mut formula_cache: HashMap<String, HashMap<(usize, usize), String>> = HashMap::new();
         let empty_lookup: HashMap<(usize, usize), String> = HashMap::new();
@@ -1918,6 +1982,31 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         sheet.clear_dirty_cells();
     }
     Ok(out)
+}
+
+fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    // Open XLSB with minimal preservation to reduce memory usage and exposure to
+    // potentially-large/unsupported OPC parts (e.g. embedded media). The desktop app's XLSB save
+    // path re-opens `Workbook::origin_xlsb_path` with preservation disabled as well, so we do not
+    // need to keep `formula-xlsb`'s `preserved_parts` in-memory during read.
+    let wb = XlsbWorkbook::open_with_options(
+        path,
+        XlsbOpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            // Keep formula decoding enabled to preserve historical behavior (UI-visible formulas).
+            decode_formulas: true,
+        },
+    )
+    .with_context(|| format!("open xlsb workbook {:?}", path))?;
+
+    read_xlsb_from_open_workbook(
+        path,
+        wb,
+        |part_path| read_xlsb_col_properties_for_sheet(path, part_path),
+        Some(path.to_string_lossy().to_string()),
+    )
 }
 
 fn calamine_formula_lookup_for_sheet<R, RS>(
@@ -4400,6 +4489,43 @@ mod tests {
             "expected decrypted bytes to be a ZIP/OPC package"
         );
         assert!(!workbook.sheets.is_empty(), "expected sheets to be parsed");
+    }
+
+    #[test]
+    fn read_workbook_blocking_opens_password_protected_xlsb_fixture_with_password() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/encrypted/encrypted.xlsb"
+        );
+        let path = std::path::Path::new(fixture);
+
+        let err = read_workbook_blocking_with_password(path, None)
+            .expect_err("expected missing password to error");
+        assert!(
+            err.to_string().starts_with(PASSWORD_REQUIRED_PREFIX),
+            "expected password-required error, got: {err}"
+        );
+
+        let err = read_workbook_blocking_with_password(path, Some("wrong-password"))
+            .expect_err("expected wrong password to error");
+        assert!(
+            err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
+            "expected invalid-password prefix, got: {err}"
+        );
+
+        // See `fixtures/encrypted/README.md` for provenance and expected contents.
+        let workbook =
+            read_workbook_blocking_with_password(path, Some("tika")).expect("open encrypted xlsb");
+        let sheet = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 should exist");
+        let cell = sheet.get_cell(0, 0);
+        assert_eq!(
+            cell.computed_value,
+            CellScalar::Text("You can't see me".to_string())
+        );
     }
 
     #[test]
