@@ -175,11 +175,16 @@ export class SecondaryGridView {
     const drawingsCanvas = document.createElement("canvas");
     drawingsCanvas.className = "grid-canvas grid-canvas--drawings";
     drawingsCanvas.setAttribute("aria-hidden", "true");
+    drawingsCanvas.classList.add("grid-canvas--shared-drawings");
     drawingsCanvas.style.pointerEvents = "none";
 
     const selectionCanvas = document.createElement("canvas");
     selectionCanvas.className = "grid-canvas grid-canvas--selection";
     selectionCanvas.setAttribute("aria-hidden", "true");
+    // CanvasGridRenderer assigns z-index inline (0/1/2). Ensure the selection layer still
+    // sits above the drawings overlay canvas in shared-grid mode by applying the shared
+    // stacking modifier (charts-overlay.css).
+    selectionCanvas.classList.add("grid-canvas--shared-selection");
 
     this.container.appendChild(gridCanvas);
     this.container.appendChild(contentCanvas);
