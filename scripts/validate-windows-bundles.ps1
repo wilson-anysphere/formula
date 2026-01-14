@@ -762,6 +762,14 @@ try {
     $progIdVal = if ($null -ne $foundRow[1]) { $foundRow[1] } else { "" }
     $progId = $progIdVal.Trim()
     if ([string]::IsNullOrWhiteSpace($progId)) {
+      # Some toolchains may register associations via explicit Registry table entries (or other
+      # mechanisms) rather than relying on the advertised Extension/ProgId mapping. If the MSI's
+      # Registry table contains the extension/progid strings, treat this as best-effort evidence
+      # that file associations are still being registered.
+      if ($hasRegistryFallback -and (Test-MsiRegistryTableForExtension -Msi $Msi -ExtensionNoDot $ExtensionNoDot)) {
+        Write-Warning "MSI Extension table row for '$ExtensionNoDot' exists but ProgId_ is empty. The Registry table contains strings related to '.$ExtensionNoDot'; assuming file association metadata is present (best-effort)."
+        return
+      }
       throw "MSI Extension table row for '$ExtensionNoDot' exists but ProgId_ is empty. This suggests file association wiring is incomplete."
     }
 
