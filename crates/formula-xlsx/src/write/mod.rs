@@ -794,6 +794,7 @@ fn build_parts(
             orig_tab_color,
             orig_merges,
             orig_hyperlinks,
+            orig_drawing_rel_id,
             orig_views,
             orig_sheet_format,
             orig_cols,
@@ -830,6 +831,8 @@ fn build_parts(
             let orig_hyperlinks =
                 crate::parse_worksheet_hyperlinks(orig_xml, rels_xml.as_deref())?;
 
+            let orig_drawing_rel_id = worksheet_drawing_rel_id(orig_xml)?;
+
             let orig_autofilter = crate::autofilter::parse_worksheet_autofilter(orig_xml).map_err(
                 |err| match err {
                     AutoFilterParseError::Xml(e) => WriteError::Xml(e),
@@ -851,6 +854,7 @@ fn build_parts(
                 orig_tab_color,
                 orig_merges,
                 orig_hyperlinks,
+                orig_drawing_rel_id,
                 orig_views,
                 orig_sheet_format,
                 orig_cols,
@@ -864,6 +868,7 @@ fn build_parts(
                 None,
                 Vec::new(),
                 Vec::new(),
+                None,
                 SheetViewSettings::default(),
                 SheetFormatSettings::default(),
                 BTreeMap::new(),
@@ -953,13 +958,22 @@ fn build_parts(
         //
         // This is important for chart-heavy fixtures where a no-op round-trip is expected to
         // preserve `xl/drawings/*` and `.rels` parts byte-for-byte.
-        let existing_drawing_target = match rels_xml.as_deref() {
-            Some(xml) => relationship_target_by_type(xml.as_bytes(), DRAWING_REL_TYPE)?,
+        let existing_sheet_drawing_rel = match rels_xml.as_deref() {
+            Some(xml) => {
+                if let Some(rid) = orig_drawing_rel_id.as_deref() {
+                    match relationship_target_by_id(xml.as_bytes(), rid)? {
+                        Some(target) => Some((rid.to_string(), target)),
+                        None => relationship_id_and_target_by_type(xml.as_bytes(), DRAWING_REL_TYPE)?,
+                    }
+                } else {
+                    relationship_id_and_target_by_type(xml.as_bytes(), DRAWING_REL_TYPE)?
+                }
+            }
             None => None,
         };
-        let existing_drawing_part_path = existing_drawing_target
-            .as_deref()
-            .map(|target| resolve_target(&sheet_meta.path, target));
+        let existing_drawing_part_path = existing_sheet_drawing_rel
+            .as_ref()
+            .map(|(_, target)| resolve_target(&sheet_meta.path, target));
         let has_existing_drawing_part = existing_drawing_part_path
             .as_deref()
             .is_some_and(|path| parts.contains_key(path));
@@ -1111,7 +1125,16 @@ fn build_parts(
             // target path) by only rewriting the drawing part itself. Only synthesize a new
             // relationship when the sheet didn't have one.
             let existing_sheet_drawing_rel = match parts.get(&rels_part) {
-                Some(bytes) => relationship_id_and_target_by_type(bytes, DRAWING_REL_TYPE)?,
+                Some(bytes) => {
+                    if let Some(rid) = orig_drawing_rel_id.as_deref() {
+                        match relationship_target_by_id(bytes, rid)? {
+                            Some(target) => Some((rid.to_string(), target)),
+                            None => relationship_id_and_target_by_type(bytes, DRAWING_REL_TYPE)?,
+                        }
+                    } else {
+                        relationship_id_and_target_by_type(bytes, DRAWING_REL_TYPE)?
+                    }
+                }
                 None => None,
             };
 
@@ -1192,6 +1215,8 @@ fn build_parts(
             // Remove the worksheet-level `<drawing>` pointer and its corresponding relationship
             // entry. We intentionally do not delete the underlying drawing parts/media because
             // they may contain other content that Formula doesn't model yet.
+            let drawing_rid =
+                worksheet_drawing_rel_id(&sheet_xml)?.or_else(|| orig_drawing_rel_id.clone());
             if worksheet_drawing_rel_id(&sheet_xml)?.is_some() {
                 sheet_xml = remove_worksheet_drawing_xml(&sheet_xml)?;
             }
@@ -1203,7 +1228,12 @@ fn build_parts(
                 let rels = crate::relationships::Relationships::from_xml(existing_rels)?;
                 let filtered: Vec<crate::relationships::Relationship> = rels
                     .iter()
-                    .filter(|rel| rel.type_ != DRAWING_REL_TYPE)
+                    .filter(|rel| {
+                        let Some(drawing_rid) = drawing_rid.as_deref() else {
+                            return true;
+                        };
+                        !(rel.id == drawing_rid && rel.type_ == DRAWING_REL_TYPE)
+                    })
                     .cloned()
                     .collect();
                 if filtered.is_empty() {
@@ -1213,19 +1243,13 @@ fn build_parts(
                     parts.insert(rels_part.clone(), rels.to_xml());
                 }
             }
-        } else if has_drawings && existing_drawing_target.is_some() {
+        } else if has_drawings && existing_sheet_drawing_rel.is_some() {
             // We have an existing drawing relationship/part in the source package. Avoid touching
             // any `.rels` / `xl/drawings/*` parts unless we need to add new media. Still ensure the
             // `<drawing>` pointer is present in case other worksheet edits dropped it.
             if worksheet_drawing_rel_id(&sheet_xml)?.is_none() {
-                if let Some((rid, _)) = parts
-                    .get(&rels_part)
-                    .and_then(|bytes| {
-                        relationship_id_and_target_by_type(bytes, DRAWING_REL_TYPE).ok()
-                    })
-                    .flatten()
-                {
-                    sheet_xml = update_worksheet_drawing_xml(&sheet_xml, &rid)?;
+                if let Some((rid, _)) = existing_sheet_drawing_rel.as_ref() {
+                    sheet_xml = update_worksheet_drawing_xml(&sheet_xml, rid)?;
                 }
             }
         }
@@ -7635,6 +7659,48 @@ fn relationship_target_by_type(
                     }
                 }
                 if type_.as_deref() == Some(rel_type) {
+                    return Ok(target);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(None)
+}
+
+fn relationship_target_by_id(rels_xml: &[u8], rel_id: &str) -> Result<Option<String>, WriteError> {
+    let mut reader = Reader::from_reader(rels_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                let mut id = None;
+                let mut target = None;
+                let mut target_mode = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let key = local_name(attr.key.as_ref());
+                    if key.eq_ignore_ascii_case(b"Id") {
+                        id = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"Target") {
+                        target = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"TargetMode") {
+                        target_mode = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+
+                if id.as_deref() == Some(rel_id) {
+                    if target_mode
+                        .as_deref()
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                    {
+                        return Ok(None);
+                    }
                     return Ok(target);
                 }
             }
