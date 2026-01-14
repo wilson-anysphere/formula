@@ -9,6 +9,18 @@ import { runChatWithTools } from "./toolCalling.js";
 import { serializeToolResultForModel } from "./toolResultSerialization.js";
 
 /**
+ * Tool names are identifiers and should not include leading/trailing whitespace.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function normalizeToolCallName(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed || value;
+}
+
+/**
  * @param {string} [message]
  */
 function createAbortError(message = "Aborted") {
@@ -118,7 +130,7 @@ async function collectAssistantMessageFromStream(stream, onStreamEvent, signal) 
 
     if (event.type === "tool_call_start") {
       const call = getOrCreateToolCall(event.id);
-      call.name = event.name;
+      call.name = normalizeToolCallName(event.name);
       continue;
     }
 
@@ -150,7 +162,7 @@ async function collectAssistantMessageFromStream(stream, onStreamEvent, signal) 
     const args = call.args.trim() ? tryParseJson(call.args) : {};
     toolCalls.push({
       id,
-      name: call.name,
+      name: normalizeToolCallName(call.name),
       arguments: args,
     });
   }

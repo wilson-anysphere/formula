@@ -68,6 +68,72 @@ describe("runChatWithTools", () => {
     expect(result.final).toBe("A1 is 42.");
   });
 
+  it("trims tool call names before dispatching to the tool executor", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 42 });
+    const executor = new SpreadsheetToolExecutor(workbook);
+
+    const toolExecutor = {
+      tools: [
+        {
+          name: "read_range",
+          description: TOOL_REGISTRY.read_range.description,
+          parameters: TOOL_REGISTRY.read_range.jsonSchema,
+        },
+      ],
+      async execute(call: any) {
+        // The LLM may include leading/trailing whitespace around tool names; the loop
+        // should normalize it so tool dispatch still works.
+        expect(call.name).toBe("read_range");
+        const result = await executor.execute({ name: call.name, parameters: call.arguments });
+        if (!result.ok) throw new Error(result.error?.message ?? "tool failed");
+        return result;
+      },
+    };
+
+    let callCount = 0;
+    const client = {
+      async chat(request: any) {
+        callCount++;
+
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [
+                {
+                  id: "call-1",
+                  name: "  read_range  ",
+                  arguments: { range: "Sheet1!A1:A1" },
+                },
+              ],
+            },
+          };
+        }
+
+        const lastMessage = request.messages.at(-1);
+        expect(lastMessage.role).toBe("tool");
+        expect(lastMessage.toolCallId).toBe("call-1");
+
+        return {
+          message: {
+            role: "assistant",
+            content: "A1 is 42.",
+          },
+        };
+      },
+    };
+
+    const result = await runChatWithTools({
+      client: client as any,
+      toolExecutor: toolExecutor as any,
+      messages: [{ role: "user", content: "What's in A1?" }],
+    });
+
+    expect(result.final).toBe("A1 is 42.");
+  });
+
   it("enforces approval for tools that require it", async () => {
     const client = {
       async chat() {

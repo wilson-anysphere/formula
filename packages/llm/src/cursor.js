@@ -34,6 +34,17 @@ function tryParseJson(input) {
 }
 
 /**
+ * Tool names are identifiers and should not include leading/trailing whitespace.
+ *
+ * @param {unknown} value
+ */
+function normalizeToolCallName(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed || value;
+}
+
+/**
  * @param {import("./types.js").LLMMessage[]} messages
  */
 function toChatCompletionsMessages(messages) {
@@ -54,7 +65,7 @@ function toChatCompletionsMessages(messages) {
           id: c.id,
           type: "function",
           function: {
-            name: c.name,
+            name: normalizeToolCallName(c.name),
             arguments: toJsonString(c.arguments),
           },
         })),
@@ -300,7 +311,7 @@ export class CursorLLMClient {
       const toolCalls = rawToolCalls
         .map((c, index) => ({
           id: typeof c?.id === "string" ? c.id : `toolcall-${index}`,
-          name: c?.function?.name,
+          name: normalizeToolCallName(c?.function?.name),
           arguments: tryParseJson(c?.function?.arguments ?? "{}"),
         }))
         .filter((c) => typeof c.name === "string" && c.name.length > 0);
@@ -543,10 +554,11 @@ export class CursorLLMClient {
             const index = callDelta?.index;
             if (typeof index !== "number") continue;
 
-            const state = toolCallsByIndex.get(index) ?? { started: false, pendingArgs: "", args: "" };
-            const idFromDelta = typeof callDelta?.id === "string" ? callDelta.id : null;
-            const nameFromDelta = typeof callDelta?.function?.name === "string" ? callDelta.function.name : null;
-            const argsFragment = typeof callDelta?.function?.arguments === "string" ? callDelta.function.arguments : null;
+          const state = toolCallsByIndex.get(index) ?? { started: false, pendingArgs: "", args: "" };
+          const idFromDelta = typeof callDelta?.id === "string" ? callDelta.id : null;
+          const nameFromDelta =
+            typeof callDelta?.function?.name === "string" ? normalizeToolCallName(callDelta.function.name) : null;
+          const argsFragment = typeof callDelta?.function?.arguments === "string" ? callDelta.function.arguments : null;
 
             if (idFromDelta) state.id = idFromDelta;
             if (nameFromDelta) state.name = nameFromDelta;

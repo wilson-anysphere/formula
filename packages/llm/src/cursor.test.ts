@@ -99,6 +99,34 @@ describe("CursorLLMClient.chat (chat completions tool calling)", () => {
     expect(response.message.toolCalls).toEqual([{ id: "call_1", name: "getData", arguments: { a: 1 } }]);
   });
 
+  it("trims tool call names parsed from chat completions responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    { id: "call_1", type: "function", function: { name: "  getData  ", arguments: '{"a":1}' } },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as any,
+    );
+
+    const client = new CursorLLMClient({ baseUrl: "https://example.com", model: "gpt-test", timeoutMs: 1_000 });
+    const response = await client.chat({ messages: [{ role: "user", content: "hi" }] as any });
+    expect(response.message.toolCalls).toEqual([{ id: "call_1", name: "getData", arguments: { a: 1 } }]);
+  });
+
   it("synthesizes missing tool call ids (`toolcall-0`, ...)", async () => {
     vi.stubGlobal(
       "fetch",
@@ -203,4 +231,3 @@ describe("CursorLLMClient.chat (chat completions tool calling)", () => {
     expect(response.usage).toEqual({ promptTokens: 1, completionTokens: 2, totalTokens: 3 });
   });
 });
-

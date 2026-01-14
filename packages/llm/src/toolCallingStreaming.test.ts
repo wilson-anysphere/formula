@@ -93,6 +93,51 @@ describe("runChatWithToolsStreaming", () => {
     expect(nonStreamingResult.messages).toEqual(streamingResult.messages);
   });
 
+  it("trims streamed tool call names before executing tools", async () => {
+    const toolExecutor: ToolExecutor = {
+      tools: [
+        {
+          name: "read_range",
+          description: "read range",
+          parameters: { type: "object", properties: { range: { type: "string" } }, required: ["range"] },
+        },
+      ],
+      execute: vi.fn(async (call: any) => {
+        expect(call.name).toBe("read_range");
+        expect(call.arguments).toEqual({ range: "Sheet1!A1:A1" });
+        return { ok: true, data: { values: [[42]] } };
+      }),
+    };
+
+    let streamCalls = 0;
+    const client = {
+      async chat() {
+        throw new Error("chat() should not be called when streamChat is available");
+      },
+      async *streamChat() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "tool_call_start", id: "call-1", name: "  read_range  " } satisfies ChatStreamEvent;
+          yield { type: "tool_call_delta", id: "call-1", delta: '{"range":"Sheet1!A1:A1"}' } satisfies ChatStreamEvent;
+          yield { type: "done" } satisfies ChatStreamEvent;
+          return;
+        }
+
+        yield { type: "text", delta: "done" } satisfies ChatStreamEvent;
+        yield { type: "done" } satisfies ChatStreamEvent;
+      },
+    };
+
+    const result = await runChatWithToolsStreaming({
+      client: client as any,
+      toolExecutor,
+      messages: [{ role: "user", content: "What's in A1?" }],
+    });
+
+    expect(result.final).toBe("done");
+    expect(toolExecutor.execute).toHaveBeenCalledTimes(1);
+  });
+
   it("summarizes large tool results before appending them to the next streamed request", async () => {
     const bigValues = Array.from({ length: 100 }, (_, r) => Array.from({ length: 100 }, (_, c) => r * 100 + c));
     const maxToolResultChars = 1_000;

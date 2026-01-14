@@ -14,6 +14,18 @@
 import { serializeToolResultForModel } from "./toolResultSerialization.js";
 
 /**
+ * Tool names are identifiers and should not include leading/trailing whitespace.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function normalizeToolCallName(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed || value;
+}
+
+/**
  * @param {string} [message]
  */
 function createAbortError(message = "Aborted") {
@@ -123,6 +135,15 @@ export async function runChatWithTools(params) {
         signal: params.signal,
       }),
     );
+
+    // Normalize tool call names defensively (some providers/models may include
+    // leading/trailing whitespace, which would break tool dispatch).
+    if (Array.isArray(response.message?.toolCalls)) {
+      for (const call of response.message.toolCalls) {
+        const normalized = normalizeToolCallName(call?.name);
+        if (normalized && normalized !== call.name) call.name = normalized;
+      }
+    }
 
     messages.push(response.message);
 
