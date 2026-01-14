@@ -46,6 +46,11 @@ Desktop also injects a locale-aware `FunctionRegistry` so **function-name comple
 - Example (de-DE): typing `=SU` suggests `=SUMME(`.
 - Implementation: `apps/desktop/src/ai/completion/parsePartialFormula.ts` (`createLocaleAwareFunctionRegistry()`).
   - Localized aliases are derived from the engine’s TSV translation tables.
+    - These TSVs are generated from locale source JSON files under
+      `crates/formula-engine/src/locale/data/sources/`; see
+      [`crates/formula-engine/src/locale/data/README.md`](../crates/formula-engine/src/locale/data/README.md).
+      For `es-ES`, sources must come from the Excel extractor and cover the full function catalog to
+      avoid silently falling back to English spellings.
   - Aliases apply a small `FunctionSpec.completionBoost` so localized names win ranking when multiple functions share a prefix (e.g. `SUMME(` beats `SUMIF(` for `SU`).
 - Desktop also sets `TabCompletionEngine`’s `starterFunctions` option (a getter function) so the **starter stubs** shown for a bare `=`
   are localized where possible (e.g. de-DE `=` → `=SUMME(`).
