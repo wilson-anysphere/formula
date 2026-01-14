@@ -132,6 +132,35 @@ fn sheet_3d_span_uses_tab_order_after_reorder() {
 }
 
 #[test]
+fn sheet_3d_span_reversed_uses_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    // This is a reversed span (`Sheet3:Sheet2`) which should behave the same as `Sheet2:Sheet3`
+    // (i.e. the included sheets are determined by workbook tab order, not textual direction).
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SHEET(Sheet3:Sheet2!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SHEETS(Sheet3:Sheet2!A1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    engine.recalculate_single_threaded();
+
+    // Tab order is now: Sheet3, Sheet1, Sheet2.
+    // So the span `Sheet3:Sheet2` includes all three sheets and starts on Sheet3.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+}
+
+#[test]
 fn sheet_string_name_uses_tab_order_after_reorder() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
