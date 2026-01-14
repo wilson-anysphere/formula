@@ -1388,7 +1388,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
-   - macOS: `.dmg.sig` and updater tarball signature (`*.tar.gz.sig`/`*.tgz.sig`; usually `.app.tar.gz.sig`)
+   - macOS: `.dmg.sig` and updater tarball signature (`*.tar.gz.sig`/`*.tgz.sig`; usually `*.app.tar.gz.sig`)
    - Windows (each architecture): `.msi.sig` and `.exe.sig`
    - Linux (each architecture): `.AppImage.sig`, `.deb.sig`, `.rpm.sig`
 
