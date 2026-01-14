@@ -144,6 +144,9 @@ describe("ImageBitmapCache", () => {
 
     // Let the underlying decode complete to ensure there are no unhandled promise rejections.
     resolveDecode({} as ImageBitmap);
+    // `ImageBitmapCache.decode` is async and may schedule multiple microtasks before the
+    // cache's internal `.then` handlers run; flush a couple of turns so cleanup completes.
+    await Promise.resolve();
     await Promise.resolve();
 
     await cache.get(entry);
@@ -208,6 +211,8 @@ describe("ImageBitmapCache", () => {
 
     // When the decode eventually resolves, the bitmap should be closed since no one is still awaiting it.
     resolveDecode(bitmap);
+    // Flush internal `.then` handlers (see note in abort test above).
+    await Promise.resolve();
     await Promise.resolve();
 
     expect(close).toHaveBeenCalledTimes(1);
