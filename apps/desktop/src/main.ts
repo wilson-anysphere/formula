@@ -2867,7 +2867,16 @@ function reconcileSheetStoreWithDocument(ids: string[]): void {
       workbookSheetStore.remove(sheet.id);
     } catch {
       // Best-effort: avoid crashing the UI if the sheet store invariants don't
-      // allow the removal (e.g. last-sheet guard).
+      // allow the removal (e.g. last-visible-sheet guard).
+      //
+      // The DocumentController is the source of truth for sheet ids here. If the
+      // sheet store refuses the removal due to Excel-style invariants, fall back
+      // to replacing the store snapshot so we still drop the orphaned sheet id.
+      try {
+        workbookSheetStore.replaceAll(workbookSheetStore.listAll().filter((s) => s.id !== sheet.id));
+      } catch {
+        // ignore
+      }
     }
   }
 }
