@@ -25,9 +25,13 @@ function nextExtensionsUiDialogTitleId(kind) {
 function showModal(dialog) {
   // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
   if (typeof dialog.showModal === "function") {
-    // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
-    dialog.showModal();
-    return;
+    try {
+      // @ts-expect-error - HTMLDialogElement.showModal() not implemented in jsdom.
+      dialog.showModal();
+      return;
+    } catch {
+      // Fall through to non-modal open attribute.
+    }
   }
   // jsdom doesn't implement showModal(). Best-effort fallback so unit tests can
   // drive the DOM without a full dialog polyfill.
@@ -118,6 +122,11 @@ export function showToast(message, type = "info", options = {}) {
  */
 export async function showInputBox(options = {}) {
   if (typeof document === "undefined" || !document.body) return null;
+
+  // Avoid throwing when another modal dialog is already open. Treat this as a cancel
+  // so callers don't hang awaiting a prompt that can never become modal.
+  const openModal = document.querySelector("dialog[open]");
+  if (openModal) return null;
 
   const dialog = document.createElement("dialog");
   dialog.className = "dialog extensions-ui";
@@ -241,6 +250,11 @@ export async function showInputBox(options = {}) {
  */
 export async function showQuickPick(items, options = {}) {
   if (typeof document === "undefined" || !document.body) return null;
+
+  // Avoid throwing when another modal dialog is already open. Treat this as a cancel
+  // so callers don't hang awaiting a prompt that can never become modal.
+  const openModal = document.querySelector("dialog[open]");
+  if (openModal) return null;
 
   const dialog = document.createElement("dialog");
   dialog.className = "dialog extensions-ui";

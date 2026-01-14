@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { showInputBox } from "./ui.js";
 
@@ -70,5 +70,35 @@ describe("extensions/ui showInputBox", () => {
     );
 
     await expect(promise).resolves.toBe('{"a": 1}');
+  });
+
+  it("still works when HTMLDialogElement.showModal throws (best-effort fallback)", async () => {
+    const proto = (globalThis as any).HTMLDialogElement?.prototype;
+    const original = proto?.showModal;
+    if (!proto) throw new Error("Missing HTMLDialogElement prototype");
+
+    try {
+      proto.showModal = () => {
+        throw new Error("boom");
+      };
+
+      const promise = showInputBox({ prompt: "Name", value: "default" });
+      const dialog = document.querySelector('dialog[data-testid="input-box"]') as HTMLDialogElement | null;
+      expect(dialog).not.toBeNull();
+
+      const input = dialog!.querySelector('[data-testid="input-box-field"]') as HTMLInputElement | null;
+      expect(input).not.toBeNull();
+      input!.value = "hello";
+
+      const ok = dialog!.querySelector('[data-testid="input-box-ok"]') as HTMLButtonElement | null;
+      expect(ok).not.toBeNull();
+      ok!.click();
+
+      await expect(promise).resolves.toBe("hello");
+    } finally {
+      if (original) proto.showModal = original;
+      else delete proto.showModal;
+      vi.restoreAllMocks();
+    }
   });
 });
