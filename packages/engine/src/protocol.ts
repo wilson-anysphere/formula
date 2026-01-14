@@ -561,8 +561,6 @@ export type RpcMethod =
   | "getSheetDimensions"
   | "renameSheet"
   // Workbook metadata
-  | "getCalcSettings"
-  | "setCalcSettings"
   | "setWorkbookFileMetadata"
   | "setCellStyleId"
   | "setRowStyleId"
