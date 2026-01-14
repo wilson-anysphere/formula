@@ -572,7 +572,12 @@ export class DrawingOverlay {
         const imageId = obj.kind.imageId;
         if (prefetchedImageBitmaps.has(imageId)) continue;
         const entry = this.images.get(imageId);
-        if (!entry) continue;
+        if (!entry) {
+          // Start best-effort hydration early so async image byte loading can overlap with any
+          // in-flight decode awaits for earlier z-order images.
+          this.hydrateImage(imageId);
+          continue;
+        }
         const bitmapPromise = this.bitmapCache.get(entry, signal ? { signal } : undefined);
         // Attach a no-op rejection handler immediately so failures for images later in the
         // z-order (or in cancelled render passes) don't surface as unhandled promise

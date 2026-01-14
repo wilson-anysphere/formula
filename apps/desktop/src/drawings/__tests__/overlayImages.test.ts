@@ -153,6 +153,43 @@ describe("DrawingOverlay images", () => {
     expect(drawCalls[1]!.args[0]).toBe(bitmap2);
   });
 
+  it("starts async hydration for later images while earlier decodes are still pending", async () => {
+    const { ctx } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const entry1: ImageEntry = { id: "img1", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
+
+    const getAsync = vi.fn(async () => undefined);
+    const images: ImageStore = {
+      get: (id) => (id === "img1" ? entry1 : undefined),
+      set: () => {},
+      getAsync,
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    let resolveBitmap!: (bitmap: ImageBitmap) => void;
+    const bitmapPromise = new Promise<ImageBitmap>((resolve) => {
+      resolveBitmap = resolve;
+    });
+    const getBitmapMock = vi.fn(() => bitmapPromise);
+    (overlay as any).bitmapCache = { get: getBitmapMock };
+
+    const obj1 = createImageObject({ id: 1, imageId: "img1", zOrder: 0, x: 5, y: 7 });
+    const obj2 = createImageObject({ id: 2, imageId: "img2", zOrder: 1, x: 15, y: 17 });
+
+    const renderPromise = overlay.render([obj1, obj2], viewport);
+
+    // Allow the overlay to reach its first `await` (waiting for img1 decode) and flush microtasks.
+    await Promise.resolve();
+
+    // Hydration for img2 should have been kicked off even though we haven't resolved img1's bitmap yet.
+    expect(getAsync).toHaveBeenCalledWith("img2");
+
+    resolveBitmap({ tag: "bitmap1" } as unknown as ImageBitmap);
+    await renderPromise;
+  });
+
   it("does not prefetch offscreen images", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
