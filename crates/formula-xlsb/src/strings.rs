@@ -145,7 +145,12 @@ fn decode_len_prefixed_utf16le_u32(data: &[u8], offset: usize) -> Option<String>
     let raw_len: [u8; 4] = data.get(offset..offset + 4)?.try_into().ok()?;
     let cch = u32::from_le_bytes(raw_len) as usize;
     // Guard against absurd lengths from random data.
-    if cch == 0 || cch > 1_000_000 {
+    //
+    // Even though this field is sometimes encoded as a `u32`, Excel cell text is bounded and
+    // phonetic guide strings are expected to be relatively small. Treat anything larger than the
+    // maximum `u16` length as suspicious and skip it. This keeps the best-effort phonetic decoder
+    // from allocating attacker-controlled buffers when scanning large opaque payloads.
+    if cch == 0 || cch > u16::MAX as usize {
         return None;
     }
     let bytes_needed = cch.checked_mul(2)?;
@@ -382,5 +387,21 @@ mod tests {
 
         let next = rr.read_u32().expect("read next field");
         assert_eq!(next, 0x55667788);
+    }
+
+    #[test]
+    fn decode_len_prefixed_utf16le_u32_rejects_lengths_larger_than_u16() {
+        // Ensure the best-effort phonetic decoder does not try to allocate arbitrarily large
+        // buffers when scanning for a length-prefixed UTF-16LE string.
+        let cch = u16::MAX as u32 + 1;
+        let mut data = vec![0u8; 4 + (cch as usize) * 2];
+        data[..4].copy_from_slice(&cch.to_le_bytes());
+        for i in 0..cch as usize {
+            let start = 4 + i * 2;
+            data[start] = 0x41; // 'A'
+            data[start + 1] = 0;
+        }
+
+        assert!(decode_len_prefixed_utf16le_u32(&data, 0).is_none());
     }
 }
