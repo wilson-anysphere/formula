@@ -35,11 +35,15 @@ function isTestFile(relPath: string): boolean {
 describe("tauri/api guardrails", () => {
   it("does not access __TAURI__.event / __TAURI__.window / dialog.open/save outside src/tauri/api", async () => {
     const files = await collectSourceFiles(SRC_ROOT);
-    const violations: string[] = [];
+    const violations = new Set<string>();
 
     // Keep these regexes intentionally narrow so we don't block other (non-event/window)
     // uses of `__TAURI__` in the renderer (e.g. core.invoke, notifications, etc).
-    const bannedLineRes: RegExp[] = [
+    // These regexes are applied against the full file contents (not line-by-line) so we also
+    // catch multi-line chains like:
+    //   (globalThis as any).__TAURI__?.dialog
+    //     ?.open(...)
+    const bannedRes: RegExp[] = [
       // Event API access (listen/emit) should go through getTauriEventApiOr{Null,Throw}.
       /\b__TAURI__\s*(?:\?\.)\s*event\b/,
       /\b__TAURI__\s*\.\s*event\b/,
@@ -107,17 +111,25 @@ describe("tauri/api guardrails", () => {
 
       const content = await readFile(absPath, "utf8");
       const lines = content.split(/\r?\n/);
-      for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i] ?? "";
-        if (bannedLineRes.some((re) => re.test(line))) {
-          violations.push(`${relPath}:${i + 1}: ${line.trim()}`);
+
+      for (const re of bannedRes) {
+        const globalRe = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+        let match: RegExpExecArray | null = null;
+        while ((match = globalRe.exec(content)) != null) {
+          const start = match.index;
+          const lineNumber = content.slice(0, start).split(/\r?\n/).length;
+          const line = lines[lineNumber - 1] ?? "";
+          violations.add(`${relPath}:${lineNumber}: ${line.trim()}`);
+
+          // Avoid infinite loops on zero-length matches.
+          if (match[0].length === 0) globalRe.lastIndex += 1;
         }
       }
     }
 
-    if (violations.length > 0) {
+    if (violations.size > 0) {
       throw new Error(
-        "Found direct __TAURI__ dialog/window/event access outside src/tauri/api:\n" + violations.join("\n"),
+        "Found direct __TAURI__ dialog/window/event access outside src/tauri/api:\n" + [...violations].join("\n"),
       );
     }
   });
