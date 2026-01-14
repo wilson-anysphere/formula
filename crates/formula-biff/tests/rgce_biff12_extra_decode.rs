@@ -12,6 +12,12 @@ fn ptg_namex(ixti: u16, name_index: u16) -> [u8; 5] {
     [0x39, ixti_lo, ixti_hi, idx_lo, idx_hi] // PtgNameX
 }
 
+fn ptg_namex_value(ixti: u16, name_index: u16) -> [u8; 5] {
+    let [ixti_lo, ixti_hi] = ixti.to_le_bytes();
+    let [idx_lo, idx_hi] = name_index.to_le_bytes();
+    [0x59, ixti_lo, ixti_hi, idx_lo, idx_hi] // PtgNameXV
+}
+
 fn ptg_funcvar_udf(argc: u8) -> [u8; 4] {
     // PtgFuncVar(argc, iftab=0x00FF)
     [0x22, argc, 0xFF, 0x00]
@@ -34,6 +40,21 @@ fn decodes_udf_call_via_namex_and_sentinel_funcvar() {
 
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "ExternName_IXTI1_N2(1,2)");
+    assert_parseable(&text);
+}
+
+#[test]
+fn decodes_udf_call_via_value_class_namex_and_sentinel_funcvar() {
+    // Same as `decodes_udf_call_via_namex_and_sentinel_funcvar`, but with the value-class
+    // `PtgNameX` variant (0x59), which should preserve the implicit intersection marker.
+    let mut rgce = Vec::new();
+    rgce.extend_from_slice(&ptg_int(1));
+    rgce.extend_from_slice(&ptg_int(2));
+    rgce.extend_from_slice(&ptg_namex_value(1, 2));
+    rgce.extend_from_slice(&ptg_funcvar_udf(3));
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@ExternName_IXTI1_N2(1,2)");
     assert_parseable(&text);
 }
 
