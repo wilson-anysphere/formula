@@ -223,5 +223,77 @@ describe("SpreadsheetApp legacy drawings pointercancel", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("abandons a legacy drawing resize gesture on pointercancel without committing to the DocumentController", () => {
+    const root = createRoot({ width: 800, height: 600 });
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // Disable DrawingInteractionController so we exercise SpreadsheetApp's legacy drawing gesture state machine.
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+
+    const sheetId = app.getCurrentSheetId();
+    const doc: any = app.getDocument() as any;
+
+    const startCx = pxToEmu(100);
+    const startCy = pxToEmu(100);
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "shape", label: "box" },
+      zOrder: 0,
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: startCx, cy: startCy },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [drawing], { label: "Insert Picture" });
+
+    const historyBefore = doc.history.length;
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+    // Start resizing from the bottom-right handle (se). Handles are centered on corners, so landing
+    // exactly on the corner should begin a resize gesture.
+    const downX = rowHeaderWidth + 100;
+    const downY = colHeaderHeight + 100;
+    dispatchPointerEvent(selectionCanvas, "pointerdown", { clientX: downX, clientY: downY, pointerId: 1, button: 0, buttons: 1 });
+
+    // Resize it slightly so there is a preview delta.
+    dispatchPointerEvent(selectionCanvas, "pointermove", {
+      clientX: downX + 20,
+      clientY: downY + 30,
+      pointerId: 1,
+      buttons: 1,
+    });
+
+    const previewAnchor: any = app.getDrawingObjects(sheetId)[0]!.anchor;
+    expect(previewAnchor.type).toBe("absolute");
+    expect(previewAnchor.size.cx).not.toBe(startCx);
+    expect(previewAnchor.size.cy).not.toBe(startCy);
+
+    // Cancel the gesture (e.g. OS/browser cancels pointer capture).
+    dispatchPointerEvent(selectionCanvas, "pointercancel", { clientX: downX + 20, clientY: downY + 30, pointerId: 1 });
+
+    // The document should not be mutated / no new undo step created.
+    expect(doc.history.length).toBe(historyBefore);
+    const committed = doc.getSheetDrawings(sheetId)[0];
+    expect(committed.anchor.type).toBe("absolute");
+    expect(committed.anchor.size.cx).toBe(startCx);
+    expect(committed.anchor.size.cy).toBe(startCy);
+
+    // The live preview should revert to the persisted document snapshot.
+    const afterCancel: any = app.getDrawingObjects(sheetId)[0]!.anchor;
+    expect(afterCancel.type).toBe("absolute");
+    expect(afterCancel.size.cx).toBe(startCx);
+    expect(afterCancel.size.cy).toBe(startCy);
+
+    app.destroy();
+    root.remove();
+  });
+});
