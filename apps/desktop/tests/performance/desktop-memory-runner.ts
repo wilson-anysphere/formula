@@ -22,6 +22,7 @@ type Summary = {
 };
 
 function usage(): string {
+  const defaults = resolveDesktopMemoryBenchEnv({ env: {} });
   return [
     'Desktop idle memory benchmark runner (real Tauri binary).',
     '',
@@ -29,11 +30,11 @@ function usage(): string {
     '  node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts [options]',
     '',
     'Options:',
-    '  --runs <n>                 Iterations (env: FORMULA_DESKTOP_MEMORY_RUNS, default: 10)',
-    '  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: 20000)',
-    '  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: 5000)',
+    `  --runs <n>                 Iterations (env: FORMULA_DESKTOP_MEMORY_RUNS, default: ${defaults.runs})`,
+    `  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: ${defaults.timeoutMs})`,
+    `  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: ${defaults.settleMs})`,
     '  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN)',
-    '  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB, default: 100)',
+    `  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB, default: ${defaults.targetMb})`,
     '  --json, --json-path <path> Write JSON output (samples + summary) to this path',
     '  --enforce                  Exit non-zero if p95 exceeds target (env: FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1)',
     '  --allow-ci                 Allow running under CI without FORMULA_RUN_DESKTOP_MEMORY_BENCH=1',

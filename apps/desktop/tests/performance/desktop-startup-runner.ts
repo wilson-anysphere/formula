@@ -39,6 +39,7 @@ type Summary = {
 };
 
 function usage(): string {
+  const defaults = resolveDesktopStartupRunEnv({ env: {} });
   return [
     "Desktop startup benchmark runner (real Tauri binary).",
     "",
@@ -47,8 +48,8 @@ function usage(): string {
     "",
     "Options:",
     "  --mode <cold|warm>               Startup mode (env: FORMULA_DESKTOP_STARTUP_MODE, default: cold)",
-    "  --runs <n>                       Iterations (env: FORMULA_DESKTOP_STARTUP_RUNS, default: 20)",
-    "  --timeout-ms <ms>                Timeout per run (env: FORMULA_DESKTOP_STARTUP_TIMEOUT_MS, default: 15000)",
+    `  --runs <n>                       Iterations (env: FORMULA_DESKTOP_STARTUP_RUNS, default: ${defaults.runs})`,
+    `  --timeout-ms <ms>                Timeout per run (env: FORMULA_DESKTOP_STARTUP_TIMEOUT_MS, default: ${defaults.timeoutMs})`,
     "  --bin, --bin-path <path>         Desktop binary path (env: FORMULA_DESKTOP_BIN)",
     "  --startup-bench, --shell         Shell-only startup (default in CI)",
     "  --full                           Full app startup (default locally)",
