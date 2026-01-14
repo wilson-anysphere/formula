@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { stripComments } from "../../../apps/desktop/test/sourceTextUtils.js";
+
 function extractStarExports(code) {
   const exports = [];
   // Allow optional semicolons so the test stays robust across formatting changes.
@@ -16,8 +18,8 @@ test("ai-context: src/index.d.ts mirrors src/index.js exports", async () => {
   const indexJsUrl = new URL("../src/index.js", import.meta.url);
   const indexDtsUrl = new URL("../src/index.d.ts", import.meta.url);
 
-  const indexJs = await readFile(indexJsUrl, "utf8");
-  const indexDts = await readFile(indexDtsUrl, "utf8");
+  const indexJs = stripComments(await readFile(indexJsUrl, "utf8"));
+  const indexDts = stripComments(await readFile(indexDtsUrl, "utf8"));
 
   const jsExports = extractStarExports(indexJs);
   const dtsExports = extractStarExports(indexDts);
@@ -37,4 +39,3 @@ test("ai-context: src/index.d.ts mirrors src/index.js exports", async () => {
     await readFile(dtsUrl, "utf8");
   }
 });
-

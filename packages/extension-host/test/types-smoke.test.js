@@ -5,6 +5,8 @@ const path = require("node:path");
 test("extension-api types file exports the expected surface", async () => {
   const dtsPath = path.resolve(__dirname, "../../extension-api/index.d.ts");
   const text = await require("node:fs/promises").readFile(dtsPath, "utf8");
+  const { stripComments } = await import("../../../apps/desktop/test/sourceTextUtils.js");
+  const source = stripComments(text);
 
   // Smoke checks only: the repo CI may not run a full TS compile, but we still want to catch
   // accidental removals of key API declarations promised by docs/10-extensibility.md.
@@ -28,6 +30,6 @@ test("extension-api types file exports the expected surface", async () => {
     "export namespace dataConnectors",
     "function register(connectorId: string, impl: DataConnectorImplementation): Promise<Disposable>;"
   ]) {
-    assert.ok(text.includes(fragment), `Missing declaration fragment: ${fragment}`);
+    assert.ok(source.includes(fragment), `Missing declaration fragment: ${fragment}`);
   }
 });

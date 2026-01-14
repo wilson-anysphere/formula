@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { stripComments } from "../../../apps/desktop/test/sourceTextUtils.js";
+
 function extractStarExports(code) {
   const exports = [];
   // Allow optional semicolons so this stays robust across formatting styles.
@@ -61,7 +63,7 @@ function dtsDeclaresExport(dts, name) {
 
 test("ai-context: all index-exported modules have matching named exports in their .d.ts files", async () => {
   const indexJsUrl = new URL("../src/index.js", import.meta.url);
-  const indexJs = await readFile(indexJsUrl, "utf8");
+  const indexJs = stripComments(await readFile(indexJsUrl, "utf8"));
 
   const modules = extractStarExports(indexJs).filter((spec) => spec.endsWith(".js"));
 
@@ -69,8 +71,8 @@ test("ai-context: all index-exported modules have matching named exports in thei
     const jsUrl = new URL(spec, indexJsUrl);
     const dtsUrl = new URL(spec.replace(/\.js$/, ".d.ts"), indexJsUrl);
 
-    const js = await readFile(jsUrl, "utf8");
-    const dts = await readFile(dtsUrl, "utf8");
+    const js = stripComments(await readFile(jsUrl, "utf8"));
+    const dts = stripComments(await readFile(dtsUrl, "utf8"));
 
     const named = extractJsNamedExports(js);
     const missing = named.filter((name) => !dtsDeclaresExport(dts, name));
@@ -78,4 +80,3 @@ test("ai-context: all index-exported modules have matching named exports in thei
     assert.deepStrictEqual(missing, [], `${spec} exports missing from ${spec.replace(/\.js$/, ".d.ts")}`);
   }
 });
-

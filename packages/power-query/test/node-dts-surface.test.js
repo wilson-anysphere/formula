@@ -3,9 +3,11 @@ import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../../apps/desktop/test/sourceTextUtils.js";
+
 test("power-query: node.d.ts avoids .d.ts specifiers and keeps referenced types in-scope", () => {
   const nodeDtsPath = fileURLToPath(new URL("../src/node.d.ts", import.meta.url));
-  const content = fs.readFileSync(nodeDtsPath, "utf8");
+  const content = stripComments(fs.readFileSync(nodeDtsPath, "utf8"));
 
   // TypeScript's `--moduleResolution Bundler` can be sensitive to explicit `.d.ts` specifiers.
   // Ensure we only reference the runtime `.js` entrypoint, letting TS follow it to the
@@ -28,4 +30,3 @@ test("power-query: node.d.ts avoids .d.ts specifiers and keeps referenced types 
     );
   }
 });
-
