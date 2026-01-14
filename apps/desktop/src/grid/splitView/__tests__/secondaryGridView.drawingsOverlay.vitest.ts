@@ -242,4 +242,72 @@ describe("SecondaryGridView drawings overlay", () => {
 
     container.remove();
   });
+
+  it("re-renders drawings when sheetViewDeltas mutate drawings metadata (undo/redo)", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => createMockCanvasContext(),
+    });
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const images: ImageStore = { get: () => undefined, set: () => {} };
+
+    const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      // Read from DocumentController so the grid view reflects sheet view state changes.
+      getDrawingObjects: (id) =>
+        (doc.getSheetDrawings(id) ?? []).map((d: any) => ({
+          id: Number(d.id),
+          kind: d.kind,
+          anchor: d.anchor,
+          zOrder: d.zOrder,
+        })) as any,
+      images,
+    });
+
+    // Wait for any initial render work to finish, then reset the spy to focus on deltas.
+    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+    renderSpy.mockClear();
+
+    doc.setSheetDrawings(
+      sheetId,
+      [
+        {
+          id: "1",
+          zOrder: 0,
+          kind: { type: "shape" },
+          anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(40), cy: pxToEmu(20) } },
+        },
+      ],
+      { label: "Insert Drawing" },
+    );
+
+    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+    expect(renderSpy).toHaveBeenCalled();
+    expect(renderSpy.mock.calls.at(-1)?.[0]).toHaveLength(1);
+
+    renderSpy.mockClear();
+    doc.undo();
+    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+    expect(renderSpy).toHaveBeenCalled();
+    expect(renderSpy.mock.calls.at(-1)?.[0]).toHaveLength(0);
+
+    gridView.destroy();
+    container.remove();
+  });
 });

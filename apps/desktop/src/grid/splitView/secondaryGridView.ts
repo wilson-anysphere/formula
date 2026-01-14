@@ -918,6 +918,14 @@ export class SecondaryGridView {
     const matchesSheet = (delta: any): boolean => String(delta?.sheetId ?? "") === sheetId;
     const touchesSheet = (deltas: any): boolean => Array.isArray(deltas) && deltas.some(matchesSheet);
 
+    // Drawings metadata now lives in sheet view state (undoable via `sheetViewDeltas`).
+    // Additionally, any sheet-view mutation can affect drawing rendering (frozen panes,
+    // row/col sizes), so treat sheetViewDeltas on the active sheet as drawing-affecting.
+    if (touchesSheet(payload?.sheetViewDeltas)) return true;
+
+    // Sheet meta/order changes can change the active sheet or invalidate cached geometry.
+    if (touchesSheet(payload?.sheetMetaDeltas) || payload?.sheetOrderDelta) return true;
+
     if (
       touchesSheet(payload?.drawingsDeltas) ||
       touchesSheet(payload?.drawingDeltas) ||
