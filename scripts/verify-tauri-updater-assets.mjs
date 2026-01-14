@@ -24,6 +24,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { EXPECTED_PLATFORM_KEYS as REQUIRED_RUNTIME_PLATFORM_KEYS } from "./ci/validate-updater-manifest.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json";
@@ -107,7 +108,7 @@ const EXPECTED_PLATFORMS = [
     },
   },
 ];
-const EXPECTED_PLATFORM_KEYS = EXPECTED_PLATFORMS.map((p) => p.key);
+const EXPECTED_PLATFORM_KEYS = REQUIRED_RUNTIME_PLATFORM_KEYS;
 
 /**
  * @param {string} heading
