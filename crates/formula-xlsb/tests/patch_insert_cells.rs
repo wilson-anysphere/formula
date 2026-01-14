@@ -308,6 +308,7 @@ fn patch_sheet_bin_rejects_inserting_formula_that_requires_rgcb_without_rgcb() {
             shared_string_index: None,
             clear_formula: false,
             new_style: None,
+            clear_formula: false,
         }],
     )
     .expect_err("expected InvalidInput when inserting formula without rgcb");

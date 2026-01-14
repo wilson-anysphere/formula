@@ -226,6 +226,7 @@ fn patcher_can_override_existing_brt_fmla_flags() {
         new_rgcb: None,
         new_formula_flags: Some(new_flags),
         shared_string_index: None,
+        clear_formula: false,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
 
