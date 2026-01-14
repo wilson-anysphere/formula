@@ -903,8 +903,9 @@ Recommended (repo script; runs static RPM queries + an installability check in a
 # Auto-discovers RPM(s) under target/**/release/bundle/rpm/*.rpm
 bash scripts/validate-linux-rpm.sh
 
-# Or validate a specific directory (or .rpm file):
-bash scripts/validate-linux-rpm.sh --rpm apps/desktop/src-tauri/target/release/bundle/rpm
+# Or validate a specific .rpm file:
+rpm_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/rpm/*.rpm' 2>/dev/null | head -n 1)"
+bash scripts/validate-linux-rpm.sh --rpm "$rpm_pkg"
 
 # Skip the Fedora container step (static checks only):
 bash scripts/validate-linux-rpm.sh --no-container
@@ -967,11 +968,11 @@ the expected MIME/file associations.
 Recommended (repo scripts):
 
 ```bash
-appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -n 1)"
-bash scripts/validate-linux-appimage.sh --appimage "$appimage"
+# Auto-discovers AppImage(s) under target/**/release/bundle/appimage/*.AppImage
+bash scripts/validate-linux-appimage.sh
 
 # Optional: also run the CI smoke test locally (checks ELF arch + ldd "not found", no GUI).
-bash scripts/ci/check-appimage.sh "$appimage"
+bash scripts/ci/check-appimage.sh
 ```
 
 CI note: the release workflow also runs a lightweight smoke test that validates AppImage extraction
@@ -980,7 +981,7 @@ CI note: the release workflow also runs a lightweight smoke test that validates 
 Manual inspection (useful when debugging bundling issues):
 
 ```bash
-appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -n 1)"
+appimage="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/appimage/*.AppImage' 2>/dev/null | head -n 1)"
 chmod +x "$appimage"
 
 tmpdir="$(mktemp -d)"
