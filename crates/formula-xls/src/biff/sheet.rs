@@ -1987,9 +1987,9 @@ pub(crate) fn parse_biff8_sheet_formulas(
     let mut out = SheetFormulas::default();
     // Prefer the richer worksheet formula parser so we can resolve shared-formula indirections
     // (`PtgExp` via `SHRFMLA`/`ARRAY`) rather than always rendering `PtgExp` as `#UNKNOWN!`.
-    let parsed = worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, start)?;
-    for w in &parsed.warnings {
-        out.warnings.push(w.message.clone());
+    let mut parsed = worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, start)?;
+    for w in parsed.warnings.drain(..) {
+        push_warning_bounded(&mut out.warnings, w.message);
     }
 
     for cell in parsed.formula_cells.values() {
@@ -2011,7 +2011,10 @@ pub(crate) fn parse_biff8_sheet_formulas(
                 &mut resolve_warnings,
             );
             for w in resolve_warnings {
-                out.warnings.push(format!("cell {}: {}", cell.cell.to_a1(), w.message));
+                push_warning_bounded(
+                    &mut out.warnings,
+                    format!("cell {}: {}", cell.cell.to_a1(), w.message),
+                );
             }
 
             match resolution {
@@ -2041,8 +2044,10 @@ pub(crate) fn parse_biff8_sheet_formulas(
             Some(decode_base),
         );
         for warning in decoded.warnings {
-            out.warnings
-                .push(format!("cell {}: {warning}", cell.cell.to_a1()));
+            push_warning_bounded(
+                &mut out.warnings,
+                format!("cell {}: {warning}", cell.cell.to_a1()),
+            );
         }
         if !decoded.text.trim().is_empty() {
             out.formulas.insert(cell.cell, decoded.text);

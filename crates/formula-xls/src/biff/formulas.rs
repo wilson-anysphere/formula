@@ -39,6 +39,22 @@ const ROW_RELATIVE_BIT: u16 = 0x4000;
 const COL_RELATIVE_BIT: u16 = 0x8000;
 const RELATIVE_MASK: u16 = 0xC000;
 
+/// Cap warnings collected during best-effort shared/array formula recovery so a crafted `.xls`
+/// cannot allocate an unbounded number of warning strings.
+const MAX_WARNINGS_PER_SHEET: usize = 50;
+const WARNINGS_SUPPRESSED_MESSAGE: &str = "additional warnings suppressed";
+
+fn push_warning_bounded(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    if warnings.len() < MAX_WARNINGS_PER_SHEET {
+        warnings.push(warning.into());
+        return;
+    }
+    // Add a single terminal warning so callers have a hint that the import was noisy.
+    if warnings.len() == MAX_WARNINGS_PER_SHEET {
+        warnings.push(WARNINGS_SUPPRESSED_MESSAGE.to_string());
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct PtgExpFallbackResult {
     /// Recovered formulas (`CellRef` -> formula text without a leading `=`).
@@ -74,10 +90,13 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
             continue;
         };
         if base_row >= EXCEL_MAX_ROWS || base_col >= EXCEL_MAX_COLS {
-            warnings.push(format!(
+            push_warning_bounded(
+                &mut warnings,
+                format!(
                 "skipping out-of-bounds PtgExp reference in {} -> ({base_row},{base_col})",
                 cell_ref.to_a1()
-            ));
+                ),
+            );
             continue;
         }
         ptgexp_cells.push((cell_ref, CellRef::new(base_row, base_col)));
@@ -122,11 +141,14 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 {
                     Ok(v) => Cow::Owned(v),
                     Err(err) => {
-                        warnings.push(format!(
-                            "failed to materialize shared formula at {} (base {}): {err}",
-                            cell.to_a1(),
-                            base.to_a1()
-                        ));
+                        push_warning_bounded(
+                            &mut warnings,
+                            format!(
+                                "failed to materialize shared formula at {} (base {}): {err}",
+                                cell.to_a1(),
+                                base.to_a1()
+                            ),
+                        );
                         Cow::Borrowed(&def.rgce)
                     }
                 }
@@ -136,11 +158,14 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
 
             let decoded = rgce::decode_biff8_rgce_with_base(&rgce_to_decode, ctx, Some(target_cell));
             for w in decoded.warnings {
-                warnings.push(format!(
-                    "failed to fully decode shared formula at {} (base {}): {w}",
-                    cell.to_a1(),
-                    base.to_a1()
-                ));
+                push_warning_bounded(
+                    &mut warnings,
+                    format!(
+                        "failed to fully decode shared formula at {} (base {}): {w}",
+                        cell.to_a1(),
+                        base.to_a1()
+                    ),
+                );
             }
             if !decoded.text.trim().is_empty() {
                 recovered.insert(cell, decoded.text);
@@ -161,7 +186,10 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 let base_coord = rgce::CellCoord::new(base.row, base.col);
                 let decoded = rgce::decode_biff8_rgce_with_base(&def.rgce, ctx, Some(base_coord));
                 for w in decoded.warnings {
-                    warnings.push(format!("failed to fully decode array formula base {}: {w}", base.to_a1()));
+                    push_warning_bounded(
+                        &mut warnings,
+                        format!("failed to fully decode array formula base {}: {w}", base.to_a1()),
+                    );
                 }
                 let text = decoded.text;
                 decoded_arrays.insert(base, text.clone());
@@ -182,11 +210,14 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
             continue;
         }
 
-        warnings.push(format!(
-            "unresolved PtgExp reference in {} -> {}",
-            cell.to_a1(),
-            base.to_a1()
-        ));
+        push_warning_bounded(
+            &mut warnings,
+            format!(
+                "unresolved PtgExp reference in {} -> {}",
+                cell.to_a1(),
+                base.to_a1()
+            ),
+        );
     }
 
     Ok(PtgExpFallbackResult {
@@ -268,7 +299,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                warnings.push(format!("malformed BIFF record in worksheet stream: {err}"));
+                push_warning_bounded(&mut warnings, format!("malformed BIFF record in worksheet stream: {err}"));
                 break;
             }
         };
@@ -279,16 +310,18 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         if record.record_id == records::RECORD_EOF {
             break;
         }
-
         match record.record_id {
             worksheet_formulas::RECORD_FORMULA => {
                 let parsed = match worksheet_formulas::parse_biff8_formula_record(&record) {
                     Ok(parsed) => parsed,
                     Err(err) => {
-                        warnings.push(format!(
-                            "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
-                            record.offset
-                        ));
+                        push_warning_bounded(
+                            &mut warnings,
+                            format!(
+                                "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
+                                record.offset
+                            ),
+                        );
                         continue;
                     }
                 };
@@ -305,21 +338,27 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
             }
             worksheet_formulas::RECORD_SHRFMLA => {
                 let Some((row, col)) = parse_shrfmla_anchor(record.data.as_ref()) else {
-                    warnings.push(format!(
-                        "failed to parse SHRFMLA range header at offset {} (len={})",
-                        record.offset,
-                        record.data.len()
-                    ));
+                    push_warning_bounded(
+                        &mut warnings,
+                        format!(
+                            "failed to parse SHRFMLA range header at offset {} (len={})",
+                            record.offset,
+                            record.data.len()
+                        ),
+                    );
                     continue;
                 };
 
                 let parsed = match worksheet_formulas::parse_biff8_shrfmla_record(&record) {
                     Ok(parsed) => parsed,
                     Err(err) => {
-                        warnings.push(format!(
-                            "failed to parse SHRFMLA record at offset {} in worksheet stream: {err}",
-                            record.offset
-                        ));
+                        push_warning_bounded(
+                            &mut warnings,
+                            format!(
+                                "failed to parse SHRFMLA record at offset {} in worksheet stream: {err}",
+                                record.offset
+                            ),
+                        );
                         continue;
                     }
                 };
@@ -333,12 +372,15 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
 
     for (row, col, base_row, base_col, grbit) in ptgexp_cells {
         let Some(base_rgce) = rgce_by_cell.get(&(base_row, base_col)) else {
-            warnings.push(format!(
-                "failed to recover shared formula at {}: base cell ({},{}) has no FORMULA record",
-                CellRef::new(row, col).to_a1(),
-                base_row,
-                base_col
-            ));
+            push_warning_bounded(
+                &mut warnings,
+                format!(
+                    "failed to recover shared formula at {}: base cell ({},{}) has no FORMULA record",
+                    CellRef::new(row, col).to_a1(),
+                    base_row,
+                    base_col
+                ),
+            );
             continue;
         };
 
@@ -356,11 +398,14 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                     }
                     None => "missing SHRFMLA/ARRAY definition",
                 };
-                warnings.push(format!(
-                    "failed to recover shared formula at {}: base cell {} stores PtgExp ({expected})",
-                    CellRef::new(row, col).to_a1(),
-                    CellRef::new(base_row, base_col).to_a1()
-                ));
+                push_warning_bounded(
+                    &mut warnings,
+                    format!(
+                        "failed to recover shared formula at {}: base cell {} stores PtgExp ({expected})",
+                        CellRef::new(row, col).to_a1(),
+                        CellRef::new(base_row, base_col).to_a1()
+                    ),
+                );
                 continue;
             }
         }
@@ -368,11 +413,14 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         let Some(materialized) =
             materialize_biff8_rgce(base_rgce_bytes, base_row, base_col, row, col)
         else {
-            warnings.push(format!(
-                "failed to recover shared formula at {}: could not materialize base rgce from {} (unsupported or malformed tokens)",
-                CellRef::new(row, col).to_a1(),
-                CellRef::new(base_row, base_col).to_a1()
-            ));
+            push_warning_bounded(
+                &mut warnings,
+                format!(
+                    "failed to recover shared formula at {}: could not materialize base rgce from {} (unsupported or malformed tokens)",
+                    CellRef::new(row, col).to_a1(),
+                    CellRef::new(base_row, base_col).to_a1()
+                ),
+            );
             continue;
         };
 
@@ -380,19 +428,25 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         let decoded = rgce::decode_biff8_rgce_with_base(&materialized, ctx, Some(base_coord));
         if !decoded.warnings.is_empty() {
             for w in decoded.warnings {
-                warnings.push(format!(
-                    "failed to fully decode recovered shared formula at {}: {w}",
-                    CellRef::new(row, col).to_a1()
-                ));
+                push_warning_bounded(
+                    &mut warnings,
+                    format!(
+                        "failed to fully decode recovered shared formula at {}: {w}",
+                        CellRef::new(row, col).to_a1()
+                    ),
+                );
             }
         }
 
         if decoded.text.is_empty() {
             // Avoid replacing an existing formula with an empty string.
-            warnings.push(format!(
-                "failed to recover shared formula at {}: decoded rgce produced empty text",
-                CellRef::new(row, col).to_a1()
-            ));
+            push_warning_bounded(
+                &mut warnings,
+                format!(
+                    "failed to recover shared formula at {}: decoded rgce produced empty text",
+                    CellRef::new(row, col).to_a1()
+                ),
+            );
             continue;
         }
 

@@ -307,10 +307,22 @@ pub(crate) struct ParsedBiff8WorksheetFormulas {
     pub(crate) warnings: Vec<crate::ImportWarning>,
 }
 
+/// Cap warnings collected during best-effort worksheet formula scans so a crafted `.xls` cannot
+/// allocate an unbounded number of warnings.
+const MAX_WARNINGS_PER_SHEET: usize = 50;
+const WARNINGS_SUPPRESSED_MESSAGE: &str = "additional warnings suppressed";
+
 fn warn(warnings: &mut Vec<crate::ImportWarning>, msg: impl Into<String>) {
-    warnings.push(crate::ImportWarning {
-        message: msg.into(),
-    })
+    if warnings.len() < MAX_WARNINGS_PER_SHEET {
+        warnings.push(crate::ImportWarning { message: msg.into() });
+        return;
+    }
+    // Add a single terminal warning so callers have a hint that the import was noisy.
+    if warnings.len() == MAX_WARNINGS_PER_SHEET {
+        warnings.push(crate::ImportWarning {
+            message: WARNINGS_SUPPRESSED_MESSAGE.to_string(),
+        });
+    }
 }
 
 fn parse_cell_ref_u16(row: u16, col: u16) -> Option<CellRef> {

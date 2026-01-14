@@ -15,6 +15,22 @@ use super::records;
 /// SHRFMLA [MS-XLS 2.4.255]
 const RECORD_SHRFMLA: u16 = 0x04BC;
 
+/// Cap warnings collected by best-effort shared-formula scanning so a crafted `.xls` cannot
+/// allocate an unbounded number of warning strings.
+const MAX_WARNINGS_PER_SHEET: usize = 50;
+const WARNINGS_SUPPRESSED_MESSAGE: &str = "additional warnings suppressed";
+
+fn push_warning_bounded(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    if warnings.len() < MAX_WARNINGS_PER_SHEET {
+        warnings.push(warning.into());
+        return;
+    }
+    // Add a single terminal warning so callers have a hint that the import was noisy.
+    if warnings.len() == MAX_WARNINGS_PER_SHEET {
+        warnings.push(WARNINGS_SUPPRESSED_MESSAGE.to_string());
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SharedFormulaDef {
     pub(crate) row_first: u16,
@@ -46,7 +62,7 @@ pub(crate) fn parse_biff_sheet_shared_formulas(
         let record = match record {
             Ok(record) => record,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -58,10 +74,10 @@ pub(crate) fn parse_biff_sheet_shared_formulas(
         match record.record_id {
             RECORD_SHRFMLA => match parse_shrfmla_record(&record) {
                 Some(def) => out.shared_formulas.push(def),
-                None => out.warnings.push(format!(
-                    "failed to parse SHRFMLA record at offset {}",
-                    record.offset
-                )),
+                None => push_warning_bounded(
+                    &mut out.warnings,
+                    format!("failed to parse SHRFMLA record at offset {}", record.offset),
+                ),
             },
             records::RECORD_EOF => break,
             _ => {}
