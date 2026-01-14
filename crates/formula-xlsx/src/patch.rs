@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use formula_model::rich_text::{RichText, RichTextRunStyle, Underline};
+use formula_model::rich_text::{RichText, RichTextRun, RichTextRunStyle, Underline};
 use formula_model::{CellRef, CellValue, ColProperties, ErrorValue, StyleTable};
 use formula_model::Color;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
@@ -2806,12 +2806,54 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
             None => matches!(existing, ExistingCellValue::None),
         },
         CellValue::RichText(rich) => match existing {
-            ExistingCellValue::SharedString(existing_rich) => existing_rich == rich,
-            ExistingCellValue::String(v) => rich.runs.is_empty() && &rich.text == v,
+            ExistingCellValue::SharedString(existing_rich) => {
+                rich_text_semantics_eq(existing_rich, rich)
+            }
+            ExistingCellValue::String(v) => &rich.text == v && rich_text_has_no_formatting(rich),
             _ => false,
         },
         CellValue::Array(_) | CellValue::Spill(_) => false,
     }
+}
+
+fn rich_text_has_no_formatting(rich: &RichText) -> bool {
+    // `RichText::is_plain()` only checks for an empty `runs` array. For patch semantics we treat
+    // runs with empty styles (and zero-length runs) as plain too, since they carry no formatting.
+    rich_text_normalized_runs(rich).is_empty()
+}
+
+fn rich_text_semantics_eq(a: &RichText, b: &RichText) -> bool {
+    a.text == b.text && rich_text_normalized_runs(a) == rich_text_normalized_runs(b)
+}
+
+fn rich_text_normalized_runs(rich: &RichText) -> Vec<RichTextRun> {
+    // Normalize away representation differences that do not affect formatting semantics:
+    // - Drop empty-style runs (they carry no overrides).
+    // - Drop zero-length runs (they cannot affect any characters).
+    // - Merge adjacent runs that have identical styles.
+    //
+    // This allows callers to represent rich text as a sparse set of style overrides (only
+    // including non-empty runs), while still comparing equal to the fully segmented
+    // `RichText::from_segments` representation used by XLSX parsers.
+    let mut runs: Vec<RichTextRun> = rich
+        .runs
+        .iter()
+        .filter(|run| run.start < run.end && !run.style.is_empty())
+        .cloned()
+        .collect();
+    runs.sort_by_key(|run| (run.start, run.end));
+
+    let mut merged: Vec<RichTextRun> = Vec::with_capacity(runs.len());
+    for run in runs {
+        match merged.last_mut() {
+            Some(prev) if prev.style == run.style && prev.end == run.start => {
+                prev.end = run.end;
+            }
+            _ => merged.push(run),
+        }
+    }
+
+    merged
 }
 
 fn cell_representation_for_patch(
