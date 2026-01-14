@@ -3545,10 +3545,10 @@ pub fn apply_sheet_formatting_deltas(
     let mut formatting_state = parse_formatting_state(current_formatting.as_ref());
 
     // Apply deltas.
-    if let Some(default_format) = payload.default_format {
-        formatting_state.default_format = default_format.unwrap_or(JsonValue::Null);
+    if let Some(default_format) = payload.default_format.as_ref() {
+        formatting_state.default_format = default_format.clone().unwrap_or(JsonValue::Null);
     }
-    if let Some(LimitedSheetRowFormatDeltas(deltas)) = payload.row_formats {
+    if let Some(LimitedSheetRowFormatDeltas(deltas)) = payload.row_formats.as_ref() {
         for delta in deltas {
             if delta.row < 0 {
                 continue;
@@ -3556,11 +3556,13 @@ pub fn apply_sheet_formatting_deltas(
             if delta.format.is_null() {
                 formatting_state.row_formats.remove(&delta.row);
             } else {
-                formatting_state.row_formats.insert(delta.row, delta.format);
+                formatting_state
+                    .row_formats
+                    .insert(delta.row, delta.format.clone());
             }
         }
     }
-    if let Some(LimitedSheetColFormatDeltas(deltas)) = payload.col_formats {
+    if let Some(LimitedSheetColFormatDeltas(deltas)) = payload.col_formats.as_ref() {
         for delta in deltas {
             if delta.col < 0 {
                 continue;
@@ -3568,11 +3570,13 @@ pub fn apply_sheet_formatting_deltas(
             if delta.format.is_null() {
                 formatting_state.col_formats.remove(&delta.col);
             } else {
-                formatting_state.col_formats.insert(delta.col, delta.format);
+                formatting_state
+                    .col_formats
+                    .insert(delta.col, delta.format.clone());
             }
         }
     }
-    if let Some(LimitedSheetFormatRunsByColDeltas(deltas)) = payload.format_runs_by_col {
+    if let Some(LimitedSheetFormatRunsByColDeltas(deltas)) = payload.format_runs_by_col.as_ref() {
         for delta in deltas {
             if delta.col < 0 {
                 continue;
@@ -3580,14 +3584,14 @@ pub fn apply_sheet_formatting_deltas(
             let mut runs = delta
                 .runs
                 .0
-                .into_iter()
+                .iter()
                 .filter(|r| {
                     r.start_row >= 0 && r.end_row_exclusive > r.start_row && !r.format.is_null()
                 })
                 .map(|r| FormatRun {
                     start_row: r.start_row,
                     end_row_exclusive: r.end_row_exclusive,
-                    format: r.format,
+                    format: r.format.clone(),
                 })
                 .collect::<Vec<_>>();
             runs.sort_by(|a, b| {
@@ -3604,7 +3608,7 @@ pub fn apply_sheet_formatting_deltas(
             }
         }
     }
-    if let Some(LimitedSheetCellFormatDeltas(deltas)) = payload.cell_formats {
+    if let Some(LimitedSheetCellFormatDeltas(deltas)) = payload.cell_formats.as_ref() {
         for delta in deltas {
             if delta.row < 0 || delta.col < 0 {
                 continue;
@@ -3616,7 +3620,7 @@ pub fn apply_sheet_formatting_deltas(
             } else {
                 formatting_state
                     .cell_formats
-                    .insert((delta.row, delta.col), delta.format);
+                    .insert((delta.row, delta.col), delta.format.clone());
             }
         }
     }
@@ -3628,6 +3632,35 @@ pub fn apply_sheet_formatting_deltas(
     storage
         .set_sheet_metadata(sheet_uuid, Some(JsonValue::Object(metadata_root)))
         .map_err(|e| e.to_string())?;
+
+    // Best-effort: reflect formatting metadata into the engine's style table/ids so worksheet
+    // information functions (`CELL(...)`) can consult it.
+    if let Some(LimitedSheetRowFormatDeltas(deltas)) = payload.row_formats.as_ref() {
+        for delta in deltas {
+            state
+                .apply_ui_row_format_delta_to_engine(&payload.sheet_id, delta.row, &delta.format)
+                .map_err(app_error)?;
+        }
+    }
+    if let Some(LimitedSheetColFormatDeltas(deltas)) = payload.col_formats.as_ref() {
+        for delta in deltas {
+            state
+                .apply_ui_col_format_delta_to_engine(&payload.sheet_id, delta.col, &delta.format)
+                .map_err(app_error)?;
+        }
+    }
+    if let Some(LimitedSheetCellFormatDeltas(deltas)) = payload.cell_formats.as_ref() {
+        for delta in deltas {
+            state
+                .apply_ui_cell_format_delta_to_engine(
+                    &payload.sheet_id,
+                    delta.row,
+                    delta.col,
+                    &delta.format,
+                )
+                .map_err(app_error)?;
+        }
+    }
 
     // Formatting changes affect persistence/export behavior; force full regeneration on save.
     state.mark_dirty();

@@ -11,6 +11,7 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 use formula_engine::eval::{parse_a1, CellAddr};
 use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotValue};
 use formula_engine::pivot::source::build_pivot_source_range_with_number_formats;
+use formula_engine::style_bridge::ui_style_to_model_style;
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
 use formula_engine::what_if::monte_carlo::{MonteCarloEngine, SimulationConfig, SimulationResult};
 use formula_engine::what_if::scenario_manager::{
@@ -1801,7 +1802,248 @@ impl AppState {
             sheet_map,
         });
 
+        // Best-effort: apply persisted UI formatting metadata to the engine's style table so
+        // functions like `CELL("protect")` can consult it once style-aware behavior is added.
+        //
+        // Formatting metadata is stored in the persistent sheet metadata as UI-friendly JSON
+        // (`formula_ui_formatting`, typically camelCase). Convert it to `formula_model::Style`
+        // and store the resulting style ids in the engine.
+        //
+        // Note: `load_workbook` already performed an initial recalc pass. If we applied any style
+        // metadata here, trigger one additional recalc so volatile formulas (e.g. `CELL()`) can
+        // observe the new metadata.
+        if self.apply_persistent_ui_formatting_metadata_to_engine() {
+            let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+            let _ = self.refresh_computed_values_from_recalc_changes(&recalc_changes);
+        }
+
         Ok(info)
+    }
+
+    pub(crate) fn apply_ui_row_format_delta_to_engine(
+        &mut self,
+        sheet_id: &str,
+        row: i64,
+        format: &JsonValue,
+    ) -> Result<(), AppStateError> {
+        if row < 0 {
+            return Ok(());
+        }
+        let Ok(row_0based) = u32::try_from(row) else {
+            return Ok(());
+        };
+        if row_0based >= i32::MAX as u32 {
+            return Ok(());
+        }
+
+        let sheet_name = {
+            let workbook = self.get_workbook()?;
+            workbook
+                .sheet(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+                .name
+                .clone()
+        };
+
+        let style_id = if format.is_null() {
+            None
+        } else {
+            let id = self.engine.intern_style(ui_style_to_model_style(format));
+            (id != 0).then_some(id)
+        };
+        self.engine.set_row_style_id(&sheet_name, row_0based, style_id);
+        Ok(())
+    }
+
+    pub(crate) fn apply_ui_col_format_delta_to_engine(
+        &mut self,
+        sheet_id: &str,
+        col: i64,
+        format: &JsonValue,
+    ) -> Result<(), AppStateError> {
+        if col < 0 {
+            return Ok(());
+        }
+        let Ok(col_0based) = u32::try_from(col) else {
+            return Ok(());
+        };
+        if col_0based >= formula_model::EXCEL_MAX_COLS {
+            return Ok(());
+        }
+
+        let sheet_name = {
+            let workbook = self.get_workbook()?;
+            workbook
+                .sheet(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+                .name
+                .clone()
+        };
+
+        let style_id = if format.is_null() {
+            None
+        } else {
+            let id = self.engine.intern_style(ui_style_to_model_style(format));
+            (id != 0).then_some(id)
+        };
+        self.engine.set_col_style_id(&sheet_name, col_0based, style_id);
+        Ok(())
+    }
+
+    pub(crate) fn apply_ui_cell_format_delta_to_engine(
+        &mut self,
+        sheet_id: &str,
+        row: i64,
+        col: i64,
+        format: &JsonValue,
+    ) -> Result<(), AppStateError> {
+        if row < 0 || col < 0 {
+            return Ok(());
+        }
+        let Ok(row_0based) = u32::try_from(row) else {
+            return Ok(());
+        };
+        if row_0based >= i32::MAX as u32 {
+            return Ok(());
+        }
+        let Ok(col_0based) = u32::try_from(col) else {
+            return Ok(());
+        };
+        if col_0based >= formula_model::EXCEL_MAX_COLS {
+            return Ok(());
+        }
+
+        let sheet_name = {
+            let workbook = self.get_workbook()?;
+            workbook
+                .sheet(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+                .name
+                .clone()
+        };
+
+        let style_id = if format.is_null() {
+            0
+        } else {
+            self.engine.intern_style(ui_style_to_model_style(format))
+        };
+        let addr = coord_to_a1(row_0based as usize, col_0based as usize);
+        self.engine
+            .set_cell_style_id(&sheet_name, &addr, style_id)
+            .map_err(|e| AppStateError::Engine(e.to_string()))?;
+        Ok(())
+    }
+
+    fn apply_persistent_ui_formatting_metadata_to_engine(&mut self) -> bool {
+        fn parse_non_negative_i64(raw: Option<&JsonValue>) -> Option<i64> {
+            let v = raw?;
+            let n = v
+                .as_i64()
+                .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))?;
+            (n >= 0).then_some(n)
+        }
+
+        let Some(storage) = self.persistent_storage() else {
+            return false;
+        };
+        let sheet_ids = match self.get_workbook() {
+            Ok(workbook) => workbook.sheets.iter().map(|s| s.id.clone()).collect(),
+            Err(_) => return false,
+        };
+
+        let mut changed = false;
+        for sheet_id in sheet_ids {
+            let sheet_uuid = match self.persistent_sheet_uuid(&sheet_id) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let meta = match storage.get_sheet_meta(sheet_uuid) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let raw = meta
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get(FORMULA_UI_FORMATTING_METADATA_KEY));
+            let Some(obj) = raw.and_then(|v| v.as_object()) else {
+                continue;
+            };
+
+            // Row formats.
+            if let Some(rows) = obj
+                .get("rowFormats")
+                .or_else(|| obj.get("row_formats"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in rows {
+                    let Some(row) =
+                        parse_non_negative_i64(entry.get("row").or_else(|| entry.get("index")))
+                    else {
+                        continue;
+                    };
+                    let Some(format) = entry.get("format") else {
+                        continue;
+                    };
+                    if self
+                        .apply_ui_row_format_delta_to_engine(&sheet_id, row, format)
+                        .is_ok()
+                    {
+                        changed = true;
+                    }
+                }
+            }
+
+            // Col formats.
+            if let Some(cols) = obj
+                .get("colFormats")
+                .or_else(|| obj.get("col_formats"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in cols {
+                    let Some(col) =
+                        parse_non_negative_i64(entry.get("col").or_else(|| entry.get("index")))
+                    else {
+                        continue;
+                    };
+                    let Some(format) = entry.get("format") else {
+                        continue;
+                    };
+                    if self
+                        .apply_ui_col_format_delta_to_engine(&sheet_id, col, format)
+                        .is_ok()
+                    {
+                        changed = true;
+                    }
+                }
+            }
+
+            // Cell formats.
+            if let Some(cells) = obj
+                .get("cellFormats")
+                .or_else(|| obj.get("cell_formats"))
+                .and_then(|v| v.as_array())
+            {
+                for entry in cells {
+                    let Some(row) = parse_non_negative_i64(entry.get("row")) else {
+                        continue;
+                    };
+                    let Some(col) = parse_non_negative_i64(entry.get("col")) else {
+                        continue;
+                    };
+                    let Some(format) = entry.get("format") else {
+                        continue;
+                    };
+                    if self
+                        .apply_ui_cell_format_delta_to_engine(&sheet_id, row, col, format)
+                        .is_ok()
+                    {
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        changed
     }
 
     pub fn autosave_manager(&self) -> Option<Arc<AutoSaveManager>> {
