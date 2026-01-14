@@ -244,7 +244,7 @@ Useful entrypoints when working on encrypted workbook support:
 - **Encryption detection / classification (OLE vs ZIP vs BIFF):**
   - `crates/formula-io/src/lib.rs`:
     - `detect_workbook_encryption`
-    - `WorkbookEncryptionKind`
+    - `WorkbookEncryption`
     - error surfacing:
       - OOXML encrypted wrapper:
         - with `formula-io/encrypted-workbooks`: `Error::PasswordRequired` / `Error::InvalidPassword` /
@@ -370,7 +370,7 @@ use formula_io::{
     open_workbook,
     open_workbook_with_password,
     Error,
-    WorkbookEncryptionKind,
+    WorkbookEncryption,
 };
 
 let path = "book.xlsx";
@@ -413,9 +413,7 @@ match open_workbook(path) {
     Err(Error::EncryptedWorkbook { .. }) => {
         // Legacy `.xls` encryption (BIFF `FILEPASS`) or other encrypted container.
         // Use `detect_workbook_encryption` to classify further if needed:
-        let _kind = detect_workbook_encryption(path)?
-            .map(|info| info.kind)
-            .unwrap_or(WorkbookEncryptionKind::UnknownOleEncrypted);
+        let _encryption = detect_workbook_encryption(path)?;
     }
     Err(other) => return Err(other),
 }
@@ -449,19 +447,15 @@ Callers that want to decide whether to prompt for a password *before* attempting
 use `detect_workbook_encryption`:
 
 ```rust
-use formula_io::{detect_workbook_encryption, WorkbookEncryptionKind};
+use formula_io::{detect_workbook_encryption, WorkbookEncryption};
 
-if let Some(info) = detect_workbook_encryption("book.xlsx")? {
-    match info.kind {
-        WorkbookEncryptionKind::OoxmlOleEncryptedPackage => {
-            // Encrypted OOXML wrapper (`EncryptionInfo` + `EncryptedPackage`).
-        }
-        WorkbookEncryptionKind::XlsFilepass => {
-            // Legacy `.xls` workbook stream contains BIFF `FILEPASS`.
-        }
-        WorkbookEncryptionKind::UnknownOleEncrypted => {
-            // Some other encrypted OLE container (treat as encrypted/unsupported).
-        }
+match detect_workbook_encryption("book.xlsx")? {
+    WorkbookEncryption::None => {}
+    WorkbookEncryption::OoxmlEncryptedPackage { .. } => {
+        // Encrypted OOXML wrapper (`EncryptionInfo` + `EncryptedPackage`).
+    }
+    WorkbookEncryption::LegacyXlsFilePass { .. } => {
+        // Legacy `.xls` workbook stream contains BIFF `FILEPASS`.
     }
 }
 ```
