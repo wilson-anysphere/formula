@@ -1988,10 +1988,13 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                         }
                         _ => {
                             // Opaque 5-byte payload (see decoder heuristics).
-                            if i + 5 > input.len() {
+                            //
+                            // The ptg itself is followed by 5 bytes; since we consumed the first
+                            // one as the "etpg" discriminator above, skip the remaining 4 bytes.
+                            if i + 4 > input.len() {
                                 return Err("unexpected end of rgce stream".to_string());
                             }
-                            i += 5;
+                            i += 4;
                         }
                     }
                 }
@@ -2277,10 +2280,13 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                         }
                         _ => {
                             let payload = input
-                                .get(i..i + 5)
+                                // Like the rgce decoder, treat unknown Ptg18 variants as an opaque
+                                // 5-byte payload following the ptg (including the subtype byte).
+                                // Since we already consumed `etpg`, only 4 bytes remain.
+                                .get(i..i + 4)
                                 .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                             out.extend_from_slice(payload);
-                            i += 5;
+                            i += 4;
                         }
                     }
                 }
@@ -3843,6 +3849,54 @@ mod tests {
             decoded.warnings
         );
         assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn analyzes_shared_formula_rgce_with_ptg18_opaque_payload() {
+        // Ensure our shared-formula rgce analysis stays aligned when an unknown Ptg18 token
+        // appears with a 5-byte payload.
+        let rgce = vec![
+            0x18, 0x11, 0x22, 0x33, 0x44, 0x55, // ptg=0x18 + 5-byte opaque payload
+            0x24, 0x00, 0x00, 0x00, 0xC0, // PtgRef A1 (row+col relative flags)
+        ];
+        let analysis =
+            analyze_biff8_shared_formula_rgce(&rgce).expect("analyze shared formula rgce");
+        assert!(
+            analysis.has_abs_refs_with_relative_flags,
+            "expected relative flags to be detected"
+        );
+        assert!(
+            !analysis.has_refn_or_arean,
+            "expected no RefN/AreaN tokens to be detected"
+        );
+    }
+
+    #[test]
+    fn materializes_shared_formula_rgce_with_ptg18_opaque_payload() {
+        // Ensure shared-formula materialization can copy through an unknown Ptg18 token with a
+        // 5-byte payload without corrupting token alignment.
+        //
+        // Base formula (B1): [opaque][A1]+1
+        // Follower materialization (B2): [opaque][A2]+1
+        let base_cell = CellCoord::new(0, 1); // B1
+        let target_cell = CellCoord::new(1, 1); // B2
+        let rgce = vec![
+            0x18, 0x11, 0x22, 0x33, 0x44, 0x55, // ptg=0x18 + 5-byte opaque payload
+            0x24, 0x00, 0x00, 0x00, 0xC0, // PtgRef A1 (row+col relative flags)
+            0x1E, 0x01, 0x00, // PtgInt 1
+            0x03, // PtgAdd
+        ];
+
+        let materialized = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell)
+            .expect("materialize shared formula rgce");
+
+        let expected = vec![
+            0x18, 0x11, 0x22, 0x33, 0x44, 0x55, // opaque token preserved
+            0x24, 0x01, 0x00, 0x00, 0xC0, // A2
+            0x1E, 0x01, 0x00, // 1
+            0x03, // +
+        ];
+        assert_eq!(materialized, expected);
     }
 
     #[test]
