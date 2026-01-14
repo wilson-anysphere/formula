@@ -2116,6 +2116,7 @@ mod fuzz_tests {
 
     use super::*;
     use proptest::prelude::*;
+    use std::io::Cursor;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::OnceLock;
 
@@ -2204,6 +2205,20 @@ mod fuzz_tests {
             }));
             prop_assert!(outcome.is_ok(), "parse_agile_encryption_info panicked");
             prop_assert!(outcome.unwrap().is_err(), "garbage input should not parse");
+
+            // Also cover the public Agile parser (`offcrypto::agile`) to ensure both entry points are
+            // panic-free on hostile inputs.
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                crate::offcrypto::parse_agile_encryption_info_stream(&bytes)
+            }));
+            prop_assert!(
+                outcome.is_ok(),
+                "parse_agile_encryption_info_stream panicked"
+            );
+            prop_assert!(
+                outcome.unwrap().is_err(),
+                "garbage input should not parse via parse_agile_encryption_info_stream"
+            );
         }
 
         #[test]
@@ -2246,6 +2261,43 @@ mod fuzz_tests {
             }));
             prop_assert!(outcome.is_ok(), "decrypt_agile_encrypted_package panicked");
             prop_assert!(outcome.unwrap().is_err(), "garbage ciphertext should not decrypt");
+        }
+
+        #[test]
+        fn decrypt_agile_encrypted_package_stream_with_valid_info_is_panic_free_and_rejects_garbage_ciphertext(
+            declared_len in any::<u64>(),
+            mut ciphertext in prop::collection::vec(any::<u8>(), 0..=MAX_LEN),
+        ) {
+            // Ensure ciphertext (after the 8-byte original-size header) is AES-block aligned so
+            // we exercise the full decrypt path instead of failing immediately.
+            let new_len = ciphertext.len() - (ciphertext.len() % AES_BLOCK_SIZE);
+            ciphertext.truncate(new_len);
+
+            // Ensure `declared_len <= ciphertext.len()` so we reach the integrity/HMAC checks.
+            let declared_len = if ciphertext.is_empty() {
+                0u64
+            } else {
+                declared_len % (ciphertext.len() as u64 + 1)
+            };
+
+            let mut encrypted_package = Vec::with_capacity(8 + ciphertext.len());
+            encrypted_package.extend_from_slice(&declared_len.to_le_bytes());
+            encrypted_package.extend_from_slice(&ciphertext);
+
+            let encryption_info = valid_agile_encryption_info();
+            let mut cursor = Cursor::new(encrypted_package);
+            let mut out = Vec::new();
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                decrypt_agile_encrypted_package_stream(encryption_info, &mut cursor, "pw", &mut out)
+            }));
+            prop_assert!(
+                outcome.is_ok(),
+                "decrypt_agile_encrypted_package_stream panicked"
+            );
+            prop_assert!(
+                outcome.unwrap().is_err(),
+                "garbage ciphertext should not decrypt via streaming API"
+            );
         }
     }
 
