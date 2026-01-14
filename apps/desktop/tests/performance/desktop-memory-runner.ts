@@ -39,7 +39,7 @@ function usage(): string {
     "",
     "Options:",
     "  --runs <n>                 Iterations (env: FORMULA_DESKTOP_MEMORY_RUNS, default: 10)",
-    "  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: 30000)",
+    "  --timeout-ms <ms>          Timeout per run (env: FORMULA_DESKTOP_MEMORY_TIMEOUT_MS, default: 20000)",
     "  --settle-ms <ms>           Delay after startup before sampling (env: FORMULA_DESKTOP_MEMORY_SETTLE_MS, default: 5000)",
     "  --bin, --bin-path <path>   Desktop binary path (env: FORMULA_DESKTOP_BIN)",
     "  --target-mb <mb>           p95 target (env: FORMULA_DESKTOP_IDLE_RSS_TARGET_MB, default: 100)",
@@ -67,7 +67,7 @@ function parseArgs(argv: string[]): {
 } {
   const args = [...argv];
   const envRuns = Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? "") || 10;
-  const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? "") || 30_000;
+  const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? "") || 20_000;
   const envSettleMs = Number(process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS ?? "") || 5_000;
 
   const rawTarget =
