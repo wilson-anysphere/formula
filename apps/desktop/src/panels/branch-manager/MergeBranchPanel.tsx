@@ -261,6 +261,10 @@ function cellValueKey(cell: Cell | null): string {
   return "∅";
 }
 
+function EmptyMarker() {
+  return <span className="branch-merge__empty">∅</span>;
+}
+
 function CellInlineView({ cell }: { cell: Cell | null }) {
   if (!cell) return <span className="branch-merge__empty">∅</span>;
   if (cellHasEnc(cell)) return <span className="branch-merge__encrypted">{encryptedCellText(cell.enc)}</span>;
@@ -308,7 +312,7 @@ function CellConflictColumn({
         <div className="branch-merge__cell-section">
           <div className="branch-merge__cell-section-title">{t("branchMerge.cellSection.encrypted")}</div>
           <div className="branch-merge__cell-section-body">
-            {cellHasEnc(cell) ? <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span> : "∅"}
+            {cellHasEnc(cell) ? <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span> : <EmptyMarker />}
           </div>
         </div>
       ) : null}
@@ -337,7 +341,7 @@ function CellConflictColumn({
                     ? encryptedCellText(baseCell?.enc)
                     : cellHasValue(baseCell)
                       ? valueSummary(baseCell?.value)
-                      : "∅"}
+                      : <EmptyMarker />}
                 </span>
                 <span className="branch-merge__value-diff-arrow"> → </span>
                 <span className={cellHasEnc(cell) ? "branch-merge__encrypted" : undefined}>
@@ -345,7 +349,7 @@ function CellConflictColumn({
                     ? encryptedCellText(cell?.enc)
                     : cellHasValue(cell)
                       ? valueSummary(cell?.value)
-                      : "∅"}
+                      : <EmptyMarker />}
                 </span>
               </>
             ) : cellHasEnc(cell) ? (
@@ -353,7 +357,7 @@ function CellConflictColumn({
             ) : cellHasValue(cell) ? (
               valueSummary(cell?.value)
             ) : (
-              "∅"
+              <EmptyMarker />
             )}
           </div>
         </div>
