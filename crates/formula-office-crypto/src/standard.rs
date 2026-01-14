@@ -1,4 +1,4 @@
-use crate::crypto::{aes_cbc_decrypt, derive_iv, HashAlgorithm, StandardKeyDeriver};
+use crate::crypto::{aes_cbc_decrypt, derive_iv, rc4_xor_in_place, HashAlgorithm, StandardKeyDeriver};
 use crate::error::OfficeCryptoError;
 use crate::util::{
     checked_vec_len, ct_eq, decode_utf16le_nul_terminated, read_u32_le, read_u64_le,
@@ -6,12 +6,27 @@ use crate::util::{
 };
 use zeroize::Zeroizing;
 
-// CryptoAPI algorithm identifiers (MS-OFFCRYPTO Standard / CryptoAPI encryption).
-#[allow(dead_code)]
-const CALG_RC4: u32 = 0x0000_6801;
+// CryptoAPI `ALG_ID` values for Standard encryption.
 const CALG_AES_128: u32 = 0x0000_660E;
 const CALG_AES_192: u32 = 0x0000_660F;
 const CALG_AES_256: u32 = 0x0000_6610;
+const CALG_RC4: u32 = 0x0000_6801;
+
+/// Conservative upper bound on `EncryptionVerifier.saltSize` to avoid allocating attacker-controlled
+/// buffers.
+///
+/// Office-produced Standard encryption uses 16-byte salts, but we accept other sizes within this
+/// bound for robustness.
+const MAX_VERIFIER_SALT_SIZE: usize = 1024;
+
+/// Conservative upper bound on `EncryptionVerifier.verifierHashSize`.
+///
+/// Standard encryption uses CryptoAPI hash algorithms; the largest supported digest length in this
+/// crate is SHA-512 (64 bytes).
+const MAX_VERIFIER_HASH_SIZE: u32 = 64;
+
+/// Standard/CryptoAPI RC4 `EncryptedPackage` block size.
+const RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE: usize = 0x200;
 
 #[derive(Debug, Clone)]
 pub(crate) struct StandardEncryptionInfo {
@@ -105,7 +120,13 @@ fn parse_encryption_verifier(
             "EncryptionVerifier too short".to_string(),
         ));
     }
+    let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(header.alg_id_hash)?;
     let salt_size = read_u32_le(bytes, 0)? as usize;
+    if salt_size == 0 || salt_size > MAX_VERIFIER_SALT_SIZE {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptionVerifier saltSize {salt_size} is out of bounds (expected 1..={MAX_VERIFIER_SALT_SIZE})"
+        )));
+    }
     let mut offset = 4usize;
     let salt = bytes.get(offset..offset + salt_size).ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("EncryptionVerifier salt out of range".to_string())
@@ -118,8 +139,34 @@ fn parse_encryption_verifier(
     let verifier_hash_size = read_u32_le(bytes, offset)?;
     offset += 4;
 
-    // Ciphertext is padded to the cipher block size. For AES-CBC, that's 16.
-    let encrypted_hash_len = ((verifier_hash_size as usize + 15) / 16) * 16;
+    if verifier_hash_size == 0 || verifier_hash_size > MAX_VERIFIER_HASH_SIZE {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptionVerifier verifierHashSize {verifier_hash_size} is out of bounds (expected 1..={MAX_VERIFIER_HASH_SIZE})"
+        )));
+    }
+    if verifier_hash_size as usize != hash_alg.digest_len() {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptionVerifier verifierHashSize {verifier_hash_size} does not match {} digest length {}",
+            hash_alg.as_ooxml_name(),
+            hash_alg.digest_len()
+        )));
+    }
+
+    let encrypted_hash_len = match header.alg_id {
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            // Ciphertext is padded to the AES block size (16).
+            ((verifier_hash_size as usize + 15) / 16) * 16
+        }
+        CALG_RC4 => {
+            // RC4 is stream-based (no padding).
+            verifier_hash_size as usize
+        }
+        other => {
+            return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+                "unsupported cipher AlgID {other:#x}"
+            )))
+        }
+    };
     let encrypted_verifier_hash =
         bytes
             .get(offset..offset + encrypted_hash_len)
@@ -129,15 +176,8 @@ fn parse_encryption_verifier(
                 )
             })?;
 
-    // Basic algorithm sanity check: support AES only for now.
-    match header.alg_id {
-        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {}
-        other => {
-            return Err(OfficeCryptoError::UnsupportedEncryption(format!(
-                "unsupported cipher AlgID {other:#x}"
-            )))
-        }
-    }
+    // At this stage we've validated `alg_id` enough to compute lengths. Downstream decrypt logic
+    // still handles scheme-specific constraints (e.g. AES IV derivation vs RC4 block sizing).
 
     Ok(EncryptionVerifier {
         salt: salt.to_vec(),
@@ -199,10 +239,18 @@ pub(crate) fn verify_password_standard(
             );
             buf.extend_from_slice(&verifier.encrypted_verifier);
             buf.extend_from_slice(&verifier.encrypted_verifier_hash);
-            crate::crypto::rc4_xor_in_place(rc4_key.as_slice(), &mut buf)?;
+            rc4_xor_in_place(rc4_key.as_slice(), &mut buf)?;
 
-            let verifier_plain = buf[..16].to_vec();
-            let verifier_hash_plain = buf[16..].to_vec();
+            let verifier_plain = buf
+                .get(..16)
+                .ok_or_else(|| OfficeCryptoError::InvalidFormat("RC4 verifier out of range".to_string()))?
+                .to_vec();
+            let verifier_hash_plain = buf
+                .get(16..)
+                .ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat("RC4 verifier hash out of range".to_string())
+                })?
+                .to_vec();
             (verifier_plain, verifier_hash_plain)
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
@@ -258,33 +306,158 @@ pub(crate) fn decrypt_standard_encrypted_package(
 
     let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(info.header.alg_id_hash)?;
 
-    // Try a small set of schemes seen in the wild. We validate via the password verifier and by
-    // checking that the decrypted output starts with `PK`.
-    let schemes: [StandardScheme; 3] = [
-        StandardScheme::PerBlockKeyIvZero,
-        StandardScheme::ConstKeyPerBlockIvHash,
-        StandardScheme::ConstKeyIvSaltStream,
-    ];
+    match info.header.alg_id {
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            // Try a small set of schemes seen in the wild. We validate via the password verifier and by
+            // checking that the decrypted output starts with `PK`.
+            let schemes: [StandardScheme; 3] = [
+                StandardScheme::PerBlockKeyIvZero,
+                StandardScheme::ConstKeyPerBlockIvHash,
+                StandardScheme::ConstKeyIvSaltStream,
+            ];
 
-    for scheme in schemes {
-        let Ok(out) = decrypt_standard_with_scheme(
+            for scheme in schemes {
+                let Ok(out) = decrypt_standard_with_scheme(
+                    info,
+                    ciphertext,
+                    total_size,
+                    expected_len,
+                    password,
+                    hash_alg,
+                    scheme,
+                ) else {
+                    continue;
+                };
+
+                if out.len() >= 2 && &out[..2] == b"PK" {
+                    return Ok(out);
+                }
+            }
+
+            Err(OfficeCryptoError::InvalidPassword)
+        }
+        CALG_RC4 => decrypt_standard_encrypted_package_rc4(
             info,
             ciphertext,
             total_size,
             expected_len,
             password,
             hash_alg,
-            scheme,
-        ) else {
-            continue;
-        };
+        ),
+        other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported cipher AlgID {other:#x}"
+        ))),
+    }
+}
 
-        if out.len() >= 2 && &out[..2] == b"PK" {
-            return Ok(out);
-        }
+fn decrypt_standard_encrypted_package_rc4(
+    info: &StandardEncryptionInfo,
+    ciphertext: &[u8],
+    total_size: u64,
+    expected_len: usize,
+    password: &str,
+    hash_alg: HashAlgorithm,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    // Standard/CryptoAPI RC4 uses 0x200-byte blocks with per-block keys derived from the password
+    // hash + block index.
+
+    if info.header.key_bits % 8 != 0 {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptionHeader keyBits must be divisible by 8 (got {})",
+            info.header.key_bits
+        )));
+    }
+    let key_len = (info.header.key_bits / 8) as usize;
+    if !matches!(key_len, 5 | 7 | 16) {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported RC4 key length {key_len} bytes (keyBits={})",
+            info.header.key_bits
+        )));
     }
 
-    Err(OfficeCryptoError::InvalidPassword)
+    let deriver = StandardKeyDeriver::new(hash_alg, info.header.key_bits, &info.verifier.salt, password);
+    let key0 = deriver.derive_key_for_block(0)?;
+
+    // Verify password using EncryptionVerifier (decrypt verifier + verifier hash in a single RC4
+    // stream).
+    if info.verifier.encrypted_verifier.len() != 16 {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptionVerifier encryptedVerifier must be 16 bytes (got {})",
+            info.verifier.encrypted_verifier.len()
+        )));
+    }
+    let rc4_key0: Zeroizing<Vec<u8>> = if info.header.key_bits == 40 {
+        if key0.len() != 5 {
+            return Err(OfficeCryptoError::InvalidFormat(format!(
+                "derived RC4 key for keySize=40 must be 5 bytes (got {})",
+                key0.len()
+            )));
+        }
+        let mut padded = vec![0u8; 16];
+        padded[..5].copy_from_slice(&key0[..5]);
+        Zeroizing::new(padded)
+    } else {
+        key0.clone()
+    };
+    let mut verifier_buf =
+        Vec::with_capacity(info.verifier.encrypted_verifier.len() + info.verifier.encrypted_verifier_hash.len());
+    verifier_buf.extend_from_slice(&info.verifier.encrypted_verifier);
+    verifier_buf.extend_from_slice(&info.verifier.encrypted_verifier_hash);
+    rc4_xor_in_place(rc4_key0.as_slice(), &mut verifier_buf)?;
+
+    let expected_hash_len = info.verifier.verifier_hash_size as usize;
+    let verifier_plain = verifier_buf.get(..16).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("RC4 verifier out of range".to_string())
+    })?;
+    let verifier_hash_plain = verifier_buf.get(16..16 + expected_hash_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("RC4 verifier hash out of range".to_string())
+    })?;
+    let expected_hash: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(verifier_plain));
+    let expected_hash = expected_hash.get(..expected_hash_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat("hash output shorter than verifierHashSize".to_string())
+    })?;
+    if !ct_eq(verifier_hash_plain, expected_hash) {
+        return Err(OfficeCryptoError::InvalidPassword);
+    }
+
+    // Password is valid; decrypt the package. Standard RC4 has no padding; treat trailing bytes
+    // (OLE sector slack) as irrelevant.
+    if ciphertext.len() < expected_len {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptedPackage ciphertext truncated (len {}, expected at least {})",
+            ciphertext.len(),
+            expected_len
+        )));
+    }
+
+    let mut out = Vec::new();
+    out.try_reserve_exact(expected_len).map_err(|source| {
+        OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
+    })?;
+    out.extend_from_slice(&ciphertext[..expected_len]);
+
+    let mut block_index: u32 = 0;
+    for chunk in out.chunks_mut(RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE) {
+        let key = deriver.derive_key_for_block(block_index)?;
+        if info.header.key_bits == 40 {
+            if key.len() != 5 {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "derived RC4 key for keySize=40 must be 5 bytes (got {})",
+                    key.len()
+                )));
+            }
+            let mut padded = [0u8; 16];
+            padded[..5].copy_from_slice(&key[..5]);
+            rc4_xor_in_place(&padded, chunk)?;
+        } else {
+            rc4_xor_in_place(&key, chunk)?;
+        }
+        block_index = block_index.checked_add(1).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("RC4 block index overflow".to_string())
+        })?;
+    }
+
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Copy)]

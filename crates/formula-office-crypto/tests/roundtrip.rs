@@ -17,6 +17,68 @@ const BLOCK_KEY_INTEGRITY_HMAC_KEY: &[u8; 8] = b"\x5F\xB2\xAD\x01\x0C\xB9\xE1\xF
 const BLOCK_KEY_INTEGRITY_HMAC_VALUE: &[u8; 8] = b"\xA0\x67\x7F\x02\xB2\x2C\x84\x33";
 
 #[test]
+fn roundtrip_standard_rc4_sha1_encryption() {
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes =
+        encrypt_standard_rc4_ooxml_ole(plaintext, password, Rc4HashAlgorithm::Sha1, 0);
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+}
+
+#[test]
+fn roundtrip_standard_rc4_md5_encryption() {
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    // Add some trailing bytes after the verifier hash to ensure the parser does not over-read.
+    let ole_bytes =
+        encrypt_standard_rc4_ooxml_ole(plaintext, password, Rc4HashAlgorithm::Md5, 12);
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+}
+
+#[test]
+fn standard_rc4_bogus_verifier_hash_size_errors() {
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+
+    // Build an RC4 + MD5 EncryptionInfo, but lie about verifierHashSize (declare 20 bytes, which is
+    // SHA-1's digest length). This should be rejected as invalid format (not InvalidPassword).
+    let ole_bytes = encrypt_standard_rc4_ooxml_ole_with_overridden_verifier_hash_size(
+        plaintext,
+        password,
+        Rc4HashAlgorithm::Md5,
+        20,
+    );
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, password).expect_err("expected error");
+    match err {
+        OfficeCryptoError::InvalidFormat(msg) => {
+            assert!(
+                msg.contains("verifierHashSize"),
+                "expected error message to mention verifierHashSize, got: {msg}"
+            );
+        }
+        other => panic!("expected InvalidFormat, got {other:?}"),
+    }
+}
+
+#[test]
 fn roundtrip_standard_encryption() {
     let password = "Password";
     let plaintext = include_bytes!(concat!(
@@ -65,6 +127,275 @@ fn assert_zip_contains_workbook_xml(bytes: &[u8]) {
         }
     }
     assert!(found, "zip should contain xl/workbook.xml");
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rc4HashAlgorithm {
+    Sha1,
+    Md5,
+}
+
+fn rc4_hash_alg_id(hash_alg: Rc4HashAlgorithm) -> u32 {
+    match hash_alg {
+        Rc4HashAlgorithm::Sha1 => 0x0000_8004, // CALG_SHA1
+        Rc4HashAlgorithm::Md5 => 0x0000_8003,  // CALG_MD5
+    }
+}
+
+fn rc4_hash_digest(hash_alg: Rc4HashAlgorithm, data: &[u8]) -> Vec<u8> {
+    match hash_alg {
+        Rc4HashAlgorithm::Sha1 => sha1_digest(data).to_vec(),
+        Rc4HashAlgorithm::Md5 => {
+            let mut hasher = md5::Md5::new();
+            hasher.update(data);
+            hasher.finalize().to_vec()
+        }
+    }
+}
+
+fn standard_rc4_spun_password_hash(
+    hash_alg: Rc4HashAlgorithm,
+    password: &str,
+    salt: &[u8],
+) -> Vec<u8> {
+    let pw = password_to_utf16le(password);
+
+    // h = Hash(salt || pw)
+    let mut h = match hash_alg {
+        Rc4HashAlgorithm::Sha1 => {
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(salt);
+            hasher.update(&pw);
+            hasher.finalize().to_vec()
+        }
+        Rc4HashAlgorithm::Md5 => {
+            let mut hasher = md5::Md5::new();
+            hasher.update(salt);
+            hasher.update(&pw);
+            hasher.finalize().to_vec()
+        }
+    };
+
+    // spin: h = Hash(LE32(i) || h)
+    for i in 0..50_000u32 {
+        h = match hash_alg {
+            Rc4HashAlgorithm::Sha1 => {
+                let mut hasher = sha1::Sha1::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h);
+                hasher.finalize().to_vec()
+            }
+            Rc4HashAlgorithm::Md5 => {
+                let mut hasher = md5::Md5::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h);
+                hasher.finalize().to_vec()
+            }
+        };
+    }
+
+    h
+}
+
+fn standard_rc4_derive_key(
+    hash_alg: Rc4HashAlgorithm,
+    spun_hash: &[u8],
+    key_len: usize,
+    block_index: u32,
+) -> Vec<u8> {
+    let digest = match hash_alg {
+        Rc4HashAlgorithm::Sha1 => {
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(spun_hash);
+            hasher.update(block_index.to_le_bytes());
+            hasher.finalize().to_vec()
+        }
+        Rc4HashAlgorithm::Md5 => {
+            let mut hasher = md5::Md5::new();
+            hasher.update(spun_hash);
+            hasher.update(block_index.to_le_bytes());
+            hasher.finalize().to_vec()
+        }
+    };
+    digest[..key_len].to_vec()
+}
+
+fn rc4_apply(key: &[u8], data: &mut [u8]) {
+    assert!(!key.is_empty(), "RC4 key must be non-empty");
+    let mut s = [0u8; 256];
+    for (i, v) in s.iter_mut().enumerate() {
+        *v = i as u8;
+    }
+
+    // KSA
+    let mut j: u8 = 0;
+    for i in 0..256u16 {
+        let idx = i as usize;
+        j = j
+            .wrapping_add(s[idx])
+            .wrapping_add(key[idx % key.len()]);
+        s.swap(idx, j as usize);
+    }
+
+    // PRGA
+    let mut i: u8 = 0;
+    j = 0;
+    for b in data {
+        i = i.wrapping_add(1);
+        j = j.wrapping_add(s[i as usize]);
+        s.swap(i as usize, j as usize);
+        let idx = s[i as usize].wrapping_add(s[j as usize]);
+        let k = s[idx as usize];
+        *b ^= k;
+    }
+}
+
+fn encrypt_standard_rc4_ooxml_ole(
+    plaintext: &[u8],
+    password: &str,
+    hash_alg: Rc4HashAlgorithm,
+    verifier_trailing_len: usize,
+) -> Vec<u8> {
+    encrypt_standard_rc4_ooxml_ole_inner(plaintext, password, hash_alg, None, verifier_trailing_len)
+}
+
+fn encrypt_standard_rc4_ooxml_ole_with_overridden_verifier_hash_size(
+    plaintext: &[u8],
+    password: &str,
+    hash_alg: Rc4HashAlgorithm,
+    verifier_hash_size_override: u32,
+) -> Vec<u8> {
+    encrypt_standard_rc4_ooxml_ole_inner(
+        plaintext,
+        password,
+        hash_alg,
+        Some(verifier_hash_size_override),
+        0,
+    )
+}
+
+fn encrypt_standard_rc4_ooxml_ole_inner(
+    plaintext: &[u8],
+    password: &str,
+    hash_alg: Rc4HashAlgorithm,
+    verifier_hash_size_override: Option<u32>,
+    verifier_trailing_len: usize,
+) -> Vec<u8> {
+    // Deterministic parameters (not intended to be secure).
+    let salt: Vec<u8> = (0u8..=0x0F).collect();
+    let key_bits = 128u32;
+    let key_len = (key_bits / 8) as usize;
+
+    // Derive spun password hash + block 0 key.
+    let spun = standard_rc4_spun_password_hash(hash_alg, password, &salt);
+
+    // Test vectors (lock down derivation for both SHA1 and MD5).
+    if hash_alg == Rc4HashAlgorithm::Sha1 {
+        let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+        assert_eq!(
+            key0,
+            hex_decode("6ad7dedf2da3514b1d85eabee069d47d"),
+            "SHA1 block0 key vector mismatch"
+        );
+    }
+    if hash_alg == Rc4HashAlgorithm::Md5 {
+        let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+        assert_eq!(
+            key0,
+            hex_decode("69badcae244868e209d4e053ccd2a3bc"),
+            "MD5 block0 key vector mismatch"
+        );
+    }
+
+    let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+
+    // Build EncryptionVerifier.
+    let verifier_plain: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+        0x0F,
+    ];
+    let verifier_hash = rc4_hash_digest(hash_alg, &verifier_plain);
+    let verifier_hash_size = verifier_hash_size_override.unwrap_or(verifier_hash.len() as u32);
+
+    let mut verifier_buf = Vec::new();
+    verifier_buf.extend_from_slice(&verifier_plain);
+    // Truncate/pad hash to match the declared size (for bogus size tests).
+    if verifier_hash_size as usize <= verifier_hash.len() {
+        verifier_buf.extend_from_slice(&verifier_hash[..verifier_hash_size as usize]);
+    } else {
+        verifier_buf.extend_from_slice(&verifier_hash);
+        verifier_buf.resize(16 + verifier_hash_size as usize, 0);
+    }
+    rc4_apply(&key0, &mut verifier_buf);
+    let encrypted_verifier = &verifier_buf[..16];
+    let encrypted_verifier_hash = &verifier_buf[16..];
+
+    // EncryptionInfo header.
+    let version_major = 4u16;
+    let version_minor = 2u16;
+    let flags = 0x0000_0000u32;
+    let header_flags = 0u32;
+    let size_extra = 0u32;
+    let alg_id = 0x0000_6801u32; // CALG_RC4
+    let alg_id_hash = rc4_hash_alg_id(hash_alg);
+    let provider_type = 0u32;
+    let reserved1 = 0u32;
+    let reserved2 = 0u32;
+    let csp_name_utf16_nul = [0u8, 0u8];
+
+    let mut header_bytes = Vec::new();
+    header_bytes.extend_from_slice(&header_flags.to_le_bytes());
+    header_bytes.extend_from_slice(&size_extra.to_le_bytes());
+    header_bytes.extend_from_slice(&alg_id.to_le_bytes());
+    header_bytes.extend_from_slice(&alg_id_hash.to_le_bytes());
+    header_bytes.extend_from_slice(&key_bits.to_le_bytes());
+    header_bytes.extend_from_slice(&provider_type.to_le_bytes());
+    header_bytes.extend_from_slice(&reserved1.to_le_bytes());
+    header_bytes.extend_from_slice(&reserved2.to_le_bytes());
+    header_bytes.extend_from_slice(&csp_name_utf16_nul);
+    let header_size = header_bytes.len() as u32;
+
+    let mut verifier_bytes = Vec::new();
+    verifier_bytes.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+    verifier_bytes.extend_from_slice(&salt);
+    verifier_bytes.extend_from_slice(encrypted_verifier);
+    verifier_bytes.extend_from_slice(&verifier_hash_size.to_le_bytes());
+    verifier_bytes.extend_from_slice(encrypted_verifier_hash);
+    verifier_bytes.extend(std::iter::repeat(0xCCu8).take(verifier_trailing_len));
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&version_major.to_le_bytes());
+    encryption_info.extend_from_slice(&version_minor.to_le_bytes());
+    encryption_info.extend_from_slice(&flags.to_le_bytes());
+    encryption_info.extend_from_slice(&header_size.to_le_bytes());
+    encryption_info.extend_from_slice(&header_bytes);
+    encryption_info.extend_from_slice(&verifier_bytes);
+
+    // Encrypt the package in 0x200-byte blocks using per-block keys.
+    let mut ciphertext = plaintext.to_vec();
+    let mut block_index: u32 = 0;
+    for chunk in ciphertext.chunks_mut(0x200) {
+        let key = standard_rc4_derive_key(hash_alg, &spun, key_len, block_index);
+        rc4_apply(&key, chunk);
+        block_index = block_index.checked_add(1).expect("block counter overflow");
+    }
+
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    encrypted_package.extend_from_slice(&ciphertext);
+
+    // Write the OLE/CFB wrapper.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_stream("EncryptionInfo")
+        .expect("create stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole.create_stream("EncryptedPackage")
+        .expect("create stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    ole.into_inner().into_inner()
 }
 
 fn encrypt_standard_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
@@ -325,6 +656,25 @@ fn sha1_digest(data: &[u8]) -> [u8; 20] {
     hasher.update(data);
     let out = hasher.finalize();
     out.into()
+}
+
+fn hex_decode(mut s: &str) -> Vec<u8> {
+    s = s.trim();
+    let mut compact = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch.is_ascii_hexdigit() {
+            compact.push(ch);
+        }
+    }
+    assert_eq!(compact.len() % 2, 0, "hex string must have even length");
+    let bytes = compact.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for i in (0..bytes.len()).step_by(2) {
+        let hi = (bytes[i] as char).to_digit(16).unwrap();
+        let lo = (bytes[i + 1] as char).to_digit(16).unwrap();
+        out.push(((hi << 4) | lo) as u8);
+    }
+    out
 }
 
 fn sha512_digest(data: &[u8]) -> Vec<u8> {
