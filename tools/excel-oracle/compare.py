@@ -281,6 +281,73 @@ def _redact_formula(formula: str | None, *, privacy_mode: str) -> str | None:
     if not formula or privacy_mode != _PRIVACY_PRIVATE:
         return formula
 
+    def _redact_sensitive_quoted_segments(text: str) -> str:
+        # Excel uses:
+        # - double quotes for string literals, escaping embedded quotes by doubling (`""`).
+        # - single quotes for sheet/workbook references, escaping embedded quotes by doubling (`''`).
+        out: list[str] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch == '"':
+                # Parse an Excel string literal.
+                start = i
+                j = i + 1
+                while j < n:
+                    if text[j] != '"':
+                        j += 1
+                        continue
+                    # Escaped quote inside a string literal.
+                    if j + 1 < n and text[j + 1] == '"':
+                        j += 2
+                        continue
+                    break
+                if j >= n or text[j] != '"':
+                    # Unterminated; leave as-is.
+                    out.append(text[start:])
+                    break
+                raw_content = text[start + 1 : j]
+                decoded = raw_content.replace('""', '"')
+                redacted = _redact_text(decoded, privacy_mode=privacy_mode)
+                if redacted is not None and redacted != decoded:
+                    out.append(f'"{redacted}"')
+                else:
+                    out.append(text[start : j + 1])
+                i = j + 1
+                continue
+
+            if ch == "'":
+                # Parse a single-quoted sheet/workbook reference token.
+                start = i
+                j = i + 1
+                while j < n:
+                    if text[j] != "'":
+                        j += 1
+                        continue
+                    # Escaped single quote inside the token.
+                    if j + 1 < n and text[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                if j >= n or text[j] != "'":
+                    out.append(text[start:])
+                    break
+                raw_content = text[start + 1 : j]
+                decoded = raw_content.replace("''", "'")
+                redacted = _redact_text(decoded, privacy_mode=privacy_mode)
+                if redacted is not None and redacted != decoded:
+                    out.append(f"'{redacted}'")
+                else:
+                    out.append(text[start : j + 1])
+                i = j + 1
+                continue
+
+            out.append(ch)
+            i += 1
+
+        return "".join(out)
+
     known = _load_known_function_names()
 
     def _replace(match: re.Match[str]) -> str:
@@ -293,7 +360,8 @@ def _redact_formula(formula: str | None, *, privacy_mode: str) -> str | None:
             return raw_name + suffix
         return f"sha256={_sha256_text(normalized)}{suffix}"
 
-    return _FUNC_RE.sub(_replace, formula)
+    out = _FUNC_RE.sub(_replace, formula)
+    return _redact_sensitive_quoted_segments(out)
 
 
 @dataclass(frozen=True)
