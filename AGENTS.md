@@ -124,11 +124,11 @@ cargo test
 ### Environment Setup
 
 ```bash
+# Optional: override default Cargo parallelism for the session
+export FORMULA_CARGO_JOBS=8
+
 # Initialize safe defaults (do this first)
 . scripts/agent-init.sh
-
-# Optional: override default Cargo parallelism for the session
-FORMULA_CARGO_JOBS=8 . scripts/agent-init.sh
 ```
 
 ### Helper Scripts
