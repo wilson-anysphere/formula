@@ -30,7 +30,10 @@ fn opens_xlsx_even_with_unknown_extension() {
     let wb = open_workbook(&dst).expect("open workbook");
     match wb {
         Workbook::Xlsx(pkg) => {
-            assert!(pkg.part("xl/workbook.xml").is_some());
+            assert!(pkg
+                .read_part("xl/workbook.xml")
+                .expect("read xl/workbook.xml")
+                .is_some());
         }
         other => panic!("expected Workbook::Xlsx, got {other:?}"),
     }

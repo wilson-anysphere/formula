@@ -39,6 +39,7 @@ zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 formula-fs = { path = "../formula-fs" }
+tempfile = "3.10"
 office-crypto = "0.2"
 formula-office-crypto = { path = "../formula-office-crypto" }
 
@@ -51,7 +52,6 @@ insta = "1.46"
 rand = "0.9"
 rust_xlsxwriter = "0.70"
 formula-engine = { path = "../formula-engine" }
-tempfile = "3.10"
 xlsx-diff = { path = "../xlsx-diff" }
 
 [target.'cfg(all(not(target_arch = "wasm32"), windows))'.dev-dependencies]

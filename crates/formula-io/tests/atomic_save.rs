@@ -12,7 +12,7 @@ fn save_workbook_replaces_existing_file_atomically() {
     let mut cursor = Cursor::new(Vec::new());
     formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write workbook");
     let bytes = cursor.into_inner();
-    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("parse generated package");
+    let pkg = formula_xlsx::XlsxLazyPackage::from_vec(bytes).expect("parse generated package");
     let expected = pkg.write_to_bytes().expect("write package bytes");
 
     let workbook = Workbook::Xlsx(pkg);
@@ -92,7 +92,7 @@ fn save_workbook_supports_relative_paths_without_parent_directory() {
     let mut cursor = Cursor::new(Vec::new());
     formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write workbook");
     let bytes = cursor.into_inner();
-    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("parse generated package");
+    let pkg = formula_xlsx::XlsxLazyPackage::from_vec(bytes).expect("parse generated package");
     let expected = pkg.write_to_bytes().expect("write package bytes");
 
     let workbook = Workbook::Xlsx(pkg);

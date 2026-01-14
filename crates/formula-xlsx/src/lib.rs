@@ -34,6 +34,7 @@ pub mod embedded_cell_images;
 pub mod embedded_images;
 mod formula_text;
 pub mod hyperlinks;
+mod lazy_package;
 mod macro_repair;
 mod macro_strip;
 pub mod merge_cells;
@@ -91,6 +92,7 @@ pub use offcrypto::{
     decrypt_agile_ooxml_from_cfb, decrypt_agile_ooxml_from_ole_bytes, decrypt_agile_ooxml_from_ole_reader,
     OffCryptoError, OffCryptoWarning,
 };
+pub use lazy_package::XlsxLazyPackage;
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use package::{
     read_part_from_reader, read_part_from_reader_limited,

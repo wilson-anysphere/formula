@@ -92,7 +92,10 @@ fn open_workbook_with_password_decrypts_agile_encrypted_package() {
     let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
     match wb {
         Workbook::Xlsx(package) => {
-            let contents = package.part("hello.txt").expect("hello.txt missing in zip");
+            let contents = package
+                .read_part("hello.txt")
+                .expect("read hello.txt")
+                .expect("hello.txt missing in zip");
             assert_eq!(contents, b"hello");
         }
         other => panic!("expected Workbook::Xlsx, got {other:?}"),

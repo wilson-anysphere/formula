@@ -59,7 +59,9 @@ fn saving_xlsx_with_xlm_macrosheets_as_xltx_strips_macrosheets() {
         "expected test package to contain XLM macro sheet parts"
     );
     assert!(
-        pkg.vba_project_bin().is_none(),
+        pkg.read_part("xl/vbaProject.bin")
+            .expect("read xl/vbaProject.bin")
+            .is_none(),
         "expected test package to contain no VBA project"
     );
 
@@ -143,9 +145,9 @@ fn saving_xltx_as_xlsx_sets_workbook_content_type() {
     save_workbook(&wb, &xltx_path).expect("save as xltx");
 
     // Then, re-save that template as a normal workbook.
-    let xltx_pkg = reopen_pkg(&xltx_path);
     let xlsx_path = dir.path().join("out.xlsx");
-    save_workbook(&Workbook::Xlsx(xltx_pkg), &xlsx_path).expect("save as xlsx");
+    let xltx_wb = open_workbook(&xltx_path).expect("open xltx");
+    save_workbook(&xltx_wb, &xlsx_path).expect("save as xlsx");
 
     let pkg = reopen_pkg(&xlsx_path);
     let content_types =
@@ -176,9 +178,9 @@ fn saving_xltm_as_xlsm_sets_workbook_content_type() {
     save_workbook(&wb, &xltm_path).expect("save as xltm");
 
     // Then, re-save that template as a macro-enabled workbook.
-    let xltm_pkg = reopen_pkg(&xltm_path);
     let xlsm_path = dir.path().join("out.xlsm");
-    save_workbook(&Workbook::Xlsx(xltm_pkg), &xlsm_path).expect("save as xlsm");
+    let xltm_wb = open_workbook(&xltm_path).expect("open xltm");
+    save_workbook(&xltm_wb, &xlsm_path).expect("save as xlsm");
 
     let pkg = reopen_pkg(&xlsm_path);
     assert!(pkg.vba_project_bin().is_some(), "expected vbaProject.bin to be preserved");

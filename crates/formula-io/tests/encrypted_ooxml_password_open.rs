@@ -59,7 +59,9 @@ fn opens_encrypted_ooxml_via_password_api_when_streams_use_leading_slash_paths()
     };
 
     assert!(
-        pkg.part("xl/workbook.xml").is_some(),
+        pkg.read_part("xl/workbook.xml")
+            .expect("read xl/workbook.xml")
+            .is_some(),
         "expected extracted package to be a valid XLSX zip"
     );
 }

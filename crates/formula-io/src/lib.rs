@@ -153,7 +153,7 @@ pub enum Workbook {
     /// XLSX/XLSM opened as an Open Packaging Convention (OPC) package.
     ///
     /// This preserves unknown parts (e.g. `customXml/`, `xl/vbaProject.bin`) byte-for-byte.
-    Xlsx(xlsx::XlsxPackage),
+    Xlsx(xlsx::XlsxLazyPackage),
     Xls(xls::XlsImportResult),
     Xlsb(xlsb::XlsbWorkbook),
     /// A workbook represented as an in-memory model (e.g. imported from a non-OPC format like CSV/Parquet).
@@ -1115,7 +1115,7 @@ fn open_workbook_from_decrypted_ooxml_zip_bytes(
         });
     }
 
-    let package = xlsx::XlsxPackage::from_bytes(&decrypted_bytes).map_err(|source| {
+    let package = xlsx::XlsxLazyPackage::from_vec(decrypted_bytes).map_err(|source| {
         Error::OpenXlsx {
             path: path.to_path_buf(),
             source,
@@ -1972,15 +1972,16 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
 
     match workbook_format(path)? {
         WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
-            let bytes = std::fs::read(path).map_err(|source| Error::OpenIo {
+            let file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
             })?;
-            let package =
-                xlsx::XlsxPackage::from_bytes(&bytes).map_err(|source| Error::OpenXlsx {
+            let package = xlsx::XlsxLazyPackage::from_file(path.to_path_buf(), file).map_err(
+                |source| Error::OpenXlsx {
                     path: path.to_path_buf(),
                     source,
-                })?;
+                },
+            )?;
             Ok(Workbook::Xlsx(package))
         }
         WorkbookFormat::Xls => match xls::import_xls_path(path) {
@@ -2062,7 +2063,7 @@ pub fn open_workbook_with_options(
                 return Ok(Workbook::Xlsb(wb));
             }
 
-            let package = xlsx::XlsxPackage::from_bytes(&bytes).map_err(|source| Error::OpenXlsx {
+            let package = xlsx::XlsxLazyPackage::from_vec(bytes).map_err(|source| Error::OpenXlsx {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -2081,12 +2082,11 @@ pub fn open_workbook_with_options(
                 });
             }
         }
-        let package = xlsx::XlsxPackage::from_bytes(&package_bytes).map_err(|source| {
-            Error::OpenXlsx {
+        let package =
+            xlsx::XlsxLazyPackage::from_vec(package_bytes).map_err(|source| Error::OpenXlsx {
                 path: path.to_path_buf(),
                 source,
-            }
-        })?;
+            })?;
         return Ok(Workbook::Xlsx(package));
     }
     let ext = path
@@ -2111,15 +2111,16 @@ pub fn open_workbook_with_options(
 
     match format {
         WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
-            let bytes = std::fs::read(path).map_err(|source| Error::OpenIo {
+            let file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
             })?;
-            let package =
-                xlsx::XlsxPackage::from_bytes(&bytes).map_err(|source| Error::OpenXlsx {
+            let package = xlsx::XlsxLazyPackage::from_file(path.to_path_buf(), file).map_err(
+                |source| Error::OpenXlsx {
                     path: path.to_path_buf(),
                     source,
-                })?;
+                },
+            )?;
             Ok(Workbook::Xlsx(package))
         }
         WorkbookFormat::Xls => {

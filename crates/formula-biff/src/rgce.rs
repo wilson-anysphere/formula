@@ -924,7 +924,7 @@ fn decode_rgce_impl(
                 }
 
                 let name_id = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
-                // Skip reserved u16.
+                // Skip `[nameId: u32][reserved: u16]`.
                 i = i.saturating_add(6);
 
                 // Best-effort: we don't have workbook name context in this crate, so emit a stable

@@ -2,6 +2,7 @@ use std::io::{Cursor, Write};
 use std::path::PathBuf;
 
 use formula_io::{open_workbook, save_workbook, Workbook};
+use formula_xlsx::XlsxLazyPackage;
 use formula_xlsx::XlsxPackage;
 use xlsx_diff::Severity;
 
@@ -16,7 +17,10 @@ fn opens_basic_xlsx_fixture() {
 
     match wb {
         Workbook::Xlsx(pkg) => {
-            assert!(pkg.part("xl/workbook.xml").is_some());
+            assert!(pkg
+                .read_part("xl/workbook.xml")
+                .expect("read xl/workbook.xml")
+                .is_some());
         }
         other => panic!("expected Workbook::Xlsx, got {other:?}"),
     }
@@ -30,7 +34,9 @@ fn opens_xlsm_fixture_and_preserves_vba_project() {
     match wb {
         Workbook::Xlsx(pkg) => {
             assert!(
-                pkg.vba_project_bin().is_some(),
+                pkg.read_part("xl/vbaProject.bin")
+                    .expect("read xl/vbaProject.bin")
+                    .is_some(),
                 "expected xl/vbaProject.bin to be present"
             );
         }
@@ -133,7 +139,10 @@ fn opens_basic_xltx_fixture() {
     let wb = open_workbook(&dst).expect("open workbook");
     match wb {
         Workbook::Xlsx(pkg) => {
-            assert!(pkg.part("xl/workbook.xml").is_some());
+            assert!(pkg
+                .read_part("xl/workbook.xml")
+                .expect("read xl/workbook.xml")
+                .is_some());
         }
         other => panic!("expected Workbook::Xlsx, got {other:?}"),
     }
@@ -151,7 +160,9 @@ fn opens_xltm_and_xlam_as_macro_capable_packages() {
         match wb {
             Workbook::Xlsx(pkg) => {
                 assert!(
-                    pkg.vba_project_bin().is_some(),
+                    pkg.read_part("xl/vbaProject.bin")
+                        .expect("read xl/vbaProject.bin")
+                        .is_some(),
                     "expected xl/vbaProject.bin to be present for {ext}"
                 );
             }
@@ -259,9 +270,11 @@ fn saving_xlsx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
     // When saving to `.xlsx`, formula-io must strip *all* macro-capable content, not just VBA.
     let input_bytes = macro_capable_xlm_package_bytes();
 
-    let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
+    let pkg = XlsxLazyPackage::from_bytes(&input_bytes).expect("parse test package");
     assert!(
-        pkg.vba_project_bin().is_none(),
+        pkg.read_part("xl/vbaProject.bin")
+            .expect("read xl/vbaProject.bin")
+            .is_none(),
         "test package should not contain xl/vbaProject.bin"
     );
     assert!(
@@ -308,9 +321,11 @@ fn saving_xltx_strips_macro_capable_content() {
     // for packages that only contain XLM macro sheets / dialog sheets (and no vbaProject.bin).
     let input_bytes = macro_capable_xlm_package_bytes();
 
-    let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
+    let pkg = XlsxLazyPackage::from_bytes(&input_bytes).expect("parse test package");
     assert!(
-        pkg.vba_project_bin().is_none(),
+        pkg.read_part("xl/vbaProject.bin")
+            .expect("read xl/vbaProject.bin")
+            .is_none(),
         "test package should not contain xl/vbaProject.bin"
     );
     assert!(
@@ -360,7 +375,7 @@ fn saving_xltx_strips_macro_capable_content() {
 #[test]
 fn saving_xltm_preserves_macro_capable_content() {
     let input_bytes = macro_capable_xlm_package_bytes();
-    let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
+    let pkg = XlsxLazyPackage::from_bytes(&input_bytes).expect("parse test package");
     assert!(
         pkg.macro_presence().any(),
         "test package should be detected as macro-capable"
@@ -387,7 +402,7 @@ fn saving_xltm_preserves_macro_capable_content() {
 #[test]
 fn saving_xlam_preserves_macro_capable_content() {
     let input_bytes = macro_capable_xlm_package_bytes();
-    let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
+    let pkg = XlsxLazyPackage::from_bytes(&input_bytes).expect("parse test package");
     assert!(
         pkg.macro_presence().any(),
         "test package should be detected as macro-capable"
