@@ -253,26 +253,29 @@ These benchmarks enforce a 16ms p95 budget (60fps target). They are timed using 
 (`process.cpuUsage()`) rather than wall time to reduce noise from OS scheduling on shared CI runners.
 
 ```typescript
-// tests/performance/benchmark.ts
- 
+// apps/desktop/tests/performance/benchmark.ts
+  
 interface BenchmarkResult {
   name: string;
   iterations: number;
+  warmup: number;
+  unit: "ms" | "mb";
   mean: number;
   median: number;
   p95: number;
   p99: number;
   stdDev: number;
+  // Historical name: size/memory benchmarks reuse this field for their unit.
+  targetMs?: number;
   passed: boolean;
-  target: number;
 }
 
 async function runBenchmark(
   name: string,
   fn: () => Promise<void>,
-  options: { iterations?: number; warmup?: number; target: number }
+  options: { iterations?: number; warmup?: number; targetMs: number; unit?: "ms" | "mb" }
 ): Promise<BenchmarkResult> {
-  const { iterations = 100, warmup = 10, target } = options;
+  const { iterations = 100, warmup = 10, targetMs, unit = "ms" } = options;
   const results: number[] = [];
   
   // Warmup
@@ -299,13 +302,15 @@ async function runBenchmark(
   return {
     name,
     iterations,
+    warmup,
+    unit,
     mean,
     median,
     p95,
     p99,
     stdDev,
-    passed: p95 <= target,
-    target
+    passed: targetMs == null ? true : p95 <= targetMs,
+    targetMs
   };
 }
 ```
