@@ -15,7 +15,14 @@ function escapeRegExp(value) {
 test("Ribbon schema includes Home → Cells → Insert/Delete Cells command ids", () => {
   const schema = readRibbonSchemaSource("homeTab.ts");
 
-  const ids = ["home.cells.insert.insertCells", "home.cells.delete.deleteCells"];
+  const ids = [
+    "home.cells.insert.insertCells",
+    "home.cells.insert.insertSheetRows",
+    "home.cells.insert.insertSheetColumns",
+    "home.cells.delete.deleteCells",
+    "home.cells.delete.deleteSheetRows",
+    "home.cells.delete.deleteSheetColumns",
+  ];
   for (const id of ids) {
     assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected homeTab.ts to include ${id}`);
   }
@@ -28,8 +35,8 @@ test("Insert/Delete Cells ribbon commands are registered in CommandRegistry and 
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const commands = fs.readFileSync(commandsPath, "utf8");
 
-  const ids = ["home.cells.insert.insertCells", "home.cells.delete.deleteCells"];
-  for (const id of ids) {
+  const insertDeleteCellsIds = ["home.cells.insert.insertCells", "home.cells.delete.deleteCells"];
+  for (const id of insertDeleteCellsIds) {
     assert.match(
       commands,
       new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
@@ -42,7 +49,25 @@ test("Insert/Delete Cells ribbon commands are registered in CommandRegistry and 
     );
   }
 
+  const sheetRowColumnIds = [
+    "home.cells.insert.insertSheetRows",
+    "home.cells.insert.insertSheetColumns",
+    "home.cells.delete.deleteSheetRows",
+    "home.cells.delete.deleteSheetColumns",
+  ];
+  for (const id of sheetRowColumnIds) {
+    assert.match(
+      commands,
+      new RegExp(`\\bregisterCellsStructuralCommand\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerDesktopCommands.ts to register ${id} via registerCellsStructuralCommand`,
+    );
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+    );
+  }
+
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
   assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
 });
-

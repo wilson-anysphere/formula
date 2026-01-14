@@ -46,7 +46,6 @@ import { openOrganizeSheetsDialog } from "./sheets/OrganizeSheetsDialog";
 import { ThemeController } from "./theme/themeController.js";
 
 import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands, mountRibbon } from "./ribbon/index.js";
-import { executeCellsStructuralRibbonCommand } from "./ribbon/cellsStructuralCommands";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCommandRegistryDisabling.js";
@@ -130,7 +129,6 @@ import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateSto
 import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
-import { handleInsertPicturesRibbonCommand } from "./main.insertPicturesRibbonCommand.js";
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
 import { promptAndApplyCustomNumberFormat } from "./formatting/promptCustomNumberFormat.js";
@@ -8894,25 +8892,12 @@ function handleRibbonCommand(commandId: string): void {
     }
 
     switch (commandId) {
-      case "insert.illustrations.pictures":
-      case "insert.illustrations.pictures.thisDevice":
-      case "insert.illustrations.pictures.stockImages":
-      case "insert.illustrations.pictures.onlinePictures":
-      case "insert.illustrations.onlinePictures":
-        void handleInsertPicturesRibbonCommand(commandId, app);
-        return;
       case "home.cells.format":
         // This command is a dropdown with menu items; the top-level command is not expected
         // to fire when the menu is present. Keep this as a fallback.
         return;
       case "home.cells.format.organizeSheets":
         openOrganizeSheets();
-        return;
-      case "home.cells.insert.insertSheetRows":
-      case "home.cells.insert.insertSheetColumns":
-      case "home.cells.delete.deleteSheetRows":
-      case "home.cells.delete.deleteSheetColumns":
-        executeCellsStructuralRibbonCommand(app, commandId);
         return;
       case "home.cells.insert.insertSheet":
         if (isSpreadsheetEditing() || app.isReadOnly()) return;
