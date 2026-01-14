@@ -28,8 +28,7 @@ fn opens_fixture_from_bytes() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
     let bytes = std::fs::read(path).expect("read fixture bytes");
 
-    let wb = XlsbWorkbook::from_bytes(Arc::from(bytes), OpenOptions::default())
-        .expect("open xlsb from bytes");
+    let wb = XlsbWorkbook::open_from_bytes(&bytes).expect("open xlsb from bytes");
     assert_eq!(wb.sheet_metas().len(), 1);
     assert!(wb.preserved_parts().contains_key("[Content_Types].xml"));
 
@@ -47,6 +46,10 @@ fn opens_fixture_from_bytes() {
         cells.remove(&(0, 1)).unwrap().value,
         CellValue::Number(42.5)
     );
+    let fmla_cell = cells.remove(&(0, 2)).expect("C1 cell");
+    assert_eq!(fmla_cell.value, CellValue::Number(85.0));
+    let fmla = fmla_cell.formula.as_ref().expect("formula payload");
+    assert_eq!(fmla.text.as_deref(), Some("B1*2"));
 }
 
 #[test]
@@ -107,4 +110,15 @@ fn in_memory_save_as_to_writer_is_lossless_at_opc_part_level() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+#[test]
+fn open_from_bytes_produces_equivalent_sheet_metas() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let bytes = std::fs::read(path).expect("read fixture bytes");
+
+    let wb_path = XlsbWorkbook::open(path).expect("open xlsb from path");
+    let wb_bytes = XlsbWorkbook::open_from_bytes(&bytes).expect("open xlsb from bytes");
+
+    assert_eq!(wb_path.sheet_metas(), wb_bytes.sheet_metas());
 }

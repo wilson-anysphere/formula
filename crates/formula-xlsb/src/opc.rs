@@ -117,7 +117,7 @@ pub struct OpenOptions {
     /// If true, also preserve the raw bytes for worksheet `.bin` parts.
     ///
     /// Worksheet parts can be very large. If you only need fast read access,
-    /// leave this off and rely on re-reading the source file when writing.
+    /// leave this off and rely on re-reading the source workbook when writing.
     pub preserve_worksheets: bool,
     /// If true, decode parsed formula token streams (`rgce`/`rgcb`) into best-effort Excel formula
     /// text during parsing.
@@ -539,7 +539,7 @@ impl XlsbWorkbook {
     ///
     /// How [`OpenOptions`] affects `save_as`:
     /// - `preserve_unknown_parts`: stores raw bytes for unknown ZIP entries in `preserved_parts`,
-    ///   but `save_as` will still copy them from the source file even when this is `false`.
+    ///   but `save_as` will still copy them from the source package even when this is `false`.
     /// - `preserve_parsed_parts`: stores raw bytes for `xl/workbook.bin` and the shared strings
     ///   part (typically `xl/sharedStrings.bin`) so they can be re-emitted without re-reading
     ///   those ZIP entries.
