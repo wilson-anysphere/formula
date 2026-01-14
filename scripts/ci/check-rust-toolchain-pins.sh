@@ -255,6 +255,7 @@ for workflow in "${workflow_files[@]}"; do
           sub(/^run:[[:space:]]*/, "", value)
           value = trim(value)
           sub(/[[:space:]]+#.*/, "", value)
+          value = strip_quotes(value)
           if (line_looks_like_rust_tooling(value)) {
             note_rust_use("run: " value)
           }
@@ -300,6 +301,7 @@ for workflow in "${workflow_files[@]}"; do
         sub(/^run:[[:space:]]*/, "", value)
         value = trim(value)
         sub(/[[:space:]]+#.*/, "", value)
+        value = strip_quotes(value)
         if (line_looks_like_rust_tooling(value)) {
           note_rust_use("run: " value)
         }
