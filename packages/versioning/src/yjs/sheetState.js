@@ -247,6 +247,29 @@ function findSheetEntryById(doc, sheetId) {
 }
 
 /**
+ * Return true when `segment` is a canonical non-negative integer string:
+ * - ASCII digits only
+ * - no leading zeros unless the number is exactly "0"
+ *
+ * This mirrors `String(Number(segment)) === segment` for non-negative integers,
+ * but avoids allocating a normalized string.
+ *
+ * @param {string} segment
+ */
+function isCanonicalUnsignedIntSegment(segment) {
+  const len = segment.length;
+  if (len === 0) return false;
+  const first = segment.charCodeAt(0);
+  if (first < 48 || first > 57) return false;
+  if (len > 1 && first === 48) return false;
+  for (let i = 1; i < len; i++) {
+    const code = segment.charCodeAt(i);
+    if (code < 48 || code > 57) return false;
+  }
+  return true;
+}
+
+/**
  * Parse a spreadsheet cell key. Supports:
  * - `${sheetId}:${row}:${col}` (docs/06-collaboration.md)
  * - `${sheetId}:${row},${col}` (legacy internal encoding)
@@ -254,7 +277,7 @@ function findSheetEntryById(doc, sheetId) {
  *
  * @param {string} key
  * @param {{ defaultSheetId?: string }} [opts]
- * @returns {{ sheetId: string, row: number, col: number } | null}
+ * @returns {{ sheetId: string, row: number, col: number, isCanonical: boolean } | null}
  */
 export function parseSpreadsheetCellKey(key, opts = {}) {
   const defaultSheetId = opts.defaultSheetId ?? "Sheet1";
@@ -268,12 +291,21 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
     if (secondColon !== -1) {
       // Reject 3+ colon encodings (unsupported).
       if (key.indexOf(":", secondColon + 1) !== -1) return null;
-      const sheetId = key.slice(0, firstColon) || defaultSheetId;
-      const row = Number(key.slice(firstColon + 1, secondColon));
-      const col = Number(key.slice(secondColon + 1));
+      const rawSheetId = key.slice(0, firstColon);
+      const sheetId = rawSheetId || defaultSheetId;
+      const rowStr = key.slice(firstColon + 1, secondColon);
+      const colStr = key.slice(secondColon + 1);
+      const row = Number(rowStr);
+      const col = Number(colStr);
       if (!Number.isInteger(row) || row < 0) return null;
       if (!Number.isInteger(col) || col < 0) return null;
-      return { sheetId, row, col };
+      // `sheetId` is canonical when it was not default-substituted. Row/col are
+      // canonical when they match the normalized integer string representation.
+      const isCanonical =
+        rawSheetId.length > 0 &&
+        isCanonicalUnsignedIntSegment(rowStr) &&
+        isCanonicalUnsignedIntSegment(colStr);
+      return { sheetId, row, col, isCanonical };
     }
 
     // Legacy `${sheetId}:${row},${col}` encoding.
@@ -281,12 +313,12 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
     const rest = key.slice(firstColon + 1);
     const m = rest.match(/^(\d+),(\d+)$/);
     if (!m) return null;
-    return { sheetId, row: Number(m[1]), col: Number(m[2]) };
+    return { sheetId, row: Number(m[1]), col: Number(m[2]), isCanonical: false };
   }
 
   // Unit-test convenience `r{row}c{col}` encoding.
   const m = key.match(/^r(\d+)c(\d+)$/);
-  if (m) return { sheetId: defaultSheetId, row: Number(m[1]), col: Number(m[2]) };
+  if (m) return { sheetId: defaultSheetId, row: Number(m[1]), col: Number(m[2]), isCanonical: false };
 
   return null;
 }
@@ -327,7 +359,7 @@ function extractCell(cellData) {
  * layering across duplicates).
  *
  * @param {Map<string, any>} cells
- * @param {{ sheetId: string, row: number, col: number }} parsed
+ * @param {{ sheetId: string, row: number, col: number, isCanonical: boolean }} parsed
  * @param {string} rawKey
  * @param {any} cellData
  */
@@ -339,14 +371,13 @@ export function mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData) {
   // If any representation of this coordinate is encrypted (e.g. stored under a
   // legacy key encoding), treat the cell as encrypted and do not allow plaintext
   // duplicates to overwrite the ciphertext.
-  const isCanonical = rawKey === `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
-
   const enc = cell?.enc;
   const isEncrypted = enc !== null && enc !== undefined;
   const existingEnc = existing?.enc;
   const existingIsEncrypted = existingEnc !== null && existingEnc !== undefined;
 
   if (isEncrypted) {
+    const isCanonical = parsed.isCanonical === true;
     if (!existing || !existingIsEncrypted || isCanonical) {
       // Preserve any existing format metadata if the preferred encrypted record
       // lacks it (e.g. canonical key created during encryption while a legacy
