@@ -333,10 +333,17 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     await insertPromise;
 
     // Picture should land on Sheet1 (where the insert was initiated), not the newly active sheet.
-    expect(Array.isArray(doc.getSheetDrawings("Sheet1")) ? doc.getSheetDrawings("Sheet1") : []).toHaveLength(1);
+    const sheet1Drawings = Array.isArray(doc.getSheetDrawings("Sheet1")) ? doc.getSheetDrawings("Sheet1") : [];
+    expect(sheet1Drawings).toHaveLength(1);
     expect(Array.isArray(doc.getSheetDrawings("Sheet2")) ? doc.getSheetDrawings("Sheet2") : []).toHaveLength(0);
     // And it should not disrupt the current sheet's drawing selection.
     expect(app.getDrawingsDebugState().selectedId).toBe(null);
+
+    // WorkbookImageManager should track references even when drawings change on a non-active sheet.
+    const imageId = (sheet1Drawings[0] as any)?.kind?.imageId as string | undefined;
+    expect(typeof imageId).toBe("string");
+    const imageManager = (app as any).workbookImageManager;
+    expect(imageManager?.imageRefCount?.get?.(imageId!)).toBe(1);
 
     app.destroy();
     root.remove();
