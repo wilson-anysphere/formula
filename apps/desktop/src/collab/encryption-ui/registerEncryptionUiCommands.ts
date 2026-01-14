@@ -144,6 +144,24 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const range = normalizeRange(ranges[0]!);
       const a1 = rangeToA1(range);
 
+      const docId = session.doc.guid;
+      const keyStore = app.getCollabEncryptionKeyStore();
+      if (!keyStore) {
+        showToast("Encryption is not available for this workbook.", "error");
+        return;
+      }
+
+      // Ensure the encrypted range metadata is readable before we prompt for a key id or generate/store
+      // key material. If the doc contains an unknown `metadata.encryptedRanges` schema, the manager
+      // will throw; fail early so we don't create orphaned keys.
+      try {
+        manager.list();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Encrypted range metadata is in an unsupported format: ${message}`, "error");
+        return;
+      }
+
       const rawKeyId = await showInputBox({
         prompt: `Encrypt ${sheetName}!${a1} – Key ID`,
         value: randomKeyId(),
@@ -154,24 +172,6 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const keyId = String(rawKeyId).trim();
       if (!keyId) {
         showToast("Key ID is required.", "warning");
-        return;
-      }
-
-      const docId = session.doc.guid;
-      const keyStore = app.getCollabEncryptionKeyStore();
-      if (!keyStore) {
-        showToast("Encryption is not available for this workbook.", "error");
-        return;
-      }
-
-      // Ensure the encrypted range metadata is readable before we generate or store key material.
-      // If the doc contains an unknown `metadata.encryptedRanges` schema, the manager will throw;
-      // fail early so we don't create orphaned keys.
-      try {
-        manager.list();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        showToast(`Encrypted range metadata is in an unsupported format: ${message}`, "error");
         return;
       }
 

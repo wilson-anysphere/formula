@@ -314,10 +314,9 @@ describe("registerEncryptionUiCommands", () => {
 
     registerEncryptionUiCommands({ commandRegistry, app });
 
-    vi.mocked(showInputBox).mockResolvedValue("k1");
-
     await commandRegistry.executeCommand("collab.encryptSelectedRange");
 
+    expect(showInputBox).not.toHaveBeenCalled();
     expect(showQuickPick).not.toHaveBeenCalled();
     expect(keyStore.getCachedKey).not.toHaveBeenCalled();
     expect(keyStore.get).not.toHaveBeenCalled();
