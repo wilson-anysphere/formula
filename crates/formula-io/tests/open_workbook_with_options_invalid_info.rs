@@ -9,7 +9,7 @@ use std::io::{Cursor, Write as _};
 use formula_io::{open_workbook_with_options, Error, OpenOptions};
 
 #[test]
-fn maps_invalid_encryption_info_to_unsupported_ooxml_encryption() {
+fn maps_invalid_encryption_info_to_decrypt_ooxml() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
@@ -52,7 +52,7 @@ fn maps_invalid_encryption_info_to_unsupported_ooxml_encryption() {
     .expect_err("expected invalid EncryptionInfo to error");
 
     assert!(
-        matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
-        "expected UnsupportedOoxmlEncryption for malformed EncryptionInfo/EncryptedPackage, got {err:?}"
+        matches!(err, Error::DecryptOoxml { .. } | Error::UnsupportedOoxmlEncryption { .. }),
+        "expected an OOXML-related error, got {err:?}"
     );
 }

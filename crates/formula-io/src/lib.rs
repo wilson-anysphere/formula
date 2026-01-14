@@ -147,6 +147,12 @@ pub enum Error {
         "unsupported encrypted workbook `{path}`: decrypted workbook kind `{kind}` is not supported"
     )]
     UnsupportedEncryptedWorkbookKind { path: PathBuf, kind: &'static str },
+    #[error("failed to decrypt encrypted OOXML workbook `{path}`: {source}")]
+    DecryptOoxml {
+        path: PathBuf,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error(
         "password required: workbook `{path}` is password-protected/encrypted (legacy `.xls` encryption); supply a password via `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)`"
     )]
@@ -2024,10 +2030,11 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     // A wrong password should still surface as `InvalidPassword` once we can actually attempt a
     // verifier/integrity check.
     if encrypted_package.len() <= 8 {
-        return Err(Error::UnsupportedOoxmlEncryption {
+        return Err(Error::DecryptOoxml {
             path: path.to_path_buf(),
-            version_major,
-            version_minor,
+            source: Box::new(xlsx::OffCryptoError::EncryptedPackageTooShort {
+                len: encrypted_package.len(),
+            }),
         });
     }
     let decrypted = if (version_major, version_minor) == (4, 4) {
@@ -2041,9 +2048,15 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         ) {
             Ok(bytes) => bytes,
             Err(err) => match err {
-                xlsx::OffCryptoError::WrongPassword | xlsx::OffCryptoError::IntegrityMismatch => {
+                xlsx::OffCryptoError::WrongPassword => {
                     return Err(Error::InvalidPassword {
                         path: path.to_path_buf(),
+                    })
+                }
+                err @ xlsx::OffCryptoError::IntegrityMismatch => {
+                    return Err(Error::DecryptOoxml {
+                        path: path.to_path_buf(),
+                        source: Box::new(err),
                     })
                 }
                 xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
@@ -2053,11 +2066,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                         version_minor: minor,
                     })
                 }
-                _ => {
-                    return Err(Error::UnsupportedOoxmlEncryption {
+                other => {
+                    return Err(Error::DecryptOoxml {
                         path: path.to_path_buf(),
-                        version_major,
-                        version_minor,
+                        source: Box::new(other),
                     })
                 }
             },
@@ -2301,11 +2313,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                     Err(err) => return Err(err),
                 }
             }
-            Err(_) => {
-                return Err(Error::UnsupportedOoxmlEncryption {
+            Err(other) => {
+                return Err(Error::DecryptOoxml {
                     path: path.to_path_buf(),
-                    version_major,
-                    version_minor,
+                    source: Box::new(other),
                 })
             }
         }
@@ -2454,10 +2465,11 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
         // ciphertext. If the stream is too short, treat it as a malformed/unsupported encryption
         // container rather than an invalid password.
         if encrypted_package.len() <= 8 {
-            return Err(Error::UnsupportedOoxmlEncryption {
+            return Err(Error::DecryptOoxml {
                 path: path.to_path_buf(),
-                version_major,
-                version_minor,
+                source: Box::new(xlsx::OffCryptoError::EncryptedPackageTooShort {
+                    len: encrypted_package.len(),
+                }),
             });
         }
 
@@ -2469,10 +2481,15 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
             ) {
                 Ok(bytes) => bytes,
                 Err(err) => match err {
-                    formula_office_crypto::OfficeCryptoError::InvalidPassword
-                    | formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => {
+                    formula_office_crypto::OfficeCryptoError::InvalidPassword => {
                         return Err(Error::InvalidPassword {
                             path: path.to_path_buf(),
+                        })
+                    }
+                    err @ formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => {
+                        return Err(Error::DecryptOoxml {
+                            path: path.to_path_buf(),
+                            source: Box::new(err),
                         })
                     }
                     formula_office_crypto::OfficeCryptoError::Io(source) => {
@@ -2481,13 +2498,12 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
                             source,
                         })
                     }
-                    _ => match try_decrypt_ooxml_encrypted_package_from_path(path, Some(password))? {
+                    other => match try_decrypt_ooxml_encrypted_package_from_path(path, Some(password))? {
                         Some(bytes) => bytes,
                         None => {
-                            return Err(Error::UnsupportedOoxmlEncryption {
+                            return Err(Error::DecryptOoxml {
                                 path: path.to_path_buf(),
-                                version_major,
-                                version_minor,
+                                source: Box::new(other),
                             })
                         }
                     },
@@ -2504,9 +2520,15 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
             ) {
                 Ok(bytes) => bytes,
                 Err(err) => match err {
-                    xlsx::OffCryptoError::WrongPassword | xlsx::OffCryptoError::IntegrityMismatch => {
+                    xlsx::OffCryptoError::WrongPassword => {
                         return Err(Error::InvalidPassword {
                             path: path.to_path_buf(),
+                        })
+                    }
+                    err @ xlsx::OffCryptoError::IntegrityMismatch => {
+                        return Err(Error::DecryptOoxml {
+                            path: path.to_path_buf(),
+                            source: Box::new(err),
                         })
                     }
                     xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
@@ -2516,11 +2538,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
                             version_minor: minor,
                         })
                     }
-                    _ => {
-                        return Err(Error::UnsupportedOoxmlEncryption {
+                    other => {
+                        return Err(Error::DecryptOoxml {
                             path: path.to_path_buf(),
-                            version_major,
-                            version_minor,
+                            source: Box::new(other),
                         })
                     }
                 },

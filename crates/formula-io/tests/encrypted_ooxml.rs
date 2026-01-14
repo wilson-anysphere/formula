@@ -145,9 +145,11 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 assert!(
                     matches!(
                         err,
-                        Error::InvalidPassword { .. } | Error::UnsupportedOoxmlEncryption { .. }
+                        Error::InvalidPassword { .. }
+                            | Error::UnsupportedOoxmlEncryption { .. }
+                            | Error::DecryptOoxml { .. }
                     ),
-                    "expected InvalidPassword or UnsupportedOoxmlEncryption, got {err:?}"
+                    "expected InvalidPassword, UnsupportedOoxmlEncryption, or DecryptOoxml, got {err:?}"
                 );
             } else {
                 assert!(
@@ -162,9 +164,11 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 assert!(
                     matches!(
                         err,
-                        Error::InvalidPassword { .. } | Error::UnsupportedOoxmlEncryption { .. }
+                        Error::InvalidPassword { .. }
+                            | Error::UnsupportedOoxmlEncryption { .. }
+                            | Error::DecryptOoxml { .. }
                     ),
-                    "expected InvalidPassword or UnsupportedOoxmlEncryption, got {err:?}"
+                    "expected InvalidPassword, UnsupportedOoxmlEncryption, or DecryptOoxml, got {err:?}"
                 );
             } else {
                 assert!(
