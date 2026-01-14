@@ -1603,6 +1603,32 @@ impl OpenedWorkbookWithPreservedOle {
             save_workbook(&self.workbook, path)
         }
     }
+
+    /// Like [`Self::save_preserving_encryption`], but allows overriding the Office encryption
+    /// parameters (e.g. Agile `spinCount`) used when re-encrypting the workbook.
+    ///
+    /// This is primarily useful for tests and internal tooling that want deterministic output and/or
+    /// faster encryption. Most callers should use [`Self::save_preserving_encryption`], which uses
+    /// Excel-compatible defaults.
+    pub fn save_preserving_encryption_with_encrypt_options(
+        &self,
+        path: impl AsRef<Path>,
+        password: &str,
+        encrypt_opts: formula_office_crypto::EncryptOptions,
+    ) -> Result<(), Error> {
+        let path = path.as_ref();
+        if let Some(preserved) = &self.preserved_ole {
+            save_workbook_office_encrypted_ooxml(
+                &self.workbook,
+                path,
+                password,
+                encrypt_opts,
+                Some(preserved),
+            )
+        } else {
+            save_workbook(&self.workbook, path)
+        }
+    }
 }
 
 /// Open a workbook and, when it is an Office-encrypted OOXML OLE container, also preserve any

@@ -457,7 +457,8 @@ fn verify_password_standard_with_key_ecb_only(
             // (no IV). This helper intentionally does **not** attempt CBC fallbacks; callers that
             // need additional compatibility should handle that explicitly.
             let verifier_plain = aes_ecb_decrypt(key0, &verifier.encrypted_verifier)?;
-            let verifier_hash_plain_full = aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash)?;
+            let verifier_hash_plain_full =
+                aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash)?;
 
             let verifier_hash_plain =
                 verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {

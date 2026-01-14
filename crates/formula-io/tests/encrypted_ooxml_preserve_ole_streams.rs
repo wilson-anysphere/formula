@@ -80,7 +80,16 @@ fn preserves_extra_ole_metadata_streams_on_encrypt_roundtrip() {
 
     let out_path = tmp.path().join("output.xlsx");
     opened
-        .save_preserving_encryption(&out_path, password)
+        .save_preserving_encryption_with_encrypt_options(
+            &out_path,
+            password,
+            EncryptOptions {
+                scheme: EncryptionScheme::Agile,
+                key_bits: 128,
+                hash_algorithm: HashAlgorithm::Sha256,
+                spin_count: 1_000,
+            },
+        )
         .expect("save with encryption preserved");
 
     // Verify the extra stream is preserved byte-for-byte in the output OLE container.
@@ -159,7 +168,16 @@ fn preserves_extra_ole_metadata_streams_for_standard_fixture_roundtrip() {
 
     let out_path = tmp.path().join("output.xlsx");
     opened
-        .save_preserving_encryption(&out_path, password)
+        .save_preserving_encryption_with_encrypt_options(
+            &out_path,
+            password,
+            EncryptOptions {
+                scheme: EncryptionScheme::Agile,
+                key_bits: 128,
+                hash_algorithm: HashAlgorithm::Sha256,
+                spin_count: 1_000,
+            },
+        )
         .expect("save with encryption preserved");
 
     // Verify the extra stream is preserved byte-for-byte in the output OLE container.
