@@ -825,6 +825,22 @@ fn relationship_target_by_type_handles_prefixed_relationship_elements() {
 }
 
 #[test]
+fn relationship_targets_by_type_ignores_external_relationships() {
+    let rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="{rel_type}" Target="https://example.com/image.png" TargetMode="External"/>
+  <Relationship Id="rId2" Type="{rel_type}" Target="../media/image1.png"/>
+</Relationships>"#,
+        rel_type = crate::drawings::REL_TYPE_IMAGE
+    );
+
+    let targets =
+        relationship_targets_by_type(rels.as_bytes(), crate::drawings::REL_TYPE_IMAGE).expect("parse");
+    assert_eq!(targets, vec!["../media/image1.png".to_string()]);
+}
+
+#[test]
 fn ensure_workbook_rels_has_relationship_inserts_prefixed_relationship() {
     let rels = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
