@@ -256,6 +256,49 @@ fn move_range_updates_pivot_source_and_refresh_reads_from_moved_location() {
 }
 
 #[test]
+fn pivot_definitions_match_sheet_names_nfkc_case_insensitively() {
+    let mut engine = Engine::new();
+
+    // U+212A KELVIN SIGN (K) is compatibility-equivalent (NFKC) to ASCII 'K'.
+    // The engine treats these as the same sheet name for lookups, so pivot definitions should too
+    // when applying edits.
+    let sheet = "Kelvin";
+    seed_sales_data_on(&mut engine, sheet);
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: sheet.to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: sheet.to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+    assert!(!engine.pivot_table(pivot_id).unwrap().needs_refresh);
+
+    // Apply a fill edit using the compatibility-equivalent sheet name (`Kelvin`). This should
+    // still invalidate the pivot output on `Kelvin`.
+    engine
+        .apply_operation(EditOp::Fill {
+            sheet: "Kelvin".to_string(),
+            src: range("A1:B1"),
+            dst: range("D1:D1"),
+        })
+        .unwrap();
+
+    assert!(engine.pivot_table(pivot_id).unwrap().needs_refresh);
+}
+
+#[test]
 fn rename_sheet_updates_pivot_definition_and_refresh_does_not_recreate_old_sheet() {
     let mut engine = Engine::new();
     // Use a stable sheet key that differs from the user-visible display name so we can assert that

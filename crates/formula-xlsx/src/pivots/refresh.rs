@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 
 use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
-use formula_model::{CellRef, Range};
+use formula_model::{sheet_name_eq_case_insensitive, CellRef, Range};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
@@ -459,7 +459,7 @@ fn resolve_defined_name_reference(
         let sheets = package.workbook_sheets()?;
         let hint_idx = sheets
             .iter()
-            .position(|s| s.name.eq_ignore_ascii_case(sheet_hint))
+            .position(|s| sheet_name_eq_case_insensitive(&s.name, sheet_hint))
             .map(|idx| idx as u32);
 
         let mut filtered: Vec<ParsedDefinedName> = matches
@@ -600,8 +600,8 @@ fn resolve_worksheet_part(package: &XlsxPackage, sheet_name: &str) -> Result<Str
     let sheets = package.workbook_sheets()?;
     let sheet = sheets
         .iter()
-        // Sheet names are case-insensitive in Excel formulas.
-        .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
+        // Sheet names use Excel's Unicode-aware, NFKC + case-insensitive comparison semantics.
+        .find(|s| sheet_name_eq_case_insensitive(&s.name, sheet_name))
         .ok_or_else(|| XlsxError::Invalid(format!("sheet {sheet_name:?} not found in workbook")))?;
 
     let rels_part = rels_part_name("xl/workbook.xml");
