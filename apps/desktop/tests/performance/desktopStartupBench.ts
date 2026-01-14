@@ -203,7 +203,9 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   }
 
   const startupMode = resolveDesktopStartupMode();
-  const benchKind = resolveDesktopStartupBenchKind();
+  // Default to the full end-to-end app startup measurement in the integrated benchmark harness.
+  // The lightweight shell benchmark is opt-in via `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell`.
+  const benchKind = resolveDesktopStartupBenchKind({ defaultKind: 'full' });
 
   const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? '20') || 20);
   const timeoutMs = Math.max(
