@@ -274,6 +274,23 @@ def main() -> int:
         help="Path to tauri.conf.json (source of truth for expected file associations)",
     )
     parser.add_argument(
+        "--expected-main-binary",
+        default="",
+        help=(
+            "Override the expected Exec binary token used to select the app's .desktop entry "
+            "(defaults to tauri.conf.json mainBinaryName). This does not affect the expected "
+            "doc directory name."
+        ),
+    )
+    parser.add_argument(
+        "--doc-package-name",
+        default="",
+        help=(
+            "Override the expected /usr/share/doc/<package> directory name used to validate "
+            "LICENSE/NOTICE compliance artifacts (defaults to tauri.conf.json mainBinaryName)."
+        ),
+    )
+    parser.add_argument(
         "--url-scheme",
         default="formula",
         help="Expected x-scheme-handler/<scheme> entry in the .desktop MimeType= list",
@@ -282,8 +299,9 @@ def main() -> int:
 
     expected_mime_types = load_expected_mime_types(args.tauri_config)
     expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
-    expected_doc_pkg = load_expected_doc_package_name(args.tauri_config)
-    expected_main_binary = expected_doc_pkg
+    default_name = load_expected_doc_package_name(args.tauri_config)
+    expected_doc_pkg = args.doc_package_name.strip() or default_name
+    expected_main_binary = args.expected_main_binary.strip() or default_name
     if not expected_schemes:
         expected_scheme = args.url_scheme.strip().lower()
         if not expected_scheme:
@@ -313,6 +331,7 @@ def main() -> int:
         f"[linux] Expected MIME types from tauri.conf.json ({len(expected_mime_types)}): {_format_set(expected_mime_types)}"
     )
     print(f"[linux] Expected deep link scheme MIME types ({len(expected_scheme_mimes)}): {_format_set(expected_scheme_mimes)}")
+    print(f"[linux] Expected doc package name: {expected_doc_pkg!r} (for /usr/share/doc/<package>/)")
     print(f"[linux] Expected main Exec binary: {expected_main_binary!r} (or 'AppRun')")
     print(f"[linux] Observed MIME types from all .desktop files ({len(observed_mime_types)}): {_format_set(observed_mime_types)}")
 

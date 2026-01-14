@@ -24,7 +24,7 @@ cd "$REPO_ROOT"
 
 usage() {
   cat <<EOF
-${SCRIPT_NAME} - validate a formula-desktop DEB bundle
+${SCRIPT_NAME} - validate a Linux DEB bundle (Tauri desktop build)
 
 Usage:
   ${SCRIPT_NAME} [--deb <path>] [--no-container] [--image <ubuntu-image>]
@@ -38,11 +38,15 @@ Options:
                         - target/**/release/bundle/deb/*.deb
   --no-container      Skip the Ubuntu container installability check.
   --image <image>     Ubuntu image to use for the container step (default: ubuntu:24.04).
+  -h, --help          Show this help text.
 
-Environment variables:
-  DOCKER_PLATFORM             Optional docker --platform override (default: host architecture).
-  FORMULA_DEB_NAME_OVERRIDE   Override the expected Debian package name (defaults to tauri.conf.json mainBinaryName).
-  -h, --help                  Show this help text.
+Environment:
+  DOCKER_PLATFORM
+                          Optional docker --platform override (default: host architecture).
+  FORMULA_DEB_NAME_OVERRIDE
+                          Override the expected Debian package name (dpkg-deb Package field) for validation purposes.
+                          This affects the expected /usr/share/doc/<package>/... doc dir, but does NOT affect the
+                          expected /usr/bin/<mainBinaryName> path inside the package.
 EOF
 }
 
@@ -168,9 +172,17 @@ if [[ -z "$EXPECTED_VERSION" ]]; then
   die "Expected $TAURI_CONF to contain a non-empty \"version\" field."
 fi
 
-EXPECTED_DEB_NAME="${FORMULA_DEB_NAME_OVERRIDE:-$(read_tauri_conf_value mainBinaryName)}"
+# The main installed binary name should match tauri.conf.json mainBinaryName.
+EXPECTED_MAIN_BINARY="$(read_tauri_conf_value mainBinaryName)"
+if [[ -z "$EXPECTED_MAIN_BINARY" ]]; then
+  EXPECTED_MAIN_BINARY="formula-desktop"
+fi
+
+# Debian package name should typically match the main binary name, but allow overriding
+# just the Package field/doc dir name for validation purposes.
+EXPECTED_DEB_NAME="${FORMULA_DEB_NAME_OVERRIDE:-$EXPECTED_MAIN_BINARY}"
 if [[ -z "$EXPECTED_DEB_NAME" ]]; then
-  EXPECTED_DEB_NAME="formula-desktop"
+  EXPECTED_DEB_NAME="$EXPECTED_MAIN_BINARY"
 fi
 
 abs_path() {
@@ -318,6 +330,43 @@ validate_desktop_integration_extracted() {
     return 1
   fi
 
+  # Filter to the desktop entry (or entries) that actually launch our app. This avoids
+  # accidentally validating unrelated .desktop files from dependency packages.
+  local expected_binary_escaped
+  expected_binary_escaped="$(printf '%s' "$EXPECTED_MAIN_BINARY" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')"
+  local exec_token_re
+  exec_token_re="(^|[[:space:]])([^[:space:]]*/)?${expected_binary_escaped}([[:space:]]|$)"
+
+  local -a matched_desktop_files=()
+  local desktop_file
+  for desktop_file in "${desktop_files[@]}"; do
+    local exec_line
+    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+    local exec_value
+    exec_value="$(printf '%s' "$exec_line" | sed -E "s/^[[:space:]]*Exec[[:space:]]*=[[:space:]]*//I")"
+    if [[ -n "$exec_value" ]] && printf '%s' "$exec_value" | grep -Eq "${exec_token_re}"; then
+      matched_desktop_files+=("$desktop_file")
+    fi
+  done
+
+  if [[ ${#matched_desktop_files[@]} -eq 0 ]]; then
+    err "No extracted .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' in its Exec= entry."
+    err "Extracted .desktop files inspected:"
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#${package_root}/}"
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [[ -z "$exec_line" ]]; then
+        exec_line="(no Exec= entry)"
+      fi
+      echo "  - ${rel}: ${exec_line}" >&2
+    done
+    return 1
+  fi
+
+  desktop_files=("${matched_desktop_files[@]}")
+
   local required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   local required_scheme_mime="x-scheme-handler/formula"
   local spreadsheet_mime_regex
@@ -329,7 +378,6 @@ validate_desktop_integration_extracted() {
   local has_scheme_mime=0
   local bad_exec_count=0
 
-  local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
     mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
@@ -405,7 +453,15 @@ validate_static() {
   local deb_version
   deb_version="$(dpkg-deb -f "${deb_path}" Version 2>/dev/null | tr -d '\r' | head -n 1 || true)"
   [[ -n "$deb_version" ]] || die "Failed to read DEB Version field (dpkg-deb -f) for: ${deb_path}"
-  if [[ "$deb_version" != "${EXPECTED_VERSION}" && "$deb_version" != "${EXPECTED_VERSION}-"* && "$deb_version" != "${EXPECTED_VERSION}+"* && "$deb_version" != "${EXPECTED_VERSION}~"* ]]; then
+
+  # Debian version format: [epoch:]upstream[-revision]
+  local deb_version_no_epoch
+  deb_version_no_epoch="${deb_version}"
+  if [[ "$deb_version_no_epoch" == *:* ]]; then
+    deb_version_no_epoch="${deb_version_no_epoch#*:}"
+  fi
+
+  if [[ "$deb_version_no_epoch" != "${EXPECTED_VERSION}" && "$deb_version_no_epoch" != "${EXPECTED_VERSION}-"* && "$deb_version_no_epoch" != "${EXPECTED_VERSION}+"* && "$deb_version_no_epoch" != "${EXPECTED_VERSION}~"* ]]; then
     die "DEB version mismatch for ${deb_path}: expected ${EXPECTED_VERSION} (or ${EXPECTED_VERSION}-*), found ${deb_version}"
   fi
 
@@ -433,8 +489,8 @@ validate_static() {
   local file_list
   file_list="$(printf '%s\n' "$contents" | awk '{print $NF}')"
 
-  if ! grep -qx "./usr/bin/${EXPECTED_DEB_NAME}" <<<"${file_list}"; then
-    die "DEB payload missing expected desktop binary path: ./usr/bin/${EXPECTED_DEB_NAME}"
+  if ! grep -qx "./usr/bin/${EXPECTED_MAIN_BINARY}" <<<"${file_list}"; then
+    die "DEB payload missing expected desktop binary path: ./usr/bin/${EXPECTED_MAIN_BINARY}"
   fi
   if ! grep -Eq '^\.?/usr/share/applications/[^/]+\.desktop$' <<<"${file_list}"; then
     die "DEB payload missing expected .desktop file under: ./usr/share/applications/"
@@ -457,7 +513,7 @@ validate_static() {
   trap cleanup_tmpdir EXIT
   dpkg-deb -x "${deb_path}" "${tmpdir}" || die "dpkg-deb -x failed for: ${deb_path}"
 
-  [[ -x "${tmpdir}/usr/bin/${EXPECTED_DEB_NAME}" ]] || die "Extracted payload missing executable: usr/bin/${EXPECTED_DEB_NAME}"
+  [[ -x "${tmpdir}/usr/bin/${EXPECTED_MAIN_BINARY}" ]] || die "Extracted payload missing executable: usr/bin/${EXPECTED_MAIN_BINARY}"
   for filename in LICENSE NOTICE; do
     [[ -f "${tmpdir}/usr/share/doc/${EXPECTED_DEB_NAME}/${filename}" ]] || die "Extracted payload missing compliance file: usr/share/doc/${EXPECTED_DEB_NAME}/${filename}"
   done
@@ -467,7 +523,11 @@ validate_static() {
   # built artifact (not just in config).
   if command -v python3 >/dev/null 2>&1; then
     note "Static desktop integration validation (verify extracted DEB payload)"
-    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" --package-root "$tmpdir" --tauri-config "$TAURI_CONF"; then
+    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" \
+      --package-root "$tmpdir" \
+      --tauri-config "$TAURI_CONF" \
+      --expected-main-binary "$EXPECTED_MAIN_BINARY" \
+      --doc-package-name "$EXPECTED_DEB_NAME"; then
       die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
     fi
   else
@@ -506,12 +566,12 @@ validate_container() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends /deb/*.deb
-    test -x /usr/bin/'"${EXPECTED_DEB_NAME}"'
+    test -x /usr/bin/'"${EXPECTED_MAIN_BINARY}"'
     test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/LICENSE
     test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/NOTICE
     test -f /usr/share/mime/packages/app.formula.desktop.xml
     grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2
-    ldd_out="$(ldd /usr/bin/'"${EXPECTED_DEB_NAME}"' 2>&1 || true)"
+    ldd_out="$(ldd /usr/bin/'"${EXPECTED_MAIN_BINARY}"' 2>&1 || true)"
     echo "${ldd_out}"
     if echo "${ldd_out}" | grep -q "not found"; then
       echo "Missing shared libraries detected:" >&2

@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
-const expectedDebName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedDebName = expectedMainBinary;
 const expectedFileAssociationMimeTypes = Array.from(
   new Set(
     (tauriConf?.bundle?.fileAssociations ?? [])
@@ -32,13 +33,27 @@ const hasBash = (() => {
   return probe.status === 0;
 })();
 
+test("validate-linux-deb --help prints usage and mentions key env vars", { skip: !hasBash }, () => {
+  const proc = spawnSync("bash", [join(repoRoot, "scripts", "validate-linux-deb.sh"), "--help"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (proc.error) throw proc.error;
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /validate-linux-deb\.sh/i);
+  assert.match(proc.stdout, /--no-container/);
+  assert.match(proc.stdout, /DOCKER_PLATFORM/);
+  assert.match(proc.stdout, /FORMULA_DEB_NAME_OVERRIDE/);
+});
+
 function writeFakeDpkgDebTool(binDir) {
   const script = `#!/usr/bin/env bash
-set -euo pipefail
+ set -euo pipefail
 
-mode="\${FAKE_DPKG_DEB_MODE:-ok}"
-fake_version="\${FAKE_DPKG_DEB_VERSION:-0.0.0}"
-fake_package="\${FAKE_DPKG_DEB_PACKAGE:-formula-desktop}"
+ mode="\${FAKE_DPKG_DEB_MODE:-ok}"
+ fake_version="\${FAKE_DPKG_DEB_VERSION:-0.0.0}"
+ fake_package="\${FAKE_DPKG_DEB_PACKAGE:-formula-desktop}"
+ fake_binary="\${FAKE_DPKG_DEB_BINARY:-formula-desktop}"
 
 cmd="\${1:-}"
 case "$cmd" in
@@ -88,10 +103,15 @@ case "$cmd" in
 #!/usr/bin/env bash
 echo "formula stub"
 BIN
-    chmod +x "$dest/usr/bin/$fake_package"
+    rm -f "$dest/usr/bin/$fake_package" || true
+    cat > "$dest/usr/bin/$fake_binary" <<'BIN'
+#!/usr/bin/env bash
+echo "formula stub"
+BIN
+    chmod +x "$dest/usr/bin/$fake_binary"
 
     mime_value="\${FAKE_DESKTOP_MIME_VALUE:-${defaultDesktopMimeValue}}"
-    exec_line="\${FAKE_DESKTOP_EXEC_LINE:-Exec=formula-desktop %U}"
+    exec_line="\${FAKE_DESKTOP_EXEC_LINE:-Exec=$fake_binary %U}"
     cat > "$dest/usr/share/applications/formula.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
@@ -140,14 +160,22 @@ function writeDefaultDependsFile(tmpDir) {
   return p;
 }
 
-function writeDefaultContentsFile(tmpDir, { includeBinary = true, includeParquetMimeDefinition = true } = {}) {
+function writeDefaultContentsFile(
+  tmpDir,
+  {
+    includeBinary = true,
+    packageName = expectedDebName,
+    binaryName = expectedMainBinary,
+    includeParquetMimeDefinition = true,
+  } = {},
+) {
   const p = join(tmpDir, "deb-contents.txt");
   const lines = [];
   const add = (path) => lines.push(`-rw-r--r-- root/root 0 2024-01-01 00:00 ${path}`);
-  if (includeBinary) add(`./usr/bin/${expectedDebName}`);
+  if (includeBinary) add(`./usr/bin/${binaryName}`);
   add("./usr/share/applications/formula.desktop");
-  add(`./usr/share/doc/${expectedDebName}/LICENSE`);
-  add(`./usr/share/doc/${expectedDebName}/NOTICE`);
+  add(`./usr/share/doc/${packageName}/LICENSE`);
+  add(`./usr/share/doc/${packageName}/NOTICE`);
   if (includeParquetMimeDefinition) {
     add("./usr/share/mime/packages/app.formula.desktop.xml");
   }
@@ -163,7 +191,9 @@ function runValidator({
   fakeMode,
   fakeVersion,
   fakePackage,
+  fakeBinary,
   desktopMimeValue,
+  debNameOverride,
 } = {}) {
   const proc = spawnSync(
     "bash",
@@ -177,9 +207,11 @@ function runValidator({
         FAKE_DPKG_DEB_MODE: fakeMode ?? "ok",
         FAKE_DPKG_DEB_VERSION: fakeVersion ?? expectedVersion,
         FAKE_DPKG_DEB_PACKAGE: fakePackage ?? expectedDebName,
+        FAKE_DPKG_DEB_BINARY: fakeBinary ?? expectedMainBinary,
         FAKE_DPKG_DEB_DEPENDS_FILE: dependsFile,
         FAKE_DPKG_DEB_CONTENTS_FILE: contentsFile,
         ...(desktopMimeValue ? { FAKE_DESKTOP_MIME_VALUE: desktopMimeValue } : {}),
+        ...(debNameOverride ? { FORMULA_DEB_NAME_OVERRIDE: debNameOverride } : {}),
       },
     },
   );
@@ -223,6 +255,29 @@ test("validate-linux-deb fails when the expected binary path is missing", { skip
   const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /missing expected desktop binary/i);
+});
+
+test("validate-linux-deb accepts when Debian Package name is overridden for validation", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+
+  const overrideName = "formula-desktop-alt";
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp, { packageName: overrideName, binaryName: expectedMainBinary });
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    fakePackage: overrideName,
+    fakeBinary: expectedMainBinary,
+    debNameOverride: overrideName,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
 });
 
 test("validate-linux-deb fails when shared-mime-info is missing from Depends", { skip: !hasBash }, () => {

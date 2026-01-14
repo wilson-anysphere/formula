@@ -35,6 +35,8 @@ extracted `AppRun` entrypoint in a quick-exit mode:
 bash scripts/validate-linux-appimage.sh --exec-check --exec-timeout 30
 ```
 
+For Linux DEB bundles, see `scripts/validate-linux-deb.sh` (host `dpkg-deb` metadata checks including version/package name vs `tauri.conf.json` + optional Ubuntu container install smoke test).
+
 For Linux RPM bundles, see `scripts/validate-linux-rpm.sh` (host `rpm -qp` metadata checks including version/package name vs `tauri.conf.json` + optional Fedora container install smoke test).
 
 For the **exact** `latest.json.platforms` key names (and which asset each key should point to),
