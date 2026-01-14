@@ -14,9 +14,15 @@ on:
         default: false
         type: boolean
 
-# This workflow builds the same desktop bundles as the tagged release workflow, but:
-# - does NOT create/update a GitHub Release
-# - uploads bundles to Actions artifacts for inspection
+# NOTE: This workflow is a lightweight packaging smoke test and does **not** exactly mirror the
+# tagged Desktop Release workflow (`.github/workflows/release.yml`), which builds the full multi-arch
+# release matrix and performs stricter validations.
+#
+# For a full multi-arch dry-run (without touching GitHub Releases), run the **Desktop Release**
+# workflow via workflow_dispatch with `upload=false`.
+#
+# This workflow still provides value as a quick “does bundling work on default *-latest runners”
+# check, and remains fork-friendly.
 permissions:
   contents: read
 
