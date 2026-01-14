@@ -135,6 +135,101 @@ fn userelationship_override_works_with_m2m() {
 }
 
 #[test]
+fn userelationship_override_works_with_m2m_for_columnar_dim() {
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::String("B".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB", "Amount"]);
+    // Cross keys so the active vs. USERELATIONSHIP-overridden relationship produces different totals.
+    fact.push_row(vec![1.into(), 1.into(), 20.into(), 100.0.into()])
+        .unwrap();
+    fact.push_row(vec![2.into(), 2.into(), 10.into(), 200.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    model
+        .add_measure(
+            "Total via KeyB",
+            "CALCULATE([Total], USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let filter_a = FilterContext::empty().with_column_equals("Dim", "Attr", "A".into());
+    assert_eq!(model.evaluate_measure("Total", &filter_a).unwrap(), 100.0.into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &filter_a).unwrap(),
+        200.0.into()
+    );
+
+    let filter_b = FilterContext::empty().with_column_equals("Dim", "Attr", "B".into());
+    assert_eq!(model.evaluate_measure("Total", &filter_b).unwrap(), 200.0.into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &filter_b).unwrap(),
+        100.0.into()
+    );
+}
+
+#[test]
 fn blank_foreign_keys_in_m2m_flow_to_blank_dimension_member_when_allowed() {
     let mut model = DataModel::new();
 
@@ -958,6 +1053,134 @@ fn relatedtable_respects_userelationship_overrides_with_m2m() {
 }
 
 #[test]
+fn relatedtable_respects_userelationship_overrides_with_m2m_for_columnar_dim() {
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::String("B".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Number(30.0),
+        formula_columnar::Value::String("C".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB"]);
+    fact.push_row(vec![100.into(), 1.into(), 10.into()]).unwrap();
+    fact.push_row(vec![101.into(), 1.into(), 20.into()]).unwrap();
+    fact.push_row(vec![102.into(), 1.into(), 30.into()]).unwrap();
+    fact.push_row(vec![103.into(), 2.into(), 10.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", 0);
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(RELATEDTABLE(Fact))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+                &FilterContext::empty(),
+                &ctx
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    let mut ctx_c = RowContext::default();
+    ctx_c.push("Dim", 2);
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(RELATEDTABLE(Fact))",
+                &FilterContext::empty(),
+                &ctx_c
+            )
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(RELATEDTABLE(Fact)), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+                &FilterContext::empty(),
+                &ctx_c
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
 fn relatedtable_respects_userelationship_overrides_with_m2m_for_columnar_fact() {
     let mut model = DataModel::new();
 
@@ -1455,6 +1678,94 @@ fn related_respects_userelationship_overrides_with_m2m() {
     let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB"]);
     // Cross the keys so the active vs. USERELATIONSHIP-overridden relationship produces
     // different RELATED values.
+    fact.push_row(vec![100.into(), 1.into(), 20.into()]).unwrap();
+    fact.push_row(vec![101.into(), 2.into(), 10.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "Attr via active", "RELATED(Dim[Attr])")
+        .unwrap();
+    model
+        .add_calculated_column(
+            "Fact",
+            "Attr via KeyB",
+            "CALCULATE(RELATED(Dim[Attr]), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let fact = model.table("Fact").unwrap();
+    assert_eq!(fact.value(0, "Attr via active").unwrap(), "RowA".into());
+    assert_eq!(fact.value(0, "Attr via KeyB").unwrap(), "RowB".into());
+    assert_eq!(fact.value(1, "Attr via active").unwrap(), "RowB".into());
+    assert_eq!(fact.value(1, "Attr via KeyB").unwrap(), "RowA".into());
+}
+
+#[test]
+fn related_respects_userelationship_overrides_with_m2m_for_columnar_dim() {
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "KeyA".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "KeyB".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::String("RowA".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(20.0),
+        formula_columnar::Value::String("RowB".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB"]);
+    // Cross keys so the active vs. USERELATIONSHIP-overridden relationship produces different values.
     fact.push_row(vec![100.into(), 1.into(), 20.into()]).unwrap();
     fact.push_row(vec![101.into(), 2.into(), 10.into()]).unwrap();
     model.add_table(fact).unwrap();
