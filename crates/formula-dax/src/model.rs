@@ -1364,14 +1364,34 @@ impl DataModel {
             // lists can be prohibitively expensive when keys are highly duplicated. Store only the
             // key set and rely on backend filter primitives to retrieve row indices on demand.
             (TableStorage::Columnar(_), Cardinality::ManyToMany) => {
-                let mut keys = HashSet::<Value>::new();
-                let mut has_duplicates = false;
-                for row in 0..to_table.row_count() {
-                    let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
-                    if !keys.insert(value) {
-                        has_duplicates = true;
+                // Prefer backend distinct-value enumeration so we don't hash every row when the
+                // `to_table` is highly duplicated (a common columnar fact-table pattern).
+                let mut distinct_values = to_table.distinct_values_filtered(to_idx, None).unwrap_or_else(|| {
+                    let mut seen = HashSet::<Value>::new();
+                    let mut out = Vec::new();
+                    for row in 0..to_table.row_count() {
+                        let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
+                        if seen.insert(value.clone()) {
+                            out.push(value);
+                        }
                     }
+                    out
+                });
+
+                // Defensive: ensure the distinct list includes BLANK when the column contains any
+                // blanks/nulls (some backends may omit it from distinct enumeration).
+                if to_table.stats_has_blank(to_idx).unwrap_or(false)
+                    && !distinct_values.iter().any(|v| v.is_blank())
+                {
+                    distinct_values.push(Value::Blank);
                 }
+
+                let mut keys = HashSet::<Value>::with_capacity(distinct_values.len());
+                for v in distinct_values {
+                    keys.insert(v);
+                }
+
+                let has_duplicates = keys.len() < to_table.row_count();
                 ToIndex::KeySet {
                     keys,
                     has_duplicates,
