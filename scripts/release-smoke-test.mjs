@@ -6,8 +6,9 @@
  *
  * Runs:
  *  - scripts/check-desktop-version.mjs <tag>
- *  - scripts/check-desktop-url-scheme.mjs
  *  - scripts/check-updater-config.mjs
+ *  - scripts/check-desktop-url-scheme.mjs
+ *  - scripts/ci/check-desktop-compliance-artifacts.mjs
  *  - scripts/verify-desktop-release-assets.mjs --tag <tag> --repo <repo>
  *
  * Optional:
