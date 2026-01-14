@@ -49,9 +49,6 @@ function decodeBase64(value) {
 
 const MINISIGN_PUBLIC_KEY_BYTES = 42; // "Ed" + keyId(8) + pubkey(32)
 const MINISIGN_SECRET_KEY_MIN_BYTES = 74; // "Ed" + keyId(8) + secret key(64)
-// Unencrypted minisign secret keys are small; encrypted keys include scrypt params + nonce + MAC.
-// Use a generous upper bound for "clearly unencrypted" to avoid falsely requiring a password.
-const MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES = 96;
 
 /**
  * @param {string} text
@@ -106,7 +103,7 @@ function analyzeMinisignKey(value) {
 
     if (parsed.binary.length < MINISIGN_SECRET_KEY_MIN_BYTES) return null;
 
-    const encrypted = parsed.binary.length > MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES;
+    const encrypted = parsed.binary.length !== MINISIGN_SECRET_KEY_MIN_BYTES;
     return { kind: "secret", encrypted, keyIdHex: parsed.keyIdHex };
   };
 
@@ -134,7 +131,7 @@ function analyzeMinisignKey(value) {
       .toUpperCase();
     if (decoded.length === MINISIGN_PUBLIC_KEY_BYTES) return { kind: "public", keyIdHex };
     if (decoded.length < MINISIGN_SECRET_KEY_MIN_BYTES) return null;
-    const encrypted = decoded.length > MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES;
+    const encrypted = decoded.length !== MINISIGN_SECRET_KEY_MIN_BYTES;
     return { kind: "secret", encrypted, keyIdHex };
   }
 
