@@ -888,6 +888,44 @@ mod tests {
         assert!(cf_pos < dv_pos);
     }
 
+    #[test]
+    fn x14_data_bar_ext_preserves_direction_and_colors() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let mut rule = x14_data_bar_rule("B1:B3");
+        if let CfRuleKind::DataBar(ref mut db) = rule.kind {
+            db.direction = Some(DataBarDirection::RightToLeft);
+            db.negative_fill_color = Some(Color::new_argb(0xFF112233));
+            db.axis_color = Some(Color::new_argb(0xFF445566));
+        } else {
+            panic!("expected DataBar rule");
+        }
+
+        let updated = update_worksheet_conditional_formatting_xml(xml, &[rule]).unwrap();
+        let doc = Document::parse(&updated).expect("valid xml");
+        let data_bar = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "dataBar" && n.tag_name().namespace() == Some(NS_X14))
+            .expect("x14:dataBar should exist");
+
+        assert_eq!(data_bar.attribute("direction"), Some("rightToLeft"));
+
+        let negative_fill = data_bar
+            .children()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "negativeFillColor"
+                    && n.tag_name().namespace() == Some(NS_X14)
+            })
+            .expect("x14:negativeFillColor");
+        assert_eq!(negative_fill.attribute("rgb"), Some("FF112233"));
+
+        let axis_color = data_bar
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "axisColor" && n.tag_name().namespace() == Some(NS_X14))
+            .expect("x14:axisColor");
+        assert_eq!(axis_color.attribute("rgb"), Some("FF445566"));
+    }
+
     fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
         let cursor = Cursor::new(zip_bytes);
         let mut archive = ZipArchive::new(cursor).expect("open zip");
