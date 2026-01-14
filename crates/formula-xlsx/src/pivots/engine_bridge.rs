@@ -503,7 +503,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                 cache_def
                     .cache_fields
                     .get(base_field_idx as usize)
-                    .map(|f| PivotFieldRef::CacheFieldName(f.name.clone()))
+                    .map(|f| f.name.clone())
             });
 
             // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
@@ -522,14 +522,14 @@ pub fn pivot_table_to_engine_config_with_styles(
                         field_idx as usize,
                         item,
                     )))
-            });
+                });
             Some(ValueField {
                 source_field: PivotFieldRef::CacheFieldName(source_field_name),
                 name,
                 aggregation,
                 number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),
                 show_as,
-                base_field,
+                base_field: base_field.map(PivotFieldRef::CacheFieldName),
                 base_item,
             })
         })
