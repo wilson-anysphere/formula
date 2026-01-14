@@ -535,9 +535,15 @@ When implementing (or calling) encrypted-workbook support:
   See `fixtures/encrypted/ooxml/README.md` for more fixture details.
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
   where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
-- `crates/formula-io/tests/encrypted_ooxml.rs` asserts that opening these fixtures without a
-  password surfaces an error mentioning encryption/password protection (guards the “password
-  required” UX path).
+- Encryption-focused tests reference these fixtures explicitly (they are not part of the ZIP/OPC
+  round-trip corpus). See `fixtures/encrypted/ooxml/README.md` for the canonical list, passwords,
+  provenance, and test references.
+- `crates/formula-io/tests/encrypted_ooxml.rs` (and `encrypted_ooxml_fixtures.rs`) asserts that
+  opening these fixtures without a password surfaces an error mentioning
+  encryption/password protection (guards the “password required” UX path).
+- End-to-end decryption (including empty-password and multi-segment coverage) is exercised by
+  `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` and
+  `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`.
 - Some encryption coverage is exercised with **synthetic** containers generated directly in tests
   (for example `crates/formula-io/tests/encrypted_xls.rs`, plus a synthetic encrypted OOXML wrapper
   in `crates/formula-io/tests/encrypted_ooxml.rs`).

@@ -50,9 +50,11 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
 - `crates/formula-io/tests/encrypted_ooxml_fixture_validation.rs`:
   sanity checks that the OLE container and `EncryptionInfo` headers match expectations.
 - `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` (behind `formula-io` feature `encrypted-workbooks`):
-  end-to-end decryption for `agile.xlsx` against `plaintext.xlsx`, plus on-the-fly Agile
-  encryption/decryption (via `ms_offcrypto_writer`) for `open_workbook_with_password` /
-  `open_workbook_model_with_password`. Also includes wrong-password coverage for `standard.xlsx`.
+  end-to-end decryption for `agile.xlsx` and `agile-empty-password.xlsx` against `plaintext.xlsx`,
+  plus on-the-fly Agile encryption/decryption (via `ms_offcrypto_writer`) for
+  `open_workbook_with_password` / `open_workbook_model_with_password`.
+  Includes coverage that a **missing** password is distinct from an **empty** password (`""`), and
+  wrong-password coverage for `standard.xlsx`.
 - `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`:
   end-to-end decryption for `agile-large.xlsx` + `standard-large.xlsx` against `plaintext-large.xlsx`
   (exercises multi-segment decryption).
