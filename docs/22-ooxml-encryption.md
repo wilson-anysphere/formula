@@ -382,7 +382,6 @@ files (including our committed fixture corpus), Formula’s decryptors are curre
   - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
   - HMAC over ciphertext only (excludes the 8-byte size header)
   - HMAC over plaintext only (decrypted ZIP bytes)
-  - HMAC over (8-byte size header + plaintext)
 
 Writers should follow MS-OFFCRYPTO/Excel (authenticate the stream bytes). If we ever decide to make
 `formula-office-crypto` strict, update this section and the corresponding compatibility tests.
