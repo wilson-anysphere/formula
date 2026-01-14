@@ -190,6 +190,32 @@ fn agile_decrypt_tampered_size_header_fails_integrity() {
 }
 
 #[test]
+fn agile_decrypt_tampered_size_header_high_dword_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plain_zip = build_tiny_zip();
+
+    let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let mut encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    // Tamper only the high DWORD of the 8-byte size prefix. Some producers treat it as reserved for
+    // length semantics, but MS-OFFCRYPTO defines `dataIntegrity` over the full EncryptedPackage
+    // stream bytes (including all 8 header bytes), so this must fail.
+    assert!(
+        encrypted_package.len() >= 8,
+        "EncryptedPackage stream is unexpectedly small"
+    );
+    encrypted_package[4..8].copy_from_slice(&1u32.to_le_bytes());
+
+    let err = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password)
+        .expect_err("expected integrity failure");
+    assert!(
+        matches!(err, OffCryptoError::IntegrityMismatch),
+        "expected IntegrityMismatch, got {err:?}"
+    );
+}
+
+#[test]
 fn agile_decrypt_appended_ciphertext_fails_integrity() {
     let password = "correct horse battery staple";
     let plain_zip = build_tiny_zip();
