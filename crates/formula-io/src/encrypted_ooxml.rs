@@ -238,11 +238,11 @@ fn decrypt_encrypted_package_standard(
             let ciphertext = &encrypted_package[8..];
 
             let try_with_key0 = |key0: &[u8]| -> Result<Option<Vec<u8>>, DecryptError> {
-                    for scheme in schemes {
-                        let prefix_ok = decrypt_standard_aes_prefix_is_zip(
-                            &info,
-                            plaintext_len_usize,
-                            ciphertext,
+                for scheme in schemes {
+                    let prefix_ok = decrypt_standard_aes_prefix_is_zip(
+                        &info,
+                        plaintext_len_usize,
+                        ciphertext,
                             scheme,
                             key0,
                         )?;
