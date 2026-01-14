@@ -94,3 +94,20 @@ test("pasteClipboardContent converts common CSS named colors to ARGB (non-DOM fa
   assert.equal(style.font?.color, "#FFFF0000");
   assert.equal(style.fill?.fgColor, "#FFFFFF00");
 });
+
+test("pasteClipboardContent treats mso-number-format:General as clearing (does not intern a style)", () => {
+  const doc = new DocumentController();
+
+  const html = `<!DOCTYPE html><html><body><table>
+    <tr>
+      <td style="mso-number-format:'General'">1</td>
+    </tr>
+  </table></body></html>`;
+
+  const pasted = pasteClipboardContent(doc, "Sheet1", "A1", { html });
+  assert.equal(pasted, true);
+
+  const cell = doc.getCell("Sheet1", "A1");
+  assert.equal(cell.value, 1);
+  assert.equal(cell.styleId, 0);
+});

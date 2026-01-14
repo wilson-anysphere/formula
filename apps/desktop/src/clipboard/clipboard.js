@@ -301,8 +301,12 @@ export function clipboardFormatToDocStyle(format) {
   }
 
   const numberFormat = format.numberFormat;
-  if (typeof numberFormat === "string" && numberFormat.trim() !== "") {
-    out.numberFormat = numberFormat;
+  if (typeof numberFormat === "string") {
+    const trimmed = numberFormat.trim();
+    // Treat "General" (Excel default) the same as clearing number formatting.
+    if (trimmed !== "" && trimmed.toLowerCase() !== "general") {
+      out.numberFormat = numberFormat;
+    }
   }
 
   return Object.keys(out).length > 0 ? out : null;
