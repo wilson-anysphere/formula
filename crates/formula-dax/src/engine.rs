@@ -391,7 +391,7 @@ struct VarEnv {
 
 impl VarEnv {
     fn normalize_name(name: &str) -> String {
-        name.trim().to_ascii_uppercase()
+        normalize_ident(name)
     }
 
     fn lookup(&self, name: &str) -> Option<&VarValue> {
@@ -1682,10 +1682,10 @@ impl DaxEngine {
                             .table(&table)
                             .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
 
-                        let (col_count, col_idx) = match visible_cols.as_deref() {
-                            Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
-                            None => (table_ref.columns().len(), 0),
-                        };
+                        let visible_cols = visible_cols.as_deref();
+                        let col_count = visible_cols
+                            .map(|cols| cols.len())
+                            .unwrap_or_else(|| table_ref.columns().len());
 
                         if col_count != value_exprs.len() {
                             return Err(DaxError::Eval(format!(
@@ -1694,20 +1694,46 @@ impl DaxEngine {
                                 value_exprs.len()
                             )));
                         }
-                        if col_count != 1 {
-                            return Err(DaxError::Eval(
-                                "CONTAINSROW currently only supports one-column tables".into(),
-                            ));
-                        }
 
-                        let needle = self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
-                        for row in mask.iter_ones() {
-                            let value =
-                                table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
-                            if compare_values(&BinaryOp::Equals, &value, &needle)? {
-                                return Ok(Value::Boolean(true));
+                        let needles: Vec<Value> = value_exprs
+                            .iter()
+                            .map(|expr| self.eval_scalar(model, expr, filter, row_ctx, env))
+                            .collect::<DaxResult<_>>()?;
+
+                        if let Some(cols) = visible_cols {
+                            for row in mask.iter_ones() {
+                                let mut matches = true;
+                                for (&col_idx, needle) in cols.iter().zip(&needles) {
+                                    let value = table_ref
+                                        .value_by_idx(row, col_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if !compare_values(&BinaryOp::Equals, &value, needle)? {
+                                        matches = false;
+                                        break;
+                                    }
+                                }
+                                if matches {
+                                    return Ok(Value::Boolean(true));
+                                }
+                            }
+                        } else {
+                            for row in mask.iter_ones() {
+                                let mut matches = true;
+                                for (col_idx, needle) in needles.iter().enumerate() {
+                                    let value = table_ref
+                                        .value_by_idx(row, col_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if !compare_values(&BinaryOp::Equals, &value, needle)? {
+                                        matches = false;
+                                        break;
+                                    }
+                                }
+                                if matches {
+                                    return Ok(Value::Boolean(true));
+                                }
                             }
                         }
+
                         Ok(Value::Boolean(false))
                     }
                     TableResult::Virtual { columns, rows } => {

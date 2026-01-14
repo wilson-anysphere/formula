@@ -126,6 +126,23 @@ fn identifiers_are_case_insensitive_for_unicode_names() {
 }
 
 #[test]
+fn var_names_are_case_insensitive_for_unicode_names() {
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+
+    // Variables use the same case-insensitive identifier matching rules as tables/columns.
+    let value = engine
+        .evaluate(
+            &model,
+            "VAR 'Straße' = 1 RETURN 'STRASSE'",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(1.0));
+}
+
+#[test]
 fn add_table_rejects_duplicate_table_names_case_insensitively_for_unicode() {
     // `ß` uppercases to `SS`, so these two table names collide under case-insensitive matching.
     let mut model = DataModel::new();

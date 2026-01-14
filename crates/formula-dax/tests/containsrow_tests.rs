@@ -152,3 +152,31 @@ fn containsrow_with_multi_column_table_expression() {
         .unwrap();
     assert_eq!(value, Value::from(true));
 }
+
+#[test]
+fn containsrow_with_filtered_physical_table_expression() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // FILTER over a physical table can produce a dense row mask representation internally.
+    // CONTAINSROW should still support multi-column matching across the table's visible columns.
+    let value = engine
+        .evaluate(
+            &model,
+            "CONTAINSROW(FILTER(Orders, Orders[CustomerId] = 1), 100, 1, 10)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+
+    let value = engine
+        .evaluate(
+            &model,
+            "CONTAINSROW(FILTER(Orders, Orders[CustomerId] = 1), 102, 2, 5)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(false));
+}
