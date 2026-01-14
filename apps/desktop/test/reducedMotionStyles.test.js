@@ -66,16 +66,36 @@ function collectSourceFiles(dirPath) {
 test("Reduced motion overrides set motion tokens to 0ms", () => {
   const css = readDesktopFile("src", "styles", "tokens.css");
 
+  // Token-based transitions: used throughout the UI so reduced motion can zero them out.
   assert.match(
     css,
     /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\][\s\S]*--motion-duration:\s*0ms;[\s\S]*--motion-duration-fast:\s*0ms;[\s\S]*--motion-ease:\s*linear;/,
     "Expected tokens.css to set --motion-duration/--motion-duration-fast to 0ms when data-reduced-motion=\"true\"",
   );
 
+  // Smooth scrolling is also motion-heavy; ensure reduced motion forces it off globally.
+  assert.match(
+    css,
+    /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\][\s\S]*scroll-behavior:\s*auto\s*;/,
+    "Expected tokens.css to disable smooth scrolling (scroll-behavior: auto) when data-reduced-motion=\"true\"",
+  );
+
+  assert.match(
+    css,
+    /:root\[data-reduced-motion\s*=\s*(?:"true"|'true'|true)\]\s*\*\s*\{[\s\S]*scroll-behavior:\s*auto\s*;/,
+    "Expected tokens.css to disable smooth scrolling for all descendants when data-reduced-motion=\"true\"",
+  );
+
   assert.match(
     css,
     /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*:root[\s\S]*--motion-duration:\s*0ms;[\s\S]*--motion-duration-fast:\s*0ms;[\s\S]*--motion-ease:\s*linear;/,
     "Expected tokens.css to set --motion-duration/--motion-duration-fast to 0ms under prefers-reduced-motion: reduce",
+  );
+
+  assert.match(
+    css,
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*:root[\s\S]*scroll-behavior:\s*auto\s*;/,
+    "Expected tokens.css to disable smooth scrolling (scroll-behavior: auto) under prefers-reduced-motion: reduce",
   );
 });
 
