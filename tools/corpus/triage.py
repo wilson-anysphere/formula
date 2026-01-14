@@ -537,6 +537,13 @@ def _redact_uri_like_in_text(text: str) -> str:
         return _redact_uri_like(url)
 
     out = re.sub(r"https?://[^\s\"'<>]+", _replace_url, out)
+
+    # Some OOXML relationship types/targets can use non-http schemes (e.g. `urn:` or `file:`). Only
+    # match a conservative allowlist of schemes to avoid accidentally hashing non-URI strings like
+    # `A1:B2`.
+    out = re.sub(
+        r"(?:urn|mailto|file|ftp|ftps|tel|smb):[^\s\"'<>]+", _replace_url, out, flags=re.IGNORECASE
+    )
     return out
 
 
