@@ -1395,7 +1395,10 @@ describe("AiCellFunctionEngine", () => {
         if (typeof prop === "string" && /^\d+$/.test(prop)) {
           indexReads += 1;
           const idx = Number(prop);
-          return `V${idx}`;
+          // Ensure DLP heuristics/redaction still don't force a full O(N) scan:
+          // - The preview (first 30 indices) stays public.
+          // - Everything after is sensitive, so any sampled indices should redact.
+          return idx < 30 ? `PUBLIC_${idx}` : "user@example.com";
         }
         return undefined;
       },
@@ -1408,6 +1411,12 @@ describe("AiCellFunctionEngine", () => {
     });
     expect(pending).toBe(AI_CELL_PLACEHOLDER);
     await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).toContain("PUBLIC_0");
+    expect(userMessage).not.toContain("user@example.com");
 
     // We should only touch the handful of indices used for preview + sampling, not 100k.
     expect(indexReads).toBeLessThan(500);
