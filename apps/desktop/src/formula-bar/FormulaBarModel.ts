@@ -24,7 +24,6 @@ import type {
   FormulaToken as EngineFormulaToken,
   FunctionContext as EngineFunctionContext,
 } from "@formula/engine";
-import { splitSheetQualifier } from "../../../../packages/search/index.js";
 import { normalizeFormulaLocaleId } from "../spreadsheet/formulaLocale.js";
 
 type ActiveCellInfo = {
@@ -1088,6 +1087,27 @@ function formatSheetPrefix(id: string): string {
 function parseSheetQualifiedA1Range(text: string): RangeAddress | null {
   const { ref } = splitSheetQualifier(text);
   return parseA1Range(ref);
+}
+
+function splitSheetQualifier(input: string): { sheetName: string | null; ref: string } {
+  // Keep this local to avoid importing the full `packages/search` barrel (which re-exports the
+  // entire search session implementation) just to parse `Sheet1!A1`-style references.
+  const s = String(input).trim();
+
+  const quoted = s.match(/^'((?:[^']|'')+)'!(.+)$/);
+  if (quoted) {
+    return {
+      sheetName: quoted[1].replace(/''/g, "'"),
+      ref: quoted[2],
+    };
+  }
+
+  const unquoted = s.match(/^([^!]+)!(.+)$/);
+  if (unquoted) {
+    return { sheetName: unquoted[1] ?? null, ref: unquoted[2] ?? "" };
+  }
+
+  return { sheetName: null, ref: s };
 }
 
 const ARG_SEPARATOR_CACHE = new Map<string, string>();
