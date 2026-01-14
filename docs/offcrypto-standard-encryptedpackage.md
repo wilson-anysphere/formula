@@ -1,22 +1,35 @@
 # MS-OFFCRYPTO Standard/CryptoAPI AES: `EncryptedPackage` decryption notes
 
-This repo detects password-protected / encrypted OOXML workbooks as an OLE/CFB container with
-`EncryptionInfo` + `EncryptedPackage` streams.
+This repo detects password-protected / encrypted OOXML workbooks as an **OLE/CFB** container with
+`EncryptionInfo` + `EncryptedPackage` streams (MS-OFFCRYPTO).
 
-In `formula-io`, attempting to open these files without a password will surface `Error::PasswordRequired`.
-The password-aware helpers (`open_workbook_with_password` / `open_workbook_model_with_password`) can
-surface `Error::InvalidPassword`. (End-to-end decryption is still being wired; see
-[`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) for current behavior and entrypoints.)
+High-level behavior in `formula-io`:
 
-For unknown `EncryptionInfo` versions, `formula-io` may surface
-`Error::UnsupportedOoxmlEncryption { version_major, version_minor }`.
+- Encryption is always detected and surfaced via dedicated errors (`PasswordRequired` /
+  `InvalidPassword` / `UnsupportedOoxmlEncryption`) so callers can prompt for a password and route
+  “unsupported encryption” reports correctly.
+- With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
+  - The legacy password-aware entrypoints `open_workbook_with_password` /
+    `open_workbook_model_with_password` can decrypt **Agile (4.4)** encrypted `.xlsx`/`.xlsm`/`.xlsb`,
+    but still treat **Standard/CryptoAPI** as `PasswordRequired`/`InvalidPassword` for UX
+    compatibility.
+  - `open_workbook_with_options` uses a **streaming decryptor** and can open some **Standard (3.2)**
+    and **Agile (4.4)** encrypted `.xlsx`/`.xlsm` as `Workbook::Model` (note: this streaming path does
+    not yet validate Agile `dataIntegrity` HMAC).
 
-Standard (CryptoAPI) decryption support exists in this repo (notably in
-`crates/formula-office-crypto` and `crates/formula-offcrypto`), but not all `formula-io` open paths
-plumb it end-to-end yet (see [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md)).
+Standard/CryptoAPI decryption primitives also exist in lower-level crates (notably
+`crates/formula-offcrypto` and `crates/formula-office-crypto`), but the full open-path plumbing is
+still converging (see [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md)).
 
-The most common interoperability bugs are in the `EncryptedPackage` stream framing (the `u64` size
-prefix) and **padding/truncation**. This note is meant as a compact developer reference.
+This document focuses on the `EncryptedPackage` stream itself, because the most common interop bugs
+cluster around:
+
+- the 8-byte plaintext length prefix,
+- **cipher mode mismatches** (ECB vs CBC-style variants),
+- and **padding/truncation** (do **not** PKCS#7-unpad; always truncate to the declared size).
+
+For Agile (4.4) OOXML decryption details (and `dataIntegrity` gotchas), see
+[`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 ## Normative spec references (MS-OFFCRYPTO)
 
@@ -27,10 +40,6 @@ prefix) and **padding/truncation**. This note is meant as a compact developer re
 * **Salt location/size**: MS-OFFCRYPTO **§2.3.4.7** “ECMA-376 Document Encryption Key Generation
   (Standard Encryption)”.
   * Salt is 16 bytes and stored in `EncryptionVerifier.Salt`.
-Note: Agile encryption (4.4) uses 4096-byte segmenting + per-segment IVs. Standard/CryptoAPI AES
-`EncryptedPackage` decryption is **not entirely uniform in the wild**: the baseline MS-OFFCRYPTO
-scheme uses **AES-ECB** (no IV), but some producers use AES-CBC variants (segmented or stream-CBC).
-For Agile details, see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 ## `EncryptedPackage` stream layout
 
@@ -43,29 +52,55 @@ For Agile details, see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md)
 Spec note (MS-OFFCRYPTO §2.3.4.4): the *physical* stream length can be **larger** than `orig_size`
 because the encrypted data is padded to a cipher block boundary.
 
-## AES decryption (baseline + variants)
+## Decrypting `EncryptedPackage`: observed Standard/CryptoAPI AES variants
 
-Baseline (MS-OFFCRYPTO / ECMA-376 Standard AES): decrypt the ciphertext bytes with **AES-ECB(key)**:
+The Standard/CryptoAPI header does not reliably communicate “which AES mode” was used for
+`EncryptedPackage`. In this repo we have encountered at least:
+
+- **AES-ECB** (no IV), implemented by `crates/formula-offcrypto` (see also
+  `fixtures/encrypted/ooxml/standard.xlsx`).
+- **Segmented AES-CBC variants**, implemented by the streaming decryptor in
+  `crates/formula-io/src/encrypted_package_reader.rs` (and by some lower-level helpers).
+
+If you are implementing Standard decryption for real-world compatibility, expect to need **mode
+fallback**.
+
+### Variant A: AES-ECB (no IV)
+
+Decrypt the ciphertext bytes (everything after the `u64` prefix) with **AES-ECB(key)**:
 
 * AES key: derived from the password and `EncryptionInfo` (out of scope for this note).
 * Mode: ECB.
-* Padding: none (ciphertext is block-aligned).
-* Ciphertext length (bytes after the `u64` prefix) must be a **multiple of 16** bytes.
+* Padding: none at the crypto layer (ciphertext is block-aligned).
+* Ciphertext length must be a **multiple of 16** bytes.
 
-Variants (observed in non-Excel tooling / compatibility cases):
+Implementation pointer: `crates/formula-offcrypto/src/lib.rs` (`decrypt_standard_only`).
 
-- AES-CBC in 4096-byte segments with a per-segment IV (one common IV derivation is
-  `IV = SHA1(salt || LE32(segmentIndex))[0..16]`).
-- AES-CBC in 4096-byte segments with per-segment keys (block-indexed keys) and `IV=0`.
-- AES-CBC as a single stream using `IV = salt`.
+### Variant B: segmented AES-CBC (`0x1000` chunks; per-segment IV)
 
-In this repo:
+Some Standard/CryptoAPI AES producers reuse an Agile-like “encrypt in 4096-byte segments” layout:
 
-- `crates/formula-offcrypto`’s Standard decryptor uses AES-ECB for `EncryptedPackage`.
-- `crates/formula-office-crypto` tries a small set of Standard AES-CBC layouts to maximize
-  compatibility.
-- `crates/formula-io/src/offcrypto/encrypted_package.rs` implements a CBC-segmented helper (IV derived
-  from salt + segment index).
+- Plaintext is processed in **0x1000 (4096) byte segments**; segment index `i` is **0-based**.
+- Each segment is encrypted independently with AES-CBC (no chaining across segments).
+- Each segment’s ciphertext is padded to a 16-byte boundary.
+- The final ciphertext “segment” is often “whatever bytes remain” (can include an extra full padding
+  block and/or trailing OLE stream slack).
+
+The Standard/CryptoAPI AES-CBC implementation used by `crates/formula-io` derives IVs as:
+
+```text
+iv_full = SHA1(salt || LE32(i))
+iv = iv_full[0..16]  // truncate to 16 bytes for AES
+```
+
+Where:
+
+* `salt` is the 16-byte salt (`EncryptionVerifier.Salt`).
+* `LE32(i)` is the segment index encoded as a little-endian `u32`.
+
+Other CBC-style Standard variants exist (e.g. per-segment keys with IV=0). In this repo,
+`crates/formula-office-crypto/src/standard.rs` tries a small set of these schemes (`StandardScheme`)
+for compatibility.
 
 ## Padding + truncation (do not trust PKCS#7)
 
@@ -73,7 +108,7 @@ Do **not** treat decrypted bytes as PKCS#7 and “unpad”.
 
 Instead:
 
-1. Decrypt all ciphertext blocks.
+1. Decrypt ciphertext (in the correct mode).
 2. **Truncate the plaintext to `orig_size`**.
 
 Example (real fixture in this repo):
@@ -88,8 +123,6 @@ Rationale:
 
 * MS-OFFCRYPTO §2.3.4.4 defines `StreamSize`/`orig_size` as authoritative for the unencrypted size,
   and explicitly allows the encrypted stream to be larger due to block-size padding.
-* MS-OFFCRYPTO §2.3.4.15 notes the final data block is padded to the cipher block size (and padding
-  bytes can be arbitrary).
 
 ## Validation rules (recommended)
 

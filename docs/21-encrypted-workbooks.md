@@ -16,7 +16,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 - [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md) — Agile (4.4) OOXML decryption details
   (HMAC target bytes, IV/salt gotchas).
 - [`docs/offcrypto-standard-encryptedpackage.md`](./offcrypto-standard-encryptedpackage.md) —
-  Standard/CryptoAPI AES `EncryptedPackage` decryption notes (AES-ECB framing + truncation).
+  Standard/CryptoAPI AES `EncryptedPackage` decryption notes (ECB vs CBC variants; padding/truncation).
 
 ## Status (current behavior vs intended behavior)
 
@@ -26,7 +26,11 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
   right thing (prompt for password vs show “unsupported encryption”).
 - Encrypted **OOXML** (`EncryptionInfo` + `EncryptedPackage`) yields:
   - `formula_io::Error::PasswordRequired` when no password is provided.
-  - `formula_io::Error::UnsupportedOoxmlEncryption` for unknown/unimplemented `EncryptionInfo` versions.
+  - `formula_io::Error::UnsupportedOoxmlEncryption` for unknown/unimplemented `EncryptionInfo`
+    versions.
+  - Without the `formula-io` cargo feature **`encrypted-workbooks`**, supplying a password via
+    `open_workbook_with_password` / `open_workbook_model_with_password` surfaces
+    `formula_io::Error::InvalidPassword` as a UX signal (no decryption attempted).
   - With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
     - The legacy password-aware entrypoints (`open_workbook_with_password` /
       `open_workbook_model_with_password`) can decrypt and open **Agile (4.4)** encrypted
@@ -42,6 +46,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
   is provided. When a password *is* provided via `open_workbook_with_password` /
   `open_workbook_model_with_password`, Formula will attempt BIFF8 RC4 CryptoAPI decryption via the `.xls`
   importer (see below).
+- The desktop app surfaces a **password required** style error (so the UI can prompt for a password).
 
 **Intended behavior (when decryption + password plumbing is implemented):**
 
@@ -140,11 +145,14 @@ Implementation notes:
   - Standard (CryptoAPI; `versionMinor == 2`) header + verifier structures, and
   - Agile (4.4) XML (password key-encryptor subset),
   and implements Standard password→key derivation + verifier checks.
-- `crates/formula-io/src/offcrypto/encrypted_package.rs` contains a Standard/CryptoAPI
-  `EncryptedPackage` decrypt helper for an **AES-CBC segmented compatibility layout** (IV derived
-  from the verifier salt + segment index). Baseline ECMA-376/MS-OFFCRYPTO Standard AES
-  `EncryptedPackage` decryption is AES-ECB (no IV); see `docs/offcrypto-standard-encryptedpackage.md`
-  and `docs/office-encryption.md`.
+- Standard/CryptoAPI `EncryptedPackage` decryption varies by producer (baseline AES-ECB vs CBC-style
+  layouts). In this repo:
+  - Baseline **AES-ECB** (no IV): `crates/formula-offcrypto` (`decrypt_standard_ooxml_from_bytes`,
+    `decrypt_standard_only`, and the low-level `decrypt_encrypted_package_ecb`).
+  - A **CBC-segmented compatibility layout** (IV derived from verifier salt + segment index): see
+    `crates/formula-io/src/offcrypto/encrypted_package.rs` (buffer-based) and
+    `crates/formula-io/src/encrypted_package_reader.rs` (streaming).
+  See `docs/offcrypto-standard-encryptedpackage.md` and `docs/office-encryption.md`.
 - For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
   [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
@@ -240,9 +248,10 @@ Useful entrypoints when working on encrypted workbook support:
         - with a password (via `open_workbook_with_password` / `open_workbook_model_with_password`):
           routed to `formula-xls` and surfaced as `Error::OpenXls { source: ImportError::Decrypt(..) }`
 - **Standard (CryptoAPI) helpers:**
-  - End-to-end decrypt (OLE wrapper → decrypted ZIP bytes; Agile + Standard):
-    `crates/formula-office-crypto`
-  - Parse `EncryptionInfo`, derive/verify password key:
+  - End-to-end decrypt (OLE wrapper → decrypted ZIP bytes):
+    - `crates/formula-office-crypto` (Agile decrypt + writer; plus some Standard/CryptoAPI variants)
+    - `crates/formula-offcrypto` (Standard/CryptoAPI AES-ECB; see `decrypt_standard_ooxml_from_bytes`)
+  - Parse Standard `EncryptionInfo`, derive/verify password key:
     `crates/formula-offcrypto`
   - Decrypt `EncryptedPackage`:
     - Standard AES-ECB (baseline): `crates/formula-offcrypto/src/lib.rs` (`decrypt_encrypted_package_ecb`)
@@ -486,8 +495,10 @@ Current behavior in `formula-io`:
 - Encrypted OOXML wrappers already distinguish:
   - `Error::PasswordRequired` (no password provided)
   - `Error::InvalidPassword` (password provided)
-    - With `formula-io/encrypted-workbooks`: wrong password *or* Agile `dataIntegrity` mismatch (Agile 4.4).
-    - Without it (or for Standard encryption): a UX classification meaning “a password was provided but the file could not be opened/decrypted in this layer”.
+    - Without `formula-io/encrypted-workbooks`: UX signal (no cryptographic password verification).
+    - With `formula-io/encrypted-workbooks`: wrong password *or* Agile `dataIntegrity` mismatch
+      (Agile 4.4). For Standard/CryptoAPI, `InvalidPassword` is still a placeholder until Standard is
+      wired into the open path.
   - `Error::UnsupportedOoxmlEncryption` (unrecognized `EncryptionInfo` version)
 - Legacy `.xls` encryption (`FILEPASS`) is surfaced as `Error::EncryptedWorkbook` when no password is
   provided. When a password is provided via `open_workbook_with_password` /

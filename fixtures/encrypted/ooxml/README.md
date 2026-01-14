@@ -34,14 +34,16 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 - `plaintext-large.xlsx` – unencrypted ZIP-based workbook, intentionally **> 4096 bytes**.
   - Copied from `fixtures/xlsx/basic/comments.xlsx`.
 - `agile-large.xlsx` – Agile encrypted OOXML.
-  - `EncryptionInfo` header version **Major 4 / Minor 4**
-  - Decrypts to `plaintext-large.xlsx` with password `password`
+   - `EncryptionInfo` header version **Major 4 / Minor 4**
+   - Decrypts to `plaintext-large.xlsx` with password `password`
 - `standard-large.xlsx` – Standard encrypted OOXML.
    - `EncryptionInfo` header version **Major 3 / Minor 2**
    - Decrypts to `plaintext-large.xlsx` with password `password`
-   - Note: this is a *non-standard* “Standard-like” fixture matching the legacy
-     `crates/formula-xlsx::offcrypto` Standard decryptor (reduced iteration count + AES-CBC segmented
-     decryption). See `docs/office-encryption.md` for details.
+   - Note: Standard/CryptoAPI AES has multiple real-world `EncryptedPackage` variants (ECB vs CBC).
+     This is a *non-standard* “Standard-like” fixture (reduced iteration count + AES-CBC segmented
+     decryption) used to exercise multi-segment Standard decryption paths. In this repo,
+     `standard.xlsx` is the ECMA-376/MS-OFFCRYPTO AES-ECB fixture; see
+     `docs/offcrypto-standard-encryptedpackage.md` (and `docs/office-encryption.md`) for details.
 
 ### Why the `*-large.xlsx` fixtures exist
 

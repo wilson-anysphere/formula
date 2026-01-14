@@ -18,6 +18,15 @@ The intent is that an engineer can implement this without reading any external r
 For repo-specific implementation notes (which parameter subsets we accept, crate entrypoints, writer
 defaults), see `docs/office-encryption.md`.
 
+Important nuance: “Standard/CryptoAPI AES” is **not perfectly uniform** across producers. This guide
+describes the **Excel/`msoffcrypto-tool`-style** variant implemented by `crates/formula-offcrypto`,
+where the verifier fields and `EncryptedPackage` are decrypted with **AES-ECB** (no IV) after key
+derivation.
+
+If you see “every password is wrong” failures on Standard-encrypted inputs, it may be a mode/IV
+mismatch (CBC-style variants exist). See `docs/offcrypto-standard-encryptedpackage.md` and
+`crates/formula-office-crypto/src/standard.rs` (`StandardScheme`) for variant context.
+
 For Agile (4.4) OOXML password decryption details (different scheme; XML descriptor + `dataIntegrity`
 HMAC), see `docs/22-ooxml-encryption.md`.
 
