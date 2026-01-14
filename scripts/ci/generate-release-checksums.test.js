@@ -56,18 +56,21 @@ test("generate-release-checksums accepts a standard macOS updater archive (*.app
   }
 });
 
-test("generate-release-checksums rejects Linux .appimage tarballs as macOS updater archives", { skip: process.platform === "win32" }, () => {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "formula-checksums-"));
-  try {
-    // No real macOS updater tarball; only an AppImage tarball (lowercase `.appimage`), which must
-    // not satisfy the macOS updater archive requirement.
-    writeFixture(tmp, { macUpdaterTarball: "Formula.appimage.tar.gz" });
-    const outPath = path.join(tmp, "SHA256SUMS.txt");
-    const proc = runGenerateChecksums(tmp, outPath);
-    assert.notEqual(proc.status, 0, "expected script to fail");
-    assert.match(proc.stderr, /\*\.app\.tar\.gz/i);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
+test("generate-release-checksums rejects Linux AppImage tarballs as macOS updater archives", { skip: process.platform === "win32" }, () => {
+  // No real macOS updater tarball; only an AppImage tarball, which must not satisfy the macOS
+  // updater archive requirement. Cover both lower/upper-case variants and both .tar.gz/.tgz.
+  const appimageTarballs = ["Formula.appimage.tar.gz", "Formula.AppImage.tgz"];
+
+  for (const tarball of appimageTarballs) {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "formula-checksums-"));
+    try {
+      writeFixture(tmp, { macUpdaterTarball: tarball });
+      const outPath = path.join(tmp, "SHA256SUMS.txt");
+      const proc = runGenerateChecksums(tmp, outPath);
+      assert.notEqual(proc.status, 0, `expected script to fail when only ${tarball} exists`);
+      assert.match(proc.stderr, /\*\.app\.tar\.gz/i);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   }
 });
-
