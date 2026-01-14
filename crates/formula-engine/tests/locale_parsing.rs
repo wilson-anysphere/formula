@@ -157,6 +157,24 @@ fn canonicalize_accepts_thousands_grouping_in_es_es_but_localize_omits_grouping(
 }
 
 #[test]
+fn localize_does_not_insert_thousands_separators_in_numeric_literals() {
+    // Verified against Excel `FormulaLocal` via `tools/excel-oracle/extract-formula-local-number-formatting.ps1`.
+    let canonical = "=SUM(1234567.89,0.5)";
+    assert_eq!(
+        locale::localize_formula(canonical, &locale::DE_DE).unwrap(),
+        "=SUMME(1234567,89;0,5)"
+    );
+    assert_eq!(
+        locale::localize_formula(canonical, &locale::FR_FR).unwrap(),
+        "=SOMME(1234567,89;0,5)"
+    );
+    assert_eq!(
+        locale::localize_formula(canonical, &locale::ES_ES).unwrap(),
+        "=SUMA(1234567,89;0,5)"
+    );
+}
+
+#[test]
 fn canonicalize_accepts_canonical_leading_decimal_in_de_de() {
     let canonical = locale::canonicalize_formula("=SUMME(.5;1)", &locale::DE_DE).unwrap();
     assert_eq!(canonical, "=SUM(.5,1)");
@@ -365,14 +383,14 @@ fn field_access_function_names_are_not_translated() {
 }
 
 #[test]
-fn canonicalize_and_localize_supports_nbsp_thousands_separator_in_fr_fr() {
+fn canonicalize_supports_nbsp_thousands_separator_in_fr_fr() {
     // French Excel commonly uses NBSP (U+00A0) for thousands grouping.
     let fr = "=SOMME(1\u{00A0}234,56;0,5)";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=SUM(1234.56,0.5)");
 
     // Excel accepts locale-specific thousands separators in localized input, but `FormulaLocal`
-    // typically normalizes numeric literals when serializing formulas back (omitting grouping).
+    // does not insert grouping separators when serializing formulas back (it typically omits grouping).
     // See `tools/excel-oracle/extract-formula-local-number-formatting.ps1`.
     assert_eq!(
         locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
