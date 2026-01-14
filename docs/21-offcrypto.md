@@ -49,6 +49,15 @@ Notes:
 1. Check the first bytes:
    - `PK` → normal OOXML ZIP.
    - `D0 CF 11 E0 A1 B1 1A E1` → OLE container (either legacy `.xls` **or** encrypted OOXML).
+
+   Example (print the first 8 bytes as hex):
+
+   ```bash
+   xxd -l 8 -p workbook.xlsx
+   ```
+
+   - `504b0304...` ⇒ ZIP (`PK..`)
+   - `d0cf11e0a1b11ae1` ⇒ OLE/CFB
 2. If it’s OLE, list streams and look for `EncryptionInfo` + `EncryptedPackage`.
 
 Minimal Rust snippet for a bug report:
