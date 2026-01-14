@@ -165,6 +165,7 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // --- What-If Analysis / Solver ---------------------------------------------
   "data.forecast.whatIfAnalysis.scenarioManager",
   "data.forecast.whatIfAnalysis.goalSeek",
+  "data.forecast.whatIfAnalysis.monteCarlo",
   "formulas.solutions.solver",
 
   // --- Insert pictures --------------------------------------------------------

@@ -11,6 +11,7 @@ import { VbaMigratePanel } from "./vba-migrate/index.js";
 import { createMarketplacePanel } from "./marketplace/index.js";
 import { SolverPanel } from "./solver/SolverPanel.js";
 import { ScenarioManagerPanel } from "./what-if/ScenarioManagerPanel.js";
+import { MonteCarloWizard } from "./what-if/MonteCarloWizard.js";
 import { createWhatIfApi } from "./what-if/api.js";
 import { ExtensionPanelBody } from "../extensions/ExtensionPanelBody.js";
 import { ExtensionsPanel } from "../extensions/ExtensionsPanel.js";
@@ -378,6 +379,12 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     if (panelId === PanelIds.SCENARIO_MANAGER) {
       makeBodyFillAvailableHeight(body);
       renderReactPanel(panelId, body, <ScenarioManagerPanel api={whatIfApi} />);
+      return;
+    }
+
+    if (panelId === PanelIds.MONTE_CARLO) {
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(panelId, body, <MonteCarloWizard api={whatIfApi} />);
       return;
     }
 

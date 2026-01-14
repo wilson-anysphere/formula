@@ -12,6 +12,7 @@ export const PanelIds: Readonly<{
   PYTHON: string;
   SOLVER: string;
   SCENARIO_MANAGER: string;
+  MONTE_CARLO: string;
   MARKETPLACE: string;
   BRANCH_MANAGER: string;
   EXTENSIONS: string;

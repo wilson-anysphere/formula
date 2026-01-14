@@ -14,6 +14,7 @@ export const PanelIds = Object.freeze({
   PYTHON: "python",
   SOLVER: "solver",
   SCENARIO_MANAGER: "scenarioManager",
+  MONTE_CARLO: "monteCarlo",
   MARKETPLACE: "marketplace",
   BRANCH_MANAGER: "branchManager",
   EXTENSIONS: "extensions",
@@ -282,6 +283,16 @@ panelRegistry.registerPanel(
     titleKey: "whatIf.scenario.title",
     defaultDock: "left",
     defaultFloatingRect: { x: 120, y: 160, width: 520, height: 640 },
+    source: { kind: "builtin" },
+  },
+  { owner: "builtin" },
+);
+panelRegistry.registerPanel(
+  PanelIds.MONTE_CARLO,
+  {
+    titleKey: "whatIf.monteCarlo.title",
+    defaultDock: "left",
+    defaultFloatingRect: { x: 140, y: 160, width: 520, height: 640 },
     source: { kind: "builtin" },
   },
   { owner: "builtin" },

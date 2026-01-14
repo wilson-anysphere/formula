@@ -9038,6 +9038,15 @@ function handleRibbonCommand(commandId: string): void {
       case "data.forecast.whatIfAnalysis.goalSeek":
         showGoalSeekDialogModal();
         return;
+      case "data.forecast.whatIfAnalysis.monteCarlo": {
+        const controller = ribbonLayoutController;
+        if (!controller) {
+          showToast("Monte Carlo is not available in this build yet.");
+          return;
+        }
+        controller.openPanel(PanelIds.MONTE_CARLO);
+        return;
+      }
       case "formulas.solutions.solver": {
         const controller = ribbonLayoutController;
         if (!controller) {

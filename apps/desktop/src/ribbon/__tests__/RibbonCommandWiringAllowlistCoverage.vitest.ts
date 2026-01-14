@@ -55,6 +55,7 @@ const implementedCommandIds: string[] = [
   "comments.addComment",
   "comments.togglePanel",
   "data.forecast.whatIfAnalysis.goalSeek",
+  "data.forecast.whatIfAnalysis.monteCarlo",
   "data.forecast.whatIfAnalysis.scenarioManager",
   "data.queriesConnections.queriesConnections",
   "data.queriesConnections.refreshAll",
