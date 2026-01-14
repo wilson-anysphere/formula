@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use formula_io::{
     detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model,
     open_workbook_model_with_password, open_workbook_with_password, Error, Workbook,
-    WorkbookEncryption,
+    OoxmlEncryptedPackageScheme, WorkbookEncryption,
 };
 use formula_model::{CellRef, CellValue};
 
@@ -75,7 +75,9 @@ fn detects_encrypted_ooxml_xlsx_container() {
             assert!(
                 matches!(
                     encryption,
-                    WorkbookEncryption::OoxmlEncryptedPackage { scheme: None }
+                    WorkbookEncryption::OoxmlEncryptedPackage {
+                        scheme: Some(OoxmlEncryptedPackageScheme::Agile)
+                    }
                 ),
                 "expected OOXML EncryptedPackage, got {encryption:?}"
             );

@@ -276,8 +276,11 @@ pub enum WorkbookEncryption {
     /// Office-encrypted OOXML package stored in an OLE compound file via the `EncryptionInfo` +
     /// `EncryptedPackage` streams (e.g. a password-protected `.xlsx`).
     OoxmlEncryptedPackage {
-        /// Optional scheme details (e.g. Standard vs Agile) once `EncryptionInfo` parsing is
-        /// implemented for this helper.
+        /// Best-effort scheme classification derived from the `EncryptionInfo` header (when
+        /// available).
+        ///
+        /// This is intended for UX preflight (e.g. telemetry and messaging) and does not imply that
+        /// the scheme is supported by the current build.
         scheme: Option<OoxmlEncryptedPackageScheme>,
     },
     /// Legacy BIFF `.xls` workbook encryption indicated by a `FILEPASS` record in the workbook
@@ -295,6 +298,12 @@ pub enum WorkbookEncryption {
 /// [`detect_workbook_encryption`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum OoxmlEncryptedPackageScheme {
+    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption (`versionMinor == 2`; commonly `3.2`/`4.2`).
+    Standard,
+    /// MS-OFFCRYPTO "Agile" encryption (`4.4`).
+    Agile,
+    /// MS-OFFCRYPTO "Extensible" encryption (`versionMinor == 3`; rarely seen for spreadsheets).
+    Extensible,
     Unknown,
 }
 
@@ -779,7 +788,12 @@ pub fn detect_workbook_encryption(path: impl AsRef<Path>) -> Result<WorkbookEncr
     let has_encryption_info = stream_exists(&mut ole, "EncryptionInfo");
     let has_encrypted_package = stream_exists(&mut ole, "EncryptedPackage");
     if has_encryption_info || has_encrypted_package {
-        return Ok(WorkbookEncryption::OoxmlEncryptedPackage { scheme: None });
+        let scheme = if has_encryption_info {
+            sniff_ooxml_encryption_scheme(&mut ole)
+        } else {
+            None
+        };
+        return Ok(WorkbookEncryption::OoxmlEncryptedPackage { scheme });
     }
 
     if let Some(scheme) = ole_workbook_filepass_scheme(&mut ole) {
@@ -787,6 +801,26 @@ pub fn detect_workbook_encryption(path: impl AsRef<Path>) -> Result<WorkbookEncr
     }
 
     Ok(WorkbookEncryption::None)
+}
+
+fn sniff_ooxml_encryption_scheme<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+) -> Option<OoxmlEncryptedPackageScheme> {
+    use std::io::Read as _;
+
+    let mut stream = open_stream_best_effort(ole, "EncryptionInfo")?;
+    let mut hdr = [0u8; 4];
+    stream.read_exact(&mut hdr).ok()?;
+
+    let major = u16::from_le_bytes([hdr[0], hdr[1]]);
+    let minor = u16::from_le_bytes([hdr[2], hdr[3]]);
+
+    Some(match (major, minor) {
+        (4, 4) => OoxmlEncryptedPackageScheme::Agile,
+        (major, 2) if matches!(major, 2 | 3 | 4) => OoxmlEncryptedPackageScheme::Standard,
+        (major, 3) if matches!(major, 3 | 4) => OoxmlEncryptedPackageScheme::Extensible,
+        _ => OoxmlEncryptedPackageScheme::Unknown,
+    })
 }
 
 /// Inspect a workbook on disk and, when it is an OLE-encrypted OOXML container, return a
