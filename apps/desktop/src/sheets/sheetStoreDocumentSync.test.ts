@@ -104,6 +104,46 @@ describe("sheetStoreDocumentSync", () => {
     handle.dispose();
   });
 
+  test("removes store entries even when a last-visible-sheet guard would block (applyState removal + visibility update)", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1", "Sheet2"];
+    doc.sheetMetaById = {
+      Sheet1: { name: "Sheet1", visibility: "visible" },
+      // DocumentController metadata may promote Sheet2 to visible during restores where it's the only
+      // remaining sheet, even if the UI store still has it marked hidden.
+      Sheet2: { name: "Sheet2", visibility: "visible" },
+    };
+
+    const store = new WorkbookSheetStore([
+      { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", name: "Sheet2", visibility: "hidden" },
+    ]);
+
+    let activeSheetId = "Sheet1";
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activeSheetId = id;
+      },
+    );
+
+    await flushMicrotasks();
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet2"]);
+
+    // Simulate an applyState restore that deletes Sheet1 and makes Sheet2 visible.
+    doc.emit("change", { source: "applyState" });
+    doc.sheetIds = ["Sheet2"];
+    doc.sheetMetaById = { Sheet2: { name: "Sheet2", visibility: "visible" } };
+    await flushMicrotasks();
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet2"]);
+    expect(store.getById("Sheet2")?.visibility).toBe("visible");
+
+    handle.dispose();
+  });
+
   test("auto-activates first visible sheet if the active sheet no longer exists", async () => {
     const doc = new MockDoc();
     doc.sheetIds = ["Sheet1", "Sheet2"];

@@ -118,6 +118,20 @@ export function startSheetStoreDocumentSync(
           store.remove(sheet.id);
         } catch {
           // Best-effort: avoid crashing the UI if the store refuses removal (e.g. last-sheet guard).
+          //
+          // Important: DocumentController is the authoritative source of truth for the sheet-id list
+          // during this sync. If `store.remove(...)` throws because of Excel-style invariants (e.g.
+          // preventing deletion of the last *visible* sheet), fall back to `replaceAll(...)` so the
+          // store still reflects the document's sheet ids.
+          //
+          // This keeps doc->store sync robust in edge cases like applyState restores where the
+          // remaining sheet is still marked hidden in the UI store but will be updated to visible
+          // later in this sync via `doc.getSheetMeta(...)`.
+          try {
+            store.replaceAll(store.listAll().filter((s) => s.id !== sheet.id));
+          } catch {
+            // ignore
+          }
         }
       }
     });
