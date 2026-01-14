@@ -226,6 +226,46 @@ test("release-smoke-test: --local-bundles runs validate-linux-deb.sh with --no-c
     .sort()
     .map((scheme) => `x-scheme-handler/${scheme}`);
 
+  function buildSharedMimeInfoXml(config) {
+    const groups = new Map();
+    const associations = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
+
+    for (const assoc of associations) {
+      const rawMimeType = assoc?.mimeType;
+      const mimeTypes = typeof rawMimeType === "string" ? [rawMimeType] : Array.isArray(rawMimeType) ? rawMimeType : [];
+      const rawExts = assoc?.ext;
+      const exts = Array.isArray(rawExts) ? rawExts : typeof rawExts === "string" ? [rawExts] : [];
+
+      for (const raw of mimeTypes) {
+        const mimeType = typeof raw === "string" ? raw.trim() : "";
+        if (!mimeType) continue;
+        if (!groups.has(mimeType)) groups.set(mimeType, new Set());
+        for (const rawExt of exts) {
+          if (typeof rawExt !== "string") continue;
+          const ext = rawExt.trim().replace(/^\./, "").toLowerCase();
+          if (!ext) continue;
+          groups.get(mimeType).add(ext);
+        }
+      }
+    }
+
+    const lines = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+    ];
+    for (const mimeType of Array.from(groups.keys()).sort()) {
+      lines.push(`  <mime-type type="${mimeType}">`);
+      for (const ext of Array.from(groups.get(mimeType)).sort()) {
+        lines.push(`    <glob pattern="*.${ext}" />`);
+      }
+      lines.push("  </mime-type>");
+    }
+    lines.push("</mime-info>");
+    return lines.join("\n");
+  }
+
+  const sharedMimeInfoXml = buildSharedMimeInfoXml(tauriConf);
+
   const mimeList = [
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
@@ -289,11 +329,7 @@ EOF
     echo "LICENSE stub" > "$dest/usr/share/doc/$expected_pkg/LICENSE"
     echo "NOTICE stub" > "$dest/usr/share/doc/$expected_pkg/NOTICE"
     cat > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml" <<'XML'
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <mime-type type="application/vnd.apache.parquet">
-    <glob pattern="*.parquet" />
-  </mime-type>
-</mime-info>
+${sharedMimeInfoXml}
 XML
     exit 0
     ;;
