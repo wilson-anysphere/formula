@@ -606,6 +606,16 @@ mod macro_strip_streaming {
         name.strip_prefix('/').unwrap_or(name)
     }
 
+    fn find_part_name(part_names: &BTreeSet<String>, candidate: &str) -> Option<String> {
+        if let Some(found) = part_names.get(candidate) {
+            return Some(found.clone());
+        }
+        part_names
+            .iter()
+            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
+            .cloned()
+    }
+
     pub(super) fn strip_vba_project_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         archive: &mut ZipArchive<R>,
         output: W,
@@ -713,12 +723,12 @@ mod macro_strip_streaming {
         }
 
         // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
-        if part_names.contains("xl/_rels/vbaProject.bin.rels") {
-            let rels_bytes = read_zip_part(archive, "xl/_rels/vbaProject.bin.rels", read_cache)?;
+        if let Some(rels_part) = find_part_name(part_names, "xl/_rels/vbaProject.bin.rels") {
+            let rels_bytes = read_zip_part(archive, &rels_part, read_cache)?;
             let targets = parse_internal_relationship_targets(
                 &rels_bytes,
                 "xl/vbaProject.bin",
-                "xl/_rels/vbaProject.bin.rels",
+                &rels_part,
                 part_names,
             )?;
             delete.extend(targets);
@@ -768,15 +778,16 @@ mod macro_strip_streaming {
             }
 
             let rels_part = crate::path::rels_for_part(vml_part);
-            if !part_names.contains(&rels_part) {
+            let Some(rels_part) = find_part_name(part_names, &rels_part) else {
                 continue;
-            }
+            };
             let rels_bytes = read_zip_part(archive, &rels_part, read_cache)?;
 
             out.extend(parse_relationship_targets_for_ids(
                 &rels_bytes,
                 vml_part,
                 &rel_ids,
+                part_names,
             )?);
         }
 
@@ -826,6 +837,7 @@ mod macro_strip_streaming {
         xml: &[u8],
         source_part: &str,
         ids: &BTreeSet<String>,
+        part_names: &BTreeSet<String>,
     ) -> Result<BTreeSet<String>, StreamingPatchError> {
         let mut reader = XmlReader::from_reader(xml);
         reader.config_mut().trim_text(false);
@@ -877,7 +889,9 @@ mod macro_strip_streaming {
                     // `<oleObjects>` in sheet XML (valid in `.xlsx`). For macro stripping we only
                     // delete embedding binaries referenced by VML `<o:OLEObject>` control shapes.
                     if resolved.starts_with("xl/embeddings/") {
-                        out.insert(resolved);
+                        if let Some(found) = find_part_name(part_names, &resolved) {
+                            out.insert(found);
+                        }
                     }
                 }
                 _ => {}
@@ -1507,19 +1521,19 @@ mod macro_strip_streaming {
         // fall back to interpreting the target as relative to the `.rels` directory when the
         // canonical path doesn't exist (common in some producers for workbook-level parts).
         let direct = resolve_target_for_source(source_part, target);
-        if part_names.contains(&direct) {
-            return direct;
+        if let Some(found) = find_part_name(part_names, &direct) {
+            return found;
         }
 
         let rels_relative = crate::path::resolve_target(rels_part, target);
-        if part_names.contains(&rels_relative) {
-            return rels_relative;
+        if let Some(found) = find_part_name(part_names, &rels_relative) {
+            return found;
         }
 
         if !direct.starts_with("xl/") {
             let xl_prefixed = format!("xl/{direct}");
-            if part_names.contains(&xl_prefixed) {
-                return xl_prefixed;
+            if let Some(found) = find_part_name(part_names, &xl_prefixed) {
+                return found;
             }
         }
 
@@ -1564,11 +1578,17 @@ mod macro_strip_streaming {
                 let Some(source_part) = source_part_from_rels_part(rels_part) else {
                     continue;
                 };
+                let source_part = if source_part.is_empty() {
+                    source_part
+                } else {
+                    match find_part_name(part_names, &source_part) {
+                        Some(found) => found,
+                        None => continue,
+                    }
+                };
 
                 // Ignore orphan `.rels` parts; they'll be removed during cleanup.
-                if !source_part.is_empty() && !part_names.contains(&source_part) {
-                    continue;
-                }
+                // (The existence check above uses `find_part_name` and already filtered missing ones.)
 
                 let bytes = read_zip_part(archive, rels_part, read_cache)?;
                 let targets = parse_internal_relationship_targets(

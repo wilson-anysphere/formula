@@ -227,15 +227,19 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
                 continue;
             }
             let resolved = resolve_target(&sheet.part_name, &rel.target);
-            if is_drawing_adjacent_relationship(rel.type_.as_str(), &resolved)
-                && part_names.contains(&resolved)
-            {
-                root_parts.insert(resolved);
+            if is_drawing_adjacent_relationship(rel.type_.as_str(), &resolved) {
+                if let Some(resolved) = find_part_name(&part_names, &resolved) {
+                    root_parts.insert(resolved);
+                }
             }
         }
 
         if sheet.part_name.starts_with("xl/chartsheets/") {
-            root_parts.insert(sheet.part_name.clone());
+            if let Some(resolved) = find_part_name(&part_names, &sheet.part_name) {
+                root_parts.insert(resolved);
+            } else {
+                root_parts.insert(sheet.part_name.clone());
+            }
         }
 
         // Only parse the worksheet XML when the sheet has at least one drawing-adjacent relationship.
@@ -1144,6 +1148,16 @@ fn read_zip_part_required<R: Read + Seek>(
         .ok_or_else(|| ChartExtractionError::MissingPart(name.to_string()))
 }
 
+fn find_part_name(part_names: &HashSet<String>, candidate: &str) -> Option<String> {
+    if let Some(found) = part_names.get(candidate) {
+        return Some(found.clone());
+    }
+    part_names
+        .iter()
+        .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), candidate))
+        .cloned()
+}
+
 fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     part_names: &HashSet<String>,
@@ -1177,9 +1191,9 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
         out.insert(part_name.clone(), part_bytes);
 
         let rels_part_name = rels_for_part(&part_name);
-        if !part_names.contains(&rels_part_name) {
+        let Some(rels_part_name) = find_part_name(part_names, &rels_part_name) else {
             continue;
-        }
+        };
         let Some(rels_bytes) = read_zip_part_optional(archive, &rels_part_name, budget)? else {
             continue;
         };
@@ -1214,8 +1228,8 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
             let target = target.strip_prefix("./").unwrap_or(target);
 
             let target_part = resolve_target(&part_name, target);
-            if part_names.contains(&target_part) {
-                queue.push_back(target_part);
+            if let Some(found) = find_part_name(part_names, &target_part) {
+                queue.push_back(found);
             }
         }
     }
@@ -1280,10 +1294,12 @@ fn extract_workbook_chart_sheets_from_workbook_parts(
         }
 
         let resolved_target = resolve_target(workbook_part, &rel.target);
-        if !resolved_target.starts_with("xl/chartsheets/") || !part_names.contains(&resolved_target)
-        {
+        if !resolved_target.starts_with("xl/chartsheets/") {
             continue;
         }
+        let Some(resolved_target) = find_part_name(part_names, &resolved_target) else {
+            continue;
+        };
 
         out.insert(
             name.to_string(),

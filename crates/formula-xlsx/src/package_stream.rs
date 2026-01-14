@@ -131,6 +131,16 @@ impl std::fmt::Debug for StreamingXlsxPackage {
 }
 
 impl StreamingXlsxPackage {
+    fn resolve_source_part_name<'a>(&'a self, canonical: &str) -> Option<&'a str> {
+        if let Some(name) = self.source_part_names.get(canonical) {
+            return Some(name.as_str());
+        }
+        self.source_part_names
+            .iter()
+            .find(|name| crate::zip_util::zip_part_names_equivalent(name.as_str(), canonical))
+            .map(String::as_str)
+    }
+
     /// Open an XLSX/XLSM package from an arbitrary `Read + Seek` source.
     pub fn from_reader<R: Read + Seek + 'static>(reader: R) -> Result<Self, XlsxError> {
         let mut boxed: Box<dyn ReadSeek> = Box::new(reader);
@@ -188,8 +198,11 @@ impl StreamingXlsxPackage {
     /// [`PartOverride::Replace`]. When it does not exist, this is represented as
     /// [`PartOverride::Add`].
     pub fn set_part(&mut self, name: &str, bytes: Vec<u8>) {
-        let canonical = canonical_part_name(name);
-        let exists_in_source = self.source_part_names.contains(&canonical);
+        let canonical_input = canonical_part_name(name);
+        let (canonical, exists_in_source) = match self.resolve_source_part_name(&canonical_input) {
+            Some(found) => (found.to_string(), true),
+            None => (canonical_input, false),
+        };
         let override_key = self
             .source_part_name_to_zip_key
             .get(&canonical)
@@ -212,8 +225,11 @@ impl StreamingXlsxPackage {
 
     /// Remove a part from the output package.
     pub fn remove_part(&mut self, name: &str) {
-        let canonical = canonical_part_name(name);
-        let exists_in_source = self.source_part_names.contains(&canonical);
+        let canonical_input = canonical_part_name(name);
+        let (canonical, exists_in_source) = match self.resolve_source_part_name(&canonical_input) {
+            Some(found) => (found.to_string(), true),
+            None => (canonical_input, false),
+        };
         let override_key = self
             .source_part_name_to_zip_key
             .get(&canonical)
@@ -270,12 +286,27 @@ impl StreamingXlsxPackage {
 
     /// Read a single part, consulting overrides first and otherwise reading from the source ZIP.
     pub fn read_part(&self, name: &str) -> Result<Option<Vec<u8>>, XlsxError> {
-        let canonical = canonical_part_name(name);
+        let canonical_input = canonical_part_name(name);
+
+        // Added parts are keyed by canonical name directly.
+        if let Some(override_op) = self.part_overrides.get(&canonical_input) {
+            match override_op {
+                PartOverride::Remove => return Ok(None),
+                PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
+                    return Ok(Some(bytes.clone()))
+                }
+            }
+        }
+
+        let Some(canonical) = self.resolve_source_part_name(&canonical_input) else {
+            return Ok(None);
+        };
+
         let override_key = self
             .source_part_name_to_zip_key
-            .get(&canonical)
+            .get(canonical)
             .map(String::as_str)
-            .unwrap_or(canonical.as_str());
+            .unwrap_or(canonical);
 
         if let Some(override_op) = self.part_overrides.get(override_key) {
             match override_op {
@@ -286,7 +317,7 @@ impl StreamingXlsxPackage {
             }
         }
 
-        let Some(&idx) = self.source_part_name_to_index.get(&canonical) else {
+        let Some(&idx) = self.source_part_name_to_index.get(canonical) else {
             return Ok(None);
         };
 
@@ -297,7 +328,8 @@ impl StreamingXlsxPackage {
         if file.is_dir() {
             return Ok(None);
         }
-        let buf = read_zip_file_bytes_with_limit(&mut file, &canonical, MAX_XLSX_PACKAGE_PART_BYTES)?;
+        let buf =
+            read_zip_file_bytes_with_limit(&mut file, canonical, MAX_XLSX_PACKAGE_PART_BYTES)?;
         Ok(Some(buf))
     }
 
@@ -319,7 +351,11 @@ impl StreamingXlsxPackage {
 
         // Always store as `Replace` so that existing parts are rewritten in-place (and missing
         // parts are appended), matching the streaming patcher semantics.
-        let canonical = canonical_part_name("[Content_Types].xml");
+        let canonical_input = canonical_part_name("[Content_Types].xml");
+        let canonical = self
+            .resolve_source_part_name(&canonical_input)
+            .unwrap_or(canonical_input.as_str())
+            .to_string();
         let override_key = self
             .source_part_name_to_zip_key
             .get(&canonical)
