@@ -226,4 +226,86 @@ describe("Selection Pane panel", () => {
     app.destroy();
     sheetRoot.remove();
   });
+
+  it("deletes drawings via per-row Delete button", async () => {
+    const [{ createPanelBodyRenderer }, { PanelIds }, { mountRibbon }] = await Promise.all([
+      import("../../panelBodyRenderer.js"),
+      import("../../panelRegistry.js"),
+      import("../../../ribbon/index.js"),
+    ]);
+
+    const sheetRoot = createRoot();
+    const app = new SpreadsheetApp(sheetRoot, {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    });
+
+    const drawings: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 0,
+      },
+      {
+        id: 2,
+        kind: { type: "image", imageId: "img_2" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 1,
+      },
+    ];
+
+    const sheetId = app.getCurrentSheetId();
+    (app.getDocument() as any).setSheetDrawings(sheetId, drawings);
+
+    const panelBody = document.createElement("div");
+    document.body.appendChild(panelBody);
+
+    const panelBodyRenderer = createPanelBodyRenderer({
+      getDocumentController: () => app.getDocument(),
+      getSpreadsheetApp: () => app,
+    });
+
+    const ribbonRoot = document.createElement("div");
+    document.body.appendChild(ribbonRoot);
+
+    const unmountRibbon = mountRibbon(
+      ribbonRoot,
+      {
+        onCommand: (commandId: string) => {
+          if (commandId !== "pageLayout.arrange.selectionPane") return;
+          panelBodyRenderer.renderPanelBody(PanelIds.SELECTION_PANE, panelBody);
+        },
+      },
+      { initialTabId: "pageLayout" },
+    );
+
+    const commandButton = ribbonRoot.querySelector<HTMLButtonElement>('button[data-command-id="pageLayout.arrange.selectionPane"]');
+    expect(commandButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      commandButton!.click();
+    });
+
+    const deleteBtn = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-delete-2"]');
+    expect(deleteBtn).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => {
+      deleteBtn!.click();
+    });
+
+    const remainingItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
+    expect(remainingItemEls.length).toBe(1);
+    expect(remainingItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+
+    const raw = (app.getDocument() as any).getSheetDrawings(sheetId);
+    expect(Array.isArray(raw)).toBe(true);
+    expect(raw.length).toBe(1);
+    expect(String(raw[0]?.id)).toBe("1");
+
+    unmountRibbon();
+    panelBodyRenderer.cleanup([]);
+    app.destroy();
+    sheetRoot.remove();
+  });
 });
