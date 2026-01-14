@@ -12,6 +12,7 @@ use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::zip_util::open_zip_part;
+use crate::zip_util::read_zip_file_bytes_with_limit;
 
 /// Maximum uncompressed size permitted for any ZIP part inflated by the print-settings helpers.
 ///
@@ -216,29 +217,16 @@ fn read_zip_bytes<R: Read + Seek>(
     name: &str,
     max_part_bytes: u64,
 ) -> Result<Vec<u8>, PrintError> {
-    let file = open_zip_part(zip, name)?;
-    let declared_size = file.size();
-    if declared_size > max_part_bytes {
-        return Err(PrintError::PartTooLarge {
-            part: name.to_string(),
-            size: declared_size,
-            max: max_part_bytes,
-        });
-    }
-
-    // Don't trust ZIP metadata alone. Guard against incorrect/forged size fields by limiting reads
-    // to `max_part_bytes + 1` and erroring if we see more than `max_part_bytes` bytes.
-    let mut buf = Vec::new();
-    let mut reader = file.take(max_part_bytes.saturating_add(1));
-    reader.read_to_end(&mut buf)?;
-    if buf.len() as u64 > max_part_bytes {
-        return Err(PrintError::PartTooLarge {
-            part: name.to_string(),
-            size: buf.len() as u64,
-            max: max_part_bytes,
-        });
-    }
-    Ok(buf)
+    let mut file = open_zip_part(zip, name)?;
+    read_zip_file_bytes_with_limit(&mut file, name, max_part_bytes).map_err(|err| match err {
+        crate::XlsxError::PartTooLarge { part, size, max } => PrintError::PartTooLarge { part, size, max },
+        crate::XlsxError::Io(err) => PrintError::Io(err),
+        crate::XlsxError::Zip(err) => PrintError::Zip(err),
+        other => PrintError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            other.to_string(),
+        )),
+    })
 }
 
 #[derive(Debug)]
