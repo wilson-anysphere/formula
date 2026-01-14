@@ -168,7 +168,9 @@ type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 const ALL_FUNCTION_NAMES_SORTED: string[] = (Array.isArray(FUNCTION_NAMES) ? FUNCTION_NAMES : [])
   .map((name) => String(name ?? "").trim())
   .filter((name) => name.length > 0)
-  .sort((a, b) => a.localeCompare(b));
+  // Keep deterministic ordering (codepoint sort); the generated artifact is already sorted,
+  // but we still normalize/trim defensively here.
+  .sort();
 
 const COMMON_FUNCTION_NAMES = [
   "SUM",
