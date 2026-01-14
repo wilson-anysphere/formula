@@ -133,6 +133,10 @@ describe("registerBuiltinCommands: panel toggles", () => {
     expect(getPanelPlacement(layoutController.layout, PanelIds.MARKETPLACE)).toEqual({ kind: "docked", side: "right" });
     expect(ensureExtensionsLoaded).toHaveBeenCalledTimes(0);
 
+    await commandRegistry.executeCommand("view.togglePanel.marketplace");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.MARKETPLACE).kind).toBe("closed");
+    expect(ensureExtensionsLoaded).toHaveBeenCalledTimes(0);
+
     // `view.togglePanel.marketplace` should not schedule onExtensionsLoaded either.
     await Promise.resolve();
     await Promise.resolve();
