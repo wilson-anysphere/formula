@@ -583,7 +583,7 @@ When **structured DLP** is enabled (`buildContext({ dlp })` / `buildWorkbookCont
 
 - any heuristic “sensitive” finding is treated as a `Restricted` classification (`heuristic:*` labels)
 - heuristic scanning covers both:
-  - the bounded sheet/workbook text windows being prepared for prompt inclusion
+  - the bounded sheet/workbook text windows being prepared for prompt inclusion (including sheet names + schema metadata like tables/named ranges)
   - user-provided `attachments` (deep traversal, bounded)
 - policy is evaluated on `max(structured, heuristic)` so rules can **BLOCK** or **REDACT** even when there are no
   structured classification records
