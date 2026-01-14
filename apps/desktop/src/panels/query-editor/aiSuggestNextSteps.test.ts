@@ -95,6 +95,24 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "take", count: 5 }]);
   });
 
+  it("drops addColumn suggestions with invalid formulas", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          // M language style expression (unsupported)
+          { type: "addColumn", name: "Flag", formula: "if [Region] = 'East' then 1 else 0" },
+          // Valid formula expression
+          { type: "addColumn", name: "Flag2", formula: "[Region] == 'East' ? 1 : 0" },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("add flag", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "addColumn", name: "Flag2", formula: "[Region] == 'East' ? 1 : 0" }]);
+  });
+
   it("drops renameColumn suggestions that would collide with an existing column name", async () => {
     chatMock.mockResolvedValue({
       message: {

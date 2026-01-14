@@ -3,7 +3,6 @@ import type {
   AndPredicate,
   ArrowTableAdapter,
   ComparisonPredicate,
-  DataTable,
   FilterPredicate,
   NotPredicate,
   OrPredicate,
@@ -11,7 +10,7 @@ import type {
   QueryOperation,
   SortSpec,
 } from "@formula/power-query";
-import { stableStringify } from "@formula/power-query";
+import { DataTable, compileRowFormula, stableStringify } from "@formula/power-query";
 
 import { getDesktopLLMClient, getDesktopModel } from "../../ai/llm/desktopLLMClient.js";
 
@@ -38,6 +37,12 @@ Allowed operation types and shapes:
 - removeRowsWithErrors: { "type": "removeRowsWithErrors", "columns": string[] | null }
 - fillDown: { "type": "fillDown", "columns": string[] }
 - replaceValues: { "type": "replaceValues", "column": string, "find": any, "replace": any }
+
+For addColumn.formula, use Formula's expression syntax:
+- Column references: [Column Name]
+- Operators: ==, !=, >, <, >=, <=, &&, ||, +, -, *, /, %, ternary (cond ? a : b)
+- Allowed functions: text_upper, text_lower, text_trim, text_length, text_contains, date_from_text, date_add_days, number_round
+- Do NOT use M language if/then/else or Excel functions like IF().
 
 FilterPredicate shapes:
 - comparison: { "type": "comparison", "column": string, "operator": "equals"|"notEquals"|"greaterThan"|"greaterThanOrEqual"|"lessThan"|"lessThanOrEqual"|"contains"|"startsWith"|"endsWith"|"isNull"|"isNotNull", "value"?: any, "caseSensitive"?: boolean }
@@ -179,11 +184,13 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
     if (type === "distinctRows") {
       const columns = (value as { columns?: unknown }).columns;
       if (columns == null) return { type: "distinctRows", columns: null };
+      if (Array.isArray(columns) && columns.length === 0) return { type: "distinctRows", columns: null };
       return null;
     }
     if (type === "removeRowsWithErrors") {
       const columns = (value as { columns?: unknown }).columns;
       if (columns == null) return { type: "removeRowsWithErrors", columns: null };
+      if (Array.isArray(columns) && columns.length === 0) return { type: "removeRowsWithErrors", columns: null };
       return null;
     }
     return null;
@@ -199,6 +206,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       const columns = (value as { columns?: unknown }).columns;
       if (columns == null) return { type: "distinctRows", columns: null };
       if (!isStringArray(columns)) return null;
+      if (columns.length === 0) return { type: "distinctRows", columns: null };
       if (columns.some((c) => !allowedColumns.has(c))) return null;
       return { type: "distinctRows", columns: dedupePreserveOrder(columns) };
     }
@@ -206,6 +214,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       const columns = (value as { columns?: unknown }).columns;
       if (columns == null) return { type: "removeRowsWithErrors", columns: null };
       if (!isStringArray(columns)) return null;
+      if (columns.length === 0) return { type: "removeRowsWithErrors", columns: null };
       if (columns.some((c) => !allowedColumns.has(c))) return null;
       return { type: "removeRowsWithErrors", columns: dedupePreserveOrder(columns) };
     }
@@ -264,7 +273,17 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       if (typeof formula !== "string" || !formula.trim()) return null;
       const trimmedName = name.trim();
       if (allowedColumns.has(trimmedName)) return null;
-      return { type: "addColumn", name: trimmedName, formula: formula.trim() };
+      const trimmedFormula = formula.trim();
+      try {
+        // Validate that the formula parses and only references known columns.
+        // This prevents the model from suggesting M language (if/then/else),
+        // unsupported function calls, or typos in column references.
+        const table = new DataTable(Array.from(allowedColumns).map((col) => ({ name: col, type: "any" })), []);
+        compileRowFormula(table, trimmedFormula);
+      } catch {
+        return null;
+      }
+      return { type: "addColumn", name: trimmedName, formula: trimmedFormula };
     }
     case "sortRows": {
       const sortBy = (value as { sortBy?: unknown }).sortBy;
