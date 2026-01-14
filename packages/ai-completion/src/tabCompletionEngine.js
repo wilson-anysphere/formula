@@ -1831,12 +1831,30 @@ function functionCouldBeCompleteAfterArg(fnSpec, argIndex) {
 }
 
 function applyNameCase(name, typedPrefix) {
-  if (typedPrefix && typedPrefix === typedPrefix.toLowerCase()) {
-    return name.toLowerCase();
+  if (!typedPrefix) return name;
+  // Infer case preference from the *letters* the user typed (ignore digits, dots, underscores).
+  // This yields nicer results for common patterns like:
+  //   "=vlo"  -> "=vlookup("
+  //   "=VLO"  -> "=VLOOKUP("
+  //   "=Vlo"  -> "=Vlookup("
+  const letters = typedPrefix.replaceAll(/[^A-Za-z]/g, "");
+  if (!letters) return name;
+
+  const lower = letters.toLowerCase();
+  const upper = letters.toUpperCase();
+  if (letters === lower) return name.toLowerCase();
+  if (letters === upper) return name.toUpperCase();
+
+  // Title-ish casing: first letter uppercase, remainder lowercase.
+  if (letters[0] === upper[0] && letters.slice(1) === lower.slice(1)) {
+    const lowered = name.toLowerCase();
+    const firstLetterIdx = lowered.search(/[a-z]/);
+    if (firstLetterIdx >= 0) {
+      return lowered.slice(0, firstLetterIdx) + lowered[firstLetterIdx].toUpperCase() + lowered.slice(firstLetterIdx + 1);
+    }
+    return lowered;
   }
-  if (typedPrefix && typedPrefix === typedPrefix.toUpperCase()) {
-    return name.toUpperCase();
-  }
+
   return name;
 }
 
@@ -1860,6 +1878,25 @@ function applyIdentifierCase(name, typedPrefix) {
   // CamelCase identifiers (e.g. named ranges), but avoid producing "suM"-style
   // completions for ALL-CAPS identifiers by downcasing them fully.
   if (hasLetter && hasLower && !hasUpper && name === name.toUpperCase()) return name.toLowerCase();
+
+  // Title-ish casing: first letter uppercase, remainder lowercase.
+  // If the canonical identifier is ALL-CAPS, produce a nicer completion by
+  // title-casing the remainder (e.g. "Vlo" -> "Vlookup", "Fa" -> "False").
+  if (hasLetter && name === name.toUpperCase()) {
+    const letters = typedPrefix.replaceAll(/[^A-Za-z]/g, "");
+    if (letters) {
+      const lower = letters.toLowerCase();
+      const upper = letters.toUpperCase();
+      if (letters[0] === upper[0] && letters.slice(1) === lower.slice(1)) {
+        const lowered = name.toLowerCase();
+        const firstLetterIdx = lowered.search(/[a-z]/);
+        if (firstLetterIdx >= 0) {
+          return lowered.slice(0, firstLetterIdx) + lowered[firstLetterIdx].toUpperCase() + lowered.slice(firstLetterIdx + 1);
+        }
+        return lowered;
+      }
+    }
+  }
 
   return name;
 }

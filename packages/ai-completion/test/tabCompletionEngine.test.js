@@ -174,6 +174,22 @@ test("Typing =VLO suggests VLOOKUP(", async () => {
   );
 });
 
+test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=Vlo",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=Vlookup("),
+    `Expected a Vlookup suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Function name completion works after ';' inside an array constant", async () => {
   const engine = new TabCompletionEngine();
 
@@ -2008,6 +2024,23 @@ test("VLOOKUP range_lookup preserves typed casing for booleans (lowercase prefix
   assert.ok(
     suggestions.some((s) => s.text === "=VLOOKUP(A1, A1:B10, 2, false"),
     `Expected VLOOKUP to complete "f" -> "false", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("VLOOKUP range_lookup preserves typed casing for booleans (title-case prefix)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=VLOOKUP(A1, A1:B10, 2, Fa";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=VLOOKUP(A1, A1:B10, 2, False"),
+    `Expected VLOOKUP to complete \"Fa\" -> \"False\", got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
