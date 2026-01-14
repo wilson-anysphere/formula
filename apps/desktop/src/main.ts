@@ -8700,6 +8700,22 @@ async function hideTauriWindow(): Promise<void> {
 async function showTauriWindowBestEffort(): Promise<void> {
   try {
     const win = getTauriWindowHandleOrThrow();
+    // Prefer restoring from a minimized state first so `show()` makes the window visible.
+    try {
+      if (typeof win.unminimize === "function") {
+        await win.unminimize();
+      }
+    } catch {
+      // Best-effort.
+    }
+    try {
+      // Some Tauri variants expose minimize state via a setter API.
+      if (typeof win.setMinimized === "function") {
+        await win.setMinimized(false);
+      }
+    } catch {
+      // Best-effort.
+    }
     if (typeof win.show === "function") {
       await win.show();
     }
