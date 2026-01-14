@@ -345,6 +345,24 @@ fn roundtrip_agile_encryption() {
 }
 
 #[test]
+fn agile_encryption_accepts_short_hmac_key() {
+    // Some producers emit a decrypted `dataIntegrity/encryptedHmacKey` whose length is shorter than
+    // the hash output size. HMAC accepts any key length, so we should accept such files as long as
+    // the computed digest matches `encryptedHmacValue`.
+    let password = "Password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes = encrypt_agile_ooxml_ole_short_hmac_key(plaintext, password);
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+}
+
+#[test]
 fn agile_encryption_accepts_ciphertext_only_hmac_target() {
     let password = "Password";
     let plaintext = include_bytes!(concat!(
@@ -1082,6 +1100,156 @@ fn encrypt_agile_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
     // Match the crate's Agile writer: encryptedHmacKey/value are AES-CBC encrypted using the
     // package key and IVs derived from the keyData salt + fixed block keys.
     let hmac_key_plain = [0x22u8; 64];
+    let hmac_value_plain = hmac_sha512(&hmac_key_plain, &encrypted_package);
+
+    let iv_hmac_key =
+        sha512_digest(&[&salt_key_data[..], &BLOCK_KEY_INTEGRITY_HMAC_KEY[..]].concat());
+    let iv_hmac_key = &iv_hmac_key[..block_size];
+    let encrypted_hmac_key = aes256_cbc_encrypt(&package_key_plain, iv_hmac_key, &hmac_key_plain);
+
+    let iv_hmac_val =
+        sha512_digest(&[&salt_key_data[..], &BLOCK_KEY_INTEGRITY_HMAC_VALUE[..]].concat());
+    let iv_hmac_val = &iv_hmac_val[..block_size];
+    let encrypted_hmac_value =
+        aes256_cbc_encrypt(&package_key_plain, iv_hmac_val, &hmac_value_plain);
+
+    let encrypted_hmac_key_b64 = b64.encode(encrypted_hmac_key);
+    let encrypted_hmac_value_b64 = b64.encode(encrypted_hmac_value);
+
+    let xml = format!(
+        r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+  <keyData saltSize="16" blockSize="16" keyBits="256" hashAlgorithm="SHA512" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
+  <dataIntegrity encryptedHmacKey="{encrypted_hmac_key_b64}" encryptedHmacValue="{encrypted_hmac_value_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
+        saltSize="16" blockSize="16" keyBits="256" spinCount="{spin_count}" hashAlgorithm="SHA512" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
+        <p:encryptedVerifierHashInput>{enc_vhi_b64}</p:encryptedVerifierHashInput>
+        <p:encryptedVerifierHashValue>{enc_vhv_b64}</p:encryptedVerifierHashValue>
+        <p:encryptedKeyValue>{enc_kv_b64}</p:encryptedKeyValue>
+      </p:encryptedKey>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#
+    );
+
+    // Build the EncryptionInfo stream.
+    let version_major = 4u16;
+    let version_minor = 4u16;
+    let flags = 0x0000_0040u32;
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&version_major.to_le_bytes());
+    encryption_info.extend_from_slice(&version_minor.to_le_bytes());
+    encryption_info.extend_from_slice(&flags.to_le_bytes());
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    // Write the OLE/CFB wrapper.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_stream("EncryptionInfo")
+        .expect("create stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole.create_stream("EncryptedPackage")
+        .expect("create stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    ole.into_inner().into_inner()
+}
+
+fn encrypt_agile_ooxml_ole_short_hmac_key(plaintext: &[u8], password: &str) -> Vec<u8> {
+    // Like `encrypt_agile_ooxml_ole`, but uses an `encryptedHmacKey` plaintext that is shorter than
+    // the hash output size (SHA512=64 bytes). HMAC accepts any key size, so this should still
+    // decrypt successfully.
+    //
+    // Deterministic parameters (not intended to be secure).
+    let spin_count = 10_000u32; // keep test runtime reasonable
+    let block_size = 16usize;
+    let key_bits = 256usize;
+
+    let salt_key_encryptor: [u8; 16] = [
+        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
+        0xAF,
+    ];
+    let salt_key_data: [u8; 16] = [
+        0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE,
+        0xBF,
+    ];
+
+    let pw_utf16 = password_to_utf16le(password);
+
+    let verifier_hash_input_plain: [u8; 16] = *b"formula-agl-test";
+    let verifier_hash_value_plain = sha512_digest(&verifier_hash_input_plain);
+    let package_key_plain: [u8; 32] = [0x11; 32];
+
+    // Encrypt password verifier fields and package key.
+    let enc_vhi = agile_encrypt_with_block_key(
+        &salt_key_encryptor,
+        &pw_utf16,
+        spin_count,
+        key_bits,
+        block_size,
+        BLOCK_KEY_VERIFIER_HASH_INPUT,
+        &verifier_hash_input_plain,
+    );
+    let enc_vhv = agile_encrypt_with_block_key(
+        &salt_key_encryptor,
+        &pw_utf16,
+        spin_count,
+        key_bits,
+        block_size,
+        BLOCK_KEY_VERIFIER_HASH_VALUE,
+        &verifier_hash_value_plain,
+    );
+    let enc_kv = agile_encrypt_with_block_key(
+        &salt_key_encryptor,
+        &pw_utf16,
+        spin_count,
+        key_bits,
+        block_size,
+        BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+        &package_key_plain,
+    );
+
+    // Build XML descriptor.
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let salt_key_encryptor_b64 = b64.encode(salt_key_encryptor);
+    let salt_key_data_b64 = b64.encode(salt_key_data);
+    let enc_vhi_b64 = b64.encode(enc_vhi);
+    let enc_vhv_b64 = b64.encode(enc_vhv);
+    let enc_kv_b64 = b64.encode(enc_kv);
+
+    // Encrypt the package data in 4096-byte segments using a single package key and per-block IVs
+    // derived from the keyData salt + block index.
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+
+    const SEGMENT_LEN: usize = 4096;
+    let mut offset = 0usize;
+    let mut block = 0u32;
+    while offset < plaintext.len() {
+        let seg_len = (plaintext.len() - offset).min(SEGMENT_LEN);
+        let seg = &plaintext[offset..offset + seg_len];
+        let mut padded = seg.to_vec();
+        let padded_len = (padded.len() + 15) / 16 * 16;
+        padded.resize(padded_len, 0);
+
+        let iv = sha512_digest(&[&salt_key_data[..], &block.to_le_bytes()[..]].concat());
+        let iv = &iv[..block_size];
+
+        let cipher = aes256_cbc_encrypt(&package_key_plain, iv, &padded);
+        encrypted_package.extend_from_slice(&cipher);
+
+        offset += seg_len;
+        block += 1;
+    }
+
+    // Integrity (HMAC over the EncryptedPackage stream).
+    //
+    // Match the crate's Agile writer: encryptedHmacKey/value are AES-CBC encrypted using the
+    // package key and IVs derived from the keyData salt + fixed block keys.
+    let hmac_key_plain = [0x22u8; 16]; // shorter than SHA512 hash output (64 bytes)
     let hmac_value_plain = hmac_sha512(&hmac_key_plain, &encrypted_package);
 
     let iv_hmac_key =

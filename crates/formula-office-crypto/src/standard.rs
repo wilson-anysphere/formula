@@ -466,6 +466,7 @@ fn verify_password_standard_rc4_key_style(
         Err(e) => Err(e),
     }
 }
+
 fn verify_password_standard_with_key_and_mode(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
@@ -649,6 +650,7 @@ fn verify_password_standard_with_key_and_mode(
 ///
 /// Some producers encrypt verifier fields with AES-CBC; callers that need that compatibility should
 /// use `verify_password_standard_with_key_and_mode` or their own scheme-specific verification.
+#[allow(dead_code)]
 fn verify_password_standard_with_key(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
