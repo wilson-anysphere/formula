@@ -1887,7 +1887,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let extra = rr.data[rr.offset..].to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
-                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
                         {
                             rgce = materialized.rgce;
                             if rgcb_for_decode.is_empty() {
@@ -1922,7 +1922,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let extra = rr.data[rr.offset..].to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
-                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
                         {
                             rgce = materialized.rgce;
                             if rgcb_for_decode.is_empty() {
@@ -1956,7 +1956,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let extra = rr.data[rr.offset..].to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
-                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
                         {
                             rgce = materialized.rgce;
                             if rgcb_for_decode.is_empty() {
@@ -1990,7 +1990,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let extra = rr.data[rr.offset..].to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
-                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
                         {
                             rgce = materialized.rgce;
                             if rgcb_for_decode.is_empty() {
@@ -2115,6 +2115,7 @@ fn materialize_shared_formula<'a>(
     row: u32,
     col: u32,
     shared_formulas: &'a HashMap<(u32, u32), SharedFormulaDef>,
+    ctx: &WorkbookContext,
 ) -> Option<MaterializedSharedFormula<'a>> {
     let candidates = parse_ptg_exp_candidates(rgce)?;
 
@@ -2127,7 +2128,7 @@ fn materialize_shared_formula<'a>(
         };
 
         // Produce a cell-specific rgce so callers don't need shared-formula context.
-        let rgce = materialize_rgce(&def.rgce, base_row, base_col, row, col)?;
+        let rgce = materialize_rgce(&def.rgce, base_row, base_col, row, col, ctx)?;
         return Some(MaterializedSharedFormula {
             rgce,
             rgcb: &def.rgcb,
@@ -2206,6 +2207,7 @@ fn materialize_rgce(
     base_col: u32,
     row: u32,
     col: u32,
+    ctx: &WorkbookContext,
 ) -> Option<Vec<u8>> {
     const MAX_ROW: i64 = 1_048_575;
     const MAX_COL: i64 = 16_383;
@@ -2248,13 +2250,14 @@ fn materialize_rgce(
                 out.push(etpg);
 
                 match etpg {
-                    // PtgList (structured reference): fixed 12-byte payload.
+                    // PtgList (structured reference / table ref): payload layout is best-effort.
                     0x19 => {
-                        if i + 12 > base.len() {
-                            return None;
-                        }
-                        out.extend_from_slice(&base[i..i + 12]);
-                        i += 12;
+                        let remaining = base.get(i..)?;
+                        let payload_len =
+                            crate::rgce::ptg_list_payload_len_best_effort(remaining, Some(ctx))?;
+                        let payload = remaining.get(..payload_len)?;
+                        out.extend_from_slice(payload);
+                        i += payload_len;
                     }
                     _ => return None,
                 }

@@ -1904,6 +1904,72 @@ fn decode_ptg_list_payload_best_effort(
     candidates[0]
 }
 
+/// Best-effort determine how many bytes a `PtgExtend` structured reference payload (`etpg=0x19`,
+/// `PtgList`) consumes.
+///
+/// MS-XLSB documents a fixed 12-byte payload for structured references. In practice, some XLSB
+/// producers appear to insert extra prefix bytes before the 12-byte core payload (e.g. alignment
+/// padding or undocumented fields).
+///
+/// The formula decoder is able to interpret multiple observed core payload layouts (A/B/C). Shared
+/// formula materialization must also be able to *skip* the payload correctly to keep the rgce stream
+/// aligned, even when the core payload is not at the canonical start position.
+///
+/// This helper chooses the most plausible core payload alignment using the same context-based
+/// scoring heuristics as the decoder, and returns the total number of bytes to consume (prefix +
+/// core). The caller should copy the raw bytes verbatim; structured references do not embed
+/// relative row/col offsets that require shifting during shared-formula materialization.
+pub(crate) fn ptg_list_payload_len_best_effort(
+    data: &[u8],
+    ctx: Option<&WorkbookContext>,
+) -> Option<usize> {
+    const CORE_LEN: usize = 12;
+    if data.len() < CORE_LEN {
+        return None;
+    }
+
+    // Common "prefix padding" sizes seen in other BIFF12 record layouts are 2 and 4 bytes. Prefer
+    // the canonical alignment (0) unless the context-based scoring strongly suggests otherwise.
+    const OFFSETS: [usize; 3] = [0, 2, 4];
+
+    let mut best_score = i32::MIN;
+    let mut best_len = CORE_LEN;
+
+    for &offset in &OFFSETS {
+        let Some(window) = data.get(offset..offset + CORE_LEN) else {
+            continue;
+        };
+
+        let mut payload = [0u8; CORE_LEN];
+        payload.copy_from_slice(window);
+        let decoded = decode_ptg_list_payload_best_effort(&payload, ctx);
+
+        // Reuse the decoder's scoring heuristic when workbook context is available. Without
+        // context, fall back to choosing the canonical alignment.
+        let mut score = if let Some(ctx) = ctx {
+            score_ptg_list_candidate(&decoded, ctx)
+        } else {
+            0
+        };
+
+        // Strongly prefer canonical alignment.
+        score -= (offset as i32) * 10;
+
+        // Treat non-zero prefix bytes as a strong signal that the candidate alignment is wrong;
+        // most observed padding prefixes are zero-filled.
+        if offset > 0 && data[..offset].iter().any(|&b| b != 0) {
+            score -= 1_000;
+        }
+
+        if score > best_score {
+            best_score = score;
+            best_len = offset + CORE_LEN;
+        }
+    }
+
+    Some(best_len)
+}
+
 fn score_ptg_list_candidate(cand: &PtgListDecoded, ctx: &WorkbookContext) -> i32 {
     let mut score = 0i32;
 
