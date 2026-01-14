@@ -937,6 +937,66 @@ mod tests {
         ];
         assert_eq!(key, expected);
     }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn decrypts_standard_fixture_via_streaming_reader() {
+        use formula_model::{CellRef, CellValue};
+        use std::io::Read as _;
+
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/encrypted/ooxml/standard.xlsx");
+        let file = std::fs::File::open(&fixture_path).expect("open standard.xlsx fixture");
+        let mut ole = cfb::CompoundFile::open(file).expect("parse OLE");
+
+        let mut encryption_info = Vec::new();
+        ole.open_stream("EncryptionInfo")
+            .or_else(|_| ole.open_stream("/EncryptionInfo"))
+            .expect("open EncryptionInfo")
+            .read_to_end(&mut encryption_info)
+            .expect("read EncryptionInfo");
+
+        let mut encrypted_package = Vec::new();
+        ole.open_stream("EncryptedPackage")
+            .or_else(|_| ole.open_stream("/EncryptedPackage"))
+            .expect("open EncryptedPackage")
+            .read_to_end(&mut encrypted_package)
+            .expect("read EncryptedPackage");
+
+        assert!(
+            encrypted_package.len() >= 8,
+            "EncryptedPackage too short (missing size prefix)"
+        );
+        let plaintext_len = u64::from_le_bytes(
+            encrypted_package[..8]
+                .try_into()
+                .expect("EncryptedPackage size prefix"),
+        );
+        let ciphertext = encrypted_package[8..].to_vec();
+
+        // Build a `Read + Seek` decrypting view over the ciphertext and feed it directly into the
+        // XLSX reader. This exercises the `DecryptedPackageReader` segmented-cache logic plus its
+        // `Seek` implementation (ZIP central directory reads).
+        let reader = decrypted_package_reader(
+            std::io::Cursor::new(ciphertext),
+            plaintext_len,
+            &encryption_info,
+            "password",
+        )
+        .expect("create streaming decrypt reader");
+
+        let workbook =
+            formula_xlsx::read_workbook_from_reader(reader).expect("read decrypted workbook");
+        let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+        assert_eq!(
+            sheet.value(CellRef::from_a1("A1").unwrap()),
+            CellValue::Number(1.0)
+        );
+        assert_eq!(
+            sheet.value(CellRef::from_a1("B1").unwrap()),
+            CellValue::String("Hello".to_string())
+        );
+    }
 }
 
 fn validate_cipher_settings(node: roxmltree::Node<'_, '_>) -> Result<(), DecryptError> {
