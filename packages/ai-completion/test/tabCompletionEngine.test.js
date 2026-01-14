@@ -5089,6 +5089,40 @@ test("parsePartialFormula errors do not crash getSuggestions (falls back to patt
   );
 });
 
+test("Pattern suggestions preserve typed prefix casing (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "ap";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 5, col: 0 },
+    surroundingCells: createMockCellContext({ A5: "Apple" }),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "apple"),
+    `Expected a case-preserving pattern suggestion (apple), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Pattern suggestions preserve the typed suffix when cursor is mid-string", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "apX";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: 2, // cursor after "ap"
+    cellRef: { row: 5, col: 0 },
+    surroundingCells: createMockCellContext({ A5: "Apple" }),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "appleX"),
+    `Expected a pure-insertion pattern suggestion (appleX), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("getSuggestions is crash-proof for non-string currentInput", async () => {
   const engine = new TabCompletionEngine();
 

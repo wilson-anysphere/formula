@@ -271,17 +271,31 @@ export class TabCompletionEngine {
   async getPatternSuggestions(context, parsed) {
     if (parsed.isFormula) return [];
     try {
+      const input = safeToString(context?.currentInput);
+      const cursor = clampCursor(input, context?.cursorPosition);
+      const prefix = input.slice(0, cursor);
+      const suffix = input.slice(cursor);
       const candidates = suggestPatternValues({
         ...context,
         // patternSuggester normalizes internally; ensure it always receives a valid ref.
         cellRef: safeNormalizeCellRef(context?.cellRef),
+        currentInput: input,
+        cursorPosition: cursor,
       });
-      return candidates.map((c) => ({
-        text: c.text,
-        displayText: c.text,
-        type: "value",
-        confidence: c.confidence,
-      }));
+      return candidates.map((c) => {
+        // Preserve the user-typed prefix exactly so value suggestions remain representable
+        // as pure insertions at the caret (formula bar ghost text). This also means
+        // we can still suggest a match even when the source cell has different casing
+        // (e.g. "Apple" in the grid while the user types "ap").
+        const completed = completeIdentifier(c.text, prefix);
+        const text = `${completed}${suffix}`;
+        return {
+          text,
+          displayText: text,
+          type: "value",
+          confidence: c.confidence,
+        };
+      });
     } catch {
       return [];
     }
