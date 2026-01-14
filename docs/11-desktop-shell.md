@@ -106,6 +106,9 @@ Notes:
     - `FORMULA_DESKTOP_SHELL_WARM_WINDOW_VISIBLE_TARGET_MS`
     - `FORMULA_DESKTOP_SHELL_WARM_TTI_TARGET_MS`
     - `FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS`
+  - Metric naming:
+    - Cold mode emits `desktop.startup.cold.*` (and keeps legacy unscoped aliases like `desktop.startup.window_visible_ms.p95`).
+    - Warm mode emits `desktop.startup.warm.*`.
   - `FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1` to fail the command when p95 exceeds the targets (useful for CI gating)
   - `FORMULA_RUN_DESKTOP_STARTUP_BENCH=1` to allow running in CI (the runner skips in CI by default)
   - `FORMULA_DESKTOP_BIN=/path/to/formula-desktop` to benchmark a custom binary

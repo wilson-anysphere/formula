@@ -140,6 +140,14 @@ These scripts are designed to be safe to run locally:
   - **Full app** (`desktop.startup.*`): end-to-end UI startup (requires `apps/desktop/dist`); includes `first_render_ms`.
   - **Shell-only** (`desktop.shell_startup.*`): minimal webview startup via `--startup-bench` (does **not** require `apps/desktop/dist`);
     does not emit `first_render_ms`.
+- **Startup benchmark modes**:
+  - **Cold** (`.cold.`): each run uses a fresh profile directory (true cold start), e.g.
+    - `desktop.startup.cold.window_visible_ms.p95`
+    - `desktop.startup.cold.tti_ms.p95`
+  - **Warm** (`.warm.`): runs reuse the same profile directory after a warmup launch, e.g.
+    - `desktop.startup.warm.window_visible_ms.p95`
+    - `desktop.startup.warm.tti_ms.p95`
+  - Legacy unscoped metric names (e.g. `desktop.startup.window_visible_ms.p95`) are kept as **aliases to cold** mode for backwards compatibility.
 - **`idleRssMb`**: resident set size (RSS) of the desktop process *plus child processes*, sampled
   after TTI + a "settle" delay. (Useful for regression tracking; RSS can double-count shared pages.)
 - **Size**:
