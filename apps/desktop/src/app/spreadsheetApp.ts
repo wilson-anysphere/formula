@@ -19767,6 +19767,9 @@ export class SpreadsheetApp {
 
   private async transcodeImageEntryToPng(entry: ImageEntry): Promise<Uint8Array | null> {
     if (entry.mimeType === "image/png") return entry.bytes;
+    // Some legacy sources may not populate `mimeType` correctly. If the bytes already look like a
+    // PNG, avoid an unnecessary decode+re-encode step (and avoid calling `createImageBitmap`).
+    if (readPngDimensions(entry.bytes)) return entry.bytes;
 
     if (typeof document === "undefined") return null;
 
@@ -19820,6 +19823,16 @@ export class SpreadsheetApp {
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(decoded.source, 0, 0);
+    // Best-effort: release the decoded bitmap once it has been drawn into the canvas.
+    // (Image elements do not support `close()`; ImageBitmap does.)
+    try {
+      const anySource = decoded.source as any;
+      if (anySource && typeof anySource.close === "function") {
+        anySource.close();
+      }
+    } catch {
+      // Ignore close errors (best-effort).
+    }
 
     if (typeof canvas.toBlob === "function") {
       const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
