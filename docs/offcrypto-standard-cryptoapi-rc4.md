@@ -231,6 +231,9 @@ block 0 rc4_key =
 
 block 1 rc4_key =
   2ed4e8825cd48a
+
+RC4(key=block0, plaintext="Hello, RC4 CryptoAPI!") ciphertext =
+  883dbf39789abb12c0245ad562f13dd69da9b44660
 ```
 
 This is a straight truncation of the 128-bit keys: it uses the **first 7 bytes** of the
@@ -272,6 +275,9 @@ block 0 rc4_key =
 
 block 1 rc4_key =
   6f4d502ab37700
+
+RC4(key=block0, plaintext="Hello, RC4 CryptoAPI!") ciphertext =
+  acdabc88ff665d0454d32d952b18e05e8331dfb44e
 ```
 
 #### MD5 + 40-bit (padding rule) vector
