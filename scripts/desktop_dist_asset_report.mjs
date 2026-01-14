@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { appendFile, readdir, stat } from "node:fs/promises";
+import { appendFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -61,7 +61,7 @@ function usage() {
     "Desktop dist asset size report (top offenders + optional budgets).",
     "",
     "Usage:",
-    "  node scripts/desktop_dist_asset_report.mjs [--dist-dir <path>] [--top N] [--group-depth N] [--no-groups] [--no-types]",
+    "  node scripts/desktop_dist_asset_report.mjs [--dist-dir <path>] [--top N] [--group-depth N] [--no-groups] [--no-types] [--json-out <path>]",
     "",
     "Options:",
     "  --dist-dir <path>   Directory to scan (default: apps/desktop/dist).",
@@ -69,6 +69,7 @@ function usage() {
     "  --group-depth N     Group totals by the first N directory segments (default: 1).",
     "  --no-groups         Disable grouped totals output.",
     "  --no-types          Disable file type totals output.",
+    "  --json-out <path>   Write a JSON report to a file (still prints markdown to stdout).",
     "",
     "Budgets (env vars):",
     "  FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB        Fail if total dist size exceeds this value.",
@@ -89,13 +90,14 @@ function parseArgs(argv) {
     args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
   }
 
-  /** @type {{ distDir: string, topN: number, groupDepth: number, groups: boolean, types: boolean }} */
+  /** @type {{ distDir: string, topN: number, groupDepth: number, groups: boolean, types: boolean, jsonOut: string | null }} */
   const out = {
     distDir: path.join(repoRoot, "apps", "desktop", "dist"),
     topN: DEFAULT_TOP_N,
     groupDepth: DEFAULT_GROUP_DEPTH,
     groups: true,
     types: true,
+    jsonOut: null,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -113,6 +115,21 @@ function parseArgs(argv) {
 
     if (arg === "--no-types" || arg === "--no-type") {
       out.types = false;
+      continue;
+    }
+
+    const jsonMatch = arg.match(/^--json-out=(.*)$/);
+    if (jsonMatch) {
+      const value = jsonMatch[1];
+      if (!value) throw new Error("Missing value for --json-out");
+      out.jsonOut = value;
+      continue;
+    }
+    if (arg === "--json-out") {
+      const next = args[i + 1];
+      if (!next) throw new Error("Missing value for --json-out");
+      out.jsonOut = next;
+      i++;
       continue;
     }
 
@@ -177,6 +194,10 @@ function parseArgs(argv) {
     // pass a repo-relative path while running from a subdirectory). Otherwise, stick with CWD
     // resolution so missing-path errors point at what the user actually typed.
     out.distDir = existsSync(fromRepo) && !existsSync(fromCwd) ? fromRepo : fromCwd;
+  }
+
+  if (out.jsonOut && !path.isAbsolute(out.jsonOut)) {
+    out.jsonOut = path.resolve(process.cwd(), out.jsonOut);
   }
 
   return out;
@@ -358,11 +379,10 @@ function renderTopFilesTable(files, totalBytes, topN, singleBudgetMb) {
 
 /**
  * @param {Array<{ relPath: string, sizeBytes: number }>} files
- * @param {number} totalBytes
  * @param {number} groupDepth
- * @returns {string[]}
+ * @returns {Array<{ group: string, files: number, bytes: number }>}
  */
-function renderGroupedTotals(files, totalBytes, groupDepth, limit) {
+function computeGroupTotals(files, groupDepth) {
   /** @type {Map<string, { bytes: number, files: number }>} */
   const groups = new Map();
 
@@ -379,7 +399,20 @@ function renderGroupedTotals(files, totalBytes, groupDepth, limit) {
     }
   }
 
-  const sorted = Array.from(groups.entries()).sort((a, b) => b[1].bytes - a[1].bytes);
+  return Array.from(groups.entries())
+    .map(([group, value]) => ({ group, files: value.files, bytes: value.bytes }))
+    .sort((a, b) => b.bytes - a.bytes);
+}
+
+/**
+ * @param {Array<{ relPath: string, sizeBytes: number }>} files
+ * @param {number} totalBytes
+ * @param {number} groupDepth
+ * @param {number} limit
+ * @returns {string[]}
+ */
+function renderGroupedTotals(files, totalBytes, groupDepth, limit) {
+  const sorted = computeGroupTotals(files, groupDepth);
   const top = sorted.slice(0, limit);
 
   /** @type {string[]} */
@@ -389,16 +422,16 @@ function renderGroupedTotals(files, totalBytes, groupDepth, limit) {
   lines.push("| Group | Files | Size | Share |");
   lines.push("| --- | ---: | ---: | ---: |");
 
-  for (const [key, value] of top) {
-    const share = totalBytes > 0 ? `${((value.bytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
+  for (const row of top) {
+    const share = totalBytes > 0 ? `${((row.bytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
     lines.push(
-      `| \`${key}\` | ${formatInt(value.files)} | ${formatBytesAndMb(value.bytes)} | ${share} |`,
+      `| \`${row.group}\` | ${formatInt(row.files)} | ${formatBytesAndMb(row.bytes)} | ${share} |`,
     );
   }
 
   if (sorted.length > top.length) {
-    const remainingFiles = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.files, 0);
-    const remainingBytes = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.bytes, 0);
+    const remainingFiles = sorted.slice(top.length).reduce((acc, row) => acc + row.files, 0);
+    const remainingBytes = sorted.slice(top.length).reduce((acc, row) => acc + row.bytes, 0);
     const share = totalBytes > 0 ? `${((remainingBytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
     lines.push(
       `| _(other)_ | ${formatInt(remainingFiles)} | ${formatBytesAndMb(remainingBytes)} | ${share} |`,
@@ -411,11 +444,9 @@ function renderGroupedTotals(files, totalBytes, groupDepth, limit) {
 
 /**
  * @param {Array<{ ext: string, sizeBytes: number }>} files
- * @param {number} totalBytes
- * @param {number} limit
- * @returns {string[]}
+ * @returns {Array<{ type: string, files: number, bytes: number }>}
  */
-function renderTypeTotals(files, totalBytes, limit) {
+function computeTypeTotals(files) {
   /** @type {Map<string, { bytes: number, files: number }>} */
   const types = new Map();
   for (const f of files) {
@@ -429,7 +460,19 @@ function renderTypeTotals(files, totalBytes, limit) {
     }
   }
 
-  const sorted = Array.from(types.entries()).sort((a, b) => b[1].bytes - a[1].bytes);
+  return Array.from(types.entries())
+    .map(([type, value]) => ({ type, files: value.files, bytes: value.bytes }))
+    .sort((a, b) => b.bytes - a.bytes);
+}
+
+/**
+ * @param {Array<{ ext: string, sizeBytes: number }>} files
+ * @param {number} totalBytes
+ * @param {number} limit
+ * @returns {string[]}
+ */
+function renderTypeTotals(files, totalBytes, limit) {
+  const sorted = computeTypeTotals(files);
   const top = sorted.slice(0, limit);
 
   /** @type {string[]} */
@@ -439,16 +482,16 @@ function renderTypeTotals(files, totalBytes, limit) {
   lines.push("| Type | Files | Size | Share |");
   lines.push("| :---: | ---: | ---: | ---: |");
 
-  for (const [key, value] of top) {
-    const share = totalBytes > 0 ? `${((value.bytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
+  for (const row of top) {
+    const share = totalBytes > 0 ? `${((row.bytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
     lines.push(
-      `| \`${key}\` | ${formatInt(value.files)} | ${formatBytesAndMb(value.bytes)} | ${share} |`,
+      `| \`${row.type}\` | ${formatInt(row.files)} | ${formatBytesAndMb(row.bytes)} | ${share} |`,
     );
   }
 
   if (sorted.length > top.length) {
-    const remainingFiles = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.files, 0);
-    const remainingBytes = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.bytes, 0);
+    const remainingFiles = sorted.slice(top.length).reduce((acc, row) => acc + row.files, 0);
+    const remainingBytes = sorted.slice(top.length).reduce((acc, row) => acc + row.bytes, 0);
     const share = totalBytes > 0 ? `${((remainingBytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
     lines.push(
       `| _(other)_ | ${formatInt(remainingFiles)} | ${formatBytesAndMb(remainingBytes)} | ${share} |`,
@@ -554,6 +597,9 @@ try {
     const totalBudgetOverByBytes =
       totalBudgetExceeded && totalBudgetBytes !== null ? totalBytes - totalBudgetBytes : 0;
 
+    const groupTotals = args.groups ? computeGroupTotals(files, args.groupDepth) : [];
+    const typeTotals = args.types ? computeTypeTotals(files) : [];
+
     const headerLines = renderHeaderLines(
       args.distDir,
       totalBytes,
@@ -575,6 +621,63 @@ try {
     const markdown = [...headerLines, ...topLines, ...groupLines, ...typeLines].join("\n");
     console.log(markdown);
     await appendStepSummary(markdown);
+
+    if (args.jsonOut) {
+      const distDirRelRepo = args.distDir.startsWith(repoRoot + path.sep)
+        ? toPosixPath(path.relative(repoRoot, args.distDir))
+        : null;
+      const topFiles = files.slice(0, args.topN).map((f) => ({
+        path: f.relPath,
+        size_bytes: f.sizeBytes,
+        size_mb: Number((f.sizeBytes / BYTES_PER_MB).toFixed(3)),
+        ext: f.ext,
+      }));
+      const groupRows = groupTotals.slice(0, DEFAULT_GROUP_LIMIT).map((g) => ({
+        group: g.group,
+        files: g.files,
+        size_bytes: g.bytes,
+        size_mb: Number((g.bytes / BYTES_PER_MB).toFixed(3)),
+      }));
+      const typeRows = typeTotals.slice(0, DEFAULT_TYPE_LIMIT).map((t) => ({
+        type: t.type,
+        files: t.files,
+        size_bytes: t.bytes,
+        size_mb: Number((t.bytes / BYTES_PER_MB).toFixed(3)),
+      }));
+
+      const report = {
+        runner_os: (process.env.RUNNER_OS ?? "").trim() || null,
+        dist_dir_abs: args.distDir,
+        dist_dir_repo: distDirRelRepo,
+        total_files: files.length,
+        total_bytes: totalBytes,
+        total_mb: Number((totalBytes / BYTES_PER_MB).toFixed(3)),
+        top_n: args.topN,
+        top_files: topFiles,
+        group_depth: args.groupDepth,
+        groups: args.groups ? groupRows : null,
+        types: args.types ? typeRows : null,
+        budgets_mb: {
+          total: totalBudgetMb,
+          single_file: singleBudgetMb,
+        },
+        budget_exceeded: {
+          total: totalBudgetExceeded,
+          single_file: singleFileOffenders.length > 0,
+        },
+        offenders: {
+          single_file: singleFileOffenders.map((f) => ({
+            path: f.relPath,
+            size_bytes: f.sizeBytes,
+            size_mb: Number((f.sizeBytes / BYTES_PER_MB).toFixed(3)),
+            ext: f.ext,
+          })),
+        },
+      };
+
+      await mkdir(path.dirname(args.jsonOut), { recursive: true });
+      await writeFile(args.jsonOut, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    }
 
     if (totalBudgetExceeded || singleFileOffenders.length > 0) {
       printBudgetFailures(files, totalBytes, totalBudgetMb, singleBudgetMb);

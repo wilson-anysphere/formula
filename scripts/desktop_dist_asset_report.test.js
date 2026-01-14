@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -62,6 +62,30 @@ test("desktop_dist_asset_report supports --no-types", () => {
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /## Desktop dist asset report/);
   assert.doesNotMatch(proc.stdout, /### File type totals/);
+});
+
+test("desktop_dist_asset_report writes --json-out when requested", () => {
+  const distDir = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-json-"));
+  createSizedFile(path.join(distDir, "assets", "a.bin"), 123);
+  const jsonPath = path.join(distDir, "report.json");
+
+  const proc = spawnSync(
+    process.execPath,
+    [scriptPath, "--dist-dir", distDir, "--top", "1", "--no-groups", "--no-types", "--json-out", jsonPath],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(proc.status, 0, proc.stderr);
+
+  const raw = readFileSync(jsonPath, "utf8");
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.total_files, 1);
+  assert.equal(parsed.total_bytes, 123);
+  assert.equal(parsed.budgets_mb.total, null);
+  assert.equal(parsed.groups, null);
+  assert.equal(parsed.types, null);
+  assert.equal(parsed.top_files.length, 1);
+  assert.equal(parsed.top_files[0].path, "assets/a.bin");
 });
 
 test("desktop_dist_asset_report rejects non-numeric budget env vars", () => {

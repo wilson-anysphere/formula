@@ -92,6 +92,12 @@ Optional budget enforcement (MB = 1,000,000 bytes):
 - `FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB` – fail if total `dist/` size exceeds this value
 - `FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB` – fail if any single file exceeds this value
 
+Optional: write a machine-readable JSON report (still prints Markdown to stdout):
+
+```bash
+node scripts/desktop_dist_asset_report.mjs --json-out desktop-dist-assets.json
+```
+
 ## Rust binary size analysis (desktop shell)
 
 To inspect which Rust **crates/symbols** dominate the `formula-desktop` release binary (useful for bundle-size
