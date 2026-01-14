@@ -561,6 +561,17 @@ fn hash_bytes(hash_alg: HashAlgorithm, bytes: &[u8]) -> Vec<u8> {
     }
 }
 
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PasswordKeyIvDerivation {
     /// Use the password `saltValue` (truncated to `blockSize`) as the AES-CBC IV.
@@ -819,7 +830,7 @@ pub fn decrypt_agile_keys_with_options(
                 reason: "hash output shorter than hashSize".to_string(),
             }
         })?;
-        if computed != verifier_hash_value.as_slice() {
+        if !ct_eq(computed, verifier_hash_value.as_slice()) {
             return Err(OffCryptoError::WrongPassword);
         }
 
