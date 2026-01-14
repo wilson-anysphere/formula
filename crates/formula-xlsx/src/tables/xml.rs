@@ -1,10 +1,10 @@
-use formula_model::table::{
-    AutoFilter, FilterColumn, SortCondition, SortState, Table, TableColumn, TableStyleInfo,
-};
-use formula_model::{normalize_formula_text, FilterCriterion, FilterJoin, FilterValue};
-use formula_model::Range;
-use quick_xml::{de::from_str, se::to_string};
-use serde::{Deserialize, Serialize};
+use formula_model::table::{AutoFilter, Table, TableColumn, TableStyleInfo};
+use formula_model::{normalize_formula_text, Range};
+use quick_xml::de::from_str;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::Writer;
+use serde::Deserialize;
+use std::io::{Cursor, Write};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename = "table")]
@@ -21,8 +21,6 @@ struct TableXml {
     header_row_count: Option<u32>,
     #[serde(rename = "@totalsRowCount")]
     totals_row_count: Option<u32>,
-    #[serde(rename = "autoFilter")]
-    auto_filter: Option<AutoFilterXml>,
     #[serde(rename = "tableColumns")]
     table_columns: TableColumnsXml,
     #[serde(rename = "tableStyleInfo")]
@@ -63,52 +61,6 @@ struct TableStyleInfoXml {
     show_column_stripes: Option<u8>,
 }
 
-#[derive(Debug, Deserialize)]
-struct AutoFilterXml {
-    #[serde(rename = "@ref")]
-    reference: String,
-    #[serde(rename = "filterColumn", default)]
-    filter_columns: Vec<FilterColumnXml>,
-    #[serde(rename = "sortState")]
-    sort_state: Option<SortStateXml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FilterColumnXml {
-    #[serde(rename = "@colId")]
-    col_id: u32,
-    #[serde(rename = "filters")]
-    filters: Option<FiltersXml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FiltersXml {
-    #[serde(rename = "@blank")]
-    blank: Option<u8>,
-    #[serde(rename = "filter", default)]
-    filters: Vec<FilterXml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FilterXml {
-    #[serde(rename = "@val")]
-    val: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SortStateXml {
-    #[serde(rename = "sortCondition", default)]
-    sort_conditions: Vec<SortConditionXml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SortConditionXml {
-    #[serde(rename = "@ref")]
-    reference: String,
-    #[serde(rename = "@descending")]
-    descending: Option<u8>,
-}
-
 pub fn parse_table(xml: &str) -> Result<Table, String> {
     let table: TableXml = from_str(xml).map_err(|e| e.to_string())?;
 
@@ -121,8 +73,16 @@ pub fn parse_table(xml: &str) -> Result<Table, String> {
         .map(|c| TableColumn {
             id: c.id,
             name: c.name,
-            formula: c.calculated_column_formula,
-            totals_formula: c.totals_row_formula,
+            formula: c
+                .calculated_column_formula
+                .as_deref()
+                .and_then(normalize_formula_text)
+                .map(|f| crate::formula_text::strip_xlfn_prefixes(&f)),
+            totals_formula: c
+                .totals_row_formula
+                .as_deref()
+                .and_then(normalize_formula_text)
+                .map(|f| crate::formula_text::strip_xlfn_prefixes(&f)),
         })
         .collect();
 
@@ -134,62 +94,8 @@ pub fn parse_table(xml: &str) -> Result<Table, String> {
         show_column_stripes: s.show_column_stripes.unwrap_or(0) != 0,
     });
 
-    let auto_filter = table.auto_filter.map(|af| {
-        let range = Range::from_a1(&af.reference).map_err(|e| e.to_string())?;
-        let filter_columns = af
-            .filter_columns
-            .into_iter()
-            .map(|fc| {
-                let (values, include_blank) = match fc.filters {
-                    Some(filters) => (
-                        filters.filters.into_iter().map(|x| x.val).collect::<Vec<_>>(),
-                        filters.blank.unwrap_or(0) != 0,
-                    ),
-                    None => (Vec::new(), false),
-                };
- 
-                let mut criteria = Vec::new();
-                if include_blank {
-                    criteria.push(FilterCriterion::Blanks);
-                }
-                criteria.extend(
-                    values
-                        .iter()
-                        .cloned()
-                        .map(|v| FilterCriterion::Equals(FilterValue::Text(v))),
-                );
- 
-                FilterColumn {
-                    col_id: fc.col_id,
-                    join: FilterJoin::Any,
-                    criteria,
-                    values,
-                    raw_xml: Vec::new(),
-                }
-            })
-            .collect();
-        let sort_state = af.sort_state.map(|s| SortState {
-            conditions: s
-                .sort_conditions
-                .into_iter()
-                .filter_map(|c| {
-                    let range = Range::from_a1(&c.reference).ok()?;
-                    Some(SortCondition {
-                        range,
-                        descending: c.descending.unwrap_or(0) != 0,
-                    })
-                })
-                .collect(),
-        });
-        Ok::<_, String>(AutoFilter {
-            range,
-            filter_columns,
-            sort_state,
-            raw_xml: Vec::new(),
-        })
-    });
-
-    let auto_filter = auto_filter.transpose()?;
+    let auto_filter: Option<AutoFilter> = crate::autofilter::parse_worksheet_autofilter(xml)
+        .map_err(|e| e.to_string())?;
 
     Ok(Table {
         id: table.id,
@@ -206,210 +112,122 @@ pub fn parse_table(xml: &str) -> Result<Table, String> {
     })
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename = "table")]
-struct TableXmlOut<'a> {
-    #[serde(rename = "@xmlns")]
-    xmlns: &'a str,
-    #[serde(rename = "@id")]
-    id: u32,
-    #[serde(rename = "@name")]
-    name: &'a str,
-    #[serde(rename = "@displayName")]
-    display_name: &'a str,
-    #[serde(rename = "@ref")]
-    reference: String,
-    #[serde(rename = "@headerRowCount", skip_serializing_if = "Option::is_none")]
-    header_row_count: Option<u32>,
-    #[serde(rename = "@totalsRowCount", skip_serializing_if = "Option::is_none")]
-    totals_row_count: Option<u32>,
-    #[serde(rename = "autoFilter", skip_serializing_if = "Option::is_none")]
-    auto_filter: Option<AutoFilterXmlOut>,
-    #[serde(rename = "tableColumns")]
-    table_columns: TableColumnsXmlOut<'a>,
-    #[serde(rename = "tableStyleInfo", skip_serializing_if = "Option::is_none")]
-    style_info: Option<TableStyleInfoXmlOut<'a>>,
-}
-
-#[derive(Debug, Serialize)]
-struct TableColumnsXmlOut<'a> {
-    #[serde(rename = "@count")]
-    count: u32,
-    #[serde(rename = "tableColumn")]
-    columns: Vec<TableColumnXmlOut<'a>>,
-}
-
-#[derive(Debug, Serialize)]
-struct TableColumnXmlOut<'a> {
-    #[serde(rename = "@id")]
-    id: u32,
-    #[serde(rename = "@name")]
-    name: &'a str,
-    #[serde(rename = "calculatedColumnFormula", skip_serializing_if = "Option::is_none")]
-    calculated_column_formula: Option<String>,
-    #[serde(rename = "totalsRowFormula", skip_serializing_if = "Option::is_none")]
-    totals_row_formula: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct TableStyleInfoXmlOut<'a> {
-    #[serde(rename = "@name")]
-    name: &'a str,
-    #[serde(rename = "@showFirstColumn")]
-    show_first_column: u8,
-    #[serde(rename = "@showLastColumn")]
-    show_last_column: u8,
-    #[serde(rename = "@showRowStripes")]
-    show_row_stripes: u8,
-    #[serde(rename = "@showColumnStripes")]
-    show_column_stripes: u8,
-}
-
-#[derive(Debug, Serialize)]
-struct AutoFilterXmlOut {
-    #[serde(rename = "@ref")]
-    reference: String,
-    #[serde(rename = "filterColumn", skip_serializing_if = "Vec::is_empty", default)]
-    filter_columns: Vec<FilterColumnXmlOut>,
-    #[serde(rename = "sortState", skip_serializing_if = "Option::is_none")]
-    sort_state: Option<SortStateXmlOut>,
-}
-
-#[derive(Debug, Serialize)]
-struct FilterColumnXmlOut {
-    #[serde(rename = "@colId")]
-    col_id: u32,
-    #[serde(rename = "filters", skip_serializing_if = "Option::is_none")]
-    filters: Option<FiltersXmlOut>,
-}
-
-#[derive(Debug, Serialize)]
-struct FiltersXmlOut {
-    #[serde(rename = "@blank", skip_serializing_if = "Option::is_none")]
-    blank: Option<u8>,
-    #[serde(rename = "filter", skip_serializing_if = "Vec::is_empty", default)]
-    filters: Vec<FilterXmlOut>,
-}
-
-#[derive(Debug, Serialize)]
-struct FilterXmlOut {
-    #[serde(rename = "@val")]
-    val: String,
-}
-
-#[derive(Debug, Serialize)]
-struct SortStateXmlOut {
-    #[serde(rename = "sortCondition", skip_serializing_if = "Vec::is_empty", default)]
-    sort_conditions: Vec<SortConditionXmlOut>,
-}
-
-#[derive(Debug, Serialize)]
-struct SortConditionXmlOut {
-    #[serde(rename = "@ref")]
-    reference: String,
-    #[serde(rename = "@descending", skip_serializing_if = "Option::is_none")]
-    descending: Option<u8>,
-}
-
 pub fn write_table_xml(table: &Table) -> Result<String, String> {
-    let xml = TableXmlOut {
-        xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-        id: table.id,
-        name: &table.name,
-        display_name: &table.display_name,
-        reference: table.range.to_string(),
-        header_row_count: Some(table.header_row_count),
-        totals_row_count: Some(table.totals_row_count),
-        auto_filter: table.auto_filter.as_ref().map(|af| AutoFilterXmlOut {
-            reference: af.range.to_string(),
-            filter_columns: af
-                .filter_columns
-                .iter()
-                .map(|fc| FilterColumnXmlOut {
-                    col_id: fc.col_id,
-                    filters: {
-                        let include_blank = fc
-                            .criteria
-                            .iter()
-                            .any(|c| matches!(c, FilterCriterion::Blanks));
+    fn write_text_element<W: Write>(
+        writer: &mut Writer<W>,
+        name: &str,
+        text: &str,
+    ) -> Result<(), quick_xml::Error> {
+        writer.write_event(Event::Start(BytesStart::new(name)))?;
+        writer.write_event(Event::Text(BytesText::new(text)))?;
+        writer.write_event(Event::End(BytesEnd::new(name)))?;
+        Ok(())
+    }
 
-                        let values: Vec<String> = if !fc.values.is_empty() {
-                            fc.values.clone()
-                        } else {
-                            fc.criteria
-                                .iter()
-                                .filter_map(|c| match c {
-                                    FilterCriterion::Equals(FilterValue::Text(s)) => Some(s.clone()),
-                                    FilterCriterion::Equals(FilterValue::Number(n)) => {
-                                        Some(n.to_string())
-                                    }
-                                    FilterCriterion::Equals(FilterValue::Bool(b)) => {
-                                        Some(b.to_string())
-                                    }
-                                    FilterCriterion::Equals(FilterValue::DateTime(dt)) => {
-                                        Some(dt.to_string())
-                                    }
-                                    _ => None,
-                                })
-                                .collect()
-                        };
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
 
-                        if values.is_empty() && !include_blank {
-                            None
-                        } else {
-                            Some(FiltersXmlOut {
-                                blank: include_blank.then_some(1),
-                                filters: values
-                                    .iter()
-                                    .map(|v| FilterXmlOut { val: v.clone() })
-                                    .collect(),
-                            })
-                        }
-                    },
-                })
-                .collect(),
-            sort_state: af.sort_state.as_ref().map(|s| SortStateXmlOut {
-                sort_conditions: s
-                    .conditions
-                    .iter()
-                    .map(|c| SortConditionXmlOut {
-                        reference: c.range.to_string(),
-                        descending: if c.descending { Some(1) } else { None },
-                    })
-                    .collect(),
-            }),
-        }),
-        table_columns: TableColumnsXmlOut {
-            count: table.columns.len() as u32,
-            columns: table
-                .columns
-                .iter()
-                .map(|c| TableColumnXmlOut {
-                    id: c.id,
-                    name: &c.name,
-                    calculated_column_formula: c
-                        .formula
-                        .as_deref()
-                        .and_then(normalize_formula_text)
-                        .map(|formula| crate::formula_text::add_xlfn_prefixes(&formula)),
-                    totals_row_formula: c
-                        .totals_formula
-                        .as_deref()
-                        .and_then(normalize_formula_text)
-                        .map(|formula| crate::formula_text::add_xlfn_prefixes(&formula)),
-                })
-                .collect(),
-        },
-        style_info: table.style.as_ref().map(|s| TableStyleInfoXmlOut {
-            name: &s.name,
-            show_first_column: s.show_first_column as u8,
-            show_last_column: s.show_last_column as u8,
-            show_row_stripes: s.show_row_stripes as u8,
-            show_column_stripes: s.show_column_stripes as u8,
-        }),
-    };
+    let id = table.id.to_string();
+    let reference = table.range.to_string();
+    let header_row_count = table.header_row_count.to_string();
+    let totals_row_count = table.totals_row_count.to_string();
 
-    to_string(&xml).map_err(|e| e.to_string())
+    let mut table_tag = BytesStart::new("table");
+    table_tag.push_attribute(("xmlns", crate::xml::SPREADSHEETML_NS));
+    table_tag.push_attribute(("id", id.as_str()));
+    table_tag.push_attribute(("name", table.name.as_str()));
+    table_tag.push_attribute(("displayName", table.display_name.as_str()));
+    table_tag.push_attribute(("ref", reference.as_str()));
+    table_tag.push_attribute(("headerRowCount", header_row_count.as_str()));
+    table_tag.push_attribute(("totalsRowCount", totals_row_count.as_str()));
+    writer
+        .write_event(Event::Start(table_tag))
+        .map_err(|e| e.to_string())?;
+
+    if let Some(filter) = &table.auto_filter {
+        let autofilter_xml =
+            crate::autofilter::write_autofilter(filter).map_err(|e| e.to_string())?;
+        writer
+            .get_mut()
+            .write_all(autofilter_xml.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+
+    let col_count = (table.columns.len() as u32).to_string();
+    let mut table_columns = BytesStart::new("tableColumns");
+    table_columns.push_attribute(("count", col_count.as_str()));
+    writer
+        .write_event(Event::Start(table_columns))
+        .map_err(|e| e.to_string())?;
+
+    for col in &table.columns {
+        let col_id = col.id.to_string();
+        let mut table_column = BytesStart::new("tableColumn");
+        table_column.push_attribute(("id", col_id.as_str()));
+        table_column.push_attribute(("name", col.name.as_str()));
+
+        let calculated_column_formula = col
+            .formula
+            .as_deref()
+            .and_then(normalize_formula_text)
+            .map(|formula| crate::formula_text::add_xlfn_prefixes(&formula));
+        let totals_row_formula = col
+            .totals_formula
+            .as_deref()
+            .and_then(normalize_formula_text)
+            .map(|formula| crate::formula_text::add_xlfn_prefixes(&formula));
+
+        if calculated_column_formula.is_none() && totals_row_formula.is_none() {
+            writer
+                .write_event(Event::Empty(table_column))
+                .map_err(|e| e.to_string())?;
+            continue;
+        }
+
+        writer
+            .write_event(Event::Start(table_column))
+            .map_err(|e| e.to_string())?;
+
+        if let Some(formula) = calculated_column_formula {
+            write_text_element(&mut writer, "calculatedColumnFormula", &formula)
+                .map_err(|e| e.to_string())?;
+        }
+        if let Some(formula) = totals_row_formula {
+            write_text_element(&mut writer, "totalsRowFormula", &formula).map_err(|e| e.to_string())?;
+        }
+
+        writer
+            .write_event(Event::End(BytesEnd::new("tableColumn")))
+            .map_err(|e| e.to_string())?;
+    }
+
+    writer
+        .write_event(Event::End(BytesEnd::new("tableColumns")))
+        .map_err(|e| e.to_string())?;
+
+    if let Some(style) = &table.style {
+        let show_first_column = (style.show_first_column as u8).to_string();
+        let show_last_column = (style.show_last_column as u8).to_string();
+        let show_row_stripes = (style.show_row_stripes as u8).to_string();
+        let show_column_stripes = (style.show_column_stripes as u8).to_string();
+
+        let mut style_info = BytesStart::new("tableStyleInfo");
+        style_info.push_attribute(("name", style.name.as_str()));
+        style_info.push_attribute(("showFirstColumn", show_first_column.as_str()));
+        style_info.push_attribute(("showLastColumn", show_last_column.as_str()));
+        style_info.push_attribute(("showRowStripes", show_row_stripes.as_str()));
+        style_info.push_attribute(("showColumnStripes", show_column_stripes.as_str()));
+
+        writer
+            .write_event(Event::Empty(style_info))
+            .map_err(|e| e.to_string())?;
+    }
+
+    writer
+        .write_event(Event::End(BytesEnd::new("table")))
+        .map_err(|e| e.to_string())?;
+
+    let bytes = writer.into_inner().into_inner();
+    Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
 #[cfg(test)]
@@ -417,6 +235,8 @@ mod tests {
     use super::*;
     use formula_model::table::TableArea;
     use formula_model::table::{Table, TableColumn};
+    use formula_model::autofilter::{DateComparison, NumberComparison};
+    use formula_model::{FilterCriterion, FilterJoin};
 
     #[test]
     fn round_trips_table_xml() {
@@ -431,6 +251,72 @@ mod tests {
         let out = write_table_xml(&table).unwrap();
         let reparsed = parse_table(&out).unwrap();
         assert_eq!(reparsed, table);
+    }
+
+    #[test]
+    fn round_trips_table_autofilter_advanced_and_preserves_raw_xml() {
+        let xml = include_str!("../../tests/fixtures/table_autofilter_advanced.xml");
+        let table = parse_table(xml).unwrap();
+        let filter = table.auto_filter.as_ref().expect("expected autoFilter");
+        assert_eq!(filter.filter_columns.len(), 3);
+
+        let col0 = &filter.filter_columns[0];
+        assert_eq!(col0.col_id, 0);
+        assert_eq!(col0.join, FilterJoin::All);
+        assert_eq!(
+            col0.criteria,
+            vec![FilterCriterion::Number(NumberComparison::GreaterThan(10.0))]
+        );
+
+        let col1 = &filter.filter_columns[1];
+        assert_eq!(col1.col_id, 1);
+        assert_eq!(
+            col1.criteria,
+            vec![FilterCriterion::Date(DateComparison::Today)]
+        );
+
+        let col2 = &filter.filter_columns[2];
+        assert_eq!(col2.col_id, 2);
+        assert!(
+            col2.raw_xml.iter().any(|x| x.contains("<top10")),
+            "expected top10 to be captured into raw_xml, got: {:?}",
+            col2.raw_xml
+        );
+
+        assert!(
+            filter.raw_xml.iter().any(|x| x.contains("<extLst")),
+            "expected extLst to be captured into autoFilter raw_xml, got: {:?}",
+            filter.raw_xml
+        );
+        let sort_state = filter.sort_state.as_ref().expect("expected sortState");
+        assert_eq!(sort_state.conditions.len(), 1);
+        assert_eq!(sort_state.conditions[0].range.to_string(), "A2:A10");
+        assert!(sort_state.conditions[0].descending);
+
+        let written = write_table_xml(&table).unwrap();
+        assert!(written.contains("<customFilters"), "missing customFilters: {written}");
+        assert!(
+            written.contains(r#"operator="greaterThan""#),
+            "missing customFilter operator: {written}"
+        );
+        assert!(
+            written.contains("<dynamicFilter") && written.contains(r#"type="today""#),
+            "missing dynamicFilter today: {written}"
+        );
+        assert!(written.contains("<top10"), "missing top10 raw_xml: {written}");
+        assert!(written.contains("<extLst"), "missing extLst raw_xml: {written}");
+
+        let reparsed = parse_table(&written).unwrap();
+        assert_eq!(reparsed, table);
+    }
+
+    #[test]
+    fn parse_table_strips_leading_equals_and_xlfn_prefixes_in_column_formulas() {
+        let xml = r#"<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:A2" headerRowCount="1" totalsRowCount="0"><tableColumns count="1"><tableColumn id="1" name="Seq"><calculatedColumnFormula>=_xlfn.SEQUENCE(2)</calculatedColumnFormula><totalsRowFormula>=_xlfn.ISFORMULA(A1)</totalsRowFormula></tableColumn></tableColumns></table>"#;
+        let table = parse_table(xml).unwrap();
+        assert_eq!(table.columns.len(), 1);
+        assert_eq!(table.columns[0].formula.as_deref(), Some("SEQUENCE(2)"));
+        assert_eq!(table.columns[0].totals_formula.as_deref(), Some("ISFORMULA(A1)"));
     }
 
     #[test]

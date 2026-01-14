@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="TableAdvanced" displayName="TableAdvanced" ref="A1:C10" headerRowCount="1" totalsRowCount="0">
+  <autoFilter ref="A1:C10">
+    <filterColumn colId="0">
+      <customFilters and="1">
+        <customFilter operator="greaterThan" val="10"/>
+      </customFilters>
+    </filterColumn>
+    <filterColumn colId="1">
+      <dynamicFilter type="today"/>
+    </filterColumn>
+    <filterColumn colId="2">
+      <top10 val="5" percent="1"/>
+    </filterColumn>
+    <sortState>
+      <sortCondition ref="A2:A10" descending="1"/>
+    </sortState>
+    <extLst>
+      <ext uri="{00000000-0000-0000-0000-000000000000}"/>
+    </extLst>
+  </autoFilter>
+  <tableColumns count="3">
+    <tableColumn id="1" name="A"/>
+    <tableColumn id="2" name="B"/>
+    <tableColumn id="3" name="C"/>
+  </tableColumns>
+</table>
