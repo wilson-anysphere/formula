@@ -108,3 +108,37 @@ fn concatenatex_order_by_text_can_mix_numeric_and_text_keys() {
 
     assert_eq!(value, Value::from("2,A"));
 }
+
+#[test]
+fn concatenatex_supports_table_constructor_value_column() {
+    // DAX table constructors expose a single implicit column named [Value]. Ensure CONCATENATEX
+    // can iterate those virtual rows and resolve [Value] in the row context.
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "CONCATENATEX({\"A\",\"B\"}, [Value], \",\")",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, Value::from("A,B"));
+}
+
+#[test]
+fn concatenatex_table_constructor_can_order_by_value() {
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "CONCATENATEX({\"b\",\"a\"}, [Value], \",\", [Value], ASC)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, Value::from("a,b"));
+}

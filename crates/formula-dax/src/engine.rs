@@ -451,6 +451,28 @@ impl DaxEngine {
                 // are ambiguous (measure vs. column), so we parse them as `Expr::Measure`
                 // and resolve as a column when no measure is defined.
                 let Some(current_table) = row_ctx.current_table() else {
+                    // Virtual row contexts (e.g. from `SUMMARIZE` or table constructors) do not
+                    // have a single "current table". In those cases, attempt to resolve bracketed
+                    // identifiers from a unique virtual binding by column name.
+                    for frame in row_ctx.stack.iter().rev() {
+                        let RowContextFrame::Virtual { bindings } = frame else {
+                            continue;
+                        };
+                        let mut matched: Option<&Value> = None;
+                        for ((_, column), value) in bindings {
+                            if column == &normalized {
+                                if matched.is_some() {
+                                    return Err(DaxError::Eval(format!(
+                                        "ambiguous column reference [{normalized}] in virtual row context"
+                                    )));
+                                }
+                                matched = Some(value);
+                            }
+                        }
+                        if let Some(value) = matched {
+                            return Ok(value.clone());
+                        }
+                    }
                     return Err(DaxError::UnknownMeasure(name.clone()));
                 };
                 let (row, visible_cols) = row_ctx
@@ -1241,19 +1263,6 @@ impl DaxEngine {
                     ));
                 }
                 let needle = self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
-
-                // Table constructors are not (yet) represented as a `TableResult`, but we can
-                // evaluate them directly as a one-column list of values.
-                if matches!(table_expr, Expr::TableLiteral { .. }) {
-                    let values =
-                        self.eval_one_column_table_literal(model, table_expr, filter, row_ctx, env)?;
-                    for value in values {
-                        if compare_values(&BinaryOp::Equals, &value, &needle)? {
-                            return Ok(Value::Boolean(true));
-                        }
-                    }
-                    return Ok(Value::Boolean(false));
-                }
 
                 let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                 match table_result {
@@ -2865,6 +2874,18 @@ impl DaxEngine {
                     visible_cols: None,
                 }),
             },
+            Expr::TableLiteral { .. } => {
+                let values = self.eval_one_column_table_literal(model, expr, filter, row_ctx, env)?;
+                let mut rows = Vec::with_capacity(values.len());
+                for value in values {
+                    rows.push(vec![value]);
+                }
+                Ok(TableResult::Virtual {
+                    // DAX table constructors expose a single implicit column named `Value`.
+                    columns: vec![("__TABLE_LITERAL__".to_string(), "Value".to_string())],
+                    rows,
+                })
+            }
             Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
                 "FILTER" => {
                     let [table_expr, predicate] = args.as_slice() else {
