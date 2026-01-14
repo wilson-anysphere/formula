@@ -990,6 +990,24 @@ Per-sheet view state (frozen panes + row/col size overrides, plus additional sha
 
 - `doc.getArray("sheets").get(i).get("view")`
 
+### `sheets[].view` encoding: plain objects vs `Y.Map`
+
+For compatibility with BranchService snapshots and historical clients, `sheets[].view` may be stored as either:
+
+- a **plain JSON object** (most common in snapshots / branching/versioning adapters), or
+- a **`Y.Map`** (and nested keys like `view.colWidths` / `view.rowHeights` may also be `Y.Map`s).
+
+In mixed-module environments (ESM + CJS), a doc may also contain **duck-typed / “foreign” `Y.Map`** instances
+whose constructors do not match the app’s `yjs` import (e.g. after applying provider updates created by a
+different `yjs` module instance).
+
+Implications:
+
+- Do not assume `sheet.get("view")` is a plain object; prefer `@formula/collab-yjs-utils` (`getYMap`, `yjsValueToJson`)
+  or the binder/session helpers that already handle cross-instance types.
+- When `view` is stored as a `Y.Map`, desktop binders update it **in-place** to avoid rewriting large unknown keys
+  (e.g. `view.drawings`) on small changes like freeze panes or axis resizing.
+
 The `view` object is BranchService-compatible (some snapshots may include
 additional keys like layered formatting defaults), but the desktop
 binder/`DocumentController` currently consume the subset of fields related to
