@@ -1,4 +1,5 @@
 use std::io::{Cursor, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use zip::write::FileOptions;
@@ -15,6 +16,12 @@ fn zip_bytes(parts: &[(&str, &[u8])]) -> Vec<u8> {
     }
 
     writer.finish().unwrap().into_inner()
+}
+
+fn encrypted_fixture_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/encrypted/ooxml")
+        .join(name)
 }
 
 #[test]
@@ -89,4 +96,36 @@ fn cli_json_output_is_parseable_and_contains_expected_fields() {
     assert_eq!(diff["path"], "/@attr");
     assert_eq!(diff["expected"], "1");
     assert_eq!(diff["actual"], "2");
+}
+
+#[test]
+fn cli_json_output_succeeds_for_encrypted_workbooks() {
+    let plain = encrypted_fixture_path("plaintext.xlsx");
+    let encrypted = encrypted_fixture_path("agile.xlsx");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&plain)
+        .arg(&encrypted)
+        .arg("--format")
+        .arg("json")
+        .arg("--modified-password")
+        .arg("password")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["original"].as_str().unwrap(), plain.to_string_lossy());
+    assert_eq!(json["modified"].as_str().unwrap(), encrypted.to_string_lossy());
+    assert_eq!(json["counts"]["critical"].as_u64().unwrap(), 0);
+    assert_eq!(json["counts"]["warning"].as_u64().unwrap(), 0);
+    assert_eq!(json["counts"]["info"].as_u64().unwrap(), 0);
+    assert_eq!(json["diffs"].as_array().unwrap().len(), 0);
 }
