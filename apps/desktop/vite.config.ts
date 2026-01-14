@@ -266,10 +266,9 @@ export default defineConfig({
       "src/scripting/**/*.test.ts",
       "src/dlp/**/*.test.ts",
       "src/layout/__tests__/**/*.test.ts",
-      "src/ai/tools/**/*.test.ts",
-      "src/ai/dlp/__tests__/**/*.test.ts",
+      // AI tests are `.test.ts` (not `*.vitest.ts`) across several subdirectories.
+      "src/ai/**/*.test.ts",
       "src/editor/cellEditorOverlay.f4.test.ts",
-      "src/ai/inline-edit/__tests__/**/*.test.ts",
       // Drawing overlay interaction unit tests live under `src/drawings/__tests__` but use the
       // `.test.ts` suffix for historical reasons.
       //
