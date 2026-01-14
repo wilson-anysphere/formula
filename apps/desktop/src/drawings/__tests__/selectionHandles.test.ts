@@ -122,6 +122,18 @@ describe("drawings selection handles", () => {
     expect(cursorForResizeHandleWithTransform("sw", t90)).toBe("nwse-resize");
   });
 
+  it("cursorForResizeHandleWithTransform snaps to the nearest 45° cursor direction", () => {
+    const t45: DrawingTransform = { rotationDeg: 45, flipH: false, flipV: false };
+
+    // Edge handles can snap to diagonals.
+    expect(cursorForResizeHandleWithTransform("n", t45)).toBe("nesw-resize");
+    expect(cursorForResizeHandleWithTransform("e", t45)).toBe("nwse-resize");
+
+    // Corner handles can snap to horizontal/vertical.
+    expect(cursorForResizeHandleWithTransform("nw", t45)).toBe("ns-resize");
+    expect(cursorForResizeHandleWithTransform("ne", t45)).toBe("ew-resize");
+  });
+
   it("cursorForResizeHandleWithTransform is resilient to flips", () => {
     const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
     const cursors = new Set(["ns-resize", "ew-resize", "nwse-resize", "nesw-resize"]);
