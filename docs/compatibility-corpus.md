@@ -315,9 +315,11 @@ The dashboard is privacy-safe (no raw XML/value diffs) and includes:
 - top diff **parts** contributing to CRITICAL diffs and to diffs overall
 - top diff **part groups** (rels/content types/styles/worksheets/etc.) contributing to CRITICAL diffs and to diffs overall
 - a **Timings** section (per-step `duration_ms` stats like `p50`/`p90`)
+- (when `--recalc` is enabled) aggregate **cell-level calculation fidelity** (`mismatched_cells` / `formula_cells`)
 
 The machine-readable `summary.json` includes these breakdowns as `top_diff_parts_*` and
 `top_diff_part_groups_*`, and timings under `timings`, for metrics/dashboarding and CI gates.
+Cell-level calc fidelity (when available) is stored under `calculate_cells` as `{formula_cells, mismatched_cells, fidelity}`.
 
 ### Append a trend time series entry (machine-readable)
 

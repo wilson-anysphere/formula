@@ -22,6 +22,8 @@ The dashboard emits both human- and machine-readable outputs:
 
 - `summary.md` (includes a **Timings** section with per-step `duration_ms` stats like p50/p90)
 - `summary.json` (includes the same data under `timings`)
+- when `--recalc` is enabled, `summary.json` also includes aggregate cell-level calc fidelity under
+  `calculate_cells` (mismatches/formula cells)
 
 For round-trip failures (`failure_category=round_trip_diff`), triage reports also include a more
 actionable `round_trip_failure_kind` (based on diff part groups like rels/content-types/styles/worksheets,
