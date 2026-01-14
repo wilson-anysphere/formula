@@ -2,17 +2,21 @@
 set -euo pipefail
 
 # Guardrail: avoid using GitHub Actions' moving `*-latest` hosted runner labels
-# in the Desktop Release workflow.
+# in workflow configuration (`runs-on`, matrices, etc).
 #
 # Why:
 # `macos-latest`, `windows-latest`, and `ubuntu-latest` aliases periodically move
 # to newer OS images. That can introduce unexpected build breakages for tagged
 # releases and make it harder to reproduce historical artifacts.
 #
+# Usage:
+#   bash scripts/ci/check-gha-runner-pins.sh [workflow.yml ...]
+#   bash scripts/ci/check-gha-runner-pins.sh .github/workflows
+#
 # Update guidance:
 # When bumping runner pins (e.g., macos-14 -> macos-15), validate the release
-# workflow on the new images first, then update the pinned versions + this guard
-# if needed.
+# workflow (and any other affected workflows) on the new images first, then
+# update the pinned versions.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
