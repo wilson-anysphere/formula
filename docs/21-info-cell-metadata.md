@@ -158,6 +158,8 @@ This is computed from the cell’s **effective style**:
 - Uses the merged style’s `protection.locked` field.
 - Default behavior matches Excel: if protection is unspecified, treat the cell as **locked**.
 - The result reflects formatting only and does **not** depend on whether sheet protection is enabled.
+- If the reference points outside the sheet’s configured dimensions (see `Engine::set_sheet_dimensions`),
+  the engine returns `#REF!` (mirrors `get_cell_value` bounds behavior).
 
 #### `CELL("prefix")`
 
@@ -174,6 +176,7 @@ Mapping (Excel-compatible):
 | general/other/unspecified | `""` |
 
 This uses the cell’s **effective alignment** (layered style merge), not just a per-cell format.
+- If the reference points outside the sheet’s configured dimensions, the engine returns `#REF!`.
 
 #### `CELL("width")`
 
@@ -190,10 +193,12 @@ Current behavior (Excel encoding):
   - `floor(widthChars) + 0.1` when the column has an explicit per-column width override
 
 `widthChars` is stored in Excel column-width units (OOXML `<col width="…">` semantics). When unset, the engine falls back to the Excel standard `8.43`.
+- If the reference points outside the sheet’s configured dimensions, the engine returns `#REF!`.
 
 #### `CELL("format")` / `CELL("color")` / `CELL("parentheses")`
 
 These keys are computed from the cell’s **effective number format string**, not from the cell’s value.
+- If the reference points outside the sheet’s configured dimensions, the engine returns `#REF!`.
 
 - `CELL("format")` returns an Excel format code string (e.g. `"G"`, `"F2"`, `"N0"`, `"C2"`).
 - `CELL("color")` returns `1` if the **negative section** of the number format specifies a color (e.g. a second section with a color tag), otherwise `0`.
