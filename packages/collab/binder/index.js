@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { getYMap, getYText, yjsValueToJson } from "@formula/collab-yjs-utils";
+import { getYArray, getYMap, getYText, yjsValueToJson } from "@formula/collab-yjs-utils";
 
 import { makeCellKey, normalizeCellKey, parseCellKey } from "../session/src/cell-key.js";
 import { getWorkbookRoots } from "../workbook/src/index.ts";
@@ -34,16 +34,29 @@ function isRecord(value) {
  * @returns {any}
  */
 function sanitizeDrawingsForPreservation(raw) {
-  if (!Array.isArray(raw)) return raw;
+  const yArr = getYArray(raw);
+  const isArr = Array.isArray(raw);
+  if (!yArr && !isArr) return raw;
   /** @type {any[]} */
   const out = [];
   let changed = false;
-  for (const entry of raw) {
+  const len = yArr ? yArr.length : raw.length;
+  for (let idx = 0; idx < len; idx += 1) {
+    const entry = yArr ? yArr.get(idx) : raw[idx];
     if (!entry || typeof entry !== "object") {
       changed = true;
       continue;
     }
-    const rawId = entry?.get?.("id") ?? entry.id;
+    let rawId = entry.id;
+    if (typeof entry.get === "function") {
+      // Avoid Yjs warnings for unintegrated maps by reading from `_prelimContent`.
+      const prelim = entry.doc == null ? entry._prelimContent : null;
+      if (prelim instanceof Map) {
+        rawId = prelim.get("id");
+      } else {
+        rawId = entry.get("id");
+      }
+    }
     if (typeof rawId === "string") {
       if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) {
         changed = true;
@@ -59,8 +72,22 @@ function sanitizeDrawingsForPreservation(raw) {
         continue;
       }
     } else {
-      changed = true;
-      continue;
+      const text = getYText(rawId);
+      if (!text) {
+        changed = true;
+        continue;
+      }
+      // Unintegrated Y.Text instances warn on reads and may have stale `_length` values.
+      // Treat them as invalid ids.
+      if (text.doc == null) {
+        changed = true;
+        continue;
+      }
+      // Avoid materializing large Y.Text ids when preserving view state.
+      if (typeof text.length === "number" && text.length > MAX_DRAWING_ID_STRING_CHARS) {
+        changed = true;
+        continue;
+      }
     }
     out.push(entry);
   }
@@ -2101,22 +2128,26 @@ export function bindYjsToDocumentController(options) {
           // layered formatting defaults: defaultFormat/rowFormats/colFormats) so view-only
           // interactions (freeze panes, resizing) do not accidentally wipe them.
           if (existingView !== undefined) {
-            const json = yjsValueToJson(existingView);
-            const sanitized = sanitizeSheetViewForPreservation(json);
-            if (isRecord(sanitized)) {
-              for (const [key, value] of Object.entries(sanitized)) {
-                if (
-                  key === "frozenRows" ||
-                  key === "frozenCols" ||
-                  key === "backgroundImageId" ||
-                  key === "background_image_id" ||
-                  key === "colWidths" ||
-                  key === "rowHeights"
-                ) {
-                  continue;
+            // Avoid materializing arbitrary view payloads (especially `drawings[*].id` Y.Text
+            // values) by sanitizing the raw view object before calling `yjsValueToJson(...)`.
+            if (isRecord(existingView) && !getYText(existingView) && !getYArray(existingView)) {
+              const json = yjsValueToJson(sanitizeSheetViewForPreservation(existingView));
+              const sanitized = sanitizeSheetViewForPreservation(json);
+              if (isRecord(sanitized)) {
+                for (const [key, value] of Object.entries(sanitized)) {
+                  if (
+                    key === "frozenRows" ||
+                    key === "frozenCols" ||
+                    key === "backgroundImageId" ||
+                    key === "background_image_id" ||
+                    key === "colWidths" ||
+                    key === "rowHeights"
+                  ) {
+                    continue;
+                  }
+                  if (value === undefined) continue;
+                  nextView[key] = value;
                 }
-                if (value === undefined) continue;
-                nextView[key] = value;
               }
             }
           }

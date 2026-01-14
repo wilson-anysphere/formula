@@ -107,3 +107,58 @@ test("binder drops oversized drawing ids when preserving unknown sheet view keys
   }
 });
 
+test("binder does not materialize oversized Y.Text drawing ids when preserving unknown sheet view keys during view writes", async () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  const oversizedText = new Y.Text();
+  oversizedText.insert(0, "x".repeat(5000));
+  oversizedText.toString = () => {
+    throw new Error("unexpected Y.Text.toString() on oversized drawing id");
+  };
+
+  doc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const bad = new Y.Map();
+    bad.set("id", oversizedText);
+
+    // Store view as a plain object so the binder's view-write path has to materialize it
+    // (and preserve unknown keys like drawings).
+    sheet.set("view", {
+      frozenRows: 0,
+      frozenCols: 0,
+      drawings: [bad, { id: "ok" }],
+    });
+    sheets.push([sheet]);
+  });
+
+  const documentController = new TestDocumentController();
+  const binder = bindYjsToDocumentController({ ydoc: doc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    await flushAsync(5);
+
+    // Trigger a view update that the binder will persist into Yjs.
+    documentController.setSheetView("Sheet1", { frozenRows: 1, frozenCols: 0 });
+    await flushAsync(5);
+
+    const sheet = sheets.get(0);
+    assert.ok(sheet instanceof Y.Map);
+
+    const view = sheet.get("view");
+    assert.ok(view && typeof view === "object");
+    assert.equal(view.frozenRows, 1);
+    assert.equal(view.frozenCols, 0);
+    assert.ok(Array.isArray(view.drawings));
+    assert.deepEqual(
+      view.drawings.map((d) => d.id),
+      ["ok"],
+    );
+  } finally {
+    binder.destroy();
+    doc.destroy();
+  }
+});

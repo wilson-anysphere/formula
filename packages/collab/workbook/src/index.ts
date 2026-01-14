@@ -226,6 +226,83 @@ function sheetViewValueToJsonSafe(rawView: unknown): Record<string, any> | null 
   return null;
 }
 
+function cloneSheetEntryValueForMove(entry: unknown, ctors: { Map: new () => any; Array: new () => any; Text: new () => any }): any {
+  const sheetMap = getYMap(entry);
+  if (sheetMap) {
+    const out = new ctors.Map();
+    const keys = Array.from(sheetMap.keys()).sort();
+    for (const key of keys) {
+      if (key === "view") {
+        const rawView = sheetMap.get(key);
+        const viewMap = getYMap(rawView);
+        if (viewMap) {
+          const nextView = new ctors.Map();
+          const viewKeys = Array.from(viewMap.keys()).sort();
+          for (const vk of viewKeys) {
+            if (vk === "drawings") {
+              const rawDrawings = viewMap.get(vk);
+              if (rawDrawings === null) {
+                nextView.set(vk, null);
+              } else {
+                const sanitized = sanitizeDrawingsValue(rawDrawings);
+                if (sanitized != null) nextView.set(vk, sanitized);
+              }
+              continue;
+            }
+            nextView.set(vk, cloneYjsValue(viewMap.get(vk), ctors));
+          }
+          out.set(key, nextView);
+        } else {
+          const json = sheetViewValueToJsonSafe(rawView);
+          if (json != null) out.set(key, json);
+        }
+        continue;
+      }
+
+      if (key === "drawings") {
+        const rawDrawings = sheetMap.get(key);
+        if (rawDrawings === null) {
+          out.set(key, null);
+        } else {
+          const sanitized = sanitizeDrawingsValue(rawDrawings);
+          if (sanitized != null) out.set(key, sanitized);
+        }
+        continue;
+      }
+
+      out.set(key, cloneYjsValue(sheetMap.get(key), ctors));
+    }
+    return out;
+  }
+
+  // Best-effort fallback for legacy/invalid docs that store sheet entries as plain objects.
+  if (isPlainObject(entry)) {
+    /** @type {Record<string, any>} */
+    const out: Record<string, any> = {};
+    const keys = Object.keys(entry).sort();
+    for (const key of keys) {
+      if (key === "view") {
+        const json = sheetViewValueToJsonSafe((entry as any)[key]);
+        if (json != null) out.view = json;
+        continue;
+      }
+      if (key === "drawings") {
+        const rawDrawings = (entry as any)[key];
+        if (rawDrawings === null) out.drawings = null;
+        else {
+          const sanitized = sanitizeDrawingsValue(rawDrawings);
+          if (sanitized != null) out.drawings = sanitized;
+        }
+        continue;
+      }
+      out[key] = cloneYjsValue((entry as any)[key], ctors);
+    }
+    return out;
+  }
+
+  return cloneYjsValue(entry, ctors);
+}
+
 export function getWorkbookRoots(doc: Y.Doc): WorkbookSchemaRoots {
   return {
     cells: getMapRoot<unknown>(doc, "cells"),
@@ -917,7 +994,7 @@ export class SheetManager {
       const sheet = this.sheets.get(fromIndex);
       if (!sheet) throw new Error(`Sheet missing at index ${fromIndex}: ${id}`);
 
-      const sheetClone = cloneYjsValue(sheet, { Map: this.YMapCtor, Array: this.YArrayCtor, Text: this.YTextCtor });
+      const sheetClone = cloneSheetEntryValueForMove(sheet, { Map: this.YMapCtor, Array: this.YArrayCtor, Text: this.YTextCtor });
       this.sheets.delete(fromIndex, 1);
       this.sheets.insert(targetIndex, [sheetClone]);
     });
