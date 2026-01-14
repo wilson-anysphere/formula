@@ -466,6 +466,22 @@ function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
         j += 2;
       }
 
+      // Merge NBSP-based thousands separators (e.g. `1 234,56` or `1 234,56` in fr-FR).
+      if (locale.thousandsSeparator === "\u00A0" || locale.thousandsSeparator === "\u202F") {
+        while (
+          tokens[j + 1]?.type === "unknown" &&
+          (tokens[j + 1]?.text === "\u00A0" || tokens[j + 1]?.text === "\u202F") &&
+          tokens[j + 2]?.type === "number" &&
+          /^\d{3}$/.test(tokens[j + 2]!.text) &&
+          tokens[j + 1]!.start === end &&
+          tokens[j + 2]!.start === tokens[j + 1]!.end
+        ) {
+          raw += `${tokens[j + 1]!.text}${tokens[j + 2]!.text}`;
+          end = tokens[j + 2]!.end;
+          j += 2;
+        }
+      }
+
       // Merge decimal comma (e.g. `1,5` in de-DE).
       if (
         locale.decimalSeparator === "," &&

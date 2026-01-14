@@ -78,6 +78,9 @@ describe("evaluateFormula operators", () => {
     // fr-FR uses `,` decimals (thousands grouping is NBSP; we don't require it here).
     expect(evaluateFormula("=1,5+2,5", () => null, { localeId: "fr-FR" })).toBe(4);
     expect(evaluateFormula("=SOMME(1,5;2,5)", () => null, { localeId: "fr-FR" })).toBe(4);
+    // Accept NBSP (U+00A0) and narrow NBSP (U+202F) as thousands separators.
+    expect(evaluateFormula("=1\u00A0234,5+0,5", () => null, { localeId: "fr-FR" })).toBe(1235);
+    expect(evaluateFormula("=1\u202F234,5+0,5", () => null, { localeId: "fr-FR" })).toBe(1235);
 
     // es-ES uses `,` decimals.
     expect(evaluateFormula("=1,5+2,5", () => null, { localeId: "es-ES" })).toBe(4);
