@@ -447,6 +447,9 @@ export class CellStructuralConflictMonitor {
     /** @type {string[]} */
     const toDelete = [];
     let hitDeleteLimit = false;
+    // Upper bound on deletes per prune pass. Limits the size of the resulting
+    // Yjs update and avoids long blocking scans/transactions when many expired
+    // entries accumulate.
     const maxDeletesPerPass = 1000;
 
     // Iterate manually (instead of `forEach`) so we can early-break once we have

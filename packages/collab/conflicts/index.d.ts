@@ -158,6 +158,9 @@ export class CellStructuralConflictMonitor {
      * they are added, so late-arriving/offline records have a chance to be ingested
      * by other clients before being removed.
      *
+     * Note: Pruning is incremental and may run over multiple passes for very large
+     * logs.
+     *
      * Defaults to null/disabled.
      */
     maxOpRecordAgeMs?: number | null;
