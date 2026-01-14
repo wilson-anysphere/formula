@@ -636,6 +636,11 @@ export class SecondaryGridView {
       } else {
         this.document.setColWidth(sheetId, docCol, baseSize, { label, source });
       }
+      // Similar to SpreadsheetApp: the CanvasGridRenderer updates sizes interactively during the
+      // drag, and we skip re-syncing sheet view deltas back into the same pane (source-tagged).
+      // Ensure the drawings overlay re-renders at the end of the interaction so pictures/shapes
+      // stay aligned with the updated grid geometry.
+      void this.renderDrawings();
       return;
     }
 
@@ -647,6 +652,7 @@ export class SecondaryGridView {
     } else {
       this.document.setRowHeight(sheetId, docRow, baseSize, { label, source });
     }
+    void this.renderDrawings();
   }
 
   private onFillCommit(event: FillCommitEvent): void {
