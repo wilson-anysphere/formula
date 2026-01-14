@@ -1,4 +1,5 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
@@ -7,12 +8,10 @@ const MAX_VITEST_THREADS = 8;
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 
-function hasPnpmDependency(pkgName: string): boolean {
-  const pnpmDir = resolve(repoRoot, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return false;
+function canResolveFrom(specifier: string, fromPath: string): boolean {
   try {
-    // pnpm virtual store directory names start with `${name}@...` when present.
-    return readdirSync(pnpmDir).some((entry) => entry.startsWith(`${pkgName}@`));
+    createRequire(fromPath).resolve(specifier);
+    return true;
   } catch {
     return false;
   }
@@ -87,6 +86,26 @@ const spreadsheetFrontendTokenizerEntry = resolve(
 const engineEntry = resolve(repoRoot, "packages/engine/src/index.ts");
 const engineBackendFormulaEntry = resolve(repoRoot, "packages/engine/src/backend/formula.ts");
 
+// In pnpm workspaces, many dependencies are not hoisted to the repo-root `node_modules/`.
+// The `existsSync(repoRoot/node_modules/<dep>)` checks below can incorrectly conclude a dependency
+// is missing and fall back to shims / non-React entrypoints.
+//
+// Prefer checking resolution from the workspace package that owns the dependency. This works for
+// both hoisted and isolated node_modules layouts, while still allowing shims when deps are truly
+// absent (stale/cached installs).
+const hasReact =
+  anyExists([reactPackageEntry, reactGridEntry]) || canResolveFrom("react", resolve(repoRoot, "packages/grid/package.json"));
+const hasZod = anyExists([zodPackageEntry, zodAiToolsEntry]) || canResolveFrom("zod", resolve(repoRoot, "packages/ai-tools/package.json"));
+const hasGraphemeSplitter =
+  anyExists([graphemeSplitterPackageEntry, graphemeSplitterTextLayoutEntry]) ||
+  canResolveFrom("grapheme-splitter", resolve(repoRoot, "packages/text-layout/package.json"));
+const hasLinebreak =
+  anyExists([linebreakPackageEntry, linebreakTextLayoutEntry]) ||
+  canResolveFrom("linebreak", resolve(repoRoot, "packages/text-layout/package.json"));
+const hasYWebsocket =
+  anyExists([yWebsocketPackageEntry, yWebsocketCollabSessionEntry]) ||
+  canResolveFrom("y-websocket", resolve(repoRoot, "packages/collab/session/package.json"));
+
 function resolveJsToTs() {
   return {
     name: "formula:resolve-js-to-ts",
@@ -126,9 +145,7 @@ export default defineConfig({
       // `@formula/grid`'s primary entrypoint re-exports React components (TSX). In some cached/stale
       // `node_modules` environments, React may be missing; prefer the Node-friendly entrypoint in
       // those cases so non-React desktop tests can still run.
-      ...((anyExists([reactPackageEntry, reactDesktopEntry, reactWebEntry, reactGridEntry]) || hasPnpmDependency("react"))
-        ? [{ find: /^@formula\/grid$/, replacement: gridEntry }]
-        : [{ find: /^@formula\/grid$/, replacement: gridNodeEntry }]),
+      ...(hasReact ? [{ find: /^@formula\/grid$/, replacement: gridEntry }] : [{ find: /^@formula\/grid$/, replacement: gridNodeEntry }]),
       { find: /^@formula\/grid\/node$/, replacement: gridNodeEntry },
       { find: /^@formula\/fill-engine$/, replacement: fillEngineEntry },
       { find: /^@formula\/text-layout$/, replacement: textLayoutEntry },
@@ -155,18 +172,10 @@ export default defineConfig({
       //
       // Prefer the real dependency when it's present; fall back to shims only when the pnpm
       // workspace/cached install is missing the package.
-      ...(!(anyExists([graphemeSplitterPackageEntry, graphemeSplitterTextLayoutEntry]) || hasPnpmDependency("grapheme-splitter"))
-        ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }]
-        : []),
-      ...(!(anyExists([linebreakPackageEntry, linebreakTextLayoutEntry]) || hasPnpmDependency("linebreak"))
-        ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }]
-        : []),
-      ...(!(anyExists([zodPackageEntry, zodAiToolsEntry]) || hasPnpmDependency("zod"))
-        ? [{ find: /^zod$/, replacement: zodShimEntry }]
-        : []),
-      ...(!(anyExists([yWebsocketPackageEntry, yWebsocketCollabSessionEntry]) || hasPnpmDependency("y-websocket"))
-        ? [{ find: /^y-websocket$/, replacement: yWebsocketShimEntry }]
-        : []),
+      ...(!hasGraphemeSplitter ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }] : []),
+      ...(!hasLinebreak ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }] : []),
+      ...(!hasZod ? [{ find: /^zod$/, replacement: zodShimEntry }] : []),
+      ...(!hasYWebsocket ? [{ find: /^y-websocket$/, replacement: yWebsocketShimEntry }] : []),
       // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
       // runs stay resilient in cached/stale `node_modules` environments that may be missing the
       // pnpm workspace link.
