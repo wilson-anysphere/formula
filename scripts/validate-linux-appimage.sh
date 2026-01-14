@@ -77,7 +77,8 @@ EXEC_CHECK_TIMEOUT_SECS="${FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS:-20}"
 is_truthy() {
   # Treat common "false" values as disabled; treat any other non-empty string as enabled.
   local v="${1:-}"
-  v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
+  # Trim whitespace and normalize case.
+  v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   case "$v" in
     "" | 0 | false | no | n | off) return 1 ;;
     *) return 0 ;;
