@@ -254,6 +254,23 @@ fn data_model_round_trip_columnar_calculated_columns() {
         "pivot should see calculated column values before persistence"
     );
 
+    // Also ensure we can group by the *calculated column itself* (not the related dim column).
+    // This exercises the columnar group-by fast path using the calculated column's persisted
+    // encoded chunks.
+    let pivot_group_by_calc = vec![GroupByColumn::new("FactSales", "Category From Dim")];
+    let pivot_calc_before = pivot(
+        &model,
+        "FactSales",
+        &pivot_group_by_calc,
+        &pivot_measures,
+        &FilterContext::empty(),
+    )
+    .expect("pivot by calculated column before save");
+    assert_eq!(
+        pivot_calc_before.rows, pivot_before.rows,
+        "grouping by the calculated column should match grouping by the related dim column"
+    );
+
     let fact_before = model.table("FactSales").expect("fact table");
     let double_before: Vec<formula_dax::Value> = (0..fact_before.row_count())
         .map(|row| {
@@ -449,6 +466,18 @@ fn data_model_round_trip_columnar_calculated_columns() {
     assert_eq!(
         pivot_after, pivot_before,
         "pivot should see the same calculated column values after persistence"
+    );
+    let pivot_calc_after = pivot(
+        &loaded,
+        "FactSales",
+        &pivot_group_by_calc,
+        &pivot_measures,
+        &FilterContext::empty(),
+    )
+    .expect("pivot by calculated column after load");
+    assert_eq!(
+        pivot_calc_after, pivot_calc_before,
+        "pivot grouped by calculated column should round-trip through persistence"
     );
 
     let fact_after = loaded.table("FactSales").expect("loaded fact");
