@@ -1,6 +1,7 @@
 use std::io::{Cursor, Write};
 
-use formula_xlsx::load_from_bytes;
+use formula_model::Workbook;
+use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes};
 
 fn build_minimal_xlsx(sheet_xml: &str, styles_xml: &str) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -38,8 +39,24 @@ fn build_minimal_xlsx(sheet_xml: &str, styles_xml: &str) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
-#[test]
-fn reads_row_and_col_default_styles() {
+fn style_id_for_number_format(workbook: &Workbook, format_code: &str) -> u32 {
+    let style_id = workbook
+        .styles
+        .styles
+        .iter()
+        .position(|style| style.number_format.as_deref() == Some(format_code))
+        .expect("expected custom number format style to exist") as u32;
+    assert_ne!(style_id, 0, "expected style id to be non-zero");
+    style_id
+}
+
+fn assert_row_col_style_defaults(workbook: &Workbook, style_id: u32) {
+    let sheet = workbook.sheet_by_name("Sheet1").expect("sheet exists");
+    assert_eq!(sheet.col_properties(1).unwrap().style_id, Some(style_id));
+    assert_eq!(sheet.row_properties(1).unwrap().style_id, Some(style_id));
+}
+
+fn fixture_bytes() -> Vec<u8> {
     // Custom number format to force a non-default style entry.
     let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -62,25 +79,22 @@ fn reads_row_and_col_default_styles() {
   </sheetData>
 </worksheet>"#;
 
-    let bytes = build_minimal_xlsx(sheet_xml, styles_xml);
-    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
-
-    // Find the (non-zero) style id created from the custom number format.
-    let non_zero = doc
-        .workbook
-        .styles
-        .styles
-        .iter()
-        .position(|style| style.number_format.as_deref() == Some("0.00"))
-        .expect("expected custom number format style to exist") as u32;
-    assert_ne!(non_zero, 0, "expected style id for xf=1 to be non-zero");
-
-    let sheet = doc
-        .workbook
-        .sheet_by_name("Sheet1")
-        .expect("sheet exists");
-
-    assert_eq!(sheet.col_properties(1).unwrap().style_id, Some(non_zero));
-    assert_eq!(sheet.row_properties(1).unwrap().style_id, Some(non_zero));
+    build_minimal_xlsx(sheet_xml, styles_xml)
 }
 
+#[test]
+fn reads_row_and_col_default_styles_load_from_bytes() {
+    let bytes = fixture_bytes();
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+
+    let style_id = style_id_for_number_format(&doc.workbook, "0.00");
+    assert_row_col_style_defaults(&doc.workbook, style_id);
+}
+
+#[test]
+fn reads_row_and_col_default_styles_read_workbook_model_from_bytes() {
+    let bytes = fixture_bytes();
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    let style_id = style_id_for_number_format(&workbook, "0.00");
+    assert_row_col_style_defaults(&workbook, style_id);
+}
