@@ -1457,6 +1457,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn materializes_ref_col_oob_to_referr_variants() {
+        // When a `PtgRef*` token shifts out of bounds during shared-formula materialization, the
+        // materializer must emit the 2D error ptg (`PtgRefErr*`), preserving token width.
+        for &ptg_ref in &[0x24_u8, 0x44, 0x64] {
+            // PtgRef payload: [row:u16][col+flags:u16]
+            // Use col=0x3FFF (14-bit max) with the col-relative flag so shifting by +1 col is OOB.
+            let base: Vec<u8> = vec![
+                ptg_ref, // PtgRef (ref/value/array class)
+                0x00,
+                0x00, // row=0
+                0xFF,
+                0xBF, // col=0x3FFF with COL_RELATIVE_BIT set (0xBFFF)
+            ];
+
+            let out = materialize_biff8_rgce(&base, 0, 0, 0, 1).expect("materialize");
+            assert_eq!(out[0], ptg_ref + 0x06, "ptg={ptg_ref:02X}");
+            assert_eq!(&out[1..], &base[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
+    fn materializes_area_col_oob_to_areaerr_variants() {
+        // When a `PtgArea*` token shifts out of bounds during shared-formula materialization, the
+        // materializer must emit the 2D error ptg (`PtgAreaErr*`), preserving token width.
+        for &ptg_area in &[0x25_u8, 0x45, 0x65] {
+            // PtgArea payload: [row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
+            // Use col2=0x3FFF (14-bit max) with the col-relative flag so shifting by +1 col is OOB.
+            // Keep col1 in-bounds so we cover the "one endpoint OOB" case.
+            let mut base = Vec::new();
+            base.push(ptg_area);
+            base.extend_from_slice(&0u16.to_le_bytes()); // row1=0
+            base.extend_from_slice(&0u16.to_le_bytes()); // row2=0
+            base.extend_from_slice(&0xBFFEu16.to_le_bytes()); // col1=0x3FFE + COL_RELATIVE_BIT
+            base.extend_from_slice(&0xBFFFu16.to_le_bytes()); // col2=0x3FFF + COL_RELATIVE_BIT
+
+            let out = materialize_biff8_rgce(&base, 0, 0, 0, 1).expect("materialize");
+            assert_eq!(out[0], ptg_area + 0x06, "ptg={ptg_area:02X}");
+            assert_eq!(&out[1..], &base[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
     fn materializes_ref3d_oob_to_referr3d_variants() {
         // When a `PtgRef3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
         // the materializer must emit the *3D* error ptg (`PtgRefErr3d*`), preserving token width.
