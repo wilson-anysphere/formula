@@ -29,7 +29,7 @@
   overrides default MSI discovery.
 
 .PARAMETER BundleDir
-  Optional path to a Tauri bundle directory (…/release/bundle). When provided,
+  Optional path to a Tauri bundle directory (.../release/bundle). When provided,
   the script will only search within this bundle directory for:
     - msi/**/*.msi
     - nsis/**/*.exe
