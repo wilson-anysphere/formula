@@ -3,16 +3,24 @@ import { describe, expect, it } from "vitest";
 import { DocumentController } from "../../document/documentController.js";
 import { handleRibbonCommand, type RibbonCommandHandlerContext } from "../commandHandlers.js";
 
-function createCtx(doc: DocumentController): RibbonCommandHandlerContext {
+function createCtx(
+  doc: DocumentController,
+  options: {
+    selection?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
+    isEditing?: boolean;
+  } = {},
+): RibbonCommandHandlerContext {
   return {
     app: {
       getDocument: () => doc,
       getCurrentSheetId: () => "Sheet1",
       getActiveCell: () => ({ row: 0, col: 0 }),
+      getSelectionRanges: () => options.selection ?? [],
       focus: () => {
         // no-op for tests
       },
     },
+    isEditing: () => Boolean(options.isEditing),
     applyFormattingToSelection: (_label, fn) => {
       fn(doc, "Sheet1", [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }]);
     },
@@ -62,5 +70,16 @@ describe("handleRibbonCommand", () => {
     const doc = new DocumentController();
     const ctx = createCtx(doc);
     expect(handleRibbonCommand(ctx, "home.font.nonexistentCommand")).toBe(false);
+  });
+
+  it("merges and unmerges cells", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc, { selection: [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }] });
+
+    expect(handleRibbonCommand(ctx, "home.alignment.mergeCenter.mergeCells")).toBe(true);
+    expect(doc.getMergedRanges("Sheet1")).toEqual([{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }]);
+
+    expect(handleRibbonCommand(ctx, "home.alignment.mergeCenter.unmergeCells")).toBe(true);
+    expect(doc.getMergedRanges("Sheet1")).toEqual([]);
   });
 });

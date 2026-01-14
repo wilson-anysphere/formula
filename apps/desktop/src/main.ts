@@ -79,7 +79,6 @@ import { fireWorkbookBeforeCloseBestEffort, installVbaEventMacros } from "./macr
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import type { DocumentController } from "./document/documentController.js";
-import { mergeAcross, mergeCells, mergeCenter, unmergeCells } from "./document/mergedCells.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "./formatting/selectionSizeGuard.js";
 import {
@@ -8057,6 +8056,7 @@ const onRibbonCommandError = (_commandId: string, err: unknown): void => {
 
 const ribbonCommandHandlersCtx = {
   app,
+  isEditing: isSpreadsheetEditing,
   applyFormattingToSelection,
   showToast,
   executeCommand: (commandId: string, ...args: any[]) => {
@@ -8408,99 +8408,6 @@ function handleRibbonCommand(commandId: string): void {
       case "insert.illustrations.onlinePictures":
         void handleInsertPicturesRibbonCommand(commandId, app);
         return;
-
-      case "home.alignment.mergeCenter":
-        // Dropdown container id; some ribbon interactions can surface this in `onCommand`.
-        // Treat it as a no-op fallback (menu items trigger the real commands).
-        return;
-
-      case "home.alignment.mergeCenter.mergeCenter":
-      case "home.alignment.mergeCenter.mergeCells":
-      case "home.alignment.mergeCenter.mergeAcross": {
-        if (isSpreadsheetEditing()) return;
-
-        const selection = app.getSelectionRanges();
-        if (selection.length > 1) {
-          showToast("Merge commands only support a single selection range.", "warning");
-          app.focus();
-          return;
-        }
-
-        const normalized = (() => {
-          if (selection.length === 0) {
-            const cell = app.getActiveCell();
-            return { startRow: cell.row, endRow: cell.row, startCol: cell.col, endCol: cell.col };
-          }
-          return normalizeSelectionRange(selection[0]!);
-        })();
-
-        const rows = normalized.endRow - normalized.startRow + 1;
-        const cols = normalized.endCol - normalized.startCol + 1;
-        const totalCells = rows * cols;
-        const maxCells = DEFAULT_FORMATTING_APPLY_CELL_LIMIT;
-        if (totalCells > maxCells) {
-          showToast(`Selection too large to merge (>${maxCells.toLocaleString()} cells). Select fewer cells and try again.`, "warning");
-          app.focus();
-          return;
-        }
-
-        const sheetId = app.getCurrentSheetId();
-        const label =
-          commandId === "home.alignment.mergeCenter.mergeCenter"
-            ? "Merge & Center"
-            : commandId === "home.alignment.mergeCenter.mergeAcross"
-              ? "Merge Across"
-              : "Merge Cells";
-
-        // Merge Across is only meaningful for multi-column selections.
-        if (commandId === "home.alignment.mergeCenter.mergeAcross" && cols <= 1) {
-          app.focus();
-          return;
-        }
-
-        doc.beginBatch({ label });
-        let committed = false;
-        try {
-          if (commandId === "home.alignment.mergeCenter.mergeCenter") {
-            mergeCenter(doc as any, sheetId, normalized, { label });
-          } else if (commandId === "home.alignment.mergeCenter.mergeAcross") {
-            mergeAcross(doc as any, sheetId, normalized, { label });
-          } else {
-            mergeCells(doc as any, sheetId, normalized, { label });
-          }
-          committed = true;
-        } finally {
-          if (committed) doc.endBatch();
-          else doc.cancelBatch();
-        }
-
-        app.focus();
-        return;
-      }
-
-      case "home.alignment.mergeCenter.unmergeCells": {
-        if (isSpreadsheetEditing()) return;
-
-        const selection = app.getSelectionRanges();
-        if (selection.length > 1) {
-          showToast("Unmerge Cells only supports a single selection range.", "warning");
-          app.focus();
-          return;
-        }
-
-        const normalized = (() => {
-          if (selection.length === 0) {
-            const cell = app.getActiveCell();
-            return { startRow: cell.row, endRow: cell.row, startCol: cell.col, endCol: cell.col };
-          }
-          return normalizeSelectionRange(selection[0]!);
-        })();
-
-        const sheetId = app.getCurrentSheetId();
-        unmergeCells(doc as any, sheetId, normalized, { label: "Unmerge Cells" });
-        app.focus();
-        return;
-      }
       case "home.cells.format":
         // This command is a dropdown with menu items; the top-level command is not expected
         // to fire when the menu is present. Keep this as a fallback.

@@ -1,4 +1,5 @@
 import type { DocumentController } from "../document/documentController.js";
+import { mergeAcross, mergeCells, mergeCenter, unmergeCells } from "../document/mergedCells.js";
 import {
   applyAllBorders,
   applyNumberFormatPreset,
@@ -13,6 +14,7 @@ import {
   toggleWrap,
   type CellRange,
 } from "../formatting/toolbar.js";
+import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "../formatting/selectionSizeGuard.js";
 
 export type RibbonFormattingApplyFn = (
   doc: DocumentController,
@@ -42,8 +44,14 @@ export type RibbonCommandHandlerContext = {
     getDocument: () => DocumentController;
     getCurrentSheetId: () => string;
     getActiveCell: () => { row: number; col: number };
+    getSelectionRanges?: () => Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
     focus: () => void;
   };
+  /**
+   * `main.ts` uses `isSpreadsheetEditing()` which also accounts for split-view secondary editor state.
+   * Pass that in here so command handlers can match app-shell behavior.
+   */
+  isEditing?: () => boolean;
   applyFormattingToSelection: RibbonFormattingApplyToSelection;
   /**
    * Wrapper around the desktop CommandRegistry (or equivalent) so command handlers can
@@ -772,6 +780,112 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       ctx.executeCommand?.("format.openFormatCells");
       ctx.openFormatCells?.();
       return true;
+
+    case "home.alignment.mergeCenter":
+      // Dropdown container id; some ribbon interactions can surface this in `onCommand`.
+      // Treat it as a no-op fallback (menu items trigger the real commands).
+      return true;
+
+    case "home.alignment.mergeCenter.mergeCenter":
+    case "home.alignment.mergeCenter.mergeCells":
+    case "home.alignment.mergeCenter.mergeAcross": {
+      if (ctx.isEditing?.()) return true;
+
+      const selection = ctx.app.getSelectionRanges?.() ?? [];
+      if (selection.length > 1) {
+        ctx.showToast?.("Merge commands only support a single selection range.", "warning");
+        ctx.app.focus();
+        return true;
+      }
+
+      const normalized = (() => {
+        if (selection.length === 0) {
+          const cell = ctx.app.getActiveCell();
+          return { startRow: cell.row, endRow: cell.row, startCol: cell.col, endCol: cell.col };
+        }
+        const r = selection[0]!;
+        const startRow = Math.min(r.startRow, r.endRow);
+        const endRow = Math.max(r.startRow, r.endRow);
+        const startCol = Math.min(r.startCol, r.endCol);
+        const endCol = Math.max(r.startCol, r.endCol);
+        return { startRow, endRow, startCol, endCol };
+      })();
+
+      const rows = normalized.endRow - normalized.startRow + 1;
+      const cols = normalized.endCol - normalized.startCol + 1;
+      const totalCells = rows * cols;
+      const maxCells = DEFAULT_FORMATTING_APPLY_CELL_LIMIT;
+      if (totalCells > maxCells) {
+        ctx.showToast?.(
+          `Selection too large to merge (>${maxCells.toLocaleString()} cells). Select fewer cells and try again.`,
+          "warning",
+        );
+        ctx.app.focus();
+        return true;
+      }
+
+      const sheetId = ctx.app.getCurrentSheetId();
+      const label =
+        commandId === "home.alignment.mergeCenter.mergeCenter"
+          ? "Merge & Center"
+          : commandId === "home.alignment.mergeCenter.mergeAcross"
+            ? "Merge Across"
+            : "Merge Cells";
+
+      // Merge Across is only meaningful for multi-column selections.
+      if (commandId === "home.alignment.mergeCenter.mergeAcross" && cols <= 1) {
+        ctx.app.focus();
+        return true;
+      }
+
+      doc.beginBatch({ label });
+      let committed = false;
+      try {
+        if (commandId === "home.alignment.mergeCenter.mergeCenter") {
+          mergeCenter(doc, sheetId, normalized, { label });
+        } else if (commandId === "home.alignment.mergeCenter.mergeAcross") {
+          mergeAcross(doc, sheetId, normalized, { label });
+        } else {
+          mergeCells(doc, sheetId, normalized, { label });
+        }
+        committed = true;
+      } finally {
+        if (committed) doc.endBatch();
+        else doc.cancelBatch();
+      }
+
+      ctx.app.focus();
+      return true;
+    }
+
+    case "home.alignment.mergeCenter.unmergeCells": {
+      if (ctx.isEditing?.()) return true;
+
+      const selection = ctx.app.getSelectionRanges?.() ?? [];
+      if (selection.length > 1) {
+        ctx.showToast?.("Unmerge Cells only supports a single selection range.", "warning");
+        ctx.app.focus();
+        return true;
+      }
+
+      const normalized = (() => {
+        if (selection.length === 0) {
+          const cell = ctx.app.getActiveCell();
+          return { startRow: cell.row, endRow: cell.row, startCol: cell.col, endCol: cell.col };
+        }
+        const r = selection[0]!;
+        const startRow = Math.min(r.startRow, r.endRow);
+        const endRow = Math.max(r.startRow, r.endRow);
+        const startCol = Math.min(r.startCol, r.endCol);
+        const endCol = Math.max(r.startCol, r.endCol);
+        return { startRow, endRow, startCol, endCol };
+      })();
+
+      const sheetId = ctx.app.getCurrentSheetId();
+      unmergeCells(doc, sheetId, normalized, { label: "Unmerge Cells" });
+      ctx.app.focus();
+      return true;
+    }
     case "home.number.percent":
       ctx.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
       return true;
