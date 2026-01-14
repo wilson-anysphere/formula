@@ -189,6 +189,9 @@ CI also generates and uploads a `SHA256SUMS.txt` asset (SHA256 checksums for all
 To reproduce locally:
 
 ```bash
+# Fast path: verify `latest.json` + `latest.json.sig` + referenced assets without hashing installers/bundles.
+GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --dry-run --tag vX.Y.Z --repo owner/repo
+
 # Verify the GitHub Release asset set and generate SHA256SUMS.txt for primary installers/bundles
 # (excludes `.sig` files by default; add `--include-sigs` to include them).
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt
