@@ -175,6 +175,14 @@ fn builtin_placeholder_inputs_match_builtin_strings() {
 }
 
 #[test]
+fn unknown_builtin_placeholder_is_general() {
+    let info = classify_cell_format(Some("__builtin_numFmtId:999"));
+    assert_eq!(info.cell_format_code, "G");
+    assert!(!info.negative_in_color);
+    assert!(!info.negative_in_parentheses);
+}
+
+#[test]
 fn custom_numeric_formats_compute_decimal_counts() {
     let cases: &[(&str, &str)] = &[
         ("0.000", "F3"),

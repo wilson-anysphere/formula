@@ -47,12 +47,10 @@ pub fn classify_cell_format(format_code: Option<&str>) -> CellFormatClassificati
                         negative_in_parentheses: false,
                     };
                 } else {
-                    // Unknown placeholder id; treat as unrecognized.
-                    return CellFormatClassification {
-                        cell_format_code: "N".to_string(),
-                        negative_in_color: false,
-                        negative_in_parentheses: false,
-                    };
+                    // Unknown placeholder id; treat as General rather than attempting to
+                    // classify the placeholder text itself (which contains `m`/`d` and
+                    // could be misinterpreted as a datetime pattern elsewhere).
+                    code = "General";
                 }
             }
             Err(_) => {
