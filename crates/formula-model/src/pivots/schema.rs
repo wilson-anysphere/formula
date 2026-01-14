@@ -213,7 +213,6 @@ impl fmt::Display for PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
-                let table = format_dax_table_ref(table);
                 let column = escape_dax_bracket_identifier(column);
                 write!(f, "{table}[{column}]")
             }
@@ -228,20 +227,6 @@ impl fmt::Display for PivotFieldRef {
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
-}
-
-fn format_dax_table_ref(table: &str) -> String {
-    // In DAX, a table name can be unquoted (e.g. `Sales`) or single-quoted (e.g. `'Sales 2024'`).
-    // Quote when the identifier contains anything other than ASCII alphanumerics or `_`.
-    let needs_quote = table
-        .chars()
-        .any(|c| !(c.is_ascii_alphanumeric() || c == '_'));
-    if !needs_quote {
-        return table.to_string();
-    }
-
-    // Within quoted identifiers, `'` is escaped as `''`.
-    format!("'{}'", table.replace('\'', "''"))
 }
 
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
