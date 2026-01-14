@@ -286,7 +286,7 @@ function CellConflictColumn({
 
       {showEnc ? (
         <div className="branch-merge__cell-section">
-          <div className="branch-merge__cell-section-title">Encrypted</div>
+          <div className="branch-merge__cell-section-title">{t("branchMerge.cellSection.encrypted")}</div>
           <div className="branch-merge__cell-section-body">
             {cellHasEnc(cell) ? <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span> : "∅"}
           </div>
@@ -295,7 +295,7 @@ function CellConflictColumn({
 
       {showFormula ? (
         <div className="branch-merge__cell-section">
-          <div className="branch-merge__cell-section-title">Formula</div>
+          <div className="branch-merge__cell-section-title">{t("branchMerge.cellSection.formula")}</div>
           <div className="branch-merge__cell-section-body">
             {cellHasEnc(cell) ? (
               <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span>
@@ -308,7 +308,7 @@ function CellConflictColumn({
 
       {showValue ? (
         <div className="branch-merge__cell-section">
-          <div className="branch-merge__cell-section-title">Value</div>
+          <div className="branch-merge__cell-section-title">{t("branchMerge.cellSection.value")}</div>
           <div className="branch-merge__cell-section-body">
             {showValueDiff ? (
               <>
@@ -341,7 +341,7 @@ function CellConflictColumn({
 
       {showFormat ? (
         <div className="branch-merge__cell-section">
-          <div className="branch-merge__cell-section-title">Format</div>
+          <div className="branch-merge__cell-section-title">{t("branchMerge.cellSection.format")}</div>
           <pre className="branch-merge__cell-json">{formatSummary(cell?.format)}</pre>
         </div>
       ) : null}
@@ -807,12 +807,12 @@ export function MergeBranchPanel({
                             checked={draft.deleteCell}
                             onChange={(e) => updateManualDraft({ ...draft, deleteCell: e.target.checked }, c)}
                           />
-                          Delete cell
+                          {t("branchMerge.manualCell.deleteCell")}
                         </label>
 
                         {hasEnc ? (
                           <div className="branch-merge__manual-cell-row">
-                            <div className="branch-merge__manual-cell-label">Encrypted</div>
+                            <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.encrypted")}</div>
                             <select
                               value={draft.encSource}
                               disabled={mutationsDisabled || draft.deleteCell}
@@ -835,16 +835,16 @@ export function MergeBranchPanel({
                                 updateManualDraft(next, c);
                               }}
                             >
-                              <option value="custom">Custom (unencrypted)</option>
-                              {cellHasEnc(c.base) ? <option value="base">Use base</option> : null}
-                              {cellHasEnc(c.ours) ? <option value="ours">Use ours</option> : null}
-                              {cellHasEnc(c.theirs) ? <option value="theirs">Use theirs</option> : null}
+                              <option value="custom">{t("branchMerge.manualCell.encrypted.customUnencrypted")}</option>
+                              {cellHasEnc(c.base) ? <option value="base">{t("branchMerge.manualCell.encrypted.useBase")}</option> : null}
+                              {cellHasEnc(c.ours) ? <option value="ours">{t("branchMerge.manualCell.encrypted.useOurs")}</option> : null}
+                              {cellHasEnc(c.theirs) ? <option value="theirs">{t("branchMerge.manualCell.encrypted.useTheirs")}</option> : null}
                             </select>
                           </div>
                         ) : null}
 
                         <div className="branch-merge__manual-cell-row">
-                          <div className="branch-merge__manual-cell-label">Formula</div>
+                          <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.formula")}</div>
                           <input
                             value={draft.formulaText}
                             disabled={contentDisabled}
@@ -854,7 +854,7 @@ export function MergeBranchPanel({
                         </div>
 
                         <div className="branch-merge__manual-cell-row">
-                          <div className="branch-merge__manual-cell-label">Value</div>
+                          <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.value")}</div>
                           <input
                             value={draft.valueText}
                             disabled={contentDisabled || draft.formulaText.trim().length > 0}
@@ -864,7 +864,7 @@ export function MergeBranchPanel({
                         </div>
 
                         <div className="branch-merge__manual-cell-row branch-merge__manual-cell-row--format">
-                          <div className="branch-merge__manual-cell-label">Format (JSON)</div>
+                          <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.formatJson")}</div>
                           <textarea
                             value={draft.formatText}
                             disabled={formatDisabled}
