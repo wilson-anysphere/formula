@@ -3860,6 +3860,12 @@ app.getDocument().on("change", (payload: any) => {
       .filter((delta: any) => delta && typeof delta.sheetId === "string" && (delta.after ?? null) == null)
       .map((delta: any) => String(delta.sheetId));
     if (deletedSheetIds.length > 0) {
+      // Ribbon AutoFilter MVP state is view-local. If a sheet is deleted (or removed via undo/redo),
+      // drop any stored filter state for that sheet so we don't retain stale entries.
+      for (const id of deletedSheetIds) {
+        ribbonAutoFilterStore.clearSheet(id);
+      }
+
       const currentSheetId = app.getCurrentSheetId();
       if (currentSheetId && deletedSheetIds.includes(currentSheetId)) {
         const doc = app.getDocument();
