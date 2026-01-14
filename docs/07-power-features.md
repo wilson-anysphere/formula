@@ -887,20 +887,26 @@ Rust API ([`what_if/goal_seek.rs`](../crates/formula-engine/src/what_if/goal_see
 - `GoalSeekStatus` — `{ Converged, MaxIterationsReached, NoBracketFound, NumericalFailure }`.
 - `GoalSeek::{solve, solve_with_progress}` — synchronous solver (Newton step + finite-difference derivative; falls back to bisection if derivative is too small or non-finite).
 
-Proposed JS/WASM DTOs:
+JS/WASM DTOs:
 
 ```ts
+/**
+ * Rust serde DTO shape (if you expose `formula_engine::what_if::goal_seek::GoalSeekParams`
+ * directly through wasm and deserialize it via serde).
+ *
+ * Note: the current `formula-wasm` surface (`WasmWorkbook.goalSeek`) uses a smaller request
+ * object (`GoalSeekRequest`) and only exposes a subset of these tuning parameters.
+ */
 export interface GoalSeekParams {
   targetCell: CellRef;
   targetValue: number;
   changingCell: CellRef;
 
-  // Optional in JS; bindings should fill Rust defaults from GoalSeekParams::new()
-  maxIterations?: number; // default 100
-  tolerance?: number; // default 0.001
-  derivativeStep?: number | null; // null/undefined => auto (abs(x)*0.001 or 0.001)
-  minDerivative?: number; // default 1e-10
-  maxBracketExpansions?: number; // default 50
+  maxIterations: number;
+  tolerance: number;
+  derivativeStep: number | null;
+  minDerivative: number;
+  maxBracketExpansions: number;
 }
 
 // Mirrors Rust GoalSeekStatus serialization today (PascalCase variant strings).
@@ -925,17 +931,36 @@ export interface GoalSeekProgress {
   error: number;
 }
 
-export interface GoalSeekOptions {
-  /**
-   * Default sheet name used to resolve CellRefs without an explicit `Sheet!A1` prefix.
-   * (Ignored when params use explicit sheet prefixes.)
-   */
+export type RecalcMode = "singleThreaded" | "multiThreaded";
+
+/**
+ * Current `formula-wasm` API:
+ *   `workbook.goalSeek(request)` (see `crates/formula-wasm/src/lib.rs`).
+ */
+export interface GoalSeekRequest {
+  // Defaults to "Sheet1" when omitted/empty.
   sheet?: string;
-  onProgress?: (p: GoalSeekProgress) => void;
+
+  // A1 addresses WITHOUT a `Sheet!` prefix (sheet is provided separately).
+  targetCell: string;
+  changingCell: string;
+
+  targetValue: number;
+  tolerance?: number;
+  maxIterations?: number;
+
+  // Optional; note: on wasm builds "multiThreaded" falls back to single-threaded recalc.
+  recalcMode?: RecalcMode;
 }
 
-// Proposed JS/WASM entrypoint:
-//   workbook.goalSeek(params: GoalSeekParams, options?: GoalSeekOptions): GoalSeekResult
+export interface GoalSeekResponse {
+  success: boolean;
+  status: GoalSeekStatus;
+  solution: number;
+  iterations: number;
+  finalOutput: number;
+  finalError: number;
+}
 ```
 
 Validation + edge cases (Rust behavior):
@@ -951,8 +976,31 @@ Validation + edge cases (Rust behavior):
 - Side effects: Goal Seek mutates spreadsheet state as it searches:
   - `changingCell` is overwritten on every iteration and is left at the final returned `solution` value (even when not converged).
   - The model is recalculated after every update, so `targetCell` and dependents reflect the latest candidate.
-- Progress callback:
-  - Rust `solve_with_progress` cannot cancel the solve (progress is report-only); WASM bindings should document that cancellation is not supported for Goal Seek (other than host-level task cancellation).
+
+WASM binding validation rules (current `formula-wasm` implementation):
+
+- `sheet`:
+  - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
+  - must refer to an existing sheet (otherwise the call throws).
+- `targetCell` / `changingCell`:
+  - must be non-empty strings
+  - must be valid A1 addresses
+  - must **not** contain `!` (no sheet prefix)
+- `targetValue` must be a finite number.
+- `tolerance` (optional) must be a finite number and `> 0`.
+- `maxIterations` (optional) must be an integer `> 0` and not exceed `usize::MAX`.
+- `recalcMode` (optional) must be `"singleThreaded"` or `"multiThreaded"`.
+
+WASM binding side effects / integration notes:
+
+- `goalSeek` mutates the workbook state and updates the `changingCell` input to the final `solution` value (as a number).
+  - If the cell previously had a “rich” input (`setCellRich`), it is cleared so `getCell` reflects the scalar input.
+- The wasm `goalSeek` API runs recalculation internally but does **not** return a `recalculate()`-style cell change list. Hosts should call `getCell`/`getRange` (or similar) to refresh any UI state after a goal seek run.
+
+Progress events:
+
+- Rust exposes `GoalSeek::solve_with_progress` and the `GoalSeekProgress` struct.
+- The current wasm binding does **not** expose progress events and does not support cancellation.
 
 ### Scenario Manager
 
