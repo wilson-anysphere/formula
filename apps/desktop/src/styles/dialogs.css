@@ -72,8 +72,8 @@
 .permission-prompt__meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 10px;
+  gap: var(--space-1);
+  margin-bottom: calc(var(--space-4) + var(--space-1));
 }
 
 .permission-prompt__name {
@@ -86,25 +86,25 @@
 }
 
 .permission-prompt__detail {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-4);
 }
 
 .permission-prompt__list {
   margin: 0;
-  padding-left: 18px;
+  padding-left: calc(var(--space-6) + var(--space-1));
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .permission-prompt__note {
-  margin-top: 10px;
+  margin-top: calc(var(--space-4) + var(--space-1));
   color: var(--text-secondary);
   font-size: 12px;
 }
 
 .permission-prompt__controls {
-  margin-top: 14px;
+  margin-top: calc(var(--space-5) + var(--space-1));
 }
 
 /* --- Updater dialog ------------------------------------------------------- */
@@ -119,24 +119,24 @@
 }
 
 .updater-dialog__release-notes-title {
-  margin-top: 10px;
+  margin-top: calc(var(--space-4) + var(--space-1));
   font-weight: 600;
 }
 
 .updater-dialog__body {
   white-space: pre-wrap;
-  margin: 6px 0 0;
+  margin: var(--space-3) 0 0;
   max-height: 240px;
   overflow: auto;
 }
 
 .updater-dialog__status {
-  margin-top: 10px;
+  margin-top: calc(var(--space-4) + var(--space-1));
   white-space: pre-wrap;
 }
 
 .updater-dialog__progress-wrap {
-  margin-top: 10px;
+  margin-top: calc(var(--space-4) + var(--space-1));
 }
 
 .updater-dialog__progress {
@@ -144,7 +144,7 @@
 }
 
 .updater-dialog__progress-text {
-  margin-top: 6px;
+  margin-top: var(--space-3);
   font-size: 12px;
   color: var(--text-secondary);
 }
@@ -188,20 +188,20 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .organize-sheets-dialog__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .organize-sheets-dialog__header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .organize-sheets-dialog__title {
@@ -213,7 +213,7 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__header-button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
@@ -237,10 +237,10 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
   max-height: min(480px, calc(100vh - 240px));
   overflow: auto;
-  padding: 4px;
+  padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -249,8 +249,8 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-4);
+  padding: var(--space-4) calc(var(--space-4) + var(--space-1));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-secondary);
@@ -259,7 +259,7 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__name {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
@@ -277,7 +277,7 @@ dialog.custom-sort-dialog::backdrop {
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   background: var(--bg-primary);
 }
 
@@ -290,13 +290,13 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .organize-sheets-dialog__actions button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
@@ -321,7 +321,7 @@ dialog.custom-sort-dialog::backdrop {
   min-width: min(360px, 100%);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   background: var(--bg-primary);
   color: var(--text-primary);
 }
