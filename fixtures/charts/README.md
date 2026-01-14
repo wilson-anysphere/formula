@@ -38,20 +38,41 @@ Golden PNGs under `fixtures/charts/golden/excel/` are expected to be exported at
 - **800 × 600 px**
 
 ### Placeholder goldens
-
+ 
 Some chart types don't yet have a deterministic Excel-exported golden image
 checked into the repo. For these fixtures we commit a generated placeholder PNG
 (still **800 × 600 px**) so the corpus remains structurally complete in CI:
+ 
+There are currently two placeholder styles:
 
-- `area.png`
-- `bar-horizontal.png`
-- `bubble.png`
-- `radar.png`
-- `stock.png`
-- `surface.png`
-- `doughnut.png`
-- `combo-bar-line.png`
-- `map.png`
+1. A “red X” placeholder (light gray background) used by:
+   - `area.png`
+   - `bar-horizontal.png`
+   - `bubble.png`
+   - `radar.png`
+   - `stock.png`
+   - `surface.png`
+   - `doughnut.png`
+   - `combo-bar-line.png`
+   - `map.png`
+
+2. A solid-fill placeholder (single flat color) used by:
+   - `bar.png`
+   - `bar-gap-overlap.png`
+   - `bar-invert-if-negative.png`
+   - `basic-chart.png`
+   - `box-whisker.png`
+   - `funnel.png`
+   - `histogram.png`
+   - `line.png`
+   - `line-smooth.png`
+   - `manual-layout.png`
+   - `pareto.png`
+   - `pie.png`
+   - `scatter.png`
+   - `sunburst.png`
+   - `treemap.png`
+   - `waterfall.png`
 
 Replace these with real Excel exports once available (see instructions below).
 
