@@ -85,6 +85,13 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
   });
 
+  it("propagates bounded options to BoundedAIAuditStore", async () => {
+    const store = await createDefaultAIAuditStore({ bounded: { max_entry_chars: 123 } });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    expect((store as BoundedAIAuditStore).maxEntryChars).toBe(123);
+    expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it("still defaults to memory even when indexedDB globals exist", async () => {
     Object.defineProperty(globalThis as any, "indexedDB", { value: indexedDB, configurable: true });
     Object.defineProperty(globalThis as any, "IDBKeyRange", { value: IDBKeyRange, configurable: true });
