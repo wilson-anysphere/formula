@@ -8,6 +8,9 @@ use std::path::PathBuf;
 
 use formula_io::{open_workbook, open_workbook_with_password, Error, Workbook};
 
+#[cfg(feature = "vba")]
+use formula_xlsx::vba::VBAProject;
+
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures")
@@ -37,6 +40,15 @@ fn opens_encrypted_xlsm_with_password_and_preserves_vba_project() {
                 .expect("read xl/vbaProject.bin")
                 .expect("expected decrypted .xlsm to preserve xl/vbaProject.bin");
             assert!(!vba_bin.is_empty(), "vbaProject.bin should be non-empty");
+
+            // Optional deeper smoke test: ensure the VBA project is structurally parseable.
+            //
+            // This is feature-gated because VBA parsing pulls in `formula-vba` (and OpenSSL),
+            // which we intentionally keep opt-in for `formula-io`.
+            #[cfg(feature = "vba")]
+            {
+                VBAProject::parse(&vba_bin).expect("parse VBA project");
+            }
 
             // Some producers store signatures in a separate `xl/vbaProjectSignature.bin` part. If
             // present, it must survive decryption.
