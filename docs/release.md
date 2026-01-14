@@ -40,6 +40,11 @@ Desktop packaging is sensitive to Rust/toolchain changes. This repo pins Rust vi
 `rust-toolchain.toml` at the repo root, and CI/release workflows enforce that they install the
 same version.
 
+Note: the `RUSTUP_TOOLCHAIN` environment variable has higher precedence than `rust-toolchain.toml`.
+If it is set globally (often to `stable`), it can accidentally bypass the pin for local builds and
+preflight scripts. Unset it (or `source scripts/agent-init.sh` / use `scripts/cargo_agent.sh`) when
+running release steps locally.
+
 To upgrade Rust, open a PR that bumps `rust-toolchain.toml` (and any workflow pins/comments that the
 CI guard requests) and rely on CI to validate the new toolchain before tagging a release.
 
