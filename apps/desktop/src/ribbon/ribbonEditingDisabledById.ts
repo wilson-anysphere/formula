@@ -61,6 +61,13 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "edit.replace": true,
   "navigation.goTo": true,
 
+  // --- File -------------------------------------------------------------------
+  // Page Setup is also accessible via File → Print. Keep those entry points disabled while editing
+  // to prevent bypassing the Page Layout tab disabling.
+  "file.print.pageSetup": true,
+  "file.print.pageSetup.printTitles": true,
+  "file.print.pageSetup.margins": true,
+
   // --- Formatting ------------------------------------------------------------
   "format.toggleSubscript": true,
   "format.toggleSuperscript": true,
