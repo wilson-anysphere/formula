@@ -60,47 +60,25 @@ struct AgileEncryptionInfo {
     password_key: PasswordKeyEncryptor,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum PasswordKeyIvDerivation {
-    /// Use the password key encryptor `saltValue` directly as the AES-CBC IV (truncated to
-    /// `blockSize`). This matches the behavior of several implementations and is what we
-    /// historically supported.
-    SaltValue,
-    /// Derive the IV per block key: `IV = Truncate(Hash(saltValue || blockKey), blockSize)`.
-    ///
-    /// Some producers appear to use this scheme for the password-key-encryptor blobs
-    /// (`encryptedVerifierHashInput`, `encryptedVerifierHashValue`, `encryptedKeyValue`).
-    Derived,
-}
-
 fn decrypt_agile_package_key_from_password(
     info: &AgileEncryptionInfo,
     password_hash: &[u8],
     key_encrypt_key_len: usize,
     package_key_len: usize,
-    iv_derivation: PasswordKeyIvDerivation,
 ) -> Result<Vec<u8>> {
     let password_key = &info.password_key;
-
-    let password_iv_for = |block_key: &[u8]| -> Result<Vec<u8>> {
-        match iv_derivation {
-            PasswordKeyIvDerivation::SaltValue => password_key
-                .salt_value
-                .get(..password_key.block_size)
-                .ok_or_else(|| OffCryptoError::InvalidAttribute {
-                    element: "p:encryptedKey".to_string(),
-                    attr: "saltValue".to_string(),
-                    reason: "saltValue shorter than blockSize".to_string(),
-                })
-                .map(|iv| iv.to_vec()),
-            PasswordKeyIvDerivation::Derived => derive_iv_or_err(
-                &password_key.salt_value,
-                block_key,
-                password_key.block_size,
-                password_key.hash_algorithm,
-            ),
-        }
-    };
+    // MS-OFFCRYPTO: for the password key encryptor (`p:encryptedKey`), the AES-CBC IV used for
+    // `encryptedVerifierHashInput`, `encryptedVerifierHashValue`, and `encryptedKeyValue` is the
+    // password `saltValue` itself (truncated to blockSize). The block key constants are used only
+    // for key derivation.
+    let verifier_iv = password_key
+        .salt_value
+        .get(..password_key.block_size)
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "saltValue".to_string(),
+            reason: "saltValue shorter than blockSize".to_string(),
+        })?;
 
     // Decrypt verifierHashInput.
     let verifier_input = {
@@ -110,8 +88,7 @@ fn decrypt_agile_package_key_from_password(
             key_encrypt_key_len,
             password_key.hash_algorithm,
         )?;
-        let iv = password_iv_for(&VERIFIER_HASH_INPUT_BLOCK)?;
-        let decrypted = decrypt_aes_cbc_no_padding(&k, &iv, &password_key.encrypted_verifier_hash_input)
+        let decrypted = decrypt_aes_cbc_no_padding(&k, verifier_iv, &password_key.encrypted_verifier_hash_input)
             .map_err(|e| OffCryptoError::InvalidAttribute {
                 element: "p:encryptedKey".to_string(),
                 attr: "encryptedVerifierHashInput".to_string(),
@@ -135,8 +112,7 @@ fn decrypt_agile_package_key_from_password(
             key_encrypt_key_len,
             password_key.hash_algorithm,
         )?;
-        let iv = password_iv_for(&VERIFIER_HASH_VALUE_BLOCK)?;
-        let decrypted = decrypt_aes_cbc_no_padding(&k, &iv, &password_key.encrypted_verifier_hash_value)
+        let decrypted = decrypt_aes_cbc_no_padding(&k, verifier_iv, &password_key.encrypted_verifier_hash_value)
             .map_err(|e| OffCryptoError::InvalidAttribute {
                 element: "p:encryptedKey".to_string(),
                 attr: "encryptedVerifierHashValue".to_string(),
@@ -173,9 +149,8 @@ fn decrypt_agile_package_key_from_password(
             key_encrypt_key_len,
             password_key.hash_algorithm,
         )?;
-        let iv = password_iv_for(&KEY_VALUE_BLOCK)?;
         let decrypted =
-            decrypt_aes_cbc_no_padding(&k, &iv, &password_key.encrypted_key_value).map_err(|e| {
+            decrypt_aes_cbc_no_padding(&k, verifier_iv, &password_key.encrypted_key_value).map_err(|e| {
                 OffCryptoError::InvalidAttribute {
                     element: "p:encryptedKey".to_string(),
                     attr: "encryptedKeyValue".to_string(),
@@ -354,27 +329,12 @@ fn decrypt_agile_encrypted_package_impl(
     let key_encrypt_key_len =
         key_len_bytes(info.password_key.key_bits, "p:encryptedKey", "keyBits")?;
     let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
-
-    // Some producers appear to vary how the AES-CBC IV is derived for the password-key-encryptor
-    // fields. Be conservative and try both strategies, treating the verifier-hash mismatch as a
-    // signal to fall back to the alternative IV derivation.
-    let key_value = match decrypt_agile_package_key_from_password(
+    let key_value = decrypt_agile_package_key_from_password(
         &info,
         &password_hash,
         key_encrypt_key_len,
         package_key_len,
-        PasswordKeyIvDerivation::SaltValue,
-    ) {
-        Ok(key) => key,
-        Err(OffCryptoError::WrongPassword) => decrypt_agile_package_key_from_password(
-            &info,
-            &password_hash,
-            key_encrypt_key_len,
-            package_key_len,
-            PasswordKeyIvDerivation::Derived,
-        )?,
-        Err(other) => return Err(other),
-    };
+    )?;
 
     // 2) Decrypt EncryptedPackage stream to plaintext ZIP bytes.
     let (declared_len, ciphertext) = parse_encrypted_package_stream(encrypted_package)?;

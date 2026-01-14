@@ -535,22 +535,17 @@ fn decrypt_key_encryptor_blob(
                 reason: reason.to_string(),
             },
         })?;
-    let iv = derive_iv(
-        &key_encryptor.salt_value,
-        block_key,
-        iv_len,
-        key_encryptor.hash_algorithm,
-    )
-    .map_err(|e| match e {
-        crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
-            OffCryptoError::UnsupportedHashAlgorithm { hash: name }
-        }
-        crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+    // MS-OFFCRYPTO: for password key-encryptor fields (`p:encryptedKey`), the AES-CBC IV is the
+    // `saltValue` itself (truncated to `blockSize`). The `block_key` is used only for key derivation.
+    let iv = key_encryptor
+        .salt_value
+        .get(..iv_len)
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
             element: "encryptedKey".to_string(),
             attr: "saltValue".to_string(),
-            reason: reason.to_string(),
-        },
-    })?;
+            reason: "saltValue shorter than blockSize".to_string(),
+        })?
+        .to_vec();
 
     let mut buf = ciphertext.to_vec();
     decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut buf).map_err(|err| match err {
@@ -659,22 +654,43 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
     // Decrypt HMAC key/value (if present).
     let (hmac_key, hmac_value) = match info.data_integrity.as_ref() {
         Some(di) => {
-            validate_ciphertext_block_aligned(
-                "dataIntegrity.encryptedHmacKey",
-                &di.encrypted_hmac_key,
-            )?;
-            let raw_key =
-                decrypt_key_encryptor_blob(&password_hash, key_encryptor, &HMAC_KEY_BLOCK, &di.encrypted_hmac_key)?;
-            validate_ciphertext_block_aligned(
-                "dataIntegrity.encryptedHmacValue",
-                &di.encrypted_hmac_value,
-            )?;
-            let raw_val = decrypt_key_encryptor_blob(
-                &password_hash,
-                key_encryptor,
-                &HMAC_VALUE_BLOCK,
-                &di.encrypted_hmac_value,
-            )?;
+            // MS-OFFCRYPTO: `dataIntegrity` blobs are encrypted using the *package key*, and IVs are
+            // derived from `keyData/@saltValue` and fixed block keys.
+            validate_ciphertext_block_aligned("dataIntegrity.encryptedHmacKey", &di.encrypted_hmac_key)?;
+            validate_ciphertext_block_aligned("dataIntegrity.encryptedHmacValue", &di.encrypted_hmac_value)?;
+
+            let key_data = &info.key_data;
+            let iv_len = key_data.block_size as usize;
+
+            let iv_key = derive_iv(&key_data.salt_value, &HMAC_KEY_BLOCK, iv_len, key_data.hash_algorithm)
+                .map_err(|e| match e {
+                    crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+                        OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+                    }
+                    crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+                        element: "keyData".to_string(),
+                        attr: "saltValue".to_string(),
+                        reason: reason.to_string(),
+                    },
+                })?;
+            let mut raw_key = di.encrypted_hmac_key.clone();
+            decrypt_aes_cbc_no_padding_in_place(&package_key, &iv_key, &mut raw_key)?;
+
+            let iv_val =
+                derive_iv(&key_data.salt_value, &HMAC_VALUE_BLOCK, iv_len, key_data.hash_algorithm)
+                    .map_err(|e| match e {
+                        crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+                            OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+                        }
+                        crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+                            element: "keyData".to_string(),
+                            attr: "saltValue".to_string(),
+                            reason: reason.to_string(),
+                        },
+                    })?;
+            let mut raw_val = di.encrypted_hmac_value.clone();
+            decrypt_aes_cbc_no_padding_in_place(&package_key, &iv_val, &mut raw_val)?;
+
             let hmac_len = info.key_data.hash_size as usize;
             (
                 Some(raw_key.get(..hmac_len).unwrap_or(&raw_key).to_vec()),
@@ -1210,7 +1226,8 @@ mod tests {
             let key_len = (ke_key_bits / 8) as usize;
             let iv_len = ke_block_size as usize;
             let key = derive_key(pw_hash, block_key, key_len, ke_hash_alg).unwrap();
-            let iv = derive_iv(ke_salt, block_key, iv_len, ke_hash_alg).unwrap();
+            // MS-OFFCRYPTO: password key encryptor blobs use `saltValue` directly as the IV.
+            let iv = ke_salt.get(..iv_len).unwrap();
             let padded = zero_pad(plaintext.to_vec());
             encrypt_aes_cbc_no_padding(&key, &iv, &padded)
         }
@@ -1243,26 +1260,25 @@ mod tests {
             &package_key,
         );
 
-        // dataIntegrity blobs (we don't currently verify HMAC, but decrypting them exercises the same primitive).
+        // dataIntegrity blobs (we don't currently verify HMAC here, but decrypting them exercises the
+        // correct primitive): encrypted using the *package key* and IVs derived from keyData salt.
         let hmac_key_plain = (100u8..120).collect::<Vec<_>>(); // 20 bytes
         let hmac_value_plain = (200u8..220).collect::<Vec<_>>(); // 20 bytes
-        let encrypted_hmac_key = encrypt_ke_blob(
-            &pw_hash,
-            &ke_salt,
-            ke_key_bits,
-            ke_block_size,
-            ke_hash_alg,
-            &HMAC_KEY_BLOCK,
-            &hmac_key_plain,
-        );
-        let encrypted_hmac_value = encrypt_ke_blob(
-            &pw_hash,
-            &ke_salt,
-            ke_key_bits,
-            ke_block_size,
-            ke_hash_alg,
+        let iv_hmac_key =
+            derive_iv(&key_data_salt, &HMAC_KEY_BLOCK, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
+        let encrypted_hmac_key =
+            encrypt_aes_cbc_no_padding(&package_key, &iv_hmac_key, &zero_pad(hmac_key_plain.clone()));
+        let iv_hmac_val = derive_iv(
+            &key_data_salt,
             &HMAC_VALUE_BLOCK,
-            &hmac_value_plain,
+            AES_BLOCK_SIZE,
+            key_data_hash_alg,
+        )
+        .unwrap();
+        let encrypted_hmac_value = encrypt_aes_cbc_no_padding(
+            &package_key,
+            &iv_hmac_val,
+            &zero_pad(hmac_value_plain.clone()),
         );
 
         // Build the EncryptionInfo XML.
