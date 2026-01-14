@@ -132,23 +132,16 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 );
             }
 
-            // Providing a password should either surface a distinct "invalid password" error (when
-            // decryption support is not enabled) or a more specific decryption/compatibility error
-            // (when `encrypted-workbooks` is enabled, because this fixture does not contain a valid
-            // encrypted payload).
+            // Providing a password should surface an "invalid password" style error. Even though
+            // this fixture is malformed (it does not contain a valid encrypted payload), the
+            // password-aware APIs treat "can't decrypt" as `InvalidPassword` for supported OOXML
+            // encryption versions so UIs can prompt/retry without exposing internal format details.
             let err = open_workbook_with_password(&path, Some("wrong"))
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(
-                        err,
-                        Error::UnsupportedOoxmlEncryption {
-                            version_major: 4,
-                            version_minor: 4,
-                            ..
-                        }
-                    ),
-                    "expected Error::UnsupportedOoxmlEncryption(4.4), got {err:?}"
+                    matches!(err, Error::InvalidPassword { .. }),
+                    "expected Error::InvalidPassword, got {err:?}"
                 );
             } else {
                 assert!(
@@ -161,15 +154,8 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(
-                        err,
-                        Error::UnsupportedOoxmlEncryption {
-                            version_major: 4,
-                            version_minor: 4,
-                            ..
-                        }
-                    ),
-                    "expected Error::UnsupportedOoxmlEncryption(4.4), got {err:?}"
+                    matches!(err, Error::InvalidPassword { .. }),
+                    "expected Error::InvalidPassword, got {err:?}"
                 );
             } else {
                 assert!(

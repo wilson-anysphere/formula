@@ -129,12 +129,15 @@ fn open_workbook_with_password_decrypts_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let wb = open_workbook_with_password(&path, Some(password))
-        .expect("open decrypted xlsb workbook");
-    assert!(
-        matches!(wb, Workbook::Xlsb(_)),
-        "expected Workbook::Xlsb, got {wb:?}"
-    );
+    let wb =
+        open_workbook_with_password(&path, Some(password)).expect("expected XLSB to decrypt/open");
+    match wb {
+        Workbook::Xlsb(wb) => {
+            assert_eq!(wb.sheet_metas().len(), 1);
+            assert_eq!(wb.sheet_metas()[0].name, "Sheet1");
+        }
+        other => panic!("expected Workbook::Xlsb, got {other:?}"),
+    }
 }
 
 #[test]
@@ -147,8 +150,8 @@ fn open_workbook_model_with_password_decrypts_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let workbook =
-        open_workbook_model_with_password(&path, Some(password)).expect("open decrypted xlsb model");
+    let workbook = open_workbook_model_with_password(&path, Some(password))
+        .expect("open decrypted xlsb model");
     let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
     assert_eq!(
         sheet.value(CellRef::from_a1("A1").unwrap()),
