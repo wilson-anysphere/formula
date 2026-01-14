@@ -8405,53 +8405,114 @@ export class SpreadsheetApp {
         ? (hidden: { user: boolean; outline: boolean; filter: boolean }) => isHidden(hidden)
         : (hidden: { user: boolean }) => Boolean(hidden?.user);
 
-    // First scan to see if there is any hidden-column metadata at all. Most workbooks have none,
-    // so avoid scheduling an extra recalc pass unless we actually need it.
-    let hasAnyHiddenCols = false;
-    for (const outline of this.outlinesBySheet.values()) {
-      for (const entry of outline.cols.entries.values()) {
-        if (shouldTreatHidden(entry.hidden as any)) {
-          hasAnyHiddenCols = true;
-          break;
-        }
+    const ENGINE_MAX_COLS = 16_384;
+
+    const normalizeHiddenCols = (raw: unknown): number[] => {
+      if (!Array.isArray(raw) || raw.length === 0) return [];
+      const out: number[] = [];
+      for (const entry of raw) {
+        const col = Number(entry);
+        if (!Number.isInteger(col) || col < 0 || col >= ENGINE_MAX_COLS) continue;
+        out.push(col);
       }
-      if (hasAnyHiddenCols) break;
+      out.sort((a, b) => a - b);
+      // Deduplicate after sorting.
+      let write = 0;
+      let last: number | null = null;
+      for (const v of out) {
+        if (last === v) continue;
+        out[write++] = v;
+        last = v;
+      }
+      out.length = write;
+      return out;
+    };
+
+    // Engine hydration applies imported hidden columns from `doc.__sheetHiddenCols`, but users can
+    // still hide/unhide columns before the worker finishes initializing. After init, reconcile the
+    // hydrated (baseline) hidden state with the current outline state:
+    // - hide cols that the outline says are hidden but were not in the baseline
+    // - unhide cols that were hidden in the baseline but the outline says are visible
+    const baselineHiddenBySheetId = new Map<string, number[]>();
+    const hiddenColsBySheetId = (this.document as any)?.__sheetHiddenCols as Record<string, unknown> | null;
+    if (hiddenColsBySheetId && typeof hiddenColsBySheetId === "object") {
+      for (const [sheetId, cols] of Object.entries(hiddenColsBySheetId)) {
+        const normalized = normalizeHiddenCols(cols);
+        if (normalized.length > 0) baselineHiddenBySheetId.set(sheetId, normalized);
+      }
     }
-    if (!hasAnyHiddenCols) return;
 
-    await this.enqueueWasmSync(async (engine) => {
-      if (typeof (engine as any).setColHidden !== "function") return;
-
-      for (const [sheetId, outline] of this.outlinesBySheet.entries()) {
-        for (const [summaryIndex, entry] of outline.cols.entries) {
-          if (!shouldTreatHidden(entry.hidden as any)) continue;
-          // Outline indices are 1-based; engine uses 0-based column indices.
-          const col = summaryIndex - 1;
-          if (col < 0 || col >= this.limits.maxCols) continue;
-          await engine.setColHidden(col, true, sheetId);
-        }
+    const desiredHiddenBySheetId = new Map<string, number[]>();
+    for (const [sheetId, outline] of this.outlinesBySheet.entries()) {
+      const cols: number[] = [];
+      for (const [summaryIndex, entry] of outline.cols.entries) {
+        if (!shouldTreatHidden(entry.hidden as any)) continue;
+        const col = Number(summaryIndex) - 1; // outline indices are 1-based
+        if (!Number.isInteger(col) || col < 0 || col >= ENGINE_MAX_COLS) continue;
+        cols.push(col);
       }
-
-      const changes = await engine.recalculate();
-      this.applyComputedChanges(changes);
-
-      // Keep the legacy outline->engine hidden cache coherent so subsequent unhide operations can
-      // diff correctly (the sync logic does not query the engine for hidden state).
-      if (this.gridMode === "legacy") {
-        const outline = this.getOutlineForSheet(this.sheetId);
-        const hiddenCols: number[] = [];
-        for (const [summaryIndex, entry] of outline.cols.entries) {
-          if (!isHidden(entry.hidden)) continue;
-          const col = summaryIndex - 1;
-          if (col < 0 || col >= this.limits.maxCols) continue;
-          hiddenCols.push(col);
-        }
-        hiddenCols.sort((a, b) => a - b);
-        this.lastSyncedHiddenColsEngine = engine;
-        this.lastSyncedHiddenCols = hiddenCols;
-        this.lastSyncedHiddenColsKey = `${this.sheetId}:${hiddenCols.join(",")}`;
+      cols.sort((a, b) => a - b);
+      // Deduplicate.
+      let write = 0;
+      let last: number | null = null;
+      for (const v of cols) {
+        if (last === v) continue;
+        cols[write++] = v;
+        last = v;
       }
-    });
+      cols.length = write;
+      if (cols.length > 0) desiredHiddenBySheetId.set(sheetId, cols);
+    }
+
+    const unionSheetIds = new Set<string>([...baselineHiddenBySheetId.keys(), ...desiredHiddenBySheetId.keys()]);
+    if (unionSheetIds.size === 0) return;
+
+    const ops: Array<{ sheetId: string; col: number; hidden: boolean }> = [];
+    for (const sheetId of unionSheetIds) {
+      const baseline = baselineHiddenBySheetId.get(sheetId) ?? [];
+      const desired = desiredHiddenBySheetId.get(sheetId) ?? [];
+
+      // Fast-path: identical arrays.
+      if (baseline.length === desired.length && baseline.every((v, i) => v === desired[i])) continue;
+
+      const baselineSet = new Set(baseline);
+      const desiredSet = new Set(desired);
+
+      for (const col of desired) {
+        if (!baselineSet.has(col)) ops.push({ sheetId, col, hidden: true });
+      }
+      for (const col of baseline) {
+        if (!desiredSet.has(col)) ops.push({ sheetId, col, hidden: false });
+      }
+    }
+
+    if (ops.length > 0) {
+      await this.enqueueWasmSync(async (engine) => {
+        if (typeof (engine as any).setColHidden !== "function") return;
+        for (const op of ops) {
+          await engine.setColHidden(op.col, op.hidden, op.sheetId);
+        }
+        const changes = await engine.recalculate();
+        this.applyComputedChanges(changes);
+      });
+    }
+
+    // Keep the legacy outline->engine hidden cache coherent so subsequent unhide operations can
+    // diff correctly (the sync logic does not query the engine for hidden state).
+    if (this.gridMode === "legacy") {
+      const outline = this.getOutlineForSheet(this.sheetId);
+      const hiddenCols: number[] = [];
+      for (const [summaryIndex, entry] of outline.cols.entries) {
+        if (!isHidden(entry.hidden)) continue;
+        const col = summaryIndex - 1;
+        if (col < 0 || col >= this.limits.maxCols) continue;
+        hiddenCols.push(col);
+      }
+      hiddenCols.sort((a, b) => a - b);
+      this.lastSyncedHiddenColsEngine = this.wasmEngine;
+      this.lastSyncedHiddenCols = hiddenCols;
+      this.lastSyncedHiddenColsKey = `${this.sheetId}:${hiddenCols.join(",")}`;
+    }
   }
 
   /**

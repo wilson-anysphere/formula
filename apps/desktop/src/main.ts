@@ -10767,49 +10767,26 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   }
   await app.restoreDocumentState(snapshot);
 
-  // Best-effort: propagate imported hidden-column flags into the WASM engine metadata so
-  // Excel-compatible worksheet functions (e.g. `CELL("width")`) can observe them once the
-  // engine-side semantics are implemented.
+  // Best-effort: keep SpreadsheetApp's legacy outline->engine hidden-column sync cache coherent.
+  //
+  // Imported hidden columns are applied to the WASM engine during `engineHydrateFromDocument()`
+  // via the `doc.__sheetHiddenCols` escape hatch (see above). However, the legacy incremental sync
+  // logic (`SpreadsheetApp.syncHiddenColsToWasmEngine()`) relies on a local cache to compute deltas.
+  //
+  // Seed it here so the first user `unhideCols(...)` operation doesn't get skipped (because the
+  // sync code does not query engine state).
   if (importedHiddenColsBySheetId.size > 0) {
     try {
       const wasmEngine = (app as any).wasmEngine as any;
       if (wasmEngine && typeof wasmEngine.setColHidden === "function") {
-        for (const [sheetId, cols] of importedHiddenColsBySheetId) {
-          for (const col of cols) {
-            const idx = Number(col);
-            if (!Number.isInteger(idx) || idx < 0) continue;
-            // The WASM engine workbook is keyed by stable sheet ids (not display/tab names). Use
-            // the DocumentController sheet id directly so we don't accidentally create phantom
-            // sheets after a sheet rename.
-            await wasmEngine.setColHidden(idx, true, sheetId);
-          }
-        }
-
-        // Keep SpreadsheetApp's hidden-column sync cache consistent with the engine changes we just
-        // applied. Without this, the next `unhideCols` action can be skipped because
-        // `syncHiddenColsToWasmEngine()` only knows about columns it previously synced via its own
-        // cache (it does not query the engine for hidden state).
-        //
-        // Best-effort: cache is legacy-only and sheet-local.
-        try {
-          const activeSheetId = app.getCurrentSheetId();
-          const hiddenCols = importedHiddenColsBySheetId.get(activeSheetId) ?? [];
-          (app as any).lastSyncedHiddenColsEngine = wasmEngine;
-          (app as any).lastSyncedHiddenCols = [...hiddenCols];
-          (app as any).lastSyncedHiddenColsKey = `${activeSheetId}:${hiddenCols.join(",")}`;
-        } catch {
-          // ignore
-        }
-
-        // If the engine produces value-change deltas (e.g. volatile `CELL("width")`), apply them
-        // to keep computed-value caches coherent.
-        if (typeof wasmEngine.recalculate === "function" && typeof (app as any).applyComputedChanges === "function") {
-          const changes = await wasmEngine.recalculate();
-          await (app as any).applyComputedChanges(changes);
-        }
+        const activeSheetId = app.getCurrentSheetId();
+        const hiddenCols = importedHiddenColsBySheetId.get(activeSheetId) ?? [];
+        (app as any).lastSyncedHiddenColsEngine = wasmEngine;
+        (app as any).lastSyncedHiddenCols = [...hiddenCols];
+        (app as any).lastSyncedHiddenColsKey = `${activeSheetId}:${hiddenCols.join(",")}`;
       }
     } catch (err) {
-      console.warn("[formula][desktop] Failed to sync imported hidden columns into WASM engine:", err);
+      console.warn("[formula][desktop] Failed to seed hidden-column engine sync cache:", err);
     }
   }
 
