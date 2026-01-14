@@ -527,6 +527,25 @@ fn calculate_table_filter_var_over_values_column_filters_by_column_values() {
 }
 
 #[test]
+fn calculate_table_filters_over_allnoblankrow_intersect() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // Multiple table filter arguments should combine via intersection, regardless of argument
+    // order. This previously failed when `ALLNOBLANKROW(Table)` returned a non-normalized table
+    // name, causing later filters to overwrite earlier ones instead of intersecting.
+    let value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(Customers), FILTER(ALLNOBLANKROW(Customers), Customers[Name] = \"Alice\"), FILTER(ALLNOBLANKROW(Customers), Customers[Region] = \"East\"))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 1.into());
+}
+
+#[test]
 fn calculate_keepfilters_preserves_existing_filters_for_boolean_expressions() {
     let mut model = build_model();
     model

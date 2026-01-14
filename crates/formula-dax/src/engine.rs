@@ -2807,6 +2807,11 @@ impl DaxEngine {
                             rows,
                             visible_cols,
                         } => {
+                            // Table results are expected to use normalized identifiers. Normalize
+                            // again here to ensure CALCULATE filter intersection semantics remain
+                            // case-insensitive even if a table expression returns a non-normalized
+                            // name.
+                            let table_key = normalize_ident(&table);
                             // `VALUES(Table[Column])`-shaped physical tables are represented as
                             // `(table, representative_row_indices, visible_cols=[col])`.
                             //
@@ -2842,7 +2847,7 @@ impl DaxEngine {
                                     values.insert(v);
                                 }
 
-                                let key = (table.clone(), column.clone());
+                                let key = (table_key.clone(), normalize_ident(column));
                                 if !keep_filters {
                                     clear_columns.insert(key.clone());
                                 }
@@ -2850,9 +2855,9 @@ impl DaxEngine {
                                 Ok(())
                             } else {
                                 if !keep_filters {
-                                    clear_tables.insert(table.clone());
+                                    clear_tables.insert(table_key.clone());
                                 }
-                                row_filters.push((table, rows.into_iter().collect()));
+                                row_filters.push((table_key, rows.into_iter().collect()));
                                 Ok(())
                             }
                         }
@@ -3360,11 +3365,12 @@ impl DaxEngine {
                         Expr::TableName(name) => {
                             // Like `ALL(Table)`, return all physical rows (excluding any
                             // relationship-generated blank member).
+                            let table_key = normalize_ident(name);
                             let table_ref = model
                                 .table(name)
                                 .ok_or_else(|| DaxError::UnknownTable(name.clone()))?;
                             Ok(TableResult::Physical {
-                                table: name.clone(),
+                                table: table_key,
                                 rows: (0..table_ref.row_count()).collect(),
                                 visible_cols: None,
                             })
@@ -3401,7 +3407,7 @@ impl DaxEngine {
                             }
 
                             Ok(TableResult::Physical {
-                                table: table.clone(),
+                                table: normalize_ident(table),
                                 rows,
                                 visible_cols: Some(vec![idx]),
                             })
