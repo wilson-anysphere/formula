@@ -235,6 +235,7 @@ export class FormulaBarFunctionAutocompleteController {
   #suggestions: FunctionSuggestion[] = [];
   #selectedIndex = 0;
   #activeDescendantId: string | null = null;
+  #isComposing = false;
 
   readonly #unsubscribe: Array<() => void> = [];
 
@@ -264,12 +265,23 @@ export class FormulaBarFunctionAutocompleteController {
 
     const updateNow = () => this.update();
     const onBlur = () => this.close();
+    const onCompositionStart = () => {
+      this.#isComposing = true;
+      this.close();
+    };
+    const onCompositionEnd = () => {
+      this.#isComposing = false;
+      // Wait a microtask so the final composition text is present in `.value`.
+      queueMicrotask(() => this.update());
+    };
     this.#textarea.addEventListener("input", updateNow);
     this.#textarea.addEventListener("click", updateNow);
     this.#textarea.addEventListener("keyup", updateNow);
     this.#textarea.addEventListener("focus", updateNow);
     this.#textarea.addEventListener("select", updateNow);
     this.#textarea.addEventListener("blur", onBlur);
+    this.#textarea.addEventListener("compositionstart", onCompositionStart);
+    this.#textarea.addEventListener("compositionend", onCompositionEnd);
 
     this.#unsubscribe.push(() => this.#textarea.removeEventListener("input", updateNow));
     this.#unsubscribe.push(() => this.#textarea.removeEventListener("click", updateNow));
@@ -277,6 +289,8 @@ export class FormulaBarFunctionAutocompleteController {
     this.#unsubscribe.push(() => this.#textarea.removeEventListener("focus", updateNow));
     this.#unsubscribe.push(() => this.#textarea.removeEventListener("select", updateNow));
     this.#unsubscribe.push(() => this.#textarea.removeEventListener("blur", onBlur));
+    this.#unsubscribe.push(() => this.#textarea.removeEventListener("compositionstart", onCompositionStart));
+    this.#unsubscribe.push(() => this.#textarea.removeEventListener("compositionend", onCompositionEnd));
   }
 
   destroy(): void {
@@ -310,6 +324,10 @@ export class FormulaBarFunctionAutocompleteController {
   }
 
   update(): void {
+    if (this.#isComposing) {
+      this.close();
+      return;
+    }
     if (!this.#formulaBar.model.isEditing) {
       this.close();
       return;
