@@ -117,8 +117,18 @@ def _find_src_tauri_dirs(repo_root: Path) -> Iterable[Path]:
         "test-results",
         "playwright-report",
     }
+    # Avoid traversing arbitrarily deep trees when `repo_root` contains extracted artifacts or
+    # build output. A Tauri project should be relatively shallow in the repo (e.g.
+    # apps/desktop/src-tauri/tauri.conf.json).
+    max_depth = 8
     for root, dirs, files in os.walk(repo_root):
         dirs[:] = [d for d in dirs if d not in skip_dirnames]
+        try:
+            depth = len(Path(root).relative_to(repo_root).parts)
+        except ValueError:
+            depth = max_depth
+        if depth >= max_depth:
+            dirs[:] = []
         if "tauri.conf.json" in files:
             yield Path(root)
 

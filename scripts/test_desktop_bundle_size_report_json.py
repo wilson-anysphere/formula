@@ -15,6 +15,16 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
         self.assertTrue(script_py.is_file(), f"desktop_bundle_size_report.py not found at {script_py}")
         return script_py
 
+    def test_src_tauri_discovery_is_depth_bounded(self) -> None:
+        """
+        Perf guardrail: avoid unbounded `os.walk(repo_root)` scans when falling back to
+        src-tauri discovery (repo may contain large build output trees in CI).
+        """
+        src = self._script_path().read_text(encoding="utf-8")
+        # We don't parse Python; just assert the expected max-depth guard exists.
+        self.assertIn("max_depth = 8", src)
+        self.assertIn("if depth >= max_depth", src)
+
     def _run(self, repo_root: Path, argv: list[str]) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.pop("FORMULA_BUNDLE_SIZE_JSON_PATH", None)

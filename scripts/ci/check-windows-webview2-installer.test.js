@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -34,6 +34,14 @@ function detectPythonExecutable() {
 
 const pythonExe = detectPythonExecutable();
 const hasPython = Boolean(pythonExe);
+
+test("check-windows-webview2-installer bounds fallback src-tauri discovery (perf guardrail)", () => {
+  const src = readFileSync(scriptPath, "utf8");
+  assert.ok(
+    src.includes("max_depth = 8") && src.includes("if depth >= max_depth"),
+    "Expected check-windows-webview2-installer.py to bound os.walk repo discovery with max_depth.",
+  );
+});
 
 /**
  * @param {{ installerBytes: Buffer; webviewInstallMode?: string; cwd?: string }} opts
