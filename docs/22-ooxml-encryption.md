@@ -49,9 +49,10 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
 - **MS-OFFCRYPTO parsing + decrypt helpers + low-level building blocks:** `crates/formula-offcrypto`
   - `parse_encryption_info`, `inspect_encryption_info` (`crates/formula-offcrypto/src/lib.rs`)
   - End-to-end decrypt helpers:
-    - `decrypt_encrypted_package` (given `EncryptionInfo` + `EncryptedPackage` stream bytes)
-    - `decrypt_ooxml_from_ole_bytes` (given raw OLE/CFB bytes)
-    - Integrity verification is optional via `DecryptOptions.verify_integrity`
+    - `decrypt_encrypted_package` (given `EncryptionInfo` + `EncryptedPackage` stream bytes;
+      integrity verification is optional via `DecryptOptions.verify_integrity`)
+    - `decrypt_ooxml_from_ole_bytes` (given raw OLE/CFB bytes; does not currently verify
+      `dataIntegrity`)
   - Agile password verifier + secret key (`crates/formula-offcrypto/src/agile.rs`)
   - Agile `EncryptedPackage` segment decryption + IV derivation
     (`crates/formula-offcrypto/src/encrypted_package.rs`, `agile_decrypt_package`)
@@ -492,13 +493,14 @@ follow a consistent flow:
      decryption + `dataIntegrity` validation.
    - `crates/formula-offcrypto` provides MS-OFFCRYPTO parsing plus end-to-end decrypt helpers (e.g.
      `decrypt_encrypted_package`, `decrypt_ooxml_from_ole_bytes`).
-     - Integrity verification is optional there (`DecryptOptions.verify_integrity`).
+     - Integrity verification is optional when using `decrypt_encrypted_package`
+       (`DecryptOptions.verify_integrity`). Other helper APIs do not currently verify `dataIntegrity`.
      - It does not include the more permissive HMAC-target fallbacks found in the higher-level
        decryptors.
 
 4. **Interpret errors**
    - `WrongPassword` / `InvalidPassword`: verifier mismatch ⇒ password wrong (or normalization
-      mismatch).
+     mismatch).
    - `IntegrityMismatch` / `IntegrityCheckFailed`: HMAC mismatch ⇒ tampering/corruption, or (if the
      password is known correct) an implementation bug. Re-check:
      - HMAC target bytes are the **raw `EncryptedPackage` stream bytes** (including the 8-byte
