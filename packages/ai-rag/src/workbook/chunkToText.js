@@ -307,8 +307,8 @@ export function chunkToText(chunk, opts) {
 
   if (headerRow != null && headerRow > 0 && chunk.kind !== "formulaRegion") {
     const preRows = [];
-    const maxPreRows = Math.min(headerRow, 2);
-    for (let r = 0; r < maxPreRows; r += 1) {
+    const maxPreRowsToShow = 2;
+    for (let r = 0; r < headerRow && preRows.length < maxPreRowsToShow; r += 1) {
       const values = [];
       for (let c = 0; c < rowColCount; c += 1) {
         const cell = cells[r]?.[c] || {};
@@ -328,7 +328,7 @@ export function chunkToText(chunk, opts) {
     if (preRows.length) {
       lines.push("PRE-HEADER ROWS:");
       for (const row of preRows) lines.push(`  - ${row}`);
-      const remaining = headerRow - maxPreRows;
+      const remaining = headerRow - preRows.length;
       if (remaining > 0) lines.push(`  - … (+${remaining} more pre-header rows)`);
     }
   }

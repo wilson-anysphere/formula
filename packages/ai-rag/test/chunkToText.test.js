@@ -185,6 +185,27 @@ test("chunkToText indicates when there are additional pre-header rows", () => {
   assert.match(text, /Region=North/);
 });
 
+test("chunkToText surfaces non-empty pre-header rows even if earlier pre-header rows are empty", () => {
+  const chunk = {
+    kind: "dataRegion",
+    title: "Data region A1:B5",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 4, c1: 1 },
+    cells: [
+      [],
+      [],
+      [{ v: "Summary" }, {}],
+      [{ v: "Region" }, { v: "Revenue" }],
+      [{ v: "North" }, { v: 1200 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /PRE-HEADER ROWS:/);
+  assert.match(text, /\bSummary\b/);
+  assert.match(text, /Region=North/);
+});
+
 test("chunkToText treats a sparse header row with blank columns as a header (not as data)", () => {
   const chunk = {
     kind: "table",
