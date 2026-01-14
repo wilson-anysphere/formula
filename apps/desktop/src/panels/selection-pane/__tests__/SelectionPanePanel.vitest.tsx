@@ -609,29 +609,42 @@ describe("Selection Pane panel", () => {
     const chartRow = panelBody.querySelector<HTMLElement>(`[data-testid="selection-pane-item-${drawingId}"]`);
     expect(chartRow).toBeInstanceOf(HTMLElement);
 
-    await act(async () => {
-      chartRow!.click();
-    });
+    const selectionChangedIds: Array<number | null> = [];
+    const onSelectionChanged = (evt: Event) => {
+      selectionChangedIds.push(((evt as CustomEvent)?.detail as any)?.id ?? null);
+    };
+    window.addEventListener("formula:drawing-selection-changed", onSelectionChanged as EventListener);
 
-    expect(app.getSelectedChartId()).toBe(chartId);
-    expect(app.getSelectedDrawingId()).toBe(drawingId);
-    expect(panelBody.querySelector(`[data-testid="selection-pane-item-${drawingId}"]`)?.getAttribute("aria-selected")).toBe("true");
+    try {
+      await act(async () => {
+        chartRow!.click();
+      });
 
-    const deleteBtn = panelBody.querySelector<HTMLButtonElement>(`[data-testid="selection-pane-delete-${drawingId}"]`);
-    expect(deleteBtn).toBeInstanceOf(HTMLButtonElement);
-    await act(async () => {
-      deleteBtn!.click();
-    });
+      expect(app.getSelectedChartId()).toBe(chartId);
+      expect(app.getSelectedDrawingId()).toBe(drawingId);
+      // Canvas-chart selection should also emit the window-level drawing selection event with the
+      // effective selected drawing id (not null).
+      expect(selectionChangedIds).toContain(drawingId);
+      expect(panelBody.querySelector(`[data-testid="selection-pane-item-${drawingId}"]`)?.getAttribute("aria-selected")).toBe("true");
 
-    expect(app.listCharts().some((c) => c.id === chartId)).toBe(false);
-    expect(panelBody.querySelector(`[data-testid="selection-pane-item-${drawingId}"]`)).toBeNull();
+      const deleteBtn = panelBody.querySelector<HTMLButtonElement>(`[data-testid="selection-pane-delete-${drawingId}"]`);
+      expect(deleteBtn).toBeInstanceOf(HTMLButtonElement);
+      await act(async () => {
+        deleteBtn!.click();
+      });
 
-    await act(async () => {
-      unmountRibbon?.();
-      panelBodyRenderer.cleanup([]);
-    });
-    app.destroy();
-    sheetRoot.remove();
+      expect(app.listCharts().some((c) => c.id === chartId)).toBe(false);
+      expect(panelBody.querySelector(`[data-testid="selection-pane-item-${drawingId}"]`)).toBeNull();
+    } finally {
+      window.removeEventListener("formula:drawing-selection-changed", onSelectionChanged as EventListener);
+
+      await act(async () => {
+        unmountRibbon?.();
+        panelBodyRenderer.cleanup([]);
+      });
+      app.destroy();
+      sheetRoot.remove();
+    }
   });
 
   it("reorders ChartStore charts via bring forward / send backward in ?canvasCharts=1 mode", async () => {

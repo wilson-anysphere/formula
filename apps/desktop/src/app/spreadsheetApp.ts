@@ -4155,7 +4155,9 @@ export class SpreadsheetApp {
 
   private dispatchDrawingSelectionChanged(): void {
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("formula:drawing-selection-changed", { detail: { id: this.selectedDrawingId } }));
+      window.dispatchEvent(
+        new CustomEvent("formula:drawing-selection-changed", { detail: { id: this.getSelectedDrawingId() } }),
+      );
     }
     this.emitDrawingSelectionChanged();
   }
