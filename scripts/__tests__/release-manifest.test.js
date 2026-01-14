@@ -542,64 +542,76 @@ test("verify-updater-manifest-signature.mjs verifies latest.json.sig against a t
   const keypair = await readJsonFixture("test-keypair.json");
 
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "formula-updater-sigtest-"));
-  const tmpConfigPath = path.join(tmpDir, "tauri.conf.json");
-  await writeFile(
-    tmpConfigPath,
-    `${JSON.stringify({ plugins: { updater: { pubkey: keypair.publicKeyBase64 } } }, null, 2)}\n`,
-    "utf8",
-  );
+  try {
+    const tmpConfigPath = path.join(tmpDir, "tauri.conf.json");
+    await writeFile(
+      tmpConfigPath,
+      `${JSON.stringify({ plugins: { updater: { pubkey: keypair.publicKeyBase64 } } }, null, 2)}\n`,
+      "utf8",
+    );
 
-  const latestJsonPath = path.join(fixtureDir, "latest.multi-platform.json");
-  const latestSigPath = path.join(fixtureDir, "latest.multi-platform.json.sig");
+    const latestJsonPath = path.join(fixtureDir, "latest.multi-platform.json");
+    const latestSigPath = path.join(fixtureDir, "latest.multi-platform.json.sig");
 
-  const child = spawnSync(
-    process.execPath,
-    [path.join(repoRoot, "scripts", "ci", "verify-updater-manifest-signature.mjs"), latestJsonPath, latestSigPath],
-    {
-      cwd: repoRoot,
-      env: { ...process.env, FORMULA_TAURI_CONF_PATH: tmpConfigPath },
-      encoding: "utf8",
-    },
-  );
+    const child = spawnSync(
+      process.execPath,
+      [
+        path.join(repoRoot, "scripts", "ci", "verify-updater-manifest-signature.mjs"),
+        latestJsonPath,
+        latestSigPath,
+      ],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, FORMULA_TAURI_CONF_PATH: tmpConfigPath },
+        encoding: "utf8",
+      },
+    );
 
-  assert.equal(
-    child.status,
-    0,
-    `verify-updater-manifest-signature.mjs failed (exit ${child.status})\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
-  );
-  assert.match(child.stdout, /signature OK/i);
+    assert.equal(
+      child.status,
+      0,
+      `verify-updater-manifest-signature.mjs failed (exit ${child.status})\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+    );
+    assert.match(child.stdout, /signature OK/i);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("merge-tauri-updater-manifests.mjs CLI merges manifests and writes output JSON", async () => {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "formula-updater-merge-"));
-  const outPath = path.join(tmpDir, "merged.json");
+  try {
+    const outPath = path.join(tmpDir, "merged.json");
 
-  const child = spawnSync(
-    process.execPath,
-    [
-      path.join(repoRoot, "scripts", "merge-tauri-updater-manifests.mjs"),
-      "--out",
-      outPath,
-      path.join("scripts", "__fixtures__", "tauri-updater", "latest.partial.a.json"),
-      path.join("scripts", "__fixtures__", "tauri-updater", "latest.partial.b.json"),
-    ],
-    { cwd: repoRoot, encoding: "utf8" },
-  );
+    const child = spawnSync(
+      process.execPath,
+      [
+        path.join(repoRoot, "scripts", "merge-tauri-updater-manifests.mjs"),
+        "--out",
+        outPath,
+        path.join("scripts", "__fixtures__", "tauri-updater", "latest.partial.a.json"),
+        path.join("scripts", "__fixtures__", "tauri-updater", "latest.partial.b.json"),
+      ],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
 
-  assert.equal(
-    child.status,
-    0,
-    `merge-tauri-updater-manifests.mjs failed (exit ${child.status})\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
-  );
+    assert.equal(
+      child.status,
+      0,
+      `merge-tauri-updater-manifests.mjs failed (exit ${child.status})\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+    );
 
-  const mergedText = await readFile(outPath, "utf8");
-  const merged = JSON.parse(mergedText);
-  assert.equal(merged.version, "0.1.0");
-  assert.ok(merged.platforms && typeof merged.platforms === "object");
-  assert.ok("windows-x86_64" in merged.platforms);
-  assert.ok("windows-aarch64" in merged.platforms);
-  assert.ok("linux-x86_64" in merged.platforms);
-  assert.ok("linux-aarch64" in merged.platforms);
+    const mergedText = await readFile(outPath, "utf8");
+    const merged = JSON.parse(mergedText);
+    assert.equal(merged.version, "0.1.0");
+    assert.ok(merged.platforms && typeof merged.platforms === "object");
+    assert.ok("windows-x86_64" in merged.platforms);
+    assert.ok("windows-aarch64" in merged.platforms);
+    assert.ok("linux-x86_64" in merged.platforms);
+    assert.ok("linux-aarch64" in merged.platforms);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 function assetsMapFromManifest(manifest) {
