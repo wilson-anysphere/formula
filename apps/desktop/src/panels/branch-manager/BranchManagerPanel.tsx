@@ -170,7 +170,7 @@ export function BranchManagerPanel({
                 {t("branchManager.actions.delete")}
               </button>
               <button
-                disabled={!canManage || mutationsDisabled}
+                disabled={!canManage || mutationsDisabled || isCurrent}
                 onClick={() => onStartMerge(b.name)}
               >
                 {t("branchManager.actions.merge")}
