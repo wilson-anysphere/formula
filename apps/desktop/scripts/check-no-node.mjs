@@ -3,6 +3,8 @@ import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../test/sourceTextUtils.js";
+
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcRoot = path.join(desktopRoot, "src");
 
@@ -316,12 +318,13 @@ const violations = [];
 
 for (const file of runtimeFiles) {
   const text = await readFile(file.abs, "utf8");
+  const scanText = stripComments(text);
 
   // Node built-ins (direct).
-  for (const ref of collectImportSpecifiers(text)) {
+  for (const ref of collectImportSpecifiers(scanText)) {
     const reason = classifyNodeBuiltinSpecifier(ref.specifier);
     if (!reason) continue;
-    const { line, snippet } = lineInfo(text, ref.index);
+    const { line, snippet } = lineInfo(scanText, ref.index);
     violations.push({
       file: file.rel,
       line,
@@ -331,9 +334,9 @@ for (const file of runtimeFiles) {
   }
 
   // Node-only runtime detection.
-  for (const match of text.matchAll(processVersionsNodeRe)) {
+  for (const match of scanText.matchAll(processVersionsNodeRe)) {
     const idx = match.index ?? 0;
-    const { line, snippet } = lineInfo(text, idx);
+    const { line, snippet } = lineInfo(scanText, idx);
     violations.push({
       file: file.rel,
       line,
@@ -343,7 +346,7 @@ for (const file of runtimeFiles) {
   }
 
   // Importing Node-only desktop modules into runtime code.
-  for (const ref of collectImportSpecifiers(text)) {
+  for (const ref of collectImportSpecifiers(scanText)) {
     const specifier = ref.specifier.split("?", 1)[0]?.split("#", 1)[0] ?? "";
     if (!specifier.startsWith(".")) continue;
 
@@ -362,7 +365,7 @@ for (const file of runtimeFiles) {
       nodeOnlyAbsDirs.some((dir) => resolved === dir || resolved.startsWith(`${dir}${path.sep}`));
     if (!isNodeOnly) continue;
 
-    const { line, snippet } = lineInfo(text, ref.index);
+    const { line, snippet } = lineInfo(scanText, ref.index);
     violations.push({
       file: file.rel,
       line,

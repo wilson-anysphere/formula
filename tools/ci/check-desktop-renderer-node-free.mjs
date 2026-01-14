@@ -4,6 +4,8 @@ import { builtinModules } from "node:module";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 /**
  * Guardrail: the Tauri desktop renderer bundle must stay Node-free.
  *
@@ -163,7 +165,8 @@ for await (const absPath of walkFiles(desktopSrcDir)) {
   if (!isDesktopRendererSourceFile(absPath)) continue;
 
   const sourceText = await fs.readFile(absPath, "utf8");
-  const imports = listImportSpecifiers(sourceText);
+  const stripped = stripComments(sourceText);
+  const imports = listImportSpecifiers(stripped);
   for (const imp of imports) {
     // Keep Node-only tooling out of the WebView renderer import graph. Anything in
     // `apps/desktop/tools` or `apps/desktop/scripts` is assumed to be Node-only (or at least
@@ -172,7 +175,7 @@ for await (const absPath of walkFiles(desktopSrcDir)) {
       const cleaned = stripQueryAndHash(imp.specifier);
       const resolved = path.resolve(path.dirname(absPath), cleaned);
       if (isPathWithin(resolved, desktopToolsDir) || isPathWithin(resolved, desktopScriptsDir)) {
-        const { line, column } = lineAndColumnForIndex(sourceText, imp.index);
+        const { line, column } = lineAndColumnForIndex(stripped, imp.index);
         violations.push({
           file: toPosixPath(path.relative(repoRoot, absPath)),
           line,
@@ -185,7 +188,7 @@ for await (const absPath of walkFiles(desktopSrcDir)) {
     }
 
     if (!isBannedImport(imp.specifier)) continue;
-    const { line, column } = lineAndColumnForIndex(sourceText, imp.index);
+    const { line, column } = lineAndColumnForIndex(stripped, imp.index);
     violations.push({
       file: toPosixPath(path.relative(repoRoot, absPath)),
       line,

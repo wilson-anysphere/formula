@@ -103,6 +103,44 @@ test("desktop renderer Node-free guards fail on imports from apps/desktop/tools"
   }
 });
 
+test("desktop renderer Node-free guards ignore commented-out Node imports", async () => {
+  const filename = `__node_guard_comment_only_test__.${process.pid}.${Date.now()}.ts`;
+  const filePath = path.join(desktopSrcDir, filename);
+  const relToRepo = `apps/desktop/src/${filename}`;
+  const relToDesktop = `src/${filename}`;
+
+  await fs.writeFile(
+    filePath,
+    [
+      "// Intentionally mention Node-only APIs in comments; guards should ignore commented-out code.",
+      '// import fs from "node:fs";',
+      "// process.versions.node",
+      '/* import path from "path"; */',
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const guard = runNode(nodeFreeGuardScript);
+    assert.equal(
+      guard.status,
+      0,
+      `expected tools/ci/check-desktop-renderer-node-free.mjs to ignore comment-only Node imports.\nstdout:\n${guard.stdout}\nstderr:\n${guard.stderr}`,
+    );
+    assert.doesNotMatch(guard.stderr ?? "", new RegExp(relToRepo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const checkNoNode = runNode(checkNoNodeScript);
+    assert.equal(
+      checkNoNode.status,
+      0,
+      `expected apps/desktop/scripts/check-no-node.mjs to ignore comment-only Node imports.\nstdout:\n${checkNoNode.stdout}\nstderr:\n${checkNoNode.stderr}`,
+    );
+    assert.doesNotMatch(checkNoNode.stderr ?? "", new RegExp(relToDesktop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    await fs.rm(filePath, { force: true }).catch(() => {});
+  }
+});
+
 test("desktop renderer Node-free guards catch comment-wrapped dynamic imports", async () => {
   const filename = `__node_comment_import_test__.${process.pid}.${Date.now()}.ts`;
   const filePath = path.join(desktopSrcDir, filename);
