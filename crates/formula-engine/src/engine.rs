@@ -1079,7 +1079,6 @@ impl Engine {
         let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
             return;
         };
-
         let before = sheet
             .col_properties
             .get(&col_0based)
@@ -14933,6 +14932,35 @@ fn walk_calc_expr(
                         }
                         visiting_names.remove(&visit_key);
                     }
+                }
+            }
+
+            if let Some(spec) = crate::functions::lookup_function(name) {
+                // `CELL("width", ref)` consults column metadata for `ref` but does not depend on the
+                // contents of `ref`. Avoid registering plain reference literals as calc precedents
+                // so formulas like `A1 = CELL("width", A1)` do not create spurious circular
+                // references.
+                if spec.name == "CELL"
+                    && args.len() >= 2
+                    && matches!(&args[0], Expr::Text(info) if info.trim().eq_ignore_ascii_case("width"))
+                    && matches!(
+                        &args[1],
+                        Expr::CellRef(_) | Expr::RangeRef(_) | Expr::StructuredRef(_) | Expr::SpillRange(_)
+                    )
+                {
+                    for a in args.iter().skip(2) {
+                        walk_calc_expr(
+                            a,
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                    }
+                    return;
                 }
             }
 

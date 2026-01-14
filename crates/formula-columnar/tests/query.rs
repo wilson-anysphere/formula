@@ -902,6 +902,32 @@ fn hash_join_handles_duplicate_keys() {
 }
 
 #[test]
+fn hash_right_join_includes_unmatched_right_and_respects_duplicates() {
+    let schema = vec![ColumnSchema {
+        name: "k".to_owned(),
+        column_type: ColumnType::DateTime,
+    }];
+    let left = build_table(
+        schema.clone(),
+        vec![vec![Value::DateTime(1)], vec![Value::DateTime(1)]],
+    );
+    let right = build_table(
+        schema,
+        vec![vec![Value::DateTime(1)], vec![Value::DateTime(2)]],
+    );
+
+    let join = left.hash_right_join(&right, 0, 0).unwrap();
+    let mut pairs: Vec<(Option<usize>, usize)> = join
+        .left_indices
+        .into_iter()
+        .zip(join.right_indices.into_iter())
+        .collect();
+    pairs.sort_by_key(|(l, r)| (*r, l.unwrap_or(usize::MAX)));
+
+    assert_eq!(pairs, vec![(Some(0), 0), (Some(1), 0), (None, 1)]);
+}
+
+#[test]
 fn hash_join_ignores_null_keys() {
     let schema = vec![ColumnSchema {
         name: "k".to_owned(),
@@ -1161,6 +1187,66 @@ fn hash_left_join_multi_includes_unmatched_and_null_keys() {
     assert_eq!(
         join.right_indices,
         vec![Some(0), None, None, None, Some(1)]
+    );
+}
+
+#[test]
+fn hash_right_join_multi_includes_unmatched_and_null_keys() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::Null, Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("A")), Value::Null],
+            vec![Value::String(Arc::<str>::from("C")), Value::DateTime(2)],
+        ],
+    );
+
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("C")), Value::DateTime(2)],
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("D")), Value::DateTime(2)],
+            vec![Value::Null, Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        ],
+    );
+
+    let join = left
+        .hash_right_join_multi(&right, &[0, 1], &[0, 1])
+        .unwrap();
+
+    let mut pairs: Vec<(Option<usize>, usize)> = join
+        .left_indices
+        .into_iter()
+        .zip(join.right_indices.into_iter())
+        .collect();
+    pairs.sort_by_key(|(l, r)| (*r, l.unwrap_or(usize::MAX)));
+
+    assert_eq!(
+        pairs,
+        vec![
+            (Some(0), 0),
+            (Some(4), 1),
+            (Some(1), 2),
+            (None, 3),
+            (None, 4),
+            (None, 5),
+        ]
     );
 }
 
