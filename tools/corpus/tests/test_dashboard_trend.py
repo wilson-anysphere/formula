@@ -34,6 +34,11 @@ class DashboardTrendTests(unittest.TestCase):
             "top_diff_parts_total": [{"part": "xl/workbook.xml", "count": 4}],
             "top_diff_part_groups_critical": [{"group": "worksheet_xml", "count": 5}],
             "top_diff_part_groups_total": [{"group": "worksheet_xml", "count": 6}],
+            "top_functions_in_failures": [
+                {"function": "VLOOKUP", "count": 10},
+                {"function": "SUM", "count": 2},
+            ],
+            "top_features_in_failures": [{"feature": "has_vba", "count": 3}],
             "failures_by_category": {"round_trip_diff": 1},
             "failures_by_round_trip_failure_kind": {"round_trip_styles": 1},
             # Size ratios: [110/100=1.1, 180/200=0.9]
@@ -100,6 +105,12 @@ class DashboardTrendTests(unittest.TestCase):
         )
         self.assertEqual(
             entry["failures_by_round_trip_failure_kind"], {"round_trip_styles": 1}
+        )
+        self.assertEqual(
+            entry["top_functions_in_failures"][0], {"function": "VLOOKUP", "count": 10}
+        )
+        self.assertEqual(
+            entry["top_features_in_failures"][0], {"feature": "has_vba", "count": 3}
         )
 
     def test_append_trend_file_appends_and_caps(self) -> None:

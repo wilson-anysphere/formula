@@ -349,6 +349,8 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
     _top_list("top_diff_parts_total", list_key="part")
     _top_list("top_diff_part_groups_critical", list_key="group")
     _top_list("top_diff_part_groups_total", list_key="group")
+    _top_list("top_functions_in_failures", list_key="function")
+    _top_list("top_features_in_failures", list_key="feature")
 
     # Perf trend signals (optional; only present when dashboard has timings data).
     for key, step, stat_key in [
