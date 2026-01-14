@@ -2,103 +2,21 @@ use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 mod model;
 mod schema;
 pub mod slicers;
 
-pub use schema::{CalculatedField, CalculatedItem};
 pub use model::{
     FilterField, GrandTotals, Layout, PivotCacheId, PivotConfig, PivotDestination, PivotSource,
     PivotTableModel, SubtotalPosition,
 };
+pub use schema::{CalculatedField, CalculatedItem};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
-
-/// Layout mode for a pivot table.
-///
-/// This is part of the canonical, serde-friendly pivot model used across IPC / persistence.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    /// Excel's default compact form.
-    #[default]
-    Compact,
-    /// Tabular form (one column per row field).
-    Tabular,
-    /// Outline form (grouped fields in a hierarchy).
-    Outline,
-}
-
-/// Where subtotals are displayed for each row/column field.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    /// Excel default behavior.
-    #[default]
-    Automatic,
-    /// No subtotals.
-    None,
-    /// Subtotals shown at the top of each group.
-    Top,
-    /// Subtotals shown at the bottom of each group.
-    Bottom,
-}
-
-/// Whether grand totals are enabled for pivot rows/columns.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    pub rows: bool,
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
-/// Filter configuration for a pivot field.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// Allowed items for this filter. `None` means no filtering (all items allowed).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<HashSet<PivotKeyPart>>,
-}
-
-/// Canonical pivot configuration stored alongside a pivot table definition.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotConfig {
-    #[serde(default)]
-    pub row_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub column_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub value_fields: Vec<ValueField>,
-    #[serde(default)]
-    pub filter_fields: Vec<FilterField>,
-    // Backward compat: these fields were added later; missing keys should decode to empty vectors.
-    #[serde(default)]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default)]
-    pub calculated_items: Vec<CalculatedItem>,
-    #[serde(default)]
-    pub layout: Layout,
-    #[serde(default)]
-    pub subtotals: SubtotalPosition,
-    #[serde(default)]
-    pub grand_totals: GrandTotals,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -379,103 +297,6 @@ pub struct ValueField {
     pub base_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
-}
-
-/// Filter configuration for a pivot field.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// If `None`, all items are allowed. If `Some`, only the specified items are included.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<std::collections::HashSet<PivotKeyPart>>,
-}
-
-/// Layout mode for row/column fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Outline,
-    Tabular,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Layout::Tabular
-    }
-}
-
-/// Where subtotals should be rendered for row fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    None,
-    Top,
-    Bottom,
-}
-
-impl Default for SubtotalPosition {
-    fn default() -> Self {
-        SubtotalPosition::None
-    }
-}
-
-/// Whether to include grand totals for rows and/or columns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    pub rows: bool,
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
-/// Canonical (IPC/persistence-friendly) pivot configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotConfig {
-    #[serde(default)]
-    pub row_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub column_fields: Vec<PivotField>,
-    #[serde(default)]
-    pub value_fields: Vec<ValueField>,
-    #[serde(default)]
-    pub filter_fields: Vec<FilterField>,
-    #[serde(default)]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default)]
-    pub calculated_items: Vec<CalculatedItem>,
-    #[serde(default)]
-    pub layout: Layout,
-    #[serde(default)]
-    pub subtotals: SubtotalPosition,
-    #[serde(default)]
-    pub grand_totals: GrandTotals,
-}
-
-impl Default for PivotConfig {
-    fn default() -> Self {
-        Self {
-            row_fields: Vec::new(),
-            column_fields: Vec::new(),
-            value_fields: Vec::new(),
-            filter_fields: Vec::new(),
-            calculated_fields: Vec::new(),
-            calculated_items: Vec::new(),
-            layout: Layout::default(),
-            subtotals: SubtotalPosition::default(),
-            grand_totals: GrandTotals::default(),
-        }
-    }
 }
 
 impl From<&str> for ScalarValue {
