@@ -475,10 +475,12 @@ pub struct DataModel {
 }
 
 /// A compact representation of the set of rows that share the same relationship key on the
-/// "to" side of a relationship.
+/// [`Relationship::to_table`] side of a relationship.
 ///
-/// For the common `OneToMany` case, keys are unique and we store a single row index without
-/// allocating.
+/// - For [`Cardinality::OneToMany`] and [`Cardinality::OneToOne`], keys are unique on the `to_table`
+///   side and we store a single row index via [`RowSet::One`] without allocating.
+/// - For [`Cardinality::ManyToMany`], keys can map to multiple rows on the `to_table` side and we
+///   store all matching rows via [`RowSet::Many`].
 #[derive(Clone, Debug)]
 pub(crate) enum RowSet {
     One(usize),
@@ -650,7 +652,14 @@ impl UnmatchedFactRowsBuilder {
         self.rows
     }
 }
-
+/// Internal relationship representation with precomputed key indices used by filter propagation
+/// and row-context navigation.
+///
+/// - `to_index` maps each key value in `to_table[to_column]` to the set of matching row indices in
+///   `to_table` (see [`RowSet`] for how this is represented compactly).
+/// - `from_index`, when present, maps each key value in `from_table[from_column]` to the list of
+///   matching row indices in `from_table`. Columnar fact tables omit this index and rely on
+///   backend filter primitives instead.
 #[derive(Clone, Debug)]
 pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
@@ -680,11 +689,13 @@ pub(crate) struct RelationshipInfo {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RelationshipPathDirection {
-    /// Follow relationships in their defined direction:
-    /// `from_table (many) -> to_table (one)`.
+    /// Follow relationships in their defined direction: `from_table -> to_table`.
+    ///
+    /// The name reflects the common 1:* star-schema case where `from_table` is the many-side table
+    /// and `to_table` is the one-side table, but the direction is meaningful for
+    /// [`Cardinality::ManyToMany`] as well.
     ManyToOne,
-    /// Follow relationships in reverse:
-    /// `to_table (one) -> from_table (many)`.
+    /// Follow relationships in reverse: `to_table -> from_table`.
     OneToMany,
 }
 

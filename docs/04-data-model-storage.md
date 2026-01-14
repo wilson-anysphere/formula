@@ -303,11 +303,12 @@ Row-context navigation follows the relationship orientation (`fromTable` → `to
 
 Pivot/group-by note: grouping/pivoting by columns across a many-to-many relationship **expands** a
 base row into multiple related rows. When a key matches multiple rows on the `toTable` side, the
-engine treats the group key as a set of possible related **rows/tuples**. Columns from the same
+engine treats the group key as a set of possible related **rows/tuples**: columns from the same
 related table stay correlated per related row, while the engine takes a cartesian product across
 **independent** grouping sources (base-table columns and each distinct relationship path). This can
 duplicate measure contributions (a single fact row can contribute to multiple groups), so summing
-group totals can “double count” compared to an ungrouped total.
+group totals can “double count” compared to an ungrouped total. The expansion respects the current
+filter context on the related tables.
 
 ### Referential Integrity
 

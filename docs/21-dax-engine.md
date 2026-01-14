@@ -567,15 +567,18 @@ pub fn pivot(
 - `base_table`: the table that is scanned/grouped (typically a fact table).
 - `group_by`: ordered list of grouping columns.
   - Some execution paths require every `GroupByColumn.table == base_table`.
-  - When `GroupByColumn.table != base_table`, the pivot engine will try to resolve a **unique active
-    relationship path** from `base_table` to the group-by table (a `ManyToOne` chain) and compute the key
-    via repeated relationship lookups (similar to `RELATED`, but possibly multi-hop).
+  - When `GroupByColumn.table != base_table`, the pivot engine resolves a **unique active relationship
+    path** from `base_table` to the group-by table (a `ManyToOne` chain), honoring relationship overrides
+    from the `FilterContext` (`USERELATIONSHIP`, `CROSSFILTER`).
     - If no path exists, or there are multiple active paths, pivot returns an evaluation error.
     - Relationship path resolution consults `FilterContext` overrides:
       - `USERELATIONSHIP` activation (and the “override pairs” semantics described above)
       - `CROSSFILTER(..., NONE)` disabling relationships
-    - If the path contains a `ManyToMany` hop, pivot expands a base row into multiple related key
-      values (and combinations), which can duplicate measure contributions.
+    - If every hop maps a key to at most one row, the group key is computed via chained lookups (like
+      `RELATED`, possibly multi-hop).
+    - If any hop maps a key to multiple rows (many-to-many), pivot **expands group keys** by enumerating
+      related rows, collecting distinct attribute values per grouping column, and taking the cartesian
+      product across grouping columns (measure duplication / double-counting risk).
 - `measures`: list of named expressions to evaluate per group.
   - A `PivotMeasure` is *not* required to correspond to a named model measure; `expression` is parsed as DAX.
 - `filter`: the initial filter context applied to the pivot query.
@@ -591,52 +594,60 @@ pub fn pivot(
 `pivot(...)` chooses the fastest applicable strategy:
 
 1. **Columnar group-by + planned measures** (`pivot_columnar_group_by`)  
-   Fast path when:
-   - all `group_by` columns are on `base_table`, and
-   - the backend supports `group_by_aggregations`, and
-   - every measure can be “planned” into a small set of aggregations + arithmetic
+    Fast path when:
+    - all `group_by` columns are on `base_table`, and
+    - the backend supports `group_by_aggregations`, and
+    - every measure can be “planned” into a small set of aggregations + arithmetic
 
-   Planned expressions support:
-   - Aggregations over `base_table` columns:
-     - `SUM`, `AVERAGE`, `MIN`, `MAX`
-     - `COUNT`, `COUNTA`, `COUNTBLANK`
-     - `DISTINCTCOUNT`
-     - `COUNTROWS(base_table)`
-   - arithmetic (`+ - * /`), unary `-`
-   - text concatenation (`&`)
-   - comparisons (`= <> < <= > >=`)
-   - boolean ops (`&&`/`||`), plus `NOT`, `AND`, `OR`
-   - `IF`, `ISBLANK`, `COALESCE`, `DIVIDE`
-   - references to named measures that expand to the above
+    Planned expressions support:
+    - Aggregations over `base_table` columns:
+      - `SUM`, `AVERAGE`, `MIN`, `MAX`
+      - `COUNT`, `COUNTA`, `COUNTBLANK`
+      - `DISTINCTCOUNT`
+      - `COUNTROWS(base_table)`
+    - arithmetic (`+ - * /`), unary `-`
+    - text concatenation (`&`)
+    - comparisons (`= <> < <= > >=`)
+    - boolean ops (`&&`/`||`), plus `NOT`, `AND`, `OR`
+    - `IF`, `ISBLANK`, `COALESCE`, `DIVIDE`
+    - references to named measures that expand to the above
 
 2. **Columnar groups + per-group measure evaluation** (`pivot_columnar_groups_with_measure_eval`)  
-   Fast path when:
-   - `group_by` is non-empty and only uses `base_table` columns
-   - the backend can produce distinct group keys quickly
+    Fast path when:
+    - `group_by` is non-empty and only uses `base_table` columns
+    - the backend can produce distinct group keys quickly
 
-   Measures are then evaluated via `DaxEngine` per group. This is still *O(groups × measure_cost)*.
+    Measures are then evaluated via `DaxEngine` per group. This is still *O(groups × measure_cost)*.
 
-3. **Columnar star-schema group-by + planned measures** (`pivot_columnar_star_schema_group_by`)  
-   Fast path when:
-   - the base table is columnar and supports `group_by_aggregations`
-   - `group_by` may include:
-     - base table columns, and
-     - one-hop related dimension columns (`base_table (many) -> dim_table (one)`; multi-hop is not supported)
-   - measures are plannable, and their required aggregations are composable for rollup:
-     - `AVERAGE` is currently not supported by this fast path
-     - `DISTINCTCOUNT` is only allowed when it is constant within the final group (i.e. the counted column is
-       itself part of the user-specified base-table group keys)
+3. **Row-scan many-to-many group expansion** (`pivot_row_scan_many_to_many`)  
+    Used when:
+    - any relationship hop needed to resolve a group-by column has non-unique keys (many-to-many)
 
-   Internally this groups by base-table columns and foreign keys, then “rolls up” those groups into the
-   requested dimension attribute keys using relationship lookups.
+    The engine scans base rows, expands each base row into one or more group keys (cartesian product
+    of per-column related values), then evaluates measures per group. This path can be much slower
+    than the columnar fast paths and can generate many groups.
 
-4. **Row-scan planned group-by** (`pivot_planned_row_group_by`)  
-   Works for non-columnar backends (and supports grouping by related dimension columns via a unique active
-   relationship path), but still requires that measures are plannable (same restrictions as path 1).
+4. **Columnar star-schema group-by + planned measures** (`pivot_columnar_star_schema_group_by`)  
+    Fast path when:
+    - the base table is columnar and supports `group_by_aggregations`
+    - `group_by` may include:
+      - base table columns, and
+      - one-hop related dimension columns (`base_table (many) -> dim_table (one)`; multi-hop is not supported)
+    - measures are plannable, and their required aggregations are composable for rollup:
+      - `AVERAGE` is currently not supported by this fast path
+      - `DISTINCTCOUNT` is only allowed when it is constant within the final group (i.e. the counted column is
+        itself part of the user-specified base-table group keys)
 
-5. **Fallback row-scan** (`pivot_row_scan`)  
-   Always works, but is the slowest: it scans base rows to enumerate groups, then evaluates each measure
-   via `DaxEngine` per group.
+    Internally this groups by base-table columns and foreign keys, then “rolls up” those groups into the
+    requested dimension attribute keys using relationship lookups.
+
+5. **Row-scan planned group-by** (`pivot_planned_row_group_by`)  
+    Works for non-columnar backends (and supports grouping by related dimension columns via a unique active
+    relationship path), but still requires that measures are plannable (same restrictions as path 1).
+
+6. **Fallback row-scan** (`pivot_row_scan`)  
+    Always works, but is the slowest: it scans base rows to enumerate groups, then evaluates each measure
+    via `DaxEngine` per group.
 
 ### `pivot_crosstab(...)`
 
@@ -884,12 +895,13 @@ assert_eq!(result.columns, vec!["Fact[Category]".to_string(), "Total".to_string(
 This is not an exhaustive list, but the most common contributor-facing constraints:
 
 - **Relationships**
-  - `OneToMany`, `OneToOne`, and `ManyToMany` are supported.
+  - `OneToMany`, `OneToOne`, and `ManyToMany` are supported (many-to-many uses distinct-key propagation).
   - Only single-column relationships are supported.
   - `RELATED` errors when a relationship key matches multiple rows on the `to_table` side (ambiguous scalar lookup).
-  - Grouping/pivoting by columns across a `ManyToMany` relationship uses expansion semantics: a base
-    row can contribute to multiple related group keys (and combinations), which can duplicate measure
-    contributions.
+  - Grouping/pivoting by columns across a many-to-many relationship uses expansion semantics: a base row can
+    contribute to multiple group keys (and combinations), which can duplicate measure contributions.
+  - `SUMMARIZECOLUMNS` grouping currently expects unique lookups when traversing relationships and will error
+    if a hop matches multiple rows (many-to-many).
 - **DAX language coverage**
   - Variables (`VAR`/`RETURN`) are supported.
   - Table constructors (`{ ... }`) are limited to one-column literals (no nesting / no multi-column rows),

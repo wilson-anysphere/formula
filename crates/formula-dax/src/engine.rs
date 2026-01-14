@@ -2222,10 +2222,10 @@ impl DaxEngine {
             expr: &Expr,
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
-            env: &mut VarEnv,
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
+            env: &mut VarEnv,
         ) -> DaxResult<()> {
             let mut referenced_tables: HashSet<String> = HashSet::new();
             let mut referenced_columns: HashSet<(String, String)> = HashSet::new();
@@ -2387,10 +2387,10 @@ impl DaxEngine {
                     arg,
                     &eval_filter,
                     row_ctx,
-                    env,
                     keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
+                    env,
                 )?,
                 Expr::Call { name, .. }
                     if name.eq_ignore_ascii_case("NOT")
@@ -2403,10 +2403,10 @@ impl DaxEngine {
                         arg,
                         &eval_filter,
                         row_ctx,
-                        env,
                         keep_filters,
                         &mut clear_columns,
                         &mut row_filters,
+                        env,
                     )?
                 }
                 Expr::BinaryOp { op, left, right } => {
@@ -4701,11 +4701,11 @@ fn propagate_filter(
 ) -> DaxResult<bool> {
     match direction {
         Direction::ToMany => {
-            // Propagate allowed keys from the relationship's `to_table` to the `from_table`.
+            // Propagate allowed keys from `to_table` to `from_table`.
             //
-            // This is the standard Tabular/PowerPivot propagation primitive for both 1:* and 1:1
-            // relationships (for 1:1, the `from_table` keys are also unique, but we keep the same
-            // index shape and propagation logic).
+            // This is the default relationship direction in Tabular/PowerPivot. For 1:* and 1:1 it
+            // corresponds to one → many propagation; for *:* it still uses key-set propagation
+            // based on the distinct set of visible keys on the `to_table` side.
             let to_table_name = relationship.rel.to_table.as_str();
             let from_table_name = relationship.rel.from_table.as_str();
 
@@ -4715,8 +4715,8 @@ fn propagate_filter(
 
             let blank_row_allowed = blank_row_allowed(filter, to_table_name);
 
-            // If the one-side table is unfiltered (including the relationship's implicit blank
-            // row), it should not restrict the many-side table.
+            // If `to_table` is unfiltered (including the relationship's implicit blank/unknown
+            // member), it should not restrict `from_table`.
             if blank_row_allowed && to_set.all_true() {
                 return Ok(false);
             }
@@ -4821,8 +4821,9 @@ fn propagate_filter(
                 }
 
                 if blank_row_allowed {
-                    // Include fact rows whose foreign key does not match any key in the dimension.
-                    // Tabular models treat those rows as belonging to a virtual blank dimension row.
+                    // Include `from_table` rows whose key is BLANK or does not match any key in
+                    // `to_table`. Tabular models treat those rows as belonging to a virtual
+                    // blank/unknown member on the `to_table` side.
                     for (key, rows) in from_index {
                         if key.is_blank() || !relationship.to_index.contains_key(key) {
                             for &row in rows {
@@ -4864,6 +4865,9 @@ fn propagate_filter(
                 }
 
                 if blank_row_allowed {
+                    // Include `from_table` rows whose key is BLANK or does not match any key in
+                    // `to_table`. Tabular models treat those rows as belonging to a virtual
+                    // blank/unknown member on the `to_table` side.
                     if let Some(unmatched) = relationship.unmatched_fact_rows.as_ref() {
                         unmatched.for_each_row(|row| {
                             if row < from_set.len() && from_set.get(row) {
@@ -4892,10 +4896,10 @@ fn propagate_filter(
             Ok(changed)
         }
         Direction::ToOne => {
-            // Propagate allowed keys from the relationship's `from_table` back to the `to_table`.
+            // Propagate allowed keys from `from_table` back to `to_table`.
             //
             // When `cross_filter_direction == Both`, this enables bidirectional filtering for both
-            // 1:* and 1:1 relationships.
+            // 1:* / 1:1 and *:* relationships.
             let to_table_name = relationship.rel.to_table.as_str();
             let from_table_name = relationship.rel.from_table.as_str();
 
@@ -4906,9 +4910,9 @@ fn propagate_filter(
                 .get(to_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
 
-            // Similarly, if the many-side table isn't filtered, it should not restrict the
-            // one-side table. In particular, bidirectional relationships should not remove
-            // dimension members that simply have no matching fact rows.
+            // If `from_table` isn't filtered, it should not restrict `to_table`. In particular,
+            // bidirectional relationships should not remove `to_table` rows that simply have no
+            // matching `from_table` rows.
             if from_set.all_true() {
                 return Ok(false);
             }
@@ -5170,10 +5174,11 @@ fn virtual_blank_row_exists(
     table: &str,
     sets: Option<&HashMap<String, BitVec>>,
 ) -> DaxResult<bool> {
-    // Tabular models materialize an "unknown" (blank) row on the one-side of relationships when
-    // there are fact-side rows whose foreign key is BLANK or has no match in the dimension. We
-    // model that row virtually (at `row_count()`), so we need to know whether it exists for a
-    // given table under the currently active relationship set (including `USERELATIONSHIP`).
+    // Tabular models materialize an "unknown" (blank) row on the `to_table` side of relationships
+    // when there are rows on the `from_table` side whose key is BLANK or has no match in the
+    // related `to_table`. We model that row virtually (at `row_count()`), so we need to know
+    // whether it exists for a given table under the currently active relationship set (including
+    // `USERELATIONSHIP`).
 
     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
     for &idx in &filter.active_relationship_overrides {
@@ -5213,8 +5218,8 @@ fn virtual_blank_row_exists(
             continue;
         }
 
-        // A virtual blank row exists if the relationship has any *currently visible* fact-side
-        // row whose foreign key is BLANK or has no match in the dimension.
+        // A virtual blank row exists if the relationship has any *currently visible* `from_table`
+        // row whose key is BLANK or has no match in `to_table`.
         if filter.is_empty() {
             if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
                 if !unmatched.is_empty() {
