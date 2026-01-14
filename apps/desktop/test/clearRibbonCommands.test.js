@@ -87,6 +87,8 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   const disabling = fs.readFileSync(disablingPath, "utf8");
   const editingDisabledPath = path.join(__dirname, "..", "src", "ribbon", "ribbonEditingDisabledById.ts");
   const editingDisabled = fs.readFileSync(editingDisabledPath, "utf8");
+  const commandHandlersPath = path.join(__dirname, "..", "src", "ribbon", "commandHandlers.ts");
+  const commandHandlers = fs.readFileSync(commandHandlersPath, "utf8");
 
   // Clear Contents is an editing command (used by Delete key + ribbon), so it should be registered as `edit.clearContents`.
   assert.match(
@@ -148,6 +150,16 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   // Ensure the old bespoke routing module isn't reintroduced.
   assert.doesNotMatch(main, /\bhomeEditingClearCommandRouting\b/);
   assert.doesNotMatch(main, /\bresolveHomeEditingClearCommandTarget\b/);
+  assert.doesNotMatch(
+    main,
+    /["']format\.clearContents["']/,
+    "Expected main.ts to not reference legacy format.clearContents",
+  );
+  assert.doesNotMatch(
+    commandHandlers,
+    /["']format\.clearContents["']/,
+    "Expected ribbon/commandHandlers.ts to not reference legacy format.clearContents",
+  );
 
   // Read-only ribbon disabling should keep Clear Contents / Clear All disabled, even for band selections.
   // `format.clearFormats` is explicitly re-enabled (formatting defaults) in read-only mode.
