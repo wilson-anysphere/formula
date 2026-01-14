@@ -295,6 +295,28 @@ pub(crate) fn decode_biff8_rgce_with_base(
     ctx: &RgceDecodeContext<'_>,
     base: Option<CellCoord>,
 ) -> DecodeRgceResult {
+    decode_biff8_rgce_with_base_and_rgcb_opt(rgce, None, ctx, base)
+}
+
+/// Decode a BIFF8 `rgce` token stream using a trailing `rgcb` payload stream to decode array
+/// constants (`PtgArray`).
+///
+/// The returned text does **not** include a leading `=`.
+pub(crate) fn decode_biff8_rgce_with_base_and_rgcb(
+    rgce: &[u8],
+    rgcb: &[u8],
+    ctx: &RgceDecodeContext<'_>,
+    base: Option<CellCoord>,
+) -> DecodeRgceResult {
+    decode_biff8_rgce_with_base_and_rgcb_opt(rgce, Some(rgcb), ctx, base)
+}
+
+fn decode_biff8_rgce_with_base_and_rgcb_opt(
+    rgce: &[u8],
+    rgcb: Option<&[u8]>,
+    ctx: &RgceDecodeContext<'_>,
+    base: Option<CellCoord>,
+) -> DecodeRgceResult {
     let base_is_default = base.is_none();
     let base = base.unwrap_or(CellCoord::new(0, 0));
     if rgce.is_empty() {
@@ -305,6 +327,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
     }
 
     let mut input = rgce;
+    let mut rgcb_pos: usize = 0;
     let mut stack: Vec<ExprFragment> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut warnings_suppressed = false;
@@ -781,10 +804,6 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 stack.push(ExprFragment::new(f64::from_le_bytes(bytes).to_string()));
             }
             // PtgArray: [unused: 7 bytes] + array constant values stored in rgcb.
-            //
-            // We only have access to the `rgce` token stream (as stored in the NAME record), not
-            // the trailing `rgcb` data blocks, so we cannot reconstruct the array literal. Instead
-            // we render a parseable placeholder and continue decoding.
             0x20 | 0x40 | 0x60 => {
                 if input.len() < 7 {
                     push_warning(
@@ -795,12 +814,30 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     return unsupported(ptg, warnings, &mut warnings_suppressed);
                 }
                 input = &input[7..];
-                push_warning(
-                    &mut warnings,
-                    "PtgArray constant is not supported; rendering #UNKNOWN!",
-                    &mut warnings_suppressed,
-                );
-                stack.push(ExprFragment::new("#UNKNOWN!".to_string()));
+
+                if let Some(rgcb) = rgcb {
+                    match decode_array_constant(rgcb, &mut rgcb_pos, &mut warnings, &mut warnings_suppressed) {
+                        Some(arr) => stack.push(ExprFragment::new(arr)),
+                        None => {
+                            push_warning(
+                                &mut warnings,
+                                "failed to decode PtgArray constant from rgcb; rendering #UNKNOWN!",
+                                &mut warnings_suppressed,
+                            );
+                            stack.push(ExprFragment::new("#UNKNOWN!".to_string()));
+                        }
+                    }
+                } else {
+                    // We only have access to the `rgce` token stream (as stored in some NAME
+                    // records), not the trailing `rgcb` data blocks, so we cannot reconstruct the
+                    // array literal. Render a parseable placeholder and continue decoding.
+                    push_warning(
+                        &mut warnings,
+                        "PtgArray constant is not supported; rendering #UNKNOWN!",
+                        &mut warnings_suppressed,
+                    );
+                    stack.push(ExprFragment::new("#UNKNOWN!".to_string()));
+                }
             }
             // PtgFunc: [iftab: u16] (fixed arg count is implicit).
             0x21 | 0x41 | 0x61 => {
@@ -1566,6 +1603,146 @@ pub(crate) fn decode_biff8_rgce_with_base(
     };
 
     DecodeRgceResult { text, warnings }
+}
+
+fn decode_array_constant(
+    rgcb: &[u8],
+    pos: &mut usize,
+    warnings: &mut Vec<String>,
+    suppressed: &mut bool,
+) -> Option<String> {
+    // BIFF8 array constant payload stream stored as trailing `rgcb` bytes. This matches the
+    // structure used by BIFF12-era formats at a high level:
+    //   [cols_minus1: u16][rows_minus1: u16][values...]
+    // where each value begins with a type byte:
+    //   0x00 = empty
+    //   0x01 = number (f64)
+    //   0x02 = string ([cch: u16][utf16 chars...])
+    //   0x04 = bool ([b: u8])
+    //   0x10 = error ([code: u8])
+    const MAX_ARRAY_CELLS: usize = 4096;
+
+    let mut i = *pos;
+    if rgcb.len().saturating_sub(i) < 4 {
+        return None;
+    }
+
+    let cols_minus1 = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
+    let rows_minus1 = u16::from_le_bytes([rgcb[i + 2], rgcb[i + 3]]) as usize;
+    i += 4;
+
+    let cols = cols_minus1.saturating_add(1);
+    let rows = rows_minus1.saturating_add(1);
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+    if cols.saturating_mul(rows) > MAX_ARRAY_CELLS {
+        push_warning(
+            warnings,
+            format!(
+                "array constant is too large to decode (rows={rows}, cols={cols}); rendering #UNKNOWN!"
+            ),
+            suppressed,
+        );
+        return None;
+    }
+
+    let mut row_texts = Vec::with_capacity(rows);
+    for _ in 0..rows {
+        let mut col_texts = Vec::with_capacity(cols);
+        for _ in 0..cols {
+            if i >= rgcb.len() {
+                return None;
+            }
+            let ty = rgcb[i];
+            i += 1;
+            match ty {
+                0x00 => col_texts.push(String::new()),
+                0x01 => {
+                    if rgcb.len().saturating_sub(i) < 8 {
+                        return None;
+                    }
+                    let mut bytes = [0u8; 8];
+                    bytes.copy_from_slice(&rgcb[i..i + 8]);
+                    i += 8;
+                    col_texts.push(f64::from_le_bytes(bytes).to_string());
+                }
+                0x02 => {
+                    if rgcb.len().saturating_sub(i) < 2 {
+                        return None;
+                    }
+                    let cch = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
+                    i += 2;
+                    let byte_len = cch.checked_mul(2)?;
+                    if rgcb.len().saturating_sub(i) < byte_len {
+                        return None;
+                    }
+                    let raw = &rgcb[i..i + byte_len];
+                    i += byte_len;
+
+                    let mut units = Vec::with_capacity(cch);
+                    for chunk in raw.chunks_exact(2) {
+                        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    }
+                    let s = String::from_utf16_lossy(&units);
+                    let escaped = s.replace('"', "\"\"");
+                    col_texts.push(format!("\"{escaped}\""));
+                }
+                0x04 => {
+                    if rgcb.len().saturating_sub(i) < 1 {
+                        return None;
+                    }
+                    let b = rgcb[i];
+                    i += 1;
+                    col_texts.push(if b == 0 { "FALSE" } else { "TRUE" }.to_string());
+                }
+                0x10 => {
+                    if rgcb.len().saturating_sub(i) < 1 {
+                        return None;
+                    }
+                    let code = rgcb[i];
+                    i += 1;
+                    let lit = match code {
+                        0x00 => "#NULL!",
+                        0x07 => "#DIV/0!",
+                        0x0F => "#VALUE!",
+                        0x17 => "#REF!",
+                        0x1D => "#NAME?",
+                        0x24 => "#NUM!",
+                        0x2A => "#N/A",
+                        0x2B => "#GETTING_DATA",
+                        0x2C => "#SPILL!",
+                        0x2D => "#CALC!",
+                        0x2E => "#FIELD!",
+                        0x2F => "#CONNECT!",
+                        0x30 => "#BLOCKED!",
+                        0x31 => "#UNKNOWN!",
+                        _ => {
+                            push_warning(
+                                warnings,
+                                format!("unknown error code 0x{code:02X} in array constant"),
+                                suppressed,
+                            );
+                            "#UNKNOWN!"
+                        }
+                    };
+                    col_texts.push(lit.to_string());
+                }
+                other => {
+                    push_warning(
+                        warnings,
+                        format!("unsupported array constant element type 0x{other:02X}"),
+                        suppressed,
+                    );
+                    return None;
+                }
+            }
+        }
+        row_texts.push(col_texts.join(","));
+    }
+
+    *pos = i;
+    Some(format!("{{{}}}", row_texts.join(";")))
 }
 
 fn unsupported(ptg: u8, warnings: Vec<String>, suppressed: &mut bool) -> DecodeRgceResult {

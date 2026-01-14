@@ -446,6 +446,25 @@ pub fn build_shared_formula_area3d_mixed_flags_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2` where the shared formula
+/// definition (`SHRFMLA`) includes a `PtgArray` constant stored in trailing `rgcb` bytes.
+///
+/// This is used to validate that BIFF8 shared-formula expansion (via `PtgExp`) preserves `rgcb`
+/// blocks so array constants decode to `{...}` literals rather than `#UNKNOWN!`.
+pub fn build_shared_formula_ptgarray_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgarray_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -5875,6 +5894,94 @@ fn build_shared_formula_ptgfuncvar_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgarray_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_ptgarray_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedArray", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula range B1:B2.
+    //
+    // Both cells contain PtgExp, and the shared formula body is stored in the trailing SHRFMLA
+    // record along with the `rgcb` payload required to decode `PtgArray` constants.
+    //
+    // Expected decoded formulas:
+    // - B1: `A1+SUM({1,2;3,4})`
+    // - B2: `A2+SUM({1,2;3,4})`
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in A1/A2 so the references are within the sheet's used range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Set FORMULA.grbit.fShrFmla (0x0008) so parsers recognize the shared-formula membership.
+    let grbit_shared: u16 = 0x0008;
+
+    // B1 formula: PtgExp pointing to itself (rw=0,col=1).
+    let ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(0, 1, xf_cell, 0.0, grbit_shared, &ptgexp),
+    );
+
+    // Shared formula body stored in SHRFMLA.
+    let rgce_shared = {
+        let mut v = Vec::new();
+        // PtgRefN: row_off=0, col_off=-1 relative to the formula cell.
+        v.push(0x2C);
+        v.extend_from_slice(&0u16.to_le_bytes()); // row_off = 0
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off = -1 (14-bit), row+col relative
+
+        // PtgArray (array constant; data stored in rgcb).
+        v.push(0x20);
+        v.extend_from_slice(&[0u8; 7]); // reserved
+
+        // PtgFuncVar: SUM(argc=1).
+        v.push(0x22);
+        v.push(1);
+        v.extend_from_slice(&4u16.to_le_bytes());
+
+        // PtgAdd.
+        v.push(0x03);
+        v
+    };
+
+    // rgcb payload for the array constant `{1,2;3,4}`.
+    let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
+
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record_with_rgcb(0, 1, 1, 1, &rgce_shared, &rgcb),
+    );
+
+    // B2 formula: PtgExp pointing to base cell B1 (rw=0,col=1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, 1, xf_cell, 0.0, grbit_shared, &ptgexp),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
@@ -12049,6 +12156,42 @@ fn shrfmla_record(
     out.extend_from_slice(&0u16.to_le_bytes()); // cUse
     out.extend_from_slice(&(rgce.len() as u16).to_le_bytes());
     out.extend_from_slice(rgce);
+    out
+}
+
+fn shrfmla_record_with_rgcb(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u8,
+    col_last: u8,
+    rgce: &[u8],
+    rgcb: &[u8],
+) -> Vec<u8> {
+    // SHRFMLA record payload (BIFF8) [MS-XLS 2.4.277].
+    //
+    // Some ptgs (notably `PtgArray`) reference additional data blocks serialized after the rgce
+    // token stream. BIFF8 stores these blocks as trailing bytes inside the same record (commonly
+    // referred to as `rgcb`).
+    let mut out = shrfmla_record(rw_first, rw_last, col_first, col_last, rgce);
+    out.extend_from_slice(rgcb);
+    out
+}
+
+fn rgcb_array_constant_numbers_2x2(values: &[f64; 4]) -> Vec<u8> {
+    // Serialize a 2x2 numeric array constant payload for BIFF8 `rgcb` trailing bytes.
+    //
+    // BIFF8/BIFF12 use a similar array-constant structure. We write a minimal subset that matches
+    // what our BIFF8 array-constant decoder expects:
+    //   [cols_minus1: u16][rows_minus1: u16]
+    // followed by row-major elements, each encoded as:
+    //   [xltypeNum: 0x01][f64]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&1u16.to_le_bytes()); // cols_minus1 (2 cols)
+    out.extend_from_slice(&1u16.to_le_bytes()); // rows_minus1 (2 rows)
+    for v in *values {
+        out.push(0x01); // xltypeNum
+        out.extend_from_slice(&v.to_le_bytes());
+    }
     out
 }
 

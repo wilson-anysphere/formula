@@ -4073,8 +4073,14 @@ fn import_biff8_shared_formulas(
             continue;
         };
 
-        // Map anchor (row,col) -> shared rgce token stream.
-        let mut shared_by_anchor: HashMap<(u16, u16), Vec<u8>> = HashMap::new();
+        #[derive(Debug, Clone)]
+        struct SharedFormulaDef {
+            rgce: Vec<u8>,
+            rgcb: Vec<u8>,
+        }
+
+        // Map anchor (row,col) -> shared formula definition (rgce + trailing rgcb bytes).
+        let mut shared_by_anchor: HashMap<(u16, u16), SharedFormulaDef> = HashMap::new();
         // Collect (cell_row, cell_col, anchor_row, anchor_col) for PtgExp formulas.
         let mut ptgexp_cells: Vec<(u16, u16, u16, u16)> = Vec::new();
         let mut last_formula_cell: Option<(u16, u16)> = None;
@@ -4137,7 +4143,8 @@ fn import_biff8_shared_formulas(
                     // Layout A (common): RefU (6) + cUse (2) + cce (2) + rgce
                     // Layout B (seen in the wild/tests): RefU (6) + cce (2) + rgce
                     // Layout C (common): Ref8 (8) + cUse (2) + cce (2) + rgce
-                    let parse_rgce = |cce_off: usize, rgce_off: usize| -> Option<&[u8]> {
+                    let parse_rgce =
+                        |cce_off: usize, rgce_off: usize| -> Option<(Vec<u8>, Vec<u8>)> {
                         if data.len() < cce_off + 2 {
                             return None;
                         }
@@ -4146,15 +4153,21 @@ fn import_biff8_shared_formulas(
                         if cce == 0 {
                             return None;
                         }
-                        data.get(rgce_off..rgce_off + cce)
+                        let rgce_end = rgce_off.checked_add(cce)?;
+                        let rgce = data.get(rgce_off..rgce_end)?;
+                        let rgcb = data.get(rgce_end..).unwrap_or(&[]);
+                        Some((rgce.to_vec(), rgcb.to_vec()))
                     };
-                    let rgce = parse_rgce(8, 10)
+                    let parsed = parse_rgce(8, 10)
                         .or_else(|| parse_rgce(6, 8))
                         .or_else(|| parse_rgce(10, 12));
-                    let Some(rgce) = rgce else {
+                    let Some((rgce, rgcb)) = parsed else {
                         continue;
                     };
-                    shared_by_anchor.insert((anchor_row, anchor_col), rgce.to_vec());
+                    shared_by_anchor.insert(
+                        (anchor_row, anchor_col),
+                        SharedFormulaDef { rgce, rgcb },
+                    );
                 }
                 biff::records::RECORD_EOF => break,
                 _ => {}
@@ -4185,9 +4198,11 @@ fn import_biff8_shared_formulas(
             {
                 continue;
             }
-            let Some(shared_rgce) = shared_by_anchor.get(&(anchor_row, anchor_col)) else {
+            let Some(shared) = shared_by_anchor.get(&(anchor_row, anchor_col)) else {
                 continue;
             };
+            let shared_rgce = &shared.rgce;
+            let shared_rgcb = &shared.rgcb;
             let materialized = if row == anchor_row && col == anchor_col {
                 None
             } else {
@@ -4200,8 +4215,9 @@ fn import_biff8_shared_formulas(
                 )
             };
 
-            let decoded = biff::rgce::decode_biff8_rgce_with_base(
+            let decoded = biff::rgce::decode_biff8_rgce_with_base_and_rgcb(
                 materialized.as_deref().unwrap_or(shared_rgce),
+                shared_rgcb,
                 &ctx,
                 Some(biff::rgce::CellCoord::new(row as u32, col as u32)),
             );
