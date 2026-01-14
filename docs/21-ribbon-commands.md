@@ -119,8 +119,9 @@ The ribbon UI merges:
 `apps/desktop/src/main.ts` maintains these overrides in `scheduleRibbonSelectionFormatStateUpdate()`:
 
 - `pressedById`: drives toggle buttons (Bold/Italic/Underline/Wrap/etc.)
-- `labelById`: drives dynamic button labels (e.g. `home.number.numberFormat`)
-- `disabledById`: disables controls based on editing/runtime state
+- `labelById`: drives dynamic labels for both top-level ribbon buttons and dropdown menu items (by command id)
+- `disabledById`: disables controls based on editing/runtime state (including dropdown menu items; overrides take precedence over schema `disabled`)
+- `shortcutById` / `ariaKeyShortcutsById`: keyboard shortcut hints for tooltips and `aria-keyshortcuts` (applies to both buttons and dropdown menu items)
 
 If you **rename a ribbon id**, you must update every place that uses that id as a key:
 
