@@ -34,3 +34,10 @@ fn pduration_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     excel_result_number(super::pduration(rate, pv, fv))
 }
+
+// On wasm targets, `inventory` registrations can be dropped by the linker if the object file
+// contains no otherwise-referenced symbols. Referencing this function (indirectly via
+// `financial::__force_link`) ensures the module (and its `inventory::submit!` entries) are
+// retained.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn __force_link() {}

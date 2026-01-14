@@ -53,4 +53,16 @@ static FORCE_LINK_FINANCIAL_BUILTINS: fn() = builtins::__force_link;
 
 // Referenced from `functions/mod.rs` to ensure the `financial` module itself is linked on wasm.
 #[cfg(target_arch = "wasm32")]
-pub(super) fn __force_link() {}
+pub(super) fn __force_link() {
+    builtins::__force_link();
+    builtins_accrint::__force_link();
+    builtins_amortization::__force_link();
+    builtins_bonds::__force_link();
+    builtins_depreciation_ext::__force_link();
+    builtins_french_depreciation::__force_link();
+    builtins_misc::__force_link();
+    builtins_odd_coupon::__force_link();
+    builtins_pduration::__force_link();
+    builtins_schedules::__force_link();
+    builtins_securities::__force_link();
+}
