@@ -85,6 +85,40 @@ fn reads_sheet_format_pr_defaults_into_model() {
 }
 
 #[test]
+fn reads_row_and_col_metadata_with_whitespace_attrs() {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min=" 2 " max=" 2 " width=" 25 " customWidth=" 1 " hidden=" 1 "/>
+  </cols>
+  <sheetData>
+    <row r=" 1 " ht=" 17 " customHeight=" 1 " hidden=" 1 "/>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx_with_sheet1(sheet_xml);
+
+    // Fast reader path.
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("fast reader");
+    let sheet = &workbook.sheets[0];
+    let col_b = sheet.col_properties(1).expect("expected col B properties");
+    assert_eq!(col_b.width, Some(25.0));
+    assert!(col_b.hidden);
+    let row_1 = sheet.row_properties(0).expect("expected row 1 properties");
+    assert_eq!(row_1.height, Some(17.0));
+    assert!(row_1.hidden);
+
+    // Full loader path.
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    let sheet = &doc.workbook.sheets[0];
+    let col_b = sheet.col_properties(1).expect("expected col B properties");
+    assert_eq!(col_b.width, Some(25.0));
+    assert!(col_b.hidden);
+    let row_1 = sheet.row_properties(0).expect("expected row 1 properties");
+    assert_eq!(row_1.height, Some(17.0));
+    assert!(row_1.hidden);
+}
+
+#[test]
 fn semantic_export_emits_sheet_format_pr_defaults() {
     let mut workbook = Workbook::new();
     let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();

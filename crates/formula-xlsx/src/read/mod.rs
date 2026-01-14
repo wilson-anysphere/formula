@@ -2722,27 +2722,27 @@ fn parse_worksheet_into_model(
                     let attr = attr?;
                     match attr.key.as_ref() {
                         b"min" => {
-                            min = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                            min = Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
                         }
                         b"max" => {
-                            max = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                            max = Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
                         }
                         b"width" => {
-                            width = attr.unescape_value()?.into_owned().parse::<f32>().ok();
+                            width = attr.unescape_value()?.trim().parse::<f32>().ok();
                         }
                         b"customWidth" => {
-                            let v = attr.unescape_value()?.into_owned();
+                            let v = attr.unescape_value()?;
                             custom_width = Some(parse_xml_bool(&v));
                         }
                         b"style" => {
-                            style = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            style = attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         b"customFormat" => {
-                            let v = attr.unescape_value()?.into_owned();
+                            let v = attr.unescape_value()?;
                             custom_format = Some(parse_xml_bool(&v));
                         }
                         b"hidden" => {
-                            let v = attr.unescape_value()?.into_owned();
+                            let v = attr.unescape_value()?;
                             hidden = parse_xml_bool(&v);
                         }
                         _ => {}
@@ -2986,24 +2986,24 @@ fn parse_worksheet_into_model(
                     match attr.key.as_ref() {
                         b"r" => {
                             row_1_based =
-                                Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0));
+                                Some(attr.unescape_value()?.trim().parse().unwrap_or(0));
                         }
                         b"ht" => {
-                            height = attr.unescape_value()?.into_owned().parse::<f32>().ok();
+                            height = attr.unescape_value()?.trim().parse::<f32>().ok();
                         }
                         b"customHeight" => {
-                            let v = attr.unescape_value()?.into_owned();
+                            let v = attr.unescape_value()?;
                             custom_height = Some(parse_xml_bool(&v));
                         }
                         b"s" => {
-                            style = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            style = attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         b"customFormat" => {
-                            let v = attr.unescape_value()?.into_owned();
+                            let v = attr.unescape_value()?;
                             custom_format = Some(parse_xml_bool(&v));
                         }
                         b"hidden" => {
-                            let v = attr.unescape_value()?.into_owned();
+                            let v = attr.unescape_value()?;
                             hidden = parse_xml_bool(&v);
                         }
                         _ => {}
@@ -3802,7 +3802,8 @@ fn expand_shared_formulas(
 }
 
 fn parse_xml_bool(val: &str) -> bool {
-    val == "1" || val.eq_ignore_ascii_case("true")
+    let trimmed = val.trim();
+    trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
 }
 
 fn parse_xml_u16_hex(val: &str) -> Option<u16> {
