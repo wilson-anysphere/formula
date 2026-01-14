@@ -64,7 +64,8 @@ usage() {
   cat >&2 <<'EOF'
 validate-macos-bundle.sh
 
-Validate macOS desktop release artifacts produced by Tauri (.dmg, optionally .app.tar.gz).
+Validate macOS desktop release artifacts produced by Tauri (.dmg, optionally a macOS updater tarball:
+*.app.tar.gz preferred; allow *.tar.gz/*.tgz).
 
 This script must run on macOS (it uses hdiutil/codesign/spctl/xcrun).
 
@@ -929,8 +930,14 @@ main() {
       # Fast path: use globs against the expected bundle output directories.
       dmgs+=("$root/release/bundle/dmg/"*.dmg)
       dmgs+=("$root"/*/release/bundle/dmg/*.dmg)
+      # Tauri's macOS updater artifact is typically `*.app.tar.gz`, but some toolchains may emit a
+      # plain `*.tar.gz` / `*.tgz`. Accept either under the macOS bundle directory.
       app_tars+=("$root/release/bundle/macos/"*.app.tar.gz)
+      app_tars+=("$root/release/bundle/macos/"*.tar.gz)
+      app_tars+=("$root/release/bundle/macos/"*.tgz)
       app_tars+=("$root"/*/release/bundle/macos/*.app.tar.gz)
+      app_tars+=("$root"/*/release/bundle/macos/*.tar.gz)
+      app_tars+=("$root"/*/release/bundle/macos/*.tgz)
     done
 
     if [ "$nullglob_was_set" -eq 0 ]; then
@@ -951,7 +958,7 @@ main() {
         if [ "${#app_tars[@]}" -eq 0 ]; then
           while IFS= read -r -d '' path; do
             app_tars+=("$path")
-          done < <(find "$root" -type f -path "*/release/bundle/macos/*.app.tar.gz" -print0 2>/dev/null || true)
+          done < <(find "$root" -type f \( -path "*/release/bundle/macos/*.tar.gz" -o -path "*/release/bundle/macos/*.tgz" \) -print0 2>/dev/null || true)
         fi
       done
     fi
@@ -986,14 +993,14 @@ main() {
       printf '  - %s\n' "${roots[@]}" >&2
     fi
     if [ "${#app_tars[@]}" -gt 0 ]; then
-      warn "found .app.tar.gz artifacts (but DMG is required for validation):"
+      warn "found macOS updater tarball artifacts (but DMG is required for validation):"
       printf '  %s\n' "${app_tars[@]}" >&2
     fi
     die "expected a DMG at apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg, apps/desktop/target/**/release/bundle/dmg/*.dmg, or target/**/release/bundle/dmg/*.dmg (or pass --dmg)"
   fi
 
   if [ "${#app_tars[@]}" -gt 0 ]; then
-    echo "bundle: discovered .app.tar.gz artifacts:"
+    echo "bundle: discovered macOS updater tarball artifacts:"
     printf '  %s\n' "${app_tars[@]}"
   fi
 
