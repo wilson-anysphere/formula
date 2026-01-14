@@ -57,42 +57,10 @@ if [ "${#workflow_files[@]}" -eq 0 ]; then
 fi
 
 for workflow in "${workflow_files[@]}"; do
-  # If a workflow uses Rust tooling (cargo/rustup/rustc, our cargo wrapper, or Tauri build actions),
-  # it must install the pinned toolchain explicitly. GitHub-hosted runners ship with a preinstalled
-  # Rust, but that version can drift over time (breaking reproducibility and causing "CI green,
-  # release red" when CI and release workflows disagree).
-  #
-  # We enforce the repo standard: install Rust via dtolnay/rust-toolchain pinned to a commit SHA,
-  # with `with: toolchain: <pinned>` set explicitly.
-  workflow_uses_rust=0
-  if grep -Eq '^[[:space:]]*(cargo|rustup|rustc)([[:space:]]|$)' "$workflow"; then
-    workflow_uses_rust=1
-  elif grep -Eq '^[[:space:]]*-?[[:space:]]*run:[[:space:]]*(cargo|rustup|rustc)([[:space:]]|$)' "$workflow"; then
-    workflow_uses_rust=1
-  elif grep -Eq '^[[:space:]]*[^#[:space:]].*cargo_agent\.sh' "$workflow"; then
-    workflow_uses_rust=1
-  elif grep -Eq '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*tauri-apps/tauri-action@' "$workflow"; then
-    workflow_uses_rust=1
-  elif grep -Eq '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*Swatinem/rust-cache@' "$workflow"; then
-    workflow_uses_rust=1
-  fi
-
-  workflow_has_dtolnay=0
-  if grep -Eq '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*dtolnay/rust-toolchain@' "$workflow"; then
-    workflow_has_dtolnay=1
-  fi
-
-  if [ "${workflow_uses_rust}" -eq 1 ] && [ "${workflow_has_dtolnay}" -eq 0 ]; then
-    echo "Rust toolchain pin check failed: ${workflow} appears to use Rust tooling but does not install the pinned toolchain." >&2
-    echo "Fix: add a dtolnay/rust-toolchain step pinned to a commit SHA with:" >&2
-    echo "  with:" >&2
-    echo "    toolchain: ${channel}" >&2
-    echo "" >&2
-    fail=1
-    continue
-  fi
-
-  # Parse each workflow and validate every dtolnay/rust-toolchain step declares a matching toolchain.
+  # Parse each workflow and validate:
+  # - Each job that runs Rust tooling installs the pinned toolchain (dtolnay/rust-toolchain),
+  #   and does so *before* any cargo/rustup/rustc usage.
+  # - Every dtolnay/rust-toolchain step declares a matching `with: toolchain: <pinned>` input.
   awk -v workflow="$workflow" -v expected="$channel" '
     function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
     function rtrim(s) { sub(/[[:space:]]+$/, "", s); return s }
@@ -107,6 +75,35 @@ for workflow in "${workflow_files[@]}"; do
       s = strip_quotes(s)
       sub(/^v/, "", s)
       return s
+    }
+    function note_rust_use(snippet) {
+      if (steps_saw_dtolnay) return
+      if (steps_rust_before_toolchain_line != 0) return
+      steps_rust_before_toolchain_line = NR
+      steps_rust_before_toolchain_snippet = snippet
+    }
+    function line_looks_like_rust_tooling(s) {
+      # True for:
+      # - `cargo ...`, `rustup ...`, `rustc ...` (including `cargo +nightly ...`)
+      # - invocations of the repo cargo wrapper
+      # - but not `.cargo/` paths or `cargo-foo` cache keys.
+      if (s ~ /cargo_agent\.sh/) return 1
+      if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
+      if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1
+      if (s ~ /(^|[[:space:];&|()])rustc([[:space:]]|$)/) return 1
+      return 0
+    }
+    function finalize_steps_block() {
+      if (!in_steps) return
+      if (steps_rust_before_toolchain_line == 0) return
+      printf("Rust toolchain pin check failed:\n") > "/dev/stderr"
+      printf("  rust-toolchain.toml channel = %s\n", expected) > "/dev/stderr"
+      printf("  %s:%d uses Rust tooling before installing the pinned toolchain\n", workflow, steps_rust_before_toolchain_line) > "/dev/stderr"
+      if (steps_rust_before_toolchain_snippet != "") {
+        printf("  First Rust usage in this job: %s\n", steps_rust_before_toolchain_snippet) > "/dev/stderr"
+      }
+      printf("  Fix: add a dtolnay/rust-toolchain step (pinned to a commit SHA) *before* any Rust tooling in this job, with:\n    with:\n      toolchain: %s\n\n", expected) > "/dev/stderr"
+      fail = 1
     }
     function finalize_step() {
       if (!step_dtolnay) return
@@ -144,6 +141,9 @@ for workflow in "${workflow_files[@]}"; do
       step_item_indent = 0
       in_with = 0
       with_indent = 0
+      steps_saw_dtolnay = 0
+      steps_rust_before_toolchain_line = 0
+      steps_rust_before_toolchain_snippet = ""
       step_dtolnay = 0
       step_toolchain = ""
       step_uses_line = 0
@@ -162,6 +162,9 @@ for workflow in "${workflow_files[@]}"; do
         if (trimmed != "" && indent <= block_indent) {
           in_block = 0
         } else {
+          if (in_steps && line_looks_like_rust_tooling(trimmed)) {
+            note_rust_use(trimmed)
+          }
           next
         }
       }
@@ -179,6 +182,9 @@ for workflow in "${workflow_files[@]}"; do
           step_item_indent = steps_indent + 2
           in_with = 0
           with_indent = 0
+          steps_saw_dtolnay = 0
+          steps_rust_before_toolchain_line = 0
+          steps_rust_before_toolchain_snippet = ""
           step_dtolnay = 0
           step_toolchain = ""
           step_uses_line = 0
@@ -191,8 +197,12 @@ for workflow in "${workflow_files[@]}"; do
       if (trimmed != "" && trimmed !~ /^#/) {
         if (indent <= steps_indent) {
           finalize_step()
+          finalize_steps_block()
           in_steps = 0
           in_with = 0
+          steps_saw_dtolnay = 0
+          steps_rust_before_toolchain_line = 0
+          steps_rust_before_toolchain_snippet = ""
           step_dtolnay = 0
           step_toolchain = ""
           next
@@ -209,7 +219,7 @@ for workflow in "${workflow_files[@]}"; do
         step_uses_line = 0
         step_toolchain_line = 0
 
-        # Inline "- uses: ..." form.
+        # Inline "- uses: ..." / "- run: ..." forms.
         step_line = trimmed
         sub(/^-+/, "", step_line)
         step_line = trim(step_line)
@@ -223,6 +233,17 @@ for workflow in "${workflow_files[@]}"; do
           if (value ~ /^dtolnay\/rust-toolchain@/) {
             step_dtolnay = 1
             step_uses_line = NR
+            steps_saw_dtolnay = 1
+          } else if (value ~ /^tauri-apps\/tauri-action@/ || value ~ /^Swatinem\/rust-cache@/) {
+            note_rust_use("uses: " value)
+          }
+        } else if (step_line ~ /^run:[[:space:]]*/) {
+          value = step_line
+          sub(/^run:[[:space:]]*/, "", value)
+          value = trim(value)
+          sub(/[[:space:]]+#.*/, "", value)
+          if (line_looks_like_rust_tooling(value)) {
+            note_rust_use("run: " value)
           }
         }
         next
@@ -254,6 +275,20 @@ for workflow in "${workflow_files[@]}"; do
         if (value ~ /^dtolnay\/rust-toolchain@/) {
           step_dtolnay = 1
           step_uses_line = NR
+          steps_saw_dtolnay = 1
+        } else if (value ~ /^tauri-apps\/tauri-action@/ || value ~ /^Swatinem\/rust-cache@/) {
+          note_rust_use("uses: " value)
+        }
+      }
+
+      # Detect run commands that invoke Rust tooling.
+      if (trimmed ~ /^run:[[:space:]]*/) {
+        value = trimmed
+        sub(/^run:[[:space:]]*/, "", value)
+        value = trim(value)
+        sub(/[[:space:]]+#.*/, "", value)
+        if (line_looks_like_rust_tooling(value)) {
+          note_rust_use("run: " value)
         }
       }
 
@@ -271,6 +306,7 @@ for workflow in "${workflow_files[@]}"; do
     END {
       if (in_steps) {
         finalize_step()
+        finalize_steps_block()
       }
       exit fail
     }
