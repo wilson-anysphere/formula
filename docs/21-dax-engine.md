@@ -784,6 +784,9 @@ Supported expression forms:
   - measures: `[Total]`
   - column names: `Fact[Amount]` (column part is bracketed)
   - escape `]` inside bracket identifiers as `]]` (e.g. `Table[Col]]Name]`)
+  - note: `[Name]` is ambiguous (measure vs. column-in-row-context). The engine resolves it as a
+    measure if one exists, otherwise it resolves it as a column on the current row-context table (or
+    a unique virtual binding) if available.
 - Function calls: `NAME(arg1, arg2, ...)` (comma- or semicolon-separated arguments)
 - Unary minus: `-expr`
 - Binary operators:
@@ -798,10 +801,12 @@ Supported expression forms:
 - Row constructors / tuples: `(expr1, expr2, ...)` (comma- or semicolon-separated)  
   Parsed as a row constructor (`Expr::Tuple`). Row constructors are supported on the LHS of multi-column
   `IN`, and as the row syntax inside multi-column table constructors (e.g. `{(1,2), (3,4)}`).
+  They are not a first-class scalar value: using a row constructor outside of `IN` will error.
 - Variables:
   - `VAR Name = <expr> ... RETURN <expr>` (one or more `VAR` bindings)
   - Variables are referenced by bare identifiers (parsed as `Expr::TableName`) and can be **scalar** or
     **table** valued.
+  - Variable names are resolved case-insensitively via `normalize_ident` (same rules as tables/columns).
 - Table constructors: `{ 1, 2, 3 }` (one column) and `{ (1, 2), (3, 4) }` (multi-column row tuples)  
   Separators may be `,` or `;`. Nested table constructors are not supported, and all rows must have the
   same number of values.
