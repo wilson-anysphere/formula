@@ -676,7 +676,6 @@ mod sheet_format_pr_tests {
         assert_eq!(node.attribute("defaultRowHeight"), Some("15"));
     }
 }
-
 fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, u32>) -> String {
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
 
