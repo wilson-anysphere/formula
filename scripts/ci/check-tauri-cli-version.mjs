@@ -4,6 +4,8 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const cargoTomlRelativePath = "apps/desktop/src-tauri/Cargo.toml";
@@ -62,17 +64,60 @@ function extractTauriVersionFromCargoToml(tomlText) {
 }
 
 function extractPinnedCliVersionFromWorkflow(workflowText) {
-  const match = workflowText.match(/^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/m);
-  return match ? match[1].trim() : null;
+  for (const line of yamlLinesOutsideBlockScalars(workflowText)) {
+    const match = line.match(/^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/);
+    if (match) return match[1].trim();
+  }
+  return null;
 }
 
-function extractPinnedCliVersionsFromWorkflow(workflowText) {
+export function extractPinnedCliVersionsFromWorkflow(workflowText) {
   const versions = [];
-  const re = /^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/gm;
-  for (const match of workflowText.matchAll(re)) {
-    versions.push(match[1].trim());
+  for (const line of yamlLinesOutsideBlockScalars(workflowText)) {
+    const match = line.match(/^[\t ]*TAURI_CLI_VERSION:[\t ]*["']?([^"'\n]+)["']?/);
+    if (match) versions.push(match[1].trim());
   }
   return versions;
+}
+
+function yamlLinesOutsideBlockScalars(yamlText) {
+  // GitHub Actions YAML uses block scalars (`run: |`, `script: >-`, etc) which can contain arbitrary
+  // text. When scanning workflow configuration we must ignore the *contents* of block scalars so
+  // YAML-ish strings inside scripts cannot satisfy or fail guardrails.
+  //
+  // We keep this YAML handling intentionally lightweight (no YAML parser dependency).
+  const rawLines = stripHashComments(String(yamlText ?? "")).split(/\r?\n/);
+  let inBlock = false;
+  let blockIndent = 0;
+  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
+
+  for (let i = 0; i < rawLines.length; i += 1) {
+    const detect = rawLines[i] ?? "";
+
+    const indentMatch = detect.match(/^[ \t]*/);
+    const indentLen = indentMatch ? indentMatch[0].length : 0;
+
+    if (inBlock) {
+      // Blank lines can appear inside block scalars at any indentation; treat them as part of the scalar.
+      if (detect.trim() === "") {
+        rawLines[i] = "";
+        continue;
+      }
+      if (indentLen > blockIndent) {
+        rawLines[i] = "";
+        continue;
+      }
+      inBlock = false;
+    }
+
+    const detectTrimmedEnd = detect.trimEnd();
+    if (blockRe.test(detectTrimmedEnd)) {
+      inBlock = true;
+      blockIndent = indentLen;
+    }
+  }
+
+  return rawLines;
 }
 
 export function findTauriActionScriptIssues(workflowText) {
@@ -82,7 +127,7 @@ export function findTauriActionScriptIssues(workflowText) {
   //
   // We intentionally keep this YAML parsing very lightweight/dependency-free.
   const issues = [];
-  const lines = workflowText.split(/\r?\n/);
+  const lines = yamlLinesOutsideBlockScalars(workflowText);
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const trimmed = line.trimStart();
