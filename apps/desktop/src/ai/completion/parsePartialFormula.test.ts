@@ -212,13 +212,15 @@ describe("createLocaleAwarePartialFormulaParser", () => {
   });
 
   it("caches unsupported localeIds to avoid repeated engine RPC failures", async () => {
-    setLocale("ar");
+    // Simulate an engine version mismatch: the host thinks a locale is supported, but the
+    // engine rejects it. The wrapper should cache this signal and avoid retrying on every keypress.
+    setLocale("de-DE");
 
     let calls = 0;
     const engine = {
       parseFormulaPartial: async () => {
         calls += 1;
-        throw new Error("unknown localeId: ar");
+        throw new Error("unknown localeId: de-DE");
       },
     };
 

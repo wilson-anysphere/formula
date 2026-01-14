@@ -759,8 +759,18 @@ export function createLocaleAwarePartialFormulaParser(options: {
       .then(() => engine.parseFormulaPartial(input, cursor, { localeId: normalizedLocaleId }, { timeoutMs }))
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
-        if (typeof message === "string" && message.startsWith("unknown localeId:")) {
-          unsupportedLocaleIds.add(normalizedLocaleId);
+        if (typeof message === "string") {
+          const trimmed = message.trim();
+          const prefix = "unknown localeId:";
+          if (trimmed.startsWith(prefix)) {
+            const unknown = trimmed.slice(prefix.length).trim();
+            // Only cache when the engine is rejecting the exact locale id we passed. This keeps the
+            // defensive "unsupported locale" fast-path from triggering on unrelated errors that
+            // happen to share the same prefix.
+            if (unknown && unknown.toLowerCase() === normalizedLocaleId.toLowerCase()) {
+              unsupportedLocaleIds.add(normalizedLocaleId);
+            }
+          }
         }
         return null;
       });
