@@ -285,6 +285,39 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
     root.remove();
   });
 
+  it("clears the selected drawing when clicking the secondary header area", () => {
+    const { app, root, secondaryView, secondaryContainer, selectionCanvas } = setup();
+
+    const headerOffsetX = secondaryView.grid.renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = secondaryView.grid.renderer.scroll.rows.totalSize(1);
+
+    // Select the drawing first.
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", {
+        clientX: secondaryContainer.getBoundingClientRect().left + headerOffsetX + 60,
+        clientY: secondaryContainer.getBoundingClientRect().top + headerOffsetY + 30,
+        button: 0,
+      }),
+    );
+    expect(app.getSelectedDrawingId()).toBe(1);
+
+    // Click in the secondary column header area. This should behave like "click outside any drawing":
+    // clear drawing selection but allow the grid header selection logic to proceed.
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", {
+        clientX: secondaryContainer.getBoundingClientRect().left + headerOffsetX + 10,
+        clientY: secondaryContainer.getBoundingClientRect().top + 2,
+        button: 0,
+      }),
+    );
+    expect(app.getSelectedDrawingId()).toBeNull();
+
+    secondaryView.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
+
   it("shows drawing hover cursors in the secondary pane", () => {
     const { app, root, secondaryView, secondaryContainer, selectionCanvas } = setup();
 

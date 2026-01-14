@@ -8199,22 +8199,13 @@ export class SpreadsheetApp {
     if (!Number.isFinite(sx) || !Number.isFinite(sy)) return;
     if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return;
 
-    const headerRows = 1;
-    const headerCols = 1;
-    const headerWidth = headerCols > 0 ? secondary.grid.renderer.scroll.cols.totalSize(headerCols) : 0;
-    const headerHeight = headerRows > 0 ? secondary.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
-    const headerOffsetX = Math.min(headerWidth, rect.width);
-    const headerOffsetY = Math.min(headerHeight, rect.height);
-    const inCellArea = sx >= headerOffsetX && sy >= headerOffsetY;
-
     const prevSelected = this.selectedDrawingId;
 
     const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
     if (!hit) {
-      // Clicking outside of any drawing clears selection, but still allows normal grid selection.
-      if (prevSelected != null && inCellArea) {
-        this.selectDrawingById(null);
-      }
+      // Clicking anywhere outside a drawing clears the drawing selection, but still allows the
+      // grid to handle the pointerdown (e.g. row/column header selection in the secondary pane).
+      if (prevSelected != null) this.selectDrawingById(null);
       return;
     }
 
