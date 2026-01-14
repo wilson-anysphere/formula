@@ -339,11 +339,22 @@ impl PivotCache {
                     }
                 }
                 // Rare: quoted table name but raw (unescaped) column name.
-                let table = dax_quoted_table_name(table);
-                let quoted_unescaped = format!("'{table}'[{column}]");
+                let quoted_table = dax_quoted_table_name(table);
+                let quoted_unescaped = format!("'{quoted_table}'[{column}]");
                 if quoted_unescaped != quoted {
                     if let Some(idx) = self.field_index(&quoted_unescaped) {
                         return Some(idx);
+                    }
+                }
+
+                // Final best-effort: some producers include whitespace around DAX components (e.g.
+                // `'<Table>' [Column]`). Parse cache captions and compare decoded identifiers.
+                for f in &self.fields {
+                    let Some((t, c)) = formula_model::pivots::parse_dax_column_ref(&f.name) else {
+                        continue;
+                    };
+                    if &t == table && &c == column {
+                        return Some(f.index);
                     }
                 }
             }
@@ -3756,6 +3767,54 @@ mod tests {
     fn pivot_header_renders_data_model_columns_using_display_string() {
         let data = vec![
             pv_row(&["'Sales Table'[Region]".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into()]),
+            pv_row(&["West".into(), 200.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: PivotFieldRef::DataModelColumn {
+                    table: "Sales Table".to_string(),
+                    column: "Region".to_string(),
+                },
+                sort_order: SortOrder::default(),
+                manual_sort: None,
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Sales"),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data[0][0],
+            PivotValue::Text("Sales Table[Region]".to_string())
+        );
+    }
+
+    #[test]
+    fn pivot_header_resolves_quoted_dax_column_captions_with_whitespace() {
+        // Some producers include whitespace between the quoted table name and the column ref,
+        // e.g. `'Sales Table' [Region]` instead of `'Sales Table'[Region]`.
+        let data = vec![
+            pv_row(&["'Sales Table' [Region]".into(), "Sales".into()]),
             pv_row(&["East".into(), 100.into()]),
             pv_row(&["West".into(), 200.into()]),
         ];
