@@ -82,3 +82,42 @@ fn parses_manual_layout_for_legend() {
     assert_eq!(layout.w, Some(0.5));
     assert_eq!(layout.h, Some(0.75));
 }
+
+#[test]
+fn parses_manual_layout_for_title() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+  <c:chart>
+    <c:title>
+      <c:layout>
+        <c:manualLayout>
+          <c:xMode val="edge"/>
+          <c:yMode val="edge"/>
+          <c:x val="0.1"/>
+          <c:y val="0.2"/>
+        </c:manualLayout>
+      </c:layout>
+      <c:tx>
+        <c:v>My title</c:v>
+      </c:tx>
+    </c:title>
+    <c:plotArea>
+      <c:barChart/>
+    </c:plotArea>
+  </c:chart>
+</c:chartSpace>
+"#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "manual-layout-title.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+
+    let title = model.title.as_ref().expect("title present");
+    assert_eq!(title.rich_text.plain_text(), "My title");
+
+    let layout = title.layout.as_ref().expect("title manual layout present");
+    assert_eq!(layout.x_mode.as_deref(), Some("edge"));
+    assert_eq!(layout.y_mode.as_deref(), Some("edge"));
+    assert_eq!(layout.x, Some(0.1));
+    assert_eq!(layout.y, Some(0.2));
+}
