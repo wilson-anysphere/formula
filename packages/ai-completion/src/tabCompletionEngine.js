@@ -597,7 +597,10 @@ export class TabCompletionEngine {
           const hasPureInsertionSuggestion = merged.some(
             (s) => typeof s?.text === "string" && s.text.startsWith(input) && s.text.length > input.length
           );
-          if (!hasPureInsertionSuggestion && looksLikeCompleteRangeOrCellArg(innerPrefix)) {
+          if (
+            !hasPureInsertionSuggestion &&
+            (looksLikeCompleteRangeOrCellArg(innerPrefix) || looksLikeCompleteLiteralArg(innerPrefix))
+          ) {
             const closed = closeUnbalancedParens(input);
             if (closed !== input) {
               merged.push({
@@ -610,7 +613,7 @@ export class TabCompletionEngine {
           }
         } else if (cursor === input.length && functionCouldBeComplete && merged.length === 0) {
           // Same auto-close fallback for cases where we truly had no range/schema candidates at all.
-          if (looksLikeCompleteRangeOrCellArg(innerPrefix)) {
+          if (looksLikeCompleteRangeOrCellArg(innerPrefix) || looksLikeCompleteLiteralArg(innerPrefix)) {
             const closed = closeUnbalancedParens(input);
             if (closed !== input) {
               merged.push({

@@ -88,12 +88,13 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
             - `=SUM(OFFS` → `=SUM(OFFSET(`
             - `=SUM(A1:OFFS` → `=SUM(A1:OFFSET(`
           - When no *pure insertion* range completion applies, `suggestRangeCompletions()` may still offer a low-confidence
-            **auto-close parens** suggestion for complete range/cell references (including sheet-qualified refs), even when
+            **auto-close parens** suggestion for complete literals or references (including sheet-qualified refs), even when
             the surrounding-cell scan can’t find a contiguous data block:
             - `=SUM(A1` → `=SUM(A1)`
             - `=SUM(A1:A10` → `=SUM(A1:A10)` (even if the range is empty)
             - `=SUM(Sheet2!A1` → `=SUM(Sheet2!A1)` (even without a `SchemaProvider`)
             - `=SUM(Table1[Amount]` → `=SUM(Table1[Amount])` (balanced structured ref brackets; even without a `SchemaProvider`)
+            - `=SUM(5` → `=SUM(5)`
         - **Argument value hints** for simple arg types (`TRUE/FALSE`, `0/1`, “cell to the left”) via `suggestArgumentValues()`.
           - When no enum/heuristic suggestions apply, the engine falls back to **nested function-name completion**
             at the cursor (still enforcing the formula bar’s “pure insertion” constraint).

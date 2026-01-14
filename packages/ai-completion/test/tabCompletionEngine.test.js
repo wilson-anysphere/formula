@@ -1648,6 +1648,40 @@ test("Typing =SUM('My Sheet'!A1 suggests auto-closing parens without needing sch
   );
 });
 
+test("Typing =SUM(5 suggests auto-closing parens for a numeric literal in a range arg", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SUM(5";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(5)"),
+    `Expected SUM to suggest closing parens after a numeric literal, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test('Typing =SUM("x" suggests auto-closing parens for a string literal in a range arg', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=SUM(\"x\"';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=SUM(\"x\")'),
+    `Expected SUM to suggest closing parens after a string literal, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(Table1[Amount] suggests auto-closing parens without needing schema", async () => {
   const engine = new TabCompletionEngine();
 
