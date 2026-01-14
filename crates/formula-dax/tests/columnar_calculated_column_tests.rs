@@ -1,4 +1,6 @@
-use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
+use formula_columnar::{
+    ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
+};
 use formula_dax::{DataModel, DaxError, Table, Value};
 
 #[test]
@@ -72,3 +74,78 @@ fn columnar_calculated_column_type_mismatch_does_not_mutate_table() {
     assert_eq!(table.row_count(), 32);
     assert_eq!(table.value(0, "X").unwrap(), 0.0.into());
 }
+
+#[test]
+fn columnar_calculated_column_all_blank_defaults_to_number_type() {
+    let schema = vec![ColumnSchema {
+        name: "X".to_string(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 16,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+
+    let mut builder = ColumnarTableBuilder::new(schema, options);
+    for i in 0..64 {
+        builder.append_row(&[formula_columnar::Value::Number(i as f64)]);
+    }
+
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::from_columnar("T", builder.finalize()))
+        .unwrap();
+
+    model
+        .add_calculated_column("T", "Y", "BLANK()")
+        .unwrap();
+
+    let table = model.table("T").unwrap();
+    assert_eq!(table.row_count(), 64);
+    for row in 0..64 {
+        assert_eq!(table.value(row, "Y").unwrap(), Value::Blank);
+    }
+
+    let columnar = table.columnar_table().unwrap();
+    let y_schema = columnar.schema().iter().find(|c| c.name == "Y").unwrap();
+    assert_eq!(y_schema.column_type, ColumnType::Number);
+}
+
+#[test]
+fn columnar_calculated_column_boolean_infers_type() {
+    let schema = vec![ColumnSchema {
+        name: "X".to_string(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 16,
+        cache: PageCacheConfig { max_entries: 2 },
+    };
+
+    let mut builder = ColumnarTableBuilder::new(schema, options);
+    for i in 0..64 {
+        builder.append_row(&[formula_columnar::Value::Number(i as f64)]);
+    }
+
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::from_columnar("T", builder.finalize()))
+        .unwrap();
+
+    // Leading blanks, then boolean values.
+    model
+        .add_calculated_column("T", "Y", "IF([X] < 5, BLANK(), [X] > 10)")
+        .unwrap();
+
+    let table = model.table("T").unwrap();
+    for row in 0..5 {
+        assert_eq!(table.value(row, "Y").unwrap(), Value::Blank);
+    }
+    assert_eq!(table.value(5, "Y").unwrap(), false.into());
+    assert_eq!(table.value(11, "Y").unwrap(), true.into());
+
+    let columnar = table.columnar_table().unwrap();
+    let y_schema = columnar.schema().iter().find(|c| c.name == "Y").unwrap();
+    assert_eq!(y_schema.column_type, ColumnType::Boolean);
+}
+
