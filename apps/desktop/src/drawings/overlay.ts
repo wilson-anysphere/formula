@@ -45,10 +45,10 @@ const DEFAULT_OVERLAY_COLOR_TOKENS: OverlayColorTokens = {
   selectionHandleFill: "white",
 };
 
-function getRootCssStyle(): CssVarStyle | null {
-  if (typeof document === "undefined" || typeof getComputedStyle !== "function") return null;
+function getRootCssStyle(root: unknown): CssVarStyle | null {
+  if (!root || typeof getComputedStyle !== "function") return null;
   try {
-    return getComputedStyle(document.documentElement);
+    return getComputedStyle(root as any);
   } catch {
     return null;
   }
@@ -357,6 +357,7 @@ export class DrawingOverlay {
     private readonly geom: GridGeometry,
     private readonly chartRenderer?: ChartRenderer,
     requestRender?: (() => void) | null,
+    private readonly cssVarRoot: HTMLElement | null = null,
   ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("overlay canvas 2d context not available");
@@ -366,10 +367,14 @@ export class DrawingOverlay {
   }
 
   private installThemeObserver(): void {
-    if (typeof document === "undefined") return;
-    const root = document.documentElement;
-    if (!root) return;
     if (typeof MutationObserver !== "function") return;
+    const doc = (this.canvas as any)?.ownerDocument ?? (globalThis as any)?.document ?? null;
+    const docRoot = doc?.documentElement ?? null;
+
+    const roots: unknown[] = [];
+    if (docRoot) roots.push(docRoot);
+    if (this.cssVarRoot && this.cssVarRoot !== docRoot) roots.push(this.cssVarRoot);
+    if (roots.length === 0) return;
 
     try {
       this.themeObserver?.disconnect();
@@ -380,7 +385,13 @@ export class DrawingOverlay {
         this.refreshThemeTokens();
         this.scheduleHydrationRerender();
       });
-      this.themeObserver.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+
+      // Custom properties can be toggled via classes/inline styles on the grid root
+      // (in addition to `<html data-theme=...>`). Observe both so overlays remain in sync.
+      const attributeFilter = ["style", "class", "data-theme", "data-reduced-motion"];
+      for (const root of roots) {
+        this.themeObserver.observe(root as any, { attributes: true, attributeFilter });
+      }
     } catch {
       this.themeObserver = null;
     }
@@ -432,7 +443,8 @@ export class DrawingOverlay {
 
   private getCssVarStyle(): CssVarStyle | null {
     if (this.cssVarStyle !== undefined) return this.cssVarStyle;
-    this.cssVarStyle = getRootCssStyle();
+    const root = this.cssVarRoot ?? (this.canvas as any)?.ownerDocument?.documentElement ?? (globalThis as any)?.document?.documentElement ?? null;
+    this.cssVarStyle = getRootCssStyle(root);
     return this.cssVarStyle;
   }
 

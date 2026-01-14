@@ -1345,16 +1345,8 @@ export class SpreadsheetApp {
     | null = null;
 
   private selection: SelectionState;
-  private selectionRenderer = new SelectionRenderer();
-  private formulaSelectionRenderer = new SelectionRenderer({
-    fillColor: "transparent",
-    borderColor: "transparent",
-    activeBorderColor: resolveCssVar("--formula-grid-selection-border", { fallback: resolveCssVar("--selection-border", { fallback: "transparent" }) }),
-    fillHandleColor: "transparent",
-    borderWidth: 2,
-    activeBorderWidth: 3,
-    fillHandleSize: 0,
-  });
+  private selectionRenderer: SelectionRenderer;
+  private formulaSelectionRenderer: SelectionRenderer;
   private readonly selectionListeners = new Set<(selection: SelectionState) => void>();
   private readonly scrollListeners = new Set<(scroll: { x: number; y: number }) => void>();
   private readonly zoomListeners = new Set<(zoom: number) => void>();
@@ -1584,6 +1576,19 @@ export class SpreadsheetApp {
             maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS
           });
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
+    // Canvas selection colors are resolved from CSS variables. Use the grid root as
+    // the CSS var scope so `--formula-grid-*` can be overridden per-grid without
+    // affecting the rest of the app.
+    this.selectionRenderer = new SelectionRenderer(null, { cssVarRoot: this.root });
+    this.formulaSelectionRenderer = new SelectionRenderer(null, {
+      cssVarRoot: this.root,
+      styleOverrides: {
+        fillColor: "transparent",
+        borderColor: "transparent",
+        fillHandleColor: "transparent",
+        fillHandleSize: 0,
+      },
+    });
     const rawCollab = opts.collab ?? resolveCollabOptionsFromUrl() ?? resolveCollabOptionsFromStoredConnection(opts.workbookId);
     const jwtPermissions = rawCollab?.token ? tryDeriveCollabSessionPermissionsFromJwtToken(rawCollab.token) : null;
     const collab = rawCollab
@@ -2013,7 +2018,14 @@ export class SpreadsheetApp {
       // Match the selection canvas z-index so chart handles are drawn above charts in shared mode.
       this.chartSelectionCanvas.classList.add("grid-canvas--shared-selection");
     }
-    this.chartSelectionOverlay = new DrawingOverlay(this.chartSelectionCanvas, this.chartOverlayImages, this.chartOverlayGeom);
+    this.chartSelectionOverlay = new DrawingOverlay(
+      this.chartSelectionCanvas,
+      this.chartOverlayImages,
+      this.chartOverlayGeom,
+      undefined,
+      () => this.renderChartSelectionOverlay(),
+      this.root,
+    );
 
     this.referenceCanvas = document.createElement("canvas");
     this.referenceCanvas.className = "grid-canvas grid-canvas--content";
@@ -2258,7 +2270,8 @@ export class SpreadsheetApp {
         colCount: this.limits.maxCols + headerCols,
         showFormulas: () => this.showFormulas,
         getComputedValue: (cell) => this.getCellComputedValue(cell),
-        getCommentMeta: (row, col) => this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col) ?? null
+        getCommentMeta: (row, col) => this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col) ?? null,
+        cssVarRoot: this.root,
       });
 
       this.sharedGrid = new DesktopSharedGrid({
@@ -2568,6 +2581,8 @@ export class SpreadsheetApp {
       this.drawingImages,
       this.drawingGeom,
       this.drawingChartRenderer,
+      undefined,
+      this.root,
     );
     this.drawingOverlay.setSelectedId(null);
     this.drawingOverlay.setRequestRender(() => this.refresh("scroll"));
@@ -3717,7 +3732,11 @@ export class SpreadsheetApp {
       const presence = this.collabSession.presence;
       if (presence) {
         const defaultPresenceColor = resolveCssVar("--formula-grid-remote-presence-default", {
-          fallback: resolveCssVar("--accent", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) }),
+          root: this.root,
+          fallback: resolveCssVar("--accent", {
+            root: this.root,
+            fallback: resolveCssVar("--text-primary", { root: this.root, fallback: "CanvasText" }),
+          }),
         });
         // Publish local selection state.
         this.collabSelectionUnsubscribe = this.subscribeSelection((selection) => {
@@ -11434,7 +11453,10 @@ export class SpreadsheetApp {
     ctx.restore();
 
     ctx.save();
-    ctx.fillStyle = resolveCssVar("--formula-grid-bg", { fallback: resolveCssVar("--bg-primary", { fallback: "Canvas" }) });
+    ctx.fillStyle = resolveCssVar("--formula-grid-bg", {
+      root: this.root,
+      fallback: resolveCssVar("--bg-primary", { root: this.root, fallback: "Canvas" }),
+    });
     ctx.fillRect(0, 0, this.width, this.height);
 
     const originX = this.rowHeaderWidth;
@@ -11516,16 +11538,25 @@ export class SpreadsheetApp {
       }
     }
 
-    ctx.strokeStyle = resolveCssVar("--formula-grid-line", { fallback: resolveCssVar("--grid-line", { fallback: "CanvasText" }) });
+    ctx.strokeStyle = resolveCssVar("--formula-grid-line", {
+      root: this.root,
+      fallback: resolveCssVar("--grid-line", { root: this.root, fallback: "CanvasText" }),
+    });
     ctx.lineWidth = 1;
 
     // Header backgrounds.
-    ctx.fillStyle = resolveCssVar("--formula-grid-header-bg", { fallback: resolveCssVar("--grid-header-bg", { fallback: "Canvas" }) });
+    ctx.fillStyle = resolveCssVar("--formula-grid-header-bg", {
+      root: this.root,
+      fallback: resolveCssVar("--grid-header-bg", { root: this.root, fallback: "Canvas" }),
+    });
     ctx.fillRect(0, 0, this.width, this.colHeaderHeight);
     ctx.fillRect(0, 0, this.rowHeaderWidth, this.height);
 
     // Corner cell.
-    ctx.fillStyle = resolveCssVar("--formula-grid-header-bg", { fallback: resolveCssVar("--grid-header-bg", { fallback: "Canvas" }) });
+    ctx.fillStyle = resolveCssVar("--formula-grid-header-bg", {
+      root: this.root,
+      fallback: resolveCssVar("--grid-header-bg", { root: this.root, fallback: "Canvas" }),
+    });
     ctx.fillRect(0, 0, this.rowHeaderWidth, this.colHeaderHeight);
 
     // Header separator lines.
@@ -11538,15 +11569,28 @@ export class SpreadsheetApp {
     ctx.lineTo(this.width, originY + 0.5);
     ctx.stroke();
 
-    const cellFontFamily = resolveCssVar("--font-mono", { fallback: DEFAULT_GRID_MONOSPACE_FONT_FAMILY });
-    const headerFontFamily = resolveCssVar("--font-sans", { fallback: DEFAULT_GRID_FONT_FAMILY });
+    const cellFontFamily = resolveCssVar("--font-mono", { root: this.root, fallback: DEFAULT_GRID_MONOSPACE_FONT_FAMILY });
+    const headerFontFamily = resolveCssVar("--font-sans", { root: this.root, fallback: DEFAULT_GRID_FONT_FAMILY });
     const fontSizePx = 14;
-    const defaultTextColor = resolveCssVar("--formula-grid-cell-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
-    const errorTextColor = resolveCssVar("--formula-grid-error-text", { fallback: resolveCssVar("--error", { fallback: defaultTextColor }) });
-    const linkTextColor = resolveCssVar("--formula-grid-link", { fallback: resolveCssVar("--link", { fallback: defaultTextColor }) });
-    const commentIndicatorColor = resolveCssVar("--formula-grid-comment-indicator", { fallback: resolveCssVar("--warning", { fallback: "CanvasText" }) });
+    const defaultTextColor = resolveCssVar("--formula-grid-cell-text", {
+      root: this.root,
+      fallback: resolveCssVar("--text-primary", { root: this.root, fallback: "CanvasText" }),
+    });
+    const errorTextColor = resolveCssVar("--formula-grid-error-text", {
+      root: this.root,
+      fallback: resolveCssVar("--error", { root: this.root, fallback: defaultTextColor }),
+    });
+    const linkTextColor = resolveCssVar("--formula-grid-link", {
+      root: this.root,
+      fallback: resolveCssVar("--link", { root: this.root, fallback: defaultTextColor }),
+    });
+    const commentIndicatorColor = resolveCssVar("--formula-grid-comment-indicator", {
+      root: this.root,
+      fallback: resolveCssVar("--warning", { root: this.root, fallback: "CanvasText" }),
+    });
     const commentIndicatorResolvedColor = resolveCssVar("--formula-grid-comment-indicator-resolved", {
-      fallback: resolveCssVar("--text-secondary", { fallback: commentIndicatorColor }),
+      root: this.root,
+      fallback: resolveCssVar("--text-secondary", { root: this.root, fallback: commentIndicatorColor }),
     });
 
     // Avoid allocating per-cell `{row,col}` objects in the legacy renderer.
@@ -11728,7 +11772,8 @@ export class SpreadsheetApp {
     // Freeze lines.
     ctx.save();
     ctx.strokeStyle = resolveCssVar("--formula-grid-freeze-line", {
-      fallback: resolveCssVar("--grid-line", { fallback: "CanvasText" })
+      root: this.root,
+      fallback: resolveCssVar("--grid-line", { root: this.root, fallback: "CanvasText" })
     });
     ctx.lineWidth = 2;
     if (frozenWidth > 0 && frozenWidth < viewportWidth) {
@@ -11748,7 +11793,10 @@ export class SpreadsheetApp {
     ctx.restore();
 
     // Header labels.
-    ctx.fillStyle = resolveCssVar("--formula-grid-header-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
+    ctx.fillStyle = resolveCssVar("--formula-grid-header-text", {
+      root: this.root,
+      fallback: resolveCssVar("--text-primary", { root: this.root, fallback: "CanvasText" }),
+    });
     ctx.font = `12px ${headerFontFamily}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -13875,7 +13923,7 @@ export class SpreadsheetApp {
         this.selectionCtx.beginPath();
         this.selectionCtx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
         this.selectionCtx.clip();
-        this.selectionCtx.strokeStyle = resolveCssVar("--warning", { fallback: "CanvasText" });
+        this.selectionCtx.strokeStyle = resolveCssVar("--warning", { root: this.root, fallback: "CanvasText" });
         this.selectionCtx.lineWidth = 2;
         this.selectionCtx.setLineDash([4, 3]);
         this.selectionCtx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
@@ -13899,10 +13947,12 @@ export class SpreadsheetApp {
         );
 
         const stroke = resolveCssVar("--formula-grid-selection-border", {
-          fallback: resolveCssVar("--selection-border", { fallback: "CanvasText" })
+          root: this.root,
+          fallback: resolveCssVar("--selection-border", { root: this.root, fallback: "CanvasText" })
         });
         const handleFill = resolveCssVar("--formula-grid-bg", {
-          fallback: resolveCssVar("--bg-primary", { fallback: "Canvas" })
+          root: this.root,
+          fallback: resolveCssVar("--bg-primary", { root: this.root, fallback: "Canvas" })
         });
         const handleSize = RESIZE_HANDLE_SIZE_PX;
         const half = handleSize / 2;
@@ -21071,7 +21121,7 @@ export class SpreadsheetApp {
       const startCol = Math.min(this.referencePreview.start.col, this.referencePreview.end.col);
       const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
       drawRangeOutline(startRow, endRow, startCol, endCol, {
-        color: resolveCssVar("--warning", { fallback: "CanvasText" }),
+        color: resolveCssVar("--warning", { root: this.root, fallback: "CanvasText" }),
         dash: [4, 3],
       });
     }

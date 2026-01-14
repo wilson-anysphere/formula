@@ -281,7 +281,8 @@ export class SecondaryGridView {
         colCount: options.colCount,
         showFormulas: options.showFormulas,
         getComputedValue: options.getComputedValue,
-        getCommentMeta: options.getCommentMeta
+        getCommentMeta: options.getCommentMeta,
+        cssVarRoot: this.container,
       });
 
     const externalCallbacks: DesktopSharedGridCallbacks = options.callbacks ?? {};
@@ -461,8 +462,13 @@ export class SecondaryGridView {
         };
       },
     };
-    this.drawingsOverlay = new DrawingOverlay(drawingsCanvas, this.drawingsImages, geom, options.chartRenderer, () =>
-      this.renderDrawings(),
+    this.drawingsOverlay = new DrawingOverlay(
+      drawingsCanvas,
+      this.drawingsImages,
+      geom,
+      options.chartRenderer,
+      () => this.renderDrawings(),
+      this.container,
     );
 
     // Initial sizing (ResizeObserver will keep it updated).

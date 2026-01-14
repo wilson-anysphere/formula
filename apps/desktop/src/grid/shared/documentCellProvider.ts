@@ -88,16 +88,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export class DocumentCellProvider implements CellProvider {
-  private readonly headerStyle: CellStyle = {
-    fontFamily: resolveCssVar("--font-sans", { fallback: DEFAULT_GRID_FONT_FAMILY }),
-    fontWeight: "600",
-    textAlign: "center"
-  };
-  private readonly rowHeaderStyle: CellStyle = {
-    fontFamily: resolveCssVar("--font-sans", { fallback: DEFAULT_GRID_FONT_FAMILY }),
-    fontWeight: "600",
-    textAlign: "end"
-  };
+  private readonly headerStyle: CellStyle;
+  private readonly rowHeaderStyle: CellStyle;
   private resolvedDefaultHyperlinkStyle: CellStyle | null = null;
   private resolvedLinkColor: string | null = null;
   private readonly options: {
@@ -116,6 +108,13 @@ export class DocumentCellProvider implements CellProvider {
     showFormulas: () => boolean;
     getComputedValue: (cell: { row: number; col: number }) => unknown;
     getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
+    /**
+     * Optional root element used when resolving theme CSS variables.
+     *
+     * This is useful when `--formula-grid-*` vars are overridden on a specific
+     * grid root (e.g. split panes) instead of being applied globally.
+     */
+    cssVarRoot?: HTMLElement | null;
     /**
      * Max entries per sheet in the per-cell cache. Lower values reduce memory usage
      * but may increase document reads and formatting work during fast scrolling.
@@ -178,6 +177,7 @@ export class DocumentCellProvider implements CellProvider {
     showFormulas: () => boolean;
     getComputedValue: (cell: { row: number; col: number }) => unknown;
     getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
+    cssVarRoot?: HTMLElement | null;
     sheetCacheMaxSize?: number;
     resolvedFormatCacheMaxSize?: number;
     singleLayerFormatCacheMaxSize?: number;
@@ -194,6 +194,21 @@ export class DocumentCellProvider implements CellProvider {
     this.resolvedFormatCache = new LruCache<string, ResolvedFormat>(this.resolvedFormatCacheMaxSize);
     // Caches cover cell metadata + value formatting work. Keep each sheet bounded to
     // avoid memory blow-ups on huge scrolls.
+
+    const cssVarRoot = options.cssVarRoot ?? null;
+    const headerFontFamily = cssVarRoot
+      ? resolveCssVar("--font-sans", { root: cssVarRoot, fallback: DEFAULT_GRID_FONT_FAMILY })
+      : resolveCssVar("--font-sans", { fallback: DEFAULT_GRID_FONT_FAMILY });
+    this.headerStyle = {
+      fontFamily: headerFontFamily,
+      fontWeight: "600",
+      textAlign: "center"
+    };
+    this.rowHeaderStyle = {
+      fontFamily: headerFontFamily,
+      fontWeight: "600",
+      textAlign: "end"
+    };
   }
 
   private resolveStyle(styleId: unknown): CellStyle | undefined {
@@ -637,7 +652,10 @@ export class DocumentCellProvider implements CellProvider {
       // Use a theme token for default border colors so dark mode remains legible.
       // `resolveCssVar()` returns computed values at runtime, but falls back
       // gracefully in unit tests / non-DOM environments.
-      const defaultBorderColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
+      const cssVarRoot = this.options.cssVarRoot ?? null;
+      const defaultBorderColor = cssVarRoot
+        ? resolveCssVar("--text-primary", { root: cssVarRoot, fallback: "CanvasText" })
+        : resolveCssVar("--text-primary", { fallback: "CanvasText" });
       const mapExcelBorderStyle = (style: unknown): { width: number; style: string } | null => {
         if (typeof style !== "string") return null;
         switch (style) {
@@ -727,9 +745,12 @@ export class DocumentCellProvider implements CellProvider {
     //
     // We intentionally use a system color fallback so unit tests / non-DOM
     // environments remain readable.
-    let resolved = resolveCssVar("--formula-grid-link", { fallback: "LinkText" });
+    const cssVarRoot = this.options.cssVarRoot ?? null;
+    let resolved = cssVarRoot
+      ? resolveCssVar("--formula-grid-link", { root: cssVarRoot, fallback: "LinkText" })
+      : resolveCssVar("--formula-grid-link", { fallback: "LinkText" });
 
-    const root = globalThis?.document?.documentElement ?? null;
+    const root = cssVarRoot ?? globalThis?.document?.documentElement ?? null;
     if (root && typeof getComputedStyle === "function") {
       const probe = root.ownerDocument.createElement("div");
       probe.style.position = "absolute";

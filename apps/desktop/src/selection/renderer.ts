@@ -39,6 +39,24 @@ export interface SelectionRenderStyle {
   fillHandleSize: number;
 }
 
+export interface SelectionRendererOptions {
+  /**
+   * Element used as the CSS variable root when resolving theme tokens.
+   *
+   * When omitted, `resolveCssVar` falls back to `document.documentElement`.
+   *
+   * This is important for per-grid theming where `--formula-grid-*` vars can be
+   * overridden on a specific grid root element without affecting the app shell.
+   */
+  cssVarRoot?: HTMLElement | null;
+  /**
+   * Partial overrides applied on top of the default theme-derived style.
+   *
+   * Note: This only applies when `style` is not provided.
+   */
+  styleOverrides?: Partial<SelectionRenderStyle>;
+}
+
 export type SelectionRangeRenderInfo = {
   range: Range;
   rect: Rect;
@@ -50,20 +68,27 @@ export type SelectionRenderDebugInfo = {
   activeCellRect: Rect | null;
 };
 
-function defaultStyleFromTheme(): SelectionRenderStyle {
+function defaultStyleFromTheme(cssVarRoot?: HTMLElement | null): SelectionRenderStyle {
+  const resolveVar = (varName: string, fallback: string): string => {
+    if (cssVarRoot) {
+      return resolveCssVar(varName, { root: cssVarRoot, fallback });
+    }
+    return resolveCssVar(varName, { fallback });
+  };
+
   const resolveToken = (primary: string, fallback: () => string): string => {
-    const value = resolveCssVar(primary, { fallback: "" });
+    const value = resolveVar(primary, "");
     if (value) return value;
     return fallback();
   };
 
   return {
-    fillColor: resolveToken("--formula-grid-selection-fill", () => resolveCssVar("--selection-fill", { fallback: "transparent" })),
-    borderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
-    activeBorderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
+    fillColor: resolveToken("--formula-grid-selection-fill", () => resolveVar("--selection-fill", "transparent")),
+    borderColor: resolveToken("--formula-grid-selection-border", () => resolveVar("--selection-border", "transparent")),
+    activeBorderColor: resolveToken("--formula-grid-selection-border", () => resolveVar("--selection-border", "transparent")),
     fillHandleColor: resolveToken("--formula-grid-selection-handle", () =>
       resolveToken("--formula-grid-selection-border", () =>
-        resolveCssVar("--selection-border", { fallback: "transparent" }),
+        resolveVar("--selection-border", "transparent"),
       ),
     ),
     borderWidth: 2,
@@ -73,8 +98,16 @@ function defaultStyleFromTheme(): SelectionRenderStyle {
 }
 
 export class SelectionRenderer {
-  constructor(private style: SelectionRenderStyle | null = null) {}
+  private readonly cssVarRoot: HTMLElement | null;
+  private readonly styleOverrides: Partial<SelectionRenderStyle> | null;
 
+  constructor(style: SelectionRenderStyle | null = null, options: SelectionRendererOptions = {}) {
+    this.style = style;
+    this.cssVarRoot = options.cssVarRoot ?? null;
+    this.styleOverrides = options.styleOverrides ?? null;
+  }
+
+  private style: SelectionRenderStyle | null;
   private lastDebug: SelectionRenderDebugInfo | null = null;
 
   getLastDebug(): SelectionRenderDebugInfo | null {
@@ -82,7 +115,8 @@ export class SelectionRenderer {
   }
 
   getFillHandleRect(selection: SelectionState, metrics: GridMetrics, options: SelectionRenderOptions = {}): Rect | null {
-    const style = this.style ?? defaultStyleFromTheme();
+    let style = this.style ?? defaultStyleFromTheme(this.cssVarRoot);
+    if (!this.style && this.styleOverrides) style = { ...style, ...this.styleOverrides };
     return this.computeFillHandleRect(selection, metrics, style, options);
   }
 
@@ -92,7 +126,8 @@ export class SelectionRenderer {
     metrics: GridMetrics,
     options: SelectionRenderOptions = {}
   ): void {
-    const style = this.style ?? defaultStyleFromTheme();
+    let style = this.style ?? defaultStyleFromTheme(this.cssVarRoot);
+    if (!this.style && this.styleOverrides) style = { ...style, ...this.styleOverrides };
 
     // `clearRect` is affected by the current transform. Reset to identity to
     // clear the full backing store regardless of DPR scaling.
@@ -202,6 +237,7 @@ export class SelectionRenderer {
     if (!info.edges.bottom || !info.edges.right) return null;
 
     const size = style.fillHandleSize;
+    if (size <= 0) return null;
     return {
       x: info.rect.x + info.rect.width - size / 2,
       y: info.rect.y + info.rect.height - size / 2,
