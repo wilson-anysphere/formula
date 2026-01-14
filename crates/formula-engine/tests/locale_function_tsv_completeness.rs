@@ -641,3 +641,55 @@ fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
         panic!("{report}");
     }
 }
+
+fn assert_error_alias(entries: &BTreeMap<String, Vec<String>>, canon: &str, localized: &str) {
+    let Some(list) = entries.get(canon) else {
+        panic!("expected error TSV to contain canonical key {canon:?}");
+    };
+    assert!(
+        list.iter().any(|value| value == localized),
+        "expected error TSV mapping for {canon:?} to include alias {localized:?}; got {list:?}"
+    );
+}
+
+#[test]
+fn locale_error_tsvs_preserve_known_alias_spellings() {
+    // Regression guard: some locales deliberately include additional spellings ("aliases") for
+    // Excel compatibility (e.g. Spanish inverted punctuation variants, French synonyms for
+    // dynamic-array spill errors). These aliases are needed for robust localized parsing and are
+    // easy to lose if upstream extraction is overwritten without preserving existing entries.
+    let path = Path::new("<in-memory>");
+
+    let de_de = parse_error_tsv(
+        "de-DE",
+        path,
+        include_str!("../src/locale/data/de-DE.errors.tsv"),
+        /*require_sorted*/ true,
+    );
+    assert_error_alias(&de_de.entries, "#N/A", "#NV");
+    assert_error_alias(&de_de.entries, "#N/A", "#N/A!");
+
+    let fr_fr = parse_error_tsv(
+        "fr-FR",
+        path,
+        include_str!("../src/locale/data/fr-FR.errors.tsv"),
+        /*require_sorted*/ true,
+    );
+    assert_error_alias(&fr_fr.entries, "#NULL!", "#NUL!");
+    assert_error_alias(&fr_fr.entries, "#NULL!", "#NULL!");
+    assert_error_alias(&fr_fr.entries, "#SPILL!", "#PROPAGATION!");
+    assert_error_alias(&fr_fr.entries, "#SPILL!", "#DEVERSEMENT!");
+
+    let es_es = parse_error_tsv(
+        "es-ES",
+        path,
+        include_str!("../src/locale/data/es-ES.errors.tsv"),
+        /*require_sorted*/ true,
+    );
+    assert_error_alias(&es_es.entries, "#VALUE!", "#¡VALOR!");
+    assert_error_alias(&es_es.entries, "#VALUE!", "#VALOR!");
+    assert_error_alias(&es_es.entries, "#NAME?", "#¿NOMBRE?");
+    assert_error_alias(&es_es.entries, "#NAME?", "#NOMBRE?");
+    assert_error_alias(&es_es.entries, "#SPILL!", "#¡DESBORDAMIENTO!");
+    assert_error_alias(&es_es.entries, "#SPILL!", "#DESBORDAMIENTO!");
+}
