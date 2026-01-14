@@ -215,10 +215,10 @@ jobs:
         id: perf
         env:
           # Enable the real desktop startup benchmark (Tauri shell) only when we've built it.
-          FORMULA_RUN_DESKTOP_STARTUP_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && '1' || '0' }}
+          FORMULA_RUN_DESKTOP_STARTUP_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.build_desktop_binary.outcome == 'success' && '1' || '0' }}
           # Enable the optional desktop idle-memory benchmark only when the desktop
           # binary + assets were built in this job.
-          FORMULA_RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && '1' || '0' }}
+          FORMULA_RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.build_desktop_binary.outcome == 'success' && '1' || '0' }}
           # Desktop startup benchmark kind: `shell` is lightweight (no apps/desktop/dist required),
           # while `full` measures end-to-end app bootstrap.
           FORMULA_DESKTOP_STARTUP_BENCH_KIND: ${{ steps.desktop_bench.outputs.kind }}
@@ -257,7 +257,7 @@ jobs:
           fail-on-alert: true
 
       - name: Enforce desktop idle RSS target (MB)
-        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
+        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.build_desktop_binary.outcome == 'success'
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
