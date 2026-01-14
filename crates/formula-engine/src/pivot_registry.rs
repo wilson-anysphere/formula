@@ -455,7 +455,7 @@ impl PivotRegistry {
 }
 
 #[cfg(test)]
-mod tests {
+mod normalize_pivot_cache_field_name_escape_tests {
     use super::normalize_pivot_cache_field_name;
 
     #[test]
