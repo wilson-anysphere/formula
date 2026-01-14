@@ -6,7 +6,7 @@
 
 export type Cell = {
   /** Cell value */
-  v?: string | number | boolean | null | undefined;
+  v?: any;
   /** Formula string, e.g. "=SUM(A1:A10)" */
   f?: string | null | undefined;
 };
@@ -55,4 +55,3 @@ export type WorkbookChunk = {
   cells: Cell[][];
   meta?: any;
 };
-
