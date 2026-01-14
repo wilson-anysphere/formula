@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -134,7 +135,10 @@ test("release-smoke-test: --local-bundles skips validators when bundle dirs exis
     return;
   }
 
-  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-empty-${process.pid}`);
+  // Use the OS temp directory (instead of repoRoot/target) so tests that manipulate
+  // temp bundle directories don't race with other suites that run `cargo clean` in
+  // parallel (which recursively scans `target/`).
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), `formula-release-smoke-test-empty-${process.pid}-`));
   const bundleDir = path.join(tmpRoot, "release", "bundle");
   fs.mkdirSync(bundleDir, { recursive: true });
 
@@ -190,7 +194,7 @@ test("release-smoke-test: --local-bundles runs validate-linux-deb.sh with --no-c
     return;
   }
 
-  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-deb-nodocker-${process.pid}`);
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), `formula-release-smoke-test-deb-nodocker-${process.pid}-`));
   const bundleDir = path.join(tmpRoot, "release", "bundle", "deb");
   const binDir = path.join(tmpRoot, "bin");
   fs.mkdirSync(bundleDir, { recursive: true });
@@ -340,7 +344,9 @@ test("release-smoke-test: --local-bundles skips validate-linux-appimage.sh when 
     return;
   }
 
-  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-appimage-nosquashfs-${process.pid}`);
+  const tmpRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), `formula-release-smoke-test-appimage-nosquashfs-${process.pid}-`),
+  );
   const bundleDir = path.join(tmpRoot, "release", "bundle", "appimage");
   const binDir = path.join(tmpRoot, "bin");
   fs.mkdirSync(bundleDir, { recursive: true });
@@ -402,7 +408,7 @@ test("release-smoke-test: --local-bundles skips validate-linux-rpm.sh when docke
     return;
   }
 
-  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-rpm-nodocker-${process.pid}`);
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), `formula-release-smoke-test-rpm-nodocker-${process.pid}-`));
   const bundleDir = path.join(tmpRoot, "release", "bundle", "rpm");
   const binDir = path.join(tmpRoot, "bin");
   fs.mkdirSync(bundleDir, { recursive: true });
