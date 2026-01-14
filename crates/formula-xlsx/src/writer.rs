@@ -1386,6 +1386,28 @@ fn sheet_xml(
     Ok((xml, rels_xml))
 }
 
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_row_height.is_none()
+        && sheet.default_col_width.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut attrs = String::new();
+    if let Some(base) = sheet.base_col_width {
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+
+    format!(r#"<sheetFormatPr{attrs}/>"#)
+}
+
 fn render_row_breaks_xml(breaks: &ManualPageBreaks) -> String {
     if breaks.row_breaks_after.is_empty() {
         return String::new();
