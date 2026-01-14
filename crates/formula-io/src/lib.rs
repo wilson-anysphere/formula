@@ -3639,6 +3639,10 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                 // - legacy dialog sheets (`xl/dialogsheets/**`)
                 let should_strip_macros = kind.is_macro_free() && out.macro_presence().any();
                 if should_strip_macros {
+                    // When stripping macros, use the macro-stripper's built-in `[Content_Types].xml`
+                    // rewrite logic (including removing macro part overrides) rather than layering
+                    // a separate workbook-kind patch on top of the original macro-enabled content
+                    // types.
                     out.remove_vba_project_with_kind(kind)
                         .map_err(|source| Error::SaveXlsxPackage {
                             path: path.to_path_buf(),

@@ -27,9 +27,10 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `password`
 - `standard.xlsx` – Standard encrypted OOXML.
-  - `EncryptionInfo` header version **Major 3 / Minor 2**
-  - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
-  - Decrypts to `plaintext.xlsx` with password `password`
+   - `EncryptionInfo` header version **Major 3 / Minor 2**
+   - `EncryptionInfo` version flags: `0x00000024` (`fCryptoAPI` + `fAES`)
+   - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
+   - Decrypts to `plaintext.xlsx` with password `password`
 - `standard-4.2.xlsx` – Standard encrypted OOXML (Apache POI output).
    - `EncryptionInfo` header version **Major 4 / Minor 2**
    - Decrypts to `plaintext.xlsx` with password `password`
