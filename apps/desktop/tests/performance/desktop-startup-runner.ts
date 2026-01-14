@@ -5,6 +5,7 @@ import {
   defaultDesktopBinPath,
   percentile,
   buildDesktopStartupProfileRoot,
+  parseDesktopStartupMode,
   runDesktopStartupIterations,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupArgv,
@@ -116,12 +117,13 @@ function parseArgs(argv: string[]): {
     if (!arg) break;
 
     if (arg === "--mode" && args[0]) {
-      const raw = String(args.shift()).trim().toLowerCase();
-      if (raw !== "cold" && raw !== "warm") {
+      const raw = String(args.shift());
+      const parsed = parseDesktopStartupMode(raw);
+      if (!parsed) {
         throw new Error(`Invalid --mode ${JSON.stringify(raw)} (expected "cold" or "warm")`);
       }
-      mode = raw;
-      out.mode = mode;
+      mode = parsed;
+      out.mode = parsed;
     } else if (arg === "--runs" && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
     else if (arg === "--timeout-ms" && args[0]) out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
     else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
