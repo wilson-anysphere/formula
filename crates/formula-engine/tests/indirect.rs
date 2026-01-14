@@ -144,7 +144,7 @@ fn indirect_path_qualified_external_workbook_refs_resolve_via_provider_with_byte
 }
 
 #[test]
-fn indirect_external_workbook_refs_are_ref_error_without_bytecode() {
+fn indirect_external_workbook_refs_resolve_via_provider_without_bytecode() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
     }
@@ -177,20 +177,15 @@ fn indirect_external_workbook_refs_are_ref_error_without_bytecode() {
 
     engine.recalculate();
 
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "A1"),
-        Value::Error(ErrorKind::Ref)
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
-    assert_eq!(
-        provider.calls(),
-        0,
-        "expected INDIRECT to reject external workbook refs without consulting the provider"
-    );
-    assert!(engine.precedents("Sheet1", "A1").unwrap().is_empty());
 }
 
 #[test]
-fn indirect_dynamic_external_workbook_refs_are_ref_error_without_bytecode() {
+fn indirect_dynamic_external_workbook_refs_resolve_via_provider_without_bytecode() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
     }
@@ -226,25 +221,26 @@ fn indirect_dynamic_external_workbook_refs_are_ref_error_without_bytecode() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
-    assert_eq!(
-        provider.calls(),
-        0,
-        "expected INDIRECT to reject external workbook refs without consulting the provider"
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
     // The dynamic ref text is sourced from `B1`, so that cell is a static precedent even though
-    // the external workbook reference is rejected.
-    assert_eq!(
-        engine.precedents("Sheet1", "A1").unwrap(),
-        vec![PrecedentNode::Cell {
-            sheet: 0,
-            addr: CellAddr { row: 0, col: 1 } // B1
-        }]
+    // the external workbook reference itself is dynamic.
+    assert!(
+        engine
+            .precedents("Sheet1", "A1")
+            .unwrap()
+            .contains(&PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 } // B1
+            })
     );
 }
 
 #[test]
-fn indirect_external_workbook_refs_are_ref_error_in_r1c1_mode_without_bytecode() {
+fn indirect_external_workbook_refs_resolve_via_provider_in_r1c1_mode_without_bytecode() {
     struct CountingExternalProvider {
         calls: AtomicUsize,
     }
@@ -281,11 +277,9 @@ fn indirect_external_workbook_refs_are_ref_error_in_r1c1_mode_without_bytecode()
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
-    assert_eq!(
-        provider.calls(),
-        0,
-        "expected INDIRECT to reject external workbook refs without consulting the provider"
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(999.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
-    assert!(engine.precedents("Sheet1", "A1").unwrap().is_empty());
 }

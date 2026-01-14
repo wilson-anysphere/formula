@@ -373,10 +373,10 @@ restrictions (notably: no `]`), so this split is unambiguous.
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
   endpoints). Use external 3D spans inside functions like `SUM(...)` instead.
-* **INDIRECT + external workbook refs:** `INDIRECT` rejects external workbook references and returns
-  `#REF!` (the external provider is **not** consulted). This includes both single-sheet refs/ranges
-  like `INDIRECT("[Book.xlsx]Sheet1!A1")` and external 3D spans like
-  `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")`.
+* **INDIRECT + external workbook refs:** `INDIRECT` supports external *single-sheet* workbook
+  references like `INDIRECT("[Book.xlsx]Sheet1!A1")` via the configured external provider.
+  External 3D spans (e.g. `INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")`) are rejected and return
+  `#REF!`.
 
 #### Minimal provider sketch (including `sheet_order`)
 

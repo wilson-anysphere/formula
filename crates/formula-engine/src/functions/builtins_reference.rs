@@ -569,7 +569,7 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let origin_ast = crate::CellAddr::new(origin.row, origin.col);
     let lowered = crate::eval::lower_ast(&parsed, if a1 { None } else { Some(origin_ast) });
 
-            match lowered {
+    match lowered {
         // Validate that the parsed expression is a "simple" static reference (cell or rectangular
         // range) before compiling it. This preserves the historical behavior of rejecting unions,
         // intersections, defined names, structured refs, etc.
@@ -596,12 +596,17 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
             match ctx.eval_arg(&compiled) {
                 ArgValue::Reference(r) => {
-                    // Excel semantics: INDIRECT does not resolve references into external
-                    // workbooks (even if an external value provider is configured).
-                    if matches!(&r.sheet_id, crate::functions::SheetId::External(_)) {
-                        Value::Error(ErrorKind::Ref)
-                    } else {
-                        Value::Reference(r)
+                    // Allow single-sheet external workbook references like `"[Book.xlsx]Sheet1"`,
+                    // but reject external 3D spans like `"[Book.xlsx]Sheet1:Sheet3"`.
+                    //
+                    // This matches the bytecode runtime's `INDIRECT` behavior.
+                    match &r.sheet_id {
+                        crate::functions::SheetId::External(key)
+                            if !crate::eval::is_valid_external_sheet_key(key) =>
+                        {
+                            Value::Error(ErrorKind::Ref)
+                        }
+                        _ => Value::Reference(r),
                     }
                 }
                 ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Ref),

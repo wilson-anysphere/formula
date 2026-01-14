@@ -17,7 +17,7 @@ duplicated follow-up work across the task queue.
 - DONE — Task 383: Copy rewrite for external refs (`90719fa5f`)
 - DONE — Task 384: Bytecode direct external refs
 - DONE — Task 385: Docs
-- DONE — INDIRECT rejects external workbook refs (bytecode + AST) (`a3a4632c`, `dfbd573f`)
+- DONE — INDIRECT supports external *single-sheet* refs (bytecode + AST); rejects external 3D spans
 
 ## Remaining (open)
 
