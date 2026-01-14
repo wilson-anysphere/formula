@@ -25,6 +25,12 @@ function queryFxButton(host: HTMLElement): HTMLButtonElement {
   return fx;
 }
 
+function queryFunctionAutocomplete(host: HTMLElement): HTMLElement {
+  const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+  if (!dropdown) throw new Error("Expected function autocomplete dropdown to exist");
+  return dropdown;
+}
+
 describe("FormulaBarView commit/cancel UX", () => {
   it("ignores commit/cancel actions while not editing", () => {
     const host = document.createElement("div");
@@ -558,6 +564,107 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(second.defaultPrevented).toBe(true);
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("=SUM()", { reason: "enter", shift: false });
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
+  it("Escape closes the function autocomplete dropdown first, then a second Escape cancels the edit", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = queryFunctionAutocomplete(host);
+    expect(dropdown.hasAttribute("hidden")).toBe(false);
+
+    const first = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+    expect(dropdown.hasAttribute("hidden")).toBe(true);
+    expect(view.model.isEditing).toBe(true);
+    expect(view.model.draft).toBe("=VLO");
+    expect(onCancel).not.toHaveBeenCalled();
+
+    const second = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(second);
+    expect(second.defaultPrevented).toBe(true);
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("");
+
+    host.remove();
+  });
+
+  it("Enter accepts function autocomplete first, then a second Enter commits the edit", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = queryFunctionAutocomplete(host);
+    expect(dropdown.hasAttribute("hidden")).toBe(false);
+
+    const first = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+
+    expect(dropdown.hasAttribute("hidden")).toBe(true);
+    expect(view.model.isEditing).toBe(true);
+    expect(view.textarea.value).toBe("=VLOOKUP(");
+
+    const second = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(second);
+    expect(second.defaultPrevented).toBe(true);
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=VLOOKUP(", { reason: "enter", shift: false });
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
+  it("Shift+Enter commits (and does not accept autocomplete)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = queryFunctionAutocomplete(host);
+    expect(dropdown.hasAttribute("hidden")).toBe(false);
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    // Should commit the draft as-typed, not accept the autocomplete replacement.
+    expect(onCommit).toHaveBeenCalledWith("=VLO", { reason: "enter", shift: true });
     expect(view.model.isEditing).toBe(false);
 
     host.remove();
