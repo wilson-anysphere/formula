@@ -198,6 +198,99 @@ fn slicer_cache_field_idx_best_effort(
     best.map(|(idx, _, _)| idx)
 }
 
+fn timeline_cache_field_name_best_effort(
+    timeline: &crate::pivots::slicers::TimelineDefinition,
+    cache_def: &PivotCacheDefinition,
+    cache: &PivotCache,
+) -> Option<String> {
+    if let Some(idx) = timeline.base_field {
+        if let Some(field) = cache_def.cache_fields.get(idx as usize) {
+            return Some(field.name.clone());
+        }
+    }
+
+    if let Some(source_name) = timeline.source_name.as_deref() {
+        if cache.unique_values.contains_key(source_name) {
+            return Some(source_name.to_string());
+        }
+        let folded = source_name.trim().to_ascii_lowercase();
+        if !folded.is_empty() {
+            if let Some(name) = cache
+                .unique_values
+                .keys()
+                .find(|k| k.to_ascii_lowercase() == folded)
+            {
+                return Some(name.clone());
+            }
+        }
+    }
+
+    let start = timeline.selection.start.as_deref().and_then(parse_iso_ymd);
+    let end = timeline.selection.end.as_deref().and_then(parse_iso_ymd);
+    if start.is_none() && end.is_none() {
+        return None;
+    }
+
+    let cache_name_folded = timeline
+        .cache_name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let timeline_name_folded = timeline
+        .name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let mut best: Option<(String, usize, bool, usize)> = None;
+    for field in &cache_def.cache_fields {
+        let Some(values) = cache.unique_values.get(&field.name) else {
+            continue;
+        };
+
+        let mut date_values = Vec::new();
+        for value in values {
+            if let PivotValue::Date(d) = value {
+                date_values.push(*d);
+            }
+        }
+        if date_values.is_empty() {
+            continue;
+        }
+
+        let mut in_range = 0usize;
+        for date in &date_values {
+            if start.is_some_and(|s| *date < s) {
+                continue;
+            }
+            if end.is_some_and(|e| *date > e) {
+                continue;
+            }
+            in_range += 1;
+        }
+
+        let field_folded = field.name.to_ascii_lowercase();
+        let name_hint = !field_folded.is_empty()
+            && (cache_name_folded.contains(&field_folded)
+                || timeline_name_folded.contains(&field_folded));
+
+        let score = in_range;
+        let is_better = match &best {
+            None => true,
+            Some((_name, best_score, best_hint, best_date_count)) => {
+                score > *best_score
+                    || (score == *best_score && name_hint && !*best_hint)
+                    || (score == *best_score && name_hint == *best_hint && date_values.len() > *best_date_count)
+            }
+        };
+        if is_better {
+            best = Some((field.name.clone(), score, name_hint, date_values.len()));
+        }
+    }
+
+    best.map(|(name, _score, _hint, _date_count)| name)
+}
+
 /// Convert a parsed slicer selection into a pivot-engine filter field.
 ///
 /// Callers can supply a resolver that maps slicer item keys (often stored as `x` indices) back into
@@ -316,11 +409,7 @@ pub fn pivot_slicer_parts_to_engine_filters(
             continue;
         }
 
-        let field = timeline
-            .base_field
-            .and_then(|idx| cache_def.cache_fields.get(idx as usize))
-            .map(|f| f.name.clone())
-            .or_else(|| timeline.source_name.clone());
+        let field = timeline_cache_field_name_best_effort(timeline, cache_def, cache);
         let Some(field) = field else {
             continue;
         };
@@ -619,6 +708,7 @@ mod tests {
     use super::*;
 
     use crate::pivots::slicers::SlicerDefinition;
+    use crate::pivots::slicers::TimelineDefinition;
     use crate::pivots::PivotCacheField;
     use pretty_assertions::assert_eq;
     use std::collections::HashSet;
@@ -1251,6 +1341,86 @@ mod tests {
                 PivotKeyPart::Text("A".to_string()),
                 PivotKeyPart::Text("B".to_string()),
             ][..])
+        );
+    }
+
+    #[test]
+    fn pivot_slicer_parts_to_engine_filters_infers_timeline_field_when_base_field_missing() {
+        let source = vec![
+            vec![
+                PivotValue::Text("Date".to_string()),
+                PivotValue::Text("Sales".to_string()),
+            ],
+            vec![
+                PivotValue::Date(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
+                1.into(),
+            ],
+            vec![
+                PivotValue::Date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()),
+                2.into(),
+            ],
+            vec![
+                PivotValue::Date(NaiveDate::from_ymd_opt(2024, 2, 1).unwrap()),
+                3.into(),
+            ],
+        ];
+        let cache = PivotCache::from_range(&source).expect("build pivot cache");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "Date".to_string(),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Sales".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let timeline = TimelineDefinition {
+            part_name: "xl/timelines/timeline1.xml".to_string(),
+            name: Some("DateTimeline".to_string()),
+            uid: None,
+            cache_part: None,
+            cache_name: Some("DateTimelineCache".to_string()),
+            source_name: None,
+            base_field: None,
+            level: None,
+            connected_pivot_tables: vec!["xl/pivotTables/pivotTable1.xml".to_string()],
+            placed_on_drawings: vec![],
+            placed_on_sheets: vec![],
+            placed_on_sheet_names: vec![],
+            selection: TimelineSelectionState {
+                start: Some("2024-01-01".to_string()),
+                end: Some("2024-01-31".to_string()),
+            },
+        };
+
+        let parts = PivotSlicerParts {
+            slicers: vec![],
+            timelines: vec![timeline],
+        };
+
+        let filters = pivot_slicer_parts_to_engine_filters(
+            "xl/pivotTables/pivotTable1.xml",
+            &cache_def,
+            &cache,
+            &parts,
+        );
+        assert_eq!(filters.len(), 1);
+        assert_eq!(
+            filters[0].source_field,
+            PivotFieldRef::CacheFieldName("Date".to_string())
+        );
+        assert_eq!(
+            filters[0].allowed.as_ref(),
+            Some(&HashSet::from([
+                PivotKeyPart::Date(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
+                PivotKeyPart::Date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()),
+            ]))
         );
     }
 }

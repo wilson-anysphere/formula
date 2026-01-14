@@ -227,6 +227,7 @@ fn parse_legend(
         layout,
     })
 }
+
 fn detect_chart_kind(doc: &Document<'_>, diagnostics: &mut Vec<ChartDiagnostic>) -> String {
     // 1) Prefer explicit chart-type nodes like `<cx:waterfallChart>`.
     if let Some(node) = find_chart_type_node(doc) {
