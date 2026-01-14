@@ -248,7 +248,6 @@ pub trait FunctionContext {
     fn get_cell_formula(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
         None
     }
-
     /// Returns the workbook's style table, if available.
     fn style_table(&self) -> Option<&formula_model::StyleTable> {
         None
@@ -284,6 +283,11 @@ pub trait FunctionContext {
     fn workbook_filename(&self) -> Option<&str> {
         None
     }
+
+    /// Resolve a worksheet name to an internal sheet id for runtime-parsed sheet references.
+    ///
+    /// Implementations should match Excel's Unicode-aware, NFKC + case-insensitive comparison
+    /// semantics (see [`formula_model::sheet_name_eq_case_insensitive`]).
     fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
         None
     }

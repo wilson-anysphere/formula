@@ -224,7 +224,13 @@ pub trait ValueResolver {
     /// Resolve a worksheet name to an internal sheet id.
     ///
     /// This is used by volatile reference functions like `INDIRECT` that parse sheet names
-    /// at runtime. Resolvers that do not support name-based sheet lookup can return `None`.
+    /// at runtime.
+    ///
+    /// Expected semantics: match Excel's Unicode-aware case-insensitive sheet name comparison.
+    /// The engine approximates this by applying Unicode NFKC (compatibility normalization) and
+    /// then Unicode uppercasing, as implemented by [`formula_model::sheet_name_eq_case_insensitive`].
+    ///
+    /// Resolvers that do not support name-based sheet lookup can return `None`.
     fn sheet_id(&self, _name: &str) -> Option<usize> {
         None
     }

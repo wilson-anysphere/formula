@@ -7237,13 +7237,24 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_id(&self, name: &str) -> Option<usize> {
-        self.sheet_names_by_id
-            .iter()
-            .enumerate()
-            .find_map(|(id, candidate)| {
-                let candidate = candidate.as_deref()?;
-                (crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal).then_some(id)
-            })
+        // Excel resolves sheet names case-insensitively across Unicode using compatibility
+        // normalization (NFKC). This ensures runtime lookups (e.g. INDIRECT, SHEET("name"))
+        // agree with compile-time reference rewriting / workbook sheet-key semantics.
+        //
+        // NOTE: `sheet_names_by_id` may eventually contain tombstoned/deleted entries once the
+        // stable-id model lands; skip any ids that `sheet_exists` reports as missing.
+        for (sheet_id, candidate) in self.sheet_names_by_id.iter().enumerate() {
+            if !self.sheet_exists(sheet_id) {
+                continue;
+            }
+            let Some(candidate) = candidate.as_deref() else {
+                continue;
+            };
+            if formula_model::sheet_name_eq_case_insensitive(candidate, name) {
+                return Some(sheet_id);
+            }
+        }
+        None
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
