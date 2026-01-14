@@ -64,6 +64,11 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
       re: /\.style\.setProperty\(\s*(["'])filter\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(filter)",
     },
+    // setProperty via bracket notation (e.g. `el.style["setProperty"]("filter", "brightness(0.9)")`)
+    {
+      re: /\.style\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'])filter\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      kind: "setProperty[filter]",
+    },
     // setAttribute("style", "filter: brightness(0.9)")
     {
       re: /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,

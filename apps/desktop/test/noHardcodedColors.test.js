@@ -173,10 +173,16 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     "gi",
   );
   const styleCssTextAssignment = /\.style\.cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
+  const styleCssTextBracketAssignment = /\.style\s*\[\s*(?:["'\`])cssText(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
   const setAttributeStyleAssignment = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
   const setPropertyStyleColor = new RegExp(
     // DOM style setProperty assignments (e.g. `el.style.setProperty("color", "red")` or `setProperty("--foo", "red")`)
     String.raw`\.style\.setProperty\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    "gi",
+  );
+  const setPropertyStyleBracketColor = new RegExp(
+    // DOM style setProperty assignments via bracket notation (e.g. `el.style["setProperty"]("color", "red")`)
+    String.raw`\.style\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setAttributeColor = new RegExp(
@@ -247,6 +253,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
       // First, check CSS style strings assigned to style attributes / cssText.
       for (const { re, kind } of [
         { re: styleCssTextAssignment, kind: "style.cssText" },
+        { re: styleCssTextBracketAssignment, kind: "style[cssText]" },
         { re: setAttributeStyleAssignment, kind: "setAttribute(style)" },
       ]) {
         re.lastIndex = 0;
@@ -288,6 +295,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
           { re: canvasStyleColor, kind: "canvas style" },
           { re: canvasStyleBracketColor, kind: "canvas style" },
           { re: setPropertyStyleColor, kind: "style.setProperty" },
+          { re: setPropertyStyleBracketColor, kind: "style.setProperty" },
           { re: setAttributeColor, kind: "setAttribute" },
           { re: jsxAttributeColor, kind: "jsx attribute" },
           { re: jsxAttributeColorExpr, kind: "jsx attribute expr" },
