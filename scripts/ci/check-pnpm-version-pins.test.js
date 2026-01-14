@@ -79,6 +79,41 @@ jobs:
   assert.match(proc.stdout, /pnpm version pins match package\.json/i);
 });
 
+test("passes when pnpm pins use v/V prefixes (action + env + corepack)", { skip: !canRun }, () => {
+  const proc = run({
+    "package.json": `{
+  "name": "formula",
+  "private": true,
+  "packageManager": "pnpm@9.0.0"
+ }`,
+    ".github/workflows/ci.yml": `
+name: CI
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: v9.0.0
+`,
+    ".github/workflows/security.yml": `
+name: Security
+env:
+  PNPM_VERSION: V9.0.0
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: \${{ env.PNPM_VERSION }}
+      - run: corepack prepare pnpm@\${{ env.PNPM_VERSION }} --activate
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /pnpm version pins match package\.json/i);
+});
+
 test("ignores commented-out pnpm/action-setup steps", { skip: !canRun }, () => {
   const proc = run({
     "package.json": `{

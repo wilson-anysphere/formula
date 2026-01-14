@@ -132,6 +132,7 @@ extract_workflow_env_pnpm_version() {
     value="${value#\'}"
     value="${value%\'}"
   fi
+  value="${value#[vV]}"
   printf '%s' "$value"
 }
 
@@ -227,6 +228,7 @@ check_workflow_pnpm_pins() {
           value="${value#\'}"
           value="${value%\'}"
         fi
+        value="${value#[vV]}"
 
         # Allow env indirection if it equals the expected version (rare in these workflows,
         # but used in some auxiliary workflows).
@@ -340,7 +342,7 @@ check_workflow_corepack_pnpm_pins() {
     # Supported forms:
     # - corepack prepare pnpm@9.0.0 --activate
     # - corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
-    if [[ "$trimmed" =~ pnpm@([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    if [[ "$trimmed" =~ pnpm@[vV]?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
       local version="${BASH_REMATCH[1]}"
       if [ "$version" != "$expected_pnpm_version" ]; then
         echo "pnpm version pin mismatch in ${file}:${line_no} (corepack prepare):" >&2
