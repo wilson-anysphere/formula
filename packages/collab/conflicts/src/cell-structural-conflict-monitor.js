@@ -68,6 +68,8 @@ export class CellStructuralConflictMonitor {
     this._maxOpRecordsPerUser = opts.maxOpRecordsPerUser ?? 2000;
     this._maxOpRecordAgeMs = opts.maxOpRecordAgeMs ?? null;
     this._lastAgePruneAt = 0;
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    this._agePruneTimer = null;
     this.doc = opts.doc;
     this.cells = opts.cells ?? getMapRoot(this.doc, "cells");
     this.localUserId = opts.localUserId;
@@ -116,6 +118,10 @@ export class CellStructuralConflictMonitor {
   dispose() {
     this.cells.unobserveDeep(this._onCellsDeepEvent);
     this._ops.unobserve(this._onOpsEvent);
+    if (this._agePruneTimer) {
+      clearTimeout(this._agePruneTimer);
+      this._agePruneTimer = null;
+    }
   }
  
   /** @returns {Array<CellStructuralConflict>} */
@@ -354,6 +360,7 @@ export class CellStructuralConflictMonitor {
     }
 
     if (sawAdd) {
+      this._maybeScheduleDeferredAgePrune(addedIds);
       // Conservative safety: avoid pruning op records in the same transaction
       // they were added. This prevents us from deleting late-arriving (offline)
       // records immediately, which could cause other clients to miss the entry
@@ -455,6 +462,55 @@ export class CellStructuralConflictMonitor {
         this._ops.delete(id);
       }
     }, this.origin);
+  }
+
+  /**
+   * If the current op-log transaction added records that are already past the
+   * age cutoff, schedule a deferred prune so the records don't stick around
+   * indefinitely when the document becomes idle (and to give other clients a
+   * chance to ingest the entries before deletion).
+   *
+   * @param {Set<string>} addedIds
+   */
+  _maybeScheduleDeferredAgePrune(addedIds) {
+    const maxAgeMs = this._maxOpRecordAgeMs;
+    if (maxAgeMs == null) return;
+    const ageMs = Number(maxAgeMs);
+    if (!Number.isFinite(ageMs) || ageMs <= 0) return;
+    if (!addedIds || addedIds.size === 0) return;
+
+    const now = Date.now();
+    const cutoff = now - ageMs;
+
+    let hasExpiredAdded = false;
+    for (const id of addedIds) {
+      const record = this._ops.get(id);
+      if (!record || typeof record !== "object") continue;
+      const createdAt = Number(record.createdAt);
+      if (!Number.isFinite(createdAt)) continue;
+      if (createdAt < cutoff) {
+        hasExpiredAdded = true;
+        break;
+      }
+    }
+    if (!hasExpiredAdded) return;
+
+    // If a timer is already scheduled, keep it; a single deferred prune is
+    // sufficient to eventually clean up any late-arriving expired records.
+    if (this._agePruneTimer) return;
+
+    const minIntervalMs = Math.max(5_000, Math.min(60_000, Math.floor(ageMs / 10)));
+
+    this._agePruneTimer = setTimeout(() => {
+      this._agePruneTimer = null;
+      this._pruneOpLogByAge();
+    }, minIntervalMs);
+
+    // In Node tests, avoid keeping the process alive solely for best-effort
+    // pruning. Browsers don't support `unref`.
+    if (typeof this._agePruneTimer?.unref === "function") {
+      this._agePruneTimer.unref();
+    }
   }
 
   _ensureLocalOpQueueInitialized() {
