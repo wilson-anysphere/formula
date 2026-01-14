@@ -483,6 +483,7 @@ export const DEFAULT_MAX_CELL_GRID_CELLS = 200_000;
 
 export function getCellGridFromRange(doc, sheetId, range, options = {}) {
   const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+  const sheetKey = String(sheetId ?? "").trim();
   const maxCells = options.maxCells ?? DEFAULT_MAX_CELL_GRID_CELLS;
   const rowCount = Math.max(0, r.end.row - r.start.row + 1);
   const colCount = Math.max(0, r.end.col - r.start.col + 1);
@@ -498,6 +499,27 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
   const grid = [];
   /** @type {Map<string, any>} */
   const formatCache = new Map();
+
+  // Avoid creating phantom sheets when callers hold stale sheet ids (e.g. during sheet
+  // deletion/applyState races). DocumentController lazily materializes sheets on
+  // `getCell()` / `getCellFormat()` / `getSheetView()`.
+  const sheetExists = (() => {
+    if (!sheetKey) return false;
+    try {
+      if (doc && typeof doc.getSheetMeta === "function") {
+        return Boolean(doc.getSheetMeta(sheetKey));
+      }
+      const sheets = doc?.model?.sheets;
+      const sheetMeta = doc?.sheetMeta;
+      if (sheets instanceof Map || sheetMeta instanceof Map) {
+        return (sheets instanceof Map && sheets.has(sheetKey)) || (sheetMeta instanceof Map && sheetMeta.has(sheetKey));
+      }
+    } catch {
+      // ignore
+    }
+    // If we can't verify existence, preserve legacy behavior.
+    return true;
+  })();
 
   /**
    * Normalize style ids returned from controller helpers / internal state.
@@ -517,8 +539,9 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
   const getSheetViewForStyleLayers = () => {
     if (cachedSheetViewLoaded) return cachedSheetView;
     cachedSheetViewLoaded = true;
+    if (!sheetExists) return cachedSheetView;
     if (doc && typeof doc.getSheetView === "function") {
-      cachedSheetView = doc.getSheetView(sheetId);
+      cachedSheetView = doc.getSheetView(sheetKey);
       cachedSheetViewHasStyleLayers = Boolean(
         cachedSheetView &&
           (cachedSheetView.sheetDefaultStyleId != null ||
@@ -547,6 +570,7 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
    * @returns {[number, number, number, number, number]}
    */
   const getCellStyleIdTuple = (row, col, cellStyleId) => {
+    if (!sheetExists) return [0, 0, 0, normalizeStyleId(cellStyleId), 0];
     const coord = { row, col };
     const styleIdForRowInRuns = (runs, r) => {
       if (!Array.isArray(runs) || runs.length === 0) return 0;
@@ -574,7 +598,7 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
       (doc && typeof doc.getCellStyleIdTuple === "function" && doc.getCellStyleIdTuple);
 
     if (helper) {
-      const out = helper.call(doc, sheetId, coord);
+      const out = helper.call(doc, sheetKey, coord);
       if (Array.isArray(out) && out.length >= 5) {
         return [normalizeStyleId(out[0]), normalizeStyleId(out[1]), normalizeStyleId(out[2]), normalizeStyleId(out[3]), normalizeStyleId(out[4])];
       }
@@ -610,7 +634,7 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
     // the style-id tuple needed for caching. When possible, derive it from the
     // internal sheet model maps.
     const sheetModel =
-      doc?.model?.sheets?.get && typeof doc.model.sheets.get === "function" ? doc.model.sheets.get(sheetId) : null;
+      doc?.model?.sheets?.get && typeof doc.model.sheets.get === "function" ? doc.model.sheets.get(sheetKey) : null;
     if (sheetModel && typeof sheetModel === "object") {
       const sheetDefaultStyleId = normalizeStyleId(
         sheetModel.defaultStyleId ?? sheetModel.sheetStyleId ?? sheetModel.sheetDefaultStyleId
@@ -648,7 +672,7 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
     let colStyleId = 0;
 
     if (doc && typeof doc.getSheetDefaultStyleId === "function") {
-      sheetDefaultStyleId = normalizeStyleId(doc.getSheetDefaultStyleId(sheetId));
+      sheetDefaultStyleId = normalizeStyleId(doc.getSheetDefaultStyleId(sheetKey));
     } else if (doc && typeof doc.getSheetView === "function") {
       const view = getSheetViewForStyleLayers();
       if (cachedSheetViewHasStyleLayers) {
@@ -671,10 +695,10 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
     }
 
     if (doc && typeof doc.getRowStyleId === "function") {
-      rowStyleId = normalizeStyleId(doc.getRowStyleId(sheetId, row));
+      rowStyleId = normalizeStyleId(doc.getRowStyleId(sheetKey, row));
     }
     if (doc && typeof doc.getColStyleId === "function") {
-      colStyleId = normalizeStyleId(doc.getColStyleId(sheetId, col));
+      colStyleId = normalizeStyleId(doc.getColStyleId(sheetKey, col));
     }
 
     return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId), 0];
@@ -689,15 +713,16 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
    * @returns {any | null}
    */
   const getEffectiveStyle = (row, col, cellStyleId) => {
+    if (!sheetExists) return null;
     const coord = { row, col };
     if (doc && typeof doc.getCellFormat === "function") {
-      return doc.getCellFormat(sheetId, coord);
+      return doc.getCellFormat(sheetKey, coord);
     }
     if (doc && typeof doc.getEffectiveCellStyle === "function") {
-      return doc.getEffectiveCellStyle(sheetId, coord);
+      return doc.getEffectiveCellStyle(sheetKey, coord);
     }
     if (doc && typeof doc.getCellStyle === "function") {
-      return doc.getCellStyle(sheetId, coord);
+      return doc.getCellStyle(sheetKey, coord);
     }
 
     // Legacy DocumentController: per-cell styleId only.
@@ -719,10 +744,10 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
 
   // Only consult `getSheetView()` when there isn't another obvious way to derive
   // the style-id tuple (some controllers may surface row/col style ids on the view).
-  if (!hasStyleIdTupleHelper && !hasPerLayerStyleIdMethods && !hasInternalLayeredStyleMaps) {
+  if (sheetExists && !hasStyleIdTupleHelper && !hasPerLayerStyleIdMethods && !hasInternalLayeredStyleMaps) {
     getSheetViewForStyleLayers();
   }
-  const canDeriveStyleIdTuple = Boolean(
+  const canDeriveStyleIdTuple = sheetExists && Boolean(
     hasStyleIdTupleHelper || hasPerLayerStyleIdMethods || hasInternalLayeredStyleMaps || cachedSheetViewHasStyleLayers
   );
 
@@ -730,7 +755,13 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
     /** @type {CellState[]} */
     const outRow = [];
     for (let col = r.start.col; col <= r.end.col; col++) {
-      const cell = doc.getCell(sheetId, { row, col });
+      const cell = (() => {
+        if (doc && typeof doc.peekCell === "function") {
+          return doc.peekCell(sheetKey, { row, col });
+        }
+        if (!sheetExists) return { value: null, formula: null, styleId: 0 };
+        return doc.getCell(sheetKey, { row, col });
+      })();
 
       const cellStyleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
 
@@ -738,7 +769,7 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
       // (sheet,row,col,cell,range-run) style-id tuple. Otherwise, fall back to caching by
       // the resolved style object to avoid collisions.
       let format = null;
-      if (doc && typeof doc.getCellFormat === "function" && !canDeriveStyleIdTuple) {
+      if (sheetExists && doc && typeof doc.getCellFormat === "function" && !canDeriveStyleIdTuple) {
         const style = getEffectiveStyle(row, col, cellStyleId);
         const cacheKey = stableStringify(style);
         if (formatCache.has(cacheKey)) {
@@ -748,16 +779,18 @@ export function getCellGridFromRange(doc, sheetId, range, options = {}) {
           formatCache.set(cacheKey, format);
         }
       } else {
-        const styleIdTuple = getCellStyleIdTuple(row, col, cellStyleId);
-        const hasAnyStyle = styleIdTuple.some((id) => id !== 0);
-        if (hasAnyStyle) {
-          const cacheKey = styleIdTuple.join(",");
-          if (formatCache.has(cacheKey)) {
-            format = formatCache.get(cacheKey) ?? null;
-          } else {
-            const style = getEffectiveStyle(row, col, cellStyleId);
-            format = styleToClipboardFormat(style);
-            formatCache.set(cacheKey, format);
+        if (sheetExists) {
+          const styleIdTuple = getCellStyleIdTuple(row, col, cellStyleId);
+          const hasAnyStyle = styleIdTuple.some((id) => id !== 0);
+          if (hasAnyStyle) {
+            const cacheKey = styleIdTuple.join(",");
+            if (formatCache.has(cacheKey)) {
+              format = formatCache.get(cacheKey) ?? null;
+            } else {
+              const style = getEffectiveStyle(row, col, cellStyleId);
+              format = styleToClipboardFormat(style);
+              formatCache.set(cacheKey, format);
+            }
           }
         }
       }

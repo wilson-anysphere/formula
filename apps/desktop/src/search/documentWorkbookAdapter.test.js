@@ -279,6 +279,25 @@ test("DocumentWorkbookAdapter exposes merged-cell metadata for search semantics"
   assert.equal(sheet.getMergedMasterCell(5, 5), null);
 });
 
+test("DocumentWorkbookAdapter merged-range helpers do not resurrect deleted sheets", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setCellValue("Sheet2", "A1", 2);
+  doc.setMergedRanges("Sheet2", [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }], { label: "Merge Cells" });
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc });
+  const sheet2 = workbook.getSheet("Sheet2");
+
+  doc.deleteSheet("Sheet2");
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+  assert.equal(doc.getSheetMeta("Sheet2"), null);
+
+  // A stale sheet adapter must not recreate the sheet via `getMergedRanges()` / `getSheetView()`.
+  assert.deepEqual(sheet2.getMergedRanges(), []);
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+  assert.equal(doc.getSheetMeta("Sheet2"), null);
+});
+
 test("DocumentWorkbookAdapter formats rich text + image payloads for search display", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", { text: "Hello", runs: [{ start: 0, end: 5, style: { bold: true } }] });

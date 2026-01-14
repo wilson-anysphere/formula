@@ -85,6 +85,50 @@ function dedupeStrings(values: string[]): { ok: boolean; values: string[] } {
   return { ok: true, values };
 }
 
+function safeGetCellState(
+  doc: any,
+  sheetId: string,
+  coord: { row: number; col: number },
+): { value: unknown; formula: string | null } {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return { value: null, formula: null };
+
+  // Prefer side-effect free reads when available. `DocumentController.getCell()` lazily
+  // materializes sheets on access, which can resurrect deleted sheets if callers hold
+  // stale sheet ids.
+  try {
+    if (doc && typeof doc.peekCell === "function") {
+      return (doc.peekCell(id, coord) as { value: unknown; formula: string | null }) ?? { value: null, formula: null };
+    }
+  } catch {
+    // Fall back to legacy behavior below.
+  }
+
+  // If we can cheaply tell the sheet doesn't exist, treat it as empty instead of
+  // calling `getCell()` (which would create a phantom sheet in DocumentController).
+  try {
+    if (doc && typeof doc.getSheetMeta === "function") {
+      const meta = doc.getSheetMeta(id);
+      if (!meta) return { value: null, formula: null };
+    } else {
+      const sheets = doc?.model?.sheets;
+      const sheetMeta = doc?.sheetMeta;
+      if (sheets instanceof Map || sheetMeta instanceof Map) {
+        const exists = (sheets instanceof Map && sheets.has(id)) || (sheetMeta instanceof Map && sheetMeta.has(id));
+        if (!exists) return { value: null, formula: null };
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    return (doc.getCell(id, coord) as { value: unknown; formula: string | null }) ?? { value: null, formula: null };
+  } catch {
+    return { value: null, formula: null };
+  }
+}
+
 function keyPartForCell(state: { value: unknown; formula: string | null }, uniqueSalt: string): string {
   if (state.formula) {
     // We don't have computed values here; treat formula cells as "could be unique"
@@ -132,7 +176,7 @@ function estimatePivotOutputRect(params: {
       for (const f of params.config.rowFields) {
         const col = colByField.get(f.sourceField);
         if (col == null) continue;
-        const state = params.document.getCell(params.sheetId, { row, col }) as { value: unknown; formula: string | null };
+        const state = safeGetCellState(params.document, params.sheetId, { row, col });
         parts.push(keyPartForCell(state, `${row},${col}`));
       }
       keys.add(parts.join("\u0000"));
@@ -150,7 +194,7 @@ function estimatePivotOutputRect(params: {
       for (const f of params.config.columnFields) {
         const col = colByField.get(f.sourceField);
         if (col == null) continue;
-        const state = params.document.getCell(params.sheetId, { row, col }) as { value: unknown; formula: string | null };
+        const state = safeGetCellState(params.document, params.sheetId, { row, col });
         parts.push(keyPartForCell(state, `${row},${col}`));
       }
       keys.add(parts.join("\u0000"));
@@ -411,10 +455,7 @@ export function PivotBuilderPanelContainer(props: Props) {
 
       const headers: string[] = [];
       for (let c = sourceRange.startCol; c <= sourceRange.endCol; c += 1) {
-        const state = doc.getCell(sourceSheetId, { row: sourceRange.startRow, col: c }) as {
-          value: unknown;
-          formula: string | null;
-        };
+        const state = safeGetCellState(doc, sourceSheetId, { row: sourceRange.startRow, col: c });
         const header = normalizeHeaderValue(state?.value ?? null).trim();
         headers.push(header);
       }
@@ -514,7 +555,7 @@ export function PivotBuilderPanelContainer(props: Props) {
       let nonEmpty = 0;
       for (let r = rect.startRow; r <= rect.endRow; r += 1) {
         for (let c = rect.startCol; c <= rect.endCol; c += 1) {
-          const state = doc.getCell(dest.sheetId, { row: r, col: c }) as { value: unknown; formula: string | null };
+          const state = safeGetCellState(doc, dest.sheetId, { row: r, col: c });
           if (state?.formula != null || state?.value != null) {
             nonEmpty += 1;
             if (nonEmpty >= 1) break;
