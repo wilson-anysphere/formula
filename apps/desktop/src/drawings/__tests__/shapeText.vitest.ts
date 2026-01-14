@@ -298,6 +298,32 @@ describe("parseDrawingMLShapeText", () => {
     });
   });
 
+  it('treats "yes"/"no" boolean values as true/false for run style attrs', () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r>
+              <a:rPr b="yes" i="no"/>
+              <a:t>Styled</a:t>
+            </a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns).toHaveLength(1);
+    expect(parsed?.textRuns[0]).toMatchObject({
+      text: "Styled",
+      bold: true,
+      italic: false,
+    });
+  });
+
   it("handles namespace declarations and non-self-closing line breaks", () => {
     // When raw snippets include `xmlns:` attributes, our DOMParser wrapper must avoid
     // generating invalid `xmlns:xmlns="..."` declarations. This case also uses an explicit

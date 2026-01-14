@@ -146,11 +146,8 @@ function formatAutoNumber(type: string, num: number): string {
 function parseBoolAttr(value: string | null): boolean | undefined {
   if (value == null) return undefined;
   const normalized = value.trim().toLowerCase();
-  if (normalized === "1" || normalized === "true") return true;
-  if (normalized === "0" || normalized === "false") return false;
-  // DrawingML sometimes uses "on"/"off".
-  if (normalized === "on") return true;
-  if (normalized === "off") return false;
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
   return undefined;
 }
 
