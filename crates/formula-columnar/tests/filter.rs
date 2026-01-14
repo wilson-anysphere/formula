@@ -405,6 +405,31 @@ fn filter_string_dictionary_and_case_sensitivity() {
         mask_to_bools(&ne_missing),
         vec![true, true, false, true, true, true]
     );
+
+    // Values outside the observed lexicographic min/max range can be rejected by stats.
+    let eq_outside = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Eq,
+            value: FilterValue::String(Arc::<str>::from("!")),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_outside),
+        vec![false, false, false, false, false, false]
+    );
+
+    let ne_outside = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Ne,
+            value: FilterValue::String(Arc::<str>::from("!")),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&ne_outside),
+        vec![true, true, false, true, true, true]
+    );
 }
 
 #[test]
@@ -446,4 +471,28 @@ fn filter_is_null_and_materialize_table() {
     assert_eq!(filtered.get_cell(1, 0), Value::Number(4.0));
     assert_eq!(filtered.get_cell(1, 1), Value::Boolean(true));
     assert_eq!(filtered.get_cell(1, 2), Value::String(Arc::<str>::from("a")));
+}
+
+#[test]
+fn filter_string_column_all_nulls_comparisons_are_false() {
+    let schema = vec![ColumnSchema {
+        name: "s".to_owned(),
+        column_type: ColumnType::String,
+    }];
+    let mut builder = ColumnarTableBuilder::new(schema, options());
+    for _ in 0..5 {
+        builder.append_row(&[Value::Null]);
+    }
+    let table = builder.finalize();
+
+    for op in [CmpOp::Eq, CmpOp::Ne] {
+        let mask = table
+            .filter_mask(&FilterExpr::Cmp {
+                col: 0,
+                op,
+                value: FilterValue::String(Arc::<str>::from("A")),
+            })
+            .unwrap();
+        assert_eq!(mask_to_bools(&mask), vec![false, false, false, false, false]);
+    }
 }
