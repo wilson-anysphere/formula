@@ -277,9 +277,12 @@ async function main(): Promise<void> {
           .map((r) => r.firstRenderMs)
           .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
       : [];
-  const webviewLoadedValues = results
-    .map((r) => r.webviewLoadedMs)
-    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  const includeWebviewLoaded = mode === "cold";
+  const webviewLoadedValues = includeWebviewLoaded
+    ? results
+        .map((r) => r.webviewLoadedMs)
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    : [];
 
   if (benchKind === "full" && firstRenderValues.length !== results.length) {
     throw new Error(
@@ -293,16 +296,18 @@ async function main(): Promise<void> {
   const minWebviewLoadedFraction = 0.8;
   const minWebviewLoadedRuns = Math.ceil(results.length * minWebviewLoadedFraction);
 
-  if (webviewLoadedValues.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log("[desktop-startup] webview_loaded_ms unavailable (0 runs reported it); skipping metric");
-  } else if (webviewLoadedValues.length < minWebviewLoadedRuns) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[desktop-startup] webview_loaded_ms only available for ${webviewLoadedValues.length}/${results.length} runs (<${Math.round(
-        minWebviewLoadedFraction * 100,
-      )}%); skipping metric`,
-    );
+  if (includeWebviewLoaded) {
+    if (webviewLoadedValues.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log("[desktop-startup] webview_loaded_ms unavailable (0 runs reported it); skipping metric");
+    } else if (webviewLoadedValues.length < minWebviewLoadedRuns) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[desktop-startup] webview_loaded_ms only available for ${webviewLoadedValues.length}/${results.length} runs (<${Math.round(
+          minWebviewLoadedFraction * 100,
+        )}%); skipping metric`,
+      );
+    }
   }
 
   const windowVisibleStats = buildBenchmarkResultFromValues(
@@ -322,7 +327,7 @@ async function main(): Promise<void> {
       ? buildBenchmarkResultFromValues("first_render_ms", firstRenderValues, firstRenderTargetMs, "ms")
       : null;
   const webviewLoadedStats =
-    webviewLoadedValues.length >= minWebviewLoadedRuns
+    includeWebviewLoaded && webviewLoadedValues.length >= minWebviewLoadedRuns
       ? buildBenchmarkResultFromValues("webview_loaded_ms", webviewLoadedValues, webviewLoadedTargetMs, "ms")
       : null;
 
