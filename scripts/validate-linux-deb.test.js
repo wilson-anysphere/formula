@@ -461,6 +461,88 @@ test("validate-linux-deb fails when OpenSSL (libssl) dependency is missing from 
   assert.match(proc.stderr, /OpenSSL/i);
 });
 
+test("validate-linux-deb fails when GTK3 dependency is missing from Depends", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = join(tmp, "deb-depends.txt");
+  writeFileSync(
+    dependsFile,
+    [
+      "shared-mime-info",
+      "libwebkit2gtk-4.1-0",
+      // Deliberately declare GTK4 instead of GTK3.
+      "libgtk-4-1",
+      "libayatana-appindicator3-1",
+      "librsvg2-2",
+      "libssl3",
+    ].join(", "),
+    "utf8",
+  );
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /GTK3/i);
+});
+
+test("validate-linux-deb fails when AppIndicator dependency is missing from Depends", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = join(tmp, "deb-depends.txt");
+  writeFileSync(
+    dependsFile,
+    [
+      "shared-mime-info",
+      "libwebkit2gtk-4.1-0",
+      "libgtk-3-0",
+      // Deliberately omit libappindicator/libayatana-appindicator.
+      "librsvg2-2",
+      "libssl3",
+    ].join(", "),
+    "utf8",
+  );
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /AppIndicator/i);
+});
+
+test("validate-linux-deb fails when librsvg dependency is missing from Depends", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = join(tmp, "deb-depends.txt");
+  writeFileSync(
+    dependsFile,
+    [
+      "shared-mime-info",
+      "libwebkit2gtk-4.1-0",
+      "libgtk-3-0",
+      "libayatana-appindicator3-1",
+      // Deliberately omit librsvg2-2.
+      "libssl3",
+    ].join(", "),
+    "utf8",
+  );
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({ cwd: tmp, debArg: "Formula.deb", dependsFile, contentsFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /librsvg/i);
+});
+
 test("validate-linux-deb fails when extracted .desktop lacks URL scheme handler (x-scheme-handler/formula)", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
   const binDir = join(tmp, "bin");
