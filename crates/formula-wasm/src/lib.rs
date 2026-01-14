@@ -1955,27 +1955,32 @@ impl WorkbookState {
             }
         }
 
-        let sheet = self.ensure_sheet(name);
-        // Mirror widths into the calc engine so worksheet metadata functions like `CELL("width")`
-        // observe the latest values.
-        self.engine.set_col_width(&sheet, col, width_chars);
-        match width_chars {
-            Some(width) => {
-                self.col_widths_chars
-                    .entry(sheet.clone())
-                    .or_default()
-                    .insert(col, width);
-            }
-            None => {
-                if let Some(cols) = self.col_widths_chars.get_mut(&sheet) {
-                    cols.remove(&col);
-                    if cols.is_empty() {
-                        self.col_widths_chars.remove(&sheet);
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(name);
+
+            match width_chars {
+                Some(width) => {
+                    this.col_widths_chars
+                        .entry(sheet.clone())
+                        .or_default()
+                        .insert(col, width);
+                }
+                None => {
+                    if let Some(cols) = this.col_widths_chars.get_mut(&sheet) {
+                        cols.remove(&col);
+                        if cols.is_empty() {
+                            this.col_widths_chars.remove(&sheet);
+                        }
                     }
                 }
             }
-        }
-        Ok(())
+
+            // Keep the underlying engine's workbook metadata in sync so worksheet information
+            // functions (e.g. `CELL("width")`) can consult column properties.
+            this.engine.set_col_width(&sheet, col, width_chars);
+            Ok(())
+        })
     }
 
     fn get_sheet_dimensions_internal(&self, name: &str) -> Result<(u32, u32), JsValue> {
@@ -2149,12 +2154,14 @@ impl WorkbookState {
         address: &str,
         style_id: u32,
     ) -> Result<(), JsValue> {
-        let sheet = self.ensure_sheet(sheet);
-        let cell_ref = Self::parse_address(address)?;
-        let address = cell_ref.to_a1();
-        self.engine
-            .set_cell_style_id(&sheet, &address, style_id)
-            .map_err(|err| js_err(err.to_string()))
+        self.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(sheet);
+            let cell_ref = Self::parse_address(address)?;
+            let address = cell_ref.to_a1();
+            this.engine
+                .set_cell_style_id(&sheet, &address, style_id)
+                .map_err(|err| js_err(err.to_string()))
+        })
     }
 
     fn get_cell_style_id_internal(&self, sheet: &str, address: &str) -> Result<u32, JsValue> {
@@ -3280,6 +3287,137 @@ fn push_u64_decimal(mut n: u64, out: &mut String) {
 
 fn object_set(obj: &Object, key: &str, value: &JsValue) -> Result<(), JsValue> {
     Reflect::set(obj, &JsValue::from_str(key), value).map(|_| ())
+}
+
+fn js_get(obj: &Object, key: &str) -> Option<JsValue> {
+    Reflect::get(obj, &JsValue::from_str(key))
+        .ok()
+        .filter(|v| !v.is_undefined() && !v.is_null())
+}
+
+fn js_get_any(obj: &Object, keys: &[&str]) -> Option<JsValue> {
+    keys.iter().find_map(|k| js_get(obj, k))
+}
+
+fn js_get_string_any(obj: &Object, keys: &[&str]) -> Option<String> {
+    js_get_any(obj, keys).and_then(|v| v.as_string())
+}
+
+fn js_get_bool_any(obj: &Object, keys: &[&str]) -> Option<bool> {
+    js_get_any(obj, keys).and_then(|v| v.as_bool())
+}
+
+fn js_get_object(obj: &Object, key: &str) -> Option<Object> {
+    js_get(obj, key).and_then(|v| v.dyn_into::<Object>().ok())
+}
+
+fn parse_horizontal_alignment(value: &JsValue) -> Option<HorizontalAlignment> {
+    let raw = value.as_string()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "general" => Some(HorizontalAlignment::General),
+        "left" => Some(HorizontalAlignment::Left),
+        "center" => Some(HorizontalAlignment::Center),
+        "right" => Some(HorizontalAlignment::Right),
+        "fill" => Some(HorizontalAlignment::Fill),
+        "justify" => Some(HorizontalAlignment::Justify),
+        _ => None,
+    }
+}
+
+fn parse_vertical_alignment(value: &JsValue) -> Option<VerticalAlignment> {
+    let raw = value.as_string()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "top" => Some(VerticalAlignment::Top),
+        "center" => Some(VerticalAlignment::Center),
+        "bottom" => Some(VerticalAlignment::Bottom),
+        _ => None,
+    }
+}
+
+fn alignment_from_js(value: JsValue) -> Option<Alignment> {
+    let obj = value.dyn_into::<Object>().ok()?;
+
+    let horizontal = js_get(&obj, "horizontal").and_then(|v| parse_horizontal_alignment(&v));
+    let vertical = js_get(&obj, "vertical").and_then(|v| parse_vertical_alignment(&v));
+
+    let wrap_text = js_get_bool_any(&obj, &["wrapText", "wrap_text"]).unwrap_or(false);
+
+    let rotation = js_get(&obj, "rotation")
+        .and_then(|v| v.as_f64())
+        .and_then(|n| {
+            if n.is_finite() && n >= i16::MIN as f64 && n <= i16::MAX as f64 {
+                Some(n as i16)
+            } else {
+                None
+            }
+        });
+
+    let indent = js_get(&obj, "indent")
+        .and_then(|v| v.as_f64())
+        .and_then(|n| {
+            if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
+                Some(n as u16)
+            } else {
+                None
+            }
+        });
+
+    let out = Alignment {
+        horizontal,
+        vertical,
+        wrap_text,
+        rotation,
+        indent,
+    };
+    // Avoid interning empty nested structs so style table ids remain stable across callers.
+    if out == Alignment::default() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn protection_from_js(value: JsValue) -> Option<Protection> {
+    let obj = value.dyn_into::<Object>().ok()?;
+    let locked = js_get(&obj, "locked").and_then(|v| v.as_bool());
+    let hidden = js_get(&obj, "hidden").and_then(|v| v.as_bool());
+    if locked.is_none() && hidden.is_none() {
+        return None;
+    }
+
+    Some(Protection {
+        locked: locked.unwrap_or(true),
+        hidden: hidden.unwrap_or(false),
+    })
+}
+
+fn style_from_js(value: JsValue) -> Style {
+    if value.is_null() || value.is_undefined() {
+        return Style::default();
+    }
+    let Ok(obj) = value.dyn_into::<Object>() else {
+        return Style::default();
+    };
+
+    let number_format =
+        js_get_string_any(&obj, &["numberFormat", "number_format"]).filter(|s| !s.is_empty());
+
+    let alignment = js_get_object(&obj, "alignment")
+        .map(JsValue::from)
+        .and_then(alignment_from_js);
+
+    let protection = js_get_object(&obj, "protection")
+        .map(JsValue::from)
+        .and_then(protection_from_js);
+
+    Style {
+        font: None,
+        fill: None,
+        border: None,
+        alignment,
+        protection,
+        number_format,
+    }
 }
 
 fn cell_data_to_js(cell: &CellData) -> Result<JsValue, JsValue> {
@@ -4449,9 +4587,13 @@ impl WasmWorkbook {
         } else {
             sheet_name
         };
-        let sheet = self.inner.ensure_sheet(sheet_name);
-        self.inner.engine.set_col_hidden(&sheet, col, hidden);
-        Ok(())
+
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(sheet_name);
+            this.engine.set_col_hidden(&sheet, col, hidden);
+            Ok(())
+        })
     }
 
     /// Update workbook file metadata used by Excel-compatible functions like `CELL("filename")`
@@ -4482,10 +4624,12 @@ impl WasmWorkbook {
             )
         };
 
-        self.inner
-            .engine
-            .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
-        Ok(())
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            this.engine
+                .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
+            Ok(())
+        })
     }
 
     /// Set the style id for a cell.
@@ -4494,10 +4638,11 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setCellStyleId")]
     pub fn set_cell_style_id(
         &mut self,
-        sheet: String,
         address: String,
         style_id: u32,
+        sheet: Option<String>,
     ) -> Result<(), JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let sheet = sheet.trim();
         let sheet = if sheet.is_empty() { DEFAULT_SHEET } else { sheet };
         self.inner

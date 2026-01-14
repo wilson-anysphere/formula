@@ -1369,8 +1369,7 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
         .unwrap();
-    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), 42)
-        .unwrap();
+    wb.set_cell_style_id("A1".to_string(), 42, None).unwrap();
     wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
         .unwrap();
 
@@ -1415,7 +1414,7 @@ fn null_inputs_preserve_cell_style_metadata_in_engine() {
         ..Default::default()
     };
     let style_id = wb.intern_style(to_js_value(&style)).unwrap();
-    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_id)
+    wb.set_cell_style_id("A1".to_string(), style_id, None)
         .unwrap();
 
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
@@ -2522,5 +2521,124 @@ fn from_xlsx_bytes_reports_password_required_for_encrypted_inputs() {
     assert!(
         message.contains("fromEncryptedXlsxBytes") || message.to_lowercase().contains("password"),
         "expected encrypted workbook error to mention fromEncryptedXlsxBytes/password, got {message:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+fn cell_filename_updates_after_set_workbook_file_metadata() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_str("=CELL(\"filename\")"),
+        None,
+    )
+    .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let before_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let before: CellData = serde_wasm_bindgen::from_value(before_js).unwrap();
+    assert_eq!(before.value, JsonValue::String("".to_string()));
+
+    wb.set_workbook_file_metadata(JsValue::from_str("/tmp"), JsValue::from_str("book.xlsx"))
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let after_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let after: CellData = serde_wasm_bindgen::from_value(after_js).unwrap();
+    assert_eq!(
+        after.value,
+        JsonValue::String(format!("/tmp/[book.xlsx]{DEFAULT_SHEET}"))
+    );
+}
+
+#[wasm_bindgen_test]
+fn cell_format_reflects_intern_style_and_set_cell_style_id() {
+    let mut wb = WasmWorkbook::new();
+
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+    wb.set_cell(
+        "B1".to_string(),
+        JsValue::from_str("=CELL(\"format\",A1)"),
+        None,
+    )
+    .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let before_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let before: CellData = serde_wasm_bindgen::from_value(before_js).unwrap();
+    assert_eq!(before.value, JsonValue::String("G".to_string()));
+
+    // The worker-side DTO uses `numberFormat` (camelCase), but accept `number_format` too for
+    // backward compatibility with Rust/serde shapes.
+    let fmt_camel = Object::new();
+    Reflect::set(
+        &fmt_camel,
+        &JsValue::from_str("numberFormat"),
+        &JsValue::from_str("0.00"),
+    )
+    .unwrap();
+    let style_id_camel = wb.intern_style(fmt_camel.into()).unwrap();
+
+    let fmt_snake = Object::new();
+    Reflect::set(
+        &fmt_snake,
+        &JsValue::from_str("number_format"),
+        &JsValue::from_str("0.00"),
+    )
+    .unwrap();
+    let style_id_snake = wb.intern_style(fmt_snake.into()).unwrap();
+    assert_eq!(style_id_camel, style_id_snake);
+
+    wb.set_cell_style_id("A1".to_string(), style_id_camel, None)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let after_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let after: CellData = serde_wasm_bindgen::from_value(after_js).unwrap();
+    assert_eq!(after.value, JsonValue::String("F2".to_string()));
+}
+
+#[wasm_bindgen_test]
+fn cell_width_reflects_set_col_width_chars() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell(
+        "B1".to_string(),
+        JsValue::from_str("=CELL(\"width\",A1)"),
+        None,
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+
+    wb.set_col_width_chars(
+        DEFAULT_SHEET.to_string(),
+        0,
+        JsValue::from_f64(16.42578125),
+    )
+    .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let after_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let after: CellData = serde_wasm_bindgen::from_value(after_js).unwrap();
+    // Excel's `CELL("width")` returns the integer part of the width (rounded down) and uses the
+    // first decimal digit as a flag for whether the width is an explicit per-column override.
+    // See `crates/formula-engine/src/functions/information/worksheet.rs`.
+    assert_json_number(&after.value, 16.1);
+
+    // Clearing the override should revert to the default width and clear the "custom width" flag.
+    wb.set_col_width_chars(DEFAULT_SHEET.to_string(), 0, JsValue::NULL)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+    let cleared_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let cleared: CellData = serde_wasm_bindgen::from_value(cleared_js).unwrap();
+    let cleared_width = cleared
+        .value
+        .as_f64()
+        .unwrap_or_else(|| panic!("expected number, got {:?}", cleared.value));
+    assert!(
+        (cleared_width - 8.0).abs() < 1e-6,
+        "expected cleared width to revert to default; got {cleared_width}"
     );
 }
