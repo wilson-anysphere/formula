@@ -30,6 +30,8 @@ type CompletionContext = {
 
 type FunctionSuggestion = { name: string; signature: string };
 
+let AUTOCOMPLETE_INSTANCE_ID = 0;
+
 const FUNCTION_NAMES: string[] = (() => {
   const names = new Set<string>();
   const items = (FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [];
@@ -225,6 +227,8 @@ export class FormulaBarFunctionAutocompleteController {
   readonly #maxItems: number;
 
   readonly #dropdownEl: HTMLDivElement;
+  readonly #listboxId: string;
+  readonly #optionIdPrefix: string;
   #itemEls: HTMLButtonElement[] = [];
 
   #context: CompletionContext | null = null;
@@ -239,10 +243,15 @@ export class FormulaBarFunctionAutocompleteController {
     this.#textarea = opts.formulaBar.textarea;
     this.#maxItems = Math.max(1, Math.min(50, opts.maxItems ?? 12));
 
+    AUTOCOMPLETE_INSTANCE_ID += 1;
+    this.#listboxId = `formula-function-autocomplete-${AUTOCOMPLETE_INSTANCE_ID}`;
+    this.#optionIdPrefix = `${this.#listboxId}-option`;
+
     const dropdown = document.createElement("div");
     dropdown.className = "formula-bar-function-autocomplete";
     dropdown.dataset.testid = "formula-function-autocomplete";
     dropdown.setAttribute("role", "listbox");
+    dropdown.id = this.#listboxId;
     dropdown.hidden = true;
     opts.anchor.appendChild(dropdown);
     this.#dropdownEl = dropdown;
@@ -250,6 +259,8 @@ export class FormulaBarFunctionAutocompleteController {
     // Keep the textarea focused while navigating the listbox, using the
     // active-descendant pattern for screen readers.
     this.#textarea.setAttribute("aria-haspopup", "listbox");
+    this.#textarea.setAttribute("aria-controls", this.#listboxId);
+    this.#textarea.setAttribute("aria-expanded", "false");
 
     const updateNow = () => this.update();
     const onBlur = () => this.close();
@@ -287,6 +298,7 @@ export class FormulaBarFunctionAutocompleteController {
     this.#selectedIndex = 0;
     this.#activeDescendantId = null;
     this.#textarea.removeAttribute("aria-activedescendant");
+    this.#textarea.setAttribute("aria-expanded", "false");
   }
 
   update(): void {
@@ -406,6 +418,7 @@ export class FormulaBarFunctionAutocompleteController {
     this.#dropdownEl.textContent = "";
     this.#itemEls = [];
     this.#activeDescendantId = null;
+    this.#textarea.setAttribute("aria-expanded", "true");
 
     for (let i = 0; i < this.#suggestions.length; i += 1) {
       const item = this.#suggestions[i]!;
@@ -416,7 +429,7 @@ export class FormulaBarFunctionAutocompleteController {
       button.dataset.testid = "formula-function-autocomplete-item";
       button.dataset.name = item.name;
       button.setAttribute("aria-selected", i === this.#selectedIndex ? "true" : "false");
-      const id = `formula-function-autocomplete-option-${i}`;
+      const id = `${this.#optionIdPrefix}-${i}`;
       button.id = id;
       if (i === this.#selectedIndex) {
         this.#activeDescendantId = id;
