@@ -1309,22 +1309,24 @@ fn resolve_image_id(
     let image_id = ImageId::new(file_name);
 
     if workbook.images.get(&image_id).is_none() {
-        let bytes = parts
-            .get(&target_path)
-            .ok_or_else(|| XlsxError::MissingPart(target_path.clone()))?
-            .clone();
-        let ext = image_id
-            .as_str()
-            .rsplit_once('.')
-            .map(|(_, ext)| ext)
-            .unwrap_or("");
-        workbook.images.insert(
-            image_id.clone(),
-            ImageData {
-                bytes,
-                content_type: Some(content_type_for_extension(ext).to_string()),
-            },
-        );
+        // Best-effort: drawing parts occasionally reference missing or stripped media.
+        // Preserve the drawing object by returning the resolved `ImageId`, but only
+        // populate `workbook.images` when the media part is present.
+        if let Some(bytes) = parts.get(&target_path) {
+            let bytes = bytes.clone();
+            let ext = image_id
+                .as_str()
+                .rsplit_once('.')
+                .map(|(_, ext)| ext)
+                .unwrap_or("");
+            workbook.images.insert(
+                image_id.clone(),
+                ImageData {
+                    bytes,
+                    content_type: Some(content_type_for_extension(ext).to_string()),
+                },
+            );
+        }
     }
 
     Ok(image_id)
