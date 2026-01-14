@@ -306,7 +306,7 @@ export function registerDesktopCommands(params: {
   // Register it so it can be enabled/disabled via CommandRegistry (and used outside the ribbon).
   commandRegistry.registerBuiltinCommand(
     "home.number.moreFormats.custom",
-    "Custom number format…",
+    t("command.home.number.moreFormats.custom"),
     async () => {
       try {
         await promptAndApplyCustomNumberFormat({
@@ -630,21 +630,27 @@ export function registerDesktopCommands(params: {
     t("command.format.applyNumberFormatPresetQuickPick"),
     async () => {
       type Choice = "general" | "currency" | "percent" | "date";
+      const labelByChoice: Record<Choice, string> = {
+        general: t("command.format.numberFormat.general"),
+        currency: t("command.format.numberFormat.currency"),
+        percent: t("command.format.numberFormat.percent"),
+        date: t("command.format.numberFormat.date"),
+      };
       const choice = await showQuickPick<Choice>(
         [
-          { label: "General", description: "Clear number format", value: "general" },
-          { label: "Currency", description: NUMBER_FORMATS.currency, value: "currency" },
-          { label: "Percent", description: NUMBER_FORMATS.percent, value: "percent" },
-          { label: "Date", description: NUMBER_FORMATS.date, value: "date" },
+          { label: labelByChoice.general, description: t("quickPick.numberFormat.general.description"), value: "general" },
+          { label: labelByChoice.currency, description: NUMBER_FORMATS.currency, value: "currency" },
+          { label: labelByChoice.percent, description: NUMBER_FORMATS.percent, value: "percent" },
+          { label: labelByChoice.date, description: NUMBER_FORMATS.date, value: "date" },
         ],
-        { placeHolder: "Number format" },
+        { placeHolder: t("quickPick.numberFormat.placeholder") },
       );
       if (!choice) return;
 
       const patch = choice === "general" ? { numberFormat: null } : { numberFormat: NUMBER_FORMATS[choice] };
 
       applyFormattingToSelection(
-        "Number format",
+        labelByChoice[choice],
         (doc, sheetId, ranges) => {
           let applied = true;
           for (const range of ranges) {

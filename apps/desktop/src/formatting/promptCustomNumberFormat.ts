@@ -1,4 +1,5 @@
 import type { DocumentController } from "../document/documentController.js";
+import { t } from "../i18n/index.js";
 import type { CellRange } from "./toolbar.js";
 
 export type ApplyFormattingToSelection = (
@@ -22,9 +23,9 @@ export async function promptAndApplyCustomNumberFormat(options: {
 
   const seed = options.getActiveCellNumberFormat() ?? "";
   const input = await options.showInputBox({
-    prompt: "Custom number format code",
+    prompt: t("prompt.customNumberFormat.code"),
     value: seed,
-    placeHolder: "General",
+    placeHolder: t("command.format.numberFormat.general"),
   });
   if (input == null) return;
 
@@ -36,7 +37,7 @@ export async function promptAndApplyCustomNumberFormat(options: {
   const trimmed = input.trim();
   const desired = !trimmed || trimmed.toLowerCase() === "general" ? null : input;
 
-  options.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+  options.applyFormattingToSelection(t("quickPick.numberFormat.placeholder"), (doc, sheetId, ranges) => {
     let applied = true;
     for (const range of ranges) {
       const ok = doc.setRangeFormat(sheetId, range, { numberFormat: desired }, { label: "Number format" });

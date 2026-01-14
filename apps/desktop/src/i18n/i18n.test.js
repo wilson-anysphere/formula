@@ -50,6 +50,23 @@ test("ribbon label strings are localizable", () => {
   assert.equal(t("ribbon.label.comma"), "فاصلة");
 });
 
+test("number format quick-pick strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("quickPick.numberFormat.placeholder"), "Number format");
+  assert.equal(t("prompt.customNumberFormat.code"), "Custom number format code");
+  assert.equal(t("command.home.number.moreFormats.custom"), "Custom number format…");
+
+  setLocale("de-DE");
+  assert.equal(t("quickPick.numberFormat.placeholder"), "Zahlenformat");
+  assert.equal(t("prompt.customNumberFormat.code"), "Benutzerdefinierter Zahlenformatcode");
+  assert.equal(t("command.home.number.moreFormats.custom"), "Benutzerdefiniertes Zahlenformat…");
+
+  setLocale("ar");
+  assert.equal(t("quickPick.numberFormat.placeholder"), "تنسيق الأرقام");
+  assert.equal(t("prompt.customNumberFormat.code"), "رمز تنسيق الأرقام المخصص");
+  assert.equal(t("command.home.number.moreFormats.custom"), "تنسيق أرقام مخصص…");
+});
+
 test("rtl locale exposes rtl direction hook", () => {
   setLocale("ar");
   assert.equal(getDirection(), "rtl");
