@@ -50,6 +50,9 @@ The Desktop Release workflow pins GitHub-hosted runner image versions (for examp
 updates the `*-latest` aliases to newer OS versions, which can unexpectedly break release builds
 and make historical tagged builds harder to reproduce.
 
+See https://github.com/actions/runner-images for the currently supported runner images and any
+deprecation notices.
+
 To update runner pins, open a PR that bumps the runner labels in
 `.github/workflows/release.yml` **after** validating that the release workflow succeeds on the new
 runner images (recommended: run the workflow via `workflow_dispatch` with `upload=false`).
