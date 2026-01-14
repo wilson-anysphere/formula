@@ -3166,7 +3166,9 @@ export class FormulaBarView {
       this.#lastHighlightSpans = highlightedSpans;
       this.#lastColoredReferences = coloredReferences;
     } else {
-      const highlightParts: string[] = [];
+      // `highlightedSpans` can be large for long formulas; prefer a fixed-length array in the
+      // common no-ghost case to avoid repeated `push` growth.
+      const highlightParts: string[] = ghost ? [] : new Array<string>(highlightedSpans.length);
       // Escaping every token individually incurs a lot of overhead on long formulas. If the
       // underlying draft contains no HTML-significant characters, we can safely emit token
       // text as-is.
@@ -3232,7 +3234,7 @@ export class FormulaBarView {
       if (!ghost) {
         for (let i = 0; i < highlightedSpans.length; i += 1) {
           const span = highlightedSpans[i]!;
-          highlightParts.push(renderSpan(span, span.text));
+          highlightParts[i] = renderSpan(span, span.text);
         }
       } else {
         let ghostInserted = false;
