@@ -462,6 +462,8 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       selectionCanvas!.dispatchEvent(event);
 
       expect(app.getSelectedDrawingId()).toBe(1);
+      // In legacy mode, drawing selection chrome is rendered on the selection canvas; the overlay stays unselected.
+      expect(((app as any).drawingOverlay as any).selectedId).toBe(null);
 
       app.destroy();
       root.remove();

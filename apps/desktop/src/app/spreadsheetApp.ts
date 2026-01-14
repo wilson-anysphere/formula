@@ -7313,11 +7313,15 @@ export class SpreadsheetApp {
     // (e.g. Escape to deselect) don't leave pointer interactions thinking an object is still
     // selected (which could enable invisible resize/rotate handles).
     this.drawingInteractionController?.setSelectedId(id);
-    this.drawingOverlay.setSelectedId(id);
+    const drawSelectionInOverlay = this.gridMode === "shared" || this.drawingInteractionController != null;
+    this.drawingOverlay.setSelectedId(drawSelectionInOverlay ? id : null);
     if (prev !== id) {
       this.dispatchDrawingSelectionChanged();
     }
     this.renderDrawings();
+    // Legacy grid mode renders drawing selection handles on the selection canvas layer,
+    // so ensure we repaint it when selection changes programmatically.
+    this.renderSelection();
   }
 
   private commitDrawingInteraction(commit: DrawingInteractionCommit): void {
@@ -12344,7 +12348,14 @@ export class SpreadsheetApp {
     // Avoid retaining cached offscreen surfaces for charts that are no longer on the active sheet.
     this.drawingChartRenderer.pruneSurfaces(keepChartIds);
 
-    overlay.setSelectedId(selectedOverlayId);
+    // In shared-grid mode, drawing selection handles are rendered by the DrawingOverlay canvas.
+    // In legacy grid mode (without the dedicated interaction controller), drawing selection handles are
+    // rendered on the selection canvas instead; avoid drawing them twice (and prevent stale overlay
+    // selection chrome when `renderDrawings()` runs during scroll/resize while selection changes elsewhere).
+    const drawDrawingSelectionInOverlay = this.gridMode === "shared" || this.drawingInteractionController != null;
+    const overlaySelectedId =
+      this.selectedDrawingId != null ? (drawDrawingSelectionInOverlay ? this.selectedDrawingId : null) : selectedOverlayId;
+    overlay.setSelectedId(overlaySelectedId);
     void overlay.render(objects, viewport).catch((err) => {
       console.warn("Drawing overlay render failed", err);
     });

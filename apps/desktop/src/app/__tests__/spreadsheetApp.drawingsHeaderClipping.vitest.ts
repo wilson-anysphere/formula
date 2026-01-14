@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 import { pxToEmu } from "../../drawings/overlay";
+import { RESIZE_HANDLE_SIZE_PX, ROTATION_HANDLE_SIZE_PX } from "../../drawings/selectionHandles";
 import type { DrawingObject } from "../../drawings/types";
 
 function createInMemoryLocalStorage(): Storage {
@@ -237,6 +238,58 @@ describe("SpreadsheetApp drawings header clipping", () => {
     }
   });
 
+  it("does not draw drawing selection chrome in the drawing overlay canvas (legacy grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("legacy");
+
+      const doc: any = app.getDocument();
+      doc.getSheetDrawings = (sheetId: string) => (sheetId === app.getCurrentSheetId() ? [seedTopLeftDrawing()] : []);
+
+      // Simulate a selected drawing then force a drawing-layer render. In legacy mode the
+      // selection chrome should be rendered on the selection canvas, not by the DrawingOverlay.
+      (app as any).selectedDrawingId = 1;
+
+      const drawingCanvas = root.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
+      const ctx = drawingCanvas.getContext("2d") as any;
+      const calls: RecordedCall[] = ctx.__calls;
+      calls.length = 0;
+
+      (app as any).renderDrawings();
+
+      const resizeRects = calls.filter(
+        (c) =>
+          c.method === "rect" &&
+          c.args[2] === RESIZE_HANDLE_SIZE_PX &&
+          c.args[3] === RESIZE_HANDLE_SIZE_PX,
+      );
+      const rotationRects = calls.filter(
+        (c) =>
+          c.method === "rect" &&
+          c.args[2] === ROTATION_HANDLE_SIZE_PX &&
+          c.args[3] === ROTATION_HANDLE_SIZE_PX,
+      );
+
+      expect(resizeRects).toHaveLength(0);
+      expect(rotationRects).toHaveLength(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("clips drawings to the cell body and ignores header hit tests (shared grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
@@ -306,6 +359,59 @@ describe("SpreadsheetApp drawings header clipping", () => {
         }),
       );
       expect((app as any).selectedDrawingId).toBe(1);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("draws drawing selection chrome in the drawing overlay canvas (shared grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const doc: any = app.getDocument();
+      doc.getSheetDrawings = (sheetId: string) => (sheetId === app.getCurrentSheetId() ? [seedTopLeftDrawing()] : []);
+
+      (app as any).selectedDrawingId = 1;
+
+      const sharedGrid = (app as any).sharedGrid;
+      const sharedViewport = sharedGrid.renderer.scroll.getViewportState();
+
+      const drawingCanvas = root.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]')!;
+      const ctx = drawingCanvas.getContext("2d") as any;
+      const calls: RecordedCall[] = ctx.__calls;
+      calls.length = 0;
+
+      (app as any).renderDrawings(sharedViewport);
+
+      const resizeRects = calls.filter(
+        (c) =>
+          c.method === "rect" &&
+          c.args[2] === RESIZE_HANDLE_SIZE_PX &&
+          c.args[3] === RESIZE_HANDLE_SIZE_PX,
+      );
+      const rotationRects = calls.filter(
+        (c) =>
+          c.method === "rect" &&
+          c.args[2] === ROTATION_HANDLE_SIZE_PX &&
+          c.args[3] === ROTATION_HANDLE_SIZE_PX,
+      );
+
+      expect(resizeRects.length).toBeGreaterThan(0);
+      expect(rotationRects.length).toBeGreaterThan(0);
 
       app.destroy();
       root.remove();
