@@ -41,7 +41,6 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     const onDrawings = () => {
       setDrawings(app.listDrawingsForSheet());
     };
-    onDrawings();
     return app.subscribeDrawings(onDrawings);
   }, [app]);
 
@@ -49,7 +48,6 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     const onSelection = (id: DrawingObjectId | null) => {
       setSelectedId(id);
     };
-    onSelection(app.getSelectedDrawingId());
     return app.subscribeDrawingSelection(onSelection);
   }, [app]);
 
