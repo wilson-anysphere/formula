@@ -401,7 +401,7 @@ pub fn pivot_table_to_engine_config(
                 cache_def
                     .cache_fields
                     .get(base_field_idx as usize)
-                    .map(|f| f.name.clone())
+                    .map(|f| PivotFieldRef::CacheFieldName(f.name.clone()))
             });
 
             // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.

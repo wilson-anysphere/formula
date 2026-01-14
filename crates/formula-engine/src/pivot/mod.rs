@@ -262,6 +262,20 @@ impl PivotCache {
         self.fields.iter().find(|f| f.name == name).map(|f| f.index)
     }
 
+    pub fn field_index_ref(&self, field: &PivotFieldRef) -> Option<usize> {
+        match field {
+            PivotFieldRef::CacheFieldName(name) => self.field_index(name),
+            // Best-effort: fall back to matching the field label against cache field names.
+            //
+            // `PivotCache` field names are always strings, so for Data Model pivots we rely on
+            // the cache generator to use the same display label as `PivotFieldRef`'s `Display`.
+            _ => {
+                let label = field.to_string();
+                self.field_index(&label)
+            }
+        }
+    }
+
     pub fn refresh_from_range(&mut self, range: &[Vec<PivotValue>]) -> Result<(), PivotError> {
         *self = Self::from_range(range)?;
         Ok(())

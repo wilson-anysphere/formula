@@ -16,7 +16,8 @@ use formula_engine::{
 };
 use formula_model::{
     display_formula_text, Alignment, CellRef, CellValue, DateSystem, DefinedNameScope, Font,
-    HorizontalAlignment, Protection, Range, Style, VerticalAlignment, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    HorizontalAlignment, Protection, Range, Style, VerticalAlignment, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS,
 };
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -100,21 +101,25 @@ fn get_js_string(obj: &Object, keys: &[&str]) -> Option<String> {
 fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
     let obj = js_value_to_object(value)?;
 
-    let horizontal = get_js_string(&obj, &["horizontal"]).and_then(|raw| match raw.trim().to_lowercase().as_str() {
-        "general" => Some(HorizontalAlignment::General),
-        "left" => Some(HorizontalAlignment::Left),
-        "center" => Some(HorizontalAlignment::Center),
-        "right" => Some(HorizontalAlignment::Right),
-        "fill" => Some(HorizontalAlignment::Fill),
-        "justify" => Some(HorizontalAlignment::Justify),
-        _ => None,
+    let horizontal = get_js_string(&obj, &["horizontal"]).and_then(|raw| {
+        match raw.trim().to_lowercase().as_str() {
+            "general" => Some(HorizontalAlignment::General),
+            "left" => Some(HorizontalAlignment::Left),
+            "center" => Some(HorizontalAlignment::Center),
+            "right" => Some(HorizontalAlignment::Right),
+            "fill" => Some(HorizontalAlignment::Fill),
+            "justify" => Some(HorizontalAlignment::Justify),
+            _ => None,
+        }
     });
 
-    let vertical = get_js_string(&obj, &["vertical"]).and_then(|raw| match raw.trim().to_lowercase().as_str() {
-        "top" => Some(VerticalAlignment::Top),
-        "center" => Some(VerticalAlignment::Center),
-        "bottom" => Some(VerticalAlignment::Bottom),
-        _ => None,
+    let vertical = get_js_string(&obj, &["vertical"]).and_then(|raw| {
+        match raw.trim().to_lowercase().as_str() {
+            "top" => Some(VerticalAlignment::Top),
+            "center" => Some(VerticalAlignment::Center),
+            "bottom" => Some(VerticalAlignment::Bottom),
+            _ => None,
+        }
     });
 
     let wrap_text = get_js_bool(&obj, &["wrapText", "wrap_text"]).unwrap_or(false);
@@ -2001,13 +2006,15 @@ impl WorkbookState {
                         this.formula_locale,
                         formula_engine::ReferenceStyle::A1,
                     )
-                        .map_err(|err| js_err(err.to_string()))?
+                    .map_err(|err| js_err(err.to_string()))?
                 };
 
                 let key = FormulaCellKey::new(sheet.clone(), cell_ref);
                 this.pending_formula_baselines
                     .entry(key)
-                    .or_insert_with(|| engine_value_to_json(this.engine.get_cell_value(&sheet, &address)));
+                    .or_insert_with(|| {
+                        engine_value_to_json(this.engine.get_cell_value(&sheet, &address))
+                    });
 
                 // Reset the stored value to blank so `getCell` returns null until the next recalc,
                 // matching the existing worker semantics.
@@ -2697,9 +2704,11 @@ impl WorkbookState {
                     }
                     Some(after) => {
                         if let Some(formula) = after.formula.as_deref() {
-                            sheet_cells.insert(address.clone(), JsonValue::String(formula.to_string()));
+                            sheet_cells
+                                .insert(address.clone(), JsonValue::String(formula.to_string()));
                         } else {
-                            let Some(value) = engine_value_to_scalar_json_input(after.value.clone())
+                            let Some(value) =
+                                engine_value_to_scalar_json_input(after.value.clone())
                             else {
                                 sheet_cells.remove(&address);
                                 continue;
@@ -2729,7 +2738,9 @@ impl WorkbookState {
                 if let Some(formula) = after.formula.as_deref() {
                     self.pending_formula_baselines
                         .entry(key)
-                        .or_insert_with(|| engine_value_to_json(self.engine.get_cell_value(&sheet, &address)));
+                        .or_insert_with(|| {
+                            engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
+                        });
 
                     // Reset stored value to blank while preserving the formula. This matches the
                     // `setCell` behavior where formula results are treated as unknown until recalc.
