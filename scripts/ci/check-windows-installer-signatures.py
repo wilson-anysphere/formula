@@ -3,11 +3,16 @@
 """
 Release guardrail: ensure Windows installers are Authenticode-signed.
 
+Deprecated: the Desktop Release workflow now uses the shared PowerShell validator:
+  scripts/validate-windows-bundles.ps1
+which also validates installer presence and is the single source of truth for
+Windows installer validation in CI.
+
 When Windows code signing secrets are configured (WINDOWS_CERTIFICATE / password),
 the release workflow should produce signed NSIS (.exe) and WiX (.msi) installers.
 
 This script locates the produced installers under a bundle directory and runs:
-  signtool verify /pa /v <installer>
+  signtool verify /pa /all /v <installer>
 
 It intentionally does *not* try to validate the certificate subject/issuer (that
 can vary by org), only that the installer passes Windows Authenticode policy
@@ -92,7 +97,7 @@ def _find_installers(bundle_dir: Path) -> tuple[list[Path], list[Path]]:
 
 
 def _run_signtool(signtool: str, installer: Path) -> tuple[int, str]:
-    cmd = [signtool, "verify", "/pa", "/v", str(installer)]
+    cmd = [signtool, "verify", "/pa", "/all", "/v", str(installer)]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
     out = proc.stdout.decode("utf-8", errors="replace")
     return (proc.returncode, out)
