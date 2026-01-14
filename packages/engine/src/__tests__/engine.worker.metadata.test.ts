@@ -232,6 +232,104 @@ describe("engine.worker workbook metadata RPCs", () => {
       dispose();
     }
   });
+
+  it("defaults blank sheet names to Sheet1 for sheet-scoped metadata RPCs", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCellStyleId",
+        params: { sheet: "", address: "A1", styleId: 7 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setRowStyleId",
+        params: { sheet: "   ", row: 5, styleId: 9 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 3,
+        method: "setColStyleId",
+        params: { sheet: "", col: 2, styleId: 11 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 4,
+        method: "setSheetDefaultStyleId",
+        params: { sheet: " ", styleId: 13 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 5,
+        method: "setColWidth",
+        params: { sheet: "", col: 2, width: 120 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 6,
+        method: "setColWidthChars",
+        params: { sheet: "", col: 3, widthChars: 8.5 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 7,
+        method: "setColHidden",
+        params: { sheet: "", col: 2, hidden: true }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 8,
+        method: "setSheetDimensions",
+        params: { sheet: "", rows: 10, cols: 20 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 9,
+        method: "getSheetDimensions",
+        params: { sheet: "" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toEqual({ rows: 100, cols: 200 });
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setCellStyleId", "A1", 7, "Sheet1"],
+        ["setRowStyleId", "Sheet1", 5, 9],
+        ["setColStyleId", "Sheet1", 2, 11],
+        ["setSheetDefaultStyleId", "Sheet1", 13],
+        ["setColWidth", "Sheet1", 2, 120],
+        ["setColWidthChars", "Sheet1", 3, 8.5],
+        ["setColHidden", "Sheet1", 2, true],
+        ["setSheetDimensions", "Sheet1", 10, 20],
+        ["getSheetDimensions", "Sheet1"]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
 });
 
 const previousSelf = (globalThis as any).self;

@@ -638,14 +638,20 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setSheetDimensions !== "function") {
                 throw new Error("setSheetDimensions: not available in this WASM build");
               }
-              (wb as any).setSheetDimensions(params.sheet, params.rows, params.cols);
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setSheetDimensions(sheet, params.rows, params.cols);
+              }
               result = null;
               break;
             case "getSheetDimensions":
               if (typeof (wb as any).getSheetDimensions !== "function") {
                 throw new Error("getSheetDimensions: not available in this WASM build");
               }
-              result = (wb as any).getSheetDimensions(params.sheet);
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                result = (wb as any).getSheetDimensions(sheet);
+              }
               break;
             case "renameSheet":
               if (typeof (wb as any).renameSheet !== "function") {
@@ -664,7 +670,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setColWidthChars !== "function") {
                 throw new Error("setColWidthChars: not available in this WASM build");
               }
-              (wb as any).setColWidthChars(params.sheet, params.col, params.widthChars);
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setColWidthChars(sheet, params.col, params.widthChars);
+              }
               result = null;
               break;
             case "setCells":
@@ -744,7 +753,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setCellStyleId !== "function") {
                 throw new Error("setCellStyleId: WasmWorkbook.setCellStyleId is not available in this WASM build");
               }
-              (wb as any).setCellStyleId(params.address, params.styleId, params.sheet ?? "Sheet1");
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setCellStyleId(params.address, params.styleId, sheet);
+              }
               result = null;
               break;
             case "setRowStyleId":
@@ -789,14 +801,20 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setColWidth !== "function") {
                 throw new Error("setColWidth: WasmWorkbook.setColWidth is not available in this WASM build");
               }
-              (wb as any).setColWidth(params.sheet ?? "Sheet1", params.col, params.width ?? null);
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setColWidth(sheet, params.col, params.width ?? null);
+              }
               result = null;
               break;
             case "setColHidden":
               if (typeof (wb as any).setColHidden !== "function") {
                 throw new Error("setColHidden: WasmWorkbook.setColHidden is not available in this WASM build");
               }
-              (wb as any).setColHidden(params.sheet ?? "Sheet1", params.col, Boolean(params.hidden));
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setColHidden(sheet, params.col, Boolean(params.hidden));
+              }
               result = null;
               break;
             case "internStyle":

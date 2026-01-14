@@ -35,6 +35,15 @@ export class WasmWorkbook {
     return [];
   }
 
+  setSheetDimensions(sheet, rows, cols) {
+    recordCall("setSheetDimensions", sheet, rows, cols);
+  }
+
+  getSheetDimensions(sheet) {
+    recordCall("getSheetDimensions", sheet);
+    return { rows: 100, cols: 200 };
+  }
+
   setWorkbookFileMetadata(directory, filename) {
     recordCall("setWorkbookFileMetadata", directory, filename);
   }
@@ -57,6 +66,10 @@ export class WasmWorkbook {
 
   setColWidth(sheet, col, width) {
     recordCall("setColWidth", sheet, col, width);
+  }
+
+  setColWidthChars(sheet, col, widthChars) {
+    recordCall("setColWidthChars", sheet, col, widthChars);
   }
 
   setColHidden(sheet, col, hidden) {
