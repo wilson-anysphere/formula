@@ -300,5 +300,144 @@ describe("SpreadsheetApp clipboard command wrappers sheet switching", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("does not restore focus target after sheet switch when cut() finishes", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+    const sheet1 = app.getCurrentSheetId();
+
+    // Ensure Sheet2 exists.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "sheet2");
+    doc.setCellValue(sheet1, { row: 0, col: 0 }, "sheet1");
+
+    // Select A1.
+    (app as any).selection = {
+      type: "range",
+      ranges: [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+      active: { row: 0, col: 0 },
+      anchor: { row: 0, col: 0 },
+      activeRangeIndex: 0,
+    };
+
+    let resolveWrite: (() => void) | null = null;
+    let notifyWriteCalled: (() => void) | null = null;
+    const writeCalled = new Promise<void>((resolve) => {
+      notifyWriteCalled = resolve;
+    });
+    const writePromise = new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    });
+
+    const provider = {
+      write: vi.fn(async () => {
+        notifyWriteCalled?.();
+        return writePromise;
+      }),
+      read: vi.fn(),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    // Simulate cut being triggered while a non-grid element has focus (e.g. split view / sheet tabs).
+    const focusTarget = document.createElement("button");
+    focusTarget.tabIndex = 0;
+    document.body.appendChild(focusTarget);
+    focusTarget.focus();
+    const focusSpy = vi.fn();
+    (focusTarget as any).focus = focusSpy;
+
+    app.cut();
+    await writeCalled;
+
+    app.activateSheet("Sheet2");
+    resolveWrite?.();
+    await app.whenIdle();
+
+    // Finishing the cut should not refocus the original element after a sheet switch.
+    expect(focusSpy).not.toHaveBeenCalled();
+
+    // Cut should still apply to the sheet where it started.
+    expect(doc.getCell(sheet1, { row: 0, col: 0 }).value).not.toBe("sheet1");
+    expect(doc.getCell("Sheet2", { row: 0, col: 0 }).value).toBe("sheet2");
+
+    app.destroy();
+    root.remove();
+    focusTarget.remove();
+  });
+
+  it("does not restore focus target after sheet switch when paste() finishes", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+    const sheet1 = app.getCurrentSheetId();
+
+    // Ensure Sheet2 exists.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "sheet2");
+    doc.setCellValue(sheet1, { row: 0, col: 0 }, "sheet1");
+
+    // Select A1.
+    (app as any).selection = {
+      type: "range",
+      ranges: [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+      active: { row: 0, col: 0 },
+      anchor: { row: 0, col: 0 },
+      activeRangeIndex: 0,
+    };
+
+    let resolveRead: ((value: any) => void) | null = null;
+    let notifyReadCalled: (() => void) | null = null;
+    const readCalled = new Promise<void>((resolve) => {
+      notifyReadCalled = resolve;
+    });
+    const readPromise = new Promise<any>((resolve) => {
+      resolveRead = resolve;
+    });
+
+    const provider = {
+      read: vi.fn(async () => {
+        notifyReadCalled?.();
+        return readPromise;
+      }),
+      write: vi.fn(),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    // Simulate paste being triggered while a non-grid element has focus (e.g. split view / sheet tabs).
+    const focusTarget = document.createElement("button");
+    focusTarget.tabIndex = 0;
+    document.body.appendChild(focusTarget);
+    focusTarget.focus();
+    const focusSpy = vi.fn();
+    (focusTarget as any).focus = focusSpy;
+
+    app.paste();
+    await readCalled;
+
+    app.activateSheet("Sheet2");
+    resolveRead?.({ text: "PASTE" });
+    await app.whenIdle();
+
+    // Finishing the paste should not refocus the original element after a sheet switch.
+    expect(focusSpy).not.toHaveBeenCalled();
+
+    // Paste should still apply to the sheet where it started.
+    expect(doc.getCell(sheet1, { row: 0, col: 0 }).value).toBe("PASTE");
+    expect(doc.getCell("Sheet2", { row: 0, col: 0 }).value).toBe("sheet2");
+
+    app.destroy();
+    root.remove();
+    focusTarget.remove();
+  });
+});

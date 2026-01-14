@@ -5218,6 +5218,7 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
+    const sheetId = this.sheetId;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
       const tag = focusTarget.tagName;
@@ -5227,6 +5228,7 @@ export class SpreadsheetApp {
     const shouldRestoreFocus = focusTarget != null && focusTarget !== this.root;
     const op = this.cutSelectionToClipboard();
     const tracked = op.finally(() => {
+      if (this.sheetId !== sheetId) return;
       if (!shouldRestoreFocus) return;
       if (!focusTarget) return;
       if (!focusTarget.isConnected) return;
@@ -5249,6 +5251,7 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
+    const sheetId = this.sheetId;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
       const tag = focusTarget.tagName;
@@ -5258,6 +5261,7 @@ export class SpreadsheetApp {
     const shouldRestoreFocus = focusTarget != null && focusTarget !== this.root;
     const op = this.pasteClipboardToSelection();
     const tracked = op.finally(() => {
+      if (this.sheetId !== sheetId) return;
       if (!shouldRestoreFocus) return;
       if (!focusTarget) return;
       if (!focusTarget.isConnected) return;
