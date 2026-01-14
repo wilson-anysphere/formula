@@ -140,6 +140,7 @@ import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/in
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
+import { registerRibbonAutoFilterCommands } from "./commands/registerRibbonAutoFilterCommands.js";
 import { HOME_STYLES_COMMAND_IDS } from "./commands/registerHomeStylesCommands.js";
 import {
   FORMAT_FONT_NAME_PRESET_COMMAND_IDS,
@@ -3032,6 +3033,39 @@ function currentSelectionRect(): SelectionRect {
 
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
+
+// Ribbon AutoFilter MVP command wiring.
+//
+// Register these early so keybindings (Ctrl+Shift+L / Cmd+Shift+L) can dispatch as soon as the
+// KeybindingService is installed, without duplicating `registerBuiltinCommand` calls in main.ts
+// (CommandRegistry guardrails require registrations live under `src/commands`).
+const ribbonAutoFilterHandlers = {
+  toggle: async (pressed?: boolean) => {
+    try {
+      const nextEnabled = typeof pressed === "boolean" ? pressed : !ribbonAutoFilterStore.hasAny(app.getCurrentSheetId());
+      if (nextEnabled) {
+        await applyRibbonAutoFilterFromSelection();
+      } else {
+        clearRibbonAutoFiltersForActiveSheet();
+      }
+    } catch (err) {
+      console.error("Failed to toggle filter:", err);
+      showToast(`Failed to toggle filter: ${String(err)}`, "error");
+      scheduleRibbonSelectionFormatStateUpdate();
+    } finally {
+      app.focus();
+    }
+  },
+  // Excel-style: "Clear" clears filter criteria (shows all rows) but keeps AutoFilter enabled.
+  clear: () => clearRibbonAutoFilterCriteriaForActiveSheet(),
+  reapply: () => reapplyRibbonAutoFiltersForActiveSheet(),
+};
+registerRibbonAutoFilterCommands({
+  commandRegistry,
+  getHandlers: () => ribbonAutoFilterHandlers,
+  isEditing: isSpreadsheetEditing,
+  category: t("commandCategory.data"),
+});
 
 const RIBBON_DISABLED_FONT_COMMANDS_WHILE_EDITING: Record<string, true> = Object.fromEntries(
   [
@@ -8204,28 +8238,7 @@ registerDesktopCommands({
     deleteActiveSheet: handleDeleteActiveSheet,
     openOrganizeSheets,
   },
-  autoFilterHandlers: {
-    toggle: async (pressed?: boolean) => {
-      try {
-        const nextEnabled =
-          typeof pressed === "boolean" ? pressed : !ribbonAutoFilterStore.hasAny(app.getCurrentSheetId());
-        if (nextEnabled) {
-          await applyRibbonAutoFilterFromSelection();
-        } else {
-          clearRibbonAutoFiltersForActiveSheet();
-        }
-      } catch (err) {
-        console.error("Failed to toggle filter:", err);
-        showToast(`Failed to toggle filter: ${String(err)}`, "error");
-        scheduleRibbonSelectionFormatStateUpdate();
-      } finally {
-        app.focus();
-      }
-    },
-    // Excel-style: "Clear" clears filter criteria (shows all rows) but keeps AutoFilter enabled.
-    clear: () => clearRibbonAutoFilterCriteriaForActiveSheet(),
-    reapply: () => reapplyRibbonAutoFiltersForActiveSheet(),
-  },
+  autoFilterHandlers: ribbonAutoFilterHandlers,
   ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
   onExtensionsLoaded: () => {
     updateKeybindingsRef?.();

@@ -39,6 +39,9 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
+  const autoFilterCommandsPath = path.join(__dirname, "..", "src", "commands", "registerRibbonAutoFilterCommands.ts");
+  const autoFilterCommands = fs.readFileSync(autoFilterCommandsPath, "utf8");
+
   const sortFilterCommandsPath = path.join(__dirname, "..", "src", "commands", "registerSortFilterCommands.ts");
   const sortFilterCommands = stripComments(fs.readFileSync(sortFilterCommandsPath, "utf8"));
 
@@ -49,18 +52,26 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   // special-cased as a ribbon `toggleOverrides` handler.
   assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.sortFilter\.filter["']\s*:/m);
 
-  // MVP AutoFilter commands are registered directly in registerDesktopCommands (via injected handlers from main.ts).
+  // MVP AutoFilter commands are registered via the shared helper (invoked by registerDesktopCommands,
+  // with host implementations injected from main.ts).
   const autoFilterIds = [
     "data.sortFilter.filter",
     "data.sortFilter.clear",
     "data.sortFilter.reapply",
     "data.sortFilter.advanced.clearFilter",
   ];
+
+  assert.match(
+    desktopCommands,
+    /\bregisterRibbonAutoFilterCommands\(/,
+    "Expected registerDesktopCommands.ts to invoke registerRibbonAutoFilterCommands",
+  );
+
   for (const id of autoFilterIds) {
     assert.match(
-      desktopCommands,
-      new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
-      `Expected registerDesktopCommands.ts to register ${id}`,
+      autoFilterCommands,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Expected registerRibbonAutoFilterCommands.ts to reference ${id}`,
     );
     assert.doesNotMatch(
       disabling,

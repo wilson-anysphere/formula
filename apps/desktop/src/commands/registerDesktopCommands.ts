@@ -26,9 +26,12 @@ import { registerDataQueriesCommands } from "./registerDataQueriesCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerRibbonMacroCommands, type RibbonMacroCommandHandlers } from "./registerRibbonMacroCommands.js";
+import { registerRibbonAutoFilterCommands, type RibbonAutoFilterCommandHandlers } from "./registerRibbonAutoFilterCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";
 import { registerSortFilterCommands } from "./registerSortFilterCommands.js";
 import { registerHomeStylesCommands } from "./registerHomeStylesCommands.js";
+
+export type { RibbonAutoFilterCommandHandlers } from "./registerRibbonAutoFilterCommands.js";
 
 export type ApplyFormattingToSelection = (
   label: string,
@@ -70,24 +73,6 @@ export type SheetStructureCommandHandlers = {
    * Open the Organize Sheets dialog (reorder/rename/hide/etc).
    */
   openOrganizeSheets?: (() => void | Promise<void>) | null;
-};
-
-export type RibbonAutoFilterCommandHandlers = {
-  /**
-   * Toggle the ribbon AutoFilter state for the active sheet.
-   *
-   * The desktop shell owns the MVP AutoFilter store + dialog UI, so this is passed in from `main.ts`.
-   */
-  toggle: (pressed?: boolean) => void | Promise<void>;
-  /**
-   * Clear any active ribbon AutoFilter criteria on the active sheet (show all rows) while keeping
-   * AutoFilter enabled (Excel-style "Clear").
-   */
-  clear: () => void | Promise<void>;
-  /**
-   * Reapply the current ribbon AutoFilters for the active sheet.
-   */
-  reapply: () => void | Promise<void>;
 };
 
 export function registerDesktopCommands(params: {
@@ -1091,68 +1076,12 @@ export function registerDesktopCommands(params: {
     }
     return handlers;
   };
-  commandRegistry.registerBuiltinCommand(
-    "data.sortFilter.filter",
-    "Filter",
-    async (pressed?: boolean) => {
-      // Ribbon AutoFilter MVP is view-local; allow it in read-only collab roles as well.
-      if (isEditingFn()) return;
-      const handlers = getAutoFilterHandlers();
-      if (!handlers) return;
-      await handlers.toggle(pressed);
-    },
-    {
-      category: commandCategoryData,
-      icon: null,
-      description: "Toggle AutoFilter for the active sheet",
-      keywords: ["filter", "auto filter", "autofilter", "sort & filter"],
-    },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "data.sortFilter.clear",
-    "Clear",
-    async () => {
-      if (isEditingFn()) return;
-      const handlers = getAutoFilterHandlers();
-      if (!handlers) return;
-      await handlers.clear();
-    },
-    {
-      category: commandCategoryData,
-      icon: null,
-      description: "Clear AutoFilter criteria (show all rows)",
-      keywords: ["clear", "filter", "auto filter", "autofilter"],
-    },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "data.sortFilter.reapply",
-    "Reapply",
-    async () => {
-      if (isEditingFn()) return;
-      const handlers = getAutoFilterHandlers();
-      if (!handlers) return;
-      await handlers.reapply();
-    },
-    {
-      category: commandCategoryData,
-      icon: null,
-      description: "Reapply the current AutoFilter",
-      keywords: ["reapply", "filter", "auto filter", "autofilter"],
-    },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "data.sortFilter.advanced.clearFilter",
-    "Clear Filter",
-    // Ribbon-only alias for the canonical Clear command.
-    () => commandRegistry.executeCommand("data.sortFilter.clear"),
-    {
-      category: commandCategoryData,
-      icon: null,
-      // Hide from the command palette so we don't surface both "Clear" and "Clear Filter"
-      // entries for the same underlying behavior.
-      when: "false",
-    },
-  );
+  registerRibbonAutoFilterCommands({
+    commandRegistry,
+    getHandlers: getAutoFilterHandlers,
+    isEditing: isEditingFn,
+    category: commandCategoryData,
+  });
 
   registerFormatAlignmentCommands({
     commandRegistry,

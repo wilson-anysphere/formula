@@ -47,38 +47,40 @@ test("main.ts wires sheetStructureHandlers + autoFilterHandlers into registerDes
 
   assert.match(
     segment,
-    /\bautoFilterHandlers\s*:\s*{/,
+    /\bautoFilterHandlers\s*:\s*ribbonAutoFilterHandlers\b/,
     "Expected main.ts to pass autoFilterHandlers into registerDesktopCommands",
   );
+
+  assert.match(main, /\bconst\s+ribbonAutoFilterHandlers\s*=\s*{/, "Expected main.ts to define ribbonAutoFilterHandlers");
   assert.match(
-    segment,
-    /\btoggle\s*:\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>\s*\{/,
-    "Expected autoFilterHandlers.toggle to be wired in main.ts",
+    main,
+    /\bconst\s+ribbonAutoFilterHandlers\s*=\s*{[\s\S]*?\btoggle\s*:\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>\s*\{/m,
+    "Expected ribbonAutoFilterHandlers.toggle to be wired in main.ts",
   );
   assert.match(
-    segment,
+    main,
+    /\bconst\s+ribbonAutoFilterHandlers\s*=\s*{[\s\S]*?\btoggle\s*:\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>\s*\{[\s\S]*?\bclearRibbonAutoFiltersForActiveSheet\(\)/m,
+    "Expected ribbonAutoFilterHandlers.toggle to clear ribbon AutoFilters when disabling",
+  );
+  assert.match(
+    main,
     /\bribbonAutoFilterStore\.hasAny\b/,
-    "Expected autoFilterHandlers.toggle to consult ribbonAutoFilterStore.hasAny",
+    "Expected ribbonAutoFilterHandlers.toggle to consult ribbonAutoFilterStore.hasAny",
   );
   assert.match(
-    segment,
+    main,
     /\bapplyRibbonAutoFilterFromSelection\b/,
-    "Expected autoFilterHandlers.toggle to apply ribbon AutoFilter from selection",
+    "Expected ribbonAutoFilterHandlers.toggle to apply ribbon AutoFilter from selection",
   );
   assert.match(
-    segment,
-    /\bclearRibbonAutoFiltersForActiveSheet\b/,
-    "Expected autoFilterHandlers.toggle to clear ribbon AutoFilters when disabling",
-  );
-  assert.match(
-    segment,
+    main,
     /\bclear\s*:\s*\(\)\s*=>\s*clearRibbonAutoFilterCriteriaForActiveSheet\b/,
-    "Expected autoFilterHandlers.clear to be wired to clearRibbonAutoFilterCriteriaForActiveSheet",
+    "Expected ribbonAutoFilterHandlers.clear to be wired to clearRibbonAutoFilterCriteriaForActiveSheet",
   );
   assert.match(
-    segment,
+    main,
     /\breapply\s*:\s*\(\)\s*=>\s*reapplyRibbonAutoFiltersForActiveSheet\b/,
-    "Expected autoFilterHandlers.reapply to be wired to reapplyRibbonAutoFiltersForActiveSheet",
+    "Expected ribbonAutoFilterHandlers.reapply to be wired to reapplyRibbonAutoFiltersForActiveSheet",
   );
 
   // These ribbon command ids are now registered in CommandRegistry; keep main.ts from

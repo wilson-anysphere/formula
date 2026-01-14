@@ -142,6 +142,12 @@ test("Formulas → Formula Auditing ribbon commands are registered in CommandReg
     "Expected view.toggleShowFormulas to be registered as a builtin command that accepts a boolean pressed state (Ribbon toggle)",
   );
 
+  assert.doesNotMatch(
+    main,
+    /\bcase\s+["']view\.toggleShowFormulas["']:/,
+    "Expected main.ts to not handle view.toggleShowFormulas via switch case (should be dispatched by createRibbonActionsFromCommands)",
+  );
+
   assert.match(
     main,
     /"view\.toggleShowFormulas":\s*app\.getShowFormulas\(\)/,
