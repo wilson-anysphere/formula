@@ -23,14 +23,14 @@ dialog.print-preview-dialog * {
 }
 
 dialog.page-setup-dialog .page-setup-dialog__body {
-  padding: var(--space-5);
+  padding: var(--space-4);
   width: 100%;
   max-width: 100%;
   min-width: 0;
 }
 
 dialog.page-setup-dialog .page-setup-dialog__title {
-  margin: 0 0 var(--space-5);
+  margin: 0 0 var(--space-4);
   font-weight: 700;
 }
 
@@ -38,8 +38,8 @@ dialog.page-setup-dialog .page-setup-dialog__row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-4);
-  margin: 0 0 calc(var(--space-4) + var(--space-1));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
   min-width: 0;
 }
 
@@ -50,8 +50,8 @@ dialog.page-setup-dialog .page-setup-dialog__row:last-of-type {
 dialog.page-setup-dialog .page-setup-dialog__fieldset {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: calc(var(--space-4) + var(--space-1));
-  margin: var(--space-5) 0 0;
+  padding: var(--space-4);
+  margin: var(--space-4) 0 0;
   min-width: 0;
 }
 
@@ -76,7 +76,7 @@ dialog.page-setup-dialog .page-setup-dialog__radio-row:last-child {
 dialog.page-setup-dialog .page-setup-dialog__margins-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--space-4) var(--space-5);
+  gap: var(--space-3) var(--space-4);
   margin-top: var(--space-3);
   min-width: 0;
 }
@@ -85,15 +85,15 @@ dialog.page-setup-dialog .page-setup-dialog__margin {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   min-width: 0;
 }
 
 dialog.page-setup-dialog .page-setup-dialog__input,
 dialog.page-setup-dialog .page-setup-dialog__select {
-  padding: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--text-primary);
   min-width: 0;
@@ -125,7 +125,7 @@ dialog.page-setup-dialog .page-setup-dialog__input--margin {
 }
 
 dialog.page-setup-dialog .page-setup-dialog__controls {
-  margin-top: var(--space-5);
+  margin-top: var(--space-4);
 }
 
 /* --- Print preview overlay ------------------------------------------------ */

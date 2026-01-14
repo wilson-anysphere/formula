@@ -105,7 +105,7 @@ dialog.print-preview-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: calc(var(--space-4) + var(--space-1)) var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--dialog-border);
 }
 
