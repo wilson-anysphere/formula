@@ -55,6 +55,9 @@ fi
 #
 # Clear it when we're inside this repo so subsequent `cargo` invocations (including ones that don't
 # use wrapper scripts) respect `rust-toolchain.toml`.
+#
+# We try to detect the repo root via `git rev-parse`, then `BASH_SOURCE` (bash only), and finally by
+# walking upward from `pwd` looking for `rust-toolchain.toml` (needed when sourced under `/bin/sh`).
 if [ -n "${RUSTUP_TOOLCHAIN:-}" ]; then
   _formula_repo_root=""
   if command -v git >/dev/null 2>&1; then
@@ -202,12 +205,14 @@ if [ -z "${CARGO_HOME:-}" ] || {
     [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] &&
     [ "${_formula_cargo_home_norm}" = "${_formula_default_global_cargo_home_norm}" ];
 }; then
-  # Prefer `git rev-parse --show-toplevel` to locate the repo root. This works
-  # even when sourced from `sh` (our agent runner shell), where bash-only
-  # variables like `BASH_SOURCE` are unavailable.
+  # Prefer `git rev-parse --show-toplevel` to locate the repo root. This works even when sourced
+  # from `sh` (our agent runner shell).
   #
-  # Fall back to `BASH_SOURCE` when running in bash (e.g. local dev), and finally
-  # to `pwd` if neither is available.
+  # Fallbacks:
+  # - In bash, use `BASH_SOURCE` to locate the script directory.
+  # - If git is unavailable/broken and `BASH_SOURCE` is unavailable (plain /bin/sh), walk upward
+  #   from `pwd` looking for `rust-toolchain.toml` (a repo-root marker).
+  # - Finally, fall back to `pwd`.
   _formula_repo_root=""
   if command -v git >/dev/null 2>&1; then
     _formula_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
