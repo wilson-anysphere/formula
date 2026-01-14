@@ -181,6 +181,7 @@ describe("Ribbon UI state overrides", () => {
       "home.cells.delete.deleteSheetRows",
       "home.cells.delete.deleteSheetColumns",
       "home.cells.delete.deleteSheet",
+      "home.cells.format",
       "home.alignment.mergeCenter",
       "home.alignment.mergeCenter.mergeCenter",
       "home.alignment.mergeCenter.mergeAcross",

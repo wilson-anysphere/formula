@@ -11,6 +11,7 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "home.number.moreFormats.custom": true,
 
   // --- Sheet structure -------------------------------------------------------
+  "home.cells.format": true,
   "home.cells.format.rowHeight": true,
   "home.cells.format.columnWidth": true,
   "home.cells.format.organizeSheets": true,
