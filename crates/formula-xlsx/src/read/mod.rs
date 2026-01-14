@@ -2726,9 +2726,7 @@ fn parse_worksheet_into_model(
                         worksheet.set_col_style_id(col, None);
                     } else if let Some(xf_index) = style {
                         let style_id = styles_part.style_id_for_xf(xf_index);
-                        if style_id != 0 {
-                            worksheet.set_col_style_id(col, Some(style_id));
-                        }
+                        worksheet.set_col_style_id(col, (style_id != 0).then_some(style_id));
                     }
                 }
             }
@@ -2974,9 +2972,7 @@ fn parse_worksheet_into_model(
                             worksheet.set_row_style_id(row, None);
                         } else if let Some(xf_index) = style {
                             let style_id = styles_part.style_id_for_xf(xf_index);
-                            if style_id != 0 {
-                                worksheet.set_row_style_id(row, Some(style_id));
-                            }
+                            worksheet.set_row_style_id(row, (style_id != 0).then_some(style_id));
                         }
                         if custom_height != Some(false) {
                             if let Some(height) = height {

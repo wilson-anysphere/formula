@@ -212,3 +212,27 @@ fn ignores_malformed_row_and_col_style_indices_best_effort() {
     let _ = style_id_for_number_format(&workbook, "0.00");
     assert_no_row_col_style_defaults(&workbook);
 }
+
+#[test]
+fn later_col_entries_can_clear_a_style_override() {
+    // Two <col> entries for the same column where the later one resets the style to the default
+    // xf (0). This can happen if a producer emits overlapping ranges.
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" style="1" customFormat="1"/>
+    <col min="2" max="2" style="0" customFormat="1"/>
+  </cols>
+  <sheetData/>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
+
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    // Sanity check: style table has the non-default numFmt.
+    let _ = style_id_for_number_format(&doc.workbook, "0.00");
+    assert_no_row_col_style_defaults(&doc.workbook);
+
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    let _ = style_id_for_number_format(&workbook, "0.00");
+    assert_no_row_col_style_defaults(&workbook);
+}
