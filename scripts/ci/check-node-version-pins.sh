@@ -80,6 +80,17 @@ extract_nvmrc_node_major() {
   extract_first_numeric_major "$line"
 }
 
+extract_node_version_file_major() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  local line=""
+  # `.node-version` is typically a single line; ignore blank lines and comments.
+  line="$(grep -E '^[[:space:]]*[^#[:space:]]' "$file" | head -n 1 || true)"
+  extract_first_numeric_major "$line"
+}
+
 extract_mise_node_major() {
   local file="$1"
   if [ ! -f "$file" ]; then
@@ -239,12 +250,14 @@ done
 
 # Optional local tooling pins (keep local release builds aligned with CI).
 nvmrc_major="$(extract_nvmrc_node_major ".nvmrc")"
+node_version_major="$(extract_node_version_file_major ".node-version")"
 mise_node_major="$(extract_mise_node_major "mise.toml")"
 
-if [ -z "$nvmrc_major" ] && [ -z "$mise_node_major" ]; then
+if [ -z "$nvmrc_major" ] && [ -z "$node_version_major" ] && [ -z "$mise_node_major" ]; then
   echo "Node workflow pin check failed: no repo-local Node version pin found." >&2
   echo "Add either:" >&2
   echo "  - .nvmrc (recommended), or" >&2
+  echo "  - .node-version, or" >&2
   echo "  - mise.toml [tools] node = \"<major>\"" >&2
   exit 1
 fi
@@ -255,6 +268,15 @@ if [ -n "$nvmrc_major" ] && [ "$nvmrc_major" != "$ci_node_major" ]; then
   echo "  .nvmrc:     ${nvmrc_major}" >&2
   echo "" >&2
   echo "Fix: update .nvmrc or the workflows so they agree." >&2
+  exit 1
+fi
+
+if [ -n "$node_version_major" ] && [ "$node_version_major" != "$ci_node_major" ]; then
+  echo "Node major pin mismatch between workflows and .node-version:" >&2
+  echo "  workflows: NODE_VERSION=${ci_node_major}" >&2
+  echo "  .node-version: ${node_version_major}" >&2
+  echo "" >&2
+  echo "Fix: update .node-version or the workflows so they agree." >&2
   exit 1
 fi
 
