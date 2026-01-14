@@ -58,3 +58,29 @@ fn scale_percent_used_when_fit_to_page_disabled() {
     assert_eq!(settings.page_setup.scaling, Scaling::Percent(77));
 }
 
+#[test]
+fn fit_to_page_applies_even_when_wsbool_record_is_after_setup() {
+    let bytes =
+        xls_fixture_builder::build_page_setup_scaling_fit_to_page_wsbool_after_setup_fixture_xls();
+    let result = import_fixture(&bytes);
+    let workbook = result.workbook;
+
+    let settings = workbook.sheet_print_settings_by_name("ScaleFitToAfterSetup");
+    assert_eq!(
+        settings.page_setup.scaling,
+        Scaling::FitTo {
+            width: 2,
+            height: 3
+        }
+    );
+}
+
+#[test]
+fn wsbool_last_record_wins_for_scaling_mode() {
+    let bytes = xls_fixture_builder::build_page_setup_scaling_wsbool_last_wins_fixture_xls();
+    let result = import_fixture(&bytes);
+    let workbook = result.workbook;
+
+    let settings = workbook.sheet_print_settings_by_name("ScaleWsboolLastWins");
+    assert_eq!(settings.page_setup.scaling, Scaling::Percent(77));
+}
