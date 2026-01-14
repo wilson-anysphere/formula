@@ -3171,10 +3171,16 @@ mod tests {
             parsed
                 .warnings
                 .iter()
-                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .filter(|w| w.as_str() == WARNINGS_SUPPRESSED_MESSAGE)
                 .count(),
             1,
             "suppression warning should only be emitted once; warnings={:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression warning should be the last warning; warnings={:?}",
             parsed.warnings
         );
     }
@@ -3217,10 +3223,16 @@ mod tests {
             props
                 .warnings
                 .iter()
-                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .filter(|w| w.as_str() == WARNINGS_SUPPRESSED_MESSAGE)
                 .count(),
             1,
             "suppression warning should only be emitted once; warnings={:?}",
+            props.warnings
+        );
+        assert_eq!(
+            props.warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression warning should be the last warning; warnings={:?}",
             props.warnings
         );
     }
@@ -3242,10 +3254,16 @@ mod tests {
             props
                 .warnings
                 .iter()
-                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .filter(|w| w.as_str() == WARNINGS_SUPPRESSED_MESSAGE)
                 .count(),
             1,
             "suppression warning should only be emitted once; warnings={:?}",
+            props.warnings
+        );
+        assert_eq!(
+            props.warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression warning should be the last warning; warnings={:?}",
             props.warnings
         );
     }
@@ -3417,10 +3435,16 @@ mod tests {
             links
                 .warnings
                 .iter()
-                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .filter(|w| w.as_str() == WARNINGS_SUPPRESSED_MESSAGE)
                 .count(),
             1,
             "suppression warning should only be emitted once; warnings={:?}",
+            links.warnings
+        );
+        assert_eq!(
+            links.warnings.last().map(String::as_str),
+            Some(WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression warning should be the last warning; warnings={:?}",
             links.warnings
         );
     }
