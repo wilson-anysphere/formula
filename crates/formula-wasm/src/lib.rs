@@ -6401,6 +6401,63 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_xlsx_bytes_imports_row_styles_for_pivot_date_inference() {
+        use std::io::Cursor;
+
+        use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+        let mut workbook = formula_model::Workbook::new();
+        let sheet_id = workbook.add_sheet("Sheet1").unwrap();
+
+        let date_style_id = workbook.styles.intern(formula_model::Style {
+            number_format: Some("m/d/yyyy".to_string()),
+            ..Default::default()
+        });
+
+        {
+            let sheet = workbook.sheet_mut(sheet_id).unwrap();
+            // Apply the date number format via row defaults for the record rows.
+            sheet.set_row_style_id(1, Some(date_style_id)); // row 2
+            sheet.set_row_style_id(2, Some(date_style_id)); // row 3
+
+            sheet
+                .set_value_a1("A1", CellValue::String("Date".to_string()))
+                .unwrap();
+            sheet
+                .set_value_a1("B1", CellValue::String("Amount".to_string()))
+                .unwrap();
+
+            let date_1 = ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900)
+                .unwrap() as f64;
+            let date_2 = ymd_to_serial(ExcelDate::new(2024, 1, 16), ExcelDateSystem::EXCEL_1900)
+                .unwrap() as f64;
+
+            sheet.set_value_a1("A2", CellValue::Number(date_1)).unwrap();
+            sheet.set_value_a1("B2", CellValue::Number(10.0)).unwrap();
+            sheet.set_value_a1("A3", CellValue::Number(date_2)).unwrap();
+            sheet.set_value_a1("B3", CellValue::Number(20.0)).unwrap();
+        }
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&workbook, &mut cursor).unwrap();
+        let bytes = cursor.into_inner();
+
+        let wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
+        let schema = wb
+            .inner
+            .get_pivot_schema_internal("Sheet1", "A1:B3", 10)
+            .unwrap();
+
+        let date_field = schema
+            .fields
+            .iter()
+            .find(|f| f.name == "Date")
+            .expect("expected Date field in schema");
+        assert_eq!(date_field.field_type, pivot_engine::PivotFieldType::Date);
+    }
+
+    #[test]
     fn localized_formula_input_is_canonicalized_and_persisted() {
         let mut wb = WasmWorkbook::new();
         assert!(wb.set_locale("de-DE".to_string()));
