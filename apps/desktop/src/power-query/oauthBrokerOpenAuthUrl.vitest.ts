@@ -102,7 +102,7 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
     (globalThis as any).__TAURI__ = { core: { invoke } };
 
     const broker = new DesktopOAuthBroker();
-    await expect(broker.openAuthUrl("https://user:pass@example.com/auth")).rejects.toThrow(/username\\/password/i);
+    await expect(broker.openAuthUrl("https://user:pass@example.com/auth")).rejects.toThrow(/username\/password/i);
     expect(invoke).not.toHaveBeenCalled();
   });
 
