@@ -322,6 +322,53 @@ fn agile_encryption_accepts_header_plus_plaintext_hmac_target() {
     assert_zip_contains_workbook_xml(&decrypted);
 }
 
+#[test]
+fn agile_header_plus_plaintext_hmac_ignores_trailing_encrypted_package_bytes() {
+    let password = "Password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/encrypted/ooxml/plaintext-large.xlsx"
+    ));
+    let ole_bytes = encrypt_agile_ooxml_ole_header_plus_plaintext_hmac(plaintext, password);
+
+    // Append junk to the EncryptedPackage stream to simulate OLE sector slack / producer quirks.
+    let cursor = Cursor::new(ole_bytes);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+    encrypted_package.extend_from_slice(&[0xA5u8; 37]);
+
+    // Re-wrap into a fresh CFB container with the modified stream.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole_out = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole_out
+        .create_stream("EncryptionInfo")
+        .expect("create stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole_out
+        .create_stream("EncryptedPackage")
+        .expect("create stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    let ole_bytes = ole_out.into_inner().into_inner();
+
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+    let decrypted = decrypt_encrypted_package(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+}
+
 fn assert_zip_contains_workbook_xml(bytes: &[u8]) {
     let cursor = Cursor::new(bytes);
     let zip = zip::ZipArchive::new(cursor).expect("zip archive");
