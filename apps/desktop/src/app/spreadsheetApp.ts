@@ -7752,7 +7752,6 @@ export class SpreadsheetApp {
     const docAny = this.document as any;
     const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     const canInsertDrawing = typeof docAny.insertDrawing === "function";
-    const canSetImage = typeof docAny.setImage === "function";
 
     if (canInsertDrawing) {
       this.document.beginBatch({ label: "Insert Image" });
@@ -7777,10 +7776,6 @@ export class SpreadsheetApp {
 
       if (canInsertDrawing) {
         try {
-          // Store the image bytes in the document so snapshots/undo/redo persist workbook media.
-          if (canSetImage) {
-            docAny.setImage(imageId, { bytes: image.bytes, mimeType: image.mimeType });
-          }
           docAny.insertDrawing(this.sheetId, inserted);
         } catch {
           // Best-effort: if inserting into the document fails, fall back to the in-memory cache below.

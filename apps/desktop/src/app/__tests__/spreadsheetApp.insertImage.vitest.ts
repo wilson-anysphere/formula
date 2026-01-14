@@ -166,9 +166,11 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     expect(entry).toBeTruthy();
     expect(entry.bytes).toEqual(bytes);
 
-    const stored = (app.getDocument() as any)?.getImage?.(obj.kind.imageId);
-    expect(stored).toBeTruthy();
-    expect(stored.bytes).toEqual(bytes);
+    // Drawing image bytes are stored out-of-band (in-memory + IndexedDB) rather than in
+    // DocumentController snapshots.
+    const snapshotBytes = app.getDocument().encodeState();
+    const snapshot = JSON.parse(new TextDecoder().decode(snapshotBytes));
+    expect(snapshot.images).toBeUndefined();
 
     // Insert should also select the new drawing (used by overlay handles + split view).
     expect(String(app.getSelectedDrawingId())).toBe(String(obj.id));
