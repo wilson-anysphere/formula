@@ -1,10 +1,12 @@
 use directories::ProjectDirs;
+use rand_core::RngCore;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 /// Pyodide version used by the desktop app.
 ///
@@ -190,6 +192,18 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+#[cfg(windows)]
+fn is_windows_reparse_point(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_windows_reparse_point(_meta: &std::fs::Metadata) -> bool {
+    false
+}
+
 fn file_has_expected_hash(path: &Path, expected_sha256: &str) -> Result<bool, String> {
     // Use `symlink_metadata` so we can treat symlinks as invalid cache entries without ever
     // following them (defense-in-depth: avoid symlink-based scope escapes and avoid hashing
@@ -201,6 +215,12 @@ fn file_has_expected_hash(path: &Path, expected_sha256: &str) -> Result<bool, St
     };
 
     if meta.file_type().is_symlink() {
+        return Ok(false);
+    }
+
+    // On Windows, directory junctions are not always classified as symlinks, but they are still
+    // reparse points that can escape the cache scope. Treat them as invalid cache entries.
+    if is_windows_reparse_point(&meta) {
         return Ok(false);
     }
 
@@ -219,6 +239,33 @@ fn file_has_expected_hash(path: &Path, expected_sha256: &str) -> Result<bool, St
 
     let actual = sha256_file(path)?;
     Ok(actual == expected_sha256)
+}
+
+async fn remove_existing_cache_entry(path: &Path) -> Result<(), String> {
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(meta) => {
+            // Avoid following symlinks/reparse points. On Windows, directory junctions can appear
+            // as directories and `remove_dir_all()` would recurse into the target, so remove the
+            // entry itself instead.
+            let is_link_like = meta.file_type().is_symlink() || is_windows_reparse_point(&meta);
+
+            let res = if is_link_like {
+                if meta.is_dir() {
+                    tokio::fs::remove_dir(path).await
+                } else {
+                    tokio::fs::remove_file(path).await
+                }
+            } else if meta.is_dir() {
+                tokio::fs::remove_dir_all(path).await
+            } else {
+                tokio::fs::remove_file(path).await
+            };
+
+            res.map_err(|e| e.to_string())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.to_string()),
+    }
 }
 
 async fn download_to_path_with_progress(
@@ -256,18 +303,32 @@ async fn download_to_path_with_progress(
         .await
         .map_err(|e| e.to_string())?;
 
-    let tmp_path = dest_path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    ));
+    let mut tmp_path = None;
+    let mut file = None;
+    for _ in 0..10 {
+        let mut suffix = [0u8; 8];
+        rand_core::OsRng.fill_bytes(&mut suffix);
+        let suffix = format!("{}-{}", Uuid::new_v4(), hex::encode(suffix));
+        let candidate = dest_path.with_extension(format!("tmp-{suffix}"));
 
-    let mut file = tokio::fs::File::create(&tmp_path)
-        .await
-        .map_err(|e| e.to_string())?;
+        match tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&candidate)
+            .await
+        {
+            Ok(f) => {
+                tmp_path = Some(candidate);
+                file = Some(f);
+                break;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+    let tmp_path =
+        tmp_path.ok_or_else(|| "failed to create a temporary file for Pyodide download".to_string())?;
+    let mut file = file.unwrap();
 
     let mut hasher = Sha256::new();
     let mut downloaded: u64 = 0;
@@ -320,26 +381,9 @@ async fn download_to_path_with_progress(
     }
 
     // Replace any existing destination entry (Windows rename doesn't overwrite).
-    //
-    // Defense-in-depth: treat pre-existing directories as corrupt cache entries and remove them so
-    // we can recover by downloading a fresh file.
-    match tokio::fs::symlink_metadata(dest_path).await {
-        Ok(meta) => {
-            let res = if meta.is_dir() {
-                tokio::fs::remove_dir_all(dest_path).await
-            } else {
-                tokio::fs::remove_file(dest_path).await
-            };
-            if let Err(err) = res {
-                let _ = tokio::fs::remove_file(&tmp_path).await;
-                return Err(err.to_string());
-            }
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => {
-            let _ = tokio::fs::remove_file(&tmp_path).await;
-            return Err(err.to_string());
-        }
+    if let Err(err) = remove_existing_cache_entry(dest_path).await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(err);
     }
 
     if let Err(err) = tokio::fs::rename(&tmp_path, dest_path).await {
