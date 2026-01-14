@@ -333,7 +333,7 @@ In addition to the main Linux perf gates, the repo also runs a scheduled **cross
 startup + idle-memory workflow (Linux/Windows/macOS) and uploads per-OS JSON artifacts:
 
 - `.github/workflows/desktop-perf-platform-matrix.yml`
-  - manual `workflow_dispatch` runs support overriding run counts/timeouts via inputs (e.g. `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`)
+  - manual `workflow_dispatch` runs support overriding run counts/timeouts via inputs (e.g. `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`) and can optionally restrict the OS via `os`
 
 For **on-demand** cross-platform desktop perf checks on a PR, apply the `desktop-perf-matrix` (or
 `run-desktop-perf`) label. This triggers:

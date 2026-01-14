@@ -3,6 +3,16 @@ name: Desktop performance (platform matrix)
 on:
   workflow_dispatch:
     inputs:
+      os:
+        description: "Which OS to run on (default: all)"
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - ubuntu-24.04
+          - windows-2022
+          - macos-14
       startupRuns:
         description: "Number of cold/warm startup iterations (default: 5)"
         required: false
@@ -70,7 +80,7 @@ jobs:
         # which can both break workflows unexpectedly and introduce noise into perf trends.
         # Update these pins deliberately after validating on newer runner images:
         # https://github.com/actions/runner-images
-        os: [ubuntu-24.04, windows-2022, macos-14]
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.os != 'all' && format('[{0}]', toJSON(inputs.os)) || '["ubuntu-24.04","windows-2022","macos-14"]') }}
 
     steps:
       - name: Checkout
