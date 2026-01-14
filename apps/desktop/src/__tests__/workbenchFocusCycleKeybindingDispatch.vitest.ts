@@ -38,24 +38,71 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function createHarness(opts: { zoomDisabled?: boolean; withSecondaryGrid?: boolean } = {}) {
+function createHarness(
+  opts: {
+    zoomDisabled?: boolean;
+    withSecondaryGrid?: boolean;
+    ribbonTabs?: Array<{ label: string; selected: boolean }>;
+    sheetTabs?: Array<{ label: string; selected: boolean }>;
+    includeFormulaInput?: boolean;
+  } = {},
+) {
+  const ribbonTabs = [
+    {
+      label: "Home",
+      selected: true,
+    },
+  ];
+  const sheetTabs = [
+    {
+      label: "Sheet1",
+      selected: true,
+    },
+  ];
+
+  // Some tests override the DOM after calling `createHarness`, but allow a couple common
+  // variations here so we can assert focus-preference ordering in a more realistic setup.
+  const extraRibbonTabs = opts.ribbonTabs;
+  const extraSheetTabs = opts.sheetTabs;
+  const includeFormulaInput = Boolean(opts.includeFormulaInput);
+
+  const ribbonTabHtml = (extraRibbonTabs ?? ribbonTabs)
+    .map(
+      (tab) =>
+        `<button class="ribbon__tab" role="tab" aria-selected="${tab.selected ? "true" : "false"}" tabindex="${
+          tab.selected ? "0" : "-1"
+        }">${tab.label}</button>`,
+    )
+    .join("");
+
+  const sheetTabHtml = (extraSheetTabs ?? sheetTabs)
+    .map(
+      (tab) =>
+        `<button role="tab" aria-selected="${tab.selected ? "true" : "false"}" tabindex="${tab.selected ? "0" : "-1"}">${
+          tab.label
+        }</button>`,
+    )
+    .join("");
+
   const gridSecondary = opts.withSecondaryGrid ? `<div id="grid-secondary" tabindex="0"></div>` : "";
   const statusBarExtra = opts.zoomDisabled
     ? `<button type="button" data-testid="open-version-history-panel">Version history</button>`
     : "";
   const zoomDisabledAttr = opts.zoomDisabled ? "disabled" : "";
+  const formulaInput = includeFormulaInput ? `<input data-testid="formula-input" />` : "";
 
   document.body.innerHTML = `
       <div id="ribbon">
-        <button class="ribbon__tab" role="tab" aria-selected="true">Home</button>
+        ${ribbonTabHtml}
       </div>
       <div id="formula-bar">
+        ${formulaInput}
         <input data-testid="formula-address" />
       </div>
       <div id="grid" tabindex="0"></div>
       ${gridSecondary}
       <div id="sheet-tabs">
-        <button role="tab" aria-selected="true">Sheet1</button>
+        ${sheetTabHtml}
       </div>
       <div class="statusbar">
         <select data-testid="zoom-control" ${zoomDisabledAttr}>
@@ -66,11 +113,15 @@ function createHarness(opts: { zoomDisabled?: boolean; withSecondaryGrid?: boole
       <button type="button" id="outside-focus">Outside</button>
     `;
 
-  const ribbonTab = document.querySelector<HTMLButtonElement>("#ribbon .ribbon__tab")!;
+  const ribbonTab =
+    document.querySelector<HTMLButtonElement>('#ribbon .ribbon__tab[role="tab"][aria-selected="true"]') ??
+    document.querySelector<HTMLButtonElement>("#ribbon .ribbon__tab")!;
   const formulaAddress = document.querySelector<HTMLInputElement>('#formula-bar [data-testid="formula-address"]')!;
   const grid = document.querySelector<HTMLElement>("#grid")!;
   const gridSecondaryEl = document.querySelector<HTMLElement>("#grid-secondary");
-  const sheetTab = document.querySelector<HTMLButtonElement>('#sheet-tabs button[role="tab"]')!;
+  const sheetTab =
+    document.querySelector<HTMLButtonElement>('#sheet-tabs button[role="tab"][aria-selected="true"]') ??
+    document.querySelector<HTMLButtonElement>('#sheet-tabs button[role="tab"]')!;
   const zoomControl = document.querySelector<HTMLElement>('.statusbar [data-testid="zoom-control"]')!;
   const versionHistoryButton = document.querySelector<HTMLButtonElement>('[data-testid="open-version-history-panel"]');
   const outsideButton = document.querySelector<HTMLButtonElement>("#outside-focus")!;
@@ -109,6 +160,7 @@ function createHarness(opts: { zoomDisabled?: boolean; withSecondaryGrid?: boole
     elements: {
       ribbonTab,
       formulaAddress,
+      formulaInput: document.querySelector<HTMLElement>('#formula-bar [data-testid="formula-input"]'),
       grid,
       gridSecondary: gridSecondaryEl,
       sheetTab,
@@ -258,6 +310,54 @@ describe("F6 focus cycling keybinding dispatch", () => {
     expect(res.handled).toBe(true);
     expect(res.event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(elements.zoomControl);
+  });
+
+  it("focuses the selected ribbon/sheet tabs and prefers the formula address input", async () => {
+    const { service, elements } = createHarness({
+      includeFormulaInput: true,
+      ribbonTabs: [
+        { label: "Home", selected: false },
+        { label: "Insert", selected: true },
+      ],
+      sheetTabs: [
+        { label: "Sheet1", selected: false },
+        { label: "Sheet2", selected: true },
+      ],
+    });
+
+    const ribbonTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("#ribbon .ribbon__tab"));
+    expect(ribbonTabs.map((t) => t.textContent)).toEqual(["Home", "Insert"]);
+    const sheetTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('#sheet-tabs button[role="tab"]'));
+    expect(sheetTabs.map((t) => t.textContent)).toEqual(["Sheet1", "Sheet2"]);
+
+    // Start from the grid -> sheet tabs should focus the selected tab (Sheet2, not Sheet1).
+    elements.grid.focus();
+    expect(document.activeElement).toBe(elements.grid);
+
+    let res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(document.activeElement).toBe(elements.sheetTab);
+    expect(elements.sheetTab.textContent).toBe("Sheet2");
+    expect(document.activeElement).not.toBe(sheetTabs[0]);
+
+    // Next -> status bar.
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(document.activeElement).toBe(elements.zoomControl);
+
+    // Next -> ribbon should focus the selected tab (Insert).
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(document.activeElement).toBe(elements.ribbonTab);
+    expect(elements.ribbonTab.textContent).toBe("Insert");
+    expect(document.activeElement).not.toBe(ribbonTabs[0]);
+
+    // Next -> formula bar should focus the address input, not the formula editor input.
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(document.activeElement).toBe(elements.formulaAddress);
+    expect(elements.formulaInput).not.toBeNull();
+    expect(document.activeElement).not.toBe(elements.formulaInput);
   });
 
   it("treats the secondary grid root as part of the grid region", async () => {
