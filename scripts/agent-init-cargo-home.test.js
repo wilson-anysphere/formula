@@ -202,6 +202,52 @@ test('agent-init exports CARGO_HOME when set without export (bash)', { skip: !ha
   assert.equal(out, `CARGO_HOME=${override}`);
 });
 
+test('agent-init exports CARGO_BUILD_JOBS when set without export (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset FORMULA_CARGO_JOBS',
+      'unset CARGO_BUILD_JOBS',
+      // Set but do not export (common interactive usage).
+      'CARGO_BUILD_JOBS=7',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'env | grep "^CARGO_BUILD_JOBS="',
+    ].join(' && '),
+  );
+
+  assert.equal(out, 'CARGO_BUILD_JOBS=7');
+});
+
+test('agent-init exports MAKEFLAGS when set without export (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset MAKEFLAGS',
+      // Set but do not export (common interactive usage).
+      'MAKEFLAGS="-j9 -l2"',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'env | grep "^MAKEFLAGS="',
+    ].join(' && '),
+  );
+
+  assert.equal(out, 'MAKEFLAGS=-j9 -l2');
+});
+
+test('agent-init exports RAYON_NUM_THREADS when set without export (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset RAYON_NUM_THREADS',
+      // Set but do not export (common interactive usage).
+      'RAYON_NUM_THREADS=11',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'env | grep "^RAYON_NUM_THREADS="',
+    ].join(' && '),
+  );
+
+  assert.equal(out, 'RAYON_NUM_THREADS=11');
+});
+
 test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   const out = runBash(
     [
@@ -501,6 +547,55 @@ test('agent-init exports CARGO_HOME when set without export under /bin/sh', { sk
 
   assert.equal(stderr, '');
   assert.equal(stdout, `CARGO_HOME=${override}`);
+});
+
+test('agent-init exports CARGO_BUILD_JOBS when set without export under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'unset FORMULA_CARGO_JOBS',
+      'unset CARGO_BUILD_JOBS',
+      // Set but do not export (common interactive usage).
+      'CARGO_BUILD_JOBS=7',
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'env | grep "^CARGO_BUILD_JOBS="',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'CARGO_BUILD_JOBS=7');
+});
+
+test('agent-init exports MAKEFLAGS when set without export under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'unset MAKEFLAGS',
+      // Set but do not export (common interactive usage).
+      'MAKEFLAGS="-j9 -l2"',
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'env | grep "^MAKEFLAGS="',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'MAKEFLAGS=-j9 -l2');
+});
+
+test('agent-init exports RAYON_NUM_THREADS when set without export under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'unset RAYON_NUM_THREADS',
+      // Set but do not export (common interactive usage).
+      'RAYON_NUM_THREADS=11',
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'env | grep "^RAYON_NUM_THREADS="',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'RAYON_NUM_THREADS=11');
 });
 
 test('agent-init exports FORMULA_CARGO_JOBS when set without export under /bin/sh', { skip: !hasSh }, () => {
