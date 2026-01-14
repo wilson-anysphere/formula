@@ -430,6 +430,65 @@ fn es_es_translation_table_covers_function_catalog() {
 }
 
 #[test]
+fn locale_error_literal_maps_match_generated_error_tsvs() {
+    fn assert_locale(locale: &locale::FormulaLocale, tsv: &str, label: &str) {
+        for (idx, raw_line) in tsv.lines().enumerate() {
+            let line_no = idx + 1;
+            let trimmed = raw_line.trim();
+            let is_comment = trimmed == "#"
+                || (trimmed.starts_with('#')
+                    && trimmed
+                        .chars()
+                        .nth(1)
+                        .map(|ch| ch == ' ' || ch == '\t')
+                        .unwrap_or(true));
+            if trimmed.is_empty() || is_comment {
+                continue;
+            }
+
+            let (canonical, localized) = raw_line
+                .split_once('\t')
+                .unwrap_or_else(|| panic!("invalid TSV line in {label}:{line_no}: {raw_line:?}"));
+            let canonical = canonical.trim();
+            let localized = localized.trim();
+            assert!(
+                !canonical.is_empty() && !localized.is_empty(),
+                "invalid TSV line in {label}:{line_no} (empty field): {raw_line:?}"
+            );
+
+            // `FormulaLocale` only stores non-identity mappings in `error_literal_map`; allow
+            // identity spellings to round-trip via the fallback behavior (leave unchanged).
+            assert_eq!(
+                locale.localized_error_literal(canonical).unwrap_or(canonical),
+                localized,
+                "canonical->localized error translation mismatch for {canonical} in {label}:{line_no}"
+            );
+            assert_eq!(
+                locale.canonical_error_literal(localized).unwrap_or(localized),
+                canonical,
+                "localized->canonical error translation mismatch for {localized} in {label}:{line_no}"
+            );
+        }
+    }
+
+    assert_locale(
+        &locale::DE_DE,
+        include_str!("../src/locale/data/de-DE.errors.tsv"),
+        "de-DE.errors.tsv",
+    );
+    assert_locale(
+        &locale::FR_FR,
+        include_str!("../src/locale/data/fr-FR.errors.tsv"),
+        "fr-FR.errors.tsv",
+    );
+    assert_locale(
+        &locale::ES_ES,
+        include_str!("../src/locale/data/es-ES.errors.tsv"),
+        "es-ES.errors.tsv",
+    );
+}
+
+#[test]
 fn canonicalize_and_localize_boolean_literals() {
     let de = "=WENN(WAHR;1;0)";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
