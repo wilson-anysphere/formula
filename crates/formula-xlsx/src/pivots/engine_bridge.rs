@@ -349,7 +349,7 @@ pub fn slicer_selection_to_engine_filter_with_resolver<F>(
 where
     F: FnMut(&str) -> Option<ScalarValue>,
 {
-    let field = PivotFieldRef::CacheFieldName(field.into());
+    let source_field = PivotFieldRef::CacheFieldName(field.into());
     let allowed = match &selection.selected_items {
         None => None,
         Some(items) => {
@@ -362,10 +362,7 @@ where
         }
     };
 
-    FilterField {
-        source_field: field,
-        allowed,
-    }
+    FilterField { source_field, allowed }
 }
 
 /// Convert a parsed timeline selection into a pivot-engine filter field.
@@ -892,7 +889,7 @@ mod tests {
             ],
             ..Default::default()
         };
-  
+   
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(cfg.value_fields[0].base_field, Some(cache_field("Region")));

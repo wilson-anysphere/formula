@@ -126,13 +126,16 @@ fn decrypt_agile_package_key_from_password_with_iv_derivation(
             key_encrypt_key_len,
             password_key.hash_algorithm,
         )?;
-        let decrypted =
-            decrypt_aes_cbc_no_padding(&k, &verifier_iv, &password_key.encrypted_verifier_hash_input)
-                .map_err(|e| OffCryptoError::InvalidAttribute {
-                    element: "p:encryptedKey".to_string(),
-                    attr: "encryptedVerifierHashInput".to_string(),
-                    reason: e.to_string(),
-                })?;
+        let decrypted = decrypt_aes_cbc_no_padding(
+            &k,
+            &verifier_iv,
+            &password_key.encrypted_verifier_hash_input,
+        )
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "encryptedVerifierHashInput".to_string(),
+            reason: e.to_string(),
+        })?;
         decrypted
             .get(..password_key.block_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -152,13 +155,16 @@ fn decrypt_agile_package_key_from_password_with_iv_derivation(
             key_encrypt_key_len,
             password_key.hash_algorithm,
         )?;
-        let decrypted =
-            decrypt_aes_cbc_no_padding(&k, &verifier_iv, &password_key.encrypted_verifier_hash_value)
-                .map_err(|e| OffCryptoError::InvalidAttribute {
-                    element: "p:encryptedKey".to_string(),
-                    attr: "encryptedVerifierHashValue".to_string(),
-                    reason: e.to_string(),
-                })?;
+        let decrypted = decrypt_aes_cbc_no_padding(
+            &k,
+            &verifier_iv,
+            &password_key.encrypted_verifier_hash_value,
+        )
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "encryptedVerifierHashValue".to_string(),
+            reason: e.to_string(),
+        })?;
         decrypted
             .get(..password_key.hash_size)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -184,7 +190,7 @@ fn decrypt_agile_package_key_from_password_with_iv_derivation(
 
     // Decrypt the package key (encryptedKeyValue).
     let key_value = {
-        let verifier_iv = iv_for_block(&KEY_VALUE_BLOCK)?;
+        let key_value_iv = iv_for_block(&KEY_VALUE_BLOCK)?;
         let k = derive_key_or_err(
             password_hash,
             &KEY_VALUE_BLOCK,
@@ -192,13 +198,12 @@ fn decrypt_agile_package_key_from_password_with_iv_derivation(
             password_key.hash_algorithm,
         )?;
         let decrypted =
-            decrypt_aes_cbc_no_padding(&k, &verifier_iv, &password_key.encrypted_key_value).map_err(
-                |e| OffCryptoError::InvalidAttribute {
+            decrypt_aes_cbc_no_padding(&k, &key_value_iv, &password_key.encrypted_key_value)
+                .map_err(|e| OffCryptoError::InvalidAttribute {
                     element: "p:encryptedKey".to_string(),
                     attr: "encryptedKeyValue".to_string(),
                     reason: e.to_string(),
-                },
-            )?;
+                })?;
         decrypted
             .get(..package_key_len)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {

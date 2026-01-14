@@ -956,3 +956,39 @@ fn stale_ranges(prev: Range, next: Range) -> Vec<Range> {
 
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pivot_definition_sheet_matching_is_unicode_case_insensitive() {
+        // German sharp s uppercases to "SS" in Unicode.
+        let mut def = PivotTableDefinition {
+            id: 1,
+            name: "Pivot".to_string(),
+            source: PivotSource::Range {
+                sheet: "ß".to_string(),
+                range: None,
+            },
+            destination: PivotDestination {
+                sheet: "ß".to_string(),
+                cell: CellRef::new(5, 0), // A6 (0-indexed row)
+            },
+            config: PivotConfig::default(),
+            apply_number_formats: true,
+            last_output_range: None,
+            needs_refresh: false,
+        };
+
+        // Insert a row on the same sheet, referenced using a casefold-equivalent name.
+        def.apply_edit_op(&EditOp::InsertRows {
+            sheet: "SS".to_string(),
+            row: 0,
+            count: 1,
+        });
+
+        // Destination anchor should shift down by one row.
+        assert_eq!(def.destination.cell, CellRef::new(6, 0));
+    }
+}

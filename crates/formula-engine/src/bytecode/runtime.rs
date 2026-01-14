@@ -5244,9 +5244,11 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Some(SheetId::Local(thread_current_sheet_id() as usize))
             }
             crate::eval::SheetReference::Sheet(name) => {
-                // Avoid interpreting bracketed external sheet keys like `"[Book.xlsx]Sheet1"` as a
-                // local sheet name. External workbook refs are represented separately by the
-                // parser/lowerer (`SheetReference::External`) and do not go through this resolver.
+                // Resolve local sheets only. Avoid interpreting bracketed external sheet keys like
+                // `"[Book.xlsx]Sheet1"` as local sheet names. External workbook refs are
+                // represented separately by the parser/lowerer (`SheetReference::External`), but
+                // some grids may still attempt to resolve them via `resolve_sheet_name`. Reject
+                // them here to avoid accidentally treating external keys as local sheets.
                 if name.starts_with('[') {
                     return None;
                 }

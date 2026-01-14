@@ -1211,7 +1211,7 @@ fn getpivotdata_returns_values_from_tabular_pivot_output() {
 fn getpivotdata_returns_values_from_compact_pivot_output() {
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotCache, PivotConfig, PivotEngine, PivotField,
-        PivotValue, SubtotalPosition, ValueField,
+        PivotFieldRef, PivotValue, SubtotalPosition, ValueField,
     };
 
     fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
@@ -1569,7 +1569,7 @@ fn getpivotdata_supports_column_fields_and_multiple_value_fields() {
 fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
-        SubtotalPosition, ValueField,
+        PivotFieldRef, SubtotalPosition, ValueField,
     };
     use formula_model::{CellRef, Range};
 

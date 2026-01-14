@@ -18,6 +18,13 @@ fn print_defined_name_parsing_accepts_sheet_names_case_insensitively() {
 }
 
 #[test]
+fn print_defined_name_parsing_uses_unicode_case_insensitive_sheet_matching() {
+    // German sharp s: Unicode uppercasing expands `ß` -> `SS`.
+    let area = parse_print_area_defined_name("ß", "SS!$A$1:$B$2").unwrap();
+    assert_eq!(area.len(), 1);
+}
+
+#[test]
 fn print_defined_name_parsing_rejects_overflowing_column_letters() {
     // Extremely large column references should be rejected without panicking on integer overflow.
     assert!(
