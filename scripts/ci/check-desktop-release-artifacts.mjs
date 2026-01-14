@@ -546,8 +546,8 @@ function validate(os, scan, opts) {
   const osReqs = requirementsForOs(os);
   if (os === "macos" && requireUpdaterSignatures) {
     osReqs.push({
-      label: "macOS updater archive (.app.tar.gz/.tar.gz/.tgz)",
-      matchBase: (p) => p.endsWith(".tar.gz") || p.endsWith(".tgz"),
+      label: "macOS updater archive (.app.tar.gz)",
+      matchBase: (p) => p.endsWith(".app.tar.gz"),
     });
   }
 

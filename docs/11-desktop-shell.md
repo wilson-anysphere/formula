@@ -447,7 +447,7 @@ Notable keys:
 The desktop app is shipped via **GitHub Releases** (see `docs/release.md` for the full checklist).
 Tagged builds are expected to produce:
 
-- **macOS:** universal `.dmg` (plus updater payload archive: `*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`)
+- **macOS:** universal `.dmg` (plus updater payload `.app.tar.gz`)
 - **Windows:** installers for **x64** and **ARM64** (`.msi` + `.exe`)
 - **Linux:** installers for **x86_64** and **ARM64** (`.AppImage` + `.deb` + `.rpm`)
 

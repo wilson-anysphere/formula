@@ -45,24 +45,16 @@ const EXPECTED_PLATFORMS = [
     key: "darwin-x86_64",
     label: "macOS (x86_64)",
     expectedUpdaterAsset: {
-      description: "macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)",
-      matches: (name) => {
-        const lower = name.toLowerCase();
-        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-      },
+      description: "macOS updater archive (*.app.tar.gz)",
+      matches: (name) => name.toLowerCase().endsWith(".app.tar.gz"),
     },
   },
   {
     key: "darwin-aarch64",
     label: "macOS (aarch64)",
     expectedUpdaterAsset: {
-      description: "macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)",
-      matches: (name) => {
-        const lower = name.toLowerCase();
-        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-      },
+      description: "macOS updater archive (*.app.tar.gz)",
+      matches: (name) => name.toLowerCase().endsWith(".app.tar.gz"),
     },
   },
   {
@@ -959,14 +951,7 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
   if (requireArtifactSigAssets) {
     const signedKinds = [
       { label: "macOS installer (.dmg)", matches: (name) => name.toLowerCase().endsWith(".dmg") },
-      {
-        label: "macOS updater archive (.tar.gz/.tgz)",
-        matches: (name) => {
-          const lower = name.toLowerCase();
-          if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-          return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-        },
-      },
+      { label: "macOS updater archive (.app.tar.gz)", matches: (name) => name.toLowerCase().endsWith(".app.tar.gz") },
       { label: "Windows installer (.msi)", matches: (name) => name.toLowerCase().endsWith(".msi") },
       { label: "Windows installer (.exe)", matches: (name) => name.toLowerCase().endsWith(".exe") },
       { label: "Linux bundle (.AppImage)", matches: (name) => name.toLowerCase().endsWith(".appimage") },

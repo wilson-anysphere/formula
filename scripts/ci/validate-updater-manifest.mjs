@@ -139,24 +139,16 @@ const EXPECTED_PLATFORMS = [
     key: "darwin-x86_64",
     label: "macOS (x86_64)",
     expectedAsset: {
-      description: `macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)`,
-      matches: (assetName) => {
-        const lower = assetName.toLowerCase();
-        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-      },
+      description: `macOS updater archive (*.app.tar.gz)`,
+      matches: (assetName) => assetName.toLowerCase().endsWith(".app.tar.gz"),
     },
   },
   {
     key: "darwin-aarch64",
     label: "macOS (aarch64)",
     expectedAsset: {
-      description: `macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)`,
-      matches: (assetName) => {
-        const lower = assetName.toLowerCase();
-        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-      },
+      description: `macOS updater archive (*.app.tar.gz)`,
+      matches: (assetName) => assetName.toLowerCase().endsWith(".app.tar.gz"),
     },
   },
   {
