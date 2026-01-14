@@ -11,6 +11,7 @@ use std::io::{Read, Seek};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use roxmltree::Document;
+use zeroize::Zeroizing;
 
 use crate::encrypted_package_reader::{DecryptedPackageReader, EncryptionMethod};
 
@@ -680,10 +681,11 @@ fn decrypted_package_reader_standard<R: Read + Seek>(
         }
     }
 
-    let key = derive_file_key_standard(&info, password)
-        .map_err(|err| DecryptError::InvalidInfo(format!("failed to derive Standard key: {err}")))?;
+    let key = Zeroizing::new(derive_file_key_standard(&info, password).map_err(|err| {
+        DecryptError::InvalidInfo(format!("failed to derive Standard key: {err}"))
+    })?);
 
-    let ok = verify_password_standard_with_key(&info, &key).map_err(|err| {
+    let ok = verify_password_standard_with_key(&info, key.as_slice()).map_err(|err| {
         DecryptError::InvalidInfo(format!("failed to verify Standard password: {err}"))
     })?;
     if !ok {
@@ -1047,16 +1049,18 @@ fn password_key_iv(
 fn agile_decrypt_package_key(
     password: &str,
     info: &AgileEncryptionInfo,
-) -> Result<Vec<u8>, DecryptError> {
+) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
     let password_key = &info.password_key;
 
-    let password_hash = hash_password(
-        password,
-        &password_key.salt_value,
-        password_key.spin_count,
-        password_key.hash_algorithm,
-    )
-    .map_err(|e| DecryptError::InvalidInfo(format!("hash_password: {e}")))?;
+    let password_hash = Zeroizing::new(
+        hash_password(
+            password,
+            &password_key.salt_value,
+            password_key.spin_count,
+            password_key.hash_algorithm,
+        )
+        .map_err(|e| DecryptError::InvalidInfo(format!("hash_password: {e}")))?,
+    );
 
     let key_encrypt_key_len = key_len_bytes(password_key.key_bits, "encryptedKey", "keyBits")?;
     let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
@@ -1068,14 +1072,14 @@ fn agile_decrypt_package_key(
             formula_xlsx::offcrypto::AES_BLOCK_SIZE
         )));
     }
-    
+
     fn try_unwrap_key(
         info: &AgileEncryptionInfo,
         password_hash: &[u8],
         key_encrypt_key_len: usize,
         package_key_len: usize,
         mode: PasswordKeyIvMode,
-    ) -> Result<Vec<u8>, DecryptError> {
+    ) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
         let password_key = &info.password_key;
 
         let verifier_input_iv = password_key_iv(password_key, mode, &VERIFIER_HASH_INPUT_BLOCK)?;
@@ -1083,52 +1087,51 @@ fn agile_decrypt_package_key(
         let key_value_iv = password_key_iv(password_key, mode, &KEY_VALUE_BLOCK)?;
 
         let verifier_input = {
-            let k = derive_key(
-                password_hash,
-                &VERIFIER_HASH_INPUT_BLOCK,
-                key_encrypt_key_len,
-                password_key.hash_algorithm,
-            )
-            .map_err(map_crypto_err("derive_key(verifierHashInput)"))?;
-            let mut decrypted = password_key.encrypted_verifier_hash_input.clone();
-            decrypt_aes_cbc_no_padding_in_place(&k, &verifier_input_iv, &mut decrypted)
-                .map_err(|e| {
-                    DecryptError::InvalidInfo(format!("decrypt verifierHashInput: {e}"))
-                })?;
+            let k = Zeroizing::new(
+                derive_key(
+                    password_hash,
+                    &VERIFIER_HASH_INPUT_BLOCK,
+                    key_encrypt_key_len,
+                    password_key.hash_algorithm,
+                )
+                .map_err(map_crypto_err("derive_key(verifierHashInput)"))?,
+            );
+            let mut decrypted = Zeroizing::new(password_key.encrypted_verifier_hash_input.clone());
+            decrypt_aes_cbc_no_padding_in_place(k.as_slice(), &verifier_input_iv, &mut decrypted)
+                .map_err(|e| DecryptError::InvalidInfo(format!("decrypt verifierHashInput: {e}")))?;
+            if decrypted.len() < password_key.block_size {
+                return Err(DecryptError::InvalidInfo(
+                    "decrypted verifierHashInput shorter than blockSize".into(),
+                ));
+            }
+            decrypted.truncate(password_key.block_size);
             decrypted
-                .get(..password_key.block_size)
-                .ok_or_else(|| {
-                    DecryptError::InvalidInfo(
-                        "decrypted verifierHashInput shorter than blockSize".into(),
-                    )
-                })?
-                .to_vec()
         };
 
         let verifier_hash = {
-            let k = derive_key(
-                password_hash,
-                &VERIFIER_HASH_VALUE_BLOCK,
-                key_encrypt_key_len,
-                password_key.hash_algorithm,
-            )
-            .map_err(map_crypto_err("derive_key(verifierHashValue)"))?;
-            let mut decrypted = password_key.encrypted_verifier_hash_value.clone();
-            decrypt_aes_cbc_no_padding_in_place(&k, &verifier_value_iv, &mut decrypted)
-                .map_err(|e| {
-                    DecryptError::InvalidInfo(format!("decrypt verifierHashValue: {e}"))
-                })?;
+            let k = Zeroizing::new(
+                derive_key(
+                    password_hash,
+                    &VERIFIER_HASH_VALUE_BLOCK,
+                    key_encrypt_key_len,
+                    password_key.hash_algorithm,
+                )
+                .map_err(map_crypto_err("derive_key(verifierHashValue)"))?,
+            );
+            let mut decrypted = Zeroizing::new(password_key.encrypted_verifier_hash_value.clone());
+            decrypt_aes_cbc_no_padding_in_place(k.as_slice(), &verifier_value_iv, &mut decrypted)
+                .map_err(|e| DecryptError::InvalidInfo(format!("decrypt verifierHashValue: {e}")))?;
+            if decrypted.len() < password_key.hash_size {
+                return Err(DecryptError::InvalidInfo(
+                    "decrypted verifierHashValue shorter than hashSize".into(),
+                ));
+            }
+            decrypted.truncate(password_key.hash_size);
             decrypted
-                .get(..password_key.hash_size)
-                .ok_or_else(|| {
-                    DecryptError::InvalidInfo(
-                        "decrypted verifierHashValue shorter than hashSize".into(),
-                    )
-                })?
-                .to_vec()
         };
 
-        let expected_hash_full = hash_bytes(password_key.hash_algorithm, &verifier_input);
+        let expected_hash_full =
+            Zeroizing::new(hash_bytes(password_key.hash_algorithm, verifier_input.as_slice()));
         let expected_hash = expected_hash_full
             .get(..password_key.hash_size)
             .ok_or_else(|| DecryptError::InvalidInfo("hash output shorter than hashSize".into()))?;
@@ -1138,26 +1141,25 @@ fn agile_decrypt_package_key(
         }
 
         let key_value = {
-            let k = derive_key(
-                password_hash,
-                &KEY_VALUE_BLOCK,
-                key_encrypt_key_len,
-                password_key.hash_algorithm,
-            )
-            .map_err(map_crypto_err("derive_key(keyValue)"))?;
-            let mut decrypted = password_key.encrypted_key_value.clone();
-            decrypt_aes_cbc_no_padding_in_place(&k, &key_value_iv, &mut decrypted)
-                .map_err(|e| {
-                    DecryptError::InvalidInfo(format!("decrypt encryptedKeyValue: {e}"))
-                })?;
+            let k = Zeroizing::new(
+                derive_key(
+                    password_hash,
+                    &KEY_VALUE_BLOCK,
+                    key_encrypt_key_len,
+                    password_key.hash_algorithm,
+                )
+                .map_err(map_crypto_err("derive_key(keyValue)"))?,
+            );
+            let mut decrypted = Zeroizing::new(password_key.encrypted_key_value.clone());
+            decrypt_aes_cbc_no_padding_in_place(k.as_slice(), &key_value_iv, &mut decrypted)
+                .map_err(|e| DecryptError::InvalidInfo(format!("decrypt encryptedKeyValue: {e}")))?;
+            if decrypted.len() < package_key_len {
+                return Err(DecryptError::InvalidInfo(
+                    "decrypted keyValue shorter than keyData.keyBits".into(),
+                ));
+            }
+            decrypted.truncate(package_key_len);
             decrypted
-                .get(..package_key_len)
-                .ok_or_else(|| {
-                    DecryptError::InvalidInfo(
-                        "decrypted keyValue shorter than keyData.keyBits".into(),
-                    )
-                })?
-                .to_vec()
         };
 
         Ok(key_value)

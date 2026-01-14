@@ -1,14 +1,15 @@
+use std::fmt;
 use std::io::{self, Read, Seek, SeekFrom};
 
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use formula_xlsx::offcrypto::decrypt_aes_cbc_no_padding_in_place;
 use sha1::Digest as _;
+use zeroize::{Zeroize, Zeroizing};
 
 const AES_BLOCK_SIZE: usize = 16;
 const SEGMENT_SIZE: usize = 0x1000;
 
-#[derive(Debug, Clone)]
 pub(crate) enum EncryptionMethod {
     /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption: AES-ECB `EncryptedPackage`.
     ///
@@ -16,7 +17,7 @@ pub(crate) enum EncryptionMethod {
     /// using AES-ECB (no IV, no chaining).
     StandardAesEcb {
         /// AES key bytes (16/24/32).
-        key: Vec<u8>,
+        key: Zeroizing<Vec<u8>>,
     },
 
     /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption: segmented AES-CBC `EncryptedPackage`.
@@ -26,7 +27,7 @@ pub(crate) enum EncryptionMethod {
     ///
     StandardCryptoApi {
         /// AES key bytes (16/24/32).
-        key: Vec<u8>,
+        key: Zeroizing<Vec<u8>>,
         /// `EncryptionVerifier.salt` from the Standard `EncryptionInfo` payload.
         salt: Vec<u8>,
     },
@@ -37,7 +38,7 @@ pub(crate) enum EncryptionMethod {
     /// For segment `i`, the IV is `Truncate(blockSize, Hash(salt || LE32(i)))`.
     Agile {
         /// AES key bytes (16/24/32).
-        key: Vec<u8>,
+        key: Zeroizing<Vec<u8>>,
         /// `keyData/@saltValue`.
         salt: Vec<u8>,
         /// `keyData/@hashAlgorithm`.
@@ -79,6 +80,42 @@ impl<R> DecryptedPackageReader<R> {
             cached_segment_index: None,
             cached_segment_plain: Vec::new(),
             cached_segment_plain_len: 0,
+        }
+    }
+}
+
+impl<R> Drop for DecryptedPackageReader<R> {
+    fn drop(&mut self) {
+        // Best-effort: wipe cached plaintext and any key material held by `EncryptionMethod`.
+        self.cached_segment_plain.zeroize();
+        self.scratch.zeroize();
+    }
+}
+
+impl fmt::Debug for EncryptionMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EncryptionMethod::StandardAesEcb { key } => f
+                .debug_struct("StandardAesEcb")
+                .field("key_len", &key.len())
+                .finish(),
+            EncryptionMethod::StandardCryptoApi { key, salt } => f
+                .debug_struct("StandardCryptoApi")
+                .field("key_len", &key.len())
+                .field("salt_len", &salt.len())
+                .finish(),
+            EncryptionMethod::Agile {
+                key,
+                salt,
+                hash_alg,
+                block_size,
+            } => f
+                .debug_struct("Agile")
+                .field("key_len", &key.len())
+                .field("salt_len", &salt.len())
+                .field("hash_alg", hash_alg)
+                .field("block_size", block_size)
+                .finish(),
         }
     }
 }
@@ -175,20 +212,25 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
         self.scratch.clear();
         std::mem::swap(&mut self.scratch, &mut self.cached_segment_plain);
 
+        // `self.scratch` now contains the previous segment's plaintext bytes. Wipe them before
+        // resizing/reading the next ciphertext segment, so sensitive data doesn't linger in the
+        // Vec's spare capacity (e.g. when the next segment is shorter).
+        self.scratch.zeroize();
+
         self.scratch.resize(seg_cipher_len, 0);
         self.inner.seek(SeekFrom::Start(seg_cipher_start))?;
         self.inner.read_exact(&mut self.scratch)?;
 
         match &self.method {
             EncryptionMethod::StandardAesEcb { key } => {
-                aes_ecb_decrypt_in_place(key, &mut self.scratch)?;
+                aes_ecb_decrypt_in_place(key.as_slice(), &mut self.scratch)?;
             }
             EncryptionMethod::StandardCryptoApi { key, salt } => {
                 let seg_index_u32 = u32::try_from(segment_index).map_err(|_| {
                     io::Error::new(io::ErrorKind::InvalidInput, "segment index exceeds u32")
                 })?;
                 let iv = derive_standard_segment_iv(salt, seg_index_u32);
-                decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut self.scratch)
+                decrypt_aes_cbc_no_padding_in_place(key.as_slice(), &iv, &mut self.scratch)
                     .map_err(map_aes_cbc_err)?;
             }
             EncryptionMethod::Agile {
@@ -209,7 +251,7 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
                     ));
                 }
                 let iv = derive_agile_segment_iv(salt, *hash_alg, seg_index_u32);
-                decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut self.scratch)
+                decrypt_aes_cbc_no_padding_in_place(key.as_slice(), &iv, &mut self.scratch)
                     .map_err(map_aes_cbc_err)?;
             }
         }
@@ -477,7 +519,7 @@ mod tests {
         let mut reader = DecryptedPackageReader::new(
             inner,
             EncryptionMethod::StandardCryptoApi {
-                key: key.to_vec(),
+                key: Zeroizing::new(key.to_vec()),
                 salt: salt.to_vec(),
             },
             plaintext.len() as u64,
@@ -512,9 +554,12 @@ mod tests {
         assert_eq!(reader.read(&mut buf).unwrap(), 0);
 
         // Cross-check against full-stream CBC-segmented decrypt helper.
-        let decrypted =
-            crate::offcrypto::decrypt_encrypted_package_standard_aes_sha1(&encrypted_stream, &key, &salt)
-                .expect("full decrypt");
+        let decrypted = crate::offcrypto::decrypt_encrypted_package_standard_aes_sha1(
+            &encrypted_stream,
+            &key,
+            &salt,
+        )
+        .expect("full decrypt");
         assert_eq!(decrypted, plaintext);
     }
 
@@ -564,7 +609,7 @@ mod tests {
             let mut reader = DecryptedPackageReader::new(
                 inner,
                 EncryptionMethod::StandardCryptoApi {
-                    key: key.to_vec(),
+                    key: Zeroizing::new(key.to_vec()),
                     salt: salt.to_vec(),
                 },
                 plaintext.len() as u64,
@@ -657,8 +702,9 @@ mod tests {
         };
 
         let password = "password";
-        let key = formula_offcrypto::standard_derive_key(&info, password).expect("derive key");
-        formula_offcrypto::standard_verify_key(&info, &key).expect("verify key");
+        let key =
+            formula_offcrypto::standard_derive_key_zeroizing(&info, password).expect("derive key");
+        formula_offcrypto::standard_verify_key(&info, key.as_slice()).expect("verify key");
 
         let plaintext_len = u64::from_le_bytes(
             encrypted_package[..8]
@@ -672,8 +718,7 @@ mod tests {
         } else {
             let first = ciphertext.get(..AES_BLOCK_SIZE).expect("first AES block");
             let mut ecb = first.to_vec();
-            let ecb_ok =
-                aes_ecb_decrypt_in_place(&key, &mut ecb).is_ok() && ecb.starts_with(b"PK");
+            let ecb_ok = aes_ecb_decrypt_in_place(&key, &mut ecb).is_ok() && ecb.starts_with(b"PK");
 
             let mut cbc = first.to_vec();
             let iv = derive_standard_segment_iv(&info.verifier.salt, 0);
@@ -692,7 +737,8 @@ mod tests {
             }
         };
 
-        let mut reader = DecryptedPackageReader::new(Cursor::new(ciphertext), method, plaintext_len);
+        let mut reader =
+            DecryptedPackageReader::new(Cursor::new(ciphertext), method, plaintext_len);
 
         // Decrypted ZIP local file header starts with `PK`.
         let mut sig = [0u8; 2];
@@ -724,7 +770,9 @@ mod tests {
         let inner = Cursor::new(ciphertext.to_vec());
         let mut reader = DecryptedPackageReader::new(
             inner,
-            EncryptionMethod::StandardAesEcb { key: key.to_vec() },
+            EncryptionMethod::StandardAesEcb {
+                key: Zeroizing::new(key.to_vec()),
+            },
             plaintext.len() as u64,
         );
 
@@ -757,9 +805,12 @@ mod tests {
         assert_eq!(reader.read(&mut buf).unwrap(), 0);
 
         // Cross-check against full-stream AES-ECB decrypt helper.
-        let decrypted =
-            crate::offcrypto::decrypt_standard_encrypted_package_stream(&encrypted_stream, &key, &[])
-                .expect("full decrypt");
+        let decrypted = crate::offcrypto::decrypt_standard_encrypted_package_stream(
+            &encrypted_stream,
+            &key,
+            &[],
+        )
+        .expect("full decrypt");
         assert_eq!(decrypted, plaintext);
     }
 
@@ -776,7 +827,7 @@ mod tests {
         let mut reader = DecryptedPackageReader::new(
             inner,
             EncryptionMethod::Agile {
-                key: key.to_vec(),
+                key: Zeroizing::new(key.to_vec()),
                 salt: salt.to_vec(),
                 hash_alg,
                 block_size: AES_BLOCK_SIZE,
@@ -804,5 +855,42 @@ mod tests {
         let n = reader.read(&mut buf).unwrap();
         assert_eq!(n, 10);
         assert_eq!(&buf[..10], &plaintext[plaintext.len() - 10..]);
+    }
+
+    #[test]
+    fn encryption_method_debug_redacts_key_material() {
+        let key_bytes = b"super_secret_key".to_vec();
+        let key_debug = format!("{key_bytes:?}");
+
+        let standard_ecb = EncryptionMethod::StandardAesEcb {
+            key: Zeroizing::new(key_bytes.clone()),
+        };
+        let standard_ecb_dbg = format!("{standard_ecb:?}");
+        assert!(
+            !standard_ecb_dbg.contains(&key_debug),
+            "Debug leaked Standard ECB key bytes: {standard_ecb_dbg}"
+        );
+
+        let standard_cbc = EncryptionMethod::StandardCryptoApi {
+            key: Zeroizing::new(key_bytes.clone()),
+            salt: vec![0u8; 16],
+        };
+        let standard_cbc_dbg = format!("{standard_cbc:?}");
+        assert!(
+            !standard_cbc_dbg.contains(&key_debug),
+            "Debug leaked Standard CBC key bytes: {standard_cbc_dbg}"
+        );
+
+        let agile = EncryptionMethod::Agile {
+            key: Zeroizing::new(key_bytes),
+            salt: vec![0u8; 16],
+            hash_alg: formula_xlsx::offcrypto::HashAlgorithm::Sha256,
+            block_size: AES_BLOCK_SIZE,
+        };
+        let agile_dbg = format!("{agile:?}");
+        assert!(
+            !agile_dbg.contains(&key_debug),
+            "Debug leaked Agile key bytes: {agile_dbg}"
+        );
     }
 }
