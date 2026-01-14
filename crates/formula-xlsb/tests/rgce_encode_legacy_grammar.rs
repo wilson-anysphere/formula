@@ -127,11 +127,29 @@ fn legacy_encoder_roundtrips_column_range_reference() {
 }
 
 #[test]
+fn legacy_encoder_roundtrips_absolute_column_range_reference() {
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("=SUM($A:$C)", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("SUM($A:$C)"), normalize(&decoded));
+}
+
+#[test]
 fn legacy_encoder_roundtrips_row_range_reference() {
     let ctx = WorkbookContext::default();
     let encoded = encode_rgce_with_context("=SUM(1:1)", &ctx, CellCoord::new(0, 0)).expect("encode");
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(normalize("SUM(1:1)"), normalize(&decoded));
+}
+
+#[test]
+fn legacy_encoder_roundtrips_absolute_row_range_reference() {
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("=SUM($1:$3)", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("SUM($1:$3)"), normalize(&decoded));
 }
 
 #[test]
