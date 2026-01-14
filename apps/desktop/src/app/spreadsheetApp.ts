@@ -11505,7 +11505,18 @@ export class SpreadsheetApp {
             const value = (rawAnchor as any)[k];
             return value && typeof value === "object" && !Array.isArray(value);
           });
-          return variantKeys.length === 1 ? variantKeys[0]! : null;
+          if (variantKeys.length === 1) return variantKeys[0]!;
+          if (variantKeys.length > 1) {
+            // Some encodings attach extra object-valued metadata keys alongside the enum payload
+            // (e.g. `{ meta: {...}, Absolute: {...} }`). Prefer a key that matches a known anchor
+            // variant, otherwise fall back to a PascalCase heuristic (Rust enum variants).
+            const known = ["onecell", "twocell", "absolute", "cell"];
+            const matches = variantKeys.filter((k) => known.includes(normalizeTag(k)));
+            if (matches.length === 1) return matches[0]!;
+            const pascalKeys = variantKeys.filter((k) => /^[A-Z]/.test(k));
+            if (pascalKeys.length === 1) return pascalKeys[0]!;
+          }
+          return null;
         })();
         if (tag) {
           const value = (rawAnchor as any)[tag];
