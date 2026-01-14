@@ -444,7 +444,7 @@ fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
 
     // Restrict the sheet to only column A; reference column B should be out-of-bounds.
     let mut engine = Engine::new();
-    engine.set_sheet_dimensions("Sheet1", 6, 1).unwrap(); // rows 1..=6, cols A only
+    engine.set_sheet_dimensions("Sheet1", 8, 1).unwrap(); // rows 1..=8, cols A only
 
     engine
         .set_cell_formula("Sheet1", "A1", "=CELL(\"protect\",B1)")
@@ -463,6 +463,12 @@ fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "A6", "=CELL(\"parentheses\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A7", "=CELL(\"contents\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A8", "=CELL(\"type\",B1)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -489,6 +495,14 @@ fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A6"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A7"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A8"),
         Value::Error(ErrorKind::Ref)
     );
 }

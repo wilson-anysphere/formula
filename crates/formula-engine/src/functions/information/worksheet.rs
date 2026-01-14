@@ -394,6 +394,13 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
         CellInfoType::Type => {
             let cell_ref = record_explicit_cell(ctx);
 
+            // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
+            // `#REF!`.
+            let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
+
             if ctx.get_cell_formula(&cell_ref.sheet_id, addr).is_some() {
                 return Value::Text("v".to_string());
             }
