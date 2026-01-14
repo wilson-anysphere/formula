@@ -52,7 +52,11 @@ pub fn parse_chart_ex(
 
     let root = doc.root_element();
     let root_name = root.tag_name().name();
-    let root_ns = root.tag_name().namespace().unwrap_or("<none>");
+    let root_ns = root
+        .tag_name()
+        .namespace()
+        .filter(|ns| !ns.is_empty())
+        .unwrap_or("<none>");
 
     let external_data_node = root
         .descendants()
@@ -1306,6 +1310,20 @@ mod tests {
             model.diagnostics.iter().any(|d| d.message
                 == "ChartEx chart kind could not be inferred (root ns=<none>); hints: <none>"),
             "expected kind inference diagnostic with <none> namespace, got: {:#?}",
+            model.diagnostics
+        );
+    }
+
+    #[test]
+    fn chart_ex_root_diagnostic_handles_empty_namespace_declaration() {
+        // Some producers explicitly reset the default namespace via `xmlns=""`. Treat that the
+        // same as an absent namespace for diagnostic purposes.
+        let xml = r#"<chartSpace xmlns=""><chart/></chartSpace>"#;
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        assert!(
+            model.diagnostics.iter().any(|d| d.message
+                == "ChartEx root <chartSpace> (ns=<none>) parsed as placeholder model"),
+            "expected root diagnostic to use <none> namespace, got: {:#?}",
             model.diagnostics
         );
     }
