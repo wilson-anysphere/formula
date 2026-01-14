@@ -3092,7 +3092,9 @@ export class DocumentController {
         if (!drawingId) throw new Error("Drawing.id must be a non-empty string");
       } else if (typeof rawId === "number") {
         if (!Number.isSafeInteger(rawId)) throw new Error("Drawing.id must be a safe integer");
-        drawingId = rawId;
+        // Persist as a string so JSON snapshots remain stable (and to avoid any ambiguity with
+        // JS number serialization for large integers).
+        drawingId = String(rawId);
       } else {
         throw new Error("Drawing.id must be a string or number");
       }
