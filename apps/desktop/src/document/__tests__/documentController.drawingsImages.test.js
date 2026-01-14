@@ -104,6 +104,14 @@ test("change event includes sheetViewDeltas (drawings) + imageDeltas", () => {
   assert.equal(lastChange.sheetViewDeltas[0].after.drawings[0].id, "d1");
 });
 
+test("getImageBlob trims mimeType before constructing the Blob", () => {
+  const doc = new DocumentController();
+  doc.setImage("img1", { bytes: new Uint8Array([1, 2, 3]), mimeType: " image/png " });
+  const blob = doc.getImageBlob("img1");
+  assert.ok(blob);
+  assert.equal(blob.type, "image/png");
+});
+
 test("drawing helpers support numeric ids (overlay-compatible)", () => {
   const doc = new DocumentController();
 

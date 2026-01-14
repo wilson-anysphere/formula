@@ -82,6 +82,49 @@ test("BrowserExtensionHost: records read taint for cells.getSelection/getCell/ge
   ]);
 });
 
+test("BrowserExtensionHost: trims sheetId when normalizing tainted ranges", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.taint-trim-sheet-id";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "taint-trim-sheet-id",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  host._taintExtensionRange(extension, { sheetId: "  sheet1  ", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+
+  assert.deepEqual(extension.taintedRanges, [{ sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+});
+
 test("BrowserExtensionHost: cells.getCell taints numeric-string coordinates", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 

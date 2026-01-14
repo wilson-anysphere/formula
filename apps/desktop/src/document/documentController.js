@@ -3708,7 +3708,7 @@ export class DocumentController {
     if (typeof Blob === "undefined") return null;
     try {
       const explicit =
-        entry && typeof entry.mimeType === "string" && entry.mimeType.trim().length > 0 ? entry.mimeType : null;
+        entry && typeof entry.mimeType === "string" && entry.mimeType.trim().length > 0 ? entry.mimeType.trim() : null;
       const mimeType = explicit ?? inferMimeTypeForImage(id, entry.bytes);
       return new Blob([entry.bytes], { type: mimeType });
     } catch {

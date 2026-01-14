@@ -104,7 +104,7 @@ function normalizeNonNegativeInt(value, { label }) {
 function normalizeTaintedRange(range) {
   if (!range || typeof range !== "object") return null;
 
-  const sheetId = typeof range.sheetId === "string" && range.sheetId.trim().length > 0 ? range.sheetId : null;
+  const sheetId = typeof range.sheetId === "string" ? range.sheetId.trim() : "";
   if (!sheetId) return null;
 
   const startRow = Number(range.startRow);
