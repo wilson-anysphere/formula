@@ -261,6 +261,7 @@ def _render_markdown(
     file_info: str | None,
     stripped: bool | None,
     build_ran: bool,
+    json_out_path: str | None,
     build_cmd: list[str] | None,
     crates_cmd: list[str] | None,
     crates_out: CmdResult | None,
@@ -317,6 +318,8 @@ def _render_markdown(
         )
         if bin_size_bytes is not None:
             lines.append(f"- Over limit: **{'YES' if over_limit else 'no'}**")
+    if json_out_path:
+        lines.append(f"- JSON report: `{json_out_path}`")
     lines.append("")
 
     if tool_note:
@@ -441,6 +444,7 @@ def main() -> int:
     bin_name = DEFAULT_BIN_NAME
     features = args.features
     target = args.target
+    json_out_path = _relpath(args.json_out, repo_root) if args.json_out else None
     enforce = args.enforce or _is_truthy_env(os.environ.get(ENV_ENFORCE_SIZE_LIMIT))
     try:
         limit_mb = args.limit_mb if args.limit_mb is not None else _parse_limit_mb(os.environ.get(ENV_SIZE_LIMIT_MB))
@@ -572,6 +576,7 @@ def main() -> int:
                 file_info=None,
                 stripped=None,
                 build_ran=build_ran,
+                json_out_path=json_out_path,
                 build_cmd=build_cmd,
                 crates_cmd=None,
                 crates_out=None,
@@ -633,6 +638,7 @@ def main() -> int:
             file_info=None,
             stripped=None,
             build_ran=build_ran,
+            json_out_path=json_out_path,
             build_cmd=build_cmd,
             crates_cmd=None,
             crates_out=None,
@@ -809,6 +815,7 @@ def main() -> int:
         file_info=file_info,
         stripped=stripped,
         build_ran=build_ran,
+        json_out_path=json_out_path,
         build_cmd=build_cmd,
         crates_cmd=crates_cmd,
         crates_out=crates_out,
