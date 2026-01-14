@@ -54,6 +54,30 @@ class TriageRustHelperReuseTests(unittest.TestCase):
                             with self.assertRaises(subprocess.CalledProcessError):
                                 triage_mod._build_rust_helper()  # noqa: SLF001
 
+    def test_reuses_existing_helper_when_cargo_missing_locally(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        with tempfile.TemporaryDirectory(prefix="corpus-triage-helper-") as td:
+            root = Path(td)
+            exe = root / "target" / "debug" / triage_mod._rust_exe_name()  # noqa: SLF001
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_bytes(b"")
+
+            with mock.patch.object(triage_mod, "_repo_root", return_value=root):  # noqa: SLF001
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    with mock.patch.object(triage_mod.shutil, "which", return_value=None):
+                        with mock.patch.object(
+                            triage_mod.subprocess,
+                            "run",
+                            side_effect=FileNotFoundError("cargo"),
+                        ):
+                            stderr = io.StringIO()
+                            with mock.patch("sys.stderr", stderr):
+                                built = triage_mod._build_rust_helper()  # noqa: SLF001
+
+            self.assertEqual(built, exe)
+            self.assertIn("using existing Rust triage helper", stderr.getvalue())
+
     def test_raises_when_no_existing_helper(self) -> None:
         import tools.corpus.triage as triage_mod
 
@@ -75,4 +99,3 @@ class TriageRustHelperReuseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

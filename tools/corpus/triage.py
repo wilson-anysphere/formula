@@ -1217,6 +1217,13 @@ def _build_rust_helper() -> Path:
             return exe
         raise
     except FileNotFoundError as e:  # noqa: PERF203 (CI signal)
+        if exe.exists() and not env.get("CI"):
+            missing = e.filename or "cargo"
+            print(
+                f"warning: {missing} not found; using existing Rust triage helper: {exe}",
+                file=sys.stderr,
+            )
+            return exe
         raise RuntimeError("cargo not found; Rust toolchain is required for corpus triage") from e
 
     if not exe.exists():
