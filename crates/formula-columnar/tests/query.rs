@@ -975,6 +975,41 @@ fn hash_join_string_works_with_different_dictionaries() {
 }
 
 #[test]
+fn hash_join_number_canonicalizes_negative_zero_and_nans() {
+    let schema = vec![ColumnSchema {
+        name: "k".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::Number(0.0)],
+            vec![Value::Number(-0.0)],
+            vec![Value::Number(f64::from_bits(0x7ff8000000000001))],
+            vec![Value::Number(f64::from_bits(0x7ff8000000000002))],
+            vec![Value::Null],
+        ],
+    );
+    let right = build_table(
+        schema,
+        vec![vec![Value::Number(0.0)], vec![Value::Number(f64::NAN)]],
+    );
+
+    let join = left.hash_join(&right, 0, 0).unwrap();
+    assert_eq!(join.len(), 4);
+    let mut pairs: Vec<(usize, usize)> = join
+        .left_indices
+        .into_iter()
+        .zip(join.right_indices.into_iter())
+        .collect();
+    pairs.sort();
+
+    // `-0.0` should match `0.0`, and all NaN bit patterns should match each other.
+    assert_eq!(pairs, vec![(0, 0), (1, 0), (2, 1), (3, 1)]);
+}
+
+#[test]
 fn hash_join_multi_inner_two_keys() {
     let schema = vec![
         ColumnSchema {
