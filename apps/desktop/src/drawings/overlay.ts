@@ -756,6 +756,8 @@ export class DrawingOverlay {
         if (obj.kind.type !== "image") continue;
 
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
+        // Zero-size drawings are invisible and do not need bitmap decoding.
+        if (rect.width <= 0 || rect.height <= 0) continue;
         const anchor = obj.anchor;
         let scrollX = scrollXBase;
         let scrollY = scrollYBase;
@@ -837,6 +839,9 @@ export class DrawingOverlay {
           // Charts behave like Excel chart objects: movable/resizable but not rotatable.
           selectedDrawRotationHandle = obj.kind.type !== "chart";
         }
+
+        // Skip degenerate objects; they are invisible and do not need decoding or placeholder rendering.
+        if (screenRectScratch.width <= 0 || screenRectScratch.height <= 0) continue;
 
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
         // Skip objects that are fully outside of their pane quadrant.

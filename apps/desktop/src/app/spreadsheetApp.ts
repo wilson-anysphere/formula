@@ -56,6 +56,7 @@ import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFr
 import { pickLocalImageFiles } from "../drawings/pickLocalImageFiles.js";
 import { MAX_INSERT_IMAGE_BYTES } from "../drawings/insertImageLimits.js";
 import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readPngDimensions } from "../drawings/pngDimensions";
+import { resolveEnableDrawingInteractions } from "../drawings/drawingInteractionsFlag.js";
 import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
@@ -2679,13 +2680,7 @@ export class SpreadsheetApp {
     });
     this.syncWorkbookImageRefCountsFromDocument();
 
-    const enableDrawingInteractions =
-      opts.enableDrawingInteractions ??
-      // Shared-grid mode renders drawings onto an overlay canvas that is otherwise not interactable.
-      // Enable the dedicated DrawingInteractionController by default so drawings can be selected,
-      // dragged, and resized. Legacy mode already has built-in drawing hit testing and keeps
-      // interactions opt-in unless explicitly enabled.
-      (this.gridMode === "shared" ? true : this.drawingsDemoEnabled);
+    const enableDrawingInteractions = opts.enableDrawingInteractions ?? resolveEnableDrawingInteractions();
     if (enableDrawingInteractions) {
       const callbacks: DrawingInteractionCallbacks = {
         getViewport: () => this.getDrawingInteractionViewportScratch(this.sharedGrid?.renderer.scroll.getViewportState()),
@@ -6530,11 +6525,7 @@ export class SpreadsheetApp {
         this.setSelectedChartId(null);
       }
       this.drawingOverlay.setSelectedId(lastInsertedId);
-      if (this.gridMode === "shared") {
-        this.ensureDrawingInteractionController().setSelectedId(lastInsertedId);
-      } else {
-        this.drawingInteractionController?.setSelectedId(lastInsertedId);
-      }
+      this.drawingInteractionController?.setSelectedId(lastInsertedId);
       if (prevSelected !== lastInsertedId) {
         this.dispatchDrawingSelectionChanged();
       }
@@ -6595,7 +6586,10 @@ export class SpreadsheetApp {
       .map((drawing, idx) => ({
         drawing,
         idx,
-        z: Number((drawing as any)?.zOrder ?? (drawing as any)?.z_order ?? idx),
+        z: (() => {
+          const raw = Number((drawing as any)?.zOrder ?? (drawing as any)?.z_order);
+          return Number.isFinite(raw) ? raw : idx;
+        })(),
         idKey: String((drawing as any)?.id ?? ""),
       }))
       .sort((a, b) => {
