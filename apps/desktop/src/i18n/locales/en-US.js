@@ -206,6 +206,7 @@ export const enUS = {
   "commandCategory.navigation": "Navigation",
   "commandCategory.data": "Data",
   "commandCategory.view": "View",
+  "commandCategory.macros": "Macros",
   "commandCategory.audit": "Audit",
   "commandCategory.editing": "Edit",
   "commandCategory.format": "Format",

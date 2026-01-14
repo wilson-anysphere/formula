@@ -109,6 +109,7 @@ export const ar = {
   "commandCategory.navigation": "تنقّل",
   "commandCategory.data": "بيانات",
   "commandCategory.view": "عرض",
+  "commandCategory.macros": "وحدات الماكرو",
   "commandCategory.editing": "تحرير",
   "commandCategory.format": "تنسيق",
   "commandCategory.comments": "تعليقات",

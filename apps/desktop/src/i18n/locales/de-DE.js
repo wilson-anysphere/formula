@@ -109,6 +109,7 @@ export const deDE = {
   "commandCategory.navigation": "Navigation",
   "commandCategory.data": "Daten",
   "commandCategory.view": "Ansicht",
+  "commandCategory.macros": "Makros",
   "commandCategory.editing": "Bearbeiten",
   "commandCategory.format": "Format",
   "commandCategory.comments": "Kommentare",

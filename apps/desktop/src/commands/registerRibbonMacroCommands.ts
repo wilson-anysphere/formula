@@ -1,4 +1,5 @@
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
+import { t } from "../i18n/index.js";
 import { PanelIds } from "../panels/panelRegistry.js";
 
 export type MacrosPanelFocusTarget =
@@ -181,9 +182,11 @@ export function registerRibbonMacroCommands(params: {
     }
   };
 
+  const category = t("commandCategory.macros");
+
   for (const commandId of RIBBON_MACRO_COMMAND_IDS) {
     commandRegistry.registerBuiltinCommand(commandId, titleForCommand(commandId), () => runCommand(commandId), {
-      category: "Macros",
+      category,
       icon: null,
       description: null,
       keywords: ["macros", "vba", "script"],
