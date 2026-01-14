@@ -189,3 +189,29 @@ fn parse_vertical(value: &str) -> VerticalAlignment {
         _ => VerticalAlignment::Bottom,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn styles_parse_dxf_respects_bold_italic_val_zero_as_false() {
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dxfs count="1">
+    <dxf>
+      <font>
+        <b val="0"/>
+        <i val="false"/>
+      </font>
+    </dxf>
+  </dxfs>
+</styleSheet>
+"#;
+
+        let styles = Styles::parse(styles_xml).unwrap();
+        assert_eq!(styles.dxfs.len(), 1);
+        assert_eq!(styles.dxfs[0].bold, Some(false));
+        assert_eq!(styles.dxfs[0].italic, Some(false));
+    }
+}

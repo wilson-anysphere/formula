@@ -497,7 +497,6 @@ fn build_conditional_formatting_dxf(style: &CfStyleOverride) -> XmlElement {
     }
     dxf
 }
-
 fn parse_num_fmts(root: &XmlElement) -> HashMap<u16, String> {
     let mut out = HashMap::new();
     let Some(num_fmts) = root.child("numFmts") else {
@@ -1239,6 +1238,30 @@ mod tests {
         let mut out = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut out).expect("read styles.xml");
         out
+    }
+
+    #[test]
+    fn conditional_formatting_dxf_parses_bold_italic_val_zero_as_false() {
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dxfs count="1">
+    <dxf>
+      <font>
+        <b val="0"/>
+        <i val="false"/>
+      </font>
+    </dxf>
+  </dxfs>
+</styleSheet>
+"#;
+
+        let mut style_table = StyleTable::new();
+        let styles_part = StylesPart::parse(styles_xml.as_bytes(), &mut style_table).unwrap();
+        let dxfs = styles_part.conditional_formatting_dxfs();
+
+        assert_eq!(dxfs.len(), 1);
+        assert_eq!(dxfs[0].bold, Some(false));
+        assert_eq!(dxfs[0].italic, Some(false));
     }
 
     #[test]

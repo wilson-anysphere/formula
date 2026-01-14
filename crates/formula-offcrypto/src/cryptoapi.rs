@@ -154,7 +154,13 @@ pub fn rc4_key_for_block(
     key_size_bits: u32,
     hash_alg: HashAlgorithm,
 ) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
-    // MS-OFFCRYPTO specifies that for RC4, `keySize=0` MUST be interpreted as 40-bit.
+    // Standard/CryptoAPI RC4 key derivation uses *raw hash truncation*, not `CryptDeriveKey`:
+    // `Hfinal = Hash(H || LE32(block))`, `rc4_key_b = Hfinal[0..keySize/8]`.
+    //
+    // MS-OFFCRYPTO specifies that for RC4, `keySize=0` MUST be interpreted as 40-bit (5 bytes).
+    //
+    // Note: some producers treat 40-bit keys as 128-bit keys padded with zeros; that
+    // compatibility behavior is handled by the Standard RC4 decryptor, not here.
     let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
     if key_size_bits % 8 != 0 {
         return Err(OffcryptoError::InvalidKeySizeBits { key_size_bits });
