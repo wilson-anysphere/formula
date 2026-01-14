@@ -259,12 +259,12 @@ impl Table {
                                 expected,
                                 actual,
                             },
-                            formula_columnar::ColumnAppendError::DuplicateColumn { name: column } => {
-                                DaxError::DuplicateColumn {
-                                    table: self.name.clone(),
-                                    column,
-                                }
-                            }
+                            formula_columnar::ColumnAppendError::DuplicateColumn {
+                                name: column,
+                            } => DaxError::DuplicateColumn {
+                                table: self.name.clone(),
+                                column,
+                            },
                             other => DaxError::Eval(format!(
                                 "failed to append column {}[{}] to columnar table: {other}",
                                 self.name, name
@@ -1090,7 +1090,6 @@ impl DataModel {
                 .tables
                 .get(&from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.clone()))?;
-
             match unmatched {
                 UnmatchedFactRows::Sparse(rows) => {
                     // When the unmatched set is sparse, scanning it is cheaper than finding all

@@ -21,8 +21,8 @@ use ordered_float::OrderedFloat;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::OnceLock;
 
 pub type DaxResult<T> = Result<T, DaxError>;
 
@@ -339,6 +339,9 @@ impl RowContext {
 enum VarValue {
     Scalar(Value),
     Table(TableResult),
+    /// A one-column virtual table value (currently produced by `{...}` table constructors in `VAR`
+    /// bindings).
+    OneColumnTable(Vec<Value>),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -481,8 +484,8 @@ impl DaxEngine {
                         (Some(v), None) => return Ok(v.clone()),
                         (Some(_), Some(_)) => {
                             return Err(DaxError::Eval(format!(
-                                "ambiguous column reference [{normalized}] in the current row context"
-                            )))
+                            "ambiguous column reference [{normalized}] in the current row context"
+                        )))
                         }
                         (None, _) => {
                             // Fall through: if there is an outer physical row context, use it as
@@ -614,9 +617,9 @@ impl DaxEngine {
             }
             Expr::TableName(name) => match env.lookup(name) {
                 Some(VarValue::Scalar(v)) => Ok(v.clone()),
-                Some(VarValue::Table(_)) => Err(DaxError::Type(format!(
-                    "table variable {name} used in scalar context"
-                ))),
+                Some(VarValue::Table(_) | VarValue::OneColumnTable(_)) => Err(DaxError::Type(
+                    format!("table variable {name} used in scalar context"),
+                )),
                 None => Err(DaxError::Type(format!(
                     "table {name} used in scalar context"
                 ))),
@@ -632,6 +635,11 @@ impl DaxEngine {
         row_ctx: &RowContext,
         env: &mut VarEnv,
     ) -> DaxResult<VarValue> {
+        if matches!(expr, Expr::TableLiteral { .. }) {
+            let values = self.eval_one_column_table_literal(model, expr, filter, row_ctx, env)?;
+            return Ok(VarValue::OneColumnTable(values));
+        }
+
         match self.eval_scalar(model, expr, filter, row_ctx, env) {
             Ok(v) => Ok(VarValue::Scalar(v)),
             Err(err) => match self.eval_table(model, expr, filter, row_ctx, env) {
@@ -693,10 +701,21 @@ impl DaxEngine {
         row_ctx: &RowContext,
         env: &mut VarEnv,
     ) -> DaxResult<Vec<Value>> {
-        let Expr::TableLiteral { rows } = expr else {
-            return Err(DaxError::Type(format!(
-                "expected a one-column table constructor, got {expr:?}"
-            )));
+        let rows = match expr {
+            Expr::TableLiteral { rows } => rows,
+            Expr::TableName(name) => match env.lookup(name) {
+                Some(VarValue::OneColumnTable(values)) => return Ok(values.clone()),
+                _ => {
+                    return Err(DaxError::Type(format!(
+                        "expected a one-column table constructor, got {expr:?}"
+                    )))
+                }
+            },
+            _ => {
+                return Err(DaxError::Type(format!(
+                    "expected a one-column table constructor, got {expr:?}"
+                )))
+            }
         };
 
         let mut out = Vec::with_capacity(rows.len());
@@ -1417,10 +1436,12 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let idx = table_ref
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                    })?;
                 if let Some(visible_cols) = visible_cols {
                     if !visible_cols.contains(&idx) {
                         return Err(DaxError::Eval(format!(
@@ -1452,10 +1473,12 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let idx = table_ref
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                    })?;
                 if let Some(visible_cols) = visible_cols {
                     if !visible_cols.contains(&idx) {
                         return Err(DaxError::Eval(format!(
@@ -2203,7 +2226,13 @@ impl DaxEngine {
             match expr {
                 Expr::Let { bindings, body } => {
                     for (_, binding_expr) in bindings {
-                        apply_relationship_modifiers(engine, model, binding_expr, filter, eval_filter)?;
+                        apply_relationship_modifiers(
+                            engine,
+                            model,
+                            binding_expr,
+                            filter,
+                            eval_filter,
+                        )?;
                     }
                     apply_relationship_modifiers(engine, model, body, filter, eval_filter)
                 }
@@ -2382,8 +2411,13 @@ impl DaxEngine {
                     env.push_scope();
                     let result = (|| -> DaxResult<()> {
                         for (name, binding_expr) in bindings {
-                            let value =
-                                engine.eval_var_value(model, binding_expr, eval_filter, row_ctx, env)?;
+                            let value = engine.eval_var_value(
+                                model,
+                                binding_expr,
+                                eval_filter,
+                                row_ctx,
+                                env,
+                            )?;
                             env.define(name, value);
                         }
                         apply_filter_arg(
@@ -2541,7 +2575,8 @@ impl DaxEngine {
                             Ok(())
                         }
                         BinaryOp::Equals => {
-                            let rhs = engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
+                            let rhs =
+                                engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
                             column_filters.push((key, HashSet::from([rhs])));
                             Ok(())
                         }
@@ -2550,7 +2585,8 @@ impl DaxEngine {
                         | BinaryOp::LessEquals
                         | BinaryOp::Greater
                         | BinaryOp::GreaterEquals => {
-                            let rhs = engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
+                            let rhs =
+                                engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
                             let mut base_filter = eval_filter.clone();
                             base_filter.column_filters.remove(&key);
                             let candidate_rows = resolve_table_rows(model, &base_filter, table)?;
@@ -2628,7 +2664,8 @@ impl DaxEngine {
                     if !keep_filters {
                         clear_columns.insert(key.clone());
                     }
-                    let values = engine.distinct_column_values(model, source_col_expr, eval_filter)?;
+                    let values =
+                        engine.distinct_column_values(model, source_col_expr, eval_filter)?;
                     column_filters.push((key, values));
                     Ok(())
                 }
@@ -2995,6 +3032,11 @@ impl DaxEngine {
                 Some(VarValue::Scalar(_)) => Err(DaxError::Type(format!(
                     "scalar variable {name} used in table context"
                 ))),
+                Some(VarValue::OneColumnTable(values)) => Ok(TableResult::Virtual {
+                    // DAX table constructors expose a single implicit column named `Value`.
+                    columns: vec![("__TABLE_LITERAL__".to_string(), "Value".to_string())],
+                    rows: values.iter().cloned().map(|v| vec![v]).collect(),
+                }),
                 None => Ok(TableResult::Physical {
                     table: name.clone(),
                     rows: resolve_table_rows(model, filter, name)?,
@@ -3002,7 +3044,8 @@ impl DaxEngine {
                 }),
             },
             Expr::TableLiteral { .. } => {
-                let values = self.eval_one_column_table_literal(model, expr, filter, row_ctx, env)?;
+                let values =
+                    self.eval_one_column_table_literal(model, expr, filter, row_ctx, env)?;
                 let mut rows = Vec::with_capacity(values.len());
                 for value in values {
                     rows.push(vec![value]);
@@ -3640,7 +3683,8 @@ impl DaxEngine {
                                                 continue;
                                             };
                                             to_row_set.for_each_row(|to_row| {
-                                                if to_row < allowed_to.len() && allowed_to.get(to_row)
+                                                if to_row < allowed_to.len()
+                                                    && allowed_to.get(to_row)
                                                 {
                                                     next_rows.insert(to_row);
                                                 }
@@ -4283,9 +4327,10 @@ impl DaxEngine {
                                 }
                             } else {
                                 // Fallback: scan the fact table to preserve blank-member semantics.
-                                let from_table_ref = model.table(target_table).ok_or_else(|| {
-                                    DaxError::UnknownTable(target_table.to_string())
-                                })?;
+                                let from_table_ref =
+                                    model.table(target_table).ok_or_else(|| {
+                                        DaxError::UnknownTable(target_table.to_string())
+                                    })?;
                                 for row in allowed.iter_ones() {
                                     let v = from_table_ref
                                         .value_by_idx(row, rel.from_idx)
@@ -4832,7 +4877,14 @@ pub(crate) fn resolve_row_sets(
     }
 
     if trace_enabled {
-        maybe_trace_resolve_row_sets(model, filter, &sets, iterations, propagate_calls, propagate_changes);
+        maybe_trace_resolve_row_sets(
+            model,
+            filter,
+            &sets,
+            iterations,
+            propagate_calls,
+            propagate_changes,
+        );
     }
 
     Ok(sets)
@@ -4858,13 +4910,7 @@ fn maybe_trace_resolve_row_sets(
 
     let mut table_counts: Vec<(&str, usize, usize)> = sets
         .iter()
-        .map(|(name, allowed)| {
-            (
-                name.as_str(),
-                allowed.count_ones(),
-                allowed.len(),
-            )
-        })
+        .map(|(name, allowed)| (name.as_str(), allowed.count_ones(), allowed.len()))
         .collect();
     table_counts.sort_by_key(|(name, _, _)| *name);
     let table_counts = table_counts
