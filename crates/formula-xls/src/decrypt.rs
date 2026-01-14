@@ -1008,7 +1008,6 @@ mod filepass_tests {
         ];
 
         let key_material = derive_key_material(hash_alg, password, &salt);
-
         let verifier_plain: [u8; 16] = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
             0x0D, 0x0E, 0x0F,
@@ -1092,6 +1091,113 @@ mod filepass_tests {
 
         decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted_stream, password).expect("decrypt");
 
+        let mut expected = plaintext_stream;
+        expected[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
+        assert_eq!(encrypted_stream, expected);
+    }
+
+    #[test]
+    fn decrypts_rc4_cryptoapi_allows_empty_password_when_file_was_encrypted_with_empty_password() {
+        // Build a minimal BIFF8 workbook stream:
+        // BOF (plaintext) + FILEPASS (plaintext) + one record with encrypted payload + EOF.
+        const RECORD_BOF: u16 = 0x0809;
+        const RECORD_EOF: u16 = 0x000A;
+        const RECORD_DUMMY: u16 = 0x1234;
+
+        let password = "";
+        let hash_alg = CryptoApiHashAlg::Sha1;
+        let key_size_bits: u32 = 128;
+        let salt: [u8; 16] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F, 0x10,
+        ];
+
+        // Derive key material per MS-OFFCRYPTO.
+        let key_material = derive_key_material(hash_alg, password, &salt);
+
+        // Build the verifier fields (encrypted with block 0 key).
+        let verifier_plain: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+            0x0D, 0x0E, 0x0F,
+        ];
+        let verifier_hash_plain: [u8; 20] = sha1_bytes(&[&verifier_plain]);
+
+        let key0 = derive_block_key_spec(hash_alg, key_material.as_slice(), 0, key_size_bits);
+        let mut rc4 = Rc4::new(&key0);
+        let mut encrypted_verifier = verifier_plain;
+        rc4.apply_keystream(&mut encrypted_verifier);
+        let mut encrypted_verifier_hash = verifier_hash_plain.to_vec();
+        rc4.apply_keystream(&mut encrypted_verifier_hash);
+
+        // Build CryptoAPI EncryptionInfo (minimal, SHA1 + RC4).
+        let mut enc_header = Vec::new();
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+        enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
+        enc_header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
+        enc_header.extend_from_slice(&key_size_bits.to_le_bytes()); // keySize (bits)
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // majorVersion (ignored by parser)
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minorVersion (ignored by parser)
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&(enc_header.len() as u32).to_le_bytes()); // headerSize
+        enc_info.extend_from_slice(&enc_header);
+        // EncryptionVerifier
+        enc_info.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+        enc_info.extend_from_slice(&salt);
+        enc_info.extend_from_slice(&encrypted_verifier);
+        enc_info.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize
+        enc_info.extend_from_slice(&encrypted_verifier_hash);
+
+        let mut filepass_payload = Vec::new();
+        filepass_payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        filepass_payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        filepass_payload.extend_from_slice(&enc_info);
+
+        // Plaintext record payload after FILEPASS. Make it >1024 bytes to ensure the decryptor
+        // rekeys (block 1 derivation must also follow the SHA1 KDF rules).
+        let mut plaintext_payload = vec![0u8; 2048];
+        for (i, b) in plaintext_payload.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+
+        let bof_payload = [0u8; 16];
+        let plaintext_stream = [
+            record(RECORD_BOF, &bof_payload),
+            record(RECORD_FILEPASS, &filepass_payload),
+            record(RECORD_DUMMY, &plaintext_payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        // Encrypt record payloads after FILEPASS using the spec-correct RC4 key derivation.
+        let (filepass_offset, filepass_len) =
+            find_filepass_record_offset(&plaintext_stream).expect("FILEPASS offset");
+        let filepass_data_end = filepass_offset + 4 + filepass_len;
+
+        let mut encrypted_stream = plaintext_stream.clone();
+        let mut payload_cipher =
+            PayloadRc4Spec::new(hash_alg, key_material.as_slice().to_vec(), key_size_bits);
+
+        let mut offset = filepass_data_end;
+        while offset < encrypted_stream.len() {
+            let len = u16::from_le_bytes([encrypted_stream[offset + 2], encrypted_stream[offset + 3]])
+                as usize;
+            let data_start = offset + 4;
+            let data_end = data_start + len;
+            payload_cipher.apply_keystream(&mut encrypted_stream[data_start..data_end]);
+            offset = data_end;
+        }
+
+        // Decrypt using the implementation under test (in place).
+        decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted_stream, password).expect("decrypt");
+
+        // The decryptor masks the FILEPASS record id but otherwise yields the original plaintext.
         let mut expected = plaintext_stream;
         expected[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
         assert_eq!(encrypted_stream, expected);
