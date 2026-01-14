@@ -1466,11 +1466,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          preferred_dir="apps/desktop/src-tauri/target/release/bundle/deb"
+          echo "Preferred .deb output dir: ${preferred_dir}"
+          ls -lah "${preferred_dir}" 2>/dev/null || true
           # Preferred location (matches docs/release.md), but fall back to scanning common Cargo target dirs.
           #
           # Use globs instead of `find` to avoid traversing the entire Cargo target directory (which can be large).
           shopt -s nullglob
-          debs=(apps/desktop/src-tauri/target/release/bundle/deb/*.deb)
+          debs=("${preferred_dir}"/*.deb)
 
           if ((${#debs[@]} == 0)); then
             roots=()
@@ -1490,6 +1494,11 @@ jobs:
           # De-dupe for deterministic logs (and to avoid double-validating when roots overlap).
           if ((${#debs[@]} > 0)); then mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u); fi
           shopt -u nullglob
+
+          echo "Discovered ${#debs[@]} .deb artifact(s)."
+          if ((${#debs[@]} > 0)); then
+            printf '  - %s\n' "${debs[@]}"
+          fi
 
           if ((${#debs[@]} == 0)); then
             echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/**/release/bundle/deb" >&2
