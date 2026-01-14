@@ -2674,13 +2674,12 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
 
         // `EncryptedPackage` streams should start with an 8-byte plaintext length header followed by
         // ciphertext. If the stream is too short, treat it as a malformed/unsupported encryption
-        // container rather than an invalid password.
+        // container rather than an invalid password (or a generic decrypt error).
         if encrypted_package.len() <= 8 {
-            return Err(Error::DecryptOoxml {
+            return Err(Error::UnsupportedOoxmlEncryption {
                 path: path.to_path_buf(),
-                source: Box::new(xlsx::OffCryptoError::EncryptedPackageTooShort {
-                    len: encrypted_package.len(),
-                }),
+                version_major,
+                version_minor,
             });
         }
 
