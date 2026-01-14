@@ -6577,17 +6577,6 @@ export class SpreadsheetApp {
 
     this.document.beginBatch({ label: "Insert Picture" });
     try {
-      for (const entry of prepared) {
-        // Persist picture bytes out-of-band (IndexedDB) so they survive reloads without
-        // bloating DocumentController snapshot payloads.
-        this.drawingImages.set(entry.imageEntry);
-        try {
-          this.imageBytesBinder?.onLocalImageInserted(entry.imageEntry);
-        } catch {
-          // Best-effort: never fail picture insertion due to collab image propagation.
-        }
-      }
-
       // Merge with the latest sheet drawings at commit time. File decoding can take long enough
       // that remote collaborators insert/delete drawings while we're preparing images; avoid
       // overwriting those changes by re-reading the current sheet drawings here.
@@ -6624,6 +6613,25 @@ export class SpreadsheetApp {
     } catch (err) {
       this.document.cancelBatch();
       throw err;
+    }
+
+    // Persist picture bytes out-of-band (IndexedDB) only after the drawings were successfully
+    // written to the DocumentController. This avoids orphaning IndexedDB records if insertion fails.
+    for (const entry of prepared) {
+      try {
+        this.drawingImages.set(entry.imageEntry);
+      } catch {
+        // Best-effort: never fail picture insertion due to persistence errors.
+      }
+      // Preload the bitmap so the first overlay render can reuse the decode promise.
+      void this.drawingOverlay.preloadImage(entry.imageEntry).catch(() => {
+        // ignore
+      });
+      try {
+        this.imageBytesBinder?.onLocalImageInserted(entry.imageEntry);
+      } catch {
+        // Best-effort: never fail picture insertion due to collab image propagation.
+      }
     }
 
     const stillOnSheet = this.sheetId === sheetId;
@@ -10117,12 +10125,22 @@ export class SpreadsheetApp {
           ? String((file as any).type).trim()
           : inferMimeTypeFromId(imageId, bytes);
 
+      // Construct the drawing object first without persisting bytes to the workbook-level
+      // ImageStore. Persist bytes only after the drawing is successfully written to the
+      // DocumentController so we don't orphan IndexedDB records if insertion fails.
+      const noopImages: ImageStore = {
+        get: () => undefined,
+        set: () => {},
+        delete: () => {},
+        clear: () => {},
+      };
+
       const { objects: combinedObjects, image } = insertImageFromBytes(bytes, {
         imageId,
         mimeType,
         anchor,
         objects: existingObjects,
-        images: this.drawingImages,
+        images: noopImages,
       });
 
       const inserted = combinedObjects[combinedObjects.length - 1];
@@ -10160,19 +10178,47 @@ export class SpreadsheetApp {
           docAny.insertDrawing(sheetId, { ...inserted, id: String(inserted.id) }, { label: "Insert Image" });
           persistedToDocument = true;
         } catch (err) {
-          // Best-effort: if inserting into the document fails, fall back to the in-memory cache below.
           console.warn("Insert image: failed to persist drawing into document", err);
+        }
+      } else if (typeof docAny.setSheetDrawings === "function" && typeof docAny.getSheetDrawings === "function") {
+        try {
+          const baseDrawings = (() => {
+            try {
+              const raw = docAny.getSheetDrawings(sheetId);
+              return Array.isArray(raw) ? raw : [];
+            } catch {
+              return [];
+            }
+          })();
+
+          const nextDrawings = [...baseDrawings, { ...(inserted as any), id: String(inserted.id) }];
+          docAny.setSheetDrawings(sheetId, nextDrawings, { label: "Insert Image" });
+          persistedToDocument = true;
+        } catch (err) {
+          console.warn("Insert image: failed to persist drawing into document via setSheetDrawings", err);
         }
       }
 
-      if (persistedToDocument) {
-        // Ensure subsequent reads re-derive drawing state from the DocumentController snapshot.
-        // (This avoids caching a stale pre-insert list if drawings changed while decoding the file.)
-        this.drawingObjectsCache = null;
-      } else {
-        // Update the cache immediately so the first re-render includes the inserted object even
-        // if the DocumentController does not publish drawing changes synchronously.
-        this.drawingObjectsCache = { sheetId, objects: combinedObjects, source: drawingsGetter };
+      if (!persistedToDocument) {
+        try {
+          showToast("Picture insertion is not supported in this build.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        focusIfStillOnSheet();
+        return;
+      }
+
+      // Ensure subsequent reads re-derive drawing state from the DocumentController snapshot.
+      // (This avoids caching a stale pre-insert list if drawings changed while decoding the file.)
+      this.drawingObjectsCache = null;
+
+      // Persist picture bytes out-of-band (IndexedDB) so they survive reloads without
+      // bloating DocumentController snapshot payloads.
+      try {
+        this.drawingImages.set(image);
+      } catch {
+        // Best-effort: if persistence fails, keep the drawing inserted (it will render as a placeholder).
       }
 
       // Preload the bitmap so the first overlay render can reuse the decode promise.
@@ -20511,26 +20557,32 @@ export class SpreadsheetApp {
       zOrder: nextZOrder,
     };
 
+    const imageEntry: ImageEntry = { id: imageId, bytes, mimeType: "image/png" };
+
     this.document.beginBatch({ label: "Paste Picture" });
     try {
-      const imageEntry: ImageEntry = { id: imageId, bytes, mimeType: "image/png" };
-      // Persist picture bytes out-of-band (IndexedDB) so they survive reloads without
-      // bloating DocumentController snapshot payloads.
-      this.drawingImages.set(imageEntry);
-      // Preload the bitmap so the first overlay render can reuse the decode promise.
-      void this.drawingOverlay.preloadImage(imageEntry).catch(() => {
-        // ignore
-      });
-      try {
-        this.imageBytesBinder?.onLocalImageInserted(imageEntry);
-      } catch {
-        // Best-effort: never fail paste due to collab image propagation.
-      }
       docAny.insertDrawing(sheetId, drawing);
       this.document.endBatch();
     } catch (err) {
       this.document.cancelBatch();
       throw err;
+    }
+
+    // Persist picture bytes out-of-band (IndexedDB) only after the drawing was successfully written
+    // to the DocumentController. This avoids orphaning IndexedDB records if the paste insert fails.
+    try {
+      this.drawingImages.set(imageEntry);
+    } catch {
+      // Best-effort: never fail paste due to persistence errors.
+    }
+    // Preload the bitmap so the first overlay render can reuse the decode promise.
+    void this.drawingOverlay.preloadImage(imageEntry).catch(() => {
+      // ignore
+    });
+    try {
+      this.imageBytesBinder?.onLocalImageInserted(imageEntry);
+    } catch {
+      // Best-effort: never fail paste due to collab image propagation.
     }
 
     const stillOnSheet = this.sheetId === sheetId;

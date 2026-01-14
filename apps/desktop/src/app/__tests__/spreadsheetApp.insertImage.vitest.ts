@@ -380,6 +380,41 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     root.remove();
   });
 
+  it("does not persist image bytes when drawing insertion fails", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+    const docAny = app.getDocument() as any;
+
+    // Force insertDrawing to fail so `insertImageFromPickedFile` bails before persisting bytes.
+    docAny.insertDrawing = vi.fn(() => {
+      throw new Error("insertDrawing failed");
+    });
+
+    const images = app.getDrawingImages();
+    const setSpy = vi.spyOn(images, "set");
+
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const file = new File([bytes], "test.png", { type: "image/png" });
+
+    await (app as any).insertImageFromPickedFile(file);
+
+    expect(setSpy).not.toHaveBeenCalled();
+    expect((docAny.getSheetDrawings?.(sheetId) ?? []).length).toBe(0);
+    expect(toastSpy).toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("restores focus when the file picker is dismissed without selecting a file", async () => {
     vi.useFakeTimers();
 
