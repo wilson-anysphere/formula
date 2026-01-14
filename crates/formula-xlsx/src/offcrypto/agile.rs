@@ -769,8 +769,15 @@ pub fn decrypt_agile_keys(
             })?
             .to_vec();
 
-        let computed = hash_bytes(key_encryptor.hash_algorithm, &verifier_hash_input);
-        if computed.get(..verifier_hash_value.len()) != Some(verifier_hash_value.as_slice()) {
+        let computed_full = hash_bytes(key_encryptor.hash_algorithm, &verifier_hash_input);
+        let computed = computed_full.get(..verifier_hash_value.len()).ok_or_else(|| {
+            OffCryptoError::InvalidAttribute {
+                element: "encryptedKey".to_string(),
+                attr: "hashAlgorithm".to_string(),
+                reason: "hash output shorter than hashSize".to_string(),
+            }
+        })?;
+        if computed != verifier_hash_value.as_slice() {
             return Err(OffCryptoError::WrongPassword);
         }
 
@@ -1743,6 +1750,120 @@ mod tests {
             decrypt_agile_encrypted_package_stream(&encryption_info_stream, &encrypted_package, password)
                 .expect("decrypt package");
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn errors_when_password_key_hash_size_exceeds_hash_output() {
+        // If `p:encryptedKey/@hashSize` is larger than the hash output size for `hashAlgorithm`,
+        // treat the file as malformed instead of returning `WrongPassword`.
+        let password = "password";
+
+        // keyData (package encryption parameters).
+        let key_data_salt = (0u8..=15).collect::<Vec<_>>();
+        let key_data_key_bits = 128u32;
+        let key_data_block_size = 16u32;
+        let key_data_hash_size = 20u32;
+
+        // password key encryptor parameters (intentionally invalid hashSize for SHA1).
+        let ke_salt = (16u8..=31).collect::<Vec<_>>();
+        let ke_spin = 10u32;
+        let ke_key_bits = 128u32;
+        let ke_block_size = 16u32;
+        let ke_hash_alg = HashAlgorithm::Sha1;
+        let ke_hash_size = 32u32; // SHA1 outputs 20 bytes; 32 is invalid.
+
+        let package_key = b"0123456789ABCDEF".to_vec();
+        let pw_hash = hash_password(password, &ke_salt, ke_spin, ke_hash_alg).unwrap();
+
+        let verifier_hash_input = b"abcdefghijklmnop".to_vec(); // 16 bytes
+        let verifier_hash_value = hash_bytes(ke_hash_alg, &verifier_hash_input); // 20 bytes for SHA1
+
+        fn encrypt_ke_blob(
+            pw_hash: &[u8],
+            ke_salt: &[u8],
+            ke_key_bits: u32,
+            ke_block_size: u32,
+            ke_hash_alg: HashAlgorithm,
+            block_key: &[u8],
+            plaintext: &[u8],
+        ) -> Vec<u8> {
+            let key_len = (ke_key_bits / 8) as usize;
+            let iv_len = ke_block_size as usize;
+            let key = derive_key(pw_hash, block_key, key_len, ke_hash_alg).unwrap();
+            // MS-OFFCRYPTO: password key encryptor blobs use `saltValue` directly as the IV.
+            let iv = ke_salt.get(..iv_len).unwrap();
+            let padded = zero_pad(plaintext.to_vec());
+            encrypt_aes_cbc_no_padding(&key, iv, &padded)
+        }
+
+        let encrypted_verifier_hash_input = encrypt_ke_blob(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &VERIFIER_HASH_INPUT_BLOCK,
+            &verifier_hash_input,
+        );
+        let encrypted_verifier_hash_value = encrypt_ke_blob(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &VERIFIER_HASH_VALUE_BLOCK,
+            &verifier_hash_value,
+        );
+        let encrypted_key_value = encrypt_ke_blob(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &KEY_VALUE_BLOCK,
+            &package_key,
+        );
+
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltSize="16" blockSize="{key_data_block_size}" keyBits="{key_data_key_bits}" hashSize="{key_data_hash_size}"
+           cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+           saltValue="{key_data_salt_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+      <p:encryptedKey saltSize="16" blockSize="{ke_block_size}" keyBits="{ke_key_bits}" hashSize="{ke_hash_size}"
+                      spinCount="{ke_spin}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                      saltValue="{ke_salt_b64}"
+                      encryptedVerifierHashInput="{evhi_b64}"
+                      encryptedVerifierHashValue="{evhv_b64}"
+                      encryptedKeyValue="{ekv_b64}"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#,
+            key_data_salt_b64 = BASE64.encode(&key_data_salt),
+            ke_salt_b64 = BASE64.encode(&ke_salt),
+            evhi_b64 = BASE64.encode(&encrypted_verifier_hash_input),
+            evhv_b64 = BASE64.encode(&encrypted_verifier_hash_value),
+            ekv_b64 = BASE64.encode(&encrypted_key_value),
+        );
+
+        let encryption_info_stream = wrap_xml_in_encryption_info_stream(&xml);
+        let parsed = parse_agile_encryption_info_stream(&encryption_info_stream).expect("parse");
+
+        let err = decrypt_agile_keys(&parsed, password).expect_err("expected invalid hashSize to fail");
+        match err {
+            OffCryptoError::InvalidAttribute { element, attr, reason } => {
+                assert_eq!(element, "encryptedKey");
+                assert_eq!(attr, "hashAlgorithm");
+                assert!(
+                    reason.contains("hash output shorter than hashSize"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            other => panic!("expected InvalidAttribute, got {other:?}"),
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
