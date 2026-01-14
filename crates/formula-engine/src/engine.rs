@@ -1179,15 +1179,19 @@ impl Engine {
     /// Set (or clear) the explicit width override for a column.
     pub fn set_col_width(&mut self, sheet: &str, col_0based: u32, width: Option<f32>) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
-        let mut changed = self.workbook.grow_sheet_dimensions(
+        let sheet_dims_changed = self.workbook.grow_sheet_dimensions(
             sheet_id,
             CellAddr {
                 row: 0,
                 col: col_0based,
             },
         );
-        if changed {
+        if sheet_dims_changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+            // Sheet dimensions affect out-of-bounds `#REF!` semantics for references. When a sheet
+            // grows, formulas that previously evaluated to `#REF!` may now become valid, so
+            // conservatively mark all compiled formulas dirty.
+            self.mark_all_compiled_cells_dirty();
         }
 
         let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
@@ -1213,30 +1217,32 @@ impl Engine {
         }
 
         let after = sheet.col_properties.get(&col_0based).and_then(|p| p.width);
-        if before != after {
-            changed = true;
-        }
+        let props_changed = before != after;
 
-        if changed {
-            self.mark_all_compiled_cells_dirty();
-            if self.calc_settings.calculation_mode != CalculationMode::Manual {
-                self.recalculate();
-            }
+        // Column width metadata affects `CELL("width")`, which is volatile. When only the
+        // per-column width changes (without altering sheet dimensions), a recalculation tick is
+        // sufficient to refresh dependents via the volatile closure (no full-workbook dirtying).
+        if (sheet_dims_changed || props_changed)
+            && self.calc_settings.calculation_mode != CalculationMode::Manual
+        {
+            self.recalculate();
         }
     }
 
     /// Set whether a column is user-hidden.
     pub fn set_col_hidden(&mut self, sheet: &str, col_0based: u32, hidden: bool) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
-        let mut changed = self.workbook.grow_sheet_dimensions(
+        let sheet_dims_changed = self.workbook.grow_sheet_dimensions(
             sheet_id,
             CellAddr {
                 row: 0,
                 col: col_0based,
             },
         );
-        if changed {
+        if sheet_dims_changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
+            // Sheet dimension growth can affect out-of-bounds semantics; see `set_col_width`.
+            self.mark_all_compiled_cells_dirty();
         }
 
         let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
@@ -1269,15 +1275,14 @@ impl Engine {
             .get(&col_0based)
             .map(|p| p.hidden)
             .unwrap_or(false);
-        if before != after {
-            changed = true;
-        }
+        let props_changed = before != after;
 
-        if changed {
-            self.mark_all_compiled_cells_dirty();
-            if self.calc_settings.calculation_mode != CalculationMode::Manual {
-                self.recalculate();
-            }
+        // Hidden state affects `CELL("width")` (hidden columns return 0). Like `set_col_width`,
+        // avoid full-workbook dirtying when only the metadata changes (rely on volatile closure).
+        if (sheet_dims_changed || props_changed)
+            && self.calc_settings.calculation_mode != CalculationMode::Manual
+        {
+            self.recalculate();
         }
     }
 
@@ -1702,10 +1707,8 @@ impl Engine {
         s.default_col_width = width;
 
         // Default column width metadata can affect `CELL("width")` outputs (and any downstream
-        // calculations that depend on those values), but it is not modeled in the calculation
-        // dependency graph. Conservatively mark compiled formula cells dirty so results refresh on
-        // the next recalc tick.
-        self.mark_all_compiled_cells_dirty();
+        // calculations that depend on those values). `CELL()` is volatile, so a recalculation tick
+        // is sufficient to refresh dependents via the volatile closure (no full-workbook dirtying).
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -1725,14 +1728,8 @@ impl Engine {
             return;
         }
         sheet.sheet_protection_enabled = enabled;
-
-        // Worksheet protection is workbook metadata that can affect certain worksheet information
-        // functions. Conservatively mark compiled cells dirty so results can refresh on the next
-        // recalculation.
-        self.mark_all_compiled_cells_dirty();
-        if self.calc_settings.calculation_mode != CalculationMode::Manual {
-            self.recalculate();
-        }
+        // Worksheet protection is currently informational only and does not affect formula
+        // evaluation, so no recalculation is required.
     }
 
     /// Returns whether worksheet protection is enabled for `sheet`.

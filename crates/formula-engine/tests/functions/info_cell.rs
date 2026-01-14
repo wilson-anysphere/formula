@@ -314,8 +314,16 @@ fn cell_width_updates_on_sheet_default_width_change_in_automatic_mode() {
         .unwrap();
     assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
 
+    // Regression guard: changing column width metadata should not force unrelated non-volatile
+    // formulas to recalculate.
+    engine
+        .set_cell_formula("Sheet1", "B2", "=RECALC_TICK_TEST()")
+        .unwrap();
+    let before_tick = engine.get_cell_value("Sheet1", "B2");
+
     engine.set_sheet_default_col_width("Sheet1", Some(20.0));
     assert_number(&engine.get_cell_value("Sheet1", "B1"), 20.0);
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), before_tick);
 }
 
 #[test]
@@ -1310,12 +1318,18 @@ fn metadata_setters_trigger_auto_recalc_in_automatic_mode() {
         Value::Text(String::new())
     );
 
+    engine
+        .set_cell_formula("Sheet1", "B3", "=RECALC_TICK_TEST()")
+        .unwrap();
+    let tick_before = engine.get_cell_value("Sheet1", "B3");
+
     // In automatic mode, metadata setters should eagerly recalculate.
     engine.set_workbook_file_metadata(Some("/tmp/"), Some("Book1.xlsx"));
     assert_eq!(
         engine.get_cell_value("Sheet1", "B1"),
         Value::Text("/tmp/[Book1.xlsx]Sheet1".to_string())
     );
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
 
     engine
         .set_cell_formula("Sheet1", "B2", "=CELL(\"width\")")
@@ -1326,6 +1340,14 @@ fn metadata_setters_trigger_auto_recalc_in_automatic_mode() {
     let after = engine.get_cell_value("Sheet1", "B2");
     assert_number(&after, 42.1);
     assert_ne!(before, after);
+
+    // The column width edit should not dirty unrelated non-volatile formulas.
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
+
+    // Same semantics for hidden state.
+    engine.set_col_hidden("Sheet1", 1, true);
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
 }
 
 #[test]
