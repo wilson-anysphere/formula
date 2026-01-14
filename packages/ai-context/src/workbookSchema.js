@@ -508,7 +508,9 @@ export function extractWorkbookSchema(workbook, options = {}) {
       a.sheetName.localeCompare(b.sheetName) ||
       a.rect.r0 - b.rect.r0 ||
       a.rect.c0 - b.rect.c0 ||
-      a.name.localeCompare(b.name),
+      a.name.localeCompare(b.name) ||
+      a.rect.r1 - b.rect.r1 ||
+      a.rect.c1 - b.rect.c1,
   );
 
   /** @type {ReturnType<typeof extractWorkbookSchema>["namedRanges"]} */
@@ -534,7 +536,9 @@ export function extractWorkbookSchema(workbook, options = {}) {
       a.sheetName.localeCompare(b.sheetName) ||
       a.rect.r0 - b.rect.r0 ||
       a.rect.c0 - b.rect.c0 ||
-      a.name.localeCompare(b.name),
+      a.name.localeCompare(b.name) ||
+      a.rect.r1 - b.rect.r1 ||
+      a.rect.c1 - b.rect.c1,
   );
 
   return {

@@ -67,6 +67,26 @@ describe("extractWorkbookSchema", () => {
     expect(schema1.tables.map((t) => t.name)).toEqual(["A", "B"]);
   });
 
+  it("sorts tables/named ranges deterministically when start cell + name collide", () => {
+    const workbook = {
+      id: "wb-colliding",
+      sheets: [{ name: "Sheet1", cells: [["H"], [1]] }],
+      // Same sheet, same start cell, same name, different rect sizes.
+      tables: [
+        { name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } },
+        { name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } },
+      ],
+      namedRanges: [
+        { name: "NR", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } },
+        { name: "NR", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } },
+      ],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables.map((t) => t.rangeA1)).toEqual(["Sheet1!A1", "Sheet1!A1:A2"]);
+    expect(schema.namedRanges.map((r) => r.rangeA1)).toEqual(["Sheet1!A1", "Sheet1!A1:A2"]);
+  });
+
   it("accepts Map-shaped workbook metadata (tables + namedRanges)", () => {
     const tables = new Map<string, any>();
     // Name is derived from the Map key when omitted.
