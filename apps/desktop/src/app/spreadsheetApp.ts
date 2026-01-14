@@ -11342,8 +11342,12 @@ export class SpreadsheetApp {
           (transform.rotationDeg !== 0 || transform.flipH || transform.flipV)
         );
 
-        const stroke = resolveCssVar("--selection-border", { fallback: "CanvasText" });
-        const handleFill = resolveCssVar("--bg-primary", { fallback: "Canvas" });
+        const stroke = resolveCssVar("--formula-grid-selection-border", {
+          fallback: resolveCssVar("--selection-border", { fallback: "CanvasText" })
+        });
+        const handleFill = resolveCssVar("--formula-grid-bg", {
+          fallback: resolveCssVar("--bg-primary", { fallback: "Canvas" })
+        });
         const handleSize = RESIZE_HANDLE_SIZE_PX;
         const half = handleSize / 2;
 
