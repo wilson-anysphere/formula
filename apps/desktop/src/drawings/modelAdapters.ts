@@ -194,7 +194,12 @@ function parseDrawingObjectId(value: unknown): number {
   // them as stable numeric keys. If an upstream snapshot stores ids as strings, guard against
   // parsing an unsafe integer (e.g. "9007199254740993") by falling back to a stable hash.
   if (parsed != null && Number.isSafeInteger(parsed)) return parsed;
-  return stableHash32(stableStringify(value));
+  // Use a disjoint negative-id namespace for hashed ids so they cannot collide with:
+  // - normal drawing ids (which are positive safe integers, including our random 53-bit ids)
+  // - chart overlay ids (which use smaller-magnitude negative ids; see `chartIdToDrawingId`)
+  const HASH_NAMESPACE_OFFSET = 0x200000000; // 2^33
+  const hashed = stableHash32(stableStringify(value));
+  return -(HASH_NAMESPACE_OFFSET + hashed);
 }
 
 function parseImageId(value: unknown, context: string): string {

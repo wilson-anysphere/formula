@@ -141,6 +141,7 @@ describe("drawings/modelAdapters", () => {
     const ui2 = convertModelDrawingObjectToUiDrawingObject(model);
 
     expect(Number.isSafeInteger(ui1.id)).toBe(true);
+    expect(ui1.id).toBeLessThan(0);
     expect(ui1.id).toBe(ui2.id);
 
     const parsed = Number(unsafeId);
@@ -165,6 +166,7 @@ describe("drawings/modelAdapters", () => {
     const ui2 = convertModelDrawingObjectToUiDrawingObject(model);
 
     expect(Number.isSafeInteger(ui1.id)).toBe(true);
+    expect(ui1.id).toBeLessThan(0);
     // The fallback id should be stable for the same input payload.
     expect(ui1.id).toBe(ui2.id);
   });
