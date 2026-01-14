@@ -152,9 +152,9 @@ When updating `sources/<locale>.json` (especially `es-ES`) and regenerating `<lo
    - `RATE` → `TASA`
 4. **Identity mappings are not suspiciously high.**
    Missing translations are emitted as `Canonical == Localized`, so a partial source can look
-   “complete” while being mostly English. As a rough heuristic, `es-ES` should have an identity
-   count in the same ballpark as `de-DE` / `fr-FR` (and should not have obvious identity mappings
-   for major function groups like `SUM*`, `IF*`, `COUNT*`, `AVERAGE*`, etc).
+   “complete” while being mostly English. Count identity mappings and sanity-check that the number
+   does not jump unexpectedly compared to the previously committed `es-ES.tsv`, and that common
+   Spanish-localized functions/groups are not falling back to English (see the sentinel list above).
 
    Quick count (Node required):
 
