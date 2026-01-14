@@ -484,6 +484,66 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
         // Best-effort fallback: treat byte count as character count.
         return text.chars().count();
     };
-    let (cow, _, _) = encoding.encode(text);
-    cow.len()
+
+    // `encoding_rs::Encoding::encode` emits HTML numeric character references for unmappable
+    // characters, which is Web-correct but not what we want for Excel byte-count semantics. We
+    // instead count the number of bytes that would be produced by the encoding while treating any
+    // unmappable code points as a single replacement byte (matching the behavior of common Windows
+    // codepages).
+    let mut encoder = encoding.new_encoder();
+    let mut remaining = text;
+    let mut total = 0usize;
+    let mut scratch: Vec<u8> = vec![0u8; 64];
+
+    while !remaining.is_empty() {
+        let (result, read, written) =
+            encoder.encode_from_utf8_without_replacement(remaining, &mut scratch, true);
+        total = total.saturating_add(written);
+        remaining = remaining.get(read..).unwrap_or("");
+
+        match result {
+            encoding_rs::EncoderResult::InputEmpty => {}
+            encoding_rs::EncoderResult::OutputFull => {
+                // Ensure progress even in the unlikely event that the scratch buffer is too small
+                // to encode a single code point.
+                if read == 0 && written == 0 {
+                    let new_len = scratch.len().saturating_mul(2).max(1);
+                    scratch.resize(new_len, 0);
+                }
+            }
+            encoding_rs::EncoderResult::Unmappable(_) => {
+                // Treat unmappable code points as a single replacement byte (e.g. '?').
+                total = total.saturating_add(1);
+                if read == 0 {
+                    // Defensive: ensure forward progress if the encoder reports an unmappable
+                    // without consuming input.
+                    if let Some(ch) = remaining.chars().next() {
+                        remaining = &remaining[ch.len_utf8()..];
+                    } else {
+                        remaining = "";
+                    }
+                }
+            }
+        }
+    }
+
+    // Flush any pending encoder state (not expected for the encodings we use, but keep the length
+    // calculation conservative).
+    loop {
+        let (result, _read, written) =
+            encoder.encode_from_utf8_without_replacement("", &mut scratch, true);
+        total = total.saturating_add(written);
+        match result {
+            encoding_rs::EncoderResult::InputEmpty => break,
+            encoding_rs::EncoderResult::OutputFull => {
+                let new_len = scratch.len().saturating_mul(2).max(1);
+                scratch.resize(new_len, 0);
+            }
+            encoding_rs::EncoderResult::Unmappable(_) => {
+                total = total.saturating_add(1);
+            }
+        }
+    }
+
+    total
 }
