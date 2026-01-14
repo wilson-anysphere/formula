@@ -9,6 +9,7 @@ type DrawingContextMenuApp = Pick<
   SpreadsheetApp,
   | "hitTestDrawingAtClientPoint"
   | "getSelectedDrawingId"
+  | "listDrawingsForSheet"
   | "isSelectedDrawingImage"
   | "selectDrawingById"
   | "cut"
@@ -24,9 +25,22 @@ export function buildDrawingContextMenuItems(params: {
   isEditing: boolean;
 }): ContextMenuItem[] {
   const { app, isEditing } = params;
-  const hasSelection = app.getSelectedDrawingId() != null;
+  const selectedId = app.getSelectedDrawingId();
+  const hasSelection = selectedId != null;
   const enabled = !isEditing && hasSelection;
   const clipboardEnabled = enabled && app.isSelectedDrawingImage();
+
+  const { canBringForward, canSendBackward } = (() => {
+    if (!enabled) return { canBringForward: false, canSendBackward: false };
+    // `listDrawingsForSheet` returns topmost-first ordering.
+    const drawings = app.listDrawingsForSheet();
+    if (!Array.isArray(drawings) || drawings.length < 2 || selectedId == null) {
+      return { canBringForward: false, canSendBackward: false };
+    }
+    const idx = drawings.findIndex((d) => d?.id === selectedId);
+    if (idx < 0) return { canBringForward: false, canSendBackward: false };
+    return { canBringForward: idx > 0, canSendBackward: idx < drawings.length - 1 };
+  })();
 
   const cutLabelRaw = t("clipboard.cut");
   const cutLabel = cutLabelRaw === "clipboard.cut" ? "Cut" : cutLabelRaw;
@@ -68,7 +82,7 @@ export function buildDrawingContextMenuItems(params: {
     {
       type: "item",
       label: "Bring Forward",
-      enabled,
+      enabled: canBringForward,
       onSelect: () => {
         app.bringSelectedDrawingForward();
         app.focus();
@@ -77,7 +91,7 @@ export function buildDrawingContextMenuItems(params: {
     {
       type: "item",
       label: "Send Backward",
-      enabled,
+      enabled: canSendBackward,
       onSelect: () => {
         app.sendSelectedDrawingBackward();
         app.focus();

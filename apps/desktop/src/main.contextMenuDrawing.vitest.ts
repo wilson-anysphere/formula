@@ -18,6 +18,7 @@ describe("Drawing context menu (main wiring helper)", () => {
     const app = {
       hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
       getSelectedDrawingId: vi.fn(() => selectedId),
+      listDrawingsForSheet: vi.fn(() => drawings),
       isSelectedDrawingImage: vi.fn(() => true),
       selectDrawingById: vi.fn((id: number | null) => {
         selectedId = id;
@@ -82,6 +83,7 @@ describe("Drawing context menu (main wiring helper)", () => {
     const app = {
       hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
       getSelectedDrawingId: vi.fn(() => selectedId),
+      listDrawingsForSheet: vi.fn(() => [{ id: 1 }, { id: 2 }]),
       isSelectedDrawingImage: vi.fn(() => true),
       selectDrawingById: vi.fn((id: number | null) => {
         selectedId = id;
@@ -121,6 +123,7 @@ describe("Drawing context menu (main wiring helper)", () => {
     const app = {
       hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
       getSelectedDrawingId: vi.fn(() => selectedId),
+      listDrawingsForSheet: vi.fn(() => [{ id: 2 }, { id: 1 }, { id: 3 }]),
       isSelectedDrawingImage: vi.fn(() => false),
       selectDrawingById: vi.fn((id: number | null) => {
         selectedId = id;
@@ -155,6 +158,48 @@ describe("Drawing context menu (main wiring helper)", () => {
     } finally {
       contextMenu.close();
       document.querySelector('[data-testid="context-menu-drawing-non-image"]')?.remove();
+    }
+  });
+
+  it("disables z-order actions when the selected drawing is already topmost/backmost", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-z-order" });
+    let selectedId: number | null = 1;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 1 })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      // Topmost-first ordering: selected id=1 is topmost.
+      listDrawingsForSheet: vi.fn(() => [{ id: 1 }, { id: 2 }]),
+      isSelectedDrawingImage: vi.fn(() => true),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteSelectedDrawing: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-z-order"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(true);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(false);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-z-order"]')?.remove();
     }
   });
 });
