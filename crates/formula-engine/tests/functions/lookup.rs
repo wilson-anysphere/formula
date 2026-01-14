@@ -1659,6 +1659,75 @@ fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
 }
 
 #[test]
+fn getpivotdata_registry_resolves_data_model_field_refs_against_quoted_cache_headers() {
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotTable,
+        PivotValue, SubtotalPosition, ValueField,
+    };
+    use formula_model::{CellRef, Range};
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    // The worksheet cache stores a quoted DAX-like column header, which `PivotFieldRef` will parse
+    // into a `DataModelColumn` ref. The canonical/display name for that ref is unquoted, so pivot
+    // registry matching must be able to map it back to the cache's actual field name.
+    let source = vec![
+        pv_row(&["'Dim Product'[Category]".into(), "Sales".into()]),
+        pv_row(&["East".into(), 100.into()]),
+        pv_row(&["West".into(), 200.into()]),
+        pv_row(&["East".into(), 150.into()]),
+    ];
+
+    let cfg = PivotConfig {
+        row_fields: vec![PivotField {
+            source_field: PivotFieldRef::from_unstructured("'Dim Product'[Category]"),
+            sort_order: Default::default(),
+            manual_sort: None,
+        }],
+        column_fields: vec![],
+        value_fields: vec![ValueField {
+            source_field: "Sales".into(),
+            name: "Sum of Sales".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: Layout::Tabular,
+        subtotals: SubtotalPosition::None,
+        grand_totals: GrandTotals {
+            rows: true,
+            columns: false,
+        },
+    };
+
+    let pivot = PivotTable::new("PivotTable1", &source, cfg).expect("create pivot");
+    let result = pivot.calculate().expect("calculate pivot");
+
+    // Register this pivot as if it were rendered starting at A1.
+    let start = CellRef::new(0, 0);
+    let end = CellRef::new(
+        start.row + result.data.len() as u32 - 1,
+        start.col + result.data[0].len() as u32 - 1,
+    );
+    let destination = Range::new(start, end);
+
+    let mut sheet = TestSheet::new();
+    sheet.register_pivot_table(destination, pivot);
+
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Dim Product[Category]\", \"East\")"),
+        Value::Number(250.0)
+    );
+}
+
+#[test]
 fn getpivotdata_falls_back_to_scan_when_pivot_not_registered() {
     let mut sheet = TestSheet::new();
 

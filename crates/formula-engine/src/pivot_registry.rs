@@ -94,15 +94,42 @@ impl PivotRegistryEntry {
             cache_field_names.insert(key, f.name.clone());
         }
 
+        let resolve_cache_field = |field: &formula_model::pivots::PivotFieldRef,
+                                   key: &str|
+         -> Result<(usize, String), PivotRegistryError> {
+            // Fast path: direct lookup by the canonical key.
+            if let Some(idx) = cache_field_indices.get(key).copied() {
+                let name = pivot
+                    .cache
+                    .fields
+                    .get(idx)
+                    .map(|f| f.name.clone())
+                    .unwrap_or_else(|| field.to_string());
+                return Ok((idx, name));
+            }
+
+            // Fallback: resolve the field ref against the cache field captions. This handles
+            // DAX-quoted column refs (`'Dim Product'[Category]`) and bracketed measure refs
+            // (`[Total Sales]`) when the cache stores a different textual form.
+            let Some(idx) = pivot.cache.field_index_ref(field) else {
+                return Err(PivotRegistryError::MissingField(field.to_string()));
+            };
+            let name = pivot
+                .cache
+                .fields
+                .get(idx)
+                .map(|f| f.name.clone())
+                .unwrap_or_else(|| field.to_string());
+            Ok((idx, name))
+        };
+
         let mut field_positions: HashMap<String, PivotFieldPosition> = HashMap::new();
         let mut field_indices: HashMap<String, usize> = HashMap::new();
 
         for (idx, f) in pivot.config.row_fields.iter().enumerate() {
             let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
-            let cache_idx = cache_field_indices
-                .get(&key)
-                .copied()
-                .ok_or_else(|| PivotRegistryError::MissingField(f.source_field.to_string()))?;
+            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &key)?;
+            cache_field_names.insert(key.clone(), cache_name);
             field_positions.insert(
                 key.clone(),
                 PivotFieldPosition {
@@ -115,10 +142,8 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.column_fields.iter().enumerate() {
             let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
-            let cache_idx = cache_field_indices
-                .get(&key)
-                .copied()
-                .ok_or_else(|| PivotRegistryError::MissingField(f.source_field.to_string()))?;
+            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &key)?;
+            cache_field_names.insert(key.clone(), cache_name);
             field_positions.insert(
                 key.clone(),
                 PivotFieldPosition {
@@ -131,10 +156,8 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.filter_fields.iter().enumerate() {
             let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
-            let cache_idx = cache_field_indices
-                .get(&key)
-                .copied()
-                .ok_or_else(|| PivotRegistryError::MissingField(f.source_field.to_string()))?;
+            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &key)?;
+            cache_field_names.insert(key.clone(), cache_name);
             field_positions.insert(
                 key.clone(),
                 PivotFieldPosition {
@@ -151,10 +174,7 @@ impl PivotRegistryEntry {
         for (idx, vf) in pivot.config.value_fields.iter().enumerate() {
             value_field_indices.insert(crate::value::casefold(&vf.name), idx);
             let key = crate::value::casefold(vf.source_field.canonical_name().as_ref());
-            let cache_idx = cache_field_indices
-                .get(&key)
-                .copied()
-                .ok_or_else(|| PivotRegistryError::MissingField(vf.source_field.to_string()))?;
+            let (cache_idx, _cache_name) = resolve_cache_field(&vf.source_field, &key)?;
             value_field_source_indices.push(cache_idx);
         }
 
