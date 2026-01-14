@@ -1343,6 +1343,32 @@ function normalizeFrozenCount(value) {
 }
 
 /**
+ * Some interop layers encode newtype/tuple ids as singleton arrays or objects with numeric keys
+ * (e.g. `{ "0": 1 }`). Unwrap these wrappers so drawings can round-trip through snapshots/collab
+ * payloads without being dropped by strict validation.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
+function unwrapSingletonId(value) {
+  let current = value;
+  for (let depth = 0; depth < 4; depth++) {
+    if (Array.isArray(current) && current.length === 1) {
+      current = current[0];
+      continue;
+    }
+    if (current && typeof current === "object" && !Array.isArray(current) && Object.prototype.hasOwnProperty.call(current, "0")) {
+      // Using numeric property access (`current[0]`) is intentional: JS coerces it to `"0"`, which
+      // matches JSON-parsed keys and wasm-bindgen tuple objects.
+      current = current[0];
+      continue;
+    }
+    break;
+  }
+  return current;
+}
+
+/**
  * @param {any} raw
  * @returns {any[] | null}
  */
@@ -1360,7 +1386,7 @@ function normalizeDrawings(raw) {
     // so formula-model snapshots can round-trip without schema transforms.
     //
     // Do this validation *before* cloning so maliciously-large ids don't force a full deep clone.
-    const rawId = entry.id;
+    const rawId = unwrapSingletonId(entry.id);
     let normalizedId;
     if (typeof rawId === "string") {
       if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) continue;
@@ -3579,7 +3605,7 @@ export class DocumentController {
       if (!isJsonObject(raw)) {
         throw new Error("Drawings must be JSON objects");
       }
-      const rawId = raw.id;
+      const rawId = unwrapSingletonId(raw.id);
       let drawingId;
       if (typeof rawId === "string") {
         if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) {

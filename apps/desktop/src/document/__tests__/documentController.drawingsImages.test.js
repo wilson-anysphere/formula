@@ -281,6 +281,62 @@ test("applyState accepts formula-model style image + drawings payloads", () => {
   assert.ok(drawings[0].kind);
 });
 
+test("applyState accepts drawings with singleton-wrapped ids (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [
+            {
+              // Some interop layers represent newtype ids as `{ 0: ... }`.
+              id: { 0: 1 },
+              z_order: 3,
+              anchor: { OneCell: { from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } }, ext: { cx: 100, cy: 80 } } },
+              kind: { Image: { image_id: { 0: "img1.png" } } },
+            },
+          ],
+        },
+      ],
+      images: {
+        images: {
+          "img1.png": { bytes: [1, 2, 3], content_type: "image/png" },
+        },
+      },
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const drawings = doc.getSheetDrawings("Sheet1");
+  assert.equal(drawings.length, 1);
+  assert.equal(drawings[0].id, 1);
+  assert.equal(drawings[0].zOrder, 3);
+});
+
+test("setSheetDrawings accepts singleton-wrapped numeric ids (interop)", () => {
+  const doc = new DocumentController();
+  doc.setSheetDrawings("Sheet1", [
+    {
+      id: { 0: 7 },
+      zOrder: 0,
+      anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+      kind: { type: "image", imageId: "img1" },
+    },
+  ]);
+
+  const drawings = doc.getSheetDrawings("Sheet1");
+  assert.equal(drawings.length, 1);
+  assert.equal(drawings[0].id, 7);
+});
+
 test("applyState accepts legacy top-level drawingsBySheet snapshots", () => {
   const drawing = {
     id: "d_legacy",
