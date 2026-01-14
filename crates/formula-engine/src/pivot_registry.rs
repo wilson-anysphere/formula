@@ -35,26 +35,6 @@ pub(crate) fn normalize_pivot_cache_field_name(name: &str) -> Cow<'_, str> {
     Cow::Borrowed(name)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn normalize_pivot_cache_field_name_preserves_bracket_escapes() {
-        // Column refs escape `]` as `]]` within `[...]`.
-        assert_eq!(
-            normalize_pivot_cache_field_name("'Dim Product'[A]]B]").as_ref(),
-            "Dim Product[A]]B]"
-        );
-
-        // Measures escape `]` the same way.
-        assert_eq!(
-            normalize_pivot_cache_field_name("[A]]B]").as_ref(),
-            "[A]]B]"
-        );
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PivotAxis {
     Row,
@@ -485,6 +465,21 @@ mod normalize_pivot_cache_field_name_escape_tests {
         assert_eq!(
             normalize_pivot_cache_field_name("'My[Table]'[Col]").as_ref(),
             "'My[Table]'[Col]"
+        );
+    }
+
+    #[test]
+    fn normalize_pivot_cache_field_name_preserves_bracket_escapes() {
+        // Column refs escape `]` as `]]` within `[...]`.
+        assert_eq!(
+            normalize_pivot_cache_field_name("'Dim Product'[A]]B]").as_ref(),
+            "Dim Product[A]]B]"
+        );
+
+        // Measures escape `]` the same way.
+        assert_eq!(
+            normalize_pivot_cache_field_name("[A]]B]").as_ref(),
+            "[A]]B]"
         );
     }
 }
