@@ -39,6 +39,15 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   // Inline AI edit applies changes to the sheet and is guarded against active cell/formula edits.
   "ai.inlineEdit": true,
 
+  // --- Clipboard --------------------------------------------------------------
+  // Paste Special operates on the grid selection and is guarded against active text editing,
+  // so disable it in edit mode to avoid "click does nothing" UX.
+  "clipboard.pasteSpecial": true,
+  "clipboard.pasteSpecial.values": true,
+  "clipboard.pasteSpecial.formulas": true,
+  "clipboard.pasteSpecial.formats": true,
+  "clipboard.pasteSpecial.transpose": true,
+
   // --- Formatting ------------------------------------------------------------
   "format.toggleSubscript": true,
   "format.toggleSuperscript": true,
