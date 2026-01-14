@@ -12674,6 +12674,12 @@ fn build_shared_formula_ptgref_row_oob_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("Shared", &sheet, 1252)
 }
 
+fn build_shared_formula_ptgarea_row_oob_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgarea_row_oob_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedArea", &sheet, 1252)
+}
+
 fn build_shared_formula_ptgref_row_oob_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Shared formula over the last two BIFF8 rows:
     //   B65535: A65536+1
@@ -12762,22 +12768,17 @@ pub fn build_shared_formula_ptgref_row_oob_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
-fn build_shared_formula_ptgarea_row_oob_workbook_stream() -> Vec<u8> {
-    let xf_cell = 16u16;
-    let sheet = build_shared_formula_ptgarea_row_oob_sheet_stream(xf_cell);
-    build_single_sheet_workbook_stream("SharedArea", &sheet, 1252)
-}
-
 fn build_shared_formula_ptgarea_row_oob_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Shared formula over the last two BIFF8 rows:
-    //   B65535: SUM(A65536)+1
-    //   B65536: SUM(#REF!)+1 (because A65537 is out of BIFF8 bounds)
+    //   B65535: SUM(A65535:A65536)+1
+    //   B65536: SUM(#REF!)+1 (because A65536:A65537 is out of BIFF8 bounds)
     //
     // The cells themselves contain only PtgExp; the shared rgce body is stored in SHRFMLA. This
     // forces the importer to materialize the shared rgce into per-cell formulas.
     const BASE_ROW: u16 = 65_534; // 0-based row for Excel row 65535
     const FOLLOWER_ROW: u16 = 65_535; // 0-based row for Excel row 65536
     const BASE_COL: u16 = 1; // column B
+    let col_with_flags: u16 = 0xC000; // col=A + row+col relative flags
 
     let mut sheet = Vec::<u8>::new();
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
@@ -12804,15 +12805,13 @@ fn build_shared_formula_ptgarea_row_oob_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &formula_cell_with_grbit(BASE_ROW, BASE_COL, xf_cell, 0.0, grbit_shared, &ptgexp),
     );
 
-    // Shared rgce body stored in SHRFMLA. This uses a PtgArea (not PtgAreaN) with relative flags so
-    // materialization must shift the row.
+    // Shared rgce body stored in SHRFMLA. This uses a PtgArea (not PtgAreaN) with relative flags
+    // on both endpoints so materialization must shift both row indices.
     let rgce_shared: Vec<u8> = {
         let mut v = Vec::new();
-        v.push(0x25); // PtgArea
-        v.extend_from_slice(&FOLLOWER_ROW.to_le_bytes()); // rwFirst = 65535 (A65536)
-        v.extend_from_slice(&FOLLOWER_ROW.to_le_bytes()); // rwLast = 65535 (A65536)
-        v.extend_from_slice(&0xC000u16.to_le_bytes()); // colFirst = A, row+col relative flags
-        v.extend_from_slice(&0xC000u16.to_le_bytes()); // colLast = A, row+col relative flags
+        // Base formula area: A65535:A65536
+        v.extend_from_slice(&ptg_area(BASE_ROW, FOLLOWER_ROW, col_with_flags, col_with_flags));
+        // SUM(...)
         v.push(0x22); // PtgFuncVar
         v.push(1); // argc=1
         v.extend_from_slice(&0x0004u16.to_le_bytes()); // iftab=4 (SUM)

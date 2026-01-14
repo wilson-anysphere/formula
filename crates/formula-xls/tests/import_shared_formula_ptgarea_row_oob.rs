@@ -22,11 +22,15 @@ fn materializes_shared_formula_ptgarea_row_oob_as_ref_error() {
         .sheet_by_name("SharedArea")
         .expect("SharedArea missing");
 
-    let follower = CellRef::from_a1("B65536").expect("B65536 ref");
-    let formula = sheet
-        .formula(follower)
-        .expect("expected formula in SharedArea!B65536");
-    assert_eq!(formula, "SUM(#REF!)+1");
-    assert_parseable_formula(formula);
-}
+    let base = sheet
+        .formula(CellRef::from_a1("B65535").unwrap())
+        .expect("expected formula in SharedArea!B65535");
+    assert_eq!(base, "SUM(A65535:A65536)+1");
+    assert_parseable_formula(base);
 
+    let follower = sheet
+        .formula(CellRef::from_a1("B65536").unwrap())
+        .expect("expected formula in SharedArea!B65536");
+    assert_eq!(follower, "SUM(#REF!)+1");
+    assert_parseable_formula(follower);
+}
