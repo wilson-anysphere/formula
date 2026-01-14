@@ -5304,16 +5304,16 @@ fn build_fit_to_clamp_sheet_stream(xf_cell: u16) -> Vec<u8> {
 }
 
 fn build_invalid_margins_workbook_stream() -> Vec<u8> {
-    build_single_sheet_workbook_stream("Margins", &build_invalid_margins_sheet_stream(), 1252)
+    build_single_sheet_workbook_stream("Sheet1", &build_invalid_margins_sheet_stream(), 1252)
 }
 
 fn build_invalid_margins_sheet_stream() -> Vec<u8> {
-    build_invalid_margins_sheet_stream_with_left_margin(100.0f64.to_le_bytes())
+    build_invalid_margins_sheet_stream_with_left_margin(50.0f64.to_le_bytes())
 }
 
 fn build_invalid_margins_nan_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
-        "Margins",
+        "Sheet1",
         &build_invalid_margins_sheet_stream_with_left_margin(f64::NAN.to_le_bytes()),
         1252,
     )
@@ -5338,20 +5338,30 @@ fn build_invalid_margins_sheet_stream_with_left_margin(invalid_left: [u8; 8]) ->
 
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
-    // LEFTMARGIN with an invalid Xnum value (out of spec range).
+    // LEFTMARGIN: emit a valid margin followed by an invalid one to validate that invalid values do
+    // not clobber earlier valid values ("last valid wins").
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &1.0f64.to_le_bytes());
     push_record(&mut sheet, RECORD_LEFTMARGIN, &invalid_left);
 
-    // RIGHTMARGIN with a valid non-default value so the importer produces a non-default PageSetup.
-    let right = 1.2f64.to_le_bytes();
-    push_record(&mut sheet, RECORD_RIGHTMARGIN, &right);
+    // Other margins: invalid-only (these should remain at model defaults).
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &(-1.0f64).to_le_bytes());
+    push_record(&mut sheet, RECORD_TOPMARGIN, &f64::NAN.to_le_bytes());
+    push_record(&mut sheet, RECORD_BOTTOMMARGIN, &f64::INFINITY.to_le_bytes());
 
-    // SETUP record: only `numHdr` and `numFtr` are relevant for our importer, but the BIFF layout
-    // is fixed-size. Offsets 16 and 24 contain Xnum header/footer margins.
-    let mut setup = vec![0u8; 34];
-    setup[16..24].copy_from_slice(&0.4f64.to_le_bytes()); // numHdr
-    setup[24..32].copy_from_slice(&0.5f64.to_le_bytes()); // numFtr
-    setup[32..34].copy_from_slice(&1u16.to_le_bytes()); // iCopies
-    push_record(&mut sheet, RECORD_SETUP, &setup);
+    // SETUP record with invalid header/footer margins.
+    push_record(
+        &mut sheet,
+        RECORD_SETUP,
+        &setup_record(
+            1,     // Letter (default)
+            100,   // iScale (default)
+            0,     // iFitWidth
+            0,     // iFitHeight
+            false, // portrait (default)
+            -1.0,  // header margin (invalid)
+            50.0,  // footer margin (invalid)
+        ),
+    );
 
     // Provide at least one cell so calamine returns a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, XF_GENERAL_CELL, 1.0));

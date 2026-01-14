@@ -13,53 +13,36 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
 }
 
 #[test]
-fn ignores_invalid_biff_margins_and_warns() {
+fn ignores_invalid_page_margin_values_and_emits_warnings() {
     let bytes = xls_fixture_builder::build_invalid_margins_fixture_xls();
     let result = import_fixture(&bytes);
-    let workbook = &result.workbook;
 
-    let margins = workbook.sheet_print_settings_by_name("Margins").page_setup.margins;
+    let settings = result.workbook.sheet_print_settings_by_name("Sheet1");
+    let margins = settings.page_setup.margins;
+    let defaults = PageMargins::default();
 
-    // LEFTMARGIN is out-of-range in the fixture and should be ignored (default retained).
-    assert_eq!(margins.left, PageMargins::default().left);
+    // Left margin has a valid record followed by an invalid record; invalid must not clobber.
+    assert!((margins.left - 1.0).abs() < 1e-12, "left={}", margins.left);
 
-    // Sanity: other margins should still be imported.
-    assert_eq!(margins.right, 1.2);
-    assert_eq!(margins.header, 0.4);
-    assert_eq!(margins.footer, 0.5);
+    // Margins populated only by invalid values should remain default.
+    assert_eq!(margins.right, defaults.right);
+    assert_eq!(margins.top, defaults.top);
+    assert_eq!(margins.bottom, defaults.bottom);
+    assert_eq!(margins.header, defaults.header);
+    assert_eq!(margins.footer, defaults.footer);
 
-    assert!(
-        result
-            .warnings
-            .iter()
-            .any(|w| w.message.contains("invalid") && w.message.contains("LEFTMARGIN")),
-        "expected invalid LEFTMARGIN warning, got {:?}",
-        result.warnings
-    );
-}
-
-#[test]
-fn ignores_nan_biff_margins_and_warns() {
-    let bytes = xls_fixture_builder::build_invalid_margins_nan_fixture_xls();
-    let result = import_fixture(&bytes);
-    let workbook = &result.workbook;
-
-    let margins = workbook.sheet_print_settings_by_name("Margins").page_setup.margins;
-
-    // LEFTMARGIN is NaN in the fixture and should be ignored (default retained).
-    assert_eq!(margins.left, PageMargins::default().left);
-
-    // Sanity: other margins should still be imported.
-    assert_eq!(margins.right, 1.2);
-    assert_eq!(margins.header, 0.4);
-    assert_eq!(margins.footer, 0.5);
-
-    assert!(
-        result
-            .warnings
-            .iter()
-            .any(|w| w.message.contains("invalid") && w.message.contains("LEFTMARGIN")),
-        "expected invalid LEFTMARGIN warning, got {:?}",
-        result.warnings
-    );
+    let warning_messages: Vec<&str> = result.warnings.iter().map(|w| w.message.as_str()).collect();
+    for needle in [
+        "LEFTMARGIN",
+        "RIGHTMARGIN",
+        "TOPMARGIN",
+        "BOTTOMMARGIN",
+        "SETUP header margin",
+        "SETUP footer margin",
+    ] {
+        assert!(
+            warning_messages.iter().any(|w| w.contains(needle)),
+            "expected warning containing {needle:?}, got warnings={warning_messages:?}"
+        );
+    }
 }

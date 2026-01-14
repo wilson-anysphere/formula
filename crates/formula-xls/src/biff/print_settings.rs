@@ -372,7 +372,7 @@ fn parse_setup_record(
         } else {
             push_warning_bounded(
                 warnings,
-                format!("invalid SETUP.numHdr value {v:?} at offset {offset}"),
+                format!("invalid SETUP header margin (numHdr) value {v:?} at offset {offset}"),
             );
         }
     }
@@ -382,7 +382,7 @@ fn parse_setup_record(
         } else {
             push_warning_bounded(
                 warnings,
-                format!("invalid SETUP.numFtr value {v:?} at offset {offset}"),
+                format!("invalid SETUP footer margin (numFtr) value {v:?} at offset {offset}"),
             );
         }
     }
