@@ -1406,6 +1406,64 @@ pub fn build_margins_without_setup_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a worksheet `SETUP` record that is intentionally
+/// truncated (payload < 34 bytes), but still contains enough bytes to recover the paper size,
+/// orientation, scaling, and header margin (`numHdr`).
+pub fn build_truncated_setup_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_truncated_setup_sheet_stream(16);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a worksheet `WSBOOL` record that is intentionally
+/// truncated (payload < 2 bytes).
+pub fn build_truncated_wsbool_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_truncated_wsbool_sheet_stream(16);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a truncated worksheet margin record followed by a valid
+/// record of the same type (to validate "last valid wins" semantics).
+pub fn build_truncated_margin_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_truncated_margin_sheet_stream(16);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing worksheet page setup + margins + manual page breaks,
 /// using percent scaling (`WSBOOL.fFitToPage=0`, `SETUP.iScale=85`).
 pub fn build_page_setup_percent_scaling_fixture_xls() -> Vec<u8> {
@@ -1580,6 +1638,100 @@ fn build_page_setup_fixture_sheet_stream(xf_cell: u16, mode: PageSetupScalingMod
 
     // Provide at least one cell so calamine returns a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 0.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_truncated_setup_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // WSBOOL with fFitToPage cleared so scaling comes from SETUP.iScale.
+    let wsbool: u16 = 0x0C01;
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
+
+    // SETUP record truncated to 24 bytes (through numHdr).
+    let mut setup = setup_record(9, 80, 2, 3, true, 0.55, 0.66);
+    setup.truncate(24);
+    push_record(&mut sheet, RECORD_SETUP, &setup);
+
+    // A1: a single cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_truncated_wsbool_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // WSBOOL record with a truncated (1-byte) payload.
+    push_record(&mut sheet, RECORD_WSBOOL, &[0x00]);
+
+    // Full-length SETUP record with non-default iScale and zero fit dimensions so scaling falls
+    // back to percent mode when WSBOOL is ignored.
+    push_record(
+        &mut sheet,
+        RECORD_SETUP,
+        &setup_record(9, 80, 0, 0, true, 0.3, 0.3),
+    );
+
+    // A1: a single cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_truncated_margin_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Truncated TOPMARGIN payload (expected 8 bytes / f64).
+    push_record(&mut sheet, RECORD_TOPMARGIN, &[0x00, 0x01, 0x02, 0x03]);
+    // Followed by a valid TOPMARGIN record; the importer should use this value.
+    push_record(&mut sheet, RECORD_TOPMARGIN, &2.25f64.to_le_bytes());
+
+    // A1: a single cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
