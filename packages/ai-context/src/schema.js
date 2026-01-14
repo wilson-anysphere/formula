@@ -766,11 +766,35 @@ export function extractSheetSchema(sheet, options = {}) {
     tableEntries.push(...implicitTables.map((t, idx) => ({ table: t, rect: implicitTableRects[idx] })));
   }
 
+  /** @type {NamedRangeSchema[]} */
+  const normalizedNamedRanges = [];
+  if (Array.isArray(sheet.namedRanges)) {
+    const seen = new Set();
+    for (const nr of sheet.namedRanges) {
+      throwIfAborted(signal);
+      if (!nr || typeof nr !== "object") continue;
+      if (typeof nr.name !== "string" || typeof nr.range !== "string") continue;
+      let parsed;
+      try {
+        parsed = parseA1Range(nr.range);
+      } catch {
+        continue;
+      }
+      if (parsed.sheetName && parsed.sheetName !== sheet.name) continue;
+      const rect = normalizeRange(parsed);
+      const canonicalRange = rangeToA1({ ...rect, sheetName: sheet.name });
+      const key = `${nr.name}\u0000${canonicalRange}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      normalizedNamedRanges.push({ name: nr.name, range: canonicalRange });
+    }
+  }
+
   throwIfAborted(signal);
   return {
     name: sheet.name,
     tables: tableEntries.map((t) => t.table),
-    namedRanges: sheet.namedRanges ?? [],
+    namedRanges: normalizedNamedRanges,
     dataRegions,
   };
 }
