@@ -2082,10 +2082,10 @@ pub(crate) mod tests {
                 cipher_algorithm: "AES".to_string(),
                 cipher_chaining: "ChainingModeCBC".to_string(),
             },
-            data_integrity: AgileDataIntegrity {
+            data_integrity: Some(AgileDataIntegrity {
                 encrypted_hmac_key,
                 encrypted_hmac_value,
-            },
+            }),
             password_key_encryptor: AgilePasswordKeyEncryptor {
                 salt: salt_key_encryptor.to_vec(),
                 block_size,
