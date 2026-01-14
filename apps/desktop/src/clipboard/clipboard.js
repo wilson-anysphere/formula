@@ -43,6 +43,10 @@ function stableStringify(value) {
   return `{${entries.join(",")}}`;
 }
 
+function hasOwn(obj, key) {
+  return Boolean(obj) && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 /**
  * Minimal CSS named-color support for paste normalization in non-DOM environments (Node tests).
  *
@@ -337,9 +341,18 @@ function styleToClipboardFormat(style) {
     if (color) out.backgroundColor = color;
   }
 
-  const rawNumberFormat = style.numberFormat ?? style.number_format;
-  if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") {
-    out.numberFormat = rawNumberFormat;
+  // Treat `numberFormat` as authoritative even when it is explicitly cleared (null/undefined)
+  // so UI patches can override imported formula-model `number_format` strings.
+  const rawNumberFormat = (() => {
+    if (hasOwn(style, "numberFormat")) return style.numberFormat;
+    if (hasOwn(style, "number_format")) return style.number_format;
+    return undefined;
+  })();
+  if (typeof rawNumberFormat === "string") {
+    const trimmed = rawNumberFormat.trim();
+    if (trimmed !== "" && trimmed.toLowerCase() !== "general") {
+      out.numberFormat = rawNumberFormat;
+    }
   }
 
   // Back-compat: allow flat clipboard-ish styles to round trip.
@@ -355,10 +368,6 @@ function styleToClipboardFormat(style) {
       style.backgroundColor ?? style.background_color ?? style.fillColor ?? style.fill_color
     );
     if (color) out.backgroundColor = color;
-  }
-  if (out.numberFormat === undefined) {
-    const nf = style.numberFormat ?? style.number_format;
-    if (typeof nf === "string" && nf.trim() !== "") out.numberFormat = nf;
   }
 
   return Object.keys(out).length > 0 ? out : null;

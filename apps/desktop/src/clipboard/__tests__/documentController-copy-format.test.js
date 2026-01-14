@@ -28,6 +28,23 @@ test("copyRangeToClipboardPayload preserves numberFormat for date serials", () =
   assert.match(payload.html, /data-number-format="yyyy-mm-dd"/);
 });
 
+test("copyRangeToClipboardPayload does not fall back to snake_case number_format when numberFormat is cleared", () => {
+  const doc = new DocumentController();
+
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+  doc.setCellValue("Sheet1", "A1", serial);
+  // Simulate imported formula-model formatting (snake_case).
+  doc.setRangeFormat("Sheet1", "A1", { number_format: "yyyy-mm-dd" });
+  // User clears back to General via UI (camelCase null override).
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: null });
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "A1");
+  // Should copy as the raw numeric serial when the number format is cleared.
+  assert.equal(payload.text, String(serial));
+  assert.ok(payload.html);
+  assert.doesNotMatch(payload.html, /data-number-format="yyyy-mm-dd"/);
+});
+
 test("copyRangeToClipboardPayload formats m/d/yyyy date serials (UI date preset)", () => {
   const doc = new DocumentController();
 
