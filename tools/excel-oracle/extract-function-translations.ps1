@@ -30,6 +30,21 @@
 
 .PARAMETER MaxFunctions
   Optional cap for debugging (extract only the first N catalog functions).
+
+.EXAMPLE
+  # Generate the de-DE source JSON from a German Excel install (from repo root)
+  powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+    -LocaleId de-DE `
+    -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+
+.EXAMPLE
+  # Debug a quick subset while watching Excel + printing per-function formulas
+  powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+    -LocaleId de-DE `
+    -OutPath out/de-DE.json `
+    -MaxFunctions 50 `
+    -Visible `
+    -Verbose
 #>
 
 [CmdletBinding()]
