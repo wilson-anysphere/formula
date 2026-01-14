@@ -26,6 +26,29 @@ function collectRibbonCommandIds(schema: RibbonSchema): string[] {
   return [...ids].sort();
 }
 
+function collectRibbonSchemaDisabledIds(schema: RibbonSchema): Set<string> {
+  // An id is considered "schema-disabled" only if every occurrence in the schema is disabled.
+  // This avoids false positives when the same id appears in multiple places with mixed `disabled` flags.
+  const disabledCandidates = new Set<string>();
+  const enabledIds = new Set<string>();
+
+  for (const tab of schema.tabs) {
+    for (const group of tab.groups) {
+      for (const button of group.buttons) {
+        if (button.disabled) disabledCandidates.add(button.id);
+        else enabledIds.add(button.id);
+
+        for (const item of button.menuItems ?? []) {
+          if (item.disabled) disabledCandidates.add(item.id);
+          else enabledIds.add(item.id);
+        }
+      }
+    }
+  }
+
+  return new Set([...disabledCandidates].filter((id) => !enabledIds.has(id)));
+}
+
 function collectRibbonDropdownTriggerIds(schema: RibbonSchema): Set<string> {
   const ids = new Set<string>();
   for (const tab of schema.tabs) {
@@ -361,6 +384,7 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
   it("does not auto-disable ribbon ids that are explicitly wired in desktop ribbon fallback handlers", () => {
     const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
     const schemaIdSet = new Set(schemaCommandIds);
+    const schemaDisabledIds = collectRibbonSchemaDisabledIds(defaultRibbonSchema);
 
     const implementedIds = extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaIdSet);
 
@@ -373,7 +397,7 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
 
     const disabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema: defaultRibbonSchema });
 
-    const disabledImplemented = implementedIds.filter((id) => disabledById[id]);
+    const disabledImplemented = implementedIds.filter((id) => !schemaDisabledIds.has(id) && disabledById[id]);
     expect(
       disabledImplemented,
       `Found ribbon ids that are wired in desktop ribbon fallback handlers but disabled by the CommandRegistry baseline:\n${disabledImplemented
@@ -386,6 +410,7 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
     const schemaIdSet = new Set(schemaCommandIds);
     const dropdownTriggerIds = collectRibbonDropdownTriggerIds(defaultRibbonSchema);
+    const schemaDisabledIds = collectRibbonSchemaDisabledIds(defaultRibbonSchema);
 
     const commandRegistry = new CommandRegistry();
     registerCommandsForRibbonDisablingTest(commandRegistry);
@@ -394,6 +419,7 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
 
     const enabledButUnregistered = schemaCommandIds
       .filter((id) => !dropdownTriggerIds.has(id))
+      .filter((id) => !schemaDisabledIds.has(id))
       .filter((id) => commandRegistry.getCommand(id) == null)
       .filter((id) => !disabledById[id]);
 
