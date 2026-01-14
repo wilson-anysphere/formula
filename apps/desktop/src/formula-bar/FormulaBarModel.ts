@@ -1,7 +1,6 @@
 import { getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
-import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
-import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
+import { parseA1Range, rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 import {
   assignFormulaReferenceColors,
@@ -20,6 +19,7 @@ import type {
   FormulaToken as EngineFormulaToken,
   FunctionContext as EngineFunctionContext,
 } from "@formula/engine";
+import { splitSheetQualifier } from "../../../../packages/search/index.js";
 
 type ActiveCellInfo = {
   address: string;
@@ -683,6 +683,11 @@ function formatRangeReference(range: RangeAddress, sheetId?: string): string {
 function formatSheetPrefix(id: string): string {
   const name = formatSheetNameForA1(id);
   return name ? `${name}!` : "";
+}
+
+function parseSheetQualifiedA1Range(text: string): RangeAddress | null {
+  const { ref } = splitSheetQualifier(text);
+  return parseA1Range(ref);
 }
 
 const ARG_SEPARATOR_CACHE = new Map<string, string>();

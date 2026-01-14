@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { FormulaBarModel } from "./FormulaBarModel.js";
 import { parseA1Range } from "../spreadsheet/a1.js";
-import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 import { FORMULA_REFERENCE_PALETTE } from "@formula/spreadsheet-frontend";
 
 describe("FormulaBarModel", () => {
@@ -71,9 +70,10 @@ describe("FormulaBarModel", () => {
   });
 
   it("parses sheet-qualified references for hover previews", () => {
-    expect(parseSheetQualifiedA1Range("A1:B2")).toEqual(parseA1Range("A1:B2"));
-    expect(parseSheetQualifiedA1Range("Sheet2!A1:B2")).toEqual(parseA1Range("A1:B2"));
-    expect(parseSheetQualifiedA1Range("'My Sheet'!A1")).toEqual(parseA1Range("A1"));
+    const model = new FormulaBarModel();
+    expect(model.resolveReferenceText("A1:B2")).toEqual(parseA1Range("A1:B2"));
+    expect(model.resolveReferenceText("Sheet2!A1:B2")).toEqual(parseA1Range("A1:B2"));
+    expect(model.resolveReferenceText("'My Sheet'!A1")).toEqual(parseA1Range("A1"));
   });
 
   it("treats sheet-qualified ranges as their A1 portion when hovering by cursor", () => {
