@@ -234,7 +234,7 @@ Implementation detail (important for contributors):
 - When any override is present for a `(from_table, to_table)` pair, *only* those overridden relationships
   are considered active for that pair.
 
-> Note: `CROSSFILTER(...)` can override direction or disable a relationship, but it does **not** activate
+> Note: `CROSSFILTER(...)` can override direction (including reverse one-way directions) or disable a relationship, but it does **not** activate
 > inactive relationships. Use `USERELATIONSHIP` to activate an inactive relationship.
 
 ### Referential integrity
@@ -319,7 +319,7 @@ When a measure is evaluated inside a **row context**, DAX performs an implicit c
 
 `formula-dax` implements this in `Expr::Measure` evaluation:
 
-- If `row_ctx.current_table().is_some()` and
+- If `!row_ctx.is_empty()` (i.e. there is any row context frame, including virtual row context) and
   `filter.suppress_implicit_measure_context_transition == false`, the engine calls
   `apply_context_transition(...)` before evaluating the measure.
 
@@ -367,8 +367,11 @@ into the in-memory table (note: `insert_row` is not supported for columnar table
 - `active_relationship_overrides: HashSet<usize>`  
   Activated relationships (via `USERELATIONSHIP`).
 - `cross_filter_overrides: HashMap<usize, RelationshipOverride>`  
-  Per-relationship overrides (via `CROSSFILTER`) that can change `CrossFilterDirection` or disable a
-  relationship for the duration of evaluation.
+  Per-relationship overrides (via `CROSSFILTER`) that can:
+  - disable a relationship (`NONE`)
+  - force bidirectional filtering (`BOTH`)
+  - force one-way filtering in either the relationship’s default direction (`ONEWAY`/`SINGLE`) or the
+    reverse direction (`ONEWAY_LEFTFILTERSRIGHT` / `ONEWAY_RIGHTFILTERSLEFT`)
 - `suppress_implicit_measure_context_transition: bool`  
   Internal flag used to keep `CALCULATE` semantics correct.
 
@@ -398,22 +401,43 @@ Filter propagation happens in `resolve_row_sets(...)`:
 
 ### `RowContext`
 
-`RowContext` is a stack of `(table, row_index)` pairs.
+`RowContext` is a stack of row-context frames.
 
 It is primarily created by iterators (`SUMX`, `FILTER`, …) by pushing a row before evaluating an expression.
 
-`RowContext` can contain **multiple entries for the same table** when iterators nest (e.g. nested `FILTER`
-or `SUMX` over the same table). The engine supports this via:
+The engine supports two kinds of row context frames:
+
+- **Physical rows**: `(table_name, row_index, visible_cols?)`  
+  This is the common case when iterating a physical table. `visible_cols` is used for single-column
+  table expressions like `VALUES(Table[Column])` where DAX exposes only that column in row context.
+
+- **Virtual rows**: `Vec<((table, column), value)>` bindings  
+  Some table functions (notably `SUMMARIZE` / `SUMMARIZECOLUMNS`) return a *virtual table* of grouping
+  keys. Iterating those tables pushes a virtual row context containing explicit bindings for the
+  grouped columns.
+
+When resolving a column reference in row context (`Table[Column]`), the engine checks for a matching
+virtual binding first, then falls back to looking up the value from the most recent physical row for
+that table.
+
+`RowContext` can contain **multiple physical entries for the same table** when iterators nest (e.g.
+nested `FILTER` or `SUMX` over the same table). The engine supports this via:
 
 - `EARLIER(Table[Column], [level])` to reference an outer row context for the same table
 - `EARLIEST(Table[Column])` to reference the outermost row context for the table
+
+Note: `EARLIER`/`EARLIEST` only consult *physical* row contexts for that table; virtual row contexts
+do not participate.
 
 ### Context transition
 
 Context transition is implemented by `apply_context_transition(...)`:
 
-- For each table that has a “current row” in `RowContext`,
-  the engine adds (or intersects) **equality column filters** for *every column in that row*.
+- For **virtual row contexts** (from virtual table iteration), it adds/intersects equality filters
+  for the explicitly bound `(table, column) = value` pairs.
+- For **physical row contexts**, it adds/intersects equality filters for the “current row” of each
+  physical table (the innermost row context wins when the same table appears multiple times). If the
+  row context is restricted to `visible_cols`, it only applies filters for those columns.
 
 This is used by:
 
@@ -443,10 +467,12 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
 2. `CROSSFILTER(TableA[Col], TableB[Col], direction)`  
    Overrides relationship filtering for the duration of the evaluation.
 
-   - `direction` is a bare identifier (parsed as `Expr::TableName`), one of:
-     - `BOTH`
-     - `ONEWAY` (or `SINGLE`)
-     - `NONE` (disables the relationship)
+   - `direction` is a bare identifier (parsed as `Expr::TableName`) or a string literal, one of:
+      - `BOTH`
+      - `ONEWAY` (or `SINGLE`)
+      - `ONEWAY_LEFTFILTERSRIGHT`
+      - `ONEWAY_RIGHTFILTERSLEFT`
+      - `NONE` (disables the relationship)
 
 3. `ALL(Table)` / `ALL(Table[Column])`, `ALLNOBLANKROW(Table)` / `ALLNOBLANKROW(Table[Column])`, and
    `REMOVEFILTERS(Table)` / `REMOVEFILTERS(Table[Column])`  
@@ -489,14 +515,19 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    - The first argument must be `VALUES(column)` or `DISTINCT(column)`
    - The second argument must be a target column reference
 
-9. Table expressions (row filters): any supported table expression (including a bare `TableName`)  
-   The table expression is evaluated, and its resulting row set becomes an explicit `row_filter` for that
-   table (intersected with any existing row filter).
+9. Table expressions (row filters): any supported **physical** table expression (including a bare
+   `TableName`)  
+   The table expression is evaluated and must produce a `TableResult::Physical` (a base table + row
+   indices). Its resulting row set becomes an explicit `row_filter` for that table (intersected with
+   any existing row filter).
 
    Examples:
    - `FILTER(Fact, Fact[Amount] > 0)`
    - `ALLEXCEPT(Dim, Dim[Category])`
    - `CALCULATETABLE(...)`
+
+   Current limitation: virtual tables (e.g. `SUMMARIZE(...)` / `SUMMARIZECOLUMNS(...)`) are not
+   accepted as `CALCULATE` table filter arguments.
 
 #### Unsupported filter argument shapes
 
@@ -746,18 +777,19 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `CALCULATETABLE(tableExpr, filter1, filter2, ...)`
 - `SUMMARIZE(tableExpr, Table[GroupCol1], Table[GroupCol2], ...)`  
   (limited: currently only grouping columns are supported; group columns may be on the base table or on
-  related tables reachable via a unique active relationship path; it returns a row set of the base table)
+  related tables reachable via a unique active relationship path; the base table must be physical; it
+  returns a **virtual table** containing the grouping columns only)
 - `SUMMARIZECOLUMNS(Table[GroupCol1], Table[GroupCol2], ..., [filterArgs...])`  
   (limited: supports leading grouping columns plus optional `CALCULATE`-style filter arguments; the
   engine picks a base table that can reach all grouped tables via active relationships; it returns a
-  row set of that base table; name/expression pairs are accepted but not yet materialized in the
-  returned table representation)
+  **virtual table** containing the grouping columns only; name/expression pairs are accepted but are
+  not yet materialized in the returned table representation)
 - `RELATEDTABLE(Table)` (requires row context)
 
 ### Filter modifiers inside `CALCULATE`
 
 - `USERELATIONSHIP(TableA[Col], TableB[Col])`
-- `CROSSFILTER(TableA[Col], TableB[Col], BOTH|ONEWAY|SINGLE|NONE)`
+- `CROSSFILTER(TableA[Col], TableB[Col], BOTH|ONEWAY|SINGLE|ONEWAY_LEFTFILTERSRIGHT|ONEWAY_RIGHTFILTERSLEFT|NONE)`
 - `ALLNOBLANKROW(Table|Table[Column])`
 - `TREATAS(VALUES(Source[Col])|DISTINCT(Source[Col]), Target[Col])` (limited)
 - `KEEPFILTERS(innerFilterArg)` (supported only as a wrapper inside `CALCULATE` / `CALCULATETABLE`)
@@ -855,10 +887,17 @@ This is not an exhaustive list, but the most common contributor-facing constrain
 - **Types**
   - Only `Blank`, `Number(f64)`, `Boolean`, and `Text` exist at the DAX layer.
 - **Calculated columns**
-  - `add_calculated_column(...)` only works for in-memory tables.
-  - Columnar tables can only register definitions via `add_calculated_column_definition(...)`.
+  - Calculated columns are supported for both in-memory and columnar tables, but columnar calculated
+    columns currently require a single logical type across all non-blank rows (number/string/boolean).
+  - `DataModel::insert_row(...)` is not supported for columnar tables (they are immutable).
+  - When loading persisted models where calculated column values are already stored, use
+    `add_calculated_column_definition(...)` to register metadata without re-evaluating.
 - **Table semantics**
-  - `SUMMARIZE(...)` currently returns a row set of the base table, not a materialized grouped table.
-  - Table expressions are represented as `(table_name, row_indices)` rather than as independent rowsets.
+  - Table expressions evaluate to either:
+    - `TableResult::Physical` (a base table name + row indices), or
+    - `TableResult::Virtual` (materialized rows with explicit `(table, column)` lineage).
+  - `SUMMARIZE`/`SUMMARIZECOLUMNS` return virtual tables of grouping columns only (no computed columns).
+  - `SUMMARIZE` currently requires a physical base table argument.
+  - `CALCULATE` table filter arguments must currently be physical tables (virtual tables are rejected).
 - **`/` operator**
   - The `/` operator performs raw `f64` division; use `DIVIDE(...)` for DAX-like blank/alternate behavior.
