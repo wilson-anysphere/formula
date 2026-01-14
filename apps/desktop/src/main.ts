@@ -2558,6 +2558,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.numberFormat.text": t("command.format.numberFormat.text"),
       // Number format dialog entrypoints.
       "format.openFormatCells": t("command.format.openFormatCells"),
+      "format.openFormatCells.ariaLabel": t("command.format.openFormatCells"),
       "home.number.moreFormats.custom": t("command.home.number.moreFormats.custom"),
       // Accounting symbol picker menu items (Home → Number → Accounting dropdown).
       "format.numberFormat.accounting.usd": stripMenuPrefix(t("command.format.numberFormat.accounting.usd")),
