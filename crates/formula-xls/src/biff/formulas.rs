@@ -90,7 +90,10 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
     let mut applied_arrays: HashSet<CellRef> = HashSet::new();
 
     for (cell, base) in ptgexp_cells {
-        // Shared formulas are decoded relative to the *current* cell.
+        // Shared formulas are stored once in SHRFMLA and referenced by follower cells via PtgExp.
+        // The rgce token stream can contain absolute 2D/3D references (PtgRef/PtgArea/etc) that
+        // carry relative flags; when the formula is applied to a different cell in the shared
+        // range, those coordinates must be shifted across the base->target delta (materialized).
         if let Some(def) = parsed
             .shrfmla
             .get(&base)
