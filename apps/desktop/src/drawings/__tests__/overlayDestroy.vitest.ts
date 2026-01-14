@@ -278,4 +278,22 @@ describe("DrawingOverlay destroy()", () => {
 
     expect(destroy).toHaveBeenCalledTimes(1);
   });
+
+  it("clears spatial index state on destroy", async () => {
+    const ctx = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const images: ImageStore = {
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    await overlay.render([createShapeObject(42, "<xdr:sp/>")], viewport);
+    expect((overlay as any).spatialIndex.getObject(42)).not.toBeNull();
+
+    overlay.destroy();
+    expect((overlay as any).spatialIndex.getObject(42)).toBeNull();
+  });
 });

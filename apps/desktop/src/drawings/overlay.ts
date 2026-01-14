@@ -994,8 +994,9 @@ export class DrawingOverlay {
     this.chartSurfacePruneSource = null;
     this.chartSurfacePruneLength = 0;
     this.chartSurfaceKeep.clear();
-    // Release any cached drawing object references (spatial index stores objects + rects).
-    this.spatialIndex.rebuild([], this.geom, 1);
+    // Release any cached drawing object references (spatial index stores objects + rects and
+    // scratch arrays referencing bucket lists from the last query).
+    this.spatialIndex.dispose();
     this.cssVarStyle = undefined;
     this.colorTokens = null;
     this.orderedObjects = [];

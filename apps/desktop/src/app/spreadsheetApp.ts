@@ -3669,8 +3669,6 @@ export class SpreadsheetApp {
     this.drawingsUnsubscribe = null;
     this.drawingsInteraction?.dispose();
     this.drawingsInteraction = null;
-    this.drawingsUnsubscribe?.();
-    this.drawingsUnsubscribe = null;
     this.wasmEngine?.terminate();
     this.wasmEngine = null;
     this.stopCommentPersistence?.();

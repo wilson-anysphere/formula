@@ -182,6 +182,41 @@ export class DrawingSpatialIndex {
   }
 
   /**
+   * Clear all cached state and release references to the last indexed objects.
+   *
+   * This is primarily intended for teardown paths (e.g. `DrawingOverlay.destroy()`)
+   * so long-lived SpreadsheetApp instances can deterministically drop drawing
+   * object references (and any large `rawXml` payloads) when a document is closed.
+   */
+  clear(): void {
+    this.buckets.clear();
+    this.globalBucket.length = 0;
+    this.rectById.clear();
+    this.aabbById.clear();
+    this.objectById.clear();
+    this.orderById.clear();
+
+    // Reset memoization so the next rebuild starts fresh.
+    this.lastObjects = null;
+    this.lastGeom = null;
+    this.lastZoom = 1;
+    this.dirty = true;
+
+    // Release any scratch references to buckets from the most recent query.
+    this.bucketArraysScratch.length = 0;
+    this.pointersScratch.length = 0;
+    this.seenGenerationById.clear();
+    this.seenGeneration = 1;
+  }
+
+  /**
+   * Alias for `clear()` (matches other teardown naming conventions).
+   */
+  dispose(): void {
+    this.clear();
+  }
+
+  /**
    * Marks the index dirty so the next `rebuild()` recomputes bucket membership.
    *
    * Useful when `GridGeometry` is stable by reference but cell sizes/origins
