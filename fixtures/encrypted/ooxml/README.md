@@ -121,6 +121,9 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
 - `crates/xlsx-diff/tests/encrypted_ooxml_diff.rs`:
   asserts the OPC-level diff tool can decrypt and compare encrypted `.xlsx`/`.xlsm` fixtures against the
   corresponding plaintext packages (and also exercises an on-the-fly encrypted `.xlsb` wrapper).
+- `crates/formula-offcrypto/tests/standard_encryptedpackage_mode.rs`:
+  canary asserting the committed Standard AES fixtures use the **ECB** `EncryptedPackage` mode (and
+  will loudly fail if fixture regeneration drifts to segmented CBC).
 
 ## Agile encryption parameters
 
