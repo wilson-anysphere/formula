@@ -14,7 +14,7 @@ fn standard_only_rejects_extensible_encryption() {
         .expect_err("expected Standard-only decrypt to reject Extensible encryption");
     assert!(
         matches!(
-            err,
+            &err,
             OffcryptoError::UnsupportedEncryption {
                 encryption_type: EncryptionType::Extensible
             }

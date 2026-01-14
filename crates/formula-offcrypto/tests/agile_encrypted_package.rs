@@ -159,7 +159,11 @@ fn agile_decrypt_package_rejects_implausible_size() {
     encrypted[0..8].copy_from_slice(&u64::MAX.to_le_bytes());
     let err = agile_decrypt_package(&info, &secret_key, &encrypted).unwrap_err();
     assert!(
-        matches!(err, OffcryptoError::EncryptedPackageSizeOverflow { total_size } if total_size == u64::MAX),
+        matches!(
+            &err,
+            OffcryptoError::EncryptedPackageSizeOverflow { total_size }
+                if *total_size == u64::MAX
+        ),
         "expected EncryptedPackageSizeOverflow(u64::MAX), got {err:?}"
     );
 }

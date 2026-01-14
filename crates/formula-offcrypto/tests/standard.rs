@@ -17,7 +17,7 @@ fn decrypt_standard_docx_roundtrip() {
 fn decrypt_standard_wrong_password_errors() {
     let err = decrypt_from_bytes(ENCRYPTED_DOCX, "wrong-password").expect_err("expected error");
     assert!(
-        matches!(err, OffcryptoError::InvalidPassword),
+        matches!(&err, OffcryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
     );
 }

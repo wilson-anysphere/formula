@@ -52,7 +52,7 @@ fn truncated_encryption_info_at_all_prefix_lengths_errors() {
     for len in 0..bytes.len() {
         let err = parse_encryption_info(&bytes[..len]).unwrap_err();
         assert!(
-            matches!(err, OffcryptoError::Truncated { .. }),
+            matches!(&err, OffcryptoError::Truncated { .. }),
             "len={len} expected Truncated, got {err:?}"
         );
     }
@@ -66,7 +66,7 @@ fn bogus_standard_header_size_is_rejected() {
         bytes[8..12].copy_from_slice(&header_size.to_le_bytes());
         let err = parse_encryption_info(&bytes).unwrap_err();
         assert!(
-            matches!(err, OffcryptoError::InvalidEncryptionInfo { .. }),
+            matches!(&err, OffcryptoError::InvalidEncryptionInfo { .. }),
             "header_size={header_size:#x} expected InvalidEncryptionInfo, got {err:?}"
         );
     }

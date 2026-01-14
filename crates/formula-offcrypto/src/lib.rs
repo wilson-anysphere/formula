@@ -2804,6 +2804,29 @@ pub fn decrypt_standard_ooxml_from_bytes(
     raw_ole: Vec<u8>,
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
+    // Fast preflight: reject non-Standard encryption based on the 8-byte `EncryptionInfo` version
+    // header. This avoids trying to parse full Agile XML (or returning confusing parse errors) when
+    // callers intentionally only support Standard encryption.
+    let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
+    let version = EncryptionVersionInfo::parse(&encryption_info)?;
+    let major = version.major;
+    let minor = version.minor;
+
+    if (major, minor) == (4, 4) {
+        return Err(OffcryptoError::UnsupportedEncryption {
+            encryption_type: EncryptionType::Agile,
+        });
+    }
+    if minor == 3 && matches!(major, 3 | 4) {
+        return Err(OffcryptoError::UnsupportedEncryption {
+            encryption_type: EncryptionType::Extensible,
+        });
+    }
+    let is_standard = minor == 2 && matches!(major, 2 | 3 | 4);
+    if !is_standard {
+        return Err(OffcryptoError::UnsupportedVersion { major, minor });
+    }
+
     decrypt_from_bytes(&raw_ole, password)
 }
 

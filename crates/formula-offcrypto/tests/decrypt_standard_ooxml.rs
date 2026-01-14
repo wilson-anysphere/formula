@@ -49,7 +49,7 @@ fn rejects_agile_fixture() {
         .expect_err("expected Agile encryption to be rejected");
     assert!(
         matches!(
-            err,
+            &err,
             OffcryptoError::UnsupportedEncryption {
                 encryption_type: EncryptionType::Agile
             }
@@ -68,11 +68,11 @@ fn missing_encryptioninfo_stream_returns_error() {
     let err = decrypt_standard_ooxml_from_bytes(bytes, "pw").unwrap_err();
     assert!(
         matches!(
-            err,
-            OffcryptoError::InvalidStructure(ref msg)
+            &err,
+            OffcryptoError::InvalidStructure(msg)
                 if msg.contains("missing `EncryptionInfo` stream")
         ),
-        "expected InvalidStructure(missing EncryptionInfo), got {err:?}"
+        "expected InvalidStructure(missing `EncryptionInfo` stream), got {err:?}"
     );
 }
 
@@ -82,11 +82,11 @@ fn invalid_ole_container_returns_error() {
     let err = decrypt_standard_ooxml_from_bytes(vec![0u8; 32], "pw").unwrap_err();
     assert!(
         matches!(
-            err,
-            OffcryptoError::InvalidStructure(ref msg)
+            &err,
+            OffcryptoError::InvalidStructure(msg)
                 if msg.contains("failed to open OLE compound file")
         ),
-        "expected InvalidStructure(open OLE), got {err:?}"
+        "expected InvalidStructure(failed to open OLE compound file), got {err:?}"
     );
 }
 
@@ -116,7 +116,7 @@ fn supports_encryptioninfo_with_leading_slash_stream_name() {
     let err = decrypt_standard_ooxml_from_bytes(ole.into_inner().into_inner(), "pw").unwrap_err();
     assert!(
         matches!(
-            err,
+            &err,
             OffcryptoError::UnsupportedEncryption {
                 encryption_type: EncryptionType::Agile
             }
@@ -149,7 +149,11 @@ fn missing_encryptedpackage_stream_returns_error() {
     let err = decrypt_standard_ooxml_from_bytes(ole.into_inner().into_inner(), "Password1234_")
         .unwrap_err();
     assert!(
-        matches!(err, OffcryptoError::InvalidStructure(ref msg) if msg.contains("missing `EncryptedPackage` stream")),
+        matches!(
+            &err,
+            OffcryptoError::InvalidStructure(msg)
+                if msg.contains("missing `EncryptedPackage` stream")
+        ),
         "expected InvalidStructure(missing EncryptedPackage), got {err:?}"
     );
 }

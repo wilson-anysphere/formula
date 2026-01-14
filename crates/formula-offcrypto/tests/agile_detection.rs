@@ -50,7 +50,7 @@ fn detects_agile_and_rejects_in_standard_only_mode() {
         .expect_err("expected standard-only decrypt to reject Agile encryption");
     assert!(
         matches!(
-            err,
+            &err,
             OffcryptoError::UnsupportedEncryption {
                 encryption_type: EncryptionType::Agile
             }

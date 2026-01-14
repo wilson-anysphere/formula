@@ -41,7 +41,7 @@ fn agile_wrong_password_returns_invalid_password() {
     let err = decrypt_agile_ooxml_from_bytes(encrypted, "not-the-password")
         .expect_err("expected wrong password to error");
     assert!(
-        matches!(err, formula_offcrypto::OffcryptoError::InvalidPassword),
+        matches!(&err, formula_offcrypto::OffcryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
     );
 }
