@@ -194,6 +194,10 @@ Implementation notes:
   bulk/range API). This is especially important for whole-row/whole-column references: for external
   sheets the engine assumes Excel’s default grid size (1,048,576 rows × 16,384 columns), so ranges
   like `[Book.xlsx]Sheet1!A:A` can result in **a very large number** of `get` calls.
+* The engine caps materialization of rectangular references into in-memory arrays at
+  `MAX_MATERIALIZED_ARRAY_CELLS` (currently 5,000,000 cells). If a reference would exceed this
+  limit (e.g. `[Book.xlsx]Sheet1!A:XFD`), evaluation returns `#SPILL!` rather than attempting a huge
+  allocation.
 
 #### External 3D sheet spans (workbook sheet order)
 

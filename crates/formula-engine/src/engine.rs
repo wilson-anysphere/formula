@@ -8668,6 +8668,11 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// dense iteration for local range functions (e.g. `SUM(A:A)`), which may have performance
 /// implications for large ranges.
 ///
+/// The engine also caps materialization of rectangular references into in-memory arrays at
+/// `MAX_MATERIALIZED_ARRAY_CELLS` (currently 5,000,000 cells). If a reference would exceed this
+/// limit (e.g. `[Book.xlsx]Sheet1!A:XFD`), evaluation returns `#SPILL!` rather than attempting a
+/// huge allocation.
+///
 /// When multi-threaded recalculation is enabled, provider methods may also be called concurrently
 /// from multiple threads. Implementations should be thread-safe and keep lookups fast (e.g. by
 /// caching results internally or minimizing lock contention).
