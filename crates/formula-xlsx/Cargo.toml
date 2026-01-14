@@ -26,6 +26,7 @@ formula-engine = { path = "../formula-engine" }
 formula-format = { path = "../formula-format" }
 formula-columnar = { path = "../formula-columnar" }
 formula-model = { path = "../formula-model" }
+formula-offcrypto = { path = "../formula-offcrypto" }
 formula-vba = { path = "../formula-vba", optional = true }
 quick-xml = { version = "0.37", features = ["serialize"] }
 rc4 = "0.1"

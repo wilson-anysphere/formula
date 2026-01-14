@@ -2451,6 +2451,7 @@ dependencies = [
  "formula-format",
  "formula-fs",
  "formula-model",
+ "formula-offcrypto",
  "formula-office-crypto",
  "formula-vba",
  "hmac",
