@@ -999,7 +999,8 @@ Quick reference (auto-update vs manual install):
 
 | Target key (`latest.json.platforms`) | Auto-update asset (`platforms[key].url`) | Manual install |
 | --- | --- | --- |
-| `darwin-universal` | `*.app.tar.gz` (or `*.tar.gz` updater archive) | `.dmg` |
+| `darwin-x86_64` | `*.app.tar.gz` (universal archive) | `.dmg` |
+| `darwin-aarch64` | `*.app.tar.gz` (universal archive) | `.dmg` |
 | `windows-x86_64` | `.msi` (preferred) or `.exe` | `.msi` / `.exe` |
 | `windows-aarch64` | `.msi` (preferred) or `.exe` | `.msi` / `.exe` |
 | `linux-x86_64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
