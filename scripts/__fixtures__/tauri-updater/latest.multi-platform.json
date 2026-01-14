@@ -1,6 +1,6 @@
 {
   "version": "0.1.0",
-  "notes": "Fixture release used by scripts/__tests__/release-manifest.test.js",
+  "notes": "Fixture release used by scripts/__tests__/release-manifest.test.js (and the .mjs wrapper)",
   "pub_date": "2026-01-01T00:00:00Z",
   "platforms": {
     "darwin-universal": {

@@ -59,7 +59,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Run manifest unit tests (fast, dependency-free)
-        run: node --test scripts/__tests__/release-manifest.test.js
+        run: node --test scripts/__tests__/release-manifest.test.mjs
 
   xlsx-roundtrip:
     name: XLSX round-trip fixtures
