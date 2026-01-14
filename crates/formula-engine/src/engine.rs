@@ -13644,17 +13644,13 @@ fn expand_external_sheet_span_key(
     let (workbook, start, end) = crate::eval::split_external_sheet_span_key(key)?;
     let sheet_names = provider.sheet_order(workbook)?;
 
-    let start_key = crate::value::casefold(start);
-    let end_key = crate::value::casefold(end);
-
     let mut start_idx: Option<usize> = None;
     let mut end_idx: Option<usize> = None;
     for (idx, name) in sheet_names.iter().enumerate() {
-        let name_key = crate::value::casefold(name);
-        if start_idx.is_none() && name_key == start_key {
+        if start_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, start) {
             start_idx = Some(idx);
         }
-        if end_idx.is_none() && name_key == end_key {
+        if end_idx.is_none() && formula_model::sheet_name_eq_case_insensitive(name, end) {
             end_idx = Some(idx);
         }
         if start_idx.is_some() && end_idx.is_some() {
