@@ -14,6 +14,8 @@ use md5::Md5;
 use sha1::Sha1;
 use sha1::Digest as _;
 
+const MAX_DIGEST_LEN: usize = 20; // SHA-1
+
 /// CryptoAPI algorithm identifier for MD5.
 pub const CALG_MD5: u32 = 0x0000_8003;
 /// CryptoAPI algorithm identifier for SHA-1.
@@ -76,17 +78,29 @@ impl Hasher {
         }
     }
 
-    fn finalize(self) -> Vec<u8> {
+    fn finalize_into(self, out: &mut [u8]) {
         match self {
-            Hasher::Md5(h) => h.finalize().to_vec(),
-            Hasher::Sha1(h) => h.finalize().to_vec(),
+            Hasher::Md5(h) => {
+                debug_assert_eq!(out.len(), 16);
+                out.copy_from_slice(&h.finalize());
+            }
+            Hasher::Sha1(h) => {
+                debug_assert_eq!(out.len(), 20);
+                out.copy_from_slice(&h.finalize());
+            }
         }
     }
 
-    fn finalize_reset(&mut self) -> Vec<u8> {
+    fn finalize_reset_into(&mut self, out: &mut [u8]) {
         match self {
-            Hasher::Md5(h) => h.finalize_reset().to_vec(),
-            Hasher::Sha1(h) => h.finalize_reset().to_vec(),
+            Hasher::Md5(h) => {
+                debug_assert_eq!(out.len(), 16);
+                out.copy_from_slice(&h.finalize_reset());
+            }
+            Hasher::Sha1(h) => {
+                debug_assert_eq!(out.len(), 20);
+                out.copy_from_slice(&h.finalize_reset());
+            }
         }
     }
 }
@@ -112,17 +126,19 @@ pub fn hash_password_fixed_spin(
     salt: &[u8],
     hash_alg: HashAlg,
 ) -> Vec<u8> {
+    let hash_len = hash_alg.hash_len();
     let mut hasher = Hasher::new(hash_alg);
     hasher.update(salt);
     hasher.update(password_utf16le);
-    let mut h = hasher.finalize_reset();
+    let mut h = [0u8; MAX_DIGEST_LEN];
+    hasher.finalize_reset_into(&mut h[..hash_len]);
 
     for i in 0u32..50_000u32 {
         hasher.update(&i.to_le_bytes());
-        hasher.update(&h);
-        h = hasher.finalize_reset();
+        hasher.update(&h[..hash_len]);
+        hasher.finalize_reset_into(&mut h[..hash_len]);
     }
-    h
+    h[..hash_len].to_vec()
 }
 
 /// Compute `Hash(H || LE32(block))`.
@@ -130,7 +146,10 @@ pub fn final_hash(h: &[u8], block: u32, hash_alg: HashAlg) -> Vec<u8> {
     let mut hasher = Hasher::new(hash_alg);
     hasher.update(h);
     hasher.update(&block.to_le_bytes());
-    hasher.finalize()
+    let hash_len = hash_alg.hash_len();
+    let mut out = [0u8; MAX_DIGEST_LEN];
+    hasher.finalize_into(&mut out[..hash_len]);
+    out[..hash_len].to_vec()
 }
 
 /// CryptoAPI `CryptDeriveKey` byte expansion used by MS-OFFCRYPTO Standard encryption.
@@ -161,25 +180,25 @@ pub fn crypt_derive_key(hash_value: &[u8], key_len_bytes: usize, hash_alg: HashA
 
     // The MS-OFFCRYPTO Standard mode only uses MD5/SHA-1, both of which have a 64-byte block size.
     // `hash_len` is guaranteed <= 64.
-    let mut buf = Vec::with_capacity(64);
-    buf.extend_from_slice(hash_value);
-    buf.resize(64, 0);
+    let mut buf = [0u8; 64];
+    buf[..hash_len].copy_from_slice(hash_value);
 
-    let mut ipad = vec![0u8; 64];
-    let mut opad = vec![0u8; 64];
+    let mut ipad = [0u8; 64];
+    let mut opad = [0u8; 64];
     for i in 0..64 {
         ipad[i] = buf[i] ^ 0x36;
         opad[i] = buf[i] ^ 0x5C;
     }
 
-    let mut key = Vec::with_capacity(hash_len * 2);
+    let mut key = vec![0u8; hash_len * 2];
     let mut hasher = Hasher::new(hash_alg);
     hasher.update(&ipad);
-    key.extend_from_slice(&hasher.finalize_reset());
+    hasher.finalize_reset_into(&mut key[..hash_len]);
     hasher.update(&opad);
-    key.extend_from_slice(&hasher.finalize_reset());
+    hasher.finalize_reset_into(&mut key[hash_len..hash_len * 2]);
 
-    key[..key_len_bytes].to_vec()
+    key.truncate(key_len_bytes);
+    key
 }
 
 #[cfg(test)]
@@ -220,6 +239,39 @@ mod tests {
         ];
 
         let key = crypt_derive_key(&hash_value, 32, HashAlg::Sha1);
+        assert_eq!(key, expected);
+    }
+
+    #[test]
+    fn crypt_derive_key_md5_truncates_when_key_len_le_hash_len() {
+        // MD5("hello") = 5d41402abc4b2a76b9719d911017c592
+        let hash_value: [u8; 16] = [
+            0x5D, 0x41, 0x40, 0x2A, 0xBC, 0x4B, 0x2A, 0x76, 0xB9, 0x71, 0x9D, 0x91, 0x10,
+            0x17, 0xC5, 0x92,
+        ];
+
+        let key = crypt_derive_key(&hash_value, 16, HashAlg::Md5);
+        assert_eq!(key, hash_value);
+    }
+
+    #[test]
+    fn crypt_derive_key_md5_expands_for_aes256() {
+        // MD5("hello") = 5d41402abc4b2a76b9719d911017c592
+        let hash_value: [u8; 16] = [
+            0x5D, 0x41, 0x40, 0x2A, 0xBC, 0x4B, 0x2A, 0x76, 0xB9, 0x71, 0x9D, 0x91, 0x10,
+            0x17, 0xC5, 0x92,
+        ];
+
+        // Expected bytes computed independently with Python:
+        //   buf = hash_value || 0x00*(64-hash_len)
+        //   key = md5(buf^0x36) || md5(buf^0x5c)
+        let expected: [u8; 32] = [
+            0x21, 0xA4, 0xF9, 0x3F, 0x30, 0xEF, 0x88, 0x60, 0x3B, 0x66, 0x15, 0x32, 0x4E,
+            0x70, 0x90, 0x1B, 0x47, 0xE2, 0xBB, 0x9D, 0x88, 0xB0, 0x9C, 0x98, 0xE4, 0x8C,
+            0x25, 0xE3, 0x68, 0xAD, 0x45, 0x9E,
+        ];
+
+        let key = crypt_derive_key(&hash_value, 32, HashAlg::Md5);
         assert_eq!(key, expected);
     }
 
