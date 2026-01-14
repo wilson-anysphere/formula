@@ -8,6 +8,7 @@ This directory contains small, in-repo workbooks used by tests and documentation
 fixtures/
   xlsx/         # ZIP/OPC-based XLSX/XLSM fixtures used by the `xlsx-diff` round-trip harness
   encrypted/    # Password-to-open/encrypted workbooks (OOXML-in-OLE + legacy `.xls`; excluded from the ZIP/OPC round-trip corpus)
+  encryption/   # Small encrypted workbook fixtures used by end-to-end decryption tests (OOXML EncryptedPackage + legacy `.xls` FILEPASS); see `fixtures/encryption/README.md`
   charts/       # Chart-specific fixtures + generated models + Excel golden PNGs
 ```
 

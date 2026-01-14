@@ -7,6 +7,9 @@ fixtures used by tests that validate **format detection**, **error handling**, a
 This is **file encryption** (“Encrypt with Password”), not workbook/worksheet protection (“password
 to edit”).
 
+For the small, regeneratable encrypted workbook fixtures used by end-to-end decryption integration
+tests (Agile/Standard OOXML + legacy `.xls` `FILEPASS`), see [`fixtures/encryption/`](../encryption/).
+
 ## Why this is separate from `fixtures/xlsx/`
 
 Excel “password to open” OOXML spreadsheets (e.g. `.xlsx`, `.xlsm`, `.xlsb`) are **not ZIP
