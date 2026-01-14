@@ -355,7 +355,7 @@ pub static JA_JP: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "TRUE",
     boolean_false: "FALSE",
-    error_literal_map: &[],
+    errors: &EMPTY_ERRORS,
     functions: &EMPTY_FUNCTIONS,
 };
 
@@ -368,7 +368,7 @@ pub static ZH_CN: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "TRUE",
     boolean_false: "FALSE",
-    error_literal_map: &[],
+    errors: &EMPTY_ERRORS,
     functions: &EMPTY_FUNCTIONS,
 };
 
@@ -381,7 +381,7 @@ pub static KO_KR: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "TRUE",
     boolean_false: "FALSE",
-    error_literal_map: &[],
+    errors: &EMPTY_ERRORS,
     functions: &EMPTY_FUNCTIONS,
 };
 
@@ -394,7 +394,7 @@ pub static ZH_TW: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "TRUE",
     boolean_false: "FALSE",
-    error_literal_map: &[],
+    errors: &EMPTY_ERRORS,
     functions: &EMPTY_FUNCTIONS,
 };
 

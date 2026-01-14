@@ -400,44 +400,6 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
     Some(lowercase_first(base))
 }
 
-fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    let mut push_hint = |hint: String| {
-        if hint.is_empty() {
-            return;
-        }
-        if seen.insert(hint.clone()) {
-            out.push(hint);
-        }
-    };
-
-    // Collect any attribute-based hints.
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        if let Some(raw) = attribute_case_insensitive(node, "layoutId") {
-            let val = normalize_chart_ex_kind_hint(raw).unwrap_or_else(|| raw.trim().to_string());
-            push_hint(format!("layoutId={val}"));
-        }
-        if let Some(raw) = attribute_case_insensitive(node, "chartType") {
-            let val = normalize_chart_ex_kind_hint(raw).unwrap_or_else(|| raw.trim().to_string());
-            push_hint(format!("chartType={val}"));
-        }
-    }
-
-    // Collect element-name hints like `<cx:waterfallChart>`.
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        let name = node.tag_name().name();
-        let lower = name.to_ascii_lowercase();
-        if !lower.ends_with("chart") || lower == "chart" || lower == "chartspace" {
-            continue;
-        }
-        push_hint(format!("node={name}"));
-    }
-
-    out
-}
-
 #[derive(Debug, Clone, Default)]
 struct ChartExDataDefinition {
     categories: Option<SeriesTextData>,
