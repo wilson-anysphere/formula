@@ -278,7 +278,9 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     const preset = commandId.slice(fillColorPrefix.length);
     if (preset === "moreColors") {
       // Prefer delegating to the builtin command (which opens the picker UI).
-      ctx.executeCommand?.("format.fillColor.moreColors");
+      // `format.fillColor` owns the DOM color picker wiring; this wrapper command simply
+      // ensures ribbon menu items can map cleanly onto CommandRegistry ids.
+      ctx.executeCommand?.("format.fillColor");
       return true;
     }
     const argb = (() => {
@@ -321,7 +323,9 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     const preset = commandId.slice(fontColorPrefix.length);
     if (preset === "moreColors") {
       // Prefer delegating to the builtin command (which opens the picker UI).
-      ctx.executeCommand?.("format.fontColor.moreColors");
+      // `format.fontColor` owns the DOM color picker wiring; this wrapper command simply
+      // ensures ribbon menu items can map cleanly onto CommandRegistry ids.
+      ctx.executeCommand?.("format.fontColor");
       return true;
     }
     const argb = (() => {

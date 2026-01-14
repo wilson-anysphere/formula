@@ -59,6 +59,26 @@ describe("handleRibbonCommand", () => {
     expect(style.fill?.fgColor).toBe("#FFFFFF00");
   });
 
+  it("delegates fillColor.moreColors to the builtin picker command", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+    const executeCommand = vi.fn();
+    ctx.executeCommand = executeCommand;
+
+    expect(handleRibbonCommand(ctx, "format.fillColor.moreColors")).toBe(true);
+    expect(executeCommand).toHaveBeenCalledWith("format.fillColor");
+  });
+
+  it("delegates fontColor.moreColors to the builtin picker command", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+    const executeCommand = vi.fn();
+    ctx.executeCommand = executeCommand;
+
+    expect(handleRibbonCommand(ctx, "format.fontColor.moreColors")).toBe(true);
+    expect(executeCommand).toHaveBeenCalledWith("format.fontColor");
+  });
+
   it("applies number format", () => {
     const doc = new DocumentController();
     const ctx = createCtx(doc);
