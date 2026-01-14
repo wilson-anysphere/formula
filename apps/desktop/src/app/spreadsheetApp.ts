@@ -19908,6 +19908,7 @@ export class SpreadsheetApp {
       return false;
     }
     if (this.isEditing()) return false;
+    const sheetId = this.sheetId;
     const toFillRange = (range: Range): FillEngineRange => ({
       startRow: range.startRow,
       endRow: range.endRow + 1,
@@ -19963,14 +19964,14 @@ export class SpreadsheetApp {
     const getCellComputedValue = (row: number, col: number) => {
       fillCoordScratch.row = row;
       fillCoordScratch.col = col;
-      return this.getCellComputedValue(fillCoordScratch) as any;
+      return this.getCellComputedValueForSheetInternal(sheetId, fillCoordScratch) as any;
     };
 
     const wasm = this.wasmEngine;
     if (wasm && mode !== "copy") {
       const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
         document: this.document,
-        sheetId: this.sheetId,
+        sheetId,
         sourceRange: source,
         targetRange: deltaRange,
         mode,
@@ -19981,7 +19982,7 @@ export class SpreadsheetApp {
         .catch(() => {
           applyFillCommitToDocumentController({
             document: this.document,
-            sheetId: this.sheetId,
+            sheetId,
             sourceRange: source,
             targetRange: deltaRange,
             mode,
@@ -19989,8 +19990,10 @@ export class SpreadsheetApp {
           });
         })
         .finally(() => {
-          this.refresh();
-          this.focus();
+          if (this.sheetId === sheetId) {
+            this.refresh();
+            this.focus();
+          }
         });
       this.idle.track(task);
       return true;
@@ -19998,7 +20001,7 @@ export class SpreadsheetApp {
 
     applyFillCommitToDocumentController({
       document: this.document,
-      sheetId: this.sheetId,
+      sheetId,
       sourceRange: source,
       targetRange: deltaRange,
       mode,
@@ -20135,13 +20138,14 @@ export class SpreadsheetApp {
     })();
 
     const wasm = this.wasmEngine;
+    const sheetId = this.sheetId;
 
     // Explicit batch so multi-range selections become a single undo step.
     const fillCoordScratch = { row: 0, col: 0 };
     const getCellComputedValue = (row: number, col: number) => {
       fillCoordScratch.row = row;
       fillCoordScratch.col = col;
-      return this.getCellComputedValue(fillCoordScratch) as any;
+      return this.getCellComputedValueForSheetInternal(sheetId, fillCoordScratch) as any;
     };
 
     // When possible, prefer engine-backed formula shifting for the fill shortcut. For multi-range
@@ -20151,7 +20155,7 @@ export class SpreadsheetApp {
       const op = operations[0]!;
       const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
         document: this.document,
-        sheetId: this.sheetId,
+        sheetId,
         sourceRange: op.sourceRange,
         targetRange: op.targetRange,
         mode,
@@ -20165,7 +20169,7 @@ export class SpreadsheetApp {
           try {
             applyFillCommitToDocumentController({
               document: this.document,
-              sheetId: this.sheetId,
+              sheetId,
               sourceRange: op.sourceRange,
               targetRange: op.targetRange,
               mode,
@@ -20176,8 +20180,10 @@ export class SpreadsheetApp {
           }
         })
         .finally(() => {
-          this.refresh();
-          this.focus();
+          if (this.sheetId === sheetId) {
+            this.refresh();
+            this.focus();
+          }
         });
       this.idle.track(task);
       return;
@@ -20191,7 +20197,7 @@ export class SpreadsheetApp {
         for (const op of operations) {
           const computed = await computeFillEditsForDocumentControllerWithFormulaRewrite({
             document: this.document,
-            sheetId: this.sheetId,
+            sheetId,
             sourceRange: op.sourceRange,
             targetRange: op.targetRange,
             mode,
@@ -20210,7 +20216,7 @@ export class SpreadsheetApp {
           for (const edit of edits) {
             coordScratch.row = edit.row;
             coordScratch.col = edit.col;
-            this.document.setCellInput(this.sheetId, coordScratch, edit.value);
+            this.document.setCellInput(sheetId, coordScratch, edit.value);
           }
         } finally {
           this.document.endBatch();
@@ -20223,7 +20229,7 @@ export class SpreadsheetApp {
             for (const op of operations) {
               applyFillCommitToDocumentController({
                 document: this.document,
-                sheetId: this.sheetId,
+                sheetId,
                 sourceRange: op.sourceRange,
                 targetRange: op.targetRange,
                 mode,
@@ -20235,8 +20241,10 @@ export class SpreadsheetApp {
           }
         })
         .finally(() => {
-          this.refresh();
-          this.focus();
+          if (this.sheetId === sheetId) {
+            this.refresh();
+            this.focus();
+          }
         });
       this.idle.track(task);
       return;
@@ -20247,7 +20255,7 @@ export class SpreadsheetApp {
       for (const op of operations) {
         applyFillCommitToDocumentController({
           document: this.document,
-          sheetId: this.sheetId,
+          sheetId,
           sourceRange: op.sourceRange,
           targetRange: op.targetRange,
           mode,
