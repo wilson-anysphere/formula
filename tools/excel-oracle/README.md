@@ -12,6 +12,7 @@ The intent is to continuously compare our formula engine against Excel across a 
 - A Windows-only **error-literal extractor** to verify locale error spellings against real Excel (`extract-error-literals.ps1`)
 - A Windows-only **structured-reference keyword probe** to inspect `[#Headers]`/`[#Data]`/etc localization via `FormulaLocal` (`extract-structured-reference-keywords.ps1`)
 - A Windows-only **numeric literal formatting probe** to inspect whether `FormulaLocal` inserts thousands separators (`extract-formula-local-number-formatting.ps1`)
+- A Windows-only **numeric literal `FormulaLocal` probe** (per locale) for common edge-case literals like `0001` / `1E3` (`extract-number-literal-formatting.ps1`)
 - A **comparison tool** that diffs engine output vs Excel output and emits a mismatch report (`compare.py`)
 - A lightweight **compatibility gate** that runs the engine + comparison on a bounded subset (`compat_gate.py`)
 - A GitHub Actions workflow (`.github/workflows/excel-compat.yml`) wired to run on `windows-2022` (engine validation) and optionally on a self-hosted Windows runner with Excel installed (oracle generation)
@@ -92,6 +93,15 @@ The output JSON includes both:
 - formulas set via `Range.Formula` (canonical / en-US form)
 - the observed `Range.FormulaLocal`
 - the observed `Range.FormulaLocal` after attempting to set `FormulaLocal` with explicit grouping
+
+For a smaller, per-locale probe focused on a handful of sentinel numeric literals (including
+`=SUM(0001,0)` and `=SUM(1E3,0)`), run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-number-literal-formatting.ps1 `
+  -LocaleId fr-FR `
+  -OutPath out/
+```
 
 ## Extract localized function-name spellings (locale data)
 
