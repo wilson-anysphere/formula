@@ -49,9 +49,18 @@ struct Args {
 
     /// Optional password for Office-encrypted workbooks.
     ///
-    /// When unset, encrypted XLSX/XLSM inputs are reported as `skipped` instead of `failed`.
-    #[arg(long)]
+    /// When unset and `--skip-encrypted` is enabled (default), encrypted XLSX/XLSM inputs are
+    /// reported as `skipped` instead of `failed`.
+    #[arg(long, conflicts_with = "password_file")]
     password: Option<String>,
+
+    /// Read workbook password from a file (first line).
+    #[arg(long, value_name = "PATH", conflicts_with = "password")]
+    password_file: Option<PathBuf>,
+
+    /// Skip encrypted workbooks when no password is provided.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    skip_encrypted: bool,
 
     /// Parts to ignore when diffing round-tripped output.
     #[arg(long = "ignore-part")]
@@ -349,22 +358,25 @@ fn run(args: &Args) -> TriageOutput {
     };
 
     if let Some(reason) = skipped_reason {
-        output
-            .steps
-            .insert("load".to_string(), StepResult::skipped(reason));
         output.result.open_ok = false;
-        output
-            .steps
-            .insert("recalc".to_string(), StepResult::skipped("open_skipped"));
-        output
-            .steps
-            .insert("render".to_string(), StepResult::skipped("open_skipped"));
-        output
-            .steps
-            .insert("round_trip".to_string(), StepResult::skipped("open_skipped"));
-        output
-            .steps
-            .insert("diff".to_string(), StepResult::skipped("open_skipped"));
+        if encrypted {
+            // For encrypted workbooks we want a stable, explicit skip reason for every step so
+            // corpus triage doesn't record a generic load failure hash.
+            for step in ["load", "round_trip", "diff", "recalc", "render"] {
+                output
+                    .steps
+                    .insert(step.to_string(), StepResult::skipped(reason.clone()));
+            }
+        } else {
+            output
+                .steps
+                .insert("load".to_string(), StepResult::skipped(reason));
+            for step in ["recalc", "render", "round_trip", "diff"] {
+                output
+                    .steps
+                    .insert(step.to_string(), StepResult::skipped("open_skipped"));
+            }
+        }
         return output;
     }
 
@@ -679,6 +691,25 @@ fn run(args: &Args) -> TriageOutput {
     }
 }
 
+fn resolve_password(args: &Args) -> Result<Option<String>> {
+    if let Some(pw) = args.password.as_ref() {
+        if pw.is_empty() {
+            anyhow::bail!("password was empty");
+        }
+        return Ok(Some(pw.clone()));
+    }
+    let Some(path) = args.password_file.as_ref() else {
+        return Ok(None);
+    };
+
+    let pw = fs::read_to_string(path).with_context(|| format!("read password file {}", path.display()))?;
+    let pw = pw.lines().next().unwrap_or("").trim_end_matches(&['\r', '\n'][..]).to_string();
+    if pw.is_empty() {
+        anyhow::bail!("password file was empty");
+    }
+    Ok(Some(pw))
+}
+
 fn prepare_workbook_bytes<'a>(
     input_bytes: &'a [u8],
     args: &Args,
@@ -687,22 +718,18 @@ fn prepare_workbook_bytes<'a>(
         return Ok((Cow::Borrowed(input_bytes), None, false));
     }
 
-    let Some(password) = args.password.as_deref() else {
-        return Ok((
-            Cow::Borrowed(input_bytes),
-            Some("encrypted workbook".to_string()),
-            true,
-        ));
+    let password = resolve_password(args)?;
+    let Some(password) = password.as_deref() else {
+        if args.skip_encrypted {
+            return Ok((Cow::Borrowed(input_bytes), Some("encrypted".to_string()), true));
+        }
+        return Ok((Cow::Borrowed(input_bytes), None, true));
     };
 
     let decrypted = formula_office_crypto::decrypt_encrypted_package(input_bytes, password)
         .context("decrypt encrypted workbook")?;
     if !looks_like_xlsx(&decrypted) {
-        return Ok((
-            Cow::Borrowed(input_bytes),
-            Some("encrypted workbook (decrypted payload is not xlsx/xlsm)".to_string()),
-            true,
-        ));
+        return Ok((Cow::Borrowed(input_bytes), Some("encrypted".to_string()), true));
     }
 
     Ok((Cow::Owned(decrypted), None, true))
@@ -1641,6 +1668,8 @@ mod tests {
             input: PathBuf::from("dummy.xlsx"),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: vec!["docProps/app.xml".to_string()],
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -1844,6 +1873,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -1940,6 +1971,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -2005,6 +2038,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -2076,6 +2111,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -2172,6 +2209,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -2235,6 +2274,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -2279,6 +2320,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -2340,6 +2383,8 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             password: None,
+            password_file: None,
+            skip_encrypted: true,
             ignore_parts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
@@ -2384,16 +2429,22 @@ mod tests {
         let args = Args::try_parse_from(["triage", "--input", path.to_str().unwrap()])
             .expect("parse args");
         let out = run(&args);
-        let load = out.steps.get("load").expect("load step missing");
-        assert_eq!(load.status, "skipped");
-        assert_eq!(
-            load.details
-                .as_ref()
-                .and_then(|v| v.get("reason"))
-                .and_then(|v| v.as_str()),
-            Some("encrypted workbook")
-        );
-        assert!(load.error.is_none(), "skipped load should not include error digest");
+        for step in ["load", "round_trip", "diff", "recalc", "render"] {
+            let res = out.steps.get(step).expect("step missing");
+            assert_eq!(res.status, "skipped", "expected {step} to be skipped");
+            assert_eq!(
+                res.details
+                    .as_ref()
+                    .and_then(|v| v.get("reason"))
+                    .and_then(|v| v.as_str()),
+                Some("encrypted"),
+                "expected {step} to have encrypted reason"
+            );
+            assert!(
+                res.error.is_none(),
+                "skipped {step} should not include error digest"
+            );
+        }
 
         // With password -> load OK (full triage may still find diffs).
         let args = Args::try_parse_from([
@@ -2429,16 +2480,22 @@ mod tests {
         ])
         .expect("parse args");
         let out = run(&args);
-        let load = out.steps.get("load").expect("load step missing");
-        assert_eq!(load.status, "skipped");
-        assert_eq!(
-            load.details
-                .as_ref()
-                .and_then(|v| v.get("reason"))
-                .and_then(|v| v.as_str()),
-            Some("encrypted workbook")
-        );
-        assert!(load.error.is_none(), "skipped load should not include error digest");
+        for step in ["load", "round_trip", "diff", "recalc", "render"] {
+            let res = out.steps.get(step).expect("step missing");
+            assert_eq!(res.status, "skipped", "expected {step} to be skipped");
+            assert_eq!(
+                res.details
+                    .as_ref()
+                    .and_then(|v| v.get("reason"))
+                    .and_then(|v| v.as_str()),
+                Some("encrypted"),
+                "expected {step} to have encrypted reason"
+            );
+            assert!(
+                res.error.is_none(),
+                "skipped {step} should not include error digest"
+            );
+        }
         assert!(!out.result.open_ok);
 
         // With password -> decrypts, but we only triage XLSX/XLSM today.
@@ -2453,16 +2510,22 @@ mod tests {
         ])
         .expect("parse args");
         let out = run(&args);
-        let load = out.steps.get("load").expect("load step missing");
-        assert_eq!(load.status, "skipped");
-        assert_eq!(
-            load.details
-                .as_ref()
-                .and_then(|v| v.get("reason"))
-                .and_then(|v| v.as_str()),
-            Some("encrypted workbook (decrypted payload is not xlsx/xlsm)")
-        );
-        assert!(load.error.is_none(), "skipped load should not include error digest");
+        for step in ["load", "round_trip", "diff", "recalc", "render"] {
+            let res = out.steps.get(step).expect("step missing");
+            assert_eq!(res.status, "skipped", "expected {step} to be skipped");
+            assert_eq!(
+                res.details
+                    .as_ref()
+                    .and_then(|v| v.get("reason"))
+                    .and_then(|v| v.as_str()),
+                Some("encrypted"),
+                "expected {step} to have encrypted reason"
+            );
+            assert!(
+                res.error.is_none(),
+                "skipped {step} should not include error digest"
+            );
+        }
         assert!(!out.result.open_ok);
     }
 }
