@@ -85,4 +85,55 @@ describe("registerEncryptionUiCommands", () => {
     // Should not have shown a "not inside encrypted range" warning.
     expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/not inside an encrypted range/i), "warning");
   });
+
+  it("exportEncryptionKey falls back to policy metadata when the active cell is not yet encrypted", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const docId = "doc-1";
+    const doc = new Y.Doc({ guid: docId });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    const range = new Y.Map<any>();
+    range.set("id", "r1");
+    range.set("sheetId", "Sheet1");
+    range.set("startRow", 0);
+    range.set("startCol", 0);
+    range.set("endRow", 0);
+    range.set("endCol", 0);
+    range.set("keyId", "k1");
+    ranges.push([range]);
+    metadata.set("encryptedRanges", ranges);
+
+    const cells = doc.getMap("cells");
+    // No enc payload present yet.
+
+    const keyBytes = new Uint8Array(32).fill(1);
+    const keyStore = {
+      getCachedKey: vi.fn((_docId: string, keyId: string) => (keyId === "k1" ? { keyId, keyBytes } : null)),
+      get: vi.fn(async () => null),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ doc, cells }),
+      getEncryptedRangeManager: () => ({ list: () => [] }),
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("done");
+
+    await commandRegistry.executeCommand("collab.exportEncryptionKey");
+
+    expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k1");
+
+    const inputOptions = vi.mocked(showInputBox).mock.calls[0]?.[0] as any;
+    const parsed = parseEncryptionKeyExportString(String(inputOptions.value));
+    expect(parsed.keyId).toBe("k1");
+    expect(parsed.keyBytes).toEqual(keyBytes);
+  });
 });
