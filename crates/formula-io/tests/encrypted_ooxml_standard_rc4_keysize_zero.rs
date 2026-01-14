@@ -106,6 +106,14 @@ fn rc4_key_40bit_from_digest(digest: &[u8; 20]) -> [u8; 5] {
     key
 }
 
+fn rc4_key_40bit_padded_16_from_digest(digest: &[u8; 20]) -> [u8; 16] {
+    // Compatibility: some producers treat the 40-bit key material as a 16-byte RC4 key by
+    // appending 11 zero bytes (non-conforming, but accepted by Formula for interoperability).
+    let mut key = [0u8; 16];
+    key[..5].copy_from_slice(&digest[..5]);
+    key
+}
+
 fn encrypt_rc4_cryptoapi_per_block_40bit(plaintext: &[u8], h: &[u8; 20]) -> Vec<u8> {
     let mut out = Vec::with_capacity(plaintext.len());
     let mut offset = 0usize;
@@ -114,6 +122,22 @@ fn encrypt_rc4_cryptoapi_per_block_40bit(plaintext: &[u8], h: &[u8; 20]) -> Vec<
         let block_len = (plaintext.len() - offset).min(RC4_BLOCK_SIZE);
         let digest = derive_block_digest_sha1(h, block_index);
         let key = rc4_key_40bit_from_digest(&digest);
+        let chunk = rc4_apply(&key, &plaintext[offset..offset + block_len]);
+        out.extend_from_slice(&chunk);
+        offset += block_len;
+        block_index += 1;
+    }
+    out
+}
+
+fn encrypt_rc4_cryptoapi_per_block_40bit_padded_key(plaintext: &[u8], h: &[u8; 20]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(plaintext.len());
+    let mut offset = 0usize;
+    let mut block_index = 0u32;
+    while offset < plaintext.len() {
+        let block_len = (plaintext.len() - offset).min(RC4_BLOCK_SIZE);
+        let digest = derive_block_digest_sha1(h, block_index);
+        let key = rc4_key_40bit_padded_16_from_digest(&digest);
         let chunk = rc4_apply(&key, &plaintext[offset..offset + block_len]);
         out.extend_from_slice(&chunk);
         offset += block_len;
@@ -276,5 +300,101 @@ fn decrypts_standard_cryptoapi_rc4_with_keysize_zero() {
     );
     let preserved = opened.preserved_ole.as_ref().unwrap();
     let got = find_preserved_stream_bytes(preserved, preserved_name).expect("missing preserved stream");
+    assert_eq!(got, preserved_bytes);
+}
+
+#[test]
+fn decrypts_standard_cryptoapi_rc4_keysize_zero_with_zero_padded_40bit_keys() {
+    // Compatibility regression test: some non-conforming producers treat a 40-bit key as a 16-byte
+    // key by appending 11 zeros. Ensure both the normal open path and the preserved-OLE open path
+    // can decrypt such inputs.
+    let password = "password";
+    let plaintext = build_tiny_xlsx();
+
+    // Deterministic parameters for a stable fixture.
+    let salt: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+        0x0E, 0x0F,
+    ];
+    let verifier_plain: [u8; 16] = *b"0123456789ABCDEF";
+    let verifier_hash: [u8; 20] = Sha1::digest(verifier_plain).into();
+
+    // --- Encrypt -------------------------------------------------------------------------------
+    let h = spun_password_hash_sha1(password, &salt);
+    let digest0 = derive_block_digest_sha1(&h, 0);
+    let key0 = rc4_key_40bit_padded_16_from_digest(&digest0);
+
+    // Encrypt verifier + verifier hash as a single RC4 stream (using the padded 16-byte key).
+    let mut verifier_concat = Vec::new();
+    verifier_concat.extend_from_slice(&verifier_plain);
+    verifier_concat.extend_from_slice(&verifier_hash);
+    let verifier_cipher = rc4_apply(&key0, &verifier_concat);
+    let encrypted_verifier: [u8; 16] = verifier_cipher[..16].try_into().unwrap();
+    let encrypted_verifier_hash: [u8; 20] = verifier_cipher[16..].try_into().unwrap();
+
+    let encryption_info = build_encryption_info_standard_rc4_keysize_zero(
+        &salt,
+        &encrypted_verifier,
+        &encrypted_verifier_hash,
+    );
+
+    // Encrypt EncryptedPackage payload with the same padded-key behavior.
+    let ciphertext = encrypt_rc4_cryptoapi_per_block_40bit_padded_key(&plaintext, &h);
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    encrypted_package.extend_from_slice(&ciphertext);
+
+    // Wrap in an OLE/CFB container with the required streams.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create OLE container");
+    ole.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    ole.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    let preserved_name = "CustomStream";
+    let preserved_bytes = b"formula-preserve-test";
+    ole.create_stream(preserved_name)
+        .expect("create preserved stream")
+        .write_all(preserved_bytes)
+        .expect("write preserved stream");
+    let bytes = ole.into_inner().into_inner();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("standard-rc4-keysize0-padded.xlsx");
+    std::fs::write(&path, bytes).expect("write encrypted file");
+
+    // --- Decrypt + open ------------------------------------------------------------------------
+    let wrong = open_workbook_model_with_password(&path, Some("wrong-password"));
+    assert!(
+        matches!(wrong, Err(Error::InvalidPassword { .. })),
+        "wrong password should return InvalidPassword, got {wrong:?}"
+    );
+
+    let workbook =
+        open_workbook_model_with_password(&path, Some(password)).expect("decrypt + open workbook");
+    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::Number(1.0)
+    );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::String("Hello".to_string())
+    );
+
+    // --- Decrypt via the preserved-OLE path ----------------------------------------------------
+    let opened = open_workbook_with_password_and_preserved_ole(&path, Some(password))
+        .expect("decrypt + open workbook with preserved ole");
+    assert!(
+        opened.preserved_ole.is_some(),
+        "expected preserved OLE entries for encrypted workbook"
+    );
+    let preserved = opened.preserved_ole.as_ref().unwrap();
+    let got =
+        find_preserved_stream_bytes(preserved, preserved_name).expect("missing preserved stream");
     assert_eq!(got, preserved_bytes);
 }
