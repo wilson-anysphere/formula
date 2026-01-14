@@ -141,5 +141,71 @@ describe("applySortSpecToSelection", () => {
     expect(readRow(3)).toEqual(["A", 1, "second"]);
     expect(readRow(4)).toEqual(["B", 1, "fourth"]);
   });
-});
 
+  it("moves formulas + formatting (styleId) with rows when sorting", () => {
+    const doc = new DocumentController();
+
+    doc.setRangeValues("Sheet1", { row: 0, col: 0 }, [
+      [
+        { value: "Letter", styleId: 10 },
+        { value: "Number", styleId: 11 },
+        { value: "Payload", styleId: 12 },
+      ],
+      [
+        { value: "A", styleId: 20 },
+        { value: 2, styleId: 21 },
+        { formula: "=1+1", styleId: 22 },
+      ],
+      [
+        { value: "A", styleId: 30 },
+        { value: 1, styleId: 31 },
+        { value: "second", styleId: 32 },
+      ],
+      [
+        { value: "B", styleId: 40 },
+        { value: 0, styleId: 41 },
+        { value: "third", styleId: 42 },
+      ],
+    ]);
+
+    const ok = applySortSpecToSelection({
+      doc,
+      sheetId: "Sheet1",
+      selection: { startRow: 0, startCol: 0, endRow: 3, endCol: 2 },
+      spec: {
+        hasHeader: true,
+        keys: [
+          { column: 0, order: "ascending" },
+          { column: 1, order: "ascending" },
+        ],
+      },
+      getCellValue: (cell) => {
+        const state = doc.getCell("Sheet1", cell) as { value: any };
+        return (state?.value ?? null) as any;
+      },
+    });
+
+    expect(ok).toBe(true);
+
+    // Header row remains fixed.
+    expect(doc.getCell("Sheet1", { row: 0, col: 0 })).toMatchObject({ value: "Letter", styleId: 10 });
+    expect(doc.getCell("Sheet1", { row: 0, col: 1 })).toMatchObject({ value: "Number", styleId: 11 });
+    expect(doc.getCell("Sheet1", { row: 0, col: 2 })).toMatchObject({ value: "Payload", styleId: 12 });
+
+    // Sorted rows should be:
+    // - A,1,second (styleId 30/31/32)
+    // - A,2,=1+1   (styleId 20/21/22)
+    // - B,0,third  (styleId 40/41/42)
+    expect(doc.getCell("Sheet1", { row: 1, col: 0 })).toMatchObject({ value: "A", styleId: 30 });
+    expect(doc.getCell("Sheet1", { row: 1, col: 1 })).toMatchObject({ value: 1, styleId: 31 });
+    expect(doc.getCell("Sheet1", { row: 1, col: 2 })).toMatchObject({ value: "second", styleId: 32 });
+
+    expect(doc.getCell("Sheet1", { row: 2, col: 0 })).toMatchObject({ value: "A", styleId: 20 });
+    expect(doc.getCell("Sheet1", { row: 2, col: 1 })).toMatchObject({ value: 2, styleId: 21 });
+    expect(doc.getCell("Sheet1", { row: 2, col: 2 })).toMatchObject({ value: null, formula: "=1+1", styleId: 22 });
+
+    expect(doc.getCell("Sheet1", { row: 3, col: 0 })).toMatchObject({ value: "B", styleId: 40 });
+    expect(doc.getCell("Sheet1", { row: 3, col: 1 })).toMatchObject({ value: 0, styleId: 41 });
+    expect(doc.getCell("Sheet1", { row: 3, col: 2 })).toMatchObject({ value: "third", styleId: 42 });
+  });
+});
