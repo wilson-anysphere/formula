@@ -34,8 +34,10 @@ if [[ ! -x "${runner}" ]]; then
     trap 'rmdir "${lock_dir}" 2>/dev/null || true' EXIT
     if [[ ! -x "${runner}" ]]; then
       echo "Installing wasm-bindgen-test-runner (wasm-bindgen-cli ${WASM_BINDGEN_CLI_VERSION})..." >&2
-      cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_CLI_VERSION}" \
-        --bin wasm-bindgen-test-runner --quiet
+      # Run from the repo root so rustup can reliably pick up `rust-toolchain.toml` (even if this
+      # runner is invoked from a different working directory).
+      (cd "${repo_root}" && cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_CLI_VERSION}" \
+        --bin wasm-bindgen-test-runner --quiet)
     fi
   else
     # Another process is installing; wait until the binary appears.
