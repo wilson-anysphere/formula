@@ -273,6 +273,9 @@ Treating bracket content as opaque is also important for correctness because it 
      - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
        error translations (`errors: &<LOCALE>_ERRORS`).
      - Add the locale to `get_locale()` in `registry.rs`.
+     - Update `crates/formula-engine/src/locale/mod.rs` (`normalize_locale_id`) so the engine can
+       actually resolve locale tags to your new locale id (especially if you add a second locale for
+       an existing language, e.g. `fr-CA` vs `fr-FR`).
      - Re-export the new constant from `crates/formula-engine/src/locale/mod.rs` if it should be
        accessible as `locale::<LOCALE>`.
 4. **Add tests:** extend `crates/formula-engine/tests/locale_parsing.rs` with basic round-trip tests
