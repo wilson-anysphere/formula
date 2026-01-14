@@ -15590,6 +15590,18 @@ pub fn build_shared_formula_ptgarea_row_oob_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+fn build_shared_formula_ptgref_row_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgref_row_oob_shrfmla_only_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedRefRowOOB_ShrFmlaOnly", &sheet, 1252)
+}
+
+fn build_shared_formula_ptgarea_row_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgarea_row_oob_shrfmla_only_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedAreaRowOOB_ShrFmlaOnly", &sheet, 1252)
+}
+
 fn build_shared_formula_ptgref_col_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
     let xf_cell = 16u16;
     let sheet = build_shared_formula_ptgref_col_oob_shrfmla_only_sheet_stream(xf_cell);
@@ -15600,6 +15612,134 @@ fn build_shared_formula_ptgarea_col_oob_shrfmla_only_workbook_stream() -> Vec<u8
     let xf_cell = 16u16;
     let sheet = build_shared_formula_ptgarea_col_oob_shrfmla_only_sheet_stream(xf_cell);
     build_single_sheet_workbook_stream("SharedAreaColOOB_ShrFmlaOnly", &sheet, 1252)
+}
+
+fn build_shared_formula_ptgref_row_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range B65535:B65536 (no FORMULA records).
+    //
+    // The shared rgce uses a PtgRef (not PtgRefN) with row/col-relative flags and a row coordinate
+    // at the BIFF8 max (0xFFFF => Excel row 65536). Filling down by 1 shifts the row to 65537,
+    // which is out-of-bounds and should materialize as `#REF!`.
+    //
+    // Expected decoded formulas:
+    // - B65535: `A65536+1`
+    // - B65536: `#REF!+1`
+    const BASE_ROW: u16 = 65_534; // 0-based row for Excel row 65535
+    const FOLLOWER_ROW: u16 = 65_535; // 0-based row for Excel row 65536
+    const BASE_COL: u16 = 1; // column B
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [BASE_ROW, FOLLOWER_ROW + 1) cols [0, 2) => A65535:B65536.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&(BASE_ROW as u32).to_le_bytes()); // first row
+    dims.extend_from_slice(&(FOLLOWER_ROW as u32 + 1).to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide one numeric cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(BASE_ROW, 0, xf_cell, 1.0)); // A65535
+
+    // Shared rgce body stored in SHRFMLA. This uses a PtgRef (not PtgRefN) with relative flags so
+    // materialization must shift the row.
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x24); // PtgRef
+        v.extend_from_slice(&FOLLOWER_ROW.to_le_bytes()); // rw = 65535 (Excel row 65536)
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // col = A, row+col relative flags
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(
+            BASE_ROW,
+            FOLLOWER_ROW,
+            BASE_COL as u8,
+            BASE_COL as u8,
+            &rgce_shared,
+        ),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgarea_row_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range B65535:B65536 (no FORMULA records).
+    //
+    // The shared rgce uses a PtgArea (not PtgAreaN) with relative flags on both endpoints.
+    // Filling down by 1 shifts the area to A65536:A65537 which is out-of-bounds.
+    //
+    // Expected decoded formulas:
+    // - B65535: `SUM(A65535:A65536)+1`
+    // - B65536: `SUM(#REF!)+1`
+    const BASE_ROW: u16 = 65_534; // 0-based row for Excel row 65535
+    const FOLLOWER_ROW: u16 = 65_535; // 0-based row for Excel row 65536
+    const BASE_COL: u16 = 1; // column B
+    let col_with_flags: u16 = 0xC000; // col=A + row+col relative flags
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [BASE_ROW, FOLLOWER_ROW + 1) cols [0, 2) => A65535:B65536.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&(BASE_ROW as u32).to_le_bytes()); // first row
+    dims.extend_from_slice(&(FOLLOWER_ROW as u32 + 1).to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide one numeric cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(BASE_ROW, 0, xf_cell, 1.0)); // A65535
+
+    // Shared rgce body stored in SHRFMLA. This uses a PtgArea (not PtgAreaN) with relative flags so
+    // materialization must shift both row indices.
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        // A65535:A65536
+        v.extend_from_slice(&ptg_area(
+            BASE_ROW,
+            FOLLOWER_ROW,
+            col_with_flags,
+            col_with_flags,
+        ));
+        // SUM(...)
+        v.push(0x22); // PtgFuncVar
+        v.push(1); // argc=1
+        v.extend_from_slice(&0x0004u16.to_le_bytes()); // iftab=4 (SUM)
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(
+            BASE_ROW,
+            FOLLOWER_ROW,
+            BASE_COL as u8,
+            BASE_COL as u8,
+            &rgce_shared,
+        ),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_shared_formula_ptgref_col_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
@@ -15702,6 +15842,38 @@ fn build_shared_formula_ptgarea_col_oob_shrfmla_only_sheet_stream(xf_cell: u16) 
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose `PtgRef` shifts
+/// out-of-bounds in the row direction during materialization.
+pub fn build_shared_formula_ptgref_row_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgref_row_oob_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose `PtgArea` shifts
+/// out-of-bounds in the row direction during materialization.
+pub fn build_shared_formula_ptgarea_row_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgarea_row_oob_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
 }
 
 /// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose `PtgRef` shifts
