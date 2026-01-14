@@ -29,3 +29,33 @@ test("desktop-bundle-dry-run workflow validates built Windows bundles (MSI + NSI
     /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+(?:\.\/)?scripts\/validate-windows-bundles\.ps1/,
   );
 });
+
+test("desktop-bundle-dry-run workflow restores tauri.conf.json before asserting a clean git diff", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const restoreNeedle = "Restore CI-only Tauri config patches";
+  const restoreIdx = lines.findIndex((line) => line.includes(restoreNeedle));
+  assert.ok(
+    restoreIdx >= 0,
+    `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${restoreNeedle}`,
+  );
+
+  const restoreSnippet = lines.slice(restoreIdx, restoreIdx + 20).join("\n");
+  assert.match(
+    restoreSnippet,
+    /git restore --source=HEAD -- apps\/desktop\/src-tauri\/tauri\.conf\.json/,
+    `Expected restore step to reset apps/desktop/src-tauri/tauri.conf.json so the git diff guard does not fail after CI-only patches.`,
+  );
+
+  const diffNeedle = "Fail if the build modified tracked files";
+  const diffIdx = lines.findIndex((line) => line.includes(diffNeedle));
+  assert.ok(
+    diffIdx >= 0,
+    `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${diffNeedle}`,
+  );
+  assert.ok(
+    restoreIdx < diffIdx,
+    `Expected ${restoreNeedle} to appear before ${diffNeedle} so CI-only config patches don't fail the reproducibility guard.`,
+  );
+});
