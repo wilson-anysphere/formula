@@ -1118,13 +1118,81 @@ impl PivotEngine {
                     );
                 }
                 ShowAsType::RunningTotal => {
-                    Self::apply_running_total(data, &leaf_rows, &cols);
+                    if let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_deref() {
+                        if let Some(base_row_pos) = cfg
+                            .row_fields
+                            .iter()
+                            .position(|f| f.source_field == base_field)
+                        {
+                            let (group_ids, group_count) =
+                                Self::group_ids_excluding_pos(row_keys, base_row_pos);
+                            Self::apply_running_total_grouped_by_row(
+                                data,
+                                &leaf_rows,
+                                &cols,
+                                &group_ids,
+                                group_count,
+                            );
+                        } else if let Some(base_col_pos) = cfg
+                            .column_fields
+                            .iter()
+                            .position(|f| f.source_field == base_field)
+                        {
+                            let (group_ids, group_count) =
+                                Self::group_ids_excluding_pos(col_keys, base_col_pos);
+                            Self::apply_running_total_grouped_by_column(
+                                data,
+                                &leaf_rows,
+                                &cols[..col_keys.len()],
+                                &group_ids,
+                                group_count,
+                            );
+                        } else {
+                            Self::apply_running_total(data, &leaf_rows, &cols);
+                        }
+                    } else {
+                        Self::apply_running_total(data, &leaf_rows, &cols);
+                    }
                 }
-                ShowAsType::RankAscending => {
-                    Self::apply_rank(data, &leaf_rows, &cols, /*descending*/ false);
-                }
-                ShowAsType::RankDescending => {
-                    Self::apply_rank(data, &leaf_rows, &cols, /*descending*/ true);
+                ShowAsType::RankAscending | ShowAsType::RankDescending => {
+                    let descending = show_as == ShowAsType::RankDescending;
+                    if let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_deref() {
+                        if let Some(base_row_pos) = cfg
+                            .row_fields
+                            .iter()
+                            .position(|f| f.source_field == base_field)
+                        {
+                            let (group_ids, group_count) =
+                                Self::group_ids_excluding_pos(row_keys, base_row_pos);
+                            Self::apply_rank_grouped_by_row(
+                                data,
+                                &leaf_rows,
+                                &cols,
+                                &group_ids,
+                                group_count,
+                                descending,
+                            );
+                        } else if let Some(base_col_pos) = cfg
+                            .column_fields
+                            .iter()
+                            .position(|f| f.source_field == base_field)
+                        {
+                            let (group_ids, group_count) =
+                                Self::group_ids_excluding_pos(col_keys, base_col_pos);
+                            Self::apply_rank_grouped_by_column(
+                                data,
+                                &leaf_rows,
+                                &cols[..col_keys.len()],
+                                &group_ids,
+                                group_count,
+                                descending,
+                            );
+                        } else {
+                            Self::apply_rank(data, &leaf_rows, &cols, descending);
+                        }
+                    } else {
+                        Self::apply_rank(data, &leaf_rows, &cols, descending);
+                    }
                 }
                 ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {
                     let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_deref() else {
@@ -1719,6 +1787,85 @@ impl PivotEngine {
         }
     }
 
+    fn group_ids_excluding_pos(keys: &[PivotKey], exclude_pos: usize) -> (Vec<usize>, usize) {
+        let mut id_by_key: HashMap<PivotKey, usize> = HashMap::new();
+        let mut out = Vec::with_capacity(keys.len());
+
+        for key in keys {
+            let group_parts = key
+                .0
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, part)| (idx != exclude_pos).then_some(part.clone()))
+                .collect::<Vec<_>>();
+            let group_key = PivotKey(group_parts);
+
+            let next_id = id_by_key.len();
+            let id = *id_by_key.entry(group_key).or_insert(next_id);
+            out.push(id);
+        }
+
+        (out, id_by_key.len())
+    }
+
+    fn apply_running_total_grouped_by_row(
+        data: &mut [Vec<PivotValue>],
+        leaf_rows: &[usize],
+        cols: &[usize],
+        row_group_ids: &[usize],
+        group_count: usize,
+    ) {
+        if group_count == 0 || leaf_rows.is_empty() {
+            return;
+        }
+
+        for &c in cols {
+            let mut running_by_group = vec![0.0; group_count];
+            for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
+                let Some(group_id) = row_group_ids.get(leaf_idx).copied() else {
+                    continue;
+                };
+                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                else {
+                    continue;
+                };
+                if let Some(running) = running_by_group.get_mut(group_id) {
+                    *running += n;
+                    data[r][c] = PivotValue::Number(*running);
+                }
+            }
+        }
+    }
+
+    fn apply_running_total_grouped_by_column(
+        data: &mut [Vec<PivotValue>],
+        leaf_rows: &[usize],
+        cols: &[usize],
+        col_group_ids: &[usize],
+        group_count: usize,
+    ) {
+        if group_count == 0 || leaf_rows.is_empty() {
+            return;
+        }
+
+        for &r in leaf_rows {
+            let mut running_by_group = vec![0.0; group_count];
+            for (col_idx, &c) in cols.iter().enumerate() {
+                let Some(group_id) = col_group_ids.get(col_idx).copied() else {
+                    continue;
+                };
+                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                else {
+                    continue;
+                };
+                if let Some(running) = running_by_group.get_mut(group_id) {
+                    *running += n;
+                    data[r][c] = PivotValue::Number(*running);
+                }
+            }
+        }
+    }
+
     fn apply_running_total(data: &mut [Vec<PivotValue>], leaf_rows: &[usize], cols: &[usize]) {
         for &c in cols {
             let mut running = 0.0;
@@ -1726,6 +1873,125 @@ impl PivotEngine {
                 if let Some(n) = data[r][c].as_number() {
                     running += n;
                     data[r][c] = PivotValue::Number(running);
+                }
+            }
+        }
+    }
+
+    fn apply_rank_grouped_by_row(
+        data: &mut [Vec<PivotValue>],
+        leaf_rows: &[usize],
+        cols: &[usize],
+        row_group_ids: &[usize],
+        group_count: usize,
+        descending: bool,
+    ) {
+        if group_count == 0 || leaf_rows.is_empty() {
+            return;
+        }
+
+        for &c in cols {
+            let mut values_by_group: Vec<Vec<(usize, f64)>> = vec![Vec::new(); group_count];
+            for (leaf_idx, &r) in leaf_rows.iter().enumerate() {
+                let Some(group_id) = row_group_ids.get(leaf_idx).copied() else {
+                    continue;
+                };
+                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                else {
+                    continue;
+                };
+                if let Some(group) = values_by_group.get_mut(group_id) {
+                    group.push((r, n));
+                }
+            }
+
+            for mut values in values_by_group {
+                if values.is_empty() {
+                    continue;
+                }
+
+                values.sort_by(|(_, a), (_, b)| {
+                    if descending {
+                        b.total_cmp(a)
+                    } else {
+                        a.total_cmp(b)
+                    }
+                });
+
+                let mut next_rank = 1usize;
+                let mut i = 0usize;
+                while i < values.len() {
+                    let value = values[i].1;
+                    let mut j = i + 1;
+                    while j < values.len() && values[j].1 == value {
+                        j += 1;
+                    }
+                    for k in i..j {
+                        data[values[k].0][c] = PivotValue::Number(next_rank as f64);
+                    }
+                    next_rank += j - i;
+                    i = j;
+                }
+            }
+        }
+    }
+
+    fn apply_rank_grouped_by_column(
+        data: &mut [Vec<PivotValue>],
+        leaf_rows: &[usize],
+        cols: &[usize],
+        col_group_ids: &[usize],
+        group_count: usize,
+        descending: bool,
+    ) {
+        if group_count == 0 || leaf_rows.is_empty() {
+            return;
+        }
+
+        for &r in leaf_rows {
+            let mut values_by_group: Vec<Vec<(usize, f64)>> = vec![Vec::new(); group_count];
+            for (col_idx, &c) in cols.iter().enumerate() {
+                let Some(group_id) = col_group_ids.get(col_idx).copied() else {
+                    continue;
+                };
+                let Some(n) = data.get(r).and_then(|row| row.get(c)).and_then(|v| v.as_number())
+                else {
+                    continue;
+                };
+                if let Some(group) = values_by_group.get_mut(group_id) {
+                    group.push((col_idx, n));
+                }
+            }
+
+            for mut values in values_by_group {
+                if values.is_empty() {
+                    continue;
+                }
+
+                values.sort_by(|(_, a), (_, b)| {
+                    if descending {
+                        b.total_cmp(a)
+                    } else {
+                        a.total_cmp(b)
+                    }
+                });
+
+                let mut next_rank = 1usize;
+                let mut i = 0usize;
+                while i < values.len() {
+                    let value = values[i].1;
+                    let mut j = i + 1;
+                    while j < values.len() && values[j].1 == value {
+                        j += 1;
+                    }
+                    for k in i..j {
+                        let col_idx = values[k].0;
+                        if let Some(&c) = cols.get(col_idx) {
+                            data[r][c] = PivotValue::Number(next_rank as f64);
+                        }
+                    }
+                    next_rank += j - i;
+                    i = j;
                 }
             }
         }
@@ -3062,6 +3328,100 @@ mod tests {
     }
 
     #[test]
+    fn show_as_running_total_respects_row_base_field() {
+        let data = vec![
+            pv_row(&["Region".into(), "Year".into(), "Sales".into()]),
+            pv_row(&["East".into(), "2019".into(), 2.into()]),
+            pv_row(&["East".into(), "2020".into(), 6.into()]),
+            pv_row(&["West".into(), "2019".into(), 4.into()]),
+            pv_row(&["West".into(), "2020".into(), 8.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region"), PivotField::new("Year")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::RunningTotal),
+                base_field: Some("Year".to_string()),
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Year".into(), "Sum of Sales".into()],
+                vec!["East".into(), "2019".into(), 2.into()],
+                vec!["East".into(), "2020".into(), 8.into()],
+                vec!["West".into(), "2019".into(), 4.into()],
+                vec!["West".into(), "2020".into(), 12.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_running_total_respects_column_base_field() {
+        let data = vec![
+            pv_row(&["Region".into(), "Year".into(), "Sales".into()]),
+            pv_row(&["East".into(), "2019".into(), 2.into()]),
+            pv_row(&["East".into(), "2020".into(), 6.into()]),
+            pv_row(&["West".into(), "2019".into(), 4.into()]),
+            pv_row(&["West".into(), "2020".into(), 8.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Year")],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::RunningTotal),
+                base_field: Some("Year".to_string()),
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "2019 - Sum of Sales".into(),
+                    "2020 - Sum of Sales".into(),
+                ],
+                vec!["East".into(), 2.into(), 8.into()],
+                vec!["West".into(), 4.into(), 12.into()],
+            ]
+        );
+    }
+
+    #[test]
     fn show_as_rank_ascending() {
         let data = vec![
             pv_row(&["Item".into(), "Sales".into()]),
@@ -3103,6 +3463,100 @@ mod tests {
                 vec!["A".into(), 3.into()],
                 vec!["B".into(), 1.into()],
                 vec!["C".into(), 2.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_rank_respects_row_base_field() {
+        let data = vec![
+            pv_row(&["Region".into(), "Year".into(), "Sales".into()]),
+            pv_row(&["East".into(), "2019".into(), 2.into()]),
+            pv_row(&["East".into(), "2020".into(), 6.into()]),
+            pv_row(&["West".into(), "2019".into(), 4.into()]),
+            pv_row(&["West".into(), "2020".into(), 8.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region"), PivotField::new("Year")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::RankDescending),
+                base_field: Some("Year".to_string()),
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Year".into(), "Sum of Sales".into()],
+                vec!["East".into(), "2019".into(), 2.into()],
+                vec!["East".into(), "2020".into(), 1.into()],
+                vec!["West".into(), "2019".into(), 2.into()],
+                vec!["West".into(), "2020".into(), 1.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_rank_respects_column_base_field() {
+        let data = vec![
+            pv_row(&["Region".into(), "Year".into(), "Sales".into()]),
+            pv_row(&["East".into(), "2019".into(), 2.into()]),
+            pv_row(&["East".into(), "2020".into(), 6.into()]),
+            pv_row(&["West".into(), "2019".into(), 4.into()]),
+            pv_row(&["West".into(), "2020".into(), 8.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Year")],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::RankDescending),
+                base_field: Some("Year".to_string()),
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "2019 - Sum of Sales".into(),
+                    "2020 - Sum of Sales".into(),
+                ],
+                vec!["East".into(), 2.into(), 1.into()],
+                vec!["West".into(), 2.into(), 1.into()],
             ]
         );
     }
