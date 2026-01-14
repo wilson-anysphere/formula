@@ -537,6 +537,52 @@ test("Typing =SUM(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Range suggestions work inside grouping parens (=SUM((A → =SUM((A1:A10)))", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=SUM((A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM((A1:A10))"),
+    `Expected a grouped SUM range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Range suggestions still work when grouping parens include whitespace (=SUM(( ␠ → =SUM(( ␠A1:A10)))", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=SUM(( ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on A11 (0-based row 10), below the data in column A.
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(( A1:A10))"),
+    `Expected a grouped SUM range suggestion preserving whitespace, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions do not delete trailing whitespace (pure insertion)", async () => {
   const engine = new TabCompletionEngine();
 
@@ -3943,6 +3989,29 @@ test("Sheet-name prefixes are suggested as SheetName! inside range args (=SUM(sh
   assert.ok(
     suggestions.some((s) => ["=SUM(sheet1!", "=SUM(sheet2!"].includes(s.text)),
     `Expected a sheet prefix suggestion ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Sheet-name prefixes are suggested inside grouping parens (=SUM((she → =SUM((sheet2!)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2", "My Sheet", "A1"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM((she";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => ["=SUM((sheet1!", "=SUM((sheet2!"].includes(s.text)),
+    `Expected a grouped sheet prefix suggestion ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 

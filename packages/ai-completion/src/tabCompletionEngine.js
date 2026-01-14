@@ -414,23 +414,30 @@ export class TabCompletionEngine {
     if (!hasValidCellRef) return [];
 
     const typedArgText = parsed.currentArg.text ?? "";
+    const { groupPrefix, innerPrefix } = splitLeadingGroupingParens(typedArgText);
     // If the user has typed trailing whitespace *after* an A1 token (e.g. "A "),
     // avoid emitting A1 range completions: they would need to delete that whitespace
     // to be valid, violating the formula bar’s "pure insertion" constraint.
     //
     // Note: we still allow schema-based completions (e.g. quoted sheet names with
     // spaces like "'My "), which are representable as pure insertions.
-    const hasTrailingWhitespace = typedArgText.length > 0 && /\s$/.test(typedArgText);
-    const isEmptyArg = typedArgText.trim().length === 0;
-    const currentArgText = isEmptyArg ? columnIndexToLetter(cellRef.col) : typedArgText;
+    const hasTrailingWhitespace = innerPrefix.length > 0 && /\s$/.test(innerPrefix);
+    const isEmptyArg = innerPrefix.trim().length === 0;
+    const currentArgText = isEmptyArg ? columnIndexToLetter(cellRef.col) : innerPrefix;
 
-    const rangeCandidates = hasTrailingWhitespace
+    const baseRangeCandidates = hasTrailingWhitespace
       ? []
       : safeSuggestRanges({
           currentArgText,
           cellRef,
           surroundingCells: context?.surroundingCells,
         });
+    const rangeCandidates =
+      groupPrefix.length > 0
+        ? baseRangeCandidates.map((c) =>
+            typeof c?.range === "string" ? { ...c, range: `${groupPrefix}${c.range}` } : c
+          )
+        : baseRangeCandidates;
 
     // Some functions (VLOOKUP table_array, TAKE array, etc.) almost always want
     // a 2D rectangular range when the surrounding data forms a table. When we
@@ -499,7 +506,7 @@ export class TabCompletionEngine {
           merged.length === 0 &&
           cursor === input.length &&
           functionCouldBeComplete &&
-          looksLikeCompleteA1RangeArg(typedArgText)
+          looksLikeCompleteA1RangeArg(innerPrefix)
         ) {
           const closed = closeUnbalancedParens(input);
           if (closed !== input) {
@@ -542,6 +549,7 @@ export class TabCompletionEngine {
     // a pure insertion at the caret. Trimming here could turn e.g. "She " into
     // "She", causing suggestions that would delete the trailing space.
     const rawPrefix = parsed.currentArg?.text ?? "";
+    const { groupPrefix, innerPrefix } = splitLeadingGroupingParens(rawPrefix);
 
     /** @type {Suggestion[]} */
     const suggestions = [];
@@ -566,27 +574,27 @@ export class TabCompletionEngine {
     for (const entry of namedRanges) {
       const name = (entry?.name ?? "").toString();
       if (!name) continue;
-      if (rawPrefix && !startsWithIgnoreCase(name, rawPrefix)) continue;
-      addReplacement(completeIdentifier(name, rawPrefix), {
-        confidence: clamp01(0.65 + ratioBoost(rawPrefix, name) * 0.25),
+      if (innerPrefix && !startsWithIgnoreCase(name, innerPrefix)) continue;
+      addReplacement(`${groupPrefix}${completeIdentifier(name, innerPrefix)}`, {
+        confidence: clamp01(0.65 + ratioBoost(innerPrefix, name) * 0.25),
       });
     }
 
     // 2) Structured references (tables)
     const tables = await safeProviderCall(provider.getTables);
     if (tables.length > 0) {
-      const structuredMatches = suggestStructuredRefs(rawPrefix, tables);
+      const structuredMatches = suggestStructuredRefs(innerPrefix, tables);
       for (const m of structuredMatches) {
-        addReplacement(m.text, { confidence: m.confidence });
+        addReplacement(`${groupPrefix}${m.text}`, { confidence: m.confidence });
       }
     }
 
     // 3) Sheet-qualified A1 ranges (Sheet2!A1:A10)
     const sheetNames = await safeProviderCall(provider.getSheetNames);
 
-    const sheetArg = splitSheetQualifiedArg(rawPrefix);
+    const sheetArg = splitSheetQualifiedArg(innerPrefix);
     if (sheetArg) {
-      const typedQuoted = rawPrefix.startsWith("'");
+      const typedQuoted = innerPrefix.startsWith("'");
       const sheetName = sheetNames
         .filter((s) => typeof s === "string" && s.length > 0)
         .find((s) => s.toLowerCase() === sheetArg.sheetPrefix.toLowerCase());
@@ -658,10 +666,10 @@ export class TabCompletionEngine {
             }
         }
       }
-    } else if (rawPrefix) {
+    } else if (innerPrefix) {
       // 4) Sheet-prefix completion: allow typing "=SUM(She" → "=SUM(Sheet1!"
       // (and for quoted sheet names: "=SUM('My" → "=SUM('My Sheet'!").
-      const typedQuoted = rawPrefix.startsWith("'");
+      const typedQuoted = innerPrefix.startsWith("'");
       for (const sheetName of sheetNames) {
         if (typeof sheetName !== "string" || sheetName.length === 0) continue;
 
@@ -672,10 +680,10 @@ export class TabCompletionEngine {
         if (typedQuoted && !requiresQuotes) continue;
 
         const formattedPrefix = formatSheetPrefix(sheetName);
-        if (!startsWithIgnoreCase(formattedPrefix, rawPrefix)) continue;
+        if (!startsWithIgnoreCase(formattedPrefix, innerPrefix)) continue;
 
-        addReplacement(completeIdentifier(formattedPrefix, rawPrefix), {
-          confidence: clamp01(0.6 + ratioBoost(rawPrefix, formattedPrefix) * 0.25),
+        addReplacement(`${groupPrefix}${completeIdentifier(formattedPrefix, innerPrefix)}`, {
+          confidence: clamp01(0.6 + ratioBoost(innerPrefix, formattedPrefix) * 0.25),
         });
       }
     }
@@ -2113,6 +2121,38 @@ function isInUnclosedDoubleQuotedString(text) {
 function ratioBoost(prefix, full) {
   if (!prefix || !full) return 0;
   return Math.min(1, prefix.length / full.length);
+}
+
+/**
+ * Split a range/schema prefix into leading grouping parentheses (and any whitespace immediately
+ * following them) and the remaining "inner" prefix.
+ *
+ * Examples:
+ * - "(A"     -> { groupPrefix: "(",   innerPrefix: "A" }
+ * - "(( A"   -> { groupPrefix: "(( ", innerPrefix: "A" }
+ * - "( (A"   -> { groupPrefix: "( (", innerPrefix: "A" }
+ *
+ * This lets range/schema suggestions work inside grouped expressions (e.g. `=SUM((A<tab>`),
+ * while still enforcing the formula bar's "pure insertion" constraint by preserving the exact
+ * user-typed prefix.
+ *
+ * @param {string} text
+ * @returns {{ groupPrefix: string, innerPrefix: string }}
+ */
+function splitLeadingGroupingParens(text) {
+  const raw = typeof text === "string" ? text : "";
+  if (!raw || raw[0] !== "(") return { groupPrefix: "", innerPrefix: raw };
+
+  let i = 0;
+  let prefixEnd = 0;
+  while (i < raw.length) {
+    if (raw[i] !== "(") break;
+    i += 1;
+    while (i < raw.length && /\s/.test(raw[i])) i += 1;
+    prefixEnd = i;
+  }
+
+  return { groupPrefix: raw.slice(0, prefixEnd), innerPrefix: raw.slice(prefixEnd) };
 }
 
 function splitSheetQualifiedArg(text) {
