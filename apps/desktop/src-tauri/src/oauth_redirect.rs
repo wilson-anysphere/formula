@@ -75,16 +75,29 @@ pub fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
     normalize_oauth_redirect_request_urls_with_schemes(urls, crate::deep_link_schemes::configured_schemes())
 }
 
+fn has_scheme_prefix(value: &str, scheme: &str) -> bool {
+    let scheme = scheme.trim();
+    if scheme.is_empty() {
+        return false;
+    }
+
+    // Fast, bounded prefix check: we only need to inspect `scheme.len() + 1` bytes (`<scheme>:`).
+    let scheme_len = scheme.len();
+    if value.len() < scheme_len + 1 {
+        return false;
+    }
+    if value.as_bytes().get(scheme_len) != Some(&b':') {
+        return false;
+    }
+
+    value
+        .get(..scheme_len)
+        .map_or(false, |prefix| prefix.eq_ignore_ascii_case(scheme))
+}
+
 fn starts_with_any_scheme(trimmed: &str, schemes: &[String]) -> bool {
     for scheme in schemes {
-        if scheme.is_empty() {
-            continue;
-        }
-        let expected = format!("{scheme}:");
-        let Some(prefix) = trimmed.get(..expected.len()) else {
-            continue;
-        };
-        if prefix.eq_ignore_ascii_case(&expected) {
+        if has_scheme_prefix(trimmed, scheme) {
             return true;
         }
     }
