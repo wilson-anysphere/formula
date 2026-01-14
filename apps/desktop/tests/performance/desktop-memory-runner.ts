@@ -467,7 +467,10 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
       settle("reject", err);
     });
 
-    child.on("exit", (code, signal) => {
+    // Use `close` (not `exit`) so stdout/stderr are fully drained before we decide whether we
+    // observed the `[startup] ...` line. This keeps error reporting stable even if the desktop
+    // process exits quickly after logging.
+    child.on("close", (code, signal) => {
       if (settled) return;
 
       if (timedOutWaitingForMetrics) {
