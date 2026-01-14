@@ -214,6 +214,18 @@ Excel table structured references have a small set of reserved **item keywords**
 Unlike function names / separators / error literals, these item keywords appear to be **canonical
 (English) in Excel's formula language across our supported locales** (`de-DE`, `fr-FR`, `es-ES`).
 
+To verify this behavior against a real Excel install (Windows + Excel desktop required), you can run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-structured-reference-keywords.ps1 `
+  -LocaleId de-DE `
+  -OutPath out/
+```
+
+The script writes a small JSON report containing `Formula` vs `FormulaLocal` for a few sentinel
+structured references (including `#All` and `#This Row`), making it easy to see whether Excel is
+localizing these tokens for your current UI language configuration.
+
 Accordingly:
 
 - `locale::canonicalize_formula*` and `locale::localize_formula*` intentionally **do not translate**
