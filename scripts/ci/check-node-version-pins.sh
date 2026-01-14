@@ -492,7 +492,12 @@ done
 
 # Always include CI + release workflows (they establish the canonical env pin for the repo).
 node_workflows+=("$ci_workflow" "$release_workflow")
-mapfile -t node_workflows < <(printf '%s\n' "${node_workflows[@]}" | sort -u)
+unique_node_workflows=()
+while IFS= read -r workflow; do
+  [ -z "$workflow" ] && continue
+  unique_node_workflows+=("$workflow")
+done < <(printf '%s\n' "${node_workflows[@]}" | sort -u)
+node_workflows=("${unique_node_workflows[@]}")
 
 if [ "${#node_workflows[@]}" -eq 0 ]; then
   echo "Node workflow pin check failed: no workflows appear to use Node tooling." >&2
