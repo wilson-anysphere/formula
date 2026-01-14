@@ -95,18 +95,48 @@ pub fn agile_iterated_hash(
     #[cfg(test)]
     ITERATED_HASH_CALLS.fetch_add(1, Ordering::Relaxed);
 
+    fn hash_into(hash_alg: HashAlgorithm, data: &[u8], out: &mut [u8]) {
+        match hash_alg {
+            HashAlgorithm::Sha1 => {
+                use sha1::Digest as _;
+                let digest = sha1::Sha1::digest(data);
+                out.copy_from_slice(&digest);
+            }
+            HashAlgorithm::Sha256 => {
+                use sha2::Digest as _;
+                let digest = sha2::Sha256::digest(data);
+                out.copy_from_slice(&digest);
+            }
+            HashAlgorithm::Sha384 => {
+                use sha2::Digest as _;
+                let digest = sha2::Sha384::digest(data);
+                out.copy_from_slice(&digest);
+            }
+            HashAlgorithm::Sha512 => {
+                use sha2::Digest as _;
+                let digest = sha2::Sha512::digest(data);
+                out.copy_from_slice(&digest);
+            }
+        }
+    }
+
+    let digest_len = hash_output_len(hash_alg);
+    let mut h = vec![0u8; digest_len];
+
+    // Initial round: Hash(salt || password_utf16le)
     let mut buf = Vec::with_capacity(salt.len() + password_utf16le.len());
     buf.extend_from_slice(salt);
     buf.extend_from_slice(password_utf16le);
-    let mut h = hash_alg.digest(&buf);
+    hash_into(hash_alg, &buf, &mut h);
 
-    // Reuse a single buffer for the inner hash rounds to avoid allocating `spinCount` times.
-    let mut round = Vec::with_capacity(4 + h.len());
+    // Iteration 0..spinCount-1: Hash(LE32(i) || H)
+    //
+    // Avoid allocating in the loop: reuse a fixed-size buffer and overwrite the hash output.
+    let mut round = vec![0u8; 4 + digest_len];
     for i in 0..spin_count {
-        round.clear();
-        round.extend_from_slice(&i.to_le_bytes());
-        round.extend_from_slice(&h);
-        h = hash_alg.digest(&round);
+        round[..4].copy_from_slice(&i.to_le_bytes());
+        round[4..].copy_from_slice(&h);
+        hash_into(hash_alg, &round, &mut h);
     }
 
     h
