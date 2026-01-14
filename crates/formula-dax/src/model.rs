@@ -1725,6 +1725,7 @@ impl DataModel {
         out
     }
 
+    #[deny(unreachable_patterns)]
     fn collect_same_table_column_dependencies_inner(
         &self,
         expr: &Expr,
