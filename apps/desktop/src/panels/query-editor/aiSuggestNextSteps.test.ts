@@ -168,6 +168,33 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "addColumn", name: "Flag2", formula: "[Region] == 'East' ? 1 : 0" }]);
   });
 
+  it("validates unpivot suggestions and rejects output name collisions", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          // Invalid: would create a duplicate "Sales" column (Sales is kept, and also used as nameColumn)
+          { type: "unpivot", columns: ["Region"], nameColumn: "Sales", valueColumn: "Value" },
+          { type: "unpivot", columns: ["Region"], nameColumn: "Attribute", valueColumn: "Value" },
+          { type: "take", count: 1 },
+        ]),
+      },
+    });
+
+    const preview = new DataTable(
+      [
+        { name: "Region", type: "string" },
+        { name: "Sales", type: "number" },
+      ],
+      [],
+    );
+    const ops = await suggestQueryNextSteps("unpivot", { query: baseQuery(), preview });
+    expect(ops).toEqual([
+      { type: "unpivot", columns: ["Region"], nameColumn: "Attribute", valueColumn: "Value" },
+      { type: "take", count: 1 },
+    ]);
+  });
+
   it("drops addColumn formulas that reference '_' (value formulas)", async () => {
     chatMock.mockResolvedValue({
       message: {
@@ -238,6 +265,31 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([
       { type: "renameColumn", oldName: "Region", newName: "Region2" },
       { type: "addColumn", name: "Flag", formula: "[Region2]" },
+    ]);
+  });
+
+  it("allows follow-up operations to reference unpivot output columns", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "unpivot", columns: ["Region"], nameColumn: "Attribute", valueColumn: "Value" },
+          { type: "addColumn", name: "Flag", formula: "[Attribute]" },
+        ]),
+      },
+    });
+
+    const preview = new DataTable(
+      [
+        { name: "Region", type: "string" },
+        { name: "Sales", type: "number" },
+      ],
+      [],
+    );
+    const ops = await suggestQueryNextSteps("unpivot then add", { query: baseQuery(), preview });
+    expect(ops).toEqual([
+      { type: "unpivot", columns: ["Region"], nameColumn: "Attribute", valueColumn: "Value" },
+      { type: "addColumn", name: "Flag", formula: "[Attribute]" },
     ]);
   });
 

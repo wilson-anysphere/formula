@@ -32,6 +32,7 @@ Allowed operation types and shapes:
 - splitColumn: { "type": "splitColumn", "column": string, "delimiter": string }
 - groupBy: { "type": "groupBy", "groupColumns": string[], "aggregations": Array<{ "column": string, "op": "sum"|"count"|"average"|"min"|"max"|"countDistinct", "as"?: string }> }
 - addColumn: { "type": "addColumn", "name": string, "formula": string }
+- unpivot: { "type": "unpivot", "columns": string[], "nameColumn": string, "valueColumn": string }
 - take: { "type": "take", "count": number }
 - distinctRows: { "type": "distinctRows", "columns": string[] | null }
 - removeRowsWithErrors: { "type": "removeRowsWithErrors", "columns": string[] | null }
@@ -161,6 +162,13 @@ function applySchemaTransform(op: QueryOperation, schema: Set<string>): Set<stri
     case "addColumn": {
       const next = new Set(schema);
       next.add(op.name);
+      return next;
+    }
+    case "unpivot": {
+      const next = new Set(schema);
+      for (const col of op.columns) next.delete(col);
+      next.add(op.nameColumn);
+      next.add(op.valueColumn);
       return next;
     }
     case "groupBy": {
@@ -363,6 +371,29 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
         return null;
       }
       return { type: "addColumn", name: trimmedName, formula: trimmedFormula };
+    }
+    case "unpivot": {
+      const columns = (value as { columns?: unknown }).columns;
+      const nameColumn = (value as { nameColumn?: unknown }).nameColumn;
+      const valueColumn = (value as { valueColumn?: unknown }).valueColumn;
+      if (!isStringArray(columns)) return null;
+      const deduped = dedupePreserveOrder(columns);
+      if (deduped.length === 0) return null;
+      if (deduped.some((c) => !allowedColumns.has(c))) return null;
+      if (typeof nameColumn !== "string" || !nameColumn.trim()) return null;
+      if (typeof valueColumn !== "string" || !valueColumn.trim()) return null;
+      const nameCol = nameColumn.trim();
+      const valueCol = valueColumn.trim();
+      if (nameCol === valueCol) return null;
+
+      // `unpivot` removes the specified columns before adding `nameColumn`/`valueColumn`,
+      // so allow them to reuse removed column names. But they must not collide with
+      // remaining columns.
+      const remaining = new Set(allowedColumns);
+      for (const col of deduped) remaining.delete(col);
+      if (remaining.has(nameCol) || remaining.has(valueCol)) return null;
+
+      return { type: "unpivot", columns: deduped, nameColumn: nameCol, valueColumn: valueCol };
     }
     case "sortRows": {
       const sortBy = (value as { sortBy?: unknown }).sortBy;
