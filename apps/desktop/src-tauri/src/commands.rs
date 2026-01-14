@@ -8930,6 +8930,29 @@ mod tests {
     }
 
     #[test]
+    fn cell_edit_ipc_formula_limit_counts_utf8_bytes() {
+        let max = crate::resource_limits::MAX_CELL_FORMULA_BYTES;
+        let emoji = "💩";
+        let bytes_per_emoji = emoji.len();
+        assert!(bytes_per_emoji > 1, "expected multi-byte UTF-8 string");
+
+        // This payload is exactly at the byte limit, but well under the limit in Unicode scalar
+        // count. This ensures we are enforcing UTF-8 byte length, not character count.
+        let fits = emoji.repeat(max / bytes_per_emoji);
+        let json = format!(r#"{{"formula":"{fits}"}}"#);
+        serde_json::from_str::<RangeCellEdit>(&json).expect("expected formula at limit to parse");
+
+        let oversized = emoji.repeat(max / bytes_per_emoji + 1);
+        let json = format!(r#"{{"formula":"{oversized}"}}"#);
+        let err = serde_json::from_str::<RangeCellEdit>(&json)
+            .expect_err("expected formula over byte limit to be rejected");
+        assert!(
+            err.to_string().contains("cell formula") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn cell_edit_ipc_rejects_oversized_range_payload_cell_count() {
         type SmallLimitedRangeCellEdits = LimitedMatrix<RangeCellEdit, 100, 10>;
 
