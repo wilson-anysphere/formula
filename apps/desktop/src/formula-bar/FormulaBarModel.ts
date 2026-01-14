@@ -103,6 +103,7 @@ export class FormulaBarModel {
   #engineSyntaxError: FormulaParseError | null = null;
   #engineToolingFormula: string | null = null;
   #engineToolingLocaleId: string = "en-US";
+  #errorExplanationCache: { value: unknown; result: ErrorExplanation | null } | null = null;
   /**
    * Full text suggestion for the current draft (not just the "ghost text" tail).
    *
@@ -131,6 +132,7 @@ export class FormulaBarModel {
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
     this.#clearEditorTooling();
+    this.#errorExplanationCache = null;
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
   }
@@ -374,7 +376,12 @@ export class FormulaBarModel {
   }
 
   errorExplanation(): ErrorExplanation | null {
-    return explainFormulaError(this.#activeCell.value);
+    const value = this.#activeCell.value;
+    const cache = this.#errorExplanationCache;
+    if (cache && cache.value === value) return cache.result;
+    const result = explainFormulaError(value);
+    this.#errorExplanationCache = { value, result };
+    return result;
   }
 
   syntaxError(): FormulaParseError | null {
