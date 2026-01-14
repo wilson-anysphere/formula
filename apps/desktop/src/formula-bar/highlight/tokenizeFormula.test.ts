@@ -135,6 +135,14 @@ describe("tokenizeFormula", () => {
     expect(totalsRefs.map((t) => t.text)).toEqual(["Table1[[#Totals],[Amount]]"]);
   });
 
+  it("tokenizes structured references with @ shorthand (this row) as single tokens", () => {
+    const input = "=SUM(Table1[@Amount], Table1[@[Total Amount]], Table1[@])";
+    const refs = tokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    expect(refs).toEqual(["Table1[@Amount]", "Table1[@[Total Amount]]", "Table1[@]"]);
+  });
+
   it("tokenizes structured references with `#This Row` selectors as single tokens", () => {
     const input = "=SUM(Table1[[#This Row],[Amount]])";
     const tokens = tokenizeFormula(input);

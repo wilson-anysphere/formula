@@ -14,6 +14,7 @@ const QUALIFIED_REFERENCE_RE = new RegExp(
   `^\\[\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]\\s*,\\s*\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]\\]$`,
   "i"
 );
+
 // Excel permits "this row" shorthand forms:
 //   TableName[@Column]
 //   TableName[@[Column Name]]
@@ -23,7 +24,10 @@ const QUALIFIED_REFERENCE_RE = new RegExp(
 //
 // The nested-bracket form exists because column names can contain spaces/special chars.
 // Column names may still contain escaped closing brackets via doubling: `]` -> `]]`.
-const THIS_ROW_NESTED_REFERENCE_RE = new RegExp(`^\\[\\s*@\\s*\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]\\s*\\]$`, "i");
+const THIS_ROW_NESTED_REFERENCE_RE = new RegExp(
+  `^\\[\\s*@\\s*\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]\\s*\\]$`,
+  "i"
+);
 const SIMPLE_REFERENCE_RE = new RegExp(`^\\[\\s*${ESCAPED_ITEM_RE_SRC}\\s*\\]$`);
 
 function unescapeStructuredRefItem(text: string): string {
@@ -51,6 +55,9 @@ export function parseStructuredReferenceText(text: string): ParsedStructuredRefe
   // Supported patterns:
   //   TableName[ColumnName]
   //   TableName[#All]
+  //   TableName[@ColumnName]
+  //   TableName[@[Column Name]]
+  //   TableName[@] (entire row; columnName will be empty)
   //   TableName[[#All],[ColumnName]]
   //   TableName[[#Data],[ColumnName]]
   //   TableName[[#Headers],[ColumnName]]
@@ -77,15 +84,14 @@ export function parseStructuredReferenceText(text: string): ParsedStructuredRefe
   const simpleMatch = SIMPLE_REFERENCE_RE.exec(suffix);
   if (simpleMatch) {
     const item = unescapeStructuredRefItem(simpleMatch[1]!.trim());
-    // `TableName[@Column]` (or implicit `[@Column]`) is a shorthand for `#This Row`.
+    // `TableName[@Column]` / `TableName[@]` (or implicit `[@...]`) is shorthand for `#This Row`.
     if (item.startsWith("@")) {
       const columnName = item.slice(1).trim();
-      if (!columnName) return null;
       // Shorthand `@Column` does not permit whitespace or nested bracket syntax; column names
       // that require quoting (spaces, etc) use the `@[[Column Name]]` form handled above.
       // Keep this strict to avoid accidentally treating `[@[Col]] , ...` tails as a single token
       // when `]]` sequences appear (which are ambiguous between escapes and nested closes).
-      if (/[\s\[\],;\]]/.test(columnName)) return null;
+      if (columnName && /[\s\[\],;\]]/.test(columnName)) return null;
       return { tableName, selector: "#This Row", columnName };
     }
     return { tableName, selector: null, columnName: item };
