@@ -20,9 +20,27 @@ function isFormula(value) {
   return typeof value === "string" && value.trimStart().startsWith("=");
 }
 
-function matchesCellFilename(formula) {
+function parseCellFilenameReferenceArg(formula) {
   const body = formula.trim().replace(/^=/, "").trim();
-  return /^CELL\s*\(\s*\"filename\"\s*\)\s*$/i.test(body);
+  const m = /^CELL\s*\(\s*\"filename\"\s*(?:,\s*(.+?)\s*)?\)\s*$/i.exec(body);
+  if (!m) return null;
+  const raw = typeof m[1] === "string" ? m[1].trim() : "";
+  return raw ? raw : "";
+}
+
+function sheetNameFromReferenceArg(arg) {
+  const raw = String(arg ?? "").trim();
+  if (!raw) return null;
+
+  const bang = raw.lastIndexOf("!");
+  if (bang < 0) return null;
+  const token = raw.slice(0, bang).trim();
+  if (!token) return null;
+
+  const quoted = /^'((?:[^']|'')+)'$/.exec(token);
+  if (quoted) return quoted[1].replace(/''/g, "'").trim() || null;
+
+  return token;
 }
 
 function matchesInfoDirectory(formula) {
@@ -105,11 +123,13 @@ export class WasmWorkbook {
       for (const [address, input] of inputs.entries()) {
         let computed = null;
         if (isFormula(input)) {
-          if (matchesCellFilename(input)) {
+          const refArg = parseCellFilenameReferenceArg(input);
+          if (refArg !== null) {
             if (!this.filename) {
               computed = "";
             } else {
-              computed = `${this.directory ?? ""}[${this.filename}]${sheetName}`;
+              const refSheetName = sheetNameFromReferenceArg(refArg);
+              computed = `${this.directory ?? ""}[${this.filename}]${refSheetName ?? sheetName}`;
             }
           } else if (matchesInfoDirectory(input)) {
             computed = this.filename ? this.directory ?? "" : "";
@@ -140,4 +160,3 @@ export function lexFormula() {
 export function parseFormulaPartial() {
   return { ast: null, error: null, context: { function: null } };
 }
-

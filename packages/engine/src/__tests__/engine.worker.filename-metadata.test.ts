@@ -124,6 +124,8 @@ describe("engine.worker workbook file metadata integration", () => {
           updates: [
             { address: "A1", value: '=CELL("filename")', sheet: "Sheet1" },
             { address: "A2", value: '=INFO("directory")', sheet: "Sheet1" },
+            { address: "A1", value: '=CELL("filename")', sheet: "Sheet2" },
+            { address: "A3", value: '=CELL("filename",Sheet2!A1)', sheet: "Sheet1" },
           ],
         },
       });
@@ -134,42 +136,67 @@ describe("engine.worker workbook file metadata integration", () => {
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe("");
 
-      resp = await sendRequest(port, { type: "request", id: 7, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      resp = await sendRequest(port, { type: "request", id: 4, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, { type: "request", id: 5, method: "getCell", params: { address: "A1", sheet: "Sheet2" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, { type: "request", id: 6, method: "getCell", params: { address: "A3", sheet: "Sheet1" } });
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe("");
 
       // Simulate Save As.
       await sendRequest(port, {
         type: "request",
-        id: 4,
+        id: 7,
         method: "setWorkbookFileMetadata",
         params: { directory: "/tmp/", filename: "book.xlsx" },
       });
 
-      await sendRequest(port, { type: "request", id: 5, method: "recalculate", params: {} });
+      await sendRequest(port, { type: "request", id: 8, method: "recalculate", params: {} });
 
-      resp = await sendRequest(port, { type: "request", id: 6, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      resp = await sendRequest(port, { type: "request", id: 9, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe("/tmp/[book.xlsx]Sheet1");
 
-      resp = await sendRequest(port, { type: "request", id: 8, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      resp = await sendRequest(port, { type: "request", id: 10, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe("/tmp/");
+
+      resp = await sendRequest(port, { type: "request", id: 11, method: "getCell", params: { address: "A1", sheet: "Sheet2" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/tmp/[book.xlsx]Sheet2");
+
+      // `CELL("filename", reference)` should use the reference's sheet name component.
+      resp = await sendRequest(port, { type: "request", id: 12, method: "getCell", params: { address: "A3", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("/tmp/[book.xlsx]Sheet2");
 
       // Simulate creating a new, unsaved workbook (metadata cleared).
       await sendRequest(port, {
         type: "request",
-        id: 9,
+        id: 13,
         method: "setWorkbookFileMetadata",
         params: { directory: null, filename: null },
       });
-      await sendRequest(port, { type: "request", id: 10, method: "recalculate", params: {} });
+      await sendRequest(port, { type: "request", id: 14, method: "recalculate", params: {} });
 
-      resp = await sendRequest(port, { type: "request", id: 11, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
+      resp = await sendRequest(port, { type: "request", id: 15, method: "getCell", params: { address: "A1", sheet: "Sheet1" } });
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe("");
 
-      resp = await sendRequest(port, { type: "request", id: 12, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      resp = await sendRequest(port, { type: "request", id: 16, method: "getCell", params: { address: "A2", sheet: "Sheet1" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, { type: "request", id: 17, method: "getCell", params: { address: "A1", sheet: "Sheet2" } });
+      expect(resp.ok).toBe(true);
+      expect(resp.result.value).toBe("");
+
+      resp = await sendRequest(port, { type: "request", id: 18, method: "getCell", params: { address: "A3", sheet: "Sheet1" } });
       expect(resp.ok).toBe(true);
       expect(resp.result.value).toBe("");
     } finally {
