@@ -192,11 +192,11 @@ impl PivotCache {
             }
 
             let mut name = base.clone();
-            if used_folded.contains(&name.to_ascii_lowercase()) {
+            if used_folded.contains(&fold_text_case_insensitive(&name)) {
                 let mut suffix = 2usize;
                 loop {
                     name = format!("{base} ({suffix})");
-                    let folded = name.to_ascii_lowercase();
+                    let folded = fold_text_case_insensitive(&name);
                     if !used_folded.contains(&folded) {
                         break;
                     }
@@ -204,7 +204,7 @@ impl PivotCache {
                 }
             }
 
-            used_folded.insert(name.to_ascii_lowercase());
+            used_folded.insert(fold_text_case_insensitive(&name));
             out.push(name);
         }
 
@@ -758,7 +758,17 @@ impl Accumulator {
 }
 
 fn normalize_pivot_item_name(name: &str) -> String {
-    name.to_ascii_lowercase()
+    fold_text_case_insensitive(name)
+}
+
+fn fold_text_case_insensitive(s: &str) -> String {
+    if s.is_ascii() {
+        s.to_ascii_uppercase()
+    } else {
+        // Use Unicode-aware uppercasing to approximate Excel-like case-insensitive matching for
+        // non-ASCII text (e.g. ß -> SS).
+        s.chars().flat_map(|c| c.to_uppercase()).collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -3628,6 +3638,58 @@ mod tests {
     }
 
     #[test]
+    fn calculated_item_resolves_unicode_item_refs_case_insensitively() {
+        let data = vec![
+            pv_row(&["Region".into(), "Sales".into()]),
+            pv_row(&["Straße".into(), 100.into()]),
+            pv_row(&["West".into(), 200.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Sales"),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![CalculatedItem {
+                field: "Region".to_string(),
+                name: "Straße+West".to_string(),
+                // `ß` uppercases to `SS`, so the existing item `"Straße"` should be addressable as
+                // `"STRASSE"` in calculated item formulas.
+                formula: "\"STRASSE\" + \"WEST\"".to_string(),
+            }],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Sum of Sales".into()],
+                vec!["Straße".into(), 100.into()],
+                vec!["Straße+West".into(), 300.into()],
+                vec!["West".into(), 200.into()],
+                vec!["Grand Total".into(), 600.into()],
+            ]
+        );
+    }
+
+    #[test]
     fn calculated_item_field_must_be_in_layout() {
         let data = vec![
             pv_row(&["Region".into(), "Sales".into()]),
@@ -5394,13 +5456,39 @@ mod tests {
             ]
         );
 
-        let folded: HashSet<String> = field_names.iter().map(|s| s.to_ascii_lowercase()).collect();
+        let folded: HashSet<String> = field_names
+            .iter()
+            .map(|s| fold_text_case_insensitive(s))
+            .collect();
         assert_eq!(folded.len(), field_names.len());
 
         assert_eq!(cache.unique_values.len(), field_names.len());
         for name in &field_names {
             assert!(cache.unique_values.contains_key(name));
         }
+    }
+
+    #[test]
+    fn pivot_cache_normalizes_unicode_duplicate_headers_case_insensitively() {
+        // Use a German sharp S (ß) to ensure we handle Unicode-aware case-insensitive header
+        // normalization (ß -> SS).
+        let data = vec![
+            pv_row(&["Straße".into(), "STRASSE".into()]),
+            pv_row(&[1.into(), 2.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let field_names: Vec<String> = cache.fields.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(
+            field_names,
+            vec!["Straße".to_string(), "STRASSE (2)".to_string()]
+        );
+
+        let folded: HashSet<String> = field_names
+            .iter()
+            .map(|s| fold_text_case_insensitive(s))
+            .collect();
+        assert_eq!(folded.len(), field_names.len());
     }
 
     #[test]

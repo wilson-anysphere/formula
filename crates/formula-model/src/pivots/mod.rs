@@ -47,6 +47,48 @@ pub enum PivotKeyPart {
     Bool(bool),
 }
 
+fn cmp_text_case_insensitive(a: &str, b: &str) -> Ordering {
+    if a.is_ascii() && b.is_ascii() {
+        return cmp_ascii_case_insensitive(a, b);
+    }
+
+    // Compare using Unicode-aware uppercasing so semantics match Excel-like case-insensitive
+    // ordering for non-ASCII text (e.g. ß -> SS).
+    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
+    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
+                Ordering::Equal => continue,
+                ord => return ord,
+            },
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
+fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
+    let mut a_iter = a.as_bytes().iter();
+    let mut b_iter = b.as_bytes().iter();
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(&ac), Some(&bc)) => {
+                let ac = ac.to_ascii_uppercase();
+                let bc = bc.to_ascii_uppercase();
+                match ac.cmp(&bc) {
+                    Ordering::Equal => continue,
+                    ord => return ord,
+                }
+            }
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
 impl PivotKeyPart {
     fn kind_rank(&self) -> u8 {
         match self {
@@ -118,9 +160,15 @@ impl Ord for PivotKeyPart {
             }
             (PivotKeyPart::Date(a), PivotKeyPart::Date(b)) => a.cmp(b),
             (PivotKeyPart::Text(a), PivotKeyPart::Text(b)) => {
-                let a_fold = a.to_ascii_lowercase();
-                let b_fold = b.to_ascii_lowercase();
-                a_fold.cmp(&b_fold).then_with(|| a.cmp(b))
+                // Pivot tables in Excel sort text case-insensitively by default. Use a casefolded
+                // comparison as the primary key, with a deterministic case-sensitive tiebreak so
+                // the overall ordering remains total.
+                let ord = cmp_text_case_insensitive(a, b);
+                if ord != Ordering::Equal {
+                    ord
+                } else {
+                    a.cmp(b)
+                }
             }
             (PivotKeyPart::Bool(a), PivotKeyPart::Bool(b)) => a.cmp(b),
             _ => Ordering::Equal,
