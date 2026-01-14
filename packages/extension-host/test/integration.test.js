@@ -11,7 +11,7 @@ const { ExtensionHost } = require("../src");
 // CI load, the default 5s activation/command timeouts can be too aggressive and cause spurious
 // EXTENSION_TIMEOUT failures. Keep the tests focused on integration correctness by using a more
 // forgiving timeout.
-const INTEGRATION_TEST_TIMEOUT_MS = 20_000;
+const INTEGRATION_TEST_TIMEOUT_MS = 30_000;
 
 function createHost(options = {}) {
   return new ExtensionHost({
@@ -32,7 +32,7 @@ test("integration: load sample extension and execute contributed command", async
     extensionStoragePath: path.join(dir, "storage.json"),
     // Worker startup can be slow under heavy CI load; keep integration tests focused on
     // correctness rather than the default 5s activation SLA.
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async ({ permissions }) => {
       // Allow command registration, but deny outbound network access.
       if (permissions.includes("network")) return false;
@@ -69,7 +69,7 @@ test("integration: panel command creates panel and sets HTML", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -95,7 +95,7 @@ test("integration: view activation creates and renders contributed panel", async
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -131,7 +131,7 @@ test("integration: viewActivated is broadcast even if view activation fails", as
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => false
   });
 
@@ -166,7 +166,7 @@ test("integration: viewActivated payload normalizes viewId to string", async (t)
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -198,7 +198,7 @@ test("integration: panel messaging (webview -> extension -> webview)", async (t)
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -233,7 +233,7 @@ test("integration: invoke custom function activates extension and returns result
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -266,7 +266,7 @@ test("integration: network.fetch is permission gated and can fetch via host", as
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -293,7 +293,7 @@ test("integration: denied network permission blocks fetch", async (t) => {
     extensionStoragePath: path.join(dir, "storage.json"),
     // Worker startup can be slow under heavy CI load; keep integration tests focused on
     // correctness rather than the default 5s activation SLA.
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async ({ permissions }) => {
       if (permissions.includes("network")) return false;
       return true;
@@ -320,7 +320,7 @@ test("integration: clipboard API is permission gated and writes clipboard text",
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -347,7 +347,7 @@ test("integration: denied clipboard permission blocks clipboard writes", async (
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async ({ permissions }) => {
       if (permissions.includes("clipboard")) return false;
       return true;
@@ -379,7 +379,7 @@ test("integration: config.get returns contributed default values", async (t) => 
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -402,7 +402,7 @@ test("integration: denied permission prevents side effects", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: INTEGRATION_TEST_TIMEOUT_MS,
     permissionPrompt: async ({ permissions }) => {
       // Allow command registration, but deny write access.
       if (permissions.includes("cells.write")) return false;
