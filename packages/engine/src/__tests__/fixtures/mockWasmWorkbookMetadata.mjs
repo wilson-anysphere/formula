@@ -72,12 +72,12 @@ export class WasmWorkbook {
     recordCall("setColStyleId", sheet, col, styleId);
   }
 
-  setSheetDefaultStyleId(sheet, styleId) {
-    recordCall("setSheetDefaultStyleId", sheet, styleId);
-  }
-
   setFormatRunsByCol(sheet, col, runs) {
     recordCall("setFormatRunsByCol", sheet, col, runs);
+  }
+
+  setSheetDefaultStyleId(sheet, styleId) {
+    recordCall("setSheetDefaultStyleId", sheet, styleId);
   }
 
   setColWidth(sheet, col, width) {

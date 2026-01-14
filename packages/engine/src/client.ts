@@ -7,6 +7,7 @@ import type {
   CellScalar,
   CellValueRich,
   EngineInfoDto,
+  FormatRun,
   WorkbookStyleDto,
   EditOp,
   EditResult,
@@ -286,12 +287,12 @@ export interface EngineClient {
     (
       sheet: string,
       col: number,
-      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+      runs: FormatRun[],
       options?: RpcOptions
     ): Promise<void>;
     (
       col: number,
-      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+      runs: FormatRun[],
       sheet?: string,
       options?: RpcOptions
     ): Promise<void>;

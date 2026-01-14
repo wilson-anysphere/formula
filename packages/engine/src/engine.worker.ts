@@ -864,6 +864,18 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               }
               result = null;
               break;
+            case "setFormatRunsByCol":
+              if (typeof (wb as any).setFormatRunsByCol !== "function") {
+                throw new Error(
+                  "setFormatRunsByCol: WasmWorkbook.setFormatRunsByCol is not available in this WASM build"
+                );
+              }
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                (wb as any).setFormatRunsByCol(sheet, params.col, params.runs ?? []);
+              }
+              result = null;
+              break;
             case "setSheetDefaultStyleId":
               if (typeof (wb as any).setSheetDefaultStyleId !== "function") {
                 throw new Error(
@@ -874,18 +886,6 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
                 const styleId = params.styleId == null ? 0 : params.styleId;
                 (wb as any).setSheetDefaultStyleId(sheet, styleId);
-              }
-              result = null;
-              break;
-            case "setFormatRunsByCol":
-              if (typeof (wb as any).setFormatRunsByCol !== "function") {
-                throw new Error(
-                  "setFormatRunsByCol: WasmWorkbook.setFormatRunsByCol is not available in this WASM build"
-                );
-              }
-              {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
-                (wb as any).setFormatRunsByCol(sheet, params.col, params.runs ?? []);
               }
               result = null;
               break;

@@ -588,6 +588,16 @@ export interface RpcOptions {
 }
 
 /**
+ * Compressed range-run formatting segment applied to a single column.
+ *
+ * Mirrors `crates/formula-engine`'s `FormatRun` and `DocumentController`'s `formatRunsByCol`
+ * representation.
+ *
+ * Runs use half-open row intervals `[startRow, endRowExclusive)` in 0-based engine coordinates.
+ */
+export type FormatRun = { startRow: number; endRowExclusive: number; styleId: number };
+
+/**
  * RPC method names supported by the `packages/engine` Web Worker protocol.
  *
  * Keep this in sync with:
@@ -640,8 +650,8 @@ export type RpcMethod =
   | "setCellStyleId"
   | "setRowStyleId"
   | "setColStyleId"
-  | "setSheetDefaultStyleId"
   | "setFormatRunsByCol"
+  | "setSheetDefaultStyleId"
   | "setColWidth"
   | "setColWidthChars"
   | "setColHidden"

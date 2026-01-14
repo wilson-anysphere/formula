@@ -9,6 +9,7 @@ import type {
   EngineInfoDto,
   EditOp,
   EditResult,
+  FormatRun,
   GoalSeekRequest,
   GoalSeekResponse,
   FormulaPartialLexResult,
@@ -646,35 +647,35 @@ export class EngineWorker {
   async setFormatRunsByCol(
     sheet: string,
     col: number,
-    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    runs: FormatRun[],
     options?: RpcOptions
   ): Promise<void>;
   async setFormatRunsByCol(
     col: number,
-    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    runs: FormatRun[],
     sheet?: string,
     options?: RpcOptions
   ): Promise<void>;
   async setFormatRunsByCol(
     sheetOrCol: string | number,
-    colOrRuns: number | Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
-    runsOrSheet?: Array<{ startRow: number; endRowExclusive: number; styleId: number }> | string | null | RpcOptions,
+    colOrRuns: number | FormatRun[],
+    runsOrSheet?: FormatRun[] | string | null | RpcOptions,
     options?: RpcOptions
   ): Promise<void> {
     await this.flush();
     let sheet: string | undefined;
     let col: number;
-    let runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+    let runs: FormatRun[];
     let finalRpcOptions: RpcOptions | undefined;
 
     if (typeof sheetOrCol === "string") {
       sheet = sheetOrCol;
       col = colOrRuns as number;
-      runs = runsOrSheet as Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+      runs = runsOrSheet as FormatRun[];
       finalRpcOptions = options;
     } else {
       col = sheetOrCol;
-      runs = colOrRuns as Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+      runs = colOrRuns as FormatRun[];
       if (typeof runsOrSheet === "string" || runsOrSheet == null) {
         sheet = typeof runsOrSheet === "string" ? runsOrSheet : undefined;
         finalRpcOptions = options;

@@ -9,8 +9,8 @@ use formula_engine::locale::{
 use formula_engine::pivot as pivot_engine;
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
-    FormatRun, ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, FormatRun, NameDefinition,
+    NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
@@ -3779,6 +3779,8 @@ impl WasmWorkbook {
     /// Replace the compressed format-run layer for a column (DocumentController `formatRunsByCol`).
     ///
     /// `runs` must be an array of `{ startRow, endRowExclusive, styleId }` objects.
+    ///
+    /// Row indices are 0-based and runs use half-open intervals `[startRow, endRowExclusive)`.
     #[wasm_bindgen(js_name = "setFormatRunsByCol")]
     pub fn set_format_runs_by_col(
         &mut self,
@@ -3786,30 +3788,81 @@ impl WasmWorkbook {
         col: u32,
         runs: JsValue,
     ) -> Result<(), JsValue> {
-        #[derive(Debug, Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct FormatRunDto {
-            start_row: u32,
-            end_row_exclusive: u32,
-            style_id: u32,
+        let sheet = self.inner.ensure_sheet(&sheet);
+        if col >= EXCEL_MAX_COLS {
+            return Err(js_err(format!("col out of Excel bounds: {col}")));
         }
 
-        let sheet = self.inner.ensure_sheet(&sheet);
+        fn parse_u32_field(obj: &Object, key: &str, context: &str) -> Result<u32, JsValue> {
+            let value = Reflect::get(obj, &JsValue::from_str(key))
+                .map_err(|_| js_err(format!("{context}: failed to read {key}")))?;
+            let n = value
+                .as_f64()
+                .ok_or_else(|| js_err(format!("{context} must be a non-negative integer")))?;
+            if !n.is_finite() || n < 0.0 || n > u32::MAX as f64 || n.fract() != 0.0 {
+                return Err(js_err(format!("{context} must be a non-negative integer")));
+            }
+            Ok(n as u32)
+        }
 
-        let runs: Vec<FormatRunDto> = serde_wasm_bindgen::from_value(runs)
-            .map_err(|err| js_err(format!("runs must be an array of objects: {err}")))?;
-        let runs: Vec<FormatRun> = runs
-            .into_iter()
-            .map(|r| FormatRun {
-                start_row: r.start_row,
-                end_row_exclusive: r.end_row_exclusive,
-                style_id: r.style_id,
-            })
-            .collect();
+        let mut parsed: Vec<FormatRun> = Vec::new();
+
+        // Accept null/undefined as clearing the column's runs.
+        if !(runs.is_null() || runs.is_undefined()) {
+            let arr = runs
+                .dyn_into::<Array>()
+                .map_err(|_| js_err("setFormatRunsByCol: runs must be an array"))?;
+
+            for (idx, item) in arr.iter().enumerate() {
+                let obj = item.dyn_into::<Object>().map_err(|_| {
+                    js_err(format!(
+                        "setFormatRunsByCol: runs[{idx}] must be an object"
+                    ))
+                })?;
+
+                let start_row = parse_u32_field(
+                    &obj,
+                    "startRow",
+                    &format!("setFormatRunsByCol: runs[{idx}].startRow"),
+                )?;
+                let end_row_exclusive = parse_u32_field(
+                    &obj,
+                    "endRowExclusive",
+                    &format!("setFormatRunsByCol: runs[{idx}].endRowExclusive"),
+                )?;
+                let style_id = parse_u32_field(
+                    &obj,
+                    "styleId",
+                    &format!("setFormatRunsByCol: runs[{idx}].styleId"),
+                )?;
+
+                if start_row >= EXCEL_MAX_ROWS {
+                    return Err(js_err(format!(
+                        "setFormatRunsByCol: runs[{idx}].startRow out of Excel bounds: {start_row}"
+                    )));
+                }
+                if end_row_exclusive > EXCEL_MAX_ROWS {
+                    return Err(js_err(format!(
+                        "setFormatRunsByCol: runs[{idx}].endRowExclusive out of Excel bounds: {end_row_exclusive}"
+                    )));
+                }
+                if end_row_exclusive <= start_row {
+                    return Err(js_err(format!(
+                        "setFormatRunsByCol: runs[{idx}].endRowExclusive must be greater than startRow"
+                    )));
+                }
+
+                parsed.push(FormatRun {
+                    start_row,
+                    end_row_exclusive,
+                    style_id,
+                });
+            }
+        }
 
         self.inner
             .engine
-            .set_format_runs_by_col(&sheet, col, runs)
+            .set_format_runs_by_col(&sheet, col, parsed)
             .map_err(|err| js_err(err.to_string()))
     }
 
