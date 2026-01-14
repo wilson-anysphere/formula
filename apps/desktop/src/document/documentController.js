@@ -961,6 +961,12 @@ function shiftFormatRunsForRowEdit(runs, row0, count, mode) {
  *   frozenRows: number,
  *   frozenCols: number,
  *   /**
+ *    * Optional tiled worksheet background image id.
+ *    *
+ *    * This references an entry in the workbook-scoped `DocumentController.images` store.
+ *    *\/
+ *   backgroundImageId?: string | null,
+ *   /**
  *    * Merged-cell regions for this sheet (Excel-style).
  *    *
  *    * Ranges use inclusive end coordinates (`endRow`/`endCol` are inclusive) and
@@ -1095,6 +1101,13 @@ function normalizeSheetViewState(view) {
     return num;
   };
 
+  const normalizeBackgroundImageId = (value) => {
+    if (value == null) return null;
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  };
+
   const normalizeMergedRanges = (raw) => {
     if (!raw) return null;
 
@@ -1205,10 +1218,12 @@ function normalizeSheetViewState(view) {
       view?.mergedCells ??
       view?.merged_cells,
   );
+  const backgroundImageId = normalizeBackgroundImageId(view?.backgroundImageId ?? view?.background_image_id);
 
   return {
     frozenRows: normalizeFrozenCount(view?.frozenRows),
     frozenCols: normalizeFrozenCount(view?.frozenCols),
+    ...(backgroundImageId ? { backgroundImageId } : {}),
     ...(mergedRanges ? { mergedRanges } : {}),
     ...(colWidths ? { colWidths } : {}),
     ...(rowHeights ? { rowHeights } : {}),
@@ -1229,6 +1244,7 @@ function emptySheetViewState() {
 function cloneSheetViewState(view) {
   /** @type {SheetViewState} */
   const next = { frozenRows: view.frozenRows, frozenCols: view.frozenCols };
+  if (view.backgroundImageId != null) next.backgroundImageId = view.backgroundImageId;
   if (Array.isArray(view.mergedRanges)) {
     next.mergedRanges = view.mergedRanges.map((r) => ({
       startRow: r.startRow,
@@ -1286,6 +1302,7 @@ function sheetViewStateEquals(a, b) {
   return (
     a.frozenRows === b.frozenRows &&
     a.frozenCols === b.frozenCols &&
+    (a.backgroundImageId ?? null) === (b.backgroundImageId ?? null) &&
     mergedRangesEqual(a.mergedRanges, b.mergedRanges) &&
     axisEquals(a.colWidths, b.colWidths) &&
     axisEquals(a.rowHeights, b.rowHeights)
@@ -5015,6 +5032,44 @@ export class DocumentController {
   }
 
   /**
+   * Get (or clear) a sheet-level tiled background image.
+   *
+   * @param {string} sheetId
+   * @returns {string | null}
+   */
+  getSheetBackgroundImageId(sheetId) {
+    const view = this.model.getSheetView(sheetId);
+    const id = view?.backgroundImageId;
+    return typeof id === "string" && id.trim() !== "" ? id : null;
+  }
+
+  /**
+   * Set (or clear) a sheet-level tiled background image id.
+   *
+   * This is undoable and persisted in `encodeState()` snapshots.
+   *
+   * @param {string} sheetId
+   * @param {string | null} imageId
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  setSheetBackgroundImageId(sheetId, imageId, options = {}) {
+    if (!this.#canEditSheetView(sheetId)) return;
+    const before = this.model.getSheetView(sheetId);
+    const after = cloneSheetViewState(before);
+
+    const normalized = imageId == null ? null : String(imageId).trim();
+    if (normalized) {
+      after.backgroundImageId = normalized;
+    } else {
+      delete after.backgroundImageId;
+    }
+
+    const next = normalizeSheetViewState(after);
+    if (sheetViewStateEquals(before, next)) return;
+    this.#applyUserSheetViewDeltas([{ sheetId, before, after: next }], options);
+  }
+
+  /**
    * Sheet-level view mutations (freeze panes, row/col sizes) are treated as view/UI
    * interactions and are allowed even when cell edits are blocked via `canEditCell`.
    *
@@ -5413,14 +5468,15 @@ export class DocumentController {
       const meta = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
       /** @type {any} */
       const out = { id, frozenRows: view.frozenRows, frozenCols: view.frozenCols, cells };
-      out.name = meta.name;
-      out.visibility = meta.visibility;
-      if (meta.tabColor) out.tabColor = cloneTabColor(meta.tabColor);
-      if (view.colWidths && Object.keys(view.colWidths).length > 0) out.colWidths = view.colWidths;
-      if (view.rowHeights && Object.keys(view.rowHeights).length > 0) out.rowHeights = view.rowHeights;
-      if (Array.isArray(view.mergedRanges) && view.mergedRanges.length > 0) {
-        out.mergedRanges = view.mergedRanges.map((r) => ({
-          startRow: r.startRow,
+       out.name = meta.name;
+       out.visibility = meta.visibility;
+       if (meta.tabColor) out.tabColor = cloneTabColor(meta.tabColor);
+       if (view.backgroundImageId != null) out.backgroundImageId = view.backgroundImageId;
+       if (view.colWidths && Object.keys(view.colWidths).length > 0) out.colWidths = view.colWidths;
+       if (view.rowHeights && Object.keys(view.rowHeights).length > 0) out.rowHeights = view.rowHeights;
+       if (Array.isArray(view.mergedRanges) && view.mergedRanges.length > 0) {
+         out.mergedRanges = view.mergedRanges.map((r) => ({
+           startRow: r.startRow,
           endRow: r.endRow,
           startCol: r.startCol,
           endCol: r.endCol,
@@ -5747,6 +5803,7 @@ export class DocumentController {
       const view = normalizeSheetViewState({
         frozenRows: sheet?.frozenRows,
         frozenCols: sheet?.frozenCols,
+        backgroundImageId: sheet?.backgroundImageId ?? sheet?.background_image_id,
         colWidths: sheet?.colWidths,
         rowHeights: sheet?.rowHeights,
         mergedRanges:

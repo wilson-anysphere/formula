@@ -926,7 +926,6 @@ export class SpreadsheetApp {
   private sharedGridZoom = 1;
 
   private readonly workbookImageBitmaps = new ImageBitmapCache();
-  private readonly sheetBackgroundImageIdBySheet = new Map<string, string | null>();
   private activeSheetBackgroundImageId: string | null = null;
   private activeSheetBackgroundBitmap: ImageBitmap | null = null;
   private activeSheetBackgroundLoadToken = 0;
@@ -2573,15 +2572,19 @@ export class SpreadsheetApp {
       // the drag, and rebuilding large override maps here can be expensive for sheets with
       // many explicit row/col sizes.
       const source = typeof payload?.source === "string" ? payload.source : "";
-      if (
+      const hasActiveSheetViewDelta =
         Array.isArray(payload?.sheetViewDeltas) &&
-        payload.sheetViewDeltas.some((delta: any) => delta?.sheetId === this.sheetId)
-      ) {
+        payload.sheetViewDeltas.some((delta: any) => delta?.sheetId === this.sheetId);
+      if (hasActiveSheetViewDelta) {
         // Keep sheet-level drawing metadata (pictures, shapes) in sync with the document.
         this.syncSheetDrawings();
         if (source !== "sharedGridAxis") {
           this.syncFrozenPanes();
         }
+        // Background image selection is persisted in the document's sheet view state;
+        // keep the active sheet's rendered pattern aligned with the latest view deltas
+        // (including undo/redo and collaboration updates).
+        this.syncActiveSheetBackgroundImage();
       }
     });
 
@@ -2688,7 +2691,8 @@ export class SpreadsheetApp {
             : [];
         for (const delta of imageDeltas) {
           const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
-          if (imageId) this.drawingOverlay.invalidateImage(imageId);
+          if (!imageId) continue;
+          this.drawingOverlay.invalidateImage(imageId);
         }
         this.handleWorkbookImageDeltasForBackground(payload);
         invalidateAndRenderDrawings("document:change");
@@ -4245,7 +4249,14 @@ export class SpreadsheetApp {
     const key = String(sheetId ?? "").trim();
     if (!key) return;
     const normalized = imageId ? String(imageId).trim() : null;
-    this.sheetBackgroundImageIdBySheet.set(key, normalized || null);
+    const doc: any = this.document as any;
+    if (typeof doc.setSheetBackgroundImageId === "function") {
+      try {
+        doc.setSheetBackgroundImageId(key, normalized || null);
+      } catch {
+        // ignore
+      }
+    }
     if (key === this.sheetId) {
       this.syncActiveSheetBackgroundImage();
     }
@@ -4254,7 +4265,17 @@ export class SpreadsheetApp {
   getSheetBackgroundImageId(sheetId: string): string | null {
     const key = String(sheetId ?? "").trim();
     if (!key) return null;
-    return this.sheetBackgroundImageIdBySheet.get(key) ?? null;
+    const doc: any = this.document as any;
+    if (typeof doc.getSheetBackgroundImageId === "function") {
+      try {
+        return doc.getSheetBackgroundImageId(key) ?? null;
+      } catch {
+        return null;
+      }
+    }
+    const view = this.document.getSheetView(key) as any;
+    const id = view?.backgroundImageId;
+    return typeof id === "string" && id.trim() !== "" ? id : null;
   }
 
   /**
@@ -4561,7 +4582,12 @@ export class SpreadsheetApp {
   }
 
   private syncActiveSheetBackgroundImage(): void {
-    const desiredId = this.sheetBackgroundImageIdBySheet.get(this.sheetId) ?? null;
+    const doc: any = this.document as any;
+    const desiredIdRaw =
+      typeof doc.getSheetBackgroundImageId === "function"
+        ? doc.getSheetBackgroundImageId(this.sheetId)
+        : (this.document.getSheetView(this.sheetId) as any)?.backgroundImageId;
+    const desiredId = typeof desiredIdRaw === "string" && desiredIdRaw.trim() !== "" ? desiredIdRaw : null;
     if (desiredId === this.activeSheetBackgroundImageId && this.activeSheetBackgroundBitmap) {
       return;
     }
@@ -4595,8 +4621,12 @@ export class SpreadsheetApp {
       return;
     }
 
-    const raw = (this.document as any).getImage?.(desiredId);
-    const entry = normalizeImageEntry(desiredId, raw);
+    let entry: ImageEntry | undefined;
+    try {
+      entry = lookupImageEntry(desiredId, doc.images) ?? normalizeImageEntry(desiredId, doc.getImage?.(desiredId));
+    } catch {
+      entry = undefined;
+    }
     if (!entry) return;
 
     const token = ++this.activeSheetBackgroundLoadToken;
@@ -4643,13 +4673,18 @@ export class SpreadsheetApp {
   private handleWorkbookImageDeltasForBackground(payload: any): void {
     if (!payload || typeof payload !== "object") return;
 
-    const desiredId = this.sheetBackgroundImageIdBySheet.get(this.sheetId) ?? null;
+    const desiredId = this.getSheetBackgroundImageId(this.sheetId);
     if (!desiredId) return;
 
     const deltas: unknown = (payload as any).imageDeltas ?? (payload as any).imagesDeltas;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
 
-    const touched = deltas.some((d) => String((d as any)?.imageId ?? "").trim() === desiredId);
+    const touched = deltas.some((d) => {
+      const anyDelta = d as any;
+      const imageId =
+        typeof anyDelta?.imageId === "string" ? anyDelta.imageId : typeof anyDelta?.id === "string" ? anyDelta.id : null;
+      return typeof imageId === "string" && imageId.trim() === desiredId;
+    });
     if (!touched) return;
 
     // Force a reload even when the background id itself is unchanged.
@@ -5188,9 +5223,15 @@ export class SpreadsheetApp {
       await this.wasmSyncPromise;
       this.clearComputedValuesByCoord();
       this.document.applyState(snapshot);
-      // ImageBitmap caches live inside individual CanvasGridRenderer instances. When the
-      // workbook changes (applyState), clear caches so we don't show stale images for
-      // reused image ids across workbooks/versions.
+      // `applyState` can replace workbook-scoped image bytes. Clear decoded bitmap caches so we
+      // don't show stale images for reused ids across workbooks/versions.
+      this.activeSheetBackgroundAbort?.abort();
+      this.activeSheetBackgroundAbort = null;
+      this.workbookImageBitmaps.clear();
+      this.activeSheetBackgroundImageId = null;
+      this.activeSheetBackgroundBitmap = null;
+      // ImageBitmap caches also live inside individual CanvasGridRenderer instances (shared-grid
+      // mode). Clear them so we don't show stale in-cell images for reused ids across versions.
       this.sharedGrid?.renderer?.clearImageCache?.();
       let sheetChanged = false;
       const sheetIds = this.document.getSheetIds();

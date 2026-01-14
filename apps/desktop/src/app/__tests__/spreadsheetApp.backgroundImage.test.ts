@@ -3,11 +3,26 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { inflateRawSync } from "node:zlib";
 
 import type { ImageEntry } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
+
+function resolveFixturePath(relativeFromRepoRoot: string): string {
+  // Vitest modules can run with non-file `import.meta.url` in some environments. Resolve fixtures
+  // from the working directory instead (walking upward until we find the repo root).
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i += 1) {
+    const candidate = path.resolve(dir, relativeFromRepoRoot);
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`fixture not found: ${relativeFromRepoRoot}`);
+}
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -283,8 +298,7 @@ describe("SpreadsheetApp worksheet background images", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
-      const fixtureUrl = new URL("../../../../../fixtures/xlsx/basic/background-image.xlsx", import.meta.url);
-      const fixtureBytes = readFileSync(fixtureUrl);
+      const fixtureBytes = readFileSync(resolveFixturePath("fixtures/xlsx/basic/background-image.xlsx"));
       const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
 
       const root = createRoot();
@@ -299,8 +313,9 @@ describe("SpreadsheetApp worksheet background images", () => {
       createdPatterns = [];
       patternFillRects = [];
 
-      app.setWorkbookImages([imageEntry]);
-      app.setSheetBackgroundImageId(app.getCurrentSheetId(), imageEntry.id);
+      const doc = app.getDocument();
+      doc.setImage(imageEntry.id, { bytes: imageEntry.bytes, mimeType: imageEntry.mimeType });
+      doc.setSheetBackgroundImageId(app.getCurrentSheetId(), imageEntry.id);
       await app.whenIdle();
 
       expect(createPatternSpy).toHaveBeenCalled();
@@ -319,8 +334,7 @@ describe("SpreadsheetApp worksheet background images", () => {
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
       Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
-      const fixtureUrl = new URL("../../../../../fixtures/xlsx/basic/background-image.xlsx", import.meta.url);
-      const fixtureBytes = readFileSync(fixtureUrl);
+      const fixtureBytes = readFileSync(resolveFixturePath("fixtures/xlsx/basic/background-image.xlsx"));
       const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
 
       const root = createRoot();
@@ -335,8 +349,9 @@ describe("SpreadsheetApp worksheet background images", () => {
       createdPatterns = [];
       patternFillRects = [];
 
-      app.setWorkbookImages([imageEntry]);
-      app.setSheetBackgroundImageId(app.getCurrentSheetId(), imageEntry.id);
+      const doc = app.getDocument();
+      doc.setImage(imageEntry.id, { bytes: imageEntry.bytes, mimeType: imageEntry.mimeType });
+      doc.setSheetBackgroundImageId(app.getCurrentSheetId(), imageEntry.id);
       await app.whenIdle();
 
       expect(createPatternSpy).toHaveBeenCalled();
