@@ -125,8 +125,14 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.findSelect.goTo",
 
   // Sort/filter (ribbon-only handlers / partially implemented).
+  "home.editing.sortFilter.sortAtoZ",
+  "home.editing.sortFilter.sortZtoA",
   "home.editing.sortFilter.customSort",
   // Data → Sort & Filter (same implementations as Home tab).
+  "data.sortFilter.sortAtoZ",
+  "data.sortFilter.sortZtoA",
+  "data.sortFilter.sort.sortAtoZ",
+  "data.sortFilter.sort.sortZtoA",
   "data.sortFilter.sort.customSort",
 
   // --- Home → Styles ----------------------------------------------------------
