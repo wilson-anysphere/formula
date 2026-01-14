@@ -6,7 +6,18 @@
 use std::io::{Cursor, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use formula_office_crypto::{encrypt_package_to_ole, EncryptOptions, EncryptionScheme, HashAlgorithm};
+use aes::{Aes128, Aes192, Aes256};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use cbc::Encryptor;
+use formula_io::xlsx::offcrypto::{
+    decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key, hash_password,
+    HashAlgorithm as AgileHashAlgorithm, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
+    VERIFIER_HASH_VALUE_BLOCK,
+};
+use formula_office_crypto::{
+    encrypt_package_to_ole, EncryptOptions, EncryptionScheme, HashAlgorithm as OfficeHashAlgorithm,
+};
 
 use formula_io::{
     detect_workbook_format, open_workbook_model, open_workbook_model_with_password,
@@ -14,6 +25,202 @@ use formula_io::{
     WorkbookFormat,
 };
 use formula_model::{CellRef, CellValue};
+
+fn aes_cbc_encrypt_no_padding(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    use aes::cipher::block_padding::NoPadding;
+    use aes::cipher::{BlockEncryptMut, KeyIvInit};
+
+    assert_eq!(iv.len(), 16);
+    assert_eq!(
+        plaintext.len() % 16,
+        0,
+        "AES-CBC no-padding requires block-aligned plaintext"
+    );
+
+    let mut buf = plaintext.to_vec();
+    let len = buf.len();
+    match key.len() {
+        16 => Encryptor::<Aes128>::new_from_slices(key, iv)
+            .expect("key/iv")
+            .encrypt_padded_mut::<NoPadding>(&mut buf, len)
+            .expect("encrypt"),
+        24 => Encryptor::<Aes192>::new_from_slices(key, iv)
+            .expect("key/iv")
+            .encrypt_padded_mut::<NoPadding>(&mut buf, len)
+            .expect("encrypt"),
+        32 => Encryptor::<Aes256>::new_from_slices(key, iv)
+            .expect("key/iv")
+            .encrypt_padded_mut::<NoPadding>(&mut buf, len)
+            .expect("encrypt"),
+        other => panic!("unsupported AES key length {other}"),
+    };
+    buf
+}
+
+fn replace_xml_attr(xml: &str, attr: &str, new_value: &str) -> String {
+    let needle = format!(r#"{attr}=""#);
+    let start = xml
+        .find(&needle)
+        .unwrap_or_else(|| panic!("missing attribute {attr}"));
+    let value_start = start + needle.len();
+    let end_rel = xml[value_start..]
+        .find('"')
+        .unwrap_or_else(|| panic!("unterminated attribute {attr}"));
+    let value_end = value_start + end_rel;
+
+    let mut out = String::with_capacity(xml.len() - (value_end - value_start) + new_value.len());
+    out.push_str(&xml[..value_start]);
+    out.push_str(new_value);
+    out.push_str(&xml[value_end..]);
+    out
+}
+
+fn patch_agile_password_key_encryptor_blobs_to_derived_iv(
+    encrypted_cfb: &[u8],
+    password: &str,
+) -> Vec<u8> {
+    let mut ole = cfb::CompoundFile::open(Cursor::new(encrypted_cfb)).expect("parse cfb");
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .or_else(|_| ole.open_stream("/EncryptionInfo"))
+        .expect("open EncryptionInfo stream")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .or_else(|_| ole.open_stream("/EncryptedPackage"))
+        .expect("open EncryptedPackage stream")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    let xml_start = encryption_info
+        .iter()
+        .position(|b| *b == b'<')
+        .expect("EncryptionInfo must contain XML");
+    let header = &encryption_info[..xml_start];
+    let xml_bytes = &encryption_info[xml_start..];
+    let xml = std::str::from_utf8(xml_bytes).expect("EncryptionInfo XML is UTF-8");
+
+    let doc = roxmltree::Document::parse(xml).expect("parse EncryptionInfo XML");
+    let encrypted_key_node = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "encryptedKey")
+        .expect("missing encryptedKey element");
+
+    let salt = BASE64
+        .decode(
+            encrypted_key_node
+                .attribute("saltValue")
+                .expect("encryptedKey saltValue"),
+        )
+        .expect("decode saltValue");
+    let spin_count = encrypted_key_node
+        .attribute("spinCount")
+        .expect("encryptedKey spinCount")
+        .parse::<u32>()
+        .expect("parse spinCount");
+    let block_size = encrypted_key_node
+        .attribute("blockSize")
+        .expect("encryptedKey blockSize")
+        .parse::<usize>()
+        .expect("parse blockSize");
+    let key_bits = encrypted_key_node
+        .attribute("keyBits")
+        .expect("encryptedKey keyBits")
+        .parse::<usize>()
+        .expect("parse keyBits");
+    let hash_alg = AgileHashAlgorithm::parse_offcrypto_name(
+        encrypted_key_node
+            .attribute("hashAlgorithm")
+            .expect("encryptedKey hashAlgorithm"),
+    )
+    .expect("parse hashAlgorithm");
+
+    let enc_vhi = BASE64
+        .decode(
+            encrypted_key_node
+                .attribute("encryptedVerifierHashInput")
+                .expect("encryptedVerifierHashInput"),
+        )
+        .expect("decode encryptedVerifierHashInput");
+    let enc_vhv = BASE64
+        .decode(
+            encrypted_key_node
+                .attribute("encryptedVerifierHashValue")
+                .expect("encryptedVerifierHashValue"),
+        )
+        .expect("decode encryptedVerifierHashValue");
+    let enc_kv = BASE64
+        .decode(
+            encrypted_key_node
+                .attribute("encryptedKeyValue")
+                .expect("encryptedKeyValue"),
+        )
+        .expect("decode encryptedKeyValue");
+
+    let pw_hash = hash_password(password, &salt, spin_count, hash_alg).expect("hash_password");
+    let key_len = key_bits / 8;
+
+    let key_vhi =
+        derive_key(&pw_hash, &VERIFIER_HASH_INPUT_BLOCK, key_len, hash_alg).expect("derive key");
+    let key_vhv =
+        derive_key(&pw_hash, &VERIFIER_HASH_VALUE_BLOCK, key_len, hash_alg).expect("derive key");
+    let key_kv = derive_key(&pw_hash, &KEY_VALUE_BLOCK, key_len, hash_alg).expect("derive key");
+
+    let iv_salt = salt
+        .get(..block_size)
+        .expect("encryptedKey saltValue shorter than blockSize");
+
+    // Decrypt existing (salt-IV) ciphertext blobs to recover plaintexts.
+    let mut plain_vhi = enc_vhi.clone();
+    decrypt_aes_cbc_no_padding_in_place(&key_vhi, iv_salt, &mut plain_vhi)
+        .expect("decrypt verifierHashInput");
+    let mut plain_vhv = enc_vhv.clone();
+    decrypt_aes_cbc_no_padding_in_place(&key_vhv, iv_salt, &mut plain_vhv)
+        .expect("decrypt verifierHashValue");
+    let mut plain_kv = enc_kv.clone();
+    decrypt_aes_cbc_no_padding_in_place(&key_kv, iv_salt, &mut plain_kv).expect("decrypt keyValue");
+
+    // Re-encrypt using derived IVs.
+    let iv_vhi =
+        derive_iv(&salt, &VERIFIER_HASH_INPUT_BLOCK, block_size, hash_alg).expect("derive iv");
+    let iv_vhv =
+        derive_iv(&salt, &VERIFIER_HASH_VALUE_BLOCK, block_size, hash_alg).expect("derive iv");
+    let iv_kv = derive_iv(&salt, &KEY_VALUE_BLOCK, block_size, hash_alg).expect("derive iv");
+
+    let enc_vhi_new = aes_cbc_encrypt_no_padding(&key_vhi, &iv_vhi, &plain_vhi);
+    let enc_vhv_new = aes_cbc_encrypt_no_padding(&key_vhv, &iv_vhv, &plain_vhv);
+    let enc_kv_new = aes_cbc_encrypt_no_padding(&key_kv, &iv_kv, &plain_kv);
+
+    let xml = replace_xml_attr(
+        xml,
+        "encryptedVerifierHashInput",
+        &BASE64.encode(enc_vhi_new),
+    );
+    let xml = replace_xml_attr(
+        &xml,
+        "encryptedVerifierHashValue",
+        &BASE64.encode(enc_vhv_new),
+    );
+    let xml = replace_xml_attr(&xml, "encryptedKeyValue", &BASE64.encode(enc_kv_new));
+
+    let mut patched_encryption_info = Vec::new();
+    patched_encryption_info.extend_from_slice(header);
+    patched_encryption_info.extend_from_slice(xml.as_bytes());
+
+    // Rebuild OLE container with the modified EncryptionInfo, preserving ciphertext.
+    let cursor = Cursor::new(Vec::new());
+    let mut out = cfb::CompoundFile::create(cursor).expect("create cfb");
+    out.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo stream")
+        .write_all(&patched_encryption_info)
+        .expect("write EncryptionInfo");
+    out.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    out.into_inner().into_inner()
+}
 
 fn build_tiny_xlsx() -> Vec<u8> {
     let mut workbook = formula_model::Workbook::new();
@@ -40,7 +247,7 @@ fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
         EncryptOptions {
             scheme: EncryptionScheme::Agile,
             key_bits: 128,
-            hash_algorithm: HashAlgorithm::Sha256,
+            hash_algorithm: OfficeHashAlgorithm::Sha256,
             spin_count: 1_000,
         },
     )
@@ -143,6 +350,60 @@ fn open_workbook_with_password_decrypts_agile_encrypted_package() {
 
     // Correct password => decrypted ZIP is routed into the lazy/streaming OPC package wrapper
     // (`Workbook::Xlsx` / `XlsxLazyPackage`).
+    let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
+    match wb {
+        Workbook::Xlsx(package) => {
+            let workbook_xml = package
+                .read_part("xl/workbook.xml")
+                .expect("read xl/workbook.xml")
+                .expect("xl/workbook.xml missing in zip");
+            let workbook_xml_str =
+                std::str::from_utf8(&workbook_xml).expect("xl/workbook.xml must be valid UTF-8");
+            assert!(
+                workbook_xml_str.contains("Sheet1"),
+                "expected xl/workbook.xml to mention Sheet1, got:\n{workbook_xml_str}"
+            );
+        }
+        other => panic!("expected Workbook::Xlsx, got {other:?}"),
+    }
+}
+
+#[test]
+fn open_workbook_with_password_decrypts_agile_encrypted_package_with_derived_password_key_iv() {
+    let password = "correct horse battery staple";
+    let plain_xlsx = build_tiny_xlsx();
+
+    // Use a small spinCount for test speed.
+    let opts = EncryptOptions {
+        scheme: EncryptionScheme::Agile,
+        key_bits: 256,
+        hash_algorithm: OfficeHashAlgorithm::Sha512,
+        spin_count: 512,
+    };
+    let encrypted_cfb = encrypt_package_to_ole(&plain_xlsx, password, opts).expect("encrypt");
+    let encrypted_cfb =
+        patch_agile_password_key_encryptor_blobs_to_derived_iv(&encrypted_cfb, password);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted-derived-iv.xlsx");
+    std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
+
+    // Missing password => prompt.
+    let err = open_workbook_with_password(&path, None).expect_err("expected PasswordRequired");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+
+    // Wrong password => invalid password.
+    let err =
+        open_workbook_with_password(&path, Some("wrong-password")).expect_err("expected error");
+    assert!(
+        matches!(err, Error::InvalidPassword { .. }),
+        "expected Error::InvalidPassword, got {err:?}"
+    );
+
+    // Correct password => decrypted ZIP is routed into the lazy/streaming OPC package wrapper.
     let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
     match wb {
         Workbook::Xlsx(package) => {
@@ -510,8 +771,7 @@ fn decrypts_agile_large_fixture_with_correct_password() {
 
     // Sanity: ensure the plaintext workbook is >4096 bytes so Agile decrypt exercises multi-segment
     // decryption.
-    let plaintext_bytes =
-        std::fs::read(&plaintext_large_path).expect("read plaintext-large.xlsx");
+    let plaintext_bytes = std::fs::read(&plaintext_large_path).expect("read plaintext-large.xlsx");
     assert!(
         plaintext_bytes.len() > 4096,
         "expected plaintext-large.xlsx to be >4096 bytes, got {}",
@@ -600,9 +860,8 @@ fn open_workbook_with_password_decrypts_standard_large_fixture() {
 
     let decrypted_bytes =
         open_decrypted_package_bytes_with_password(&standard_large_path, "password");
-    let decrypted =
-        formula_io::xlsx::read_workbook_from_reader(Cursor::new(decrypted_bytes))
-            .expect("parse decrypted standard-large.xlsx bytes");
+    let decrypted = formula_io::xlsx::read_workbook_from_reader(Cursor::new(decrypted_bytes))
+        .expect("parse decrypted standard-large.xlsx bytes");
 
     let a1 = CellRef::from_a1("A1").unwrap();
     let b2 = CellRef::from_a1("B2").unwrap();
