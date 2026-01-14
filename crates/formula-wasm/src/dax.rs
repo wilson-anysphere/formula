@@ -445,6 +445,9 @@ impl DaxFilterContext {
         }
     }
 
+    /// Set a multi-value filter for a column (`column IN { ... }`).
+    ///
+    /// `values` must be an array of scalars (`null`/`undefined`, number, string, boolean).
     #[wasm_bindgen(js_name = "setColumnIn")]
     pub fn set_column_in(
         &mut self,
@@ -460,6 +463,7 @@ impl DaxFilterContext {
         Ok(())
     }
 
+    /// Clear any filter for a specific column.
     #[wasm_bindgen(js_name = "clearColumnFilter")]
     pub fn clear_column_filter(&mut self, table: &str, column: &str) {
         self.ctx.clear_column_filter_public(table, column);

@@ -106,6 +106,23 @@ fn dax_model_evaluate_and_pivot() {
     let total_east = model.evaluate_with_filter("Total", &filter).unwrap();
     assert_eq!(total_east.as_f64().unwrap(), 38.0);
 
+    // Multi-value filter (Customers[CustomerId] IN {1,2}).
+    let mut filter_multi = DaxFilterContext::new();
+    filter_multi
+        .set_column_in(
+            "Customers",
+            "CustomerId",
+            vec![JsValue::from_f64(1.0), JsValue::from_f64(2.0)],
+        )
+        .unwrap();
+    let total_1_2 = model.evaluate_with_filter("Total", &filter_multi).unwrap();
+    assert_eq!(total_1_2.as_f64().unwrap(), 35.0);
+
+    // Clearing the filter should return to the unfiltered total.
+    filter_multi.clear_column_filter("Customers", "CustomerId");
+    let total_after_clear = model.evaluate_with_filter("Total", &filter_multi).unwrap();
+    assert_eq!(total_after_clear.as_f64().unwrap(), 43.0);
+
     // Pivot: group Orders by Customers[Region] and compute Total.
     let group_by = serde_wasm_bindgen::to_value(&vec![GroupByDto {
         table: "Customers".into(),
