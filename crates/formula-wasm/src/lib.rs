@@ -7283,6 +7283,9 @@ mod tests {
         let json_str = wb.to_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
+        // `toJson()` emits canonical (en-US) formula syntax today; `formulaLanguage` disambiguates
+        // this from localized formulas for round-trips in comma-decimal locales like `de-DE`.
+        assert_eq!(parsed["formulaLanguage"], json!("canonical"));
         // `toJson()` should include sheet tab order so `fromJson` can preserve 3D reference semantics.
         assert_eq!(parsed["sheetOrder"], json!(["Sheet1"]));
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!(1.0));
@@ -7291,8 +7294,36 @@ mod tests {
         let wb2 = WasmWorkbook::from_json(&json_str).unwrap();
         let json_str2 = wb2.to_json().unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&json_str2).unwrap();
+        assert_eq!(parsed2["formulaLanguage"], json!("canonical"));
         assert_eq!(parsed2["sheetOrder"], json!(["Sheet1"]));
         assert_eq!(parsed2["sheets"]["Sheet1"]["cells"]["A2"], json!("=A1*2"));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_json_honors_formula_language_canonical_for_comma_decimal_locales() {
+        // In comma-decimal locales like de-DE, a canonical formula like `=LOG(8,2)` must not be
+        // interpreted as the localized decimal literal `8,2` (8.2). `formulaLanguage=canonical`
+        // disambiguates the intended syntax for round-trips.
+        let input = json!({
+            "localeId": "de-DE",
+            "formulaLanguage": "canonical",
+            "sheets": {
+                "Sheet1": {
+                    "cells": {
+                        "A1": "=LOG(8,2)"
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let mut wb = WasmWorkbook::from_json(&input).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(3.0)
+        );
     }
 
     #[test]
