@@ -1262,8 +1262,8 @@ fn slicer_cache_xml_set_selection(
     xml: &[u8],
     selection: &SlicerSelectionState,
 ) -> Result<Vec<u8>, XlsxError> {
-    let preferred_selection_attr_key = detect_slicer_cache_item_selection_attr_key(xml)?
-        .unwrap_or_else(|| b"s".to_vec());
+    let preferred_selection_attr_key =
+        detect_slicer_cache_item_selection_attr_key(xml)?.unwrap_or_else(|| b"s".to_vec());
 
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(false);
@@ -1327,8 +1327,7 @@ fn patch_slicer_cache_item(
     let desired_selected = match &selection.selected_items {
         None => None,
         Some(selected) => Some(
-            !key_candidates.is_empty()
-                && key_candidates.iter().any(|key| selected.contains(key)),
+            !key_candidates.is_empty() && key_candidates.iter().any(|key| selected.contains(key)),
         ),
     };
 
