@@ -68,11 +68,8 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
     }
 
     fn segment_count(&self) -> u64 {
-        if self.orig_size == 0 {
-            0
-        } else {
-            (self.orig_size + SEGMENT_PLAINTEXT_LEN - 1) / SEGMENT_PLAINTEXT_LEN
-        }
+        // Use `div_ceil` to avoid overflow when `orig_size` is near `u64::MAX`.
+        self.orig_size.div_ceil(SEGMENT_PLAINTEXT_LEN)
     }
 
     fn derive_iv(&self, segment_index: u64) -> std::io::Result<[u8; 16]> {

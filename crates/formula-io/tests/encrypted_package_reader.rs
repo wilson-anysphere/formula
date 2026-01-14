@@ -262,3 +262,24 @@ fn errors_when_final_segment_ciphertext_is_block_aligned_but_too_short() {
         .expect_err("expected too-short final ciphertext segment to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
+
+#[test]
+fn errors_on_u64_max_orig_size_without_panicking() {
+    let key = [0xAAu8; 16];
+    let salt = [0xBBu8; 16];
+
+    // u64::MAX should not overflow segment count math.
+    let mut encrypted = Vec::new();
+    encrypted.extend_from_slice(&u64::MAX.to_le_bytes());
+    // No ciphertext bytes: should be treated as truncated/corrupt, not as "0 segments".
+
+    let cursor = Cursor::new(encrypted);
+    let mut reader =
+        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
+
+    let mut buf = [0u8; 1];
+    let err = reader
+        .read(&mut buf)
+        .expect_err("expected truncated ciphertext to error");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+}
