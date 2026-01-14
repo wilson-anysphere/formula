@@ -3,7 +3,6 @@ import { describe, expect, it, afterEach } from "vitest";
 
 import { BoundedAIAuditStore } from "../src/bounded-store.js";
 import { createDefaultAIAuditStore } from "../src/index.js";
-import { IndexedDbAIAuditStore } from "../src/indexeddb-store.js";
 import { MemoryAIAuditStore } from "../src/memory-store.js";
 
 const originalGlobals = {
@@ -41,12 +40,12 @@ describe("createDefaultAIAuditStore (node)", () => {
     expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
   });
 
-  it("chooses IndexedDbAIAuditStore when indexedDB is present (fake-indexeddb)", async () => {
+  it("still defaults to MemoryAIAuditStore in Node runtimes even when indexedDB is present (fake-indexeddb)", async () => {
     Object.defineProperty(globalThis as any, "indexedDB", { value: indexedDB, configurable: true });
     Object.defineProperty(globalThis as any, "IDBKeyRange", { value: IDBKeyRange, configurable: true });
 
     const store = await createDefaultAIAuditStore();
     expect(store).toBeInstanceOf(BoundedAIAuditStore);
-    expect(unwrap(store)).toBeInstanceOf(IndexedDbAIAuditStore);
+    expect(unwrap(store)).toBeInstanceOf(MemoryAIAuditStore);
   });
 });

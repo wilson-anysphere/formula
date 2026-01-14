@@ -116,28 +116,14 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
   }
 
   // Automatic defaults.
-  //
-  // Prefer IndexedDB when it's available (even in Node test environments via
-  // `fake-indexeddb`), otherwise fall back to a browser-appropriate localStorage
-  // store when usable.
+  // Node runtimes default to memory. Browser-like runtimes prefer IndexedDB when
+  // available/usable, falling back to localStorage and then memory.
+  if (typeof window === "undefined") return wrap(createMemory());
+
   const indexed = await createIndexedDb();
   if (indexed) return wrap(indexed);
-  if (isNodeRuntime()) return wrap(createMemory());
   if (isLocalStorageAvailable()) return wrap(createLocalStorage());
   return wrap(createMemory());
-}
-
-function isNodeRuntime(): boolean {
-  // Treat webviews/Electron renderers as browser-like when `window` exists.
-  if (typeof window !== "undefined") return false;
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const versions = typeof process !== "undefined" ? ((process as any).versions as any) : undefined;
-    return !!versions?.node;
-  } catch {
-    return false;
-  }
 }
 
 function isIndexedDbAvailable(): boolean {
