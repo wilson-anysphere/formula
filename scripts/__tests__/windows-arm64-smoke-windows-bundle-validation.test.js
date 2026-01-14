@@ -18,7 +18,6 @@ test("windows-arm64-smoke workflow validates built bundles via validate-windows-
   assert.match(text, /-RequireMsi\b/);
   assert.match(
     text,
-    /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+\.\/scripts\/validate-windows-bundles\.ps1/,
+    /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+(?:\.\/)?scripts\/validate-windows-bundles\.ps1/,
   );
 });
-

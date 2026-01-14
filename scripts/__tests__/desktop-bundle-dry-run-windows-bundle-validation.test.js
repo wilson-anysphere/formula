@@ -26,7 +26,6 @@ test("desktop-bundle-dry-run workflow validates built Windows bundles (MSI + NSI
   assert.match(snippet, /-RequireMsi\b/);
   assert.match(
     snippet,
-    /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+\.\/scripts\/validate-windows-bundles\.ps1/,
+    /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+(?:\.\/)?scripts\/validate-windows-bundles\.ps1/,
   );
 });
-
