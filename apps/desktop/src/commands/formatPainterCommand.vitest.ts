@@ -33,5 +33,68 @@ describe("format painter command", () => {
     expect(disarm).toHaveBeenCalledTimes(1);
     expect(armed).toBe(false);
   });
-});
 
+  it("does not arm while editing", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const arm = vi.fn();
+    const disarm = vi.fn();
+
+    registerFormatPainterCommand({
+      commandRegistry,
+      isArmed: () => false,
+      arm,
+      disarm,
+      isEditing: () => true,
+    });
+
+    await commandRegistry.executeCommand(FORMAT_PAINTER_COMMAND_ID);
+    expect(arm).not.toHaveBeenCalled();
+    expect(disarm).not.toHaveBeenCalled();
+  });
+
+  it("does not arm in read-only mode", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const arm = vi.fn();
+    const disarm = vi.fn();
+
+    registerFormatPainterCommand({
+      commandRegistry,
+      isArmed: () => false,
+      arm,
+      disarm,
+      isReadOnly: () => true,
+    });
+
+    await commandRegistry.executeCommand(FORMAT_PAINTER_COMMAND_ID);
+    expect(arm).not.toHaveBeenCalled();
+    expect(disarm).not.toHaveBeenCalled();
+  });
+
+  it("still disarms while blocked when already armed", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    let armed = true;
+    const arm = vi.fn(() => {
+      armed = true;
+    });
+    const disarm = vi.fn(() => {
+      armed = false;
+    });
+
+    registerFormatPainterCommand({
+      commandRegistry,
+      isArmed: () => armed,
+      arm,
+      disarm,
+      isEditing: () => true,
+      isReadOnly: () => true,
+    });
+
+    await commandRegistry.executeCommand(FORMAT_PAINTER_COMMAND_ID);
+    expect(arm).not.toHaveBeenCalled();
+    expect(disarm).toHaveBeenCalledTimes(1);
+    expect(armed).toBe(false);
+  });
+});

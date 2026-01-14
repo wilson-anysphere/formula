@@ -9,8 +9,32 @@ export function registerFormatPainterCommand(params: {
   arm: () => void;
   disarm: () => void;
   onCancel?: (() => void) | null;
+  /**
+   * Optional spreadsheet edit-state predicate. When omitted, Format Painter is assumed runnable.
+   *
+   * The desktop shell passes a custom predicate (`isSpreadsheetEditing`) that includes split-view
+   * secondary editor state so command palette/keybindings cannot bypass ribbon disabling.
+   */
+  isEditing?: (() => boolean) | null;
+  /**
+   * Optional spreadsheet read-only predicate. When omitted, Format Painter is assumed runnable.
+   *
+   * The desktop ribbon disables Format Painter in read-only collab roles; guard execution so
+   * command palette/keybindings cannot bypass that state.
+   */
+  isReadOnly?: (() => boolean) | null;
 }): void {
-  const { commandRegistry, isArmed, arm, disarm, onCancel = null } = params;
+  const {
+    commandRegistry,
+    isArmed,
+    arm,
+    disarm,
+    onCancel = null,
+    isEditing = null,
+    isReadOnly = null,
+  } = params;
+  const isEditingFn = isEditing ?? (() => false);
+  const isReadOnlyFn = isReadOnly ?? (() => false);
 
   commandRegistry.registerBuiltinCommand(
     FORMAT_PAINTER_COMMAND_ID,
@@ -21,6 +45,8 @@ export function registerFormatPainterCommand(params: {
         onCancel?.();
         return;
       }
+      if (isEditingFn()) return;
+      if (isReadOnlyFn()) return;
       arm();
     },
     {
@@ -30,4 +56,3 @@ export function registerFormatPainterCommand(params: {
     },
   );
 }
-

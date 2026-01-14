@@ -1100,7 +1100,12 @@ export function registerDesktopCommands(params: {
   }
  
   if (formatPainter) {
-    registerFormatPainterCommand({ commandRegistry, ...formatPainter });
+    registerFormatPainterCommand({
+      commandRegistry,
+      ...formatPainter,
+      isEditing: isEditingFn,
+      isReadOnly,
+    });
   }
 
   if (ribbonMacroHandlers) {
