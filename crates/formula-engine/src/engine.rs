@@ -815,16 +815,10 @@ impl Engine {
         if new_index >= self.workbook.sheet_order.len() {
             return false;
         }
-        let Some(current) = self.workbook.sheet_order_index(sheet_id) else {
-            return false;
-        };
-        if current == new_index {
-            return true;
-        }
-
         let before_order = self.workbook.sheet_order.clone();
-        self.workbook.sheet_order.remove(current);
-        self.workbook.sheet_order.insert(new_index, sheet_id);
+        if !self.workbook.reorder_sheet(sheet_id, new_index) {
+            return false;
+        }
         if self.workbook.sheet_order == before_order {
             return true;
         }
