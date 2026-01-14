@@ -2029,6 +2029,82 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "BIN2DEC",
+    description: "Converts a binary number to decimal.",
+    args: [
+      { name: "binary_number", type: "range" },
+    ],
+  },
+  {
+    name: "BIN2HEX",
+    description: "Converts a binary number to hexadecimal.",
+    args: [
+      { name: "binary_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "BIN2OCT",
+    description: "Converts a binary number to octal.",
+    args: [
+      { name: "binary_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "HEX2BIN",
+    description: "Converts a hexadecimal number to binary.",
+    args: [
+      { name: "hex_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "HEX2DEC",
+    description: "Converts a hexadecimal number to decimal.",
+    args: [
+      { name: "hex_number", type: "range" },
+    ],
+  },
+  {
+    name: "HEX2OCT",
+    description: "Converts a hexadecimal number to octal.",
+    args: [
+      { name: "hex_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "OCT2BIN",
+    description: "Converts an octal number to binary.",
+    args: [
+      { name: "octal_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "OCT2DEC",
+    description: "Converts an octal number to decimal.",
+    args: [
+      { name: "octal_number", type: "range" },
+    ],
+  },
+  {
+    name: "OCT2HEX",
+    description: "Converts an octal number to hexadecimal.",
+    args: [
+      { name: "octal_number", type: "range" },
+      { name: "places", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "ARABIC",
+    description: "Converts a Roman numeral to an Arabic number.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
     name: "CONVERT",
     description: "Converts a number from one measurement system to another.",
     args: [
