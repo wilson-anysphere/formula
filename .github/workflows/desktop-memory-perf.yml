@@ -195,26 +195,32 @@ jobs:
           }
           
           if (!fs.existsSync(inputPath)) {
+            const rel = path.relative(process.cwd(), inputPath);
+            console.error(`[desktop-memory-perf] Missing ${rel}; memory runner likely failed before writing JSON.`);
             appendSummary([
               "## Desktop idle memory (Linux)",
               "",
-              `:warning: Missing \`${path.relative(process.cwd(), inputPath)}\` (runner failed before writing JSON).`,
+              `:warning: Missing \`${rel}\` (runner failed before writing JSON).`,
               "",
             ]);
-            process.exit(0);
+            process.exit(1);
           }
           
           let data;
           try {
             data = JSON.parse(fs.readFileSync(inputPath, "utf8"));
           } catch (err) {
+            const rel = path.relative(process.cwd(), inputPath);
+            console.error(
+              `[desktop-memory-perf] Failed to parse ${rel}: ${err instanceof Error ? err.message : String(err)}`,
+            );
             appendSummary([
               "## Desktop idle memory (Linux)",
               "",
-              `:warning: Failed to parse \`${path.relative(process.cwd(), inputPath)}\`: ${err instanceof Error ? err.message : String(err)}`,
+              `:warning: Failed to parse \`${rel}\`: ${err instanceof Error ? err.message : String(err)}`,
               "",
             ]);
-            process.exit(0);
+            process.exit(1);
           }
           
           const p50 = data?.summary?.rssMb?.p50;
@@ -224,10 +230,12 @@ jobs:
           const measurement = data?.measurement ?? "rss";
 
           if (typeof p95 !== "number" || !Number.isFinite(p95)) {
+            const rel = path.relative(process.cwd(), inputPath);
+            console.error(`[desktop-memory-perf] Missing p95 RSS value in ${rel}; cannot publish benchmark history.`);
             appendSummary([
               "## Desktop idle memory (Linux)",
               "",
-              `:warning: Missing p95 RSS value in \`${path.relative(process.cwd(), inputPath)}\`; cannot publish benchmark history.`,
+              `:warning: Missing p95 RSS value in \`${rel}\`; cannot publish benchmark history.`,
               "",
             ]);
             process.exit(1);
