@@ -35,6 +35,7 @@ use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
 use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
@@ -327,9 +328,6 @@ fn open_stream_best_effort<R: Read + Seek + std::io::Write>(
 
 // --- Agile encryption constants (MS-OFFCRYPTO) ---------------------------------------------------
 
-const VERIFIER_HASH_INPUT_BLOCK: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
-const VERIFIER_HASH_VALUE_BLOCK: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
-const KEY_VALUE_BLOCK: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
 const HMAC_KEY_BLOCK: [u8; 8] = [0x5F, 0xB2, 0xAD, 0x01, 0x0C, 0xB9, 0xE1, 0xF6];
 const HMAC_VALUE_BLOCK: [u8; 8] = [0xA0, 0x67, 0x7F, 0x02, 0xB2, 0x2C, 0x84, 0x33];
 
@@ -341,18 +339,9 @@ fn decrypt_standard_encrypted_package(
     let key = standard_derive_key_zeroizing(info, password)?;
     standard_verify_key(info, &key)?;
 
-    let mut iv_seed = Vec::with_capacity(info.verifier.salt.len() + 4);
-    decrypt_encrypted_package(encrypted_package, |segment_index, ciphertext, plaintext| {
-        iv_seed.clear();
-        iv_seed.extend_from_slice(&info.verifier.salt);
-        iv_seed.extend_from_slice(&segment_index.to_le_bytes());
-
-        let digest = sha1::Sha1::digest(&iv_seed);
-        let mut iv = [0u8; 16];
-        iv.copy_from_slice(&digest[..16]);
-
+    decrypt_encrypted_package(encrypted_package, |_segment_index, ciphertext, plaintext| {
         plaintext.copy_from_slice(ciphertext);
-        aes_cbc_decrypt_in_place(&key, &iv, plaintext)
+        aes_ecb_decrypt_in_place(&key, plaintext)
     })
 }
 
@@ -362,142 +351,69 @@ fn decrypt_agile_encrypted_package(
     password: &str,
     verify_integrity: bool,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    // 1) Derive the iterated password hash H.
-    let h = derive_iterated_hash_from_password(
-        password,
-        &info.password_salt,
-        info.password_hash_algorithm,
-        info.spin_count,
-    );
+    // Derive the package "secret key" (keyValue) and validate the password verifier fields.
+    let secret_key =
+        Zeroizing::new(formula_offcrypto::agile::agile_secret_key_from_password(info, password)?);
 
-    // 2) Decrypt/verifier check.
-    let verifier_hash_input = decrypt_agile_value(
-        &h,
-        &info.password_salt,
-        info.password_hash_algorithm,
-        info.password_key_bits,
-        &VERIFIER_HASH_INPUT_BLOCK,
-        &info.encrypted_verifier_hash_input,
-    )?;
-    let verifier_hash_value = decrypt_agile_value(
-        &h,
-        &info.password_salt,
-        info.password_hash_algorithm,
-        info.password_key_bits,
-        &VERIFIER_HASH_VALUE_BLOCK,
-        &info.encrypted_verifier_hash_value,
-    )?;
-    verify_agile_password(
-        &verifier_hash_input,
-        &verifier_hash_value,
-        info.password_hash_algorithm,
-    )?;
-
-    // 3) Decrypt keyValue (the package AES key).
-    let key_value = decrypt_agile_value(
-        &h,
-        &info.password_salt,
-        info.password_hash_algorithm,
-        info.password_key_bits,
-        &KEY_VALUE_BLOCK,
-        &info.encrypted_key_value,
-    )?;
-    let key_len =
-        info.password_key_bits
-            .checked_div(8)
-            .ok_or(OffcryptoError::InvalidEncryptionInfo {
-                context: "encryptedKey.keyBits must be a multiple of 8",
-            })?;
-    if key_value.len() < key_len {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "Agile decrypted keyValue is too short",
-        });
-    }
-    let secret_key = &key_value[..key_len];
-
-    // 4) Decrypt the segmented package ciphertext.
-    let mut iv_seed = Vec::with_capacity(info.key_data_salt.len() + 4);
+    // Decrypt the segmented package ciphertext.
     let decrypted =
         decrypt_encrypted_package(encrypted_package, |segment_index, ciphertext, plaintext| {
-            iv_seed.clear();
-            iv_seed.extend_from_slice(&info.key_data_salt);
-            iv_seed.extend_from_slice(&segment_index.to_le_bytes());
-
-            let digest = hash_alg_digest(info.key_data_hash_algorithm, &iv_seed);
-            let mut iv = [0u8; 16];
-            iv.copy_from_slice(&digest[..16]);
+            let iv = derive_iv_16(
+                &info.key_data_salt,
+                &segment_index.to_le_bytes(),
+                info.key_data_hash_algorithm,
+            )?;
 
             plaintext.copy_from_slice(ciphertext);
-            aes_cbc_decrypt_in_place(secret_key, &iv, plaintext)
+            aes_cbc_decrypt_in_place(&secret_key, &iv, plaintext)
         })?;
 
-    // 5) Optional `dataIntegrity` verification.
+    // Optional `dataIntegrity` verification.
     if verify_integrity {
-        verify_agile_data_integrity(info, secret_key, &decrypted)?;
+        verify_agile_data_integrity(info, &secret_key, encrypted_package)?;
     }
 
     Ok(decrypted)
 }
 
-fn verify_agile_password(
-    verifier_hash_input: &[u8],
-    verifier_hash_value: &[u8],
-    hash_alg: HashAlgorithm,
-) -> Result<(), OffcryptoError> {
-    let expected = Zeroizing::new(hash_alg_digest(hash_alg, verifier_hash_input));
-    if verifier_hash_value.len() < expected.len() {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "Agile verifierHashValue is too short",
-        });
-    }
-    if !bool::from(verifier_hash_value[..expected.len()].ct_eq(&expected[..])) {
-        return Err(OffcryptoError::InvalidPassword);
-    }
-    Ok(())
-}
-
 fn verify_agile_data_integrity(
     info: &AgileEncryptionInfo,
     secret_key: &[u8],
-    decrypted_package: &[u8],
+    encrypted_package_stream: &[u8],
 ) -> Result<(), OffcryptoError> {
-    let key_bits = info.password_key_bits;
-
-    let iv = iv_from_salt_16(&info.key_data_salt)?;
-
-    let hmac_key_encryption_key = derive_encryption_key(
-        secret_key,
-        &HMAC_KEY_BLOCK,
-        info.key_data_hash_algorithm,
-        key_bits,
-    )?;
-    let hmac_key_buf = aes_cbc_decrypt(&info.encrypted_hmac_key, &hmac_key_encryption_key, &iv)?;
-
     let digest_len = hash_alg_digest_len(info.key_data_hash_algorithm);
-    if hmac_key_buf.len() < digest_len {
+
+    if info.key_data_block_size != 16 {
         return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "Agile decrypted HMAC key is too short",
+            context: "keyData.blockSize must be 16 for AES-CBC",
         });
     }
-    let hmac_key = &hmac_key_buf[..digest_len];
 
-    let hmac_value_encryption_key = derive_encryption_key(
-        secret_key,
-        &HMAC_VALUE_BLOCK,
-        info.key_data_hash_algorithm,
-        key_bits,
-    )?;
+    let hmac_key_iv =
+        derive_iv_16(&info.key_data_salt, &HMAC_KEY_BLOCK, info.key_data_hash_algorithm)?;
+    let hmac_key_buf = aes_cbc_decrypt(&info.encrypted_hmac_key, secret_key, &hmac_key_iv)?;
+    let hmac_key = hmac_key_buf.get(..digest_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "Agile decrypted HMAC key is too short",
+    })?;
+
+    let hmac_value_iv =
+        derive_iv_16(&info.key_data_salt, &HMAC_VALUE_BLOCK, info.key_data_hash_algorithm)?;
     let hmac_value_buf =
-        aes_cbc_decrypt(&info.encrypted_hmac_value, &hmac_value_encryption_key, &iv)?;
-    if hmac_value_buf.len() < digest_len {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "Agile decrypted HMAC value is too short",
-        });
-    }
-    let expected_hmac = &hmac_value_buf[..digest_len];
+        aes_cbc_decrypt(&info.encrypted_hmac_value, secret_key, &hmac_value_iv)?;
+    let expected_hmac =
+        hmac_value_buf
+            .get(..digest_len)
+            .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                context: "Agile decrypted HMAC value is too short",
+            })?;
 
-    let computed =
-        Zeroizing::new(compute_hmac(info.key_data_hash_algorithm, hmac_key, decrypted_package)?);
+    // MS-OFFCRYPTO: dataIntegrity HMAC is computed over the full EncryptedPackage stream bytes
+    // (length prefix + ciphertext).
+    let computed = Zeroizing::new(compute_hmac(
+        info.key_data_hash_algorithm,
+        hmac_key,
+        encrypted_package_stream,
+    )?);
     if !bool::from(computed.as_slice().ct_eq(expected_hmac)) {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "Agile dataIntegrity HMAC mismatch",
@@ -506,87 +422,31 @@ fn verify_agile_data_integrity(
     Ok(())
 }
 
-fn decrypt_agile_value(
-    h: &[u8],
-    salt: &[u8],
-    hash_alg: HashAlgorithm,
-    key_bits: usize,
-    block_key: &[u8],
-    ciphertext: &[u8],
-) -> Result<Vec<u8>, OffcryptoError> {
-    let iv = iv_from_salt_16(salt)?;
-    let key = derive_encryption_key(h, block_key, hash_alg, key_bits)?;
-    aes_cbc_decrypt(ciphertext, &key, &iv)
-}
-
-fn derive_iterated_hash_from_password(
-    password: &str,
-    salt: &[u8],
-    hash_alg: HashAlgorithm,
-    spin: u32,
-) -> Vec<u8> {
-    let pw_utf16 = password_to_utf16le_bytes(password);
-
-    let mut buf = Vec::with_capacity(salt.len() + pw_utf16.len());
-    buf.extend_from_slice(salt);
-    buf.extend_from_slice(&pw_utf16);
-    let mut h = hash_alg_digest(hash_alg, &buf);
-
-    let mut tmp = Vec::new();
-    for i in 0..spin {
-        tmp.clear();
-        tmp.extend_from_slice(&i.to_le_bytes());
-        tmp.extend_from_slice(&h);
-        h = hash_alg_digest(hash_alg, &tmp);
-    }
-
-    h
-}
-
-fn derive_encryption_key(
-    h: &[u8],
-    block_key: &[u8],
-    hash_alg: HashAlgorithm,
-    key_bits: usize,
-) -> Result<Vec<u8>, OffcryptoError> {
-    if key_bits % 8 != 0 {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "keyBits must be a multiple of 8",
-        });
-    }
-    let key_len = key_bits / 8;
-
-    let mut buf = Vec::with_capacity(h.len() + block_key.len());
-    buf.extend_from_slice(h);
-    buf.extend_from_slice(block_key);
-    let mut out = hash_alg_digest(hash_alg, &buf);
-
-    if key_len <= out.len() {
-        out.truncate(key_len);
+fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
+    if bytes.len() >= out_len {
+        bytes[..out_len].to_vec()
     } else {
-        out.resize(key_len, 0);
+        // MS-OFFCRYPTO `TruncateHash` expansion uses `0x36` bytes.
+        let mut out = vec![0x36u8; out_len];
+        out[..bytes.len()].copy_from_slice(bytes);
+        out
     }
+}
 
+fn derive_iv_16(
+    salt: &[u8],
+    block_key: &[u8],
+    hash_alg: HashAlgorithm,
+) -> Result<[u8; 16], OffcryptoError> {
+    let mut buf = Vec::with_capacity(salt.len() + block_key.len());
+    buf.extend_from_slice(salt);
+    buf.extend_from_slice(block_key);
+    let digest = hash_alg_digest(hash_alg, &buf);
+
+    let iv = normalize_key_material(&digest, 16);
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&iv);
     Ok(out)
-}
-
-fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
-    for unit in password.encode_utf16() {
-        out.extend_from_slice(&unit.to_le_bytes());
-    }
-    out
-}
-
-fn iv_from_salt_16(salt: &[u8]) -> Result<[u8; 16], OffcryptoError> {
-    if salt.len() < 16 {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "saltValue is too short for AES-CBC IV",
-        });
-    }
-    let mut iv = [0u8; 16];
-    iv.copy_from_slice(&salt[..16]);
-    Ok(iv)
 }
 
 fn hash_alg_digest_len(hash_alg: HashAlgorithm) -> usize {
@@ -653,6 +513,31 @@ fn aes_cbc_decrypt_in_place(
     }
 
     Ok(())
+}
+
+fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
+    if buf.len() % 16 != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength { len: buf.len() });
+    }
+
+    fn decrypt_with<C>(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
+    where
+        C: BlockDecrypt + KeyInit,
+    {
+        let cipher =
+            C::new_from_slice(key).map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
+        for block in buf.chunks_mut(16) {
+            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, buf),
+        24 => decrypt_with::<Aes192>(key, buf),
+        32 => decrypt_with::<Aes256>(key, buf),
+        _ => Err(OffcryptoError::InvalidKeyLength { len: key.len() }),
+    }
 }
 
 fn compute_hmac(
