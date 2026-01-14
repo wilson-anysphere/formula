@@ -60,6 +60,11 @@ Options:
                         Useful with --no-build when auto-detection picks the wrong binary.
   --help                Show this help.
 
+Environment:
+  FORMULA_COI_NO_BUILD=1        Same as --no-build.
+  FORMULA_COI_TIMEOUT_SECS=45   Linux-only: apply an outer timeout when running the packaged app
+                               (set to 0 to disable). Helps avoid hung CI jobs.
+
 Examples:
   # Default (build + run)
   pnpm -C apps/desktop check:coi
