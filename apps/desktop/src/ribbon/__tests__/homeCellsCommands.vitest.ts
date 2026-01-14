@@ -142,4 +142,30 @@ describe("Home → Cells dropdown commands", () => {
     expect(doc.insertRows).toHaveBeenCalledWith("Sheet1", 10, 3, { label: "Insert Rows", source: "ribbon" });
     expect(focus).toHaveBeenCalled();
   });
+
+  it("blocks commands in read-only mode without prompting", async () => {
+    const showQuickPick = vi.fn(async () => "shiftRight" as const);
+    const showToast = vi.fn();
+    const focus = vi.fn();
+
+    const app = {
+      isEditing: () => false,
+      isReadOnly: () => true,
+      getSelectionRanges: () => [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      focus,
+    } as any;
+
+    const handled = await handleHomeCellsInsertDeleteCommand({
+      app,
+      commandId: "home.cells.insert.insertCells",
+      showQuickPick,
+      showToast,
+    });
+
+    expect(handled).toBe(true);
+    expect(showQuickPick).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalled();
+    expect(focus).toHaveBeenCalled();
+  });
 });
