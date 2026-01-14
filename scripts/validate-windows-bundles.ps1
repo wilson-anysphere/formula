@@ -318,6 +318,31 @@ function Get-SignToolPath {
   return $null
 }
 
+function Get-SevenZipPath {
+  $cmd = Get-Command 7z.exe -ErrorAction SilentlyContinue
+  if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+    return $cmd.Source
+  }
+  $cmd = Get-Command 7z -ErrorAction SilentlyContinue
+  if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+    return $cmd.Source
+  }
+
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+    $candidates += (Join-Path $env:ProgramFiles "7-Zip\\7z.exe")
+  }
+  if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} "7-Zip\\7z.exe")
+  }
+  foreach ($c in $candidates) {
+    if (Test-Path -LiteralPath $c) {
+      return $c
+    }
+  }
+  return $null
+}
+
 function Assert-Signed {
   param(
     [Parameter(Mandatory = $true)]
@@ -824,6 +849,58 @@ try {
     return ($hasContext -and $hasExt)
   }
 
+  function Assert-ExeContainsComplianceArtifacts {
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Exe,
+      # When true, missing 7-Zip tooling will be treated as a warning instead of an error.
+      [switch]$BestEffort
+    )
+
+    Write-Host "Compliance artifact check (NSIS/EXE): $($Exe.FullName)"
+
+    $sevenZip = Get-SevenZipPath
+    if ([string]::IsNullOrWhiteSpace($sevenZip)) {
+      $msg = "7-Zip (7z) not found; cannot validate NSIS installer payload includes LICENSE/NOTICE. Install 7-Zip or ensure 7z.exe is on PATH."
+      if ($BestEffort) {
+        Write-Warning "$msg Skipping EXE compliance validation because MSI installers are present and are treated as authoritative."
+        return
+      }
+      throw $msg
+    }
+
+    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("formula-nsis-extract-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+
+    try {
+      # Extract the installer payload. 7z supports NSIS installers and is the most
+      # reliable way to inspect the embedded file set without performing a full install.
+      #
+      # - `x` preserves directory structure when possible
+      # - `-y` assumes Yes on all prompts (overwrite in temp dir)
+      # - `-o<dir>` sets output directory
+      & $sevenZip x "-o$tmpRoot" -y $Exe.FullName | Out-Null
+      if ($LASTEXITCODE -ne 0) {
+        throw "7z extraction failed for $($Exe.FullName) (exit code $LASTEXITCODE)."
+      }
+
+      $files = @(Get-ChildItem -LiteralPath $tmpRoot -Recurse -File -ErrorAction SilentlyContinue)
+      $missing = @()
+      foreach ($req in @("LICENSE", "NOTICE")) {
+        $found = $files | Where-Object { $_.Name -ieq $req } | Select-Object -First 1
+        if (-not $found) {
+          $missing += $req
+        }
+      }
+
+      if ($missing.Count -gt 0) {
+        throw "EXE installer payload is missing required compliance files: $($missing -join ", "). Expected LICENSE/NOTICE to be included in the installed app directory."
+      }
+    } finally {
+      Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
   $assocSpec = Get-ExpectedFileAssociationSpec -RepoRoot $repoRoot
   $requiredExtension = ($assocSpec.Extensions | Select-Object -First 1)
   if ([string]::IsNullOrWhiteSpace($requiredExtension)) {
@@ -888,6 +965,10 @@ try {
           throw "$msg Without an MSI, we cannot reliably confirm Windows file associations are present."
         }
       }
+
+      # NSIS is a distributed installer (alongside MSI). Ensure the same compliance artifacts
+      # are present in its payload so users who install via EXE still receive LICENSE/NOTICE.
+      Assert-ExeContainsComplianceArtifacts -Exe $exe -BestEffort:($msiInstallers.Count -gt 0)
     }
   }
 

@@ -714,6 +714,23 @@ jobs:
             throw "NSIS installation failed: makensis.exe not found on PATH."
           }
 
+      - name: Install 7-Zip (required for NSIS payload validation)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not (Get-Command 7z.exe -ErrorAction SilentlyContinue)) {
+            choco install 7zip --yes --no-progress
+            if (Test-Path "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1") {
+              Import-Module "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1"
+              refreshenv
+            }
+          }
+
+          if (-not (Get-Command 7z.exe -ErrorAction SilentlyContinue)) {
+            throw "7-Zip installation failed: 7z.exe not found on PATH."
+          }
+
       - name: Cache Rust (cargo registry + git)
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
