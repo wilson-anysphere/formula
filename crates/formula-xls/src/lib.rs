@@ -1860,14 +1860,17 @@ fn import_xls_path_with_biff_reader(
                         }
                     }
 
-                    match biff::parse_biff_sheet_shared_formulas(workbook_stream, sheet_info.offset)
-                    {
+                    match biff::parse_biff_sheet_shared_formulas(workbook_stream, sheet_info.offset) {
                         Ok(mut parsed) => {
-                            warnings.extend(parsed.warnings.drain(..).map(|w| {
-                                ImportWarning::new(format!(
-                                    "failed to import `.xls` shared formulas for sheet `{sheet_name}`: {w}"
-                                ))
-                            }));
+                            for w in parsed.warnings.drain(..) {
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to import `.xls` shared formulas for sheet `{sheet_name}`: {w}"
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
+                            }
 
                             for shared in parsed.shared_formulas.drain(..) {
                                 for row_u16 in shared.row_first..=shared.row_last {
@@ -1881,10 +1884,9 @@ fn import_xls_path_with_biff_reader(
                                         let cell_ref = CellRef::new(row, col);
                                         let anchor = sheet.merged_regions.resolve_cell(cell_ref);
 
-                                        if sheet
-                                            .formula(anchor)
-                                            .is_some_and(|existing| existing != ErrorValue::Unknown.as_str())
-                                        {
+                                        if sheet.formula(anchor).is_some_and(|existing| {
+                                            existing != ErrorValue::Unknown.as_str()
+                                        }) {
                                             continue;
                                         }
 
@@ -1896,14 +1898,17 @@ fn import_xls_path_with_biff_reader(
                                         );
 
                                         for warning in decoded.warnings {
-                                            warnings.push(ImportWarning::new(format!(
-                                                "failed to decode shared formula in sheet `{sheet_name}` at {}: {warning}",
-                                                cell_ref.to_a1()
-                                            )));
+                                            push_import_warning(
+                                                &mut warnings,
+                                                format!(
+                                                    "failed to decode shared formula in sheet `{sheet_name}` at {}: {warning}",
+                                                    cell_ref.to_a1()
+                                                ),
+                                                &mut warnings_suppressed,
+                                            );
                                         }
 
-                                        let Some(normalized) =
-                                            normalize_formula_text(&decoded.text)
+                                        let Some(normalized) = normalize_formula_text(&decoded.text)
                                         else {
                                             continue;
                                         };
@@ -1919,9 +1924,13 @@ fn import_xls_path_with_biff_reader(
                                 }
                             }
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` shared formulas for sheet `{sheet_name}`: {err}"
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` shared formulas for sheet `{sheet_name}`: {err}"
+                            ),
+                            &mut warnings_suppressed,
+                        ),
                     }
                 }
             }
@@ -1945,15 +1954,23 @@ fn import_xls_path_with_biff_reader(
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                                 sheet.set_formula(anchor, Some(formula));
                             }
-                            warnings.extend(parsed.warnings.drain(..).map(|w| {
-                                ImportWarning::new(format!(
-                                    "failed to fully import `.xls` TABLE formulas for sheet `{sheet_name}`: {w}"
-                                ))
-                            }));
+                            for w in parsed.warnings.drain(..) {
+                                push_import_warning(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to fully import `.xls` TABLE formulas for sheet `{sheet_name}`: {w}"
+                                    ),
+                                    &mut warnings_suppressed,
+                                );
+                            }
                         }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` TABLE formulas for sheet `{sheet_name}`: {err}"
-                        ))),
+                        Err(err) => push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to import `.xls` TABLE formulas for sheet `{sheet_name}`: {err}"
+                            ),
+                            &mut warnings_suppressed,
+                        ),
                     }
                 }
             }
