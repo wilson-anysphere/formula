@@ -1204,6 +1204,8 @@ export class SpreadsheetApp {
   private splitViewDrawingHitTestIndex: HitTestIndex | null = null;
   private splitViewDrawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
   private splitViewDrawingHitTestIndexGrid: DesktopSharedGrid | null = null;
+  private splitViewDrawingHitTestIndexRowsVersion: number | null = null;
+  private splitViewDrawingHitTestIndexColsVersion: number | null = null;
   private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
   private selectedDrawingId: DrawingObjectId | null = null;
   private selectedDrawingIndex: number | null = null;
@@ -7092,6 +7094,8 @@ export class SpreadsheetApp {
     this.splitViewDrawingHitTestIndex = null;
     this.splitViewDrawingHitTestIndexObjects = null;
     this.splitViewDrawingHitTestIndexGrid = null;
+    this.splitViewDrawingHitTestIndexRowsVersion = null;
+    this.splitViewDrawingHitTestIndexColsVersion = null;
   }
 
   getGridLimits(): GridLimits {
@@ -9708,6 +9712,8 @@ export class SpreadsheetApp {
     this.splitViewDrawingHitTestIndex = null;
     this.splitViewDrawingHitTestIndexObjects = null;
     this.splitViewDrawingHitTestIndexGrid = null;
+    this.splitViewDrawingHitTestIndexRowsVersion = null;
+    this.splitViewDrawingHitTestIndexColsVersion = null;
   }
 
   private getDrawingHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
@@ -9728,11 +9734,25 @@ export class SpreadsheetApp {
   ): HitTestIndex {
     const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const cached = this.splitViewDrawingHitTestIndex;
+    const versions = (() => {
+      try {
+        const scroll = (secondary.grid.renderer as any)?.scroll;
+        const rowsObj = scroll?.rows;
+        const colsObj = scroll?.cols;
+        const rowsVersion = typeof rowsObj?.getVersion === "function" ? (rowsObj.getVersion() as number) : null;
+        const colsVersion = typeof colsObj?.getVersion === "function" ? (colsObj.getVersion() as number) : null;
+        return { rowsVersion, colsVersion };
+      } catch {
+        return { rowsVersion: null, colsVersion: null };
+      }
+    })();
     if (
       cached &&
       this.splitViewDrawingHitTestIndexGrid === secondary.grid &&
       this.splitViewDrawingHitTestIndexObjects === objects &&
-      Math.abs(cached.zoom - z) < 1e-6
+      Math.abs(cached.zoom - z) < 1e-6 &&
+      (versions.rowsVersion == null || this.splitViewDrawingHitTestIndexRowsVersion === versions.rowsVersion) &&
+      (versions.colsVersion == null || this.splitViewDrawingHitTestIndexColsVersion === versions.colsVersion)
     ) {
       return cached;
     }
@@ -9740,6 +9760,8 @@ export class SpreadsheetApp {
     this.splitViewDrawingHitTestIndex = index;
     this.splitViewDrawingHitTestIndexObjects = objects;
     this.splitViewDrawingHitTestIndexGrid = secondary.grid;
+    this.splitViewDrawingHitTestIndexRowsVersion = versions.rowsVersion;
+    this.splitViewDrawingHitTestIndexColsVersion = versions.colsVersion;
     return index;
   }
 
@@ -17953,6 +17975,7 @@ export class SpreadsheetApp {
 
     const prevEffectiveSelected = this.getSelectedDrawingId();
     this.drawingObjectsCache = null;
+    this.invalidateDrawingHitTestIndexCaches();
     const prevDrawingSelected = this.selectedDrawingId;
     this.selectedDrawingId = drawingId;
     if (this.selectedChartId != null) {
