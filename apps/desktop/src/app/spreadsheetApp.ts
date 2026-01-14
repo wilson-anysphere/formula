@@ -24789,6 +24789,13 @@ export class SpreadsheetApp {
     const sheetId = editTarget.sheetId;
     const cellAddress = cellToA1(editTarget.cell);
 
+    // If the sheet being edited disappears (deleted / hidden) while the user is still typing,
+    // ensure preview evaluation never recreates it by reading cells. Unlike `commitFormulaBar`,
+    // this can be triggered on every keystroke as part of hint/overlay rendering.
+    const targetMeta = this.document.getSheetMeta(sheetId);
+    const targetVisibility = targetMeta?.visibility ?? "visible";
+    if (!targetMeta || targetVisibility !== "visible") return "(preview unavailable)";
+
     // Hard cap on the number of cell reads we allow for preview. This keeps the formula bar
     // responsive even when the argument expression references a large range.
     const MAX_CELL_READS = 5_000;
@@ -24801,9 +24808,10 @@ export class SpreadsheetApp {
       const key = String(id ?? "").trim();
       if (!key) return false;
       const lower = key.toLowerCase();
-      // The current sheet is always "known" for preview purposes, even if the DocumentController
-      // hasn't materialized it yet (e.g. very early startup or in minimal unit tests).
-      if (lower === sheetId.toLowerCase()) return true;
+      // The *active* sheet is always "known" for preview purposes, even if the DocumentController
+      // hasn't materialized it yet (e.g. very early startup or in minimal unit tests). (We still
+      // validate the actual formula edit target above to avoid resurrecting deleted sheets.)
+      if (lower === this.sheetId.toLowerCase()) return true;
       const cached = sheetExistsCache.get(lower);
       if (cached !== undefined) return cached;
       let exists = false;

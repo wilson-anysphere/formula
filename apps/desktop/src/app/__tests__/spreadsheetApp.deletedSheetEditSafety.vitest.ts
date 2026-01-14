@@ -186,5 +186,24 @@ describe("SpreadsheetApp sheet deletion edit safety", () => {
       app.destroy();
     }
   });
-});
 
+  it("does not recreate a deleted sheet when evaluating formula-bar previews targeting it", () => {
+    const app = new SpreadsheetApp(createRoot(), createStatus());
+    try {
+      seedThreeSheets(app);
+      const doc = app.getDocument();
+
+      app.activateSheet("Sheet3");
+      (app as any).formulaEditCell = { sheetId: "Sheet2", cell: { row: 0, col: 0 } };
+
+      doc.deleteSheet("Sheet2");
+      expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet3"]);
+
+      const preview = (app as any).evaluateFormulaBarArgumentPreview("A1");
+      expect(preview).toBe("(preview unavailable)");
+      expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet3"]);
+    } finally {
+      app.destroy();
+    }
+  });
+});
