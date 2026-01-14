@@ -7,8 +7,8 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions, CsvTextEncoding},
-    sanitize_sheet_name, CellValue as ModelCellValue, DateSystem as WorkbookDateSystem,
-    SheetVisibility, TabColor, WorksheetId,
+    sanitize_sheet_name, CellValue as ModelCellValue, ColProperties as ModelColProperties,
+    DateSystem as WorkbookDateSystem, SheetVisibility, TabColor, WorksheetId,
 };
 use formula_xlsb::{
     CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, OpenOptions as XlsbOpenOptions,
@@ -1815,6 +1815,417 @@ fn workbook_xml_sheet_order_override(
     Ok(Some(rewritten.into_bytes()))
 }
 
+fn parse_xml_bool(val: &str) -> bool {
+    val == "1" || val.eq_ignore_ascii_case("true")
+}
+
+fn worksheet_spreadsheetml_prefix(xml: &str) -> anyhow::Result<Option<String>> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader
+            .read_event_into(&mut buf)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"worksheet" => {
+                let name = e.name();
+                let name = name.as_ref();
+                let prefix = name
+                    .iter()
+                    .rposition(|b| *b == b':')
+                    .map(|idx| &name[..idx])
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
+                return Ok(prefix);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(None)
+}
+
+fn normalized_sheet_col_properties(
+    props: &BTreeMap<u32, ModelColProperties>,
+) -> BTreeMap<u32, (Option<f32>, bool)> {
+    let mut out = BTreeMap::new();
+    for (&col, prop) in props {
+        let width = prop.width;
+        let hidden = prop.hidden;
+        if width.is_none() && !hidden {
+            continue;
+        }
+        out.insert(col, (width, hidden));
+    }
+    out
+}
+
+fn parse_col_properties_width_hidden(
+    sheet_xml: &str,
+) -> anyhow::Result<BTreeMap<u32, (Option<f32>, bool)>> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut in_cols = false;
+    let mut map: BTreeMap<u32, (Option<f32>, bool)> = BTreeMap::new();
+
+    loop {
+        match reader
+            .read_event_into(&mut buf)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref() == b"cols" => in_cols = true,
+            Event::End(e) if e.local_name().as_ref() == b"cols" => {
+                in_cols = false;
+                drop(e);
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"cols" => {
+                in_cols = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e) if in_cols && e.local_name().as_ref() == b"col" => {
+                let mut min: Option<u32> = None;
+                let mut max: Option<u32> = None;
+                let mut width: Option<f32> = None;
+                let mut custom_width: Option<bool> = None;
+                let mut hidden = false;
+
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                    let val = attr
+                        .unescape_value()
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+                        .into_owned();
+                    match attr.key.as_ref() {
+                        b"min" => min = val.parse().ok(),
+                        b"max" => max = val.parse().ok(),
+                        b"width" => width = val.parse().ok(),
+                        b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
+                        b"hidden" => hidden = parse_xml_bool(&val),
+                        _ => {}
+                    }
+                }
+
+                let Some(min_1) = min else { continue };
+                let max_1 = max.unwrap_or(min_1).min(formula_model::EXCEL_MAX_COLS);
+                if min_1 == 0 || max_1 == 0 || min_1 > formula_model::EXCEL_MAX_COLS {
+                    continue;
+                }
+
+                let width = if custom_width == Some(false) {
+                    None
+                } else {
+                    width
+                };
+
+                for col_1 in min_1..=max_1 {
+                    let col_0 = col_1 - 1;
+                    if col_0 >= formula_model::EXCEL_MAX_COLS {
+                        continue;
+                    }
+                    if width.is_none() && !hidden {
+                        continue;
+                    }
+                    let entry = map.entry(col_0).or_insert((None, false));
+                    if width.is_some() {
+                        entry.0 = width;
+                    }
+                    if hidden {
+                        entry.1 = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(map)
+}
+
+fn escape_xml_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn parse_cols_attribute_map(
+    sheet_xml: &str,
+) -> anyhow::Result<BTreeMap<u32, BTreeMap<String, String>>> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut in_cols = false;
+    let mut attrs_by_col: BTreeMap<u32, BTreeMap<String, String>> = BTreeMap::new();
+
+    loop {
+        match reader
+            .read_event_into(&mut buf)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref() == b"cols" => in_cols = true,
+            Event::End(e) if e.local_name().as_ref() == b"cols" => {
+                in_cols = false;
+                drop(e);
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"cols" => {
+                in_cols = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e) if in_cols && e.local_name().as_ref() == b"col" => {
+                let mut min: Option<u32> = None;
+                let mut max: Option<u32> = None;
+                let mut element_attrs: Vec<(String, String)> = Vec::new();
+
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                    let key = std::str::from_utf8(attr.key.as_ref())
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+                        .to_string();
+                    let val = attr
+                        .unescape_value()
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+                        .into_owned();
+                    match key.as_str() {
+                        "min" => min = val.parse().ok(),
+                        "max" => max = val.parse().ok(),
+                        _ => element_attrs.push((key, val)),
+                    }
+                }
+
+                let Some(min_1) = min else { continue };
+                let max_1 = max.unwrap_or(min_1).min(formula_model::EXCEL_MAX_COLS);
+                if min_1 == 0 || max_1 == 0 || min_1 > formula_model::EXCEL_MAX_COLS {
+                    continue;
+                }
+
+                for col_1 in min_1..=max_1 {
+                    let entry = attrs_by_col.entry(col_1).or_default();
+                    for (k, v) in &element_attrs {
+                        entry.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(attrs_by_col)
+}
+
+fn render_cols_section(
+    prefix: Option<&str>,
+    attrs_by_col: &BTreeMap<u32, BTreeMap<String, String>>,
+) -> String {
+    if attrs_by_col.is_empty() {
+        return String::new();
+    }
+
+    let cols_tag = match prefix {
+        Some(p) => format!("{p}:cols"),
+        None => "cols".to_string(),
+    };
+    let col_tag = match prefix {
+        Some(p) => format!("{p}:col"),
+        None => "col".to_string(),
+    };
+
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&cols_tag);
+    out.push('>');
+
+    let mut current: Option<(u32, u32, BTreeMap<String, String>)> = None;
+    for (&col_1, attrs) in attrs_by_col {
+        let attrs = attrs.clone();
+        match current.take() {
+            None => current = Some((col_1, col_1, attrs)),
+            Some((start, end, cur)) if col_1 == end + 1 && attrs == cur => {
+                current = Some((start, col_1, cur));
+            }
+            Some((start, end, cur)) => {
+                out.push_str(&render_col_range(&col_tag, start, end, &cur));
+                current = Some((col_1, col_1, attrs));
+            }
+        }
+    }
+    if let Some((start, end, cur)) = current {
+        out.push_str(&render_col_range(&col_tag, start, end, &cur));
+    }
+
+    out.push_str("</");
+    out.push_str(&cols_tag);
+    out.push('>');
+    out
+}
+
+fn render_col_range(
+    col_tag: &str,
+    start_col_1: u32,
+    end_col_1: u32,
+    attrs: &BTreeMap<String, String>,
+) -> String {
+    let mut s = String::new();
+    s.push('<');
+    s.push_str(col_tag);
+    s.push_str(&format!(r#" min="{start_col_1}" max="{end_col_1}""#));
+    for (k, v) in attrs {
+        s.push(' ');
+        s.push_str(k);
+        s.push_str("=\"");
+        s.push_str(&escape_xml_attr(v));
+        s.push('"');
+    }
+    s.push_str("/>");
+    s
+}
+
+fn update_cols_xml(sheet_xml: &str, cols_section: &str) -> anyhow::Result<String> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+    use quick_xml::Writer;
+
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut skip_depth: usize = 0;
+    let mut replaced = false;
+    let mut inserted = false;
+
+    loop {
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
+            Event::Start(ref e) if e.local_name().as_ref() == b"cols" => {
+                replaced = true;
+                if !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                }
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"cols" => {
+                replaced = true;
+                if !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                }
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetData" => {
+                if !replaced && !inserted && !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                    inserted = true;
+                }
+                writer
+                    .write_event(Event::Start(e.to_owned()))
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetData" => {
+                if !replaced && !inserted && !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                    inserted = true;
+                }
+                writer
+                    .write_event(Event::Empty(e.to_owned()))
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            }
+            _ => {
+                writer
+                    .write_event(event.to_owned())
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            }
+        }
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner())
+        .map_err(|e| anyhow::anyhow!(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+}
+
+fn patch_cols_in_worksheet_xml(
+    sheet_xml: &str,
+    desired: &BTreeMap<u32, ModelColProperties>,
+) -> anyhow::Result<Option<String>> {
+    let current = parse_col_properties_width_hidden(sheet_xml)?;
+    let desired_norm = normalized_sheet_col_properties(desired);
+    if current == desired_norm {
+        return Ok(None);
+    }
+
+    let prefix = worksheet_spreadsheetml_prefix(sheet_xml)?;
+
+    let mut attrs_by_col = parse_cols_attribute_map(sheet_xml)?;
+
+    // Apply desired width/hidden overrides, preserving unsupported attributes from the source.
+    // Columns not present in `desired` are treated as default (clear width/hidden).
+    let mut touched_cols: std::collections::BTreeSet<u32> = attrs_by_col.keys().copied().collect();
+    touched_cols.extend(desired.keys().copied().map(|c0| c0.saturating_add(1)));
+
+    for col_1 in touched_cols {
+        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
+        let col_0 = col_1 - 1;
+        let desired_props = desired.get(&col_0);
+        let desired_width = desired_props.and_then(|p| p.width);
+        let desired_hidden = desired_props.map(|p| p.hidden).unwrap_or(false);
+
+        let mut entry = attrs_by_col.remove(&col_1).unwrap_or_default();
+
+        match desired_width {
+            Some(width) => {
+                entry.insert("width".to_string(), width.to_string());
+                entry.insert("customWidth".to_string(), "1".to_string());
+            }
+            None => {
+                entry.remove("width");
+                entry.remove("customWidth");
+            }
+        }
+
+        if desired_hidden {
+            entry.insert("hidden".to_string(), "1".to_string());
+        } else {
+            entry.remove("hidden");
+        }
+
+        if !entry.is_empty() {
+            attrs_by_col.insert(col_1, entry);
+        }
+    }
+
+    let cols_section = render_cols_section(prefix.as_deref(), &attrs_by_col);
+    let updated = update_cols_xml(sheet_xml, &cols_section)?;
+    Ok(Some(updated))
+}
+
 fn sheet_metadata_part_overrides(
     bytes: &[u8],
     workbook: &Workbook,
@@ -1887,7 +2298,7 @@ fn sheet_metadata_part_overrides(
         );
     }
 
-    // --- worksheet XML tabColor ---
+    // --- worksheet XML metadata ---
     // Use the cached worksheet part when available; fall back to re-discovering parts from the package.
     for sheet in &workbook.sheets {
         let part_name = sheet
@@ -1909,20 +2320,32 @@ fn sheet_metadata_part_overrides(
         let sheet_xml = std::str::from_utf8(&sheet_xml_bytes)
             .with_context(|| format!("parse worksheet part {part_name} as utf8"))?;
 
-        let current = parse_sheet_tab_color(sheet_xml)
+        let mut updated_xml = sheet_xml.to_string();
+        let mut changed = false;
+
+        // tabColor (sheetPr/tabColor)
+        let current_tab_color = parse_sheet_tab_color(sheet_xml)
             .map_err(|e| anyhow::anyhow!(e.to_string()))
             .with_context(|| format!("parse tabColor in {part_name}"))?;
-        if current == sheet.tab_color {
-            continue;
+        if current_tab_color != sheet.tab_color {
+            updated_xml = write_sheet_tab_color(&updated_xml, sheet.tab_color.as_ref())
+                .map_err(|e| anyhow::anyhow!(e.to_string()))
+                .with_context(|| format!("rewrite tabColor in {part_name}"))?;
+            changed = true;
         }
 
-        let updated = write_sheet_tab_color(sheet_xml, sheet.tab_color.as_ref())
-            .map_err(|e| anyhow::anyhow!(e.to_string()))
-            .with_context(|| format!("rewrite tabColor in {part_name}"))?;
-        part_overrides.insert(
-            part_name.to_string(),
-            PartOverride::Replace(updated.into_bytes()),
-        );
+        // Column widths / hidden columns (<cols>/<col>)
+        if let Some(patched) = patch_cols_in_worksheet_xml(&updated_xml, &sheet.col_properties)? {
+            updated_xml = patched;
+            changed = true;
+        }
+
+        if changed {
+            part_overrides.insert(
+                part_name.to_string(),
+                PartOverride::Replace(updated_xml.into_bytes()),
+            );
+        }
     }
 
     Ok(part_overrides)
@@ -4337,6 +4760,75 @@ mod tests {
 
         let sheet3 = roundtrip.sheet_by_name("Sheet3").expect("Sheet3 exists");
         assert_eq!(sheet3.visibility, SheetVisibility::VeryHidden);
+    }
+
+    #[test]
+    fn patch_save_persists_column_widths_and_hidden_columns() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read xlsx workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected read_xlsx_blocking to retain origin bytes"
+        );
+
+        // Set a custom width for column A and hide column B.
+        workbook.sheets[0].col_properties.insert(
+            0,
+            ModelColProperties {
+                width: Some(20.0),
+                hidden: false,
+                style_id: None,
+            },
+        );
+        workbook.sheets[0].col_properties.insert(
+            1,
+            ModelColProperties {
+                width: None,
+                hidden: true,
+                style_id: None,
+            },
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("cols.xlsx");
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let pkg = XlsxPackage::from_bytes(written_bytes.as_ref()).expect("parse output package");
+        let sheet_xml = pkg
+            .part("xl/worksheets/sheet1.xml")
+            .expect("sheet1.xml exists");
+        let sheet_xml_str = std::str::from_utf8(sheet_xml).expect("sheet xml is utf8");
+
+        assert!(
+            sheet_xml_str.contains("<cols"),
+            "expected sheet to contain <cols>, got:\n{sheet_xml_str}"
+        );
+        assert!(
+            sheet_xml_str.contains("min=\"1\"")
+                && sheet_xml_str.contains("max=\"1\"")
+                && sheet_xml_str.contains("width=\"20\"")
+                && sheet_xml_str.contains("customWidth=\"1\""),
+            "expected sheet xml to contain a width override for column A, got:\n{sheet_xml_str}"
+        );
+        assert!(
+            sheet_xml_str.contains("min=\"2\"")
+                && sheet_xml_str.contains("max=\"2\"")
+                && sheet_xml_str.contains("hidden=\"1\""),
+            "expected sheet xml to contain a hidden=1 override for column B, got:\n{sheet_xml_str}"
+        );
+
+        // Re-open via the normal XLSX read path and ensure the backend model picks up the column metadata.
+        let roundtrip = read_xlsx_blocking(&out_path).expect("read patched workbook");
+        let sheet = &roundtrip.sheets[0];
+        assert_eq!(
+            sheet.col_properties.get(&0).and_then(|p| p.width),
+            Some(20.0)
+        );
+        assert_eq!(sheet.col_properties.get(&1).map(|p| p.hidden), Some(true));
     }
 
     #[test]

@@ -55,6 +55,7 @@ pub fn workbook_to_model(workbook: &AppWorkbook) -> anyhow::Result<ModelWorkbook
         if let Some(model_sheet) = model.sheet_mut(sheet_id) {
             model_sheet.visibility = sheet.visibility;
             model_sheet.tab_color = sheet.tab_color.clone();
+            model_sheet.col_properties = sheet.col_properties.clone();
         }
         let sheet_idx = model.sheets.len().saturating_sub(1);
 
@@ -169,6 +170,7 @@ fn sheet_from_model(
     let mut out = AppSheet::new(sheet.name.clone(), sheet.name.clone());
     out.visibility = sheet.visibility;
     out.tab_color = sheet.tab_color.clone();
+    out.col_properties = sheet.col_properties.clone();
 
     for (cell_ref, cell) in sheet.iter_cells() {
         let row = cell_ref.row as usize;
