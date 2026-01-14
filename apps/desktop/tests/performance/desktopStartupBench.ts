@@ -225,10 +225,12 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1' };
   const argv = resolveDesktopStartupArgv(benchKind);
 
-  const rssIdleDelayMs = Math.max(
-    0,
-    Number(process.env.FORMULA_DESKTOP_RSS_IDLE_DELAY_MS ?? '1000') || 1000,
-  );
+  // Allow explicitly setting `FORMULA_DESKTOP_RSS_IDLE_DELAY_MS=0` to sample immediately (useful
+  // for unit tests / debugging). Treat unset/blank/invalid values as the default.
+  const rssIdleDelayRaw = process.env.FORMULA_DESKTOP_RSS_IDLE_DELAY_MS;
+  const rssIdleDelayParsed =
+    rssIdleDelayRaw && rssIdleDelayRaw.trim() !== '' ? Number(rssIdleDelayRaw) : 1000;
+  const rssIdleDelayMs = Number.isFinite(rssIdleDelayParsed) ? Math.max(0, rssIdleDelayParsed) : 1000;
   const rssTargetMb = Number(process.env.FORMULA_DESKTOP_RSS_TARGET_MB ?? '100') || 100;
 
   const perfHome = resolvePerfHome();
