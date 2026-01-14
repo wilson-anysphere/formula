@@ -1,4 +1,6 @@
-use formula_model::autofilter::{FilterColumn, FilterCriterion, FilterJoin, FilterValue};
+use formula_model::autofilter::{
+    FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison,
+};
 use formula_model::Range;
 
 mod common;
@@ -23,13 +25,22 @@ fn imports_biff8_autofilter_criteria_from_autofilter_records() {
 
     assert_eq!(
         af.filter_columns,
-        vec![FilterColumn {
-            col_id: 0,
-            join: FilterJoin::Any,
-            criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".to_string()))],
-            values: Vec::new(),
-            raw_xml: Vec::new(),
-        }],
+        vec![
+            FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".to_string()))],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 1,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Number(NumberComparison::GreaterThan(1.0))],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+        ],
         "unexpected filter columns; warnings={:?}",
         result.warnings
     );

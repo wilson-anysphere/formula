@@ -14957,6 +14957,13 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
     let autofilter = autofilter_record(0, false, &doper1, &doper2);
     push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
 
+    // Second AUTOFILTER record: numeric comparison on column B.
+    // Criterion: column value > 1.
+    let doper1 = autofilter_doper_number(AUTOFILTER_OP_GREATER_THAN, 1.0);
+    let doper2 = autofilter_doper_none();
+    let autofilter = autofilter_record(1, false, &doper1, &doper2);
+    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
+
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
 
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
