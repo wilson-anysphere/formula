@@ -1912,11 +1912,27 @@ impl DataModel {
         {
             if current_table == target_table {
                 if found_path.is_some() {
+                    let display_table = |table_key: &str| -> String {
+                        model
+                            .tables
+                            .get(table_key)
+                            .map(|t| t.name().to_string())
+                            .unwrap_or_else(|| table_key.to_string())
+                    };
+                    let display_path = |path: &[String]| -> String {
+                        path.iter()
+                            .map(|t| display_table(t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(" -> ")
+                    };
+
                     let first = found_table_path
                         .as_ref()
-                        .map(|p| p.join(" -> "))
+                        .map(|p| display_path(p.as_slice()))
                         .unwrap_or_else(|| "<unknown>".to_string());
-                    let second = table_path.join(" -> ");
+                    let second = display_path(table_path.as_slice());
+                    let start_table = display_table(start_table);
+                    let target_table = display_table(target_table);
                     return Err(DaxError::Eval(format!(
                         "ambiguous active relationship path between {start_display} and {target_display}: {first}; {second}"
                     )));
