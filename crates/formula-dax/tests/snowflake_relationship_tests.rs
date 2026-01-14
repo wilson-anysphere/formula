@@ -282,6 +282,41 @@ fn pivot_crosstab_supports_multi_hop_snowflake_dimensions() {
 }
 
 #[test]
+fn pivot_crosstab_supports_multi_hop_snowflake_dimensions_columnar_fact() {
+    let model = build_snowflake_model_with_columnar_sales();
+
+    let row_fields = vec![GroupByColumn::new("Categories", "CategoryName")];
+    let column_fields = vec![GroupByColumn::new("Products", "ProductId")];
+    let measures = vec![PivotMeasure::new("Total Amount", "SUM(Sales[Amount])").unwrap()];
+
+    let result = pivot_crosstab(
+        &model,
+        "Sales",
+        &row_fields,
+        &column_fields,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result,
+        PivotResultGrid {
+            data: vec![
+                vec![
+                    Value::from("Categories[CategoryName]"),
+                    Value::from("10"),
+                    Value::from("11"),
+                    Value::from("20"),
+                ],
+                vec![Value::from("A"), 10.0.into(), 5.0.into(), Value::Blank],
+                vec![Value::from("B"), Value::Blank, Value::Blank, 7.0.into()],
+            ]
+        }
+    );
+}
+
+#[test]
 fn summarize_grouping_supports_multi_hop_snowflake_dimensions() {
     let model = build_snowflake_model();
     let engine = DaxEngine::new();
