@@ -103,6 +103,14 @@ mod encrypted_package_size_prefix_tests {
         assert_eq!(parse_encrypted_package_size_prefix_bytes(prefix, Some(16)), 10);
     }
 }
+
+fn is_supported_ooxml_encryption_version(version_major: u16, version_minor: u16) -> bool {
+    // Decryption support is limited to the common modern schemes:
+    // - Agile encryption (4.4)
+    // - Standard/CryptoAPI encryption (`versionMinor == 2`; commonly 3.2, but 2.2/4.2 are observed)
+    (version_major == 4 && version_minor == 4)
+        || (version_minor == 2 && matches!(version_major, 2 | 3 | 4))
+}
 // BIFF record ids for legacy `.xls` encryption detection.
 //
 // Presence of `FILEPASS` in the workbook globals substream indicates the workbook stream is
@@ -1461,7 +1469,8 @@ pub fn open_workbook_model_with_password(
             .and_then(|s| s.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb"));
         if password.is_some() && !is_xlsb {
-            if let Some(workbook) = try_open_standard_aes_encrypted_ooxml_model_workbook(path, password)?
+            if let Some(workbook) =
+                try_open_standard_aes_encrypted_ooxml_model_workbook(path, password)?
             {
                 return Ok(workbook);
             }
@@ -1534,8 +1543,10 @@ pub fn open_workbook_with_password(
     // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
     // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-        return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
+    match try_decrypt_ooxml_encrypted_package_from_path(path, password) {
+        Ok(Some(bytes)) => return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes),
+        Ok(None) => {}
+        Err(err) => return Err(err),
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
@@ -1990,14 +2001,8 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     let version_major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
     let version_minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
 
-    // Decryption support is limited to the common modern schemes:
-    // - Agile encryption (4.4)
-    // - Standard/CryptoAPI encryption (`versionMinor == 2`; commonly 3.2, but 2.2/4.2 are observed)
-    //
     // Fail early on other versions so callers get a precise error even if a password is missing.
-    let supported = (version_major == 4 && version_minor == 4)
-        || (version_minor == 2 && matches!(version_major, 2 | 3 | 4));
-    if !supported {
+    if !is_supported_ooxml_encryption_version(version_major, version_minor) {
         return Err(Error::UnsupportedOoxmlEncryption {
             path: path.to_path_buf(),
             version_major,
@@ -2224,78 +2229,75 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             Err(formula_offcrypto::OffcryptoError::InvalidPassword)
         };
 
+        let decrypt_with_fallback = || -> Result<Vec<u8>, Error> {
+            // Fall back to a more permissive Standard decryptor for non-standard/malformed
+            // `EncryptionInfo` headers (e.g. some producers omit `fCryptoAPI` / `fAES` flags), and
+            // for cases where the primary decryptor returns `InvalidPassword` but another key
+            // derivation variant may still succeed (e.g. Standard RC4 with MD5).
+            //
+            // Prefer the internal decryptor first because it supports additional Standard variants
+            // (including alternative key derivations + CBC framing differences).
+            match encrypted_ooxml::decrypt_encrypted_package(&encryption_info, &encrypted_package, password) {
+                Ok(bytes) => Ok(bytes),
+                Err(err) => match err {
+                    encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
+                        Err(Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major: major,
+                            version_minor: minor,
+                        })
+                    }
+                    encrypted_ooxml::DecryptError::InvalidPassword
+                    | encrypted_ooxml::DecryptError::InvalidInfo(_)
+                    | encrypted_ooxml::DecryptError::Io(_) => {
+                        // As a last resort, fall back to `formula-xlsx`'s legacy Standard decryptor.
+                        match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                            &encryption_info,
+                            &encrypted_package,
+                            password,
+                        ) {
+                            Ok(bytes) => Ok(bytes),
+                            Err(err) => match err {
+                                xlsx::OffCryptoError::WrongPassword
+                                | xlsx::OffCryptoError::IntegrityMismatch => {
+                                    Err(Error::InvalidPassword {
+                                        path: path.to_path_buf(),
+                                    })
+                                }
+                                xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
+                                    Err(Error::UnsupportedOoxmlEncryption {
+                                        path: path.to_path_buf(),
+                                        version_major: major,
+                                        version_minor: minor,
+                                    })
+                                }
+                                _ => Err(Error::UnsupportedOoxmlEncryption {
+                                    path: path.to_path_buf(),
+                                    version_major,
+                                    version_minor,
+                                }),
+                            },
+                        }
+                    }
+                },
+            }
+        };
+
         match decrypt_with_offcrypto() {
             Ok(bytes) => bytes,
             Err(formula_offcrypto::OffcryptoError::InvalidPassword) => {
-                return Err(Error::InvalidPassword {
-                    path: path.to_path_buf(),
-                })
+                match decrypt_with_fallback() {
+                    Ok(bytes) => bytes,
+                    Err(err) => return Err(err),
+                }
             }
             Err(formula_offcrypto::OffcryptoError::UnsupportedNonCryptoApiStandardEncryption)
             | Err(formula_offcrypto::OffcryptoError::InvalidFlags { .. })
             | Err(formula_offcrypto::OffcryptoError::UnsupportedExternalEncryption)
             | Err(formula_offcrypto::OffcryptoError::UnsupportedAlgorithm(_)) => {
-                // Fall back to a more permissive Standard decryptor for non-standard/malformed
-                // `EncryptionInfo` headers (e.g. some producers omit `fCryptoAPI` / `fAES` flags).
-                //
-                // Prefer the internal decryptor first because it supports additional Standard
-                // variants (including alternative key derivations + CBC framing differences).
-                match encrypted_ooxml::decrypt_encrypted_package(
-                    &encryption_info,
-                    &encrypted_package,
-                    password,
-                ) {
+                match decrypt_with_fallback() {
                     Ok(bytes) => bytes,
-                    Err(err) => match err {
-                        encrypted_ooxml::DecryptError::InvalidPassword => {
-                            return Err(Error::InvalidPassword {
-                                path: path.to_path_buf(),
-                            })
-                        }
-                        encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
-                            return Err(Error::UnsupportedOoxmlEncryption {
-                                path: path.to_path_buf(),
-                                version_major: major,
-                                version_minor: minor,
-                            })
-                        }
-                        encrypted_ooxml::DecryptError::InvalidInfo(_)
-                        | encrypted_ooxml::DecryptError::Io(_) => {
-                            // As a last resort, fall back to `formula-xlsx`'s legacy Standard decryptor.
-                            match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
-                                &encryption_info,
-                                &encrypted_package,
-                                password,
-                            ) {
-                                Ok(bytes) => bytes,
-                                Err(err) => match err {
-                                    xlsx::OffCryptoError::WrongPassword
-                                    | xlsx::OffCryptoError::IntegrityMismatch => {
-                                        return Err(Error::InvalidPassword {
-                                            path: path.to_path_buf(),
-                                        })
-                                    }
-                                    xlsx::OffCryptoError::UnsupportedEncryptionVersion {
-                                        major,
-                                        minor,
-                                    } => {
-                                        return Err(Error::UnsupportedOoxmlEncryption {
-                                            path: path.to_path_buf(),
-                                            version_major: major,
-                                            version_minor: minor,
-                                        })
-                                    }
-                                    _ => {
-                                        return Err(Error::UnsupportedOoxmlEncryption {
-                                            path: path.to_path_buf(),
-                                            version_major,
-                                            version_minor,
-                                        })
-                                    }
-                                },
-                            }
-                        }
-                    },
+                    Err(err) => return Err(err),
                 }
             }
             Err(_) => {
@@ -2828,9 +2830,7 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
         return None;
     }
 
-    let is_agile = version_major == 4 && version_minor == 4;
-    let is_standard = version_minor == 2 && matches!(version_major, 2 | 3 | 4);
-    if !is_agile && !is_standard {
+    if !is_supported_ooxml_encryption_version(version_major, version_minor) {
         return Some(Error::UnsupportedOoxmlEncryption {
             path: path.to_path_buf(),
             version_major,
