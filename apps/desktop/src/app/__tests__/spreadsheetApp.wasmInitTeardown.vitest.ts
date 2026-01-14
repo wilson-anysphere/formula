@@ -169,6 +169,14 @@ describe("SpreadsheetApp WASM init teardown", () => {
     expect((app as any).wasmEngine).toBeNull();
     expect((app as any).wasmEngineInit).toBeNull();
 
+    // Ensure teardown does not hang waiting for an init() promise that never resolves.
+    await expect(
+      Promise.race([
+        app.whenIdle(),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for whenIdle")), 2000)),
+      ]),
+    ).resolves.toBeUndefined();
+
     // Even if the init promise resolves later, it should not reattach the engine.
     resolveInit?.();
     await Promise.resolve();

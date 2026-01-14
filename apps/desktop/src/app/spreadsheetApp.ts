@@ -1211,6 +1211,7 @@ export class SpreadsheetApp {
    * worker before it is fully hydrated/registered (preventing leaks in tests/hot reload).
    */
   private wasmEngineInit: EngineClient | null = null;
+  private wasmEngineInitAbort: AbortController | null = null;
   private workbookFileMetadata: { directory: string | null; filename: string | null } = { directory: null, filename: null };
   private wasmSyncSuspended = false;
   private wasmUnsubscribe: (() => void) | null = null;
@@ -4434,6 +4435,12 @@ export class SpreadsheetApp {
     this.sharedProvider = null;
     this.wasmUnsubscribe?.();
     this.wasmUnsubscribe = null;
+    try {
+      this.wasmEngineInitAbort?.abort();
+    } catch {
+      // ignore
+    }
+    this.wasmEngineInitAbort = null;
     // `initWasmEngine` can still be booting the worker when destroy runs. Terminate any
     // in-flight init client so it doesn't leak a WebWorker or keep this app instance alive.
     try {
@@ -7165,15 +7172,41 @@ export class SpreadsheetApp {
           typeof env?.VITE_FORMULA_WASM_BINARY_URL === "string" ? env.VITE_FORMULA_WASM_BINARY_URL : undefined;
 
         let engine: EngineClient | null = null;
+        let initAbort: AbortController | null = null;
         try {
           engine = createEngineClient({ wasmModuleUrl, wasmBinaryUrl });
           this.wasmEngineInit = engine;
+          initAbort = new AbortController();
+          // If `initWasmEngine()` is retried for any reason, abort the prior init (best-effort).
+          try {
+            this.wasmEngineInitAbort?.abort();
+          } catch {
+            // ignore
+          }
+          this.wasmEngineInitAbort = initAbort;
+          const signal = initAbort.signal;
+          const makeAbortError = (): Error => {
+            const err = new Error("WASM engine init was aborted.");
+            err.name = "AbortError";
+            return err;
+          };
+          const awaitWithAbort = async <T>(promise: Promise<T>): Promise<T> => {
+            if (signal.aborted) throw makeAbortError();
+            return await new Promise<T>((resolve, reject) => {
+              const onAbort = () => reject(makeAbortError());
+              signal.addEventListener("abort", onAbort, { once: true });
+              promise
+                .then(resolve, reject)
+                .finally(() => signal.removeEventListener("abort", onAbort))
+                .catch(() => undefined);
+            });
+          };
           let changedDuringInit = false;
           const unsubscribeInit = this.document.on("change", () => {
             changedDuringInit = true;
           });
           try {
-            await engine.init();
+            await awaitWithAbort(engine.init());
             if (this.disposed) {
               engine.terminate();
               return;
@@ -7194,10 +7227,10 @@ export class SpreadsheetApp {
               }
               changedDuringInit = false;
               this.clearComputedValuesByCoord();
-              const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
+              const changes = await awaitWithAbort(engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
                 workbookFileMetadata: this.workbookFileMetadata,
                 localeId: getLocale(),
-              });
+              }));
               if (this.disposed) {
                 engine.terminate();
                 return;
@@ -7215,6 +7248,7 @@ export class SpreadsheetApp {
 
           this.wasmEngine = engine;
           this.wasmEngineInit = null;
+          this.wasmEngineInitAbort = null;
           this.wasmUnsubscribe = this.document.on("change", (payload: any) => {
             if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
@@ -7331,6 +7365,7 @@ export class SpreadsheetApp {
           this.clearComputedValuesByCoord();
         } finally {
           if (this.wasmEngineInit === engine) this.wasmEngineInit = null;
+          if (this.wasmEngineInitAbort === initAbort) this.wasmEngineInitAbort = null;
         }
       })
       .catch(() => {
