@@ -21,28 +21,26 @@ function safeStableJsonStringify(value: unknown): string {
   }
 }
 
-function fnv1a32(value: string): number {
-  // 32-bit FNV-1a hash. (Stable across runs.)
-  let hash = 0x811c9dc5;
+// 64-bit FNV-1a hash (stable across runs; reduces collision risk vs 32-bit for DLP safety).
+const FNV1A64_OFFSET = 0xcbf29ce484222325n;
+const FNV1A64_PRIME = 0x100000001b3n;
+const FNV1A64_MASK = 0xffffffffffffffffn;
+
+function fnv1a64Update(hash: bigint, value: string): bigint {
+  let out = hash & FNV1A64_MASK;
   for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
+    out ^= BigInt(value.charCodeAt(i));
+    out = (out * FNV1A64_PRIME) & FNV1A64_MASK;
   }
-  return hash >>> 0;
+  return out;
 }
 
-function fnv1a32Update(hash: number, value: string): number {
-  // Incremental 32-bit FNV-1a hash update.
-  let out = hash >>> 0;
-  for (let i = 0; i < value.length; i++) {
-    out ^= value.charCodeAt(i);
-    out = Math.imul(out, 0x01000193);
-  }
-  return out >>> 0;
+function fnv1a64(value: string): bigint {
+  return fnv1a64Update(FNV1A64_OFFSET, value);
 }
 
 function hashString(value: string): string {
-  return fnv1a32(value).toString(16);
+  return fnv1a64(value).toString(16);
 }
 
 function normalizeLabels(labelsRaw: unknown): string[] {
@@ -157,14 +155,14 @@ function hashJsonArray(keys: string[]): { length: number; hash: string } {
   // Hash the JSON array string `[k1,k2,...]` without materializing a potentially huge
   // intermediate string.
   const length = 2 + keys.reduce((acc, key) => acc + key.length, 0) + Math.max(0, keys.length - 1);
-  let hash = 0x811c9dc5;
-  hash = fnv1a32Update(hash, "[");
+  let hash = FNV1A64_OFFSET;
+  hash = fnv1a64Update(hash, "[");
   for (let i = 0; i < keys.length; i++) {
-    if (i > 0) hash = fnv1a32Update(hash, ",");
-    hash = fnv1a32Update(hash, keys[i]!);
+    if (i > 0) hash = fnv1a64Update(hash, ",");
+    hash = fnv1a64Update(hash, keys[i]!);
   }
-  hash = fnv1a32Update(hash, "]");
-  return { length, hash: (hash >>> 0).toString(16) };
+  hash = fnv1a64Update(hash, "]");
+  return { length, hash: hash.toString(16) };
 }
 
 /**
