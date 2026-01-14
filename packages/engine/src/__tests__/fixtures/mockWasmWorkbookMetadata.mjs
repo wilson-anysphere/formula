@@ -39,8 +39,20 @@ export class WasmWorkbook {
     recordCall("setWorkbookFileMetadata", directory, filename);
   }
 
-  setCellStyleId(sheet, address, styleId) {
-    recordCall("setCellStyleId", sheet, address, styleId);
+  setCellStyleId(address, styleId, sheet) {
+    recordCall("setCellStyleId", address, styleId, sheet);
+  }
+
+  setRowStyleId(sheet, row, styleId) {
+    recordCall("setRowStyleId", sheet, row, styleId);
+  }
+
+  setColStyleId(sheet, col, styleId) {
+    recordCall("setColStyleId", sheet, col, styleId);
+  }
+
+  setSheetDefaultStyleId(sheet, styleId) {
+    recordCall("setSheetDefaultStyleId", sheet, styleId);
   }
 
   setColWidth(sheet, col, width) {
@@ -79,4 +91,3 @@ export function parseFormulaPartial() {
 export function rewriteFormulasForCopyDelta({ requests }) {
   return (requests ?? []).map((r) => r.formula ?? "");
 }
-

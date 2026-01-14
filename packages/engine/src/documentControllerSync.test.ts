@@ -94,7 +94,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     doc.setCellFormula("Sheet1", "A1", "1+1");
 
     const engine = {
-      loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromJson: vi.fn(async (_serialized: string) => {}),
       setCell: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
     };

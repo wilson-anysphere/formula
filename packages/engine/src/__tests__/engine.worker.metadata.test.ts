@@ -142,6 +142,30 @@ describe("engine.worker workbook metadata RPCs", () => {
       resp = await sendRequest(port, {
         type: "request",
         id: 3,
+        method: "setRowStyleId",
+        params: { sheet: "Sheet1", row: 5, styleId: 9 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 4,
+        method: "setColStyleId",
+        params: { sheet: "Sheet1", col: 2, styleId: 11 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 5,
+        method: "setSheetDefaultStyleId",
+        params: { sheet: "Sheet1", styleId: 13 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 6,
         method: "setColWidth",
         params: { sheet: "Sheet1", col: 2, width: 120 }
       });
@@ -149,7 +173,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 4,
+        id: 7,
         method: "setColHidden",
         params: { sheet: "Sheet1", col: 2, hidden: true }
       });
@@ -157,7 +181,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 5,
+        id: 8,
         method: "internStyle",
         params: { style: { font: { bold: true } } }
       });
@@ -166,7 +190,10 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
         ["setWorkbookFileMetadata", "/tmp", "book.xlsx"],
-        ["setCellStyleId", "Sheet1", "A1", 7],
+        ["setCellStyleId", "A1", 7, "Sheet1"],
+        ["setRowStyleId", "Sheet1", 5, 9],
+        ["setColStyleId", "Sheet1", 2, 11],
+        ["setSheetDefaultStyleId", "Sheet1", 13],
         ["setColWidth", "Sheet1", 2, 120],
         ["setColHidden", "Sheet1", 2, true],
         ["internStyle", { font: { bold: true } }]

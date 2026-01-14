@@ -14,8 +14,8 @@ use formula_engine::{
     RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_model::{
-    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, Style,
-    EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    display_formula_text, Alignment, CellRef, CellValue, DateSystem, DefinedNameScope, Font,
+    HorizontalAlignment, Protection, Range, Style, VerticalAlignment, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,197 @@ pub struct CellChange {
 
 fn js_err(message: impl ToString) -> JsValue {
     JsValue::from_str(&message.to_string())
+}
+
+fn js_value_to_object(value: &JsValue) -> Option<Object> {
+    if value.is_null() || value.is_undefined() {
+        return None;
+    }
+    value.clone().dyn_into::<Object>().ok()
+}
+
+fn get_js_prop(obj: &Object, key: &str) -> Option<JsValue> {
+    Reflect::get(obj, &JsValue::from_str(key))
+        .ok()
+        .filter(|v| !v.is_null() && !v.is_undefined())
+}
+
+fn get_js_bool(obj: &Object, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        let value = match get_js_prop(obj, key) {
+            Some(v) => v,
+            None => continue,
+        };
+        if let Some(b) = value.as_bool() {
+            return Some(b);
+        }
+    }
+    None
+}
+
+fn get_js_string(obj: &Object, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let value = match get_js_prop(obj, key) {
+            Some(v) => v,
+            None => continue,
+        };
+        if let Some(s) = value.as_string() {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
+    let obj = js_value_to_object(value)?;
+
+    let horizontal = get_js_string(&obj, &["horizontal"]).and_then(|raw| match raw.trim().to_lowercase().as_str() {
+        "general" => Some(HorizontalAlignment::General),
+        "left" => Some(HorizontalAlignment::Left),
+        "center" => Some(HorizontalAlignment::Center),
+        "right" => Some(HorizontalAlignment::Right),
+        "fill" => Some(HorizontalAlignment::Fill),
+        "justify" => Some(HorizontalAlignment::Justify),
+        _ => None,
+    });
+
+    let vertical = get_js_string(&obj, &["vertical"]).and_then(|raw| match raw.trim().to_lowercase().as_str() {
+        "top" => Some(VerticalAlignment::Top),
+        "center" => Some(VerticalAlignment::Center),
+        "bottom" => Some(VerticalAlignment::Bottom),
+        _ => None,
+    });
+
+    let wrap_text = get_js_bool(&obj, &["wrapText", "wrap_text"]).unwrap_or(false);
+
+    let rotation = get_js_prop(&obj, "rotation")
+        .and_then(|v| v.as_f64())
+        .map(|n| n.trunc() as i16);
+
+    let indent = get_js_prop(&obj, "indent")
+        .and_then(|v| v.as_f64())
+        .map(|n| n.trunc() as u16);
+
+    let out = Alignment {
+        horizontal,
+        vertical,
+        wrap_text,
+        rotation,
+        indent,
+    };
+
+    let is_default = out.horizontal.is_none()
+        && out.vertical.is_none()
+        && !out.wrap_text
+        && out.rotation.is_none()
+        && out.indent.is_none();
+    if is_default {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn parse_protection_from_js(value: &JsValue) -> Option<Protection> {
+    let obj = js_value_to_object(value)?;
+    let locked = get_js_bool(&obj, &["locked"]).unwrap_or(true);
+    let hidden = get_js_bool(&obj, &["hidden"]).unwrap_or(false);
+
+    // Avoid interning redundant "default" protection structs; Excel default is locked.
+    if locked && !hidden {
+        return None;
+    }
+
+    Some(Protection { locked, hidden })
+}
+
+fn parse_font_from_js(value: &JsValue, top_level_strike: Option<bool>) -> Option<Font> {
+    let obj = js_value_to_object(value)?;
+
+    let name = get_js_string(&obj, &["name"]);
+    let size_100pt = get_js_prop(&obj, "size_100pt")
+        .or_else(|| get_js_prop(&obj, "size100pt"))
+        .and_then(|v| v.as_f64())
+        .and_then(|n| {
+            if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
+                Some(n.trunc() as u16)
+            } else {
+                None
+            }
+        });
+
+    let bold = get_js_bool(&obj, &["bold"]).unwrap_or(false);
+    let italic = get_js_bool(&obj, &["italic"]).unwrap_or(false);
+    let underline = get_js_bool(&obj, &["underline"]).unwrap_or(false);
+    let strike = get_js_bool(&obj, &["strike"]).unwrap_or(top_level_strike.unwrap_or(false));
+
+    let out = Font {
+        name,
+        size_100pt,
+        bold,
+        italic,
+        underline,
+        strike,
+        color: None, // TODO: map OOXML-like color payloads when needed.
+    };
+
+    let is_default = out.name.is_none()
+        && out.size_100pt.is_none()
+        && !out.bold
+        && !out.italic
+        && !out.underline
+        && !out.strike
+        && out.color.is_none();
+
+    if is_default {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn parse_style_from_js(style: JsValue) -> Result<Style, JsValue> {
+    if style.is_null() || style.is_undefined() {
+        return Ok(Style::default());
+    }
+
+    let obj = style
+        .dyn_into::<Object>()
+        .map_err(|_| js_err("internStyle: style must be an object"))?;
+
+    let number_format = get_js_string(&obj, &["numberFormat", "number_format"]).and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        // Excel treats "General" as the default.
+        if trimmed.eq_ignore_ascii_case("general") {
+            return None;
+        }
+        Some(raw)
+    });
+
+    let top_level_strike = get_js_bool(&obj, &["strike"]);
+    let font = get_js_prop(&obj, "font")
+        .as_ref()
+        .and_then(|value| parse_font_from_js(value, top_level_strike));
+
+    let alignment = get_js_prop(&obj, "alignment")
+        .as_ref()
+        .and_then(parse_alignment_from_js);
+
+    let protection = get_js_prop(&obj, "protection")
+        .as_ref()
+        .and_then(parse_protection_from_js);
+
+    Ok(Style {
+        font,
+        fill: None,
+        border: None,
+        alignment,
+        protection,
+        number_format,
+    })
 }
 
 fn require_formula_locale(locale_id: &str) -> Result<&'static FormulaLocale, JsValue> {
@@ -1253,6 +1444,11 @@ struct WorkbookState {
     ///
     /// This is stored separately from `sheets` to keep legacy scalar IO (`toJson`/`getCell`) stable.
     sheets_rich: BTreeMap<String, BTreeMap<String, CellValue>>,
+    /// Optional per-sheet default style id (formatting metadata).
+    ///
+    /// Note: This is currently stored only in the WASM wrapper layer; the core `formula-engine`
+    /// model does not yet have a sheet-level default style id.
+    sheet_default_style_ids: HashMap<String, u32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1369,6 +1565,7 @@ impl WorkbookState {
             col_widths_chars: BTreeMap::new(),
             pending_spill_clears: BTreeSet::new(),
             pending_formula_baselines: BTreeMap::new(),
+            sheet_default_style_ids: HashMap::new(),
         }
     }
 
@@ -2879,6 +3076,52 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setLocale")]
     pub fn set_locale(&mut self, locale_id: String) -> bool {
         self.inner.set_locale_id(&locale_id)
+    }
+
+    /// Intern (deduplicate) a style object into the workbook's style table, returning its style id.
+    ///
+    /// The input uses a JS-friendly shape (best-effort). Unknown keys are ignored.
+    ///
+    /// Style id `0` is always the default (empty) style.
+    #[wasm_bindgen(js_name = "internStyle")]
+    pub fn intern_style(&mut self, style: JsValue) -> Result<u32, JsValue> {
+        let style = parse_style_from_js(style)?;
+        Ok(self.inner.engine.intern_style(style))
+    }
+
+    /// Set (or clear) the default style id for all cells in a row.
+    ///
+    /// `row` is 0-indexed (engine coordinates). `style_id=0` clears the override.
+    #[wasm_bindgen(js_name = "setRowStyleId")]
+    pub fn set_row_style_id(&mut self, sheet: String, row: u32, style_id: u32) {
+        let sheet = self.inner.ensure_sheet(&sheet);
+        let style_id = if style_id == 0 { None } else { Some(style_id) };
+        self.inner.engine.set_row_style_id(&sheet, row, style_id);
+    }
+
+    /// Set (or clear) the default style id for all cells in a column.
+    ///
+    /// `col` is 0-indexed (engine coordinates). `style_id=0` clears the override.
+    #[wasm_bindgen(js_name = "setColStyleId")]
+    pub fn set_col_style_id(&mut self, sheet: String, col: u32, style_id: u32) {
+        let sheet = self.inner.ensure_sheet(&sheet);
+        let style_id = if style_id == 0 { None } else { Some(style_id) };
+        self.inner.engine.set_col_style_id(&sheet, col, style_id);
+    }
+
+    /// Set (or clear) the default style id for an entire sheet.
+    ///
+    /// Note: this metadata is stored only in the WASM wrapper layer today. It will be consulted
+    /// by formatting-aware functions like `CELL("protect")` once sheet-level style precedence is
+    /// implemented in the core engine.
+    #[wasm_bindgen(js_name = "setSheetDefaultStyleId")]
+    pub fn set_sheet_default_style_id(&mut self, sheet: String, style_id: u32) {
+        let sheet = self.inner.ensure_sheet(&sheet);
+        if style_id == 0 {
+            self.inner.sheet_default_style_ids.remove(&sheet);
+        } else {
+            self.inner.sheet_default_style_ids.insert(sheet, style_id);
+        }
     }
 
     #[wasm_bindgen(js_name = "fromJson")]

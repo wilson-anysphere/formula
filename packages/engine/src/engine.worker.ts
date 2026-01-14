@@ -36,6 +36,9 @@ type WasmWorkbookInstance = {
   getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
   setWorkbookFileMetadata?: (directory: string | null, filename: string | null) => void;
   setCellStyleId?: (address: string, styleId: number, sheet?: string) => void;
+  setRowStyleId?: (sheet: string, row: number, styleId: number) => void;
+  setColStyleId?: (sheet: string, col: number, styleId: number) => void;
+  setSheetDefaultStyleId?: (sheet: string, styleId: number) => void;
   setColWidth?: (sheet: string, col: number, width: number | null) => void;
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
   internStyle?: (style: unknown) => number;
@@ -583,6 +586,29 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setCellStyleId: WasmWorkbook.setCellStyleId is not available in this WASM build");
               }
               (wb as any).setCellStyleId(params.address, params.styleId, params.sheet ?? "Sheet1");
+              result = null;
+              break;
+            case "setRowStyleId":
+              if (typeof (wb as any).setRowStyleId !== "function") {
+                throw new Error("setRowStyleId: WasmWorkbook.setRowStyleId is not available in this WASM build");
+              }
+              (wb as any).setRowStyleId(params.sheet ?? "Sheet1", params.row, params.styleId);
+              result = null;
+              break;
+            case "setColStyleId":
+              if (typeof (wb as any).setColStyleId !== "function") {
+                throw new Error("setColStyleId: WasmWorkbook.setColStyleId is not available in this WASM build");
+              }
+              (wb as any).setColStyleId(params.sheet ?? "Sheet1", params.col, params.styleId);
+              result = null;
+              break;
+            case "setSheetDefaultStyleId":
+              if (typeof (wb as any).setSheetDefaultStyleId !== "function") {
+                throw new Error(
+                  "setSheetDefaultStyleId: WasmWorkbook.setSheetDefaultStyleId is not available in this WASM build"
+                );
+              }
+              (wb as any).setSheetDefaultStyleId(params.sheet ?? "Sheet1", params.styleId);
               result = null;
               break;
             case "setColWidth":

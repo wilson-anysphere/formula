@@ -530,6 +530,9 @@ export type RpcMethod =
   // Workbook metadata
   | "setWorkbookFileMetadata"
   | "setCellStyleId"
+  | "setRowStyleId"
+  | "setColStyleId"
+  | "setSheetDefaultStyleId"
   | "setColWidth"
   | "setColWidthChars"
   | "setColHidden"
