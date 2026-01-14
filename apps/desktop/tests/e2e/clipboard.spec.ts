@@ -543,7 +543,7 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     // Mark A1:A1 as Restricted in the local classification store (keyed by workbook id).
     await page.evaluate(() => {
       const docIdParam = new URL(window.location.href).searchParams.get("docId");
-      const workbookId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : "local-workbook";
+      const workbookId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam.trim() : "local-workbook";
       const app = (window as any).__formulaApp;
       const sheetId = app.getCurrentSheetId();
 

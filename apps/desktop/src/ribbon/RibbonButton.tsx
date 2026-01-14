@@ -114,12 +114,13 @@ export const RibbonButton = React.memo(function RibbonButton({
   );
   const label = labelOverride ?? labelById?.[button.id] ?? button.label;
   const ariaLabelOverride = labelById?.[`${button.id}.ariaLabel`];
+  const labelOverrideTrimmed = typeof labelOverride === "string" ? labelOverride.trim() : null;
   // For icon-only buttons, the label is visually hidden so it's especially important that
   // assistive technology uses a localized name when available. Prefer the label override
   // when provided (e.g. from desktop i18n `labelById` overrides).
   const fallbackAriaLabel =
-    size === "icon" && typeof labelOverride === "string" && labelOverride.trim() !== ""
-      ? labelOverride
+    size === "icon" && labelOverrideTrimmed
+      ? labelOverrideTrimmed
       : button.ariaLabel;
   const ariaLabel = ariaLabelOverride ?? fallbackAriaLabel;
   const disabledByIdOverride = disabledById?.[button.id];

@@ -495,7 +495,7 @@ test.describe("BrowserExtensionHost", () => {
       app.refresh();
 
       const docIdParam = new URL(window.location.href).searchParams.get("docId");
-      const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
+      const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam.trim() : null;
       const workbookId = docId ?? "local-workbook";
 
       // Mark A1 as Restricted.
@@ -661,7 +661,7 @@ test.describe("BrowserExtensionHost", () => {
         doc.setCellValue(sheetId, { row: 0, col: 1 }, "Public"); // B1
 
         const docIdParam = new URL(window.location.href).searchParams.get("docId");
-        const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
+        const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam.trim() : null;
         const workbookId = docId ?? "local-workbook";
 
         // Mark A1 as Restricted so DLP blocks clipboard.copy and extension clipboard.writeText.
@@ -847,7 +847,7 @@ test.describe("BrowserExtensionHost", () => {
         doc.setCellValue(sheetId, { row: 0, col: 0 }, "Initial"); // A1
 
         const docIdParam = new URL(window.location.href).searchParams.get("docId");
-        const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
+        const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam.trim() : null;
         const workbookId = docId ?? "local-workbook";
 
         // Mark A1 as Restricted so DLP blocks clipboard.copy and extension clipboard.writeText.

@@ -624,10 +624,9 @@ function buildScene(model: ChartModel, data: ResolvedChartData, theme: ChartThem
   const plotNodes = buildPlotScene(model, data, layout, theme);
   if (plotNodes.length === 0) {
     // If we couldn't render the chart kind, show a placeholder but keep title.
-    const placeholder =
-      typeof model.options?.placeholder === "string" && model.options.placeholder.trim() !== ""
-        ? model.options.placeholder
-        : null;
+    const placeholderRaw = typeof model.options?.placeholder === "string" ? model.options.placeholder : null;
+    const placeholderTrimmed = placeholderRaw?.trim() ?? "";
+    const placeholder = placeholderTrimmed !== "" ? placeholderTrimmed : null;
     const unknownName = typeof (model as any)?.chartType?.name === "string" ? String((model as any).chartType.name).trim() : "";
     const label =
       placeholder ??

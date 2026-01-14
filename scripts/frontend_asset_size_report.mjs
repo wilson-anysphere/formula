@@ -198,8 +198,8 @@ async function main() {
   const assetsDir = path.join(distDir, "assets");
 
   const rawJsonOut = args.jsonOut ?? process.env[DEFAULT_JSON_OUT_ENV];
-  const jsonOut =
-    rawJsonOut && String(rawJsonOut).trim() !== "" ? path.resolve(repoRoot, String(rawJsonOut)) : null;
+  const jsonOutPath = rawJsonOut == null ? "" : String(rawJsonOut).trim();
+  const jsonOut = jsonOutPath !== "" ? path.resolve(repoRoot, jsonOutPath) : null;
 
   const enforce = Boolean(args.enforce) || isTruthyEnv(process.env.FORMULA_ENFORCE_FRONTEND_ASSET_SIZE);
   const limitMb = args.limitMb != null ? Number(args.limitMb) : parseLimitMb(process.env.FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB);
