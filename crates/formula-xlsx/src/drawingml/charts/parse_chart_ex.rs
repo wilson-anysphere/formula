@@ -269,7 +269,8 @@ fn detect_chart_kind(
 
 fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     // This helper only feeds diagnostics when ChartEx kind detection fails.
-    // Keep output small + stable, but include enough context to extend detection later.
+    // Keep output small + stable (tests depend on ordering), but include enough context to extend
+    // detection later.
     const MAX_HINTS: usize = 12;
 
     // Best-effort: capture any attribute-based hints that might identify the ChartEx chart kind.

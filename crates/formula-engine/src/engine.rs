@@ -806,9 +806,8 @@ impl Engine {
             return true;
         }
         let before_order = self.workbook.sheet_order.clone();
-        if !self.workbook.reorder_sheet(sheet_id, new_index) {
-            return false;
-        }
+        self.workbook.sheet_order.remove(current);
+        self.workbook.sheet_order.insert(new_index, sheet_id);
         if self.workbook.sheet_order == before_order {
             return true;
         }

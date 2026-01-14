@@ -16,6 +16,7 @@ formula-format = { path = "../formula-format" }
 formula-fs = { path = "../formula-fs" }
 formula-model = { path = "../formula-model" }
 formula-offcrypto = { path = "../formula-offcrypto" }
+md-5 = "0.10"
 quick-xml = "0.31"
 sha1 = "0.10"
 serde = { version = "1.0", features = ["derive"] }

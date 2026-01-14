@@ -2410,6 +2410,7 @@ dependencies = [
  "formula-fs",
  "formula-model",
  "formula-offcrypto",
+ "md-5",
  "pretty_assertions",
  "proptest",
  "quick-xml 0.31.0",
