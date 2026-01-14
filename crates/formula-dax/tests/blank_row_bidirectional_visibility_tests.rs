@@ -265,3 +265,93 @@ fn distinctcount_virtual_blank_row_respects_bidirectional_filter_context_many_to
         1.into()
     );
 }
+
+#[test]
+fn summarizecolumns_virtual_blank_row_respects_bidirectional_filter_context() {
+    let model = build_model_blank_row_bidirectional();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn summarizecolumns_virtual_blank_row_respects_bidirectional_filter_context_many_to_many() {
+    let model = build_model_blank_row_bidirectional_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
