@@ -3448,11 +3448,11 @@ fn parse_sqref_ranges(val: &str) -> Vec<Range> {
 }
 
 fn normalize_data_validation_formula(raw: &str) -> String {
-    // Data validation formulas are stored without a leading `=` in the model and without
-    // `_xlfn.` function prefixes (to match how we normalize cell formulas). Preserve the text
-    // exactly as it appears in the worksheet XML, but strip:
-    // - a single leading `=` if present
-    // - any `_xlfn.` prefixes that appear at function-call boundaries
+    // Data validation formulas are stored without a leading `=` in the model, matching
+    // SpreadsheetML (and `formula_model::normalize_formula_text`).
+    //
+    // Also strip any `_xlfn.` prefixes at function-call boundaries (mirrors cell formula
+    // normalization).
     crate::formula_text::strip_xlfn_prefixes(raw.strip_prefix('=').unwrap_or(raw))
 }
 
