@@ -1,7 +1,7 @@
 # Encrypted OOXML fixture generator (Apache POI)
 
 This directory contains a small, standalone generator for producing **Office-encrypted OOXML**
-workbooks (`.xlsx`/`.xlsm`) without Excel.
+spreadsheets (`.xlsx`/`.xlsm`/`.xlsb`) without Excel.
 
 It is an **alternative** regeneration tool for the encrypted OOXML fixtures under
 `fixtures/encrypted/ooxml/` (or to create new ones).
@@ -17,9 +17,9 @@ Excel password-encrypted OOXML workbooks are stored on disk as an **OLE/CFB cont
 containing:
 
 - `EncryptionInfo`
-- `EncryptedPackage` (encrypted bytes of the underlying `.xlsx`/`.xlsm` ZIP payload)
+- `EncryptedPackage` (encrypted bytes of the underlying `.xlsx`/`.xlsm`/`.xlsb` ZIP payload)
 
-The generator wraps a plaintext OOXML ZIP (`.xlsx`/`.xlsm`) into this container using Apache POI.
+The generator wraps a plaintext OOXML ZIP (`.xlsx`/`.xlsm`/`.xlsb`) into this container using Apache POI.
 
 ## Usage
 
@@ -41,6 +41,9 @@ tools/encrypted-ooxml-fixtures/generate.sh standard "pässwörd🔒" fixtures/en
 # Macro-enabled `.xlsm` fixtures:
 tools/encrypted-ooxml-fixtures/generate.sh agile password fixtures/encrypted/ooxml/plaintext-basic.xlsm /tmp/agile-basic.xlsm
 tools/encrypted-ooxml-fixtures/generate.sh standard password fixtures/encrypted/ooxml/plaintext-basic.xlsm /tmp/standard-basic.xlsm
+
+# `.xlsb` fixtures (OOXML-in-OLE encrypted wrappers):
+tools/encrypted-ooxml-fixtures/generate.sh agile password crates/formula-xlsb/tests/fixtures/simple.xlsb /tmp/agile.xlsb
 ```
 
 ## Reproducibility / supply-chain safety

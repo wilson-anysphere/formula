@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generate encrypted OOXML `.xlsx` fixtures using Apache POI.
+# Generate encrypted OOXML `.xlsx`/`.xlsm`/`.xlsb` fixtures using Apache POI.
 #
 # This script intentionally does NOT commit jar binaries to the repo. Instead it:
 #   1) downloads a pinned set of jars from Maven Central into a local cache dir
@@ -12,7 +12,7 @@ set -euo pipefail
 # Apache POI version: 5.2.5
 #
 # Usage:
-#   tools/encrypted-ooxml-fixtures/generate.sh agile|standard <password> <in_plaintext_xlsx> <out_encrypted_xlsx>
+#   tools/encrypted-ooxml-fixtures/generate.sh agile|standard <password> <in_plaintext_ooxml_zip> <out_encrypted_ooxml>
 #
 # Example (from repo root):
 #   tools/encrypted-ooxml-fixtures/generate.sh agile password fixtures/xlsx/basic/basic.xlsx fixtures/encrypted/ooxml/agile.xlsx
@@ -20,11 +20,13 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: generate.sh <mode> <password> <in_plaintext_xlsx> <out_encrypted_xlsx>
+Usage: generate.sh <mode> <password> <in_plaintext_ooxml_zip> <out_encrypted_ooxml>
   mode: agile | standard
 
 Example:
   tools/encrypted-ooxml-fixtures/generate.sh agile password fixtures/xlsx/basic/basic.xlsx fixtures/encrypted/ooxml/agile.xlsx
+  tools/encrypted-ooxml-fixtures/generate.sh agile password fixtures/encrypted/ooxml/plaintext-basic.xlsm /tmp/agile-basic.xlsm
+  tools/encrypted-ooxml-fixtures/generate.sh agile password crates/formula-xlsb/tests/fixtures/simple.xlsb /tmp/agile.xlsb
 
 Empty password example:
   tools/encrypted-ooxml-fixtures/generate.sh agile "" fixtures/xlsx/basic/basic.xlsx /tmp/agile-empty-password.xlsx
@@ -44,8 +46,8 @@ fi
 MODE_RAW="$1"
 MODE="$(printf '%s' "${MODE_RAW}" | tr '[:upper:]' '[:lower:]')"
 PASSWORD="$2"
-IN_PLAINTEXT_XLSX="$3"
-OUT_ENCRYPTED_XLSX="$4"
+IN_PLAINTEXT_OOXML_ZIP="$3"
+OUT_ENCRYPTED_OOXML="$4"
 
 if [[ "${MODE}" != "agile" && "${MODE}" != "standard" ]]; then
   echo "ERROR: mode must be 'agile' or 'standard' (got: ${MODE_RAW})" >&2
@@ -53,13 +55,13 @@ if [[ "${MODE}" != "agile" && "${MODE}" != "standard" ]]; then
   exit 2
 fi
 
-if [[ ! -f "${IN_PLAINTEXT_XLSX}" ]]; then
-  echo "ERROR: input plaintext xlsx not found: ${IN_PLAINTEXT_XLSX}" >&2
+if [[ ! -f "${IN_PLAINTEXT_OOXML_ZIP}" ]]; then
+  echo "ERROR: input plaintext OOXML ZIP not found: ${IN_PLAINTEXT_OOXML_ZIP}" >&2
   exit 2
 fi
 
-if [[ "${IN_PLAINTEXT_XLSX}" == "${OUT_ENCRYPTED_XLSX}" ]]; then
-  echo "ERROR: output path must be different from input path (${IN_PLAINTEXT_XLSX})" >&2
+if [[ "${IN_PLAINTEXT_OOXML_ZIP}" == "${OUT_ENCRYPTED_OOXML}" ]]; then
+  echo "ERROR: output path must be different from input path (${IN_PLAINTEXT_OOXML_ZIP})" >&2
   exit 2
 fi
 
@@ -197,15 +199,15 @@ if [[ ! -f "${MAIN_CLASSFILE}" || "${SOURCE}" -nt "${MAIN_CLASSFILE}" ]]; then
   javac -proc:none -classpath "${CP_JARS}" -d "${CLASSES_DIR}" "${SOURCE}"
 fi
 
-java -classpath "${CLASSES_DIR}:${CP_JARS}" "${MAIN_CLASS}" "${MODE}" "${PASSWORD}" "${IN_PLAINTEXT_XLSX}" "${OUT_ENCRYPTED_XLSX}"
+java -classpath "${CLASSES_DIR}:${CP_JARS}" "${MAIN_CLASS}" "${MODE}" "${PASSWORD}" "${IN_PLAINTEXT_OOXML_ZIP}" "${OUT_ENCRYPTED_OOXML}"
 
-# Minimal sanity check: encrypted OOXML XLSX files are OLE/CFB containers, not ZIP archives.
-if [[ ! -s "${OUT_ENCRYPTED_XLSX}" ]]; then
-  echo "ERROR: generator did not produce a non-empty output file: ${OUT_ENCRYPTED_XLSX}" >&2
+# Minimal sanity check: encrypted OOXML files are OLE/CFB containers, not ZIP archives.
+if [[ ! -s "${OUT_ENCRYPTED_OOXML}" ]]; then
+  echo "ERROR: generator did not produce a non-empty output file: ${OUT_ENCRYPTED_OOXML}" >&2
   exit 1
 fi
 OLE_MAGIC_HEX="d0cf11e0a1b11ae1"
-OUT_MAGIC_HEX="$(head -c 8 "${OUT_ENCRYPTED_XLSX}" | od -An -t x1 | tr -d ' \n')"
+OUT_MAGIC_HEX="$(head -c 8 "${OUT_ENCRYPTED_OOXML}" | od -An -t x1 | tr -d ' \n')"
 if [[ "${OUT_MAGIC_HEX}" != "${OLE_MAGIC_HEX}" ]]; then
   echo "ERROR: output does not look like an OLE/CFB container (expected magic ${OLE_MAGIC_HEX}, got ${OUT_MAGIC_HEX})" >&2
   exit 1

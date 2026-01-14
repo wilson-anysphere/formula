@@ -10,20 +10,22 @@ import org.apache.poi.poifs.crypt.Encryptor;
 import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 
 /**
- * Generate an encrypted OOXML workbook (`.xlsx`) by wrapping a plaintext OOXML package
+ * Generate an encrypted OOXML spreadsheet (`.xlsx`/`.xlsm`/`.xlsb`) by wrapping a plaintext OOXML
+ * package
  * in an OLE2/CFB container ("EncryptedPackage" + "EncryptionInfo" streams).
  *
  * <p>Usage:
  *
  * <pre>
  *   java -cp ... GenerateEncryptedXlsx agile    password in.xlsx out.xlsx
- *   java -cp ... GenerateEncryptedXlsx standard password in.xlsx out.xlsx
+ *   java -cp ... GenerateEncryptedXlsx standard password in.xlsm out.xlsm
+ *   java -cp ... GenerateEncryptedXlsx agile    password in.xlsb out.xlsb
  * </pre>
  *
  * <p>Notes:
  * <ul>
- *   <li>The output `.xlsx` is <b>not</b> a ZIP file; it is an OLE2/CFB container as used by Excel for
- *       encrypted OOXML.
+ *   <li>The output file is <b>not</b> a ZIP file even if it uses a `.xlsx`/`.xlsm`/`.xlsb` extension;
+ *       it is an OLE2/CFB container as used by Excel for encrypted OOXML.
  *   <li>Apache POI uses random salts/IVs for encryption, so output bytes are not expected to be
  *       bit-for-bit stable across runs. The resulting files should still be valid encrypted
  *       workbooks.</li>
@@ -32,7 +34,7 @@ import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 public final class GenerateEncryptedXlsx {
   private static void usageAndExit() {
     System.err.println(
-        "Usage: GenerateEncryptedXlsx <mode> <password> <in_plaintext_xlsx> <out_encrypted_xlsx>\n"
+        "Usage: GenerateEncryptedXlsx <mode> <password> <in_plaintext_ooxml_zip> <out_encrypted_ooxml>\n"
             + "  mode: agile | standard\n"
             + "\n"
             + "Example:\n"
@@ -95,7 +97,8 @@ public final class GenerateEncryptedXlsx {
       // Encrypt the raw OOXML ZIP bytes directly (avoid parsing/repacking and avoid mutating the input).
       try (InputStream plaintext = Files.newInputStream(inPath);
           OutputStream encryptedStream = enc.getDataStream(fs)) {
-        // XLSX is a ZIP file, so the payload should begin with "PK". If it doesn't, still proceed
+        // OOXML packages (`.xlsx`/`.xlsm`/`.xlsb`) are ZIP files, so the payload should begin with "PK".
+        // If it doesn't, still proceed
         // (the user may intentionally encrypt arbitrary bytes), but warn to avoid accidental misuse.
         byte[] first2 = new byte[2];
         int n = plaintext.read(first2);
