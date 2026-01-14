@@ -16,19 +16,60 @@ const hasPython3 = (() => {
 
 function writeConfig(dir, { mainBinaryName = "formula-desktop" } = {}) {
   const configPath = path.join(dir, "tauri.conf.json");
+  const fileAssociations = [
+    {
+      ext: ["xlsx"],
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
+  ];
   const conf = {
     mainBinaryName,
     bundle: {
-      fileAssociations: [
-        {
-          ext: ["xlsx"],
-          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        },
-      ],
+      fileAssociations,
     },
   };
   writeFileSync(configPath, JSON.stringify(conf), "utf8");
   return configPath;
+}
+
+function writeConfigWithAssociations(
+  dir,
+  {
+    mainBinaryName = "formula-desktop",
+    fileAssociations = [
+      {
+        ext: ["xlsx"],
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+    ],
+  } = {},
+) {
+  const configPath = path.join(dir, "tauri.conf.json");
+  const conf = {
+    mainBinaryName,
+    bundle: { fileAssociations },
+  };
+  writeFileSync(configPath, JSON.stringify(conf), "utf8");
+  return configPath;
+}
+
+function writeParquetMimeDefinition(
+  pkgRoot,
+  {
+    filename = "app.formula.desktop.xml",
+    xmlContent = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+      '  <mime-type type="application/vnd.apache.parquet">',
+      '    <glob pattern="*.parquet" />',
+      "  </mime-type>",
+      "</mime-info>",
+    ].join("\n"),
+  } = {},
+) {
+  const mimeDir = path.join(pkgRoot, "usr", "share", "mime", "packages");
+  mkdirSync(mimeDir, { recursive: true });
+  writeFileSync(path.join(mimeDir, filename), xmlContent, "utf8");
 }
 
 function writePackageRoot(dir, { execLine, mimeTypeLine, docPackageName = "formula-desktop" } = {}) {
@@ -147,3 +188,101 @@ test("verify_linux_desktop_integration fails when NOTICE is missing from /usr/sh
   assert.match(proc.stderr, /missing LICENSE\/NOTICE compliance artifacts/i);
   assert.match(proc.stderr, /NOTICE/i);
 });
+
+test(
+  "verify_linux_desktop_integration passes when Parquet association is configured and shared-mime-info XML is packaged",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = writeConfigWithAssociations(tmp, {
+      fileAssociations: [
+        {
+          ext: ["xlsx"],
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        {
+          ext: ["parquet"],
+          mimeType: "application/vnd.apache.parquet",
+        },
+      ],
+    });
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+    writeParquetMimeDefinition(pkgRoot);
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
+  "verify_linux_desktop_integration fails when Parquet association is configured but shared-mime-info packages dir is missing",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = writeConfigWithAssociations(tmp, {
+      fileAssociations: [
+        {
+          ext: ["xlsx"],
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        {
+          ext: ["parquet"],
+          mimeType: "application/vnd.apache.parquet",
+        },
+      ],
+    });
+
+    // Ensure the .desktop file advertises Parquet so the verifier reaches the MIME XML check.
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /shared-mime-info packages dir/i);
+  },
+);
+
+test(
+  "verify_linux_desktop_integration fails when Parquet association is configured but MIME XML lacks the *.parquet glob",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = writeConfigWithAssociations(tmp, {
+      fileAssociations: [
+        {
+          ext: ["xlsx"],
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        {
+          ext: ["parquet"],
+          mimeType: "application/vnd.apache.parquet",
+        },
+      ],
+    });
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+    writeParquetMimeDefinition(pkgRoot, {
+      xmlContent: [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+        '  <mime-type type="application/vnd.apache.parquet">',
+        // Intentionally omit the *.parquet glob mapping.
+        "  </mime-type>",
+        "</mime-info>",
+      ].join("\n"),
+    });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /glob \*\.parquet/i);
+  },
+);
