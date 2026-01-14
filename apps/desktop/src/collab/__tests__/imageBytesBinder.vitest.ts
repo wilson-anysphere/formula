@@ -180,4 +180,65 @@ describe("imageBytesBinder", () => {
 
     binder.destroy();
   });
+
+  it("hydrates from a plain-object drawingImages container", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const bytes = new Uint8Array([7, 8, 9]);
+    metadata.set("drawingImages", {
+      "img-1": {
+        mimeType: "image/png",
+        bytesBase64: Buffer.from(bytes).toString("base64"),
+      },
+    });
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    const hydrated = store.get("img-1");
+    expect(hydrated).toBeTruthy();
+    expect(hydrated?.mimeType).toBe("image/png");
+    expect(Array.from(hydrated?.bytes ?? [])).toEqual([7, 8, 9]);
+
+    // Binder should not eagerly rewrite the container just to read it.
+    expect(metadata.get("drawingImages")).toEqual({
+      "img-1": {
+        mimeType: "image/png",
+        bytesBase64: Buffer.from(bytes).toString("base64"),
+      },
+    });
+
+    binder.destroy();
+  });
+
+  it("converts a record drawingImages container into a Y.Map when publishing new bytes", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    // Legacy/plain-object container.
+    metadata.set("drawingImages", {
+      existing: {
+        mimeType: "image/png",
+        bytesBase64: Buffer.from([1]).toString("base64"),
+      },
+    });
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    const next: ImageEntry = { id: "new", mimeType: "image/png", bytes: new Uint8Array([2, 3]) };
+    binder.onLocalImageInserted(next);
+
+    const container = metadata.get("drawingImages");
+    expect(container).toBeInstanceOf(Y.Map);
+    const imagesMap = container as Y.Map<any>;
+    expect(imagesMap.get("existing")).toBeTruthy();
+    expect(imagesMap.get("new")).toBeTruthy();
+
+    binder.destroy();
+  });
 });  
