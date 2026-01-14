@@ -620,6 +620,49 @@ describe("engine sync helpers", () => {
     expect(changes).toEqual(recalcResult);
   });
 
+  it("maps row/col/sheet style layer deltas through sheetIdToSheet when provided", async () => {
+    const styleObj = { font: { italic: true } };
+    const recalcResult: CellChange[] = [{ sheet: "Budget", address: "B2", value: 456 }];
+    const sheetIdToSheet = (sheetId: string) => (sheetId === "sheet_2" ? "Budget" : sheetId);
+
+    const internStyle = vi.fn((_: unknown) => 100);
+    const setRowStyleId = vi.fn(async () => {});
+    const setColStyleId = vi.fn(async () => {});
+    const setSheetDefaultStyleId = vi.fn(async () => {});
+    const recalculate = vi.fn(async () => recalcResult);
+
+    const engine: EngineSyncTarget = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate,
+      internStyle,
+      setRowStyleId,
+      setColStyleId,
+      setSheetDefaultStyleId,
+    };
+
+    const payload = {
+      recalc: false,
+      rowStyleDeltas: [{ sheetId: "sheet_2", row: 0, afterStyleId: 7 }],
+      colStyleDeltas: [{ sheetId: "sheet_2", col: 1, afterStyleId: 7 }],
+      sheetStyleDeltas: [{ sheetId: "sheet_2", afterStyleId: 7 }],
+    };
+
+    const changes = await engineApplyDocumentChange(engine, payload, {
+      getStyleById: (styleId) => (styleId === 7 ? styleObj : null),
+      sheetIdToSheet,
+    });
+
+    expect(internStyle).toHaveBeenCalledTimes(1);
+    expect(internStyle).toHaveBeenCalledWith(styleObj);
+    expect(setRowStyleId).toHaveBeenCalledWith("Budget", 0, 100);
+    expect(setColStyleId).toHaveBeenCalledWith("Budget", 1, 100);
+    expect(setSheetDefaultStyleId).toHaveBeenCalledWith("Budget", 100);
+
+    expect(recalculate).toHaveBeenCalledTimes(1);
+    expect(changes).toEqual(recalcResult);
+  });
+
   it("clears row/col/sheet style layers by passing null (without interning styles) and still forces a recalc", async () => {
     const recalcResult: CellChange[] = [{ sheet: "Sheet1", address: "C3", value: 123 }];
 

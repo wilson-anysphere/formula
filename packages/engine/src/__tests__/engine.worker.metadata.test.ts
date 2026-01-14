@@ -166,9 +166,27 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
+        id: 10,
+        method: "setColStyleId",
+        // Clear semantics: `null` should be treated as "reset" (worker forwards `0` to wasm).
+        params: { sheet: "Sheet1", col: 3, styleId: null }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
         id: 5,
         method: "setSheetDefaultStyleId",
         params: { sheet: "Sheet1", styleId: 13 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 11,
+        method: "setSheetDefaultStyleId",
+        // Clear semantics: `null` should be treated as "reset" (worker forwards `0` to wasm).
+        params: { sheet: "Sheet1", styleId: null }
       });
       expect(resp.ok).toBe(true);
 
@@ -211,7 +229,9 @@ describe("engine.worker workbook metadata RPCs", () => {
         ["setRowStyleId", "Sheet1", 5, 9],
         ["setRowStyleId", "Sheet1", 6, 0],
         ["setColStyleId", "Sheet1", 2, 11],
+        ["setColStyleId", "Sheet1", 3, 0],
         ["setSheetDefaultStyleId", "Sheet1", 13],
+        ["setSheetDefaultStyleId", "Sheet1", 0],
         ["setColWidth", "Sheet1", 2, 120],
         ["setColHidden", "Sheet1", 2, true],
         ["internStyle", { font: { bold: true } }],
