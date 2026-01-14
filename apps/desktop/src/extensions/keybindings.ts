@@ -24,6 +24,10 @@ const KEY_ALIASES: Record<string, string> = {
   // Common human-readable alias for the "+" key (useful because "+" cannot appear directly in
   // our keybinding strings since "+" is the token separator).
   plus: "+",
+  // UI Events uses `KeyboardEvent.key === "Add"` on some browsers for the numpad plus key.
+  add: "+",
+  // Some environments use a string name for the numpad subtract key.
+  subtract: "-",
   pgup: "pageup",
   pgdn: "pagedown",
   pgdown: "pagedown",

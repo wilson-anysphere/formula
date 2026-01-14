@@ -156,6 +156,14 @@ describe("keybindings", () => {
     const binding = parseKeybinding("cmd", "ctrl+plus");
     expect(binding).not.toBeNull();
     expect(matchesKeybinding(binding!, eventForKey("+", { ctrlKey: true, code: "NumpadAdd" }))).toBe(true);
+    // Some browsers report numpad "+" as `KeyboardEvent.key === "Add"`.
+    expect(matchesKeybinding(binding!, eventForKey("Add", { ctrlKey: true, code: "NumpadAdd" }))).toBe(true);
+  });
+
+  it("matches numpad subtract when the key is 'Subtract' (ctrl+-)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+-");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("Subtract", { ctrlKey: true, code: "NumpadSubtract" }))).toBe(true);
   });
 
   it("matches shifted digits via KeyboardEvent.code fallback (ctrl+shift+1)", () => {
