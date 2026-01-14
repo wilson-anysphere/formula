@@ -493,7 +493,22 @@ async function main() {
   // Validate the combined updater manifest's schema + per-platform updater artifact types before we
   // sign/upload it. This catches regressions where `latest.json.platforms[*].url` points at an
   // installer artifact (like `.deb`/`.rpm`/`.dmg`) instead of the updater-consumed payload type.
-  validateTauriUpdaterManifest(combined, { expectedVersion });
+  //
+  // When uploading to a GitHub Release (non-dry-run), we also enforce that the combined manifest
+  // contains our required runtime `{os}-{arch}` target keys (see docs/desktop-updater-target-mapping.md).
+  // In `--dry-run` mode we skip the required-key check so maintainers can merge/inspect partial
+  // manifests for debugging without needing to fabricate every platform.
+  const requiredPlatforms = dryRun
+    ? undefined
+    : [
+        "darwin-x86_64",
+        "darwin-aarch64",
+        "windows-x86_64",
+        "windows-aarch64",
+        "linux-x86_64",
+        "linux-aarch64",
+      ];
+  validateTauriUpdaterManifest(combined, { expectedVersion, requiredPlatforms });
 
   const latestJsonText = `${JSON.stringify(combined, null, 2)}\n`;
   const latestJsonBytes = Buffer.from(latestJsonText, "utf8");

@@ -76,17 +76,19 @@ test("fails before uploading if TAURI_PRIVATE_KEY does not match the embedded up
   const manifestsDir = path.join(tmp, "manifests");
   mkdirSync(manifestsDir, { recursive: true });
 
-  // Minimal per-platform manifest produced by tauri-action (enough for publish-updater-manifest to merge).
+  // Minimal multi-platform manifest (enough for publish-updater-manifest to validate required runtime targets).
   writeFileSync(
     path.join(manifestsDir, "linux.json"),
     JSON.stringify(
       {
         version: "0.1.0",
         platforms: {
-          "linux-x86_64": {
-            url: "https://example.com/Formula.AppImage",
-            signature: "sig",
-          },
+          "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+          "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+          "linux-x86_64": { url: "https://example.com/Formula_x86_64.AppImage", signature: "sig" },
+          "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
         },
       },
       null,
@@ -241,6 +243,43 @@ test("fails when a runtime updater entry references an installer artifact (Linux
  
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /Linux updater artifact must be an AppImage bundle/i);
+});
+
+test("fails when required runtime platform keys are missing (non-dry-run)", () => {
+  const tmp = makeTempDir();
+  const manifestsDir = path.join(tmp, "manifests");
+  mkdirSync(manifestsDir, { recursive: true });
+
+  writeFileSync(
+    path.join(manifestsDir, "partial.json"),
+    JSON.stringify(
+      {
+        version: "0.1.0",
+        platforms: {
+          // Valid updater artifact type for Linux, but missing other required platform keys.
+          "linux-x86_64": { url: "https://example.com/Formula_x86_64.AppImage", signature: "sig" },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  const proc = run({
+    cwd: tmp,
+    args: ["v0.1.0", manifestsDir],
+    env: {
+      // Provide placeholders so the script gets past required env checks; it should fail before any network call.
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_TOKEN: "dummy",
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /missing required platform/i);
+  assert.match(proc.stderr, /darwin-x86_64/i);
+  // If this ever appears, the script got past manifest validation and attempted a network call.
+  assert.doesNotMatch(proc.stderr, /api\\.github\\.com/i);
 });
 
 test("fails loudly on conflicting top-level manifest fields", () => {
