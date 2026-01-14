@@ -93,6 +93,7 @@ jobs:
             scripts/ci/check-benchmark-gh-pages-concurrency.test.js \
             scripts/ci/check-toml-validity.test.js \
             scripts/ci/check-workflow-step-name-colons.test.js \
+            scripts/ci/check-rust-toolchain-pins.test.js \
             scripts/ci/check-node-version-pins.test.js \
             scripts/ci/check-pnpm-version-pins.test.js \
             scripts/ci/check-wasm-pack-version-pins.test.js \
