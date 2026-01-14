@@ -17,6 +17,11 @@ fn locale_parsing_es_es_core_function_spellings_match_excel() {
         ("VLOOKUP", "BUSCARV"),
         ("HLOOKUP", "BUSCARH"),
         ("IFERROR", "SI.ERROR"),
+        // DBCS (`*B`) text functions should preserve the base translation + `B` suffix.
+        ("LEFTB", "IZQUIERDAB"),
+        ("RIGHTB", "DERECHAB"),
+        ("LENB", "LARGOB"),
+        ("MIDB", "EXTRAEB"),
     ];
 
     for (canonical, localized) in mappings {
