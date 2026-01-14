@@ -283,14 +283,19 @@ Excel can also vary algorithms via “Advanced” encryption options; our suppor
 defaults above.
 
 ### Generating fixtures (recommended)
+Repo note: the committed encrypted OOXML fixtures under `fixtures/encrypted/ooxml/` are generated
+using Python + [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) (see
+`fixtures/encrypted/ooxml/README.md` for the exact tool versions, passwords, and regeneration notes).
+
 To generate fixtures for regression tests:
 
 1. Create a minimal workbook (one sheet, a few cells).
 2. In Excel: **File → Info → Protect Workbook → Encrypt with Password**.
 3. Save as `.xlsx` (Agile by default on modern Excel).
 
-For Standard fixtures, prefer using a known Excel 2007 install (or a controlled fixture generator
-tooling in CI) so the output is stable.
+For Standard fixtures, prefer deterministic tooling (like the repo’s `msoffcrypto-tool`-generated
+`fixtures/encrypted/ooxml/standard.xlsx`) or a known Excel 2007 install (if you specifically need
+Excel-ground-truth output).
 
 Repo fixtures:
 
