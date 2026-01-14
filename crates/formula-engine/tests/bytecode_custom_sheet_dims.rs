@@ -40,6 +40,73 @@ fn bytecode_custom_sheet_dims_whole_row_and_column_refs() {
 }
 
 #[test]
+fn bytecode_custom_sheet_dims_row_spill_respects_sheet_row_count() {
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 10, 5)
+        .expect("set sheet dimensions");
+
+    // Place the formula outside the referenced column so it doesn't create a circular reference.
+    // `ROW(A:A)` should spill a 10x1 array (one element per sheet row).
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROW(A:A)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+
+    // Spill range should be exactly B1:B10 (10 rows).
+    let (start, end) = engine.spill_range("Sheet1", "B1").expect("spill range");
+    assert_eq!(start.row, 0);
+    assert_eq!(start.col, 1);
+    assert_eq!(end.row, 9);
+    assert_eq!(end.col, 1);
+
+    // Origin cell stores the top-left value of the spill.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B5"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B10"), Value::Number(10.0));
+}
+
+#[test]
+fn bytecode_custom_sheet_dims_column_spill_respects_sheet_col_count() {
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 10, 5)
+        .expect("set sheet dimensions");
+
+    // `COLUMN(1:1)` should spill a 1x5 array (one element per sheet column).
+    // Place it on row 2 so it doesn't reference itself (row 1 is referenced).
+    engine
+        .set_cell_formula("Sheet1", "A2", "=COLUMN(1:1)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+
+    // Spill range should be exactly A2:E2 (5 cols).
+    let (start, end) = engine.spill_range("Sheet1", "A2").expect("spill range");
+    assert_eq!(start.row, 1);
+    assert_eq!(start.col, 0);
+    assert_eq!(end.row, 1);
+    assert_eq!(end.col, 4);
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(5.0));
+}
+
+#[test]
 fn bytecode_custom_sheet_dims_use_referenced_sheet_for_sheet_prefixed_whole_row_col_refs() {
     let mut engine = Engine::new();
     engine
