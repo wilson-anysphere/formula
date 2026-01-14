@@ -380,7 +380,11 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
   }
 
   const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? '10') || 10);
-  const settleMs = Math.max(0, Number(process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS ?? '5000') || 5000);
+  // Allow explicitly setting `FORMULA_DESKTOP_MEMORY_SETTLE_MS=0` to sample immediately. Treat
+  // unset/blank/invalid values as the default.
+  const settleRaw = process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS;
+  const settleParsed = settleRaw && settleRaw.trim() !== '' ? Number(settleRaw) : 5000;
+  const settleMs = Number.isFinite(settleParsed) ? Math.max(0, settleParsed) : 5000;
   const timeoutMs = Math.max(
     1,
     Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '20000') || 20000,

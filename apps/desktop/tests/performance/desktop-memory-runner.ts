@@ -94,7 +94,11 @@ function parseArgs(argv: string[]): {
   const args = [...argv];
   const envRuns = Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? "") || 10;
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? "") || 20_000;
-  const envSettleMs = Number(process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS ?? "") || 5_000;
+  // Allow explicitly setting `FORMULA_DESKTOP_MEMORY_SETTLE_MS=0` to sample immediately.
+  // Treat unset/blank/invalid values as the default.
+  const settleRaw = process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS;
+  const settleParsed = settleRaw && settleRaw.trim() !== "" ? Number(settleRaw) : 5_000;
+  const envSettleMs = Number.isFinite(settleParsed) ? Math.max(0, settleParsed) : 5_000;
 
   const rawTarget =
     process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB ?? "";
@@ -119,7 +123,11 @@ function parseArgs(argv: string[]): {
     if (!arg) break;
     if (arg === "--runs" && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
     else if (arg === "--timeout-ms" && args[0]) out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
-    else if (arg === "--settle-ms" && args[0]) out.settleMs = Math.max(0, Number(args.shift()) || out.settleMs);
+    else if (arg === "--settle-ms" && args[0]) {
+      const raw = String(args.shift());
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) out.settleMs = Math.max(0, parsed);
+    }
     else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
     else if (arg === "--target-mb" && args[0]) {
       const raw = Number(args.shift());
