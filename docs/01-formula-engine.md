@@ -175,6 +175,10 @@ Implementation notes:
 * When the engine is configured for multi-threaded recalculation, these methods may be called
   concurrently from multiple threads; implementations should be thread-safe and keep lookups fast
   (e.g. internal caching, lock-free reads, etc.).
+* The provider is also used as a **fallback for local sheets** when a cell is not present in the
+  engine’s internal grid storage (useful for streaming/virtualized worksheets). In that case the
+  engine calls `get` with the plain local sheet name (e.g. `"Sheet1"`), not a `"[workbook]sheet"`
+  key.
 * The engine currently resolves ranges by calling `get(sheet, addr)` **per-cell** (there is no
   bulk/range API). This is especially important for whole-row/whole-column references: for external
   sheets the engine assumes Excel’s default grid size (1,048,576 rows × 16,384 columns), so ranges
