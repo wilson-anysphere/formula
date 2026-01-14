@@ -2442,13 +2442,32 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
         )?;
     }
 
-    let workbook_bin = read_zip_entry_required(zip, &workbook_part)?;
-
-    let (mut sheets, workbook_context, workbook_properties, defined_names) = parse_workbook(
-        &mut Cursor::new(&workbook_bin),
-        &workbook_rels,
-        options.decode_formulas,
-    )?;
+    // `workbook.bin` can be large. When we don't need to preserve raw bytes, parse it directly
+    // from the ZIP entry stream to avoid buffering the entire part into memory.
+    let (mut sheets, workbook_context, workbook_properties, defined_names, workbook_bin) =
+        if options.preserve_parsed_parts {
+            let workbook_bin = read_zip_entry_required(zip, &workbook_part)?;
+            let (sheets, ctx, props, defined_names) = parse_workbook(
+                &mut Cursor::new(&workbook_bin),
+                &workbook_rels,
+                options.decode_formulas,
+            )?;
+            (sheets, ctx, props, defined_names, Some(workbook_bin))
+        } else {
+            let max = max_xlsb_zip_part_bytes();
+            let mut wb = zip.by_name(&workbook_part)?;
+            let size = wb.size();
+            if size > max {
+                return Err(ParseError::PartTooLarge {
+                    part: workbook_part.clone(),
+                    size,
+                    max,
+                });
+            }
+            let (sheets, ctx, props, defined_names) =
+                parse_workbook(&mut wb, &workbook_rels, options.decode_formulas)?;
+            (sheets, ctx, props, defined_names, None)
+        };
     let mut workbook_context = workbook_context;
 
     load_table_definitions(zip, &mut workbook_context, &sheets)?;
@@ -2462,7 +2481,7 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
             sheet.part_path = actual;
         }
     }
-    if options.preserve_parsed_parts {
+    if let Some(workbook_bin) = workbook_bin.filter(|_| options.preserve_parsed_parts) {
         insert_preserved_part(
             &mut preserved_parts,
             &mut preserved_total_bytes,
@@ -2472,22 +2491,45 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
     }
 
     let shared_strings = match shared_strings_part.as_deref() {
-        Some(part) => match read_zip_entry(zip, part)? {
-            Some(bytes) => {
-                let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
-                let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
-                if options.preserve_parsed_parts {
-                    insert_preserved_part(
-                        &mut preserved_parts,
-                        &mut preserved_total_bytes,
-                        part.to_string(),
-                        bytes,
-                    )?;
+        Some(part) => {
+            if options.preserve_parsed_parts {
+                match read_zip_entry(zip, part)? {
+                    Some(bytes) => {
+                        let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
+                        let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
+                        insert_preserved_part(
+                            &mut preserved_parts,
+                            &mut preserved_total_bytes,
+                            part.to_string(),
+                            bytes,
+                        )?;
+                        (strings, table)
+                    }
+                    None => (Vec::new(), Vec::new()),
                 }
-                (strings, table)
+            } else {
+                // Like `workbook.bin`, shared strings can be very large. Stream parse when we don't
+                // need raw bytes for round-trip preservation.
+                match zip.by_name(part) {
+                    Ok(mut sst) => {
+                        let max = max_xlsb_zip_part_bytes();
+                        let size = sst.size();
+                        if size > max {
+                            return Err(ParseError::PartTooLarge {
+                                part: part.to_string(),
+                                size,
+                                max,
+                            });
+                        }
+                        let table = parse_shared_strings(&mut sst)?;
+                        let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
+                        (strings, table)
+                    }
+                    Err(zip::result::ZipError::FileNotFound) => (Vec::new(), Vec::new()),
+                    Err(e) => return Err(e.into()),
+                }
             }
-            None => (Vec::new(), Vec::new()),
-        },
+        }
         None => (Vec::new(), Vec::new()),
     };
 
