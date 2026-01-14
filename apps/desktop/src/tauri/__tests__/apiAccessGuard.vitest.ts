@@ -90,6 +90,8 @@ function buildBannedResForTauriAlias(root: string): RegExp[] {
     new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]event['"]\\s*\\]`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]window['"]\\s*\\]`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]dialog['"]\\s*\\]`),
+    // Destructuring patterns: `const { dialog } = tauri;`
+    new RegExp(`\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${r}\\b`),
 
     // Plugin container variants.
     new RegExp(`\\b${r}\\s*(?:\\?\\.|\\.)\\s*plugin\\s*(?:\\?\\.|\\.)\\s*event\\b`),
@@ -122,6 +124,7 @@ function buildBannedResForTauriPluginAlias(root: string): RegExp[] {
     new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]event['"]\\s*\\]`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]window['"]\\s*\\]`),
     new RegExp(`\\b${r}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]dialog['"]\\s*\\]`),
+    new RegExp(`\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${r}\\b`),
   ];
 }
 
@@ -164,6 +167,9 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]dialog['"]\s*\]/,
+
+      // Destructuring patterns: `const { dialog } = globalThis.__TAURI__;`
+      /\b(?:const|let|var)\s*\{[\s\S]*?\b(?:dialog|event|window)\b[\s\S]*?\}\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__|__TAURI__)\b/,
     ];
 
     for (const absPath of files) {
