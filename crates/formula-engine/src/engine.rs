@@ -4510,6 +4510,8 @@ impl Engine {
             self.pivot_registry.clone(),
         );
         let sheet_dims_generation = self.sheet_dims_generation;
+        let external_sheets =
+            Mutex::new(ExternalSheetResolver::new(snapshot.sheet_names_by_id.len()));
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let mut dynamic_dirty_roots: Vec<CellId> = Vec::new();
         let text_codepage = self.text_codepage;
@@ -4599,9 +4601,7 @@ impl Engine {
                                 cols_by_sheet: &column_cache.by_sheet,
                                 slice_mode,
                                 trace: None,
-                                external_sheets: Mutex::new(ExternalSheetResolver::new(
-                                    snapshot.sheet_names_by_id.len(),
-                                )),
+                                external_sheets: &external_sheets,
                             };
                             let base = bytecode::CellCoord {
                                 row: k.addr.row as i32,
@@ -4632,9 +4632,12 @@ impl Engine {
                                                 recalc_ctx.now_utc.clone(),
                                                 recalc_ctx.recalc_id,
                                             ),
+                                            Mutex::new(ExternalSheetResolver::new(
+                                                snapshot.sheet_names_by_id.len(),
+                                            )),
                                         )
                                     },
-                                    |(vm, _eval_ctx_guard), (k, compiled)| {
+                                    |(vm, _eval_ctx_guard, external_sheets), (k, compiled)| {
                                         let ctx = crate::eval::EvalContext {
                                             current_sheet: k.sheet,
                                             current_cell: k.addr,
@@ -4659,8 +4662,7 @@ impl Engine {
                                                     .by_sheet
                                                     .get(k.sheet)
                                                     .unwrap_or(&empty_cols);
-                                                let slice_mode =
-                                                    slice_mode_for_program(&bc.program);
+                                                let slice_mode = slice_mode_for_program(&bc.program);
                                                 let grid = EngineBytecodeGrid {
                                                     snapshot: &snapshot,
                                                     sheet_id: k.sheet,
@@ -4668,11 +4670,7 @@ impl Engine {
                                                     cols_by_sheet: &column_cache.by_sheet,
                                                     slice_mode,
                                                     trace: None,
-                                                    external_sheets: Mutex::new(
-                                                        ExternalSheetResolver::new(
-                                                            snapshot.sheet_names_by_id.len(),
-                                                        ),
-                                                    ),
+                                                    external_sheets: &*external_sheets,
                                                 };
                                                 let base = bytecode::CellCoord {
                                                     row: k.addr.row as i32,
@@ -4744,9 +4742,7 @@ impl Engine {
                             cols_by_sheet: &column_cache.by_sheet,
                             slice_mode,
                             trace: None,
-                            external_sheets: Mutex::new(ExternalSheetResolver::new(
-                                snapshot.sheet_names_by_id.len(),
-                            )),
+                            external_sheets: &external_sheets,
                         };
                         let base = bytecode::CellCoord {
                             row: k.addr.row as i32,
@@ -4809,9 +4805,7 @@ impl Engine {
                             cols_by_sheet: &column_cache.by_sheet,
                             slice_mode,
                             trace: Some(&bytecode_trace),
-                            external_sheets: Mutex::new(ExternalSheetResolver::new(
-                                snapshot.sheet_names_by_id.len(),
-                            )),
+                            external_sheets: &external_sheets,
                         };
                         let base = bytecode::CellCoord {
                             row: k.addr.row as i32,
@@ -10968,6 +10962,15 @@ impl BytecodeColumnCache {
             }
         }
 
+        // If no formulas in this batch require columnar caching, avoid scanning the entire sheet's
+        // stored values. This is a critical fast path for deep dependency chains where we may
+        // evaluate many single-cell levels (each with no range args).
+        if row_ranges_by_col.iter().all(|cols| cols.is_empty()) {
+            return Self {
+                by_sheet: vec![HashMap::new(); sheet_count],
+            };
+        }
+
         fn apply_value(seg: &mut BytecodeColumnSegment, value: &Value, row: i32) {
             match value {
                 Value::Number(n) => seg.values[(row - seg.row_start) as usize] = *n,
@@ -11142,7 +11145,7 @@ struct EngineBytecodeGrid<'a> {
     /// [`bytecode::grid::Grid::resolve_sheet_name`], which currently returns a `usize`. To let
     /// runtime-parsed external sheet keys flow through the bytecode runtime, we intern them as
     /// synthetic ids and treat them as external during reads/bounds checks.
-    external_sheets: Mutex<ExternalSheetResolver>,
+    external_sheets: &'a Mutex<ExternalSheetResolver>,
 }
 
 #[derive(Debug)]
@@ -14152,6 +14155,39 @@ fn walk_calc_expr(
         }
     }
 
+    fn is_direct_self_reference(expr: &CompiledExpr, current_cell: CellKey) -> bool {
+        match expr {
+            Expr::CellRef(r) => {
+                let Some(sheet) = resolve_single_sheet(&r.sheet, current_cell.sheet) else {
+                    return false;
+                };
+                if sheet != current_cell.sheet {
+                    return false;
+                }
+                let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                    return false;
+                };
+                addr == current_cell.addr
+            }
+            Expr::RangeRef(RangeRef { sheet, start, end }) => {
+                let Some(sheet_id) = resolve_single_sheet(sheet, current_cell.sheet) else {
+                    return false;
+                };
+                if sheet_id != current_cell.sheet {
+                    return false;
+                }
+                let Some(start) = start.resolve(current_cell.addr) else {
+                    return false;
+                };
+                let Some(end) = end.resolve(current_cell.addr) else {
+                    return false;
+                };
+                start == current_cell.addr && end == current_cell.addr
+            }
+            _ => false,
+        }
+    }
+
     match expr {
         Expr::CellRef(r) => {
             if let Some(sheets) = resolve_sheet_span(&r.sheet, current_cell.sheet, workbook) {
@@ -14476,20 +14512,8 @@ fn walk_calc_expr(
                                 // Treat the reference argument like a normal value/range dependency
                                 // *except* for a direct self-reference (which is non-circular in Excel
                                 // because CELL reads formula/metadata, not the evaluated value).
-                                if let Expr::CellRef(r) = &args[1] {
-                                    if let Some(sheets) =
-                                        resolve_sheet_span(&r.sheet, current_cell.sheet, workbook)
-                                    {
-                                        let Some(addr) = r.addr.resolve(current_cell.addr) else {
-                                            return;
-                                        };
-                                        if sheets.len() == 1
-                                            && sheets[0] == current_cell.sheet
-                                            && addr == current_cell.addr
-                                        {
-                                            return;
-                                        }
-                                    }
+                                if is_direct_self_reference(&args[1], current_cell) {
+                                    return;
                                 }
 
                                 walk_calc_expr(
@@ -18125,6 +18149,7 @@ mod tests {
             },
         );
 
+        let external_sheets = Mutex::new(ExternalSheetResolver::new(snapshot.sheet_names_by_id.len()));
         let grid = EngineBytecodeGrid {
             snapshot: &snapshot,
             sheet_id: 0,
@@ -18132,9 +18157,7 @@ mod tests {
             cols_by_sheet: std::slice::from_ref(&cols),
             slice_mode: ColumnSliceMode::IgnoreNonNumeric,
             trace: None,
-            external_sheets: Mutex::new(ExternalSheetResolver::new(
-                snapshot.sheet_names_by_id.len(),
-            )),
+            external_sheets: &external_sheets,
         };
 
         assert!(
