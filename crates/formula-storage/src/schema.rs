@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::collections::HashSet;
 
-const LATEST_SCHEMA_VERSION: i64 = 8;
+const LATEST_SCHEMA_VERSION: i64 = 9;
 
 pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     // Ensure foreign keys are enforced (disabled by default in SQLite).
@@ -45,6 +45,7 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
             6 => migrate_to_v6(&tx)?,
             7 => migrate_to_v7(&tx)?,
             8 => migrate_to_v8(&tx)?,
+            9 => migrate_to_v9(&tx)?,
             _ => unreachable!("unknown schema migration target: {next}"),
         }
         tx.execute(
@@ -527,6 +528,19 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         "#,
     )?;
 
+    Ok(())
+}
+
+fn migrate_to_v9(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    // Persist workbook text codepage (used for legacy DBCS text functions and XLS imports).
+    ensure_column(
+        tx,
+        "workbooks",
+        "codepage",
+        "codepage INTEGER NOT NULL DEFAULT 1252",
+    )?;
+    // Persist per-cell phonetic guide text (furigana).
+    ensure_column(tx, "cells", "phonetic", "phonetic TEXT")?;
     Ok(())
 }
 

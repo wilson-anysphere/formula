@@ -50,7 +50,7 @@ fn migration_v8_deduplicates_model_sheet_ids() {
     let version: i64 = conn
         .query_row("SELECT version FROM schema_version WHERE id = 1", [], |r| r.get(0))
         .expect("schema version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let mut stmt = conn
         .prepare("SELECT model_sheet_id FROM sheets WHERE workbook_id = ?1")
@@ -133,7 +133,7 @@ fn migration_v8_tolerates_invalid_workbook_and_sheet_id_types() {
     let version: i64 = conn
         .query_row("SELECT version FROM schema_version WHERE id = 1", [], |r| r.get(0))
         .expect("schema version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let sheet_b_model_id: i64 = conn
         .query_row(
@@ -198,7 +198,7 @@ fn migration_v8_ignores_orphaned_sheets_when_creating_unique_index() {
     let version: i64 = conn
         .query_row("SELECT version FROM schema_version WHERE id = 1", [], |r| r.get(0))
         .expect("schema version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let orphan_ids_with_model_id: i64 = conn
         .query_row(

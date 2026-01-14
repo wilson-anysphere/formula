@@ -32,7 +32,6 @@ fn schema_init_tolerates_invalid_schema_version_types() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .expect("read schema version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert_eq!(type_name, "integer");
 }
-

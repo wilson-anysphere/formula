@@ -19,7 +19,6 @@ fn export_model_workbook_includes_styles_added_after_import() {
                 value: CellValue::Number(1.0),
                 phonetic: None,
                 formula: None,
-                phonetic: None,
                 style_id: existing_style_id,
             },
         );

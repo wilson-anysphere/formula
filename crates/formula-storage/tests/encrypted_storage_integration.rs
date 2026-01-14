@@ -387,7 +387,6 @@ fn encrypted_model_workbook_round_trip() {
                 value: ModelCellValue::Number(7.0),
                 phonetic: None,
                 formula: None,
-                phonetic: None,
                 style_id: 0,
             },
         );
@@ -397,7 +396,6 @@ fn encrypted_model_workbook_round_trip() {
                 value: ModelCellValue::Empty,
                 phonetic: None,
                 formula: Some("SUM(A1)".to_string()),
-                phonetic: None,
                 style_id: 0,
             },
         );

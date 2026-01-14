@@ -74,7 +74,9 @@ pub struct Workbook {
     /// This is used when interpreting legacy 8-bit text (including Excel DBCS `*B` semantics).
     #[serde(
         default = "default_codepage",
-        skip_serializing_if = "is_default_codepage"
+        skip_serializing_if = "is_default_codepage",
+        alias = "text_codepage",
+        alias = "textCodepage"
     )]
     pub codepage: u16,
 
@@ -1612,7 +1614,11 @@ impl<'de> Deserialize<'de> for Workbook {
             calc_settings: CalcSettings,
             #[serde(default)]
             date_system: DateSystem,
-            #[serde(default = "default_codepage")]
+            #[serde(
+                default = "default_codepage",
+                alias = "text_codepage",
+                alias = "textCodepage"
+            )]
             codepage: u16,
             #[serde(default)]
             theme: ThemePalette,

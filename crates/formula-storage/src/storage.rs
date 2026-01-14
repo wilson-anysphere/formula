@@ -449,38 +449,40 @@ impl Storage {
         let view = (workbook.view != formula_model::WorkbookView::default())
             .then_some(serde_json::to_value(&workbook.view)?);
 
-        tx.execute(
-            r#"
-            INSERT INTO workbooks (
-              id,
-              name,
-              metadata,
-              model_schema_version,
-              model_workbook_id,
-              date_system,
-              calc_settings,
-              theme,
-              workbook_protection,
-              defined_names,
-              print_settings,
-              view
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            "#,
-            params![
-                workbook_meta.id.to_string(),
-                &workbook_meta.name,
-                workbook_meta.metadata.clone(),
-                workbook.schema_version as i64,
-                workbook.id as i64,
-                date_system_to_str(workbook.date_system),
-                serde_json::to_value(&workbook.calc_settings)?,
-                theme,
-                workbook_protection,
-                defined_names,
-                print_settings,
-                view
-            ],
-        )?;
+         tx.execute(
+             r#"
+             INSERT INTO workbooks (
+               id,
+               name,
+               metadata,
+               model_schema_version,
+               model_workbook_id,
+               codepage,
+               date_system,
+               calc_settings,
+               theme,
+               workbook_protection,
+               defined_names,
+               print_settings,
+               view
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             "#,
+             params![
+                 workbook_meta.id.to_string(),
+                 &workbook_meta.name,
+                 workbook_meta.metadata.clone(),
+                 workbook.schema_version as i64,
+                 workbook.id as i64,
+                 workbook.codepage as i64,
+                 date_system_to_str(workbook.date_system),
+                 serde_json::to_value(&workbook.calc_settings)?,
+                 theme,
+                 workbook_protection,
+                 defined_names,
+                 print_settings,
+                 view
+             ],
+         )?;
 
         // Persist workbook-scoped images.
         {
@@ -647,19 +649,20 @@ impl Storage {
         {
             let mut stmt = tx.prepare(
                 r#"
-                INSERT INTO cells (
-                  sheet_id,
-                  row,
-                  col,
-                  value_type,
-                  value_number,
-                  value_string,
-                  value_json,
-                  formula,
-                  style_id
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                "#,
-            )?;
+                 INSERT INTO cells (
+                   sheet_id,
+                   row,
+                   col,
+                   value_type,
+                   value_number,
+                   value_string,
+                   value_json,
+                   formula,
+                   style_id,
+                   phonetic
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 "#,
+             )?;
 
             for sheet in &workbook.sheets {
                 let Some(storage_sheet_id) = model_sheet_to_storage.get(&sheet.id) else {
@@ -679,20 +682,21 @@ impl Storage {
                     let (value_type, value_number, value_string) =
                         cell_value_fast_path(&cell.value);
 
-                    stmt.execute(params![
-                        storage_sheet_id.to_string(),
-                        cell_ref.row as i64,
-                        cell_ref.col as i64,
-                        value_type,
-                        value_number,
-                        value_string,
-                        value_json,
-                        cell.formula.as_deref(),
-                        storage_style_id
-                    ])?;
-                }
-            }
-        }
+                     stmt.execute(params![
+                         storage_sheet_id.to_string(),
+                         cell_ref.row as i64,
+                         cell_ref.col as i64,
+                         value_type,
+                         value_number,
+                         value_string,
+                         value_json,
+                         cell.formula.as_deref(),
+                         storage_style_id,
+                         cell.phonetic.as_deref()
+                     ])?;
+                 }
+             }
+         }
 
         tx.commit()?;
         Ok(workbook_meta)
@@ -704,46 +708,49 @@ impl Storage {
         let row = conn
             .query_row(
                 r#"
-                SELECT
-                  model_schema_version,
-                  model_workbook_id,
-                  date_system,
-                  calc_settings,
-                  theme,
-                  workbook_protection,
-                  defined_names,
-                  print_settings,
-                  view
-                FROM workbooks
-                WHERE id = ?1
+                 SELECT
+                   model_schema_version,
+                   model_workbook_id,
+                   codepage,
+                   date_system,
+                   calc_settings,
+                   theme,
+                   workbook_protection,
+                   defined_names,
+                   print_settings,
+                   view
+                 FROM workbooks
+                 WHERE id = ?1
                 "#,
                 params![workbook_id.to_string()],
                 |r| {
-                    Ok((
-                        r.get::<_, Option<i64>>(0).ok().flatten(),
-                        r.get::<_, Option<i64>>(1).ok().flatten(),
-                        r.get::<_, Option<String>>(2).ok().flatten(),
-                        r.get::<_, Option<String>>(3).ok().flatten(),
-                        r.get::<_, Option<String>>(4).ok().flatten(),
-                        r.get::<_, Option<String>>(5).ok().flatten(),
-                        r.get::<_, Option<String>>(6).ok().flatten(),
-                        r.get::<_, Option<String>>(7).ok().flatten(),
-                        r.get::<_, Option<String>>(8).ok().flatten(),
-                    ))
-                },
-            )
-            .optional()?;
+                     Ok((
+                         r.get::<_, Option<i64>>(0).ok().flatten(),
+                         r.get::<_, Option<i64>>(1).ok().flatten(),
+                         r.get::<_, Option<i64>>(2).ok().flatten(),
+                         r.get::<_, Option<String>>(3).ok().flatten(),
+                         r.get::<_, Option<String>>(4).ok().flatten(),
+                         r.get::<_, Option<String>>(5).ok().flatten(),
+                         r.get::<_, Option<String>>(6).ok().flatten(),
+                         r.get::<_, Option<String>>(7).ok().flatten(),
+                         r.get::<_, Option<String>>(8).ok().flatten(),
+                         r.get::<_, Option<String>>(9).ok().flatten(),
+                     ))
+                 },
+             )
+             .optional()?;
 
         let Some((
-            model_schema_version,
-            model_workbook_id,
-            date_system,
-            calc_settings,
-            theme,
-            workbook_protection,
-            defined_names,
-            print_settings,
-            view,
+             model_schema_version,
+             model_workbook_id,
+             codepage,
+             date_system,
+             calc_settings,
+             theme,
+             workbook_protection,
+             defined_names,
+             print_settings,
+             view,
         )) = row
         else {
             return Err(StorageError::WorkbookNotFound(workbook_id));
@@ -755,14 +762,17 @@ impl Storage {
         if let Some(schema_version) = model_schema_version.and_then(|v| u32::try_from(v).ok()) {
             model_workbook.schema_version = schema_version;
         }
-        if let Some(id) = model_workbook_id.and_then(|v| u32::try_from(v).ok()) {
-            model_workbook.id = id;
-        }
-        if let Some(date_system) = date_system {
-            if let Ok(date_system) = parse_date_system(&date_system) {
-                model_workbook.date_system = date_system;
-            }
-        }
+         if let Some(id) = model_workbook_id.and_then(|v| u32::try_from(v).ok()) {
+             model_workbook.id = id;
+         }
+         if let Some(codepage) = codepage.and_then(|v| u16::try_from(v).ok()) {
+             model_workbook.codepage = codepage;
+         }
+         if let Some(date_system) = date_system {
+             if let Ok(date_system) = parse_date_system(&date_system) {
+                 model_workbook.date_system = date_system;
+             }
+         }
         if let Some(calc_settings) = calc_settings {
             if let Ok(calc_settings) = serde_json::from_str(&calc_settings) {
                 model_workbook.calc_settings = calc_settings;
@@ -3652,7 +3662,7 @@ fn stream_cells_into_model_sheet(
 ) -> Result<()> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT row, col, value_type, value_number, value_string, value_json, formula, style_id
+        SELECT row, col, value_type, value_number, value_string, value_json, formula, style_id, phonetic
         FROM cells
         WHERE sheet_id = ?1
         ORDER BY row, col
@@ -3684,6 +3694,7 @@ fn stream_cells_into_model_sheet(
             row.get::<_, Option<String>>(6).ok().flatten(),
             row.get::<_, Option<i64>>(7).ok().flatten(),
         )?;
+        let phonetic = row.get::<_, Option<String>>(8).ok().flatten();
 
         let style_id = snapshot
             .style_id
@@ -3697,7 +3708,7 @@ fn stream_cells_into_model_sheet(
         let cell = formula_model::Cell {
             value: snapshot.value,
             formula,
-            phonetic: None,
+            phonetic,
             style_id,
             ..Default::default()
         };
