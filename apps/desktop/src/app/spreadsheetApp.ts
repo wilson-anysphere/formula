@@ -14,9 +14,11 @@ import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
 import { DrawingInteractionController, resizeAnchor, shiftAnchor, type DrawingInteractionCallbacks } from "../drawings/interaction";
 import {
+  cursorForRotationHandle,
   cursorForResizeHandle,
   cursorForResizeHandleWithTransform,
   getResizeHandleCenters,
+  hitTestRotationHandle,
   hitTestResizeHandle,
   RESIZE_HANDLE_SIZE_PX,
   type ResizeHandle,
@@ -7910,8 +7912,22 @@ export class SpreadsheetApp {
     const objects = this.drawingObjects;
     if (objects.length === 0) return null;
 
-    const index = this.getDrawingHitTestIndex(objects);
     const viewport = this.getDrawingInteractionViewport();
+
+    const selectedId = this.selectedDrawingId;
+    if (selectedId != null) {
+      const selected = objects.find((obj) => obj.id === selectedId) ?? null;
+      if (selected) {
+        const bounds = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
+        if (hitTestRotationHandle(bounds, x, y, selected.transform)) return cursorForRotationHandle(false);
+        // When selected, handles can extend slightly outside the untransformed bounds. Check the selected
+        // object explicitly so hover feedback works even when the cursor lies just beyond the anchor rect.
+        const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
+        if (handle) return cursorForResizeHandleWithTransform(handle, selected.transform);
+      }
+    }
+
+    const index = this.getDrawingHitTestIndex(objects);
     const hit = hitTestDrawings(index, viewport, x, y);
     if (!hit) return null;
     const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);

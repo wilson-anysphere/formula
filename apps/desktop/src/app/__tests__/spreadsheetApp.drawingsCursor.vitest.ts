@@ -4,7 +4,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { drawingObjectToViewportRect } from "../../drawings/hitTest";
 import { pxToEmu } from "../../drawings/overlay";
+import { getRotationHandleCenter } from "../../drawings/selectionHandles";
 import type { DrawingObject } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
@@ -149,6 +151,62 @@ describe("SpreadsheetApp drawing hover cursor", () => {
       } as any);
 
       expect(root.style.cursor).toBe("nwse-resize");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("shows a grab cursor when hovering the selected drawing rotation handle", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const drawing: DrawingObject = {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      };
+
+      // Ensure `renderDrawings` can pick up the seeded drawing objects.
+      const docAny = (app as any).document as any;
+      docAny.getSheetDrawings = () => [drawing];
+
+      (app as any).selectedDrawingId = drawing.id;
+      (app as any).renderDrawings();
+
+      const viewport = app.getDrawingInteractionViewport();
+      const bounds = drawingObjectToViewportRect(drawing, viewport, (app as any).drawingGeom);
+      const handleCenter = getRotationHandleCenter(bounds, drawing.transform);
+
+      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+      (app as any).onSharedPointerMove({
+        clientX: handleCenter.x,
+        clientY: handleCenter.y,
+        offsetX: handleCenter.x,
+        offsetY: handleCenter.y,
+        buttons: 0,
+        pointerType: "mouse",
+        target: selectionCanvas,
+      } as any);
+
+      expect(root.style.cursor).toBe("grab");
 
       app.destroy();
       root.remove();
