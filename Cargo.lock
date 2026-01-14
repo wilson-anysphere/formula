@@ -2189,7 +2189,6 @@ dependencies = [
  "cbc",
  "cfb 0.10.0",
  "cipher",
- "getrandom 0.3.4",
  "hex",
  "hmac",
  "md-5",
