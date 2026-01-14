@@ -86,7 +86,11 @@ export function createDesktopFormulaConflictMonitor(opts) {
  * @param {Set<any>} [opts.undoLocalOrigins]
  * @param {(conflict: import("../../../../packages/collab/conflicts/index.js").CellStructuralConflict) => void} opts.onConflict
  * @param {number} [opts.maxOpRecordsPerUser]
- * @param {number | null} [opts.maxOpRecordAgeMs]
+ * @param {number | null} [opts.maxOpRecordAgeMs] Optional age-based pruning window
+ *   for records in the shared `cellStructuralOps` log. When enabled, records older
+ *   than `Date.now() - maxOpRecordAgeMs` may be deleted by any client (best-effort).
+ *   Pruning is conservative (newly-arriving records are not deleted in the same
+ *   op-log transaction they are added) and incremental for very large logs.
  */
 export function createDesktopCellStructuralConflictMonitor(opts) {
   const localOrigins = new Set();
