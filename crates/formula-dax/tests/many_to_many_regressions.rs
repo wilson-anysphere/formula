@@ -276,3 +276,151 @@ fn insert_row_can_resolve_unmatched_facts_and_updates_blank_member() {
         7.0.into()
     );
 }
+
+#[test]
+fn related_respects_userelationship_overrides_with_m2m() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
+    dim.push_row(vec![1.into(), 10.into(), "RowA".into()]).unwrap();
+    dim.push_row(vec![2.into(), 20.into(), "RowB".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB"]);
+    // Cross the keys so the active vs. USERELATIONSHIP-overridden relationship produces
+    // different RELATED values.
+    fact.push_row(vec![100.into(), 1.into(), 20.into()]).unwrap();
+    fact.push_row(vec![101.into(), 2.into(), 10.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "Attr via active", "RELATED(Dim[Attr])")
+        .unwrap();
+    model
+        .add_calculated_column(
+            "Fact",
+            "Attr via KeyB",
+            "CALCULATE(RELATED(Dim[Attr]), USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    let fact = model.table("Fact").unwrap();
+    assert_eq!(fact.value(0, "Attr via active").unwrap(), "RowA".into());
+    assert_eq!(fact.value(0, "Attr via KeyB").unwrap(), "RowB".into());
+    assert_eq!(fact.value(1, "Attr via active").unwrap(), "RowB".into());
+    assert_eq!(fact.value(1, "Attr via KeyB").unwrap(), "RowA".into());
+}
+
+#[test]
+fn insert_row_updates_inactive_m2m_indexes_used_by_userelationship() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
+    dim.push_row(vec![1.into(), 10.into(), "A".into()]).unwrap();
+    dim.push_row(vec![2.into(), 20.into(), "B".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "KeyA", "KeyB", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.into(), 5.0.into()])
+        .unwrap();
+    fact.push_row(vec![2.into(), 2.into(), 20.into(), 7.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    // Active relationship on KeyA.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyA".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyA".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyA".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    // Inactive relationship on KeyB, only enabled via USERELATIONSHIP.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim_KeyB".into(),
+            from_table: "Fact".into(),
+            from_column: "KeyB".into(),
+            to_table: "Dim".into(),
+            to_column: "KeyB".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    model
+        .add_measure(
+            "Total via KeyB",
+            "CALCULATE([Total], USERELATIONSHIP(Fact[KeyB], Dim[KeyB]))",
+        )
+        .unwrap();
+
+    // Touch the inactive relationship so any lazy index construction happens before inserts.
+    let a_filter = FilterContext::empty().with_column_equals("Dim", "Attr", "A".into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &a_filter).unwrap(),
+        5.0.into()
+    );
+
+    // Insert a new Dim row and a new Fact row that only match via the inactive relationship.
+    model
+        .insert_row("Dim", vec![3.into(), 30.into(), "C".into()])
+        .unwrap();
+
+    let c_filter = FilterContext::empty().with_column_equals("Dim", "Attr", "C".into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &c_filter).unwrap(),
+        Value::Blank
+    );
+
+    model
+        .insert_row("Fact", vec![3.into(), 1.into(), 30.into(), 11.0.into()])
+        .unwrap();
+
+    // The inserted row should be visible through USERELATIONSHIP, meaning the inactive
+    // relationship indexes were incrementally updated.
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &c_filter).unwrap(),
+        11.0.into()
+    );
+
+    // The default active relationship should not accidentally include it under the same Dim filter.
+    assert_eq!(model.evaluate_measure("Total", &c_filter).unwrap(), Value::Blank);
+}
