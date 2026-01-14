@@ -108,6 +108,26 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("fails when concurrency group exists but is attached to a different job", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  other:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: benchmark-gh-pages-publish
+      cancel-in-progress: false
+    steps:
+      - run: echo ok
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          auto-push: true
+`);
+  assert.notEqual(proc.status, 0);
+});
+
 test("passes when concurrency group is quoted", { skip: !hasBash }, () => {
   const proc = runYaml(`
 jobs:
@@ -116,6 +136,36 @@ jobs:
     concurrency:
       group: "benchmark-gh-pages-publish"
       cancel-in-progress: false
+    steps:
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          auto-push: true
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("passes when workflow-level concurrency serializes publishes", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+concurrency:
+  group: benchmark-gh-pages-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          auto-push: true
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("passes when job-level concurrency uses scalar form", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    concurrency: benchmark-gh-pages-publish
     steps:
       - uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -180,4 +230,3 @@ jobs:
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /bad\.yml/);
 });
-

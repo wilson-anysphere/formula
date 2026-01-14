@@ -54,21 +54,99 @@ fi
 
 bad=()
 for wf in "${workflows[@]}"; do
-  read -r has_benchmark has_auto_push has_concurrency < <(
-    awk '
+  missing_jobs="$(
+    awk -v expected_group="benchmark-gh-pages-publish" '
       function indent(s) {
         match(s, /^[ ]*/);
         return RLENGTH;
       }
 
+      function trim(s) {
+        sub(/^[[:space:]]+/, "", s);
+        sub(/[[:space:]]+$/, "", s);
+        return s;
+      }
+
+      function strip_quotes(s) {
+        s = trim(s);
+        if (substr(s, 1, 1) == "\"" && substr(s, length(s), 1) == "\"") {
+          return substr(s, 2, length(s) - 2);
+        }
+        if (substr(s, 1, 1) == "'"'"'" && substr(s, length(s), 1) == "'"'"'") {
+          return substr(s, 2, length(s) - 2);
+        }
+        return s;
+      }
+
+      function auto_push_enabled(v,    low, compact) {
+        v = strip_quotes(v);
+        low = tolower(v);
+        compact = low;
+        gsub(/[[:space:]]+/, "", compact);
+        # Treat explicit "false"/0 values (including `${{ false }}`) as disabled.
+        if (compact == "" ||
+          compact == "false" ||
+          compact == "0" ||
+          compact == "${{false}}" ||
+          compact == "${{0}}" ||
+          compact == "${{'false'}}" ||
+          compact == "${{\"false\"}}" ||
+          compact == "${{'0'}}" ||
+          compact == "${{\"0\"}}") {
+          return 0;
+        }
+        return 1;
+      }
+
+      function finish_step() {
+        if (step_is_benchmark && step_auto_push) {
+          job_auto_push = 1;
+        }
+        in_step = 0;
+        step_is_benchmark = 0;
+        step_auto_push = 0;
+        in_with = 0;
+        with_indent = 0;
+      }
+
+      function finish_job() {
+        finish_step();
+        if (job_name != "" && job_auto_push && !(workflow_concurrency_ok || job_concurrency_ok)) {
+          print job_name;
+        }
+        job_name = "";
+        job_auto_push = 0;
+        job_concurrency_ok = 0;
+        in_job_concurrency = 0;
+        job_concurrency_indent = 0;
+        in_steps = 0;
+        steps_indent = 0;
+      }
+
       BEGIN {
-        has_benchmark = 0;
-        has_auto_push = 0;
-        has_concurrency = 0;
+        block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
 
         in_block = 0;
         block_indent = 0;
-        block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+
+        workflow_concurrency_ok = 0;
+        in_workflow_concurrency = 0;
+        workflow_concurrency_indent = 0;
+
+        in_jobs = 0;
+        job_name = "";
+        job_auto_push = 0;
+        job_concurrency_ok = 0;
+        in_job_concurrency = 0;
+        job_concurrency_indent = 0;
+
+        in_steps = 0;
+        steps_indent = 0;
+        in_step = 0;
+        step_is_benchmark = 0;
+        step_auto_push = 0;
+        in_with = 0;
+        with_indent = 0;
       }
 
       {
@@ -92,73 +170,181 @@ for wf in "${workflows[@]}"; do
         sub(/#.*/, "", line);
 
         is_block = (line ~ block_re);
+        trimmed = line;
+        sub(/^[[:space:]]*/, "", trimmed);
 
-        # Ignore single-line `run:` steps (avoid matching `auto-push:` strings inside shell).
-        if (!is_block && line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]+/) {
-          next;
-        }
-
-        if (line ~ /benchmark-action\/github-action-benchmark@/) {
-          has_benchmark = 1;
-        }
-
-        if (line ~ /^[[:space:]]*group:[[:space:]]*/) {
-          group_value = line;
-          sub(/^[[:space:]]*group:[[:space:]]*/, "", group_value);
-          gsub(/^[[:space:]]+/, "", group_value);
-          gsub(/[[:space:]]+$/, "", group_value);
-          if (substr(group_value, 1, 1) == "\"" && substr(group_value, length(group_value), 1) == "\"") {
-            group_value = substr(group_value, 2, length(group_value) - 2);
-          } else if (substr(group_value, 1, 1) == "'"'"'" && substr(group_value, length(group_value), 1) == "'"'"'") {
-            group_value = substr(group_value, 2, length(group_value) - 2);
-          }
-          if (group_value == "benchmark-gh-pages-publish") {
-            has_concurrency = 1;
-          }
-        }
-
-        if (line ~ /^[[:space:]]*auto-push:[[:space:]]*/) {
-          v = line;
-          sub(/^[[:space:]]*auto-push:[[:space:]]*/, "", v);
-          gsub(/^[[:space:]]+/, "", v);
-          gsub(/[[:space:]]+$/, "", v);
-          if (substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") {
-            v = substr(v, 2, length(v) - 2);
-          } else if (substr(v, 1, 1) == "'"'"'" && substr(v, length(v), 1) == "'"'"'") {
-            v = substr(v, 2, length(v) - 2);
-          }
-          low = tolower(v);
-          compact = low;
-          gsub(/[[:space:]]+/, "", compact);
-          # Treat explicit "false"/0 values (including `${{ false }}`) as disabled.
-          is_false = (compact == "" ||
-            compact == "false" ||
-            compact == "0" ||
-            compact == "${{false}}" ||
-            compact == "${{0}}" ||
-            compact == "${{'false'}}" ||
-            compact == "${{\"false\"}}" ||
-            compact == "${{'0'}}" ||
-            compact == "${{\"0\"}}");
-          if (!is_false) {
-            has_auto_push = 1;
-          }
-        }
-
+        # Detect YAML block scalars (e.g. `run: |`, `script: >-`) so we can skip their content.
         if (is_block) {
           in_block = 1;
           block_indent = ind;
+          next;
+        }
+
+        # Workflow-level concurrency: allow serializing the entire workflow as an alternative.
+        if (ind == 0 && trimmed ~ /^concurrency:[[:space:]]*/) {
+          v = trimmed;
+          sub(/^concurrency:[[:space:]]*/, "", v);
+          v = strip_quotes(v);
+          if (v != "") {
+            if (v == expected_group) {
+              workflow_concurrency_ok = 1;
+            }
+          } else {
+            in_workflow_concurrency = 1;
+            workflow_concurrency_indent = ind;
+          }
+          next;
+        }
+
+        if (in_workflow_concurrency) {
+          if (ind <= workflow_concurrency_indent && trimmed !~ /^$/) {
+            in_workflow_concurrency = 0;
+          } else if (trimmed ~ /^group:[[:space:]]*/) {
+            v = trimmed;
+            sub(/^group:[[:space:]]*/, "", v);
+            v = strip_quotes(v);
+            if (v == expected_group) {
+              workflow_concurrency_ok = 1;
+            }
+          }
+        }
+
+        if (ind == 0 && trimmed ~ /^jobs:[[:space:]]*$/) {
+          in_jobs = 1;
+          next;
+        }
+
+        if (!in_jobs) {
+          next;
+        }
+
+        # End the jobs map if we hit a new root key.
+        if (ind == 0 && trimmed ~ /^[A-Za-z0-9_-]+:/ && trimmed !~ /^jobs:/) {
+          finish_job();
+          in_jobs = 0;
+          next;
+        }
+
+        # Job start (under jobs:)
+        if (ind == 2 && trimmed ~ /^[A-Za-z0-9_-]+:[[:space:]]*$/) {
+          finish_job();
+          job_name = trimmed;
+          sub(/:.*/, "", job_name);
+          job_name = trim(job_name);
+          next;
+        }
+
+        if (job_name == "") {
+          next;
+        }
+
+        # Job-level concurrency
+        if (ind == 4 && trimmed ~ /^concurrency:[[:space:]]*/) {
+          v = trimmed;
+          sub(/^concurrency:[[:space:]]*/, "", v);
+          v = strip_quotes(v);
+          if (v != "") {
+            if (v == expected_group) {
+              job_concurrency_ok = 1;
+            }
+            in_job_concurrency = 0;
+          } else {
+            in_job_concurrency = 1;
+            job_concurrency_indent = ind;
+          }
+          next;
+        }
+
+        if (in_job_concurrency) {
+          if (ind <= job_concurrency_indent && trimmed !~ /^$/ && trimmed !~ /^concurrency:/) {
+            in_job_concurrency = 0;
+          } else if (trimmed ~ /^group:[[:space:]]*/) {
+            v = trimmed;
+            sub(/^group:[[:space:]]*/, "", v);
+            v = strip_quotes(v);
+            if (v == expected_group) {
+              job_concurrency_ok = 1;
+            }
+          }
+        }
+
+        # Steps list start/end
+        if (ind == 4 && trimmed ~ /^steps:[[:space:]]*$/) {
+          in_steps = 1;
+          steps_indent = ind;
+          next;
+        }
+
+        if (in_steps && ind <= steps_indent && trimmed !~ /^$/ && trimmed !~ /^steps:/) {
+          finish_step();
+          in_steps = 0;
+        }
+
+        if (!in_steps) {
+          next;
+        }
+
+        # New step item
+        if (ind == steps_indent + 2 && trimmed ~ /^-[[:space:]]/) {
+          finish_step();
+          in_step = 1;
+          step_is_benchmark = 0;
+          step_auto_push = 0;
+          in_with = 0;
+          with_indent = 0;
+          # Continue parsing this line (it may contain inline keys).
+        }
+
+        if (!in_step) {
+          next;
+        }
+
+        # Per-step parsing: detect `uses: benchmark-action/...` and `with: auto-push: ...`.
+        step_line = trimmed;
+        if (step_line ~ /^-[[:space:]]/) {
+          sub(/^-+[[:space:]]*/, "", step_line);
+        }
+        step_line = trim(step_line);
+
+        if (step_line ~ /^uses:[[:space:]]*/) {
+          v = step_line;
+          sub(/^uses:[[:space:]]*/, "", v);
+          v = strip_quotes(v);
+          if (v ~ /benchmark-action\/github-action-benchmark@/) {
+            step_is_benchmark = 1;
+          }
+        }
+
+        if (step_line ~ /^with:[[:space:]]*$/) {
+          in_with = 1;
+          with_indent = ind;
+          next;
+        }
+
+        if (in_with) {
+          if (ind <= with_indent && trimmed !~ /^$/ && step_line !~ /^with:/) {
+            in_with = 0;
+          } else if (step_line ~ /^auto-push:[[:space:]]*/) {
+            v = step_line;
+            sub(/^auto-push:[[:space:]]*/, "", v);
+            if (auto_push_enabled(v)) {
+              step_auto_push = 1;
+            }
+          }
         }
       }
 
       END {
-        printf "%d %d %d\n", has_benchmark, has_auto_push, has_concurrency;
+        finish_job();
       }
     ' "$wf"
-  )
+  )"
 
-  if [ "$has_benchmark" -eq 1 ] && [ "$has_auto_push" -eq 1 ] && [ "$has_concurrency" -ne 1 ]; then
-    bad+=("$wf")
+  if [ -n "$missing_jobs" ]; then
+    while IFS= read -r job; do
+      [ -z "$job" ] && continue
+      bad+=("${wf}:${job}")
+    done <<<"$missing_jobs"
   fi
 done
 
@@ -171,8 +357,8 @@ if [ "${#bad[@]}" -gt 0 ]; then
   echo "    cancel-in-progress: false" >&2
   echo "" >&2
   echo "Missing in:" >&2
-  for wf in "${bad[@]}"; do
-    echo "  - ${wf}" >&2
+  for entry in "${bad[@]}"; do
+    echo "  - ${entry}" >&2
   done
   exit 1
 fi
