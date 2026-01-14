@@ -769,9 +769,44 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
 
     // Coverage: ensure the ribbon command id is registered.
     expect(commandRegistry.getCommand("formulas.formulaAuditing.tracePrecedents")).toBeDefined();
+    // This ribbon id is an alias for the canonical audit command; keep it hidden from the command palette
+    // to avoid duplicate entries.
+    expect(commandRegistry.getCommand("formulas.formulaAuditing.tracePrecedents")?.when).toBe("false");
 
     await commandRegistry.executeCommand("formulas.formulaAuditing.tracePrecedents");
     expect(calls).toEqual(["clearAuditing", "toggleAuditingPrecedents", "focus"]);
+  });
+
+  it("executes formulas.formulaAuditing.traceDependents by clearing auditing then toggling dependents", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const calls: string[] = [];
+    const app = {
+      isEditing: vi.fn(() => false),
+      clearAuditing: vi.fn(() => calls.push("clearAuditing")),
+      toggleAuditingDependents: vi.fn(() => calls.push("toggleAuditingDependents")),
+      focus: vi.fn(() => calls.push("focus")),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    // Coverage: ensure the ribbon command id is registered.
+    expect(commandRegistry.getCommand("formulas.formulaAuditing.traceDependents")).toBeDefined();
+    // This ribbon id is an alias for the canonical audit command; keep it hidden from the command palette
+    // to avoid duplicate entries.
+    expect(commandRegistry.getCommand("formulas.formulaAuditing.traceDependents")?.when).toBe("false");
+
+    await commandRegistry.executeCommand("formulas.formulaAuditing.traceDependents");
+    expect(calls).toEqual(["clearAuditing", "toggleAuditingDependents", "focus"]);
   });
 
   it("executes audit.toggleTransitive", async () => {

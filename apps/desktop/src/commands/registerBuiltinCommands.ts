@@ -1322,6 +1322,9 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.view.zoom.openPicker"),
       keywords: ["zoom", "custom zoom", "view", "scale"],
+      // Hide this dropdown trigger alias from context-aware UI surfaces (command palette, etc)
+      // to avoid duplicate "Zoom…" entries (`view.zoom.openPicker` is the canonical command).
+      when: "false",
     },
   );
 
@@ -1404,6 +1407,9 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.audit.tracePrecedents"),
       keywords: ["audit", "precedents", "trace", "ribbon"],
+      // Hide this ribbon alias from context-aware UI surfaces (command palette, etc)
+      // to avoid duplicate "Trace Precedents" entries (`audit.tracePrecedents` is the canonical command).
+      when: "false",
     },
   );
 
@@ -1441,6 +1447,9 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.audit.traceDependents"),
       keywords: ["audit", "dependents", "trace", "ribbon"],
+      // Hide this ribbon alias from context-aware UI surfaces (command palette, etc)
+      // to avoid duplicate "Trace Dependents" entries (`audit.traceDependents` is the canonical command).
+      when: "false",
     },
   );
 
@@ -2032,6 +2041,7 @@ export function registerBuiltinCommands(params: {
       keywords: ["fill", "fill left", "excel"],
     },
   );
+
   commandRegistry.registerBuiltinCommand(
     "edit.selectCurrentRegion",
     t("command.edit.selectCurrentRegion"),

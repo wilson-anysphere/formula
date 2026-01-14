@@ -308,8 +308,6 @@ describe("Ribbon UI state overrides", () => {
       "data.sortFilter.sortZtoA",
       "data.sortFilter.sort",
       "data.sortFilter.sort.customSort",
-      "data.sortFilter.sort.sortAtoZ",
-      "data.sortFilter.sort.sortZtoA",
       "data.sortFilter.filter",
       "data.sortFilter.clear",
       "data.sortFilter.reapply",

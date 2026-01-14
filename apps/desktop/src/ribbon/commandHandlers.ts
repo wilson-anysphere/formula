@@ -924,14 +924,10 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       // Dropdown container id; its menu items execute `format.openFormatCells` / custom format prompts.
       return true;
 
-    case "home.editing.sortFilter.sortAtoZ":
     case "data.sortFilter.sortAtoZ":
-    case "data.sortFilter.sort.sortAtoZ":
       ctx.sortSelection?.({ order: "ascending" });
       return true;
-    case "home.editing.sortFilter.sortZtoA":
     case "data.sortFilter.sortZtoA":
-    case "data.sortFilter.sort.sortZtoA":
       ctx.sortSelection?.({ order: "descending" });
       return true;
     case "home.editing.sortFilter.customSort":

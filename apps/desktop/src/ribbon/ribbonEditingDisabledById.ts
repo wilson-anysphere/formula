@@ -131,8 +131,6 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "data.sortFilter.sortZtoA": true,
   "data.sortFilter.sort": true,
   "data.sortFilter.sort.customSort": true,
-  "data.sortFilter.sort.sortAtoZ": true,
-  "data.sortFilter.sort.sortZtoA": true,
   "data.sortFilter.filter": true,
   "data.sortFilter.clear": true,
   "data.sortFilter.reapply": true,
