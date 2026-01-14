@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::date::ExcelDateSystem;
 use crate::eval::{CellAddr, CompiledExpr};
@@ -429,6 +429,14 @@ pub trait FunctionContext {
     /// Optional external data provider used by RTD / CUBE* functions.
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
+    }
+
+    /// Optional API for discovering the sheet order of an external workbook.
+    ///
+    /// This enables workbook/worksheet information functions to map an external sheet name to its
+    /// 1-based position within the external workbook (e.g. `SHEET([Book.xlsx]Sheet2!A1)`).
+    fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
+        self.external_sheet_order(workbook).map(Arc::from)
     }
 
     /// Locale configuration used when parsing locale-sensitive strings at runtime.

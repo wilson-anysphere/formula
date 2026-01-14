@@ -102,6 +102,15 @@ fn table_fixture_multi_col() -> Table {
     }
 }
 
+#[derive(Default)]
+struct ProviderWithoutSheetOrder;
+
+impl ExternalValueProvider for ProviderWithoutSheetOrder {
+    fn get(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
+        None
+    }
+}
+
 #[test]
 fn external_cell_ref_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
@@ -916,4 +925,39 @@ fn database_functions_support_computed_criteria_over_external_database() {
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1500.0));
     assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(0.0));
+}
+
+#[test]
+fn sheet_returns_external_sheet_index_when_provider_exposes_sheet_order() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec!["Sheet1".to_string(), "Sheet2".to_string()],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet2!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
+fn sheet_returns_na_for_external_refs_when_provider_lacks_sheet_order() {
+    let provider = Arc::new(ProviderWithoutSheetOrder::default());
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet2!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::NA)
+    );
 }

@@ -7,6 +7,7 @@ use crate::functions::{
 };
 use crate::value::{ErrorKind, Value};
 use formula_model::sheet_name_eq_case_insensitive;
+use std::sync::Arc;
 
 inventory::submit! {
     FunctionSpec {
@@ -24,7 +25,7 @@ inventory::submit! {
 
 fn external_sheet_index(ctx: &dyn FunctionContext, sheet_key: &str) -> Option<usize> {
     let (workbook, sheet) = split_external_sheet_key(sheet_key)?;
-    let order = ctx.external_sheet_order(workbook)?;
+    let order = ctx.workbook_sheet_names(workbook)?;
     order
         .iter()
         .position(|s| sheet_name_eq_case_insensitive(s, sheet))
@@ -50,7 +51,7 @@ fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Re
             // If there are no local sheets in the reference union, attempt to resolve the sheet
             // order for an external workbook.
             let mut workbook: Option<String> = None;
-            let mut order: Option<Vec<String>> = None;
+            let mut order: Option<Arc<[String]>> = None;
             let mut min_idx: Option<usize> = None;
 
             for r in references {
@@ -66,7 +67,7 @@ fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Re
                     Some(_) => {}
                     None => {
                         workbook = Some(wb.to_string());
-                        order = ctx.external_sheet_order(wb);
+                        order = ctx.workbook_sheet_names(wb);
                         if order.is_none() {
                             return Value::Error(ErrorKind::NA);
                         }
