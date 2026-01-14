@@ -44,6 +44,37 @@
 //!     Value::String(Arc::<str>::from("C"))
 //! );
 //! ```
+//!
+//! ## Filtering
+//!
+//! The query module can evaluate simple predicates and return a compact [`BitVec`] mask.
+//! This avoids materializing full row vectors, which is useful for UI filters and pivot engines.
+//!
+//! ```no_run
+//! use formula_columnar::{CmpOp, ColumnSchema, ColumnType, ColumnarTableBuilder, FilterExpr, FilterValue, TableOptions, Value};
+//! use std::sync::Arc;
+//!
+//! let schema = vec![
+//!     ColumnSchema { name: "cat".to_owned(), column_type: ColumnType::String },
+//!     ColumnSchema { name: "x".to_owned(), column_type: ColumnType::Number },
+//! ];
+//! let mut builder = ColumnarTableBuilder::new(schema, TableOptions::default());
+//! builder.append_row(&[Value::String(Arc::<str>::from("A")), Value::Number(1.0)]);
+//! builder.append_row(&[Value::String(Arc::<str>::from("B")), Value::Number(2.0)]);
+//! let table = builder.finalize();
+//!
+//! let expr = FilterExpr::Cmp {
+//!     col: 0,
+//!     op: CmpOp::Eq,
+//!     value: FilterValue::String(Arc::<str>::from("A")),
+//! };
+//! let mask = table.filter_mask(&expr).unwrap();
+//! assert_eq!(mask.count_ones(), 1);
+//!
+//! // Optionally materialize a filtered snapshot.
+//! let filtered = table.filter_table(&mask).unwrap();
+//! assert_eq!(filtered.row_count(), 1);
+//! ```
 
 #![forbid(unsafe_code)]
 
