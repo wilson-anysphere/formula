@@ -683,6 +683,8 @@ async function comparePerformance(): Promise<PerfComparison> {
 | Total initial | 200KB | Under 3G target |
 | Full app | 5MB | After lazy loading |
 
+Note: the repo’s CI-enforced **compressed JS/CSS/WASM** budget is tracked separately as **Frontend asset download size** (<10MB brotli by default; see `node scripts/frontend_asset_size_report.mjs`).
+
 ### Runtime Budget
 
 | Operation | Budget | Notes |
