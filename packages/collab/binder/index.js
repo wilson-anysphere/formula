@@ -296,6 +296,15 @@ function sameNormalizedCell(a, b) {
  *   userId?: string | null,
  *   encryption?: {
  *     keyForCell: (cell: { sheetId: string, row: number, col: number }) => { keyId: string, keyBytes: Uint8Array } | null,
+ *     /**
+ *      * Optional override for deciding whether a cell should be encrypted.
+ *      * Defaults to `true` when `keyForCell` returns a non-null key.
+ *      *
+ *      * Tip: to drive encryption policy from shared workbook metadata (so clients
+ *      * without keys can still refuse plaintext writes), use
+ *      * `createEncryptionPolicyFromDoc(doc)` from `@formula/collab-encrypted-ranges`
+ *      * and pass its `shouldEncryptCell` here.
+ *      *\/
  *     shouldEncryptCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
  *     encryptFormat?: boolean,
  *   } | null,

@@ -468,6 +468,11 @@ export interface CollabSessionOptions {
     /**
      * Optional override for deciding whether a cell should be encrypted.
      * Defaults to `true` when `keyForCell` returns a non-null key.
+     *
+     * Tip: to drive encryption policy from shared workbook metadata (so clients
+     * without keys can still refuse plaintext writes), use
+     * `createEncryptionPolicyFromDoc(doc)` from `@formula/collab-encrypted-ranges`
+     * and pass its `shouldEncryptCell` here.
      */
     shouldEncryptCell?: (cell: CellAddress) => boolean;
     /**
