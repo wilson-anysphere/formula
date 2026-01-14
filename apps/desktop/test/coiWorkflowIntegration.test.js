@@ -12,19 +12,31 @@ function readWorkflow(repoRoot, name) {
 }
 
 function assertWorkflowUsesNoBuildForCoi(workflowName, text) {
-  const matches = [...text.matchAll(/pnpm\s+-C\s+apps\/desktop\s+check:coi[^\n]*/g)].map((m) => m[0]);
+  /** @type {Array<{ index: number, snippet: string }>} */
+  const matches = [];
+  const re = /pnpm\s+-C\s+apps\/desktop\s+check:coi/g;
+  for (const m of text.matchAll(re)) {
+    const idx = m.index ?? -1;
+    if (idx < 0) continue;
+    const lineEnd = text.indexOf("\n", idx);
+    const snippet = (lineEnd === -1 ? text.slice(idx) : text.slice(idx, lineEnd)).trim();
+    matches.push({ index: idx, snippet });
+  }
+
   assert.ok(matches.length > 0, `expected ${workflowName} to invoke pnpm -C apps/desktop check:coi`);
 
-  for (const m of matches) {
+  for (const { index, snippet } of matches) {
+    // Look ahead a short window so wrapped/multiline YAML `run: |` commands still match.
+    const window = text.slice(index, Math.min(text.length, index + 200));
     assert.ok(
-      m.includes("--no-build") || m.includes("FORMULA_COI_NO_BUILD"),
-      `expected ${workflowName} COI invocation to use --no-build (or FORMULA_COI_NO_BUILD). Found: ${m}`,
+      window.includes("--no-build") || window.includes("FORMULA_COI_NO_BUILD"),
+      `expected ${workflowName} COI invocation to use --no-build (or FORMULA_COI_NO_BUILD). Found: ${snippet}`,
     );
   }
 
-  // Heuristic: ensure a Tauri build step exists somewhere before the COI invocation so the workflow
+  // Heuristic: ensure a Tauri build step exists somewhere before the first COI invocation so the workflow
   // can reuse already-built artifacts.
-  const firstCoi = text.indexOf(matches[0] ?? "");
+  const firstCoi = matches[0]?.index ?? -1;
   const tauriActionRe = /^\s*uses:\s*tauri-apps\/tauri-action\b/m;
   const firstTauriAction = text.search(tauriActionRe);
   assert.ok(
