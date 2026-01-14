@@ -108,7 +108,7 @@ function encKeyId(enc: unknown): string | null {
 
 function encryptedCellText(enc: unknown): string {
   const keyId = encKeyId(enc);
-  return keyId ? `Encrypted cell (keyId: ${keyId})` : "Encrypted cell";
+  return keyId ? tWithVars("branchMerge.encryptedCell.withKeyId", { keyId }) : t("branchMerge.encryptedCell");
 }
 
 function truncate(text: string, maxLen: number): string {

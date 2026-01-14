@@ -147,6 +147,8 @@ export const enUS = {
   "branchMerge.chooseOurs": "Choose ours",
   "branchMerge.chooseTheirs": "Choose theirs",
   "branchMerge.manual": "Manual…",
+  "branchMerge.encryptedCell": "Encrypted cell",
+  "branchMerge.encryptedCell.withKeyId": "Encrypted cell (keyId: {keyId})",
   "branchMerge.reason.content": "Content",
   "branchMerge.reason.format": "Format",
   "branchMerge.reason.deleteVsEdit": "Delete vs edit",
