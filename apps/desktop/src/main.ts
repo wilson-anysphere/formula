@@ -7338,13 +7338,15 @@ if (
             }
           };
 
-          const refreshRunner = async () => {
-            await macrosMod.renderMacroRunner(runnerPanel, guardedBackend as any, workbookId, {
-              onApplyUpdates: async (updates) => {
-                if (vbaEventMacros) {
-                  await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
-                  return;
-                }
+           const refreshRunner = async () => {
+             await macrosMod.renderMacroRunner(runnerPanel, guardedBackend as any, workbookId, {
+               isEditing: () => isSpreadsheetEditing(),
+               isReadOnly: () => app.isReadOnly?.() === true,
+               onApplyUpdates: async (updates) => {
+                 if (vbaEventMacros) {
+                   await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
+                   return;
+                 }
 
                 const doc = app.getDocument();
                 doc.beginBatch({ label: "Run macro" });

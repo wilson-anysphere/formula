@@ -4,6 +4,19 @@ import { MacroRunner } from "./runner";
 
 export interface MacroRunnerRenderOptions {
   onApplyUpdates?: (updates: MacroCellUpdate[]) => void | Promise<void>;
+  /**
+   * Optional spreadsheet edit-state predicate.
+   *
+   * When omitted, `renderMacroRunner` falls back to the desktop shell's global
+   * `__formulaSpreadsheetIsEditing` flag (when present) and otherwise assumes editing is off.
+   */
+  isEditing?: (() => boolean) | null;
+  /**
+   * Optional read-only predicate (e.g. collab viewer/commenter roles).
+   *
+   * When omitted, read-only is assumed to be false.
+   */
+  isReadOnly?: (() => boolean) | null;
 }
 
 /**
@@ -22,6 +35,16 @@ export async function renderMacroRunner(
   workbookId: string,
   opts: MacroRunnerRenderOptions = {}
 ): Promise<void> {
+  // Abort any prior run's event listeners so rerendering does not leak window handlers.
+  const prevAbort = (container as any).__formulaMacroRunnerAbort as AbortController | undefined;
+  try {
+    prevAbort?.abort();
+  } catch {
+    // ignore
+  }
+  const abort = new AbortController();
+  (container as any).__formulaMacroRunnerAbort = abort;
+
   const security = new DefaultMacroSecurityController();
   const runner = new MacroRunner(backend, security);
   const macros = await runner.list(workbookId);
@@ -67,6 +90,42 @@ export async function renderMacroRunner(
   output.className = "macros-runner__output";
 
   let currentSecurity = securityStatus;
+  let running = false;
+  let isEditing = (() => {
+    if (typeof opts.isEditing === "function") {
+      try {
+        return Boolean(opts.isEditing());
+      } catch {
+        return false;
+      }
+    }
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    return globalEditing === true;
+  })();
+  let isReadOnly = (() => {
+    if (typeof opts.isReadOnly === "function") {
+      try {
+        return Boolean(opts.isReadOnly());
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  })();
+  let mutationsDisabled = isEditing || isReadOnly;
+
+  const syncRunButtonDisabledState = () => {
+    runButton.disabled = running || mutationsDisabled;
+    if (mutationsDisabled) {
+      runButton.title = isReadOnly
+        ? "Read-only: you don't have permission to run macros."
+        : isEditing
+          ? "Finish editing to run a macro."
+          : "";
+    } else {
+      runButton.title = "";
+    }
+  };
 
   function renderSecurityBanner(status: MacroSecurityStatus): void {
     securityBanner.dataset["blocked"] = "false";
@@ -92,6 +151,52 @@ export async function renderMacroRunner(
   }
 
   renderSecurityBanner(currentSecurity);
+  syncRunButtonDisabledState();
+
+  const addWindowListener = (type: string, listener: (event: Event) => void) => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+    window.addEventListener(type, listener as EventListener);
+    abort.signal.addEventListener(
+      "abort",
+      () => {
+        try {
+          window.removeEventListener(type, listener as EventListener);
+        } catch {
+          // ignore
+        }
+      },
+      { once: true },
+    );
+  };
+
+  addWindowListener("formula:spreadsheet-editing-changed", (evt: Event) => {
+    const detail = (evt as CustomEvent)?.detail as any;
+    if (detail && typeof detail.isEditing === "boolean") {
+      isEditing = detail.isEditing;
+    } else {
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      isEditing = globalEditing === true;
+    }
+    mutationsDisabled = isEditing || isReadOnly;
+    syncRunButtonDisabledState();
+  });
+
+  addWindowListener("formula:read-only-changed", (evt: Event) => {
+    const detail = (evt as CustomEvent)?.detail as any;
+    if (detail && typeof detail.readOnly === "boolean") {
+      isReadOnly = detail.readOnly;
+    } else if (typeof opts.isReadOnly === "function") {
+      try {
+        isReadOnly = Boolean(opts.isReadOnly());
+      } catch {
+        isReadOnly = false;
+      }
+    } else {
+      isReadOnly = false;
+    }
+    mutationsDisabled = isEditing || isReadOnly;
+    syncRunButtonDisabledState();
+  });
 
   trustButton.onclick = async () => {
     try {
@@ -109,8 +214,10 @@ export async function renderMacroRunner(
   };
 
   runButton.onclick = async () => {
+    if (mutationsDisabled) return;
     output.textContent = "";
-    runButton.disabled = true;
+    running = true;
+    syncRunButtonDisabledState();
     try {
       const macroId = select.value;
       const selected = macros.find((m) => m.id === macroId);
@@ -144,7 +251,8 @@ export async function renderMacroRunner(
     } catch (err) {
       output.textContent += `Error: ${String(err)}\n`;
     } finally {
-      runButton.disabled = false;
+      running = false;
+      syncRunButtonDisabledState();
     }
   };
 

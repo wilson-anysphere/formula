@@ -21,6 +21,9 @@ describe("renderMacroRunner", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // Ensure tests don't leak the desktop shell global editing flag.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__formulaSpreadsheetIsEditing;
   });
 
   it("invokes onApplyUpdates when the backend returns updates", async () => {
@@ -117,6 +120,43 @@ describe("renderMacroRunner", () => {
     const output = container.querySelector("pre");
     expect(output?.textContent).toContain("Blocked by Trust Center (not_trusted)");
     expect(output?.textContent).toContain("Macros are blocked by Trust Center policy.");
+
+    container.remove();
+  });
+
+  it("disables the Run button while the spreadsheet is in edit mode", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+
+    const backend: MacroBackend = {
+      listMacros: vi.fn(async (_workbookId: string) => [{ id: "macro-1", name: "Macro1", language: "vba" as const }]),
+      getMacroSecurityStatus: vi.fn(async (_workbookId: string) => ({
+        hasMacros: true,
+        trust: "trusted_once" as const,
+        signature: { status: "unsigned" as const },
+      })),
+      setMacroTrust: vi.fn(async (_workbookId: string) => ({
+        hasMacros: true,
+        trust: "trusted_once" as const,
+        signature: { status: "unsigned" as const },
+      })),
+      runMacro: vi.fn(async () => ({ ok: true, output: [], updates: [] })),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderMacroRunner(container, backend, "workbook-1");
+
+    const runButton = container.querySelectorAll("button")[1] as HTMLButtonElement | undefined;
+    expect(runButton).toBeTruthy();
+    expect(runButton?.disabled).toBe(true);
+
+    // Disabled buttons won't fire click events in the browser, but test harnesses can still
+    // call handlers directly. Ensure we no-op defensively.
+    await (runButton as any).onclick?.();
+    expect(backend.runMacro).not.toHaveBeenCalled();
 
     container.remove();
   });
