@@ -20,13 +20,9 @@ const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const repoRoot = path.resolve(desktopRoot, "../..");
 const require = createRequire(import.meta.url);
 
-const testDir = path.normalize(fileURLToPath(new URL("../test/", import.meta.url)));
-const clipboardTestDir = path.normalize(fileURLToPath(new URL("../src/clipboard/__tests__/", import.meta.url)));
-
 /** @type {string[]} */
 const files = [];
-await collectTests(testDir, files);
-await collectTests(clipboardTestDir, files);
+await collectTests(desktopRoot, files);
 files.sort((a, b) => a.localeCompare(b));
 
 const tsLoaderArgs = resolveTypeScriptLoaderArgs();
@@ -165,9 +161,35 @@ async function collectTests(dir, out) {
   }
 
   for (const entry of entries) {
+    // Keep this list in sync with `scripts/run-node-tests.mjs` at the repo root.
+    if (
+      entry.name === ".git" ||
+      entry.name === "node_modules" ||
+      entry.name === "dist" ||
+      entry.name === "coverage" ||
+      entry.name === "target" ||
+      entry.name === "build" ||
+      entry.name === ".turbo" ||
+      entry.name === ".pnpm-store" ||
+      entry.name === ".cache" ||
+      entry.name === ".vite" ||
+      entry.name === "playwright-report" ||
+      entry.name === "test-results" ||
+      entry.name === "security-report" ||
+      entry.name.startsWith(".tmp")
+    ) {
+      continue;
+    }
+
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectTests(fullPath, out);
+      continue;
+    }
+
     if (!entry.isFile()) continue;
     if (!entry.name.endsWith(".test.js")) continue;
-    out.push(path.join(dir, entry.name));
+    out.push(fullPath);
   }
 }
 
