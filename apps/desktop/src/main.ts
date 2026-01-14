@@ -8840,10 +8840,7 @@ function handleRibbonCommand(commandId: string): void {
         void handleDeleteActiveSheet();
         return;
       case "edit.autoSum":
-      // Legacy ribbon schema ids (Home → Editing → AutoSum).
-      case "home.editing.autoSum":
-      case "home.editing.autoSum.sum":
-        executeBuiltinCommand("edit.autoSum");
+        executeBuiltinCommand(commandId);
         // `edit.autoSum` restores focus, but ensure the grid is focused even if the command is a no-op.
         app.focus();
         return;
