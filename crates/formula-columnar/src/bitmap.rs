@@ -251,6 +251,47 @@ impl BitVec {
         }
     }
 
+    pub fn extend_constant(&mut self, value: bool, mut count: usize) {
+        if count == 0 {
+            return;
+        }
+
+        // Fill any remaining bits in the current word first.
+        let bit = self.len % 64;
+        if bit != 0 {
+            let available = 64 - bit;
+            let take = count.min(available);
+            if value {
+                let word_idx = self.len / 64;
+                let mask = ((1u64 << take) - 1) << bit;
+                self.words[word_idx] |= mask;
+                self.ones = self.ones.saturating_add(take);
+            }
+            self.len += take;
+            count -= take;
+        }
+
+        // Add full words.
+        while count >= 64 {
+            self.words.push(if value { u64::MAX } else { 0 });
+            self.len += 64;
+            if value {
+                self.ones = self.ones.saturating_add(64);
+            }
+            count -= 64;
+        }
+
+        // Add remaining partial word.
+        if count > 0 {
+            let word = if value { (1u64 << count) - 1 } else { 0 };
+            self.words.push(word);
+            self.len += count;
+            if value {
+                self.ones = self.ones.saturating_add(count);
+            }
+        }
+    }
+
     /// Reconstruct a [`BitVec`] from a raw word buffer and a bit length.
     ///
     /// This is primarily used by persistence layers that store the `u64` words
@@ -290,5 +331,32 @@ impl BitVec {
 impl Default for BitVec {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BitVec;
+
+    #[test]
+    fn extend_constant_matches_push() {
+        let mut a = BitVec::new();
+        for _ in 0..3 {
+            a.push(false);
+        }
+        for _ in 0..70 {
+            a.push(true);
+        }
+        for _ in 0..5 {
+            a.push(false);
+        }
+
+        let mut b = BitVec::new();
+        b.extend_constant(false, 3);
+        b.extend_constant(true, 70);
+        b.extend_constant(false, 5);
+
+        assert_eq!(a, b);
+        assert_eq!(b.count_ones(), 70);
     }
 }

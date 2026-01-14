@@ -631,6 +631,34 @@ fn eval_filter_string(
             });
         };
 
+        // When the chunk has no nulls and uses RLE indices we can preserve some compression
+        // benefits by emitting whole runs at once.
+        if c.validity.is_none() {
+            if let Some(t) = target {
+                match &c.indices {
+                    U32SequenceEncoding::Rle(rle) => {
+                        let mut start: usize = 0;
+                        for (&run_value, &end) in rle.values.iter().zip(rle.ends.iter()) {
+                            let end = end as usize;
+                            if start >= chunk_rows {
+                                break;
+                            }
+                            let run_len = end.saturating_sub(start).min(chunk_rows - start);
+                            let passed = match op {
+                                CmpOp::Eq => run_value == t,
+                                CmpOp::Ne => run_value != t,
+                                _ => false,
+                            };
+                            out.extend_constant(passed, run_len);
+                            start = end;
+                        }
+                        continue;
+                    }
+                    U32SequenceEncoding::Bitpacked { .. } => {}
+                }
+            }
+        }
+
         let mut cursor = U32SeqCursor::new(&c.indices);
         for i in 0..chunk_rows {
             let ix = cursor.next();
