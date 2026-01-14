@@ -1460,7 +1460,7 @@ validate load → save → diff round-trips:
 
 - Fixtures live under `fixtures/xlsx/**` (kept intentionally small).
 - Encrypted/password-protected OOXML workbooks (e.g. `.xlsx`, `.xlsm`, `.xlsb` “Encrypt with Password”) are **OLE/CFB containers**, not ZIP/OPC packages.
-  They live under `fixtures/encrypted/ooxml/` and are intentionally excluded from the `xlsx-diff::collect_fixture_paths` round-trip corpus.
+  They live under `fixtures/encrypted/` (see `fixtures/encrypted/ooxml/` for the vendored encrypted `.xlsx`/`.xlsm` corpus) and are intentionally excluded from the `xlsx-diff::collect_fixture_paths` round-trip corpus.
 - The diff tool is implemented in Rust: `crates/xlsx-diff`.
 
 Run a diff locally:

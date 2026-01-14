@@ -647,6 +647,9 @@ Notes:
 - The desktop save command supports writing an **encrypted** `.xlsx`/`.xlsm` when a `password` is
   provided (it encrypts the plaintext OOXML package into an OLE/CFB wrapper via
   `formula_office_crypto::encrypt_package_to_ole` / `OpenedWorkbookWithPreservedOle::save_preserving_encryption`).
+- Opening encrypted `.xlsb` is supported, but the decrypted payload is not backed by an on-disk XLSB
+  ZIP package (`origin_xlsb_path`), so the desktop app currently cannot save back to `.xlsb` and
+  forces “Save As” (save as `.xlsx` instead).
 - Saving encrypted `.xlsb` is currently rejected (save as `.xlsx` instead).
 
 Product/UX mitigations (if the caller is *not* using the preserve-encryption save path):

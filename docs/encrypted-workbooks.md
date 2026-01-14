@@ -161,6 +161,9 @@ Current desktop limitations:
   packages (via the `open_workbook` command’s `password` parameter). The desktop frontend prompts
   for a password and retries open when it receives `PASSWORD_REQUIRED:` / `INVALID_PASSWORD:` errors.
 - Legacy `.xls` BIFF `FILEPASS` password prompting is not yet wired through the desktop open path.
+- Encrypted `.xlsb` opens are supported, but because the input on disk is an encrypted OLE/CFB
+  container (not a plaintext `.xlsb` ZIP package), the desktop app cannot round-trip `.xlsb` yet and
+  forces “Save As”. Save as `.xlsx` instead.
 - Saving **encrypted** `.xlsx`/`.xlsm` is supported when the save command is invoked with a
   `password` (the output is wrapped back into an OLE/CFB `EncryptedPackage` container).
 - Saving encrypted `.xlsb` is not supported yet (save as `.xlsx` instead).
