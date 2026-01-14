@@ -2442,6 +2442,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       return false;
     };
 
+    const hasRibbonAutoFilter = ribbonAutoFilterStore.hasAny(sheetId);
+
     const pressedById = {
       "format.toggleBold": formatState.bold,
       "format.toggleItalic": formatState.italic,
@@ -2475,7 +2477,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "data.queriesConnections.queriesConnections": isPanelOpen(PanelIds.DATA_QUERIES),
       "comments.togglePanel": app.isCommentsPanelVisible(),
       // MVP ribbon AutoFilter: treat "Filter" as pressed when any filter is active on the sheet.
-      "data.sortFilter.filter": ribbonAutoFilterStore.hasAny(sheetId),
+      "data.sortFilter.filter": hasRibbonAutoFilter,
       [FORMAT_PAINTER_COMMAND_ID]: Boolean(formatPainterState),
     };
 
@@ -2742,12 +2744,21 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "data.outline.ungroup": true,
             "data.outline.subtotal": true,
             "data.outline.showDetail": true,
-             "data.outline.hideDetail": true,
-             // MVP ribbon AutoFilter uses outline.hidden.filter, which isn't implemented in shared-grid mode yet.
-             "data.sortFilter.filter": true,
-             "data.sortFilter.clear": true,
-             "data.sortFilter.reapply": true,
-             "data.sortFilter.advanced.clearFilter": true,
+            "data.outline.hideDetail": true,
+            // MVP ribbon AutoFilter uses outline.hidden.filter, which isn't implemented in shared-grid mode yet.
+            "data.sortFilter.filter": true,
+            "data.sortFilter.clear": true,
+            "data.sortFilter.reapply": true,
+            "data.sortFilter.advanced.clearFilter": true,
+          }
+        : null),
+      ...(!hasRibbonAutoFilter
+        ? {
+            // Clear/Reapply should only be enabled when AutoFilter is enabled for the current sheet.
+            // (Excel-style: these are no-ops when no filter exists.)
+            "data.sortFilter.clear": true,
+            "data.sortFilter.reapply": true,
+            "data.sortFilter.advanced.clearFilter": true,
           }
         : null),
     };
