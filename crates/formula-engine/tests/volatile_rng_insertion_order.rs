@@ -103,4 +103,3 @@ fn volatile_rng_is_deterministic_wrt_insertion_order() {
     // Extremely unlikely to collide for all cells; this is a sanity check that recalc_id advances.
     assert_ne!(snap2, snap1);
 }
-
