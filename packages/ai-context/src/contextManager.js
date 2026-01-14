@@ -108,7 +108,20 @@ function stableHashValue(value, options = {}) {
     if (typeof v === "bigint") return fnv1a64Update(hash, `bigint:${v.toString()}`);
     if (typeof v === "symbol") return fnv1a64Update(hash, `symbol:${v.toString()}`);
     if (typeof v === "function") return fnv1a64Update(hash, `fn:${v.name || "anonymous"}`);
-    if (v instanceof Date) return fnv1a64Update(hash, `date:${v.toISOString()}`);
+    if (v instanceof Date) {
+      // Avoid calling per-instance overrides (e.g. `date.toISOString = () => "secret"`).
+      let iso = "";
+      try {
+        iso = Date.prototype.toISOString.call(v);
+      } catch {
+        try {
+          iso = Date.prototype.toString.call(v);
+        } catch {
+          iso = "";
+        }
+      }
+      return fnv1a64Update(hash, `date:${iso}`);
+    }
 
     if (v && typeof v === "object") {
       if (stack.has(v)) return fnv1a64Update(hash, "[Circular]");
@@ -3558,7 +3571,16 @@ function classifyStructuredForDlp(value, options = {}) {
     seen.add(v);
 
     if (v instanceof Date) {
-      considerText(v.toISOString());
+      // Avoid calling per-instance overrides (e.g. `date.toISOString = () => "secret"`).
+      try {
+        considerText(Date.prototype.toISOString.call(v));
+      } catch {
+        try {
+          considerText(Date.prototype.toString.call(v));
+        } catch {
+          // ignore
+        }
+      }
       return;
     }
     // Avoid scanning large binary blobs.

@@ -104,7 +104,26 @@ function isCellEffectivelyEmpty(value) {
 function scalarToSampleString(value) {
   if (isCellEmpty(value)) return "";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+  if (value instanceof Date) {
+    // Avoid calling per-instance overrides (e.g. `date.toISOString = () => "secret"`).
+    let time = NaN;
+    try {
+      time = Date.prototype.getTime.call(value);
+    } catch {
+      time = NaN;
+    }
+    if (Number.isNaN(time)) return "";
+    try {
+      return Date.prototype.toISOString.call(value);
+    } catch {
+      // Invalid dates throw in `toISOString()`; fall back to a stable string form.
+      try {
+        return Date.prototype.toString.call(value);
+      } catch {
+        return "";
+      }
+    }
+  }
   if (value && typeof value === "object") {
     try {
       const json = JSON.stringify(value);
