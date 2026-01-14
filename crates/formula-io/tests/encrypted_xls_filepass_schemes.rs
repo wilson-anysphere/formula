@@ -8,6 +8,12 @@ fn encrypted_xls_fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn real_encrypted_xls_fixture_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/encrypted")
+        .join(name)
+}
+
 #[test]
 fn detects_xor_filepass_scheme() {
     let path = encrypted_xls_fixture_path("biff8_xor_pw_open.xls");
@@ -44,5 +50,20 @@ fn detects_rc4_cryptoapi_legacy_filepass_scheme() {
             scheme: Some(LegacyXlsFilePassScheme::Rc4CryptoApi),
         },
         "expected RC4 CryptoAPI FILEPASS for legacy layout, got {info:?}"
+    );
+}
+
+#[test]
+fn detects_rc4_cryptoapi_scheme_for_real_world_legacy_fixture() {
+    // `fixtures/encrypted/encrypted.xls` is a Microsoft Excel-generated BIFF8 RC4 CryptoAPI
+    // workbook that uses the legacy FILEPASS layout (`wEncryptionInfo=0x0004`).
+    let path = real_encrypted_xls_fixture_path("encrypted.xls");
+    let info = detect_workbook_encryption(&path).expect("detect encryption");
+    assert_eq!(
+        info,
+        WorkbookEncryption::LegacyXlsFilePass {
+            scheme: Some(LegacyXlsFilePassScheme::Rc4CryptoApi),
+        },
+        "expected RC4 CryptoAPI FILEPASS for real fixture, got {info:?}"
     );
 }
