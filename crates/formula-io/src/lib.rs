@@ -46,7 +46,7 @@ pub enum Error {
     #[error("invalid password for workbook `{path}`")]
     InvalidPassword { path: PathBuf },
     #[error(
-        "unsupported encrypted OOXML workbook `{path}`: EncryptionInfo version {version_major}.{version_minor} is not supported"
+        "unsupported encrypted OOXML workbook `{path}`: EncryptionInfo version {version_major}.{version_minor} is invalid or not supported"
     )]
     UnsupportedOoxmlEncryption {
         path: PathBuf,
@@ -1325,6 +1325,14 @@ pub fn open_workbook_with_options(
                     path: path.to_path_buf(),
                     source,
                 })?;
+            let (info_version_major, info_version_minor) = if encryption_info.len() >= 4 {
+                (
+                    u16::from_le_bytes([encryption_info[0], encryption_info[1]]),
+                    u16::from_le_bytes([encryption_info[2], encryption_info[3]]),
+                )
+            } else {
+                (0, 0)
+            };
 
             let mut pkg_stream =
                 open_stream_case_tolerant(&mut ole, "EncryptedPackage").map_err(|source| {
@@ -1371,8 +1379,10 @@ pub fn open_workbook_with_options(
                     path: path.to_path_buf(),
                     source,
                 },
-                encrypted_ooxml::DecryptError::InvalidInfo(_) => Error::EncryptedWorkbook {
+                encrypted_ooxml::DecryptError::InvalidInfo(_) => Error::UnsupportedOoxmlEncryption {
                     path: path.to_path_buf(),
+                    version_major: info_version_major,
+                    version_minor: info_version_minor,
                 },
             })?;
 
