@@ -216,4 +216,34 @@ describe("startupMetrics", () => {
     await expect(markStartupFirstRender()).resolves.toEqual(expect.any(Object));
     await expect(markStartupTimeToInteractive({ whenIdle: Promise.resolve() })).resolves.toEqual(expect.any(Object));
   });
+
+  it("is idempotent across repeated bootstrap evaluation (global guardrail)", async () => {
+    const invoke = vi.fn().mockResolvedValue(null);
+    const listen = vi.fn().mockResolvedValue(() => {});
+    (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
+
+    vi.resetModules();
+    await import("./startupMetricsBootstrap");
+
+    // Allow the listener-install retry loop to schedule its `.then(...)` work.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    const firstCallCount = invoke.mock.calls.length;
+    expect(firstCallCount).toBeGreaterThan(0);
+
+    // Force a re-evaluation of the module (simulates it being loaded via multiple entrypoints),
+    // but keep the global bootstrapped marker intact.
+    vi.resetModules();
+    await import("./startupMetricsBootstrap");
+
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(invoke).toHaveBeenCalledTimes(firstCallCount);
+  });
 });
