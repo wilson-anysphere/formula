@@ -95,8 +95,26 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
   const originalArray = globalThis.Array;
   const originalMapSet = Map.prototype.set;
   const originalArrayPush = originalArray.prototype.push;
+  const originalArrayBuffer = globalThis.ArrayBuffer;
+  const typedArrayNames = [
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Uint16Array",
+    "Uint32Array",
+    "Int8Array",
+    "Int16Array",
+    "Int32Array",
+    "Float32Array",
+    "Float64Array",
+  ] as const;
+  const originalTypedArrays: Record<string, unknown> = {};
+  for (const name of typedArrayNames) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    originalTypedArrays[name] = (globalThis as any)[name];
+  }
 
   const MAX_ARRAY_LENGTH = 200_000;
+  const MAX_ARRAY_BUFFER_BYTES = 200_000;
   let mapSetCalls = 0;
   let pushedElements = 0;
 
@@ -153,6 +171,36 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).Array = GuardedArray;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).ArrayBuffer = new Proxy(originalArrayBuffer, {
+    construct(target, args, newTarget) {
+      const size = typeof args[0] === "number" ? args[0] : NaN;
+      if (Number.isFinite(size) && size > MAX_ARRAY_BUFFER_BYTES) {
+        throw new Error(`Unexpected large ArrayBuffer allocation: byteLength=${size}`);
+      }
+      return Reflect.construct(target, args, newTarget);
+    },
+  });
+
+  for (const name of typedArrayNames) {
+    const ctor = originalTypedArrays[name];
+    if (!ctor) continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any)[name] = new Proxy(ctor as any, {
+      construct(target, args, newTarget) {
+        const first = args[0];
+        if (typeof first === "number" && first > MAX_ARRAY_LENGTH) {
+          throw new Error(`Unexpected large ${name} allocation: length=${first}`);
+        }
+        const byteLength =
+          first && typeof first === "object" && typeof (first as any).byteLength === "number" ? (first as any).byteLength : null;
+        if (byteLength != null && byteLength > MAX_ARRAY_BUFFER_BYTES) {
+          throw new Error(`Unexpected large ${name} backing buffer: byteLength=${byteLength}`);
+        }
+        return Reflect.construct(target, args, newTarget);
+      },
+    });
+  }
 
   const start = performance.now();
   try {
@@ -161,6 +209,12 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
   } finally {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).Array = originalArray;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).ArrayBuffer = originalArrayBuffer;
+    for (const name of typedArrayNames) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any)[name] = originalTypedArrays[name];
+    }
     Map.prototype.set = originalMapSet;
     originalArray.prototype.push = originalArrayPush;
   }
