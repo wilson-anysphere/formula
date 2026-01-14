@@ -924,6 +924,252 @@ fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys_for_columnar_di
 }
 
 #[test]
+fn related_does_not_match_blank_facts_to_physical_blank_dimension_keys() {
+    // Regression: BLANK fact keys map to the *virtual* blank dimension member, not a physical
+    // dimension row whose key is BLANK. This should apply to `RELATED` navigation as well.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key"]);
+    fact.push_row(vec![1.into(), 1.into()]).unwrap();
+    fact.push_row(vec![2.into(), Value::Blank]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "Related Attr", "RELATED(Dim[Attr])")
+        .unwrap();
+
+    let fact = model.table("Fact").unwrap();
+    assert_eq!(fact.value(0, "Related Attr").unwrap(), "A".into());
+    assert_eq!(fact.value(1, "Related Attr").unwrap(), Value::Blank);
+}
+
+#[test]
+fn related_does_not_match_blank_facts_to_physical_blank_dimension_keys_for_columnar_dim() {
+    // Same regression as `related_does_not_match_blank_facts_to_physical_blank_dimension_keys`, but
+    // with a columnar-backed dimension table.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key"]);
+    fact.push_row(vec![1.into(), 1.into()]).unwrap();
+    fact.push_row(vec![2.into(), Value::Blank]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "Related Attr", "RELATED(Dim[Attr])")
+        .unwrap();
+
+    let fact = model.table("Fact").unwrap();
+    assert_eq!(fact.value(0, "Related Attr").unwrap(), "A".into());
+    assert_eq!(fact.value(1, "Related Attr").unwrap(), Value::Blank);
+}
+
+#[test]
+fn related_does_not_match_blank_facts_to_physical_blank_dimension_keys_for_columnar_fact() {
+    // Same regression as `related_does_not_match_blank_facts_to_physical_blank_dimension_keys`, but
+    // with a columnar-backed fact table.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Null,
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "Related Attr", "RELATED(Dim[Attr])")
+        .unwrap();
+
+    let fact = model.table("Fact").unwrap();
+    assert_eq!(fact.value(0, "Related Attr").unwrap(), "A".into());
+    assert_eq!(fact.value(1, "Related Attr").unwrap(), Value::Blank);
+}
+
+#[test]
+fn related_does_not_match_blank_facts_to_physical_blank_dimension_keys_for_columnar_dim_and_fact() {
+    // Same regression as `related_does_not_match_blank_facts_to_physical_blank_dimension_keys`, but
+    // with both dimension and fact tables columnar-backed.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Null,
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "Related Attr", "RELATED(Dim[Attr])")
+        .unwrap();
+
+    let fact = model.table("Fact").unwrap();
+    assert_eq!(fact.value(0, "Related Attr").unwrap(), "A".into());
+    assert_eq!(fact.value(1, "Related Attr").unwrap(), Value::Blank);
+}
+
+#[test]
 fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys_with_bidirectional_filtering() {
     // Similar to `blank_foreign_keys_do_not_match_physical_blank_dimension_keys`, but with
     // bidirectional filtering enabled.
