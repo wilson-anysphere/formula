@@ -3,6 +3,45 @@ import { describe, expect, it } from "vitest";
 import { serializeToolResultForModel } from "./toolResultSerialization.js";
 
 describe("serializeToolResultForModel", () => {
+  it("trims tool names in tool execution envelopes", () => {
+    const toolCall = {
+      id: "call-trim",
+      name: "read_range",
+      arguments: { range: "Sheet1!A1:A1" }
+    };
+
+    const result = {
+      tool: "  read_range  ",
+      ok: true,
+      data: { values: [[1]] }
+    };
+
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars: 5_000 });
+    const payload = JSON.parse(serialized);
+    expect(payload.tool).toBe("read_range");
+  });
+
+  it("uses specialized serializers even when toolCall.name includes whitespace", () => {
+    const toolCall = {
+      id: "call-trim-2",
+      name: "  read_range  ",
+      arguments: { range: "Sheet1!A1:A1" }
+    };
+
+    const result = {
+      tool: "read_range",
+      ok: true,
+      data: { values: [[1]] }
+    };
+
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars: 5_000 });
+    const payload = JSON.parse(serialized);
+
+    expect(payload.tool).toBe("read_range");
+    // `read_range` serializer always includes a `shape` summary (generic serializer does not).
+    expect(payload.data.shape).toEqual({ rows: 1, cols: 1 });
+  });
+
   it("read_range includes formulas preview + truncation metadata within budget", () => {
     const rows = 30;
     const cols = 15;

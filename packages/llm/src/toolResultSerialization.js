@@ -16,14 +16,27 @@
  
 const DEFAULT_MAX_CHARS = 20_000;
 const CHARS_PER_TOKEN_APPROX = 4;
- 
+
+/**
+ * Tool names are identifiers and should not include leading/trailing whitespace.
+ *
+ * @param {unknown} value
+ * @param {string} fallback
+ * @returns {string}
+ */
+function normalizeToolName(value, fallback) {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : fallback;
+}
+
 /**
  * @param {{ toolCall: ToolCall, result: unknown, maxChars?: number, maxTokens?: number }} params
  * @returns {string}
  */
 export function serializeToolResultForModel(params) {
   const maxChars = resolveMaxChars(params);
-  const toolName = String(params?.toolCall?.name ?? "");
+  const toolName = normalizeToolName(params?.toolCall?.name, "");
 
   // Prefer deterministic, per-tool summaries for high-volume tools.
   if (toolName === "read_range") {
@@ -317,13 +330,13 @@ function serializeGeneric(params) {
  
   return finalizeJson(
     safeJsonStringify({
-      tool: String(params.toolCall?.name ?? "tool"),
+      tool: normalizeToolName(params.toolCall?.name, "tool"),
       ok: typeof base.ok === "boolean" ? base.ok : undefined,
       truncated: true,
       note: "Tool result exceeded max serialization budget."
     }),
     params.maxChars,
-    { tool: String(params.toolCall?.name ?? "tool"), truncated: true }
+    { tool: normalizeToolName(params.toolCall?.name, "tool"), truncated: true }
   );
 }
  
@@ -332,16 +345,21 @@ function serializeGeneric(params) {
  * @param {unknown} result
  */
 function normalizeToolExecutionEnvelope(toolCall, result) {
+  const toolName = normalizeToolName(toolCall?.name, "tool");
+
   if (result && typeof result === "object" && !Array.isArray(result)) {
     // If this is already a ToolExecutionResult-like envelope, keep it.
     if ("tool" in result || "ok" in result || "data" in result || "error" in result) {
-      return /** @type {any} */ (result);
+      const envelope = /** @type {any} */ (result);
+      const tool = normalizeToolName(envelope.tool, toolName);
+      if (tool !== envelope.tool) return { ...envelope, tool };
+      return envelope;
     }
   }
- 
+
   // Otherwise wrap in a generic envelope.
   return {
-    tool: String(toolCall?.name ?? "tool"),
+    tool: toolName,
     ok: true,
     data: result
   };
