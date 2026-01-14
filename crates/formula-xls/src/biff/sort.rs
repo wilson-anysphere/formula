@@ -653,6 +653,22 @@ mod tests {
         payload
     }
 
+    fn canonical_sort_payload_one_key_b_desc_with_header() -> Vec<u8> {
+        // SORT range: A1:C5, 1 key: B descending, header present.
+        let mut payload = ref8_payload_a1_c5();
+        payload.extend_from_slice(&(SORT_GRBIT_HEADER_LOW).to_le_bytes()); // grbit
+        payload.extend_from_slice(&1u16.to_le_bytes()); // cKey
+        // rgKey[3]
+        payload.extend_from_slice(&1u16.to_le_bytes()); // col B
+        payload.extend_from_slice(&0xFFFFu16.to_le_bytes()); // unused
+        payload.extend_from_slice(&0xFFFFu16.to_le_bytes()); // unused
+        // rgOrder[3]
+        payload.extend_from_slice(&1u16.to_le_bytes()); // B descending
+        payload.extend_from_slice(&0u16.to_le_bytes()); // unused
+        payload.extend_from_slice(&0u16.to_le_bytes()); // unused
+        payload
+    }
+
     fn ref8_payload_a1_c5() -> Vec<u8> {
         let mut payload = Vec::new();
         payload.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
@@ -803,6 +819,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_sort12_frt_record_with_embedded_one_key_sort() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(
+                RT_SORT12,
+                RT_SORT12,
+                &canonical_sort_payload_one_key_b_desc_with_header(),
+            ),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
     fn parses_sortdata12_frt_record_with_embedded_canonical_sort() {
         // AutoFilter range: A1:C5.
         let af = Range::from_a1("A1:C5").unwrap();
@@ -854,5 +899,58 @@ mod tests {
             parsed.warnings,
             vec!["unsupported SortData12 record at offset 20".to_string()]
         );
+    }
+
+    #[test]
+    fn parses_sortdata12_frt_record_with_embedded_one_key_sort() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(
+                RT_SORTDATA12,
+                RT_SORTDATA12,
+                &canonical_sort_payload_one_key_b_desc_with_header(),
+            ),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![SortCondition {
+                range: Range::from_a1("B2:B5").unwrap(),
+                descending: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn does_not_warn_on_unsupported_sort12_with_irrelevant_ref8() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        // Ref8 range: D1:F5 (outside A1:C5).
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        payload.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        payload.extend_from_slice(&3u16.to_le_bytes()); // colFirst (D)
+        payload.extend_from_slice(&5u16.to_le_bytes()); // colLast (F)
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORT12, RT_SORT12, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.sort_state.is_none());
+        assert!(parsed.warnings.is_empty());
     }
 }
