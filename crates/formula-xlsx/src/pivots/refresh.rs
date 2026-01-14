@@ -592,7 +592,7 @@ fn resolve_worksheet_part_for_table(
             }
             let target = resolve_target(worksheet_part, &rel.target);
             let target = target.strip_prefix('/').unwrap_or(target.as_str());
-            if target == table_part {
+            if crate::zip_util::zip_part_names_equivalent(target, table_part) {
                 candidates.push(worksheet_part.to_string());
                 break;
             }
@@ -1751,6 +1751,44 @@ mod tests {
             .filter(|n| n.is_element() && n.tag_name().name() == "r")
             .count();
         assert_eq!(record_count, 2);
+    }
+
+    #[test]
+    fn resolve_worksheet_part_for_table_matches_case_insensitive_rels_targets() {
+        // Some producers differ in how they case relationship targets vs ZIP entry names. Ensure we
+        // still detect the worksheet that owns a table even when the relationship target casing
+        // doesn't match the table part name.
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+        let worksheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/Table1.xml"/>
+</Relationships>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
+        zip.write_all(worksheet_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/tables/table1.xml", options).unwrap();
+        zip.write_all(b"<table/>").unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let worksheet_part =
+            resolve_worksheet_part_for_table(&pkg, "xl/tables/table1.xml").expect("resolve");
+        assert_eq!(worksheet_part.as_deref(), Some("xl/worksheets/sheet1.xml"));
     }
 
     #[test]
