@@ -95,3 +95,46 @@ test("fork mode: Windows requires installer artifacts but not updater signatures
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("fork mode: Linux requires AppImage + deb + rpm but not updater signatures", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "formula-release-artifacts-"));
+  const bundleDir = path.join(tmp, "target", "release", "bundle");
+
+  touch(path.join(bundleDir, "appimage", "Formula.AppImage"));
+  touch(path.join(bundleDir, "deb", "Formula.deb"));
+  touch(path.join(bundleDir, "rpm", "Formula.rpm"));
+
+  const proc = run(
+    {
+      RUNNER_OS: "Linux",
+      FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: "false",
+      FORMULA_HAS_TAURI_UPDATER_KEY: "false",
+    },
+    ["--bundle-dir", bundleDir],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("signed mode: Linux requires latest.json + signatures for AppImage/deb/rpm", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "formula-release-artifacts-"));
+  const bundleDir = path.join(tmp, "target", "release", "bundle");
+
+  touch(path.join(bundleDir, "latest.json"));
+  touch(path.join(bundleDir, "latest.json.sig"));
+
+  touch(path.join(bundleDir, "appimage", "Formula.AppImage"));
+  touch(path.join(bundleDir, "appimage", "Formula.AppImage.sig"));
+  touch(path.join(bundleDir, "deb", "Formula.deb"));
+  touch(path.join(bundleDir, "deb", "Formula.deb.sig"));
+  touch(path.join(bundleDir, "rpm", "Formula.rpm"));
+  touch(path.join(bundleDir, "rpm", "Formula.rpm.sig"));
+
+  const proc = run(
+    {
+      RUNNER_OS: "Linux",
+      FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: "true",
+      FORMULA_HAS_TAURI_UPDATER_KEY: "true",
+    },
+    ["--bundle-dir", bundleDir],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+});

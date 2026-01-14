@@ -707,6 +707,9 @@ jobs:
           # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
 
+          # AppImage-based tooling (including `appimagetool`) supports "extract and run" mode.
+          # Prefer it in CI to reduce reliance on a working FUSE setup.
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "${GITHUB_ENV}"
       - name: Install JS dependencies
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
         env:
