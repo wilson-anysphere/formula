@@ -1703,6 +1703,41 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("clears AI suggestion state on Alt+Enter (newline wins over suggestion)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=SUM(";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.setAiSuggestion("=SUM(A1)");
+    expect(view.model.aiSuggestion()).toBe("=SUM(A1)");
+    expect(view.model.aiGhostText()).toBe("A1)");
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+    // Alt+Enter inserts a newline and preserves indentation, clearing any stale suggestion.
+    expect(view.textarea.value).toBe("=SUM(\n  ");
+    expect(view.model.draft).toBe("=SUM(\n  ");
+    expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiGhostText()).toBe("");
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
+
+    host.remove();
+  });
+
   it("does not cancel twice if Escape is pressed multiple times", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
