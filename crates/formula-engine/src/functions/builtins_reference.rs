@@ -548,8 +548,7 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     // Parse the text as a standalone reference expression using the canonical parser so we
-    // support A1/R1C1, quoting, and range operators. External workbook references remain
-    // unsupported and surface as #REF!.
+    // support A1/R1C1, quoting, and range operators.
     let parsed = match crate::parse_formula(
         ref_text,
         crate::ParseOptions {
@@ -589,13 +588,24 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
             match ctx.eval_arg(&compiled) {
                 ArgValue::Reference(r) => {
-                    // External workbook references are not supported by INDIRECT and should
-                    // surface as `#REF!` even if an external value provider is configured.
-                    if matches!(r.sheet_id, crate::functions::SheetId::External(_)) {
-                        Value::Error(ErrorKind::Ref)
-                    } else {
-                        Value::Reference(r)
+                    // Allow external workbook references (single-sheet keys) to flow through the
+                    // existing external value provider machinery, matching behavior of direct
+                    // external references.
+                    if let crate::functions::SheetId::External(key) = &r.sheet_id {
+                        // Keep INDIRECT's current "no true 3D spans" behavior: reject
+                        // `[Book.xlsx]Sheet1:Sheet3!A1` even if the provider could theoretically
+                        // resolve it.
+                        if let Some(end) = key.find(']') {
+                            if key[end + 1..].contains(':') {
+                                return Value::Error(ErrorKind::Ref);
+                            }
+                        }
+
+                        if !crate::eval::is_valid_external_sheet_key(key) {
+                            return Value::Error(ErrorKind::Ref);
+                        }
                     }
+                    Value::Reference(r)
                 }
                 ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Ref),
                 ArgValue::Scalar(Value::Error(e)) => Value::Error(e),

@@ -63,6 +63,25 @@ fn external_cell_ref_resolves_via_provider() {
 }
 
 #[test]
+fn indirect_external_cell_ref_resolves_via_provider() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+}
+
+#[test]
 fn external_cell_ref_participates_in_arithmetic() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set(
@@ -109,6 +128,26 @@ fn sum_over_external_range_uses_reference_semantics() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+}
+
+#[test]
+fn indirect_external_range_ref_participates_in_sum() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=SUM(INDIRECT("[Book.xlsx]Sheet1!A1:A2"))"#,
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
 }
 
 #[test]
@@ -331,6 +370,27 @@ fn external_3d_sheet_range_refs_are_ref_error_even_if_provider_has_value() {
     engine.set_external_value_provider(Some(provider));
     engine
         .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
+}
+
+#[test]
+fn indirect_external_3d_span_is_ref_error() {
+    let provider = Arc::new(TestExternalProvider::default());
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")"#,
+        )
         .unwrap();
     engine.recalculate();
 
