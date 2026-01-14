@@ -1921,7 +1921,6 @@ fn pivot_planned_row_group_by(
 
     let (table_ref, group_key_accessors) =
         build_group_key_accessors(model, base_table, group_by, filter)?;
-
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
     let mut plans: Vec<PlannedExpr> = Vec::with_capacity(measures.len());

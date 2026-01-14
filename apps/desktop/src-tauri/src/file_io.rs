@@ -3941,6 +3941,27 @@ mod tests {
     }
 
     #[test]
+    fn write_xlsb_to_disk_blocking_roundtrips_fixture() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        );
+        let workbook = read_xlsb_blocking(Path::new(fixture_path)).expect("read xlsb workbook");
+
+        let out_path = tmp.path().join("roundtrip.xlsb");
+        write_xlsb_to_disk_blocking(&out_path, &workbook).expect("write xlsb");
+
+        let meta = std::fs::metadata(&out_path).expect("metadata");
+        assert!(meta.len() > 0, "expected non-empty xlsb output file");
+
+        let mut file = std::fs::File::open(&out_path).expect("open xlsb");
+        let mut signature = [0u8; 2];
+        file.read_exact(&mut signature).expect("read signature");
+        assert_eq!(&signature, b"PK");
+    }
+
+    #[test]
     fn zip_part_exists_tolerates_leading_slash_zip_entry_names() {
         let fixture = concat!(
             env!("CARGO_MANIFEST_DIR"),

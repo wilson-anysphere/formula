@@ -1644,7 +1644,10 @@ fn pivot_field_ref_from_ipc(field: String) -> PivotFieldRef {
 impl From<IpcPivotFieldRef> for PivotFieldRef {
     fn from(value: IpcPivotFieldRef) -> Self {
         match value {
-            IpcPivotFieldRef::Text(raw) => pivot_field_ref_from_ipc(raw.into_inner()),
+            IpcPivotFieldRef::Text(raw) => {
+                let raw = raw.into_inner();
+                PivotFieldRef::from_unstructured(&raw)
+            }
             IpcPivotFieldRef::Column { table, column } => PivotFieldRef::DataModelColumn {
                 table: table.into_inner(),
                 column: column.into_inner(),
