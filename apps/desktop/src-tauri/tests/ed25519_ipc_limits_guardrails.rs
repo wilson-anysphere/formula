@@ -28,7 +28,7 @@ fn limited_byte_vec_deserialize_enforces_max_len() {
 fn verify_ed25519_signature_command_has_ipc_origin_checks() {
     let src = include_str!("../src/ed25519_verifier.rs");
     let start = src
-        .find("fn verify_ed25519_signature")
+        .find("fn verify_ed25519_signature(")
         .expect("expected verify_ed25519_signature command to exist");
     let body = &src[start..];
     let contains_call = |haystack: &str, fn_name: &str| {
