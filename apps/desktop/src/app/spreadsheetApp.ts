@@ -8191,10 +8191,17 @@ export class SpreadsheetApp {
     input.value = "";
     input.onchange = () => {
       const file = input.files?.[0] ?? null;
-      if (!file) return;
-      void this.insertImageFromPickedFile(file).catch((err) => {
-        console.warn("Insert image failed", err);
-      });
+      if (!file) {
+        this.focus();
+        return;
+      }
+      void this.insertImageFromPickedFile(file)
+        .catch((err) => {
+          console.warn("Insert image failed", err);
+        })
+        .finally(() => {
+          this.focus();
+        });
     };
 
     try {
