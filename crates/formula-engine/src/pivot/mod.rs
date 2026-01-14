@@ -51,6 +51,15 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
     }
 }
 
+fn pivot_field_ref_caption(field: &PivotFieldRef) -> Cow<'_, str> {
+    // Value field captions should use the human-facing field name (Excel-like), not the DAX
+    // reference form. In particular, measures are displayed without surrounding brackets.
+    match field {
+        PivotFieldRef::DataModelMeasure(measure) => Cow::Borrowed(measure.as_str()),
+        _ => pivot_field_ref_name(field),
+    }
+}
+
 fn pivot_field_ref_from_legacy_string(raw: String) -> PivotFieldRef {
     PivotFieldRef::from_unstructured_owned(raw)
 }
@@ -555,7 +564,7 @@ impl CreatePivotTableRequest {
                             format!(
                                 "{:?} of {}",
                                 vf.aggregation,
-                                pivot_field_ref_name(&source_field)
+                                pivot_field_ref_caption(&source_field)
                             )
                         });
                     ValueField {
@@ -1784,7 +1793,7 @@ impl PivotEngine {
                     format!(
                         "{:?} of {}",
                         vf.aggregation,
-                        pivot_field_ref_name(&vf.source_field)
+                        pivot_field_ref_caption(&vf.source_field)
                     )
                 } else {
                     vf.name.clone()
@@ -1804,7 +1813,7 @@ impl PivotEngine {
                     format!(
                         "{:?} of {}",
                         vf.aggregation,
-                        pivot_field_ref_name(&vf.source_field)
+                        pivot_field_ref_caption(&vf.source_field)
                     )
                 } else {
                     vf.name.clone()
@@ -3476,10 +3485,6 @@ mod tests {
 
     fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
         values.to_vec()
-    }
-
-    fn cache_field(name: &str) -> PivotFieldRef {
-        PivotFieldRef::CacheFieldName(name.to_string())
     }
 
     #[test]
