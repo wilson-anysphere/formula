@@ -2072,6 +2072,7 @@ dependencies = [
  "pkcs8",
  "plist",
  "png 0.17.16",
+ "quick-xml 0.37.5",
  "rand_core 0.6.4",
  "reqwest",
  "serde",

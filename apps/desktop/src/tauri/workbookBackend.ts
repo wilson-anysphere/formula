@@ -30,6 +30,14 @@ export type { ImportedEmbeddedCellImageInfo };
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
+export type ImportedSheetBackgroundImageInfo = {
+  sheet_name: string;
+  worksheet_part: string;
+  image_id: string;
+  bytes_base64: string;
+  mime_type: string;
+};
+
 function getTauriInvoke(): TauriInvoke {
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
   if (!invoke) {
@@ -105,6 +113,15 @@ export class TauriWorkbookBackend implements WorkbookBackend {
   async listImportedEmbeddedCellImages(): Promise<ImportedEmbeddedCellImageInfo[]> {
     const payload = await this.invoke("list_imported_embedded_cell_images");
     return (payload as ImportedEmbeddedCellImageInfo[]) ?? [];
+  }
+
+  /**
+   * Desktop-only: fetch worksheet background images (`<picture r:id="...">`) extracted from the
+   * opened XLSX package.
+   */
+  async listImportedSheetBackgroundImages(): Promise<ImportedSheetBackgroundImageInfo[]> {
+    const payload = await this.invoke("list_imported_sheet_background_images");
+    return (payload as ImportedSheetBackgroundImageInfo[]) ?? [];
   }
 
   async saveWorkbook(path?: string): Promise<void> {

@@ -233,6 +233,7 @@ import {
 } from "./workbook/load/clampUsedRange.js";
 import { mergeEmbeddedCellImagesIntoSnapshot } from "./workbook/load/embeddedCellImages.js";
 import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
+import { hydrateSheetBackgroundImagesFromBackend } from "./workbook/load/hydrateSheetBackgroundImages.js";
 import {
   mergeFormattingIntoSnapshot,
   type CellFormatClampBounds,
@@ -9672,6 +9673,14 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   refreshTableSignaturesFromBackend(doc, [], { workbookSignature });
   refreshDefinedNameSignaturesFromBackend(doc, [], { workbookSignature });
   await app.restoreDocumentState(snapshot);
+
+  // Hydrate worksheet background images (`<picture r:id="...">`) from the opened XLSX package.
+  // Best-effort: failures should never prevent the workbook from loading.
+  try {
+    await hydrateSheetBackgroundImagesFromBackend({ app, workbookSheetStore, backend: tauriBackend });
+  } catch (err) {
+    console.warn("[formula][desktop] Failed to hydrate worksheet background images:", err);
+  }
 
   warnIfWorkbookLoadTruncated(truncations, { maxRows: MAX_ROWS, maxCols: MAX_COLS }, showToast);
 

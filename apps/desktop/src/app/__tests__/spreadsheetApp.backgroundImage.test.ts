@@ -9,6 +9,8 @@ import { inflateRawSync } from "node:zlib";
 
 import type { ImageEntry } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
+import { WorkbookSheetStore } from "../../sheets/workbookSheetStore";
+import { hydrateSheetBackgroundImagesFromBackend } from "../../workbook/load/hydrateSheetBackgroundImages";
 
 function resolveFixturePath(relativeFromRepoRoot: string): string {
   // Vitest modules can run with non-file `import.meta.url` in some environments. Resolve fixtures
@@ -364,6 +366,62 @@ describe("SpreadsheetApp worksheet background images", () => {
       const hiDpiPattern = createdPatterns.find((p) => (p.source as any)?.width === 16);
       expect((hiDpiPattern as any)?.setTransform).toBeDefined();
       expect(((hiDpiPattern as any).setTransform as any).mock?.calls?.length ?? 0).toBeGreaterThan(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("hydrates worksheet background images from the desktop workbook backend during workbook load", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const fixtureUrl = new URL("../../../../../fixtures/xlsx/basic/background-image.xlsx", import.meta.url);
+      const fixtureBytes = readFileSync(fixtureUrl);
+      const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
+      const imageId = imageEntry.id.split("/").pop() ?? imageEntry.id;
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      createPatternSpy.mockClear();
+      createdPatterns = [];
+      patternFillRects = [];
+
+      const workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
+      const bytesBase64 = Buffer.from(imageEntry.bytes).toString("base64");
+
+      await hydrateSheetBackgroundImagesFromBackend({
+        app,
+        workbookSheetStore,
+        backend: {
+          async listImportedSheetBackgroundImages() {
+            return [
+              {
+                sheet_name: "Sheet1",
+                worksheet_part: "xl/worksheets/sheet1.xml",
+                image_id: imageId,
+                bytes_base64: bytesBase64,
+                mime_type: imageEntry.mimeType,
+              },
+            ];
+          },
+        },
+      });
+
+      await app.whenIdle();
+
+      expect(app.getSheetBackgroundImageId(app.getCurrentSheetId())).toBe(imageId);
+      expect(createPatternSpy).toHaveBeenCalled();
+      expect(patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base")).length).toBeGreaterThan(0);
 
       app.destroy();
       root.remove();

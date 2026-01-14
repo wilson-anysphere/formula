@@ -2922,10 +2922,50 @@ export class SpreadsheetApp {
           : Array.isArray(payload?.imagesDeltas)
             ? payload.imagesDeltas
             : [];
+        const activeDesiredBackgroundId = this.sheetBackgroundImageIdBySheet.get(this.sheetId) ?? null;
+        let activeBackgroundNeedsReload = false;
+
         for (const delta of imageDeltas) {
           const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
           if (!imageId) continue;
           this.drawingOverlay.invalidateImage(imageId);
+
+          // Keep the workbook-scoped in-cell/background image store aligned with DocumentController
+          // image deltas so callers can populate images via `DocumentController.setImage(...)`.
+          //
+          // Note: This is intentionally best-effort; ignore malformed deltas.
+          try {
+            const after = (delta as any)?.after ?? null;
+            if (!after) {
+              this.imageStore.delete(imageId);
+            } else if (typeof after === "object") {
+              const bytes: unknown = (after as any).bytes;
+              if (bytes instanceof Uint8Array) {
+                const mimeTypeRaw: unknown = (after as any).mimeType;
+                const mimeType =
+                  typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== "" ? mimeTypeRaw : "application/octet-stream";
+                this.imageStore.set(imageId, { bytes, mimeType });
+              }
+            }
+
+            // Image bytes may have changed; invalidate decoded bitmaps so patterns re-decode.
+            this.workbookImageBitmaps.invalidate(imageId);
+
+            if (imageId === activeDesiredBackgroundId) {
+              activeBackgroundNeedsReload = true;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (activeBackgroundNeedsReload) {
+          // Force a reload even when the active sheet points at the same image id.
+          this.activeSheetBackgroundAbort?.abort();
+          this.activeSheetBackgroundAbort = null;
+          this.activeSheetBackgroundImageId = null;
+          this.activeSheetBackgroundBitmap = null;
+          this.syncActiveSheetBackgroundImage();
         }
         this.handleWorkbookImageDeltasForBackground(payload);
         invalidateAndRenderDrawings("document:change");

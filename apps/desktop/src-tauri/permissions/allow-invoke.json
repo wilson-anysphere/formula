@@ -39,6 +39,8 @@
           "list_dir",
           "list_imported_chart_objects",
           "list_imported_chart_models",
+          "list_imported_embedded_cell_images",
+          "list_imported_sheet_background_images",
           "list_macros",
           "list_pivot_tables",
           "list_tables",

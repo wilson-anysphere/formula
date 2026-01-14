@@ -268,6 +268,24 @@ pub struct ImportedEmbeddedCellImageInfo {
     pub alt_text: Option<String>,
 }
 
+/// Worksheet background image extracted from an opened XLSX package.
+///
+/// Excel stores tiled worksheet background images as `<picture r:id="..."/>` inside the worksheet
+/// XML, with the relationship pointing at an image part in `xl/media/...`.
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ImportedSheetBackgroundImageInfo {
+    pub sheet_name: String,
+    /// ZIP entry name for the worksheet XML (e.g. `xl/worksheets/sheet1.xml`).
+    pub worksheet_part: String,
+    /// Workbook-scoped image id used by the UI image store (recommended: filename only).
+    pub image_id: String,
+    /// Base64-encoded image bytes.
+    pub bytes_base64: String,
+    /// Best-effort MIME type inferred from the image file extension.
+    pub mime_type: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SheetUsedRange {
     pub start_row: usize,
@@ -2889,6 +2907,196 @@ pub async fn list_imported_embedded_cell_images(
                 bytes_base64: STANDARD.encode(&image.image_bytes),
                 mime_type: infer_mime_type(&image_id),
                 alt_text: image.alt_text,
+            });
+        }
+
+        Ok::<_, String>(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Extract worksheet background images (`<picture r:id="...">`) from the opened XLSX package.
+///
+/// Best-effort: failures should never prevent workbook interactions.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn list_imported_sheet_background_images(
+    window: tauri::WebviewWindow,
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<ImportedSheetBackgroundImageInfo>, String> {
+    ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
+        "imported sheet background image extraction",
+        ipc_origin::Verb::Are,
+    )?;
+
+    let origin_bytes = {
+        let state = state.inner().lock().unwrap();
+        let Ok(workbook) = state.get_workbook() else {
+            return Ok(Vec::new());
+        };
+        workbook.origin_xlsx_bytes.clone()
+    };
+
+    let Some(origin_bytes) = origin_bytes else {
+        return Ok(Vec::new());
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        use quick_xml::events::Event;
+        use quick_xml::Reader as XmlReader;
+        use std::collections::HashMap;
+        use std::io::Cursor;
+
+        use crate::resource_limits::{
+            MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
+        };
+
+        fn extract_picture_rel_id(xml: &[u8]) -> Option<String> {
+            let mut reader = XmlReader::from_reader(Cursor::new(xml));
+            reader.config_mut().trim_text(true);
+            let mut buf = Vec::new();
+
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(start)) | Ok(Event::Empty(start)) => {
+                        if formula_xlsx::openxml::local_name(start.name().as_ref())
+                            .eq_ignore_ascii_case(b"picture")
+                        {
+                            for attr in start.attributes().with_checks(false) {
+                                let attr = match attr {
+                                    Ok(attr) => attr,
+                                    Err(_) => continue,
+                                };
+                                let key = formula_xlsx::openxml::local_name(attr.key.as_ref());
+                                if !key.eq_ignore_ascii_case(b"id") {
+                                    continue;
+                                }
+                                let value = match attr.unescape_value() {
+                                    Ok(v) => v.into_owned(),
+                                    Err(_) => continue,
+                                };
+                                let trimmed = value.trim();
+                                if trimmed.is_empty() {
+                                    return None;
+                                }
+                                return Some(trimmed.to_string());
+                            }
+                            return None;
+                        }
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(_) => return None,
+                    _ => {}
+                }
+                buf.clear();
+            }
+
+            None
+        }
+
+        // Best-effort: XLSX parsing should never prevent workbook interactions.
+        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
+            Ok(pkg) => pkg,
+            Err(_) => return Ok::<_, String>(Vec::new()),
+        };
+
+        let sheets = match pkg.worksheet_parts() {
+            Ok(parts) => parts,
+            Err(_) => return Ok::<_, String>(Vec::new()),
+        };
+
+        // Cache base64 payloads for shared image parts so multiple worksheets that reference the
+        // same background image don't repeatedly re-encode bytes.
+        let mut cached_by_target: HashMap<String, (String, String, usize)> = HashMap::new();
+        let mut total_bytes = 0usize;
+        let mut out = Vec::new();
+
+        for sheet in sheets {
+            let worksheet_part = sheet.worksheet_part.clone();
+            let xml_bytes = match pkg.part(&worksheet_part) {
+                Some(bytes) => bytes,
+                None => continue,
+            };
+
+            let Some(rel_id) = extract_picture_rel_id(xml_bytes) else {
+                continue;
+            };
+
+            let target_part = match formula_xlsx::openxml::resolve_relationship_target(
+                &pkg,
+                &worksheet_part,
+                &rel_id,
+            ) {
+                Ok(Some(target)) => target,
+                _ => continue,
+            };
+
+            // Resolve the UI image id (filename only) so we can share it with other in-app image
+            // sources (drawings, in-cell images, etc).
+            let image_id = target_part
+                .rsplit('/')
+                .next()
+                .unwrap_or(target_part.as_str())
+                .to_string();
+            if image_id.trim().is_empty() {
+                continue;
+            }
+
+            // Reuse cached base64 if we've already loaded this target part.
+            if let Some((bytes_base64, mime_type, byte_len)) =
+                cached_by_target.get(&target_part).cloned()
+            {
+                if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES {
+                    continue;
+                }
+                total_bytes = total_bytes.saturating_add(byte_len);
+                out.push(ImportedSheetBackgroundImageInfo {
+                    sheet_name: sheet.name.clone(),
+                    worksheet_part,
+                    image_id,
+                    bytes_base64,
+                    mime_type,
+                });
+                continue;
+            }
+
+            let bytes = match pkg.part(&target_part) {
+                Some(bytes) => bytes,
+                None => continue,
+            };
+
+            let byte_len = bytes.len();
+            if byte_len == 0 {
+                continue;
+            }
+            if byte_len > MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES {
+                continue;
+            }
+            if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES {
+                continue;
+            }
+            total_bytes = total_bytes.saturating_add(byte_len);
+
+            let bytes_base64 = STANDARD.encode(bytes);
+            let mime_type = mime_guess::from_path(&image_id)
+                .first_or_octet_stream()
+                .essence_str()
+                .to_string();
+
+            cached_by_target.insert(
+                target_part.clone(),
+                (bytes_base64.clone(), mime_type.clone(), byte_len),
+            );
+
+            out.push(ImportedSheetBackgroundImageInfo {
+                sheet_name: sheet.name,
+                worksheet_part,
+                image_id,
+                bytes_base64,
+                mime_type,
             });
         }
 

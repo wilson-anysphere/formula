@@ -103,6 +103,7 @@ http-range = "0.1"
 infer = "0.16"
 mime_guess = "2.0"
 percent-encoding = "2"
+quick-xml = "0.37"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

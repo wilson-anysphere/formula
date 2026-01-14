@@ -102,6 +102,18 @@ pub fn max_origin_xlsx_bytes() -> usize {
     }
 }
 
+/// Maximum size (in bytes) of an imported worksheet background image payload returned over IPC.
+///
+/// Worksheet background images are extracted from untrusted XLSX packages and base64-encoded for
+/// the Tauri IPC boundary. This limit is applied to the *raw* image bytes before base64 encoding.
+pub const MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+
+/// Maximum total size (in bytes) of all imported worksheet background images returned over IPC.
+///
+/// This is a defense-in-depth cap to avoid sending very large base64 payloads across IPC when a
+/// workbook contains many worksheets with background images.
+pub const MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
+
 /// Maximum number of macro permissions accepted over IPC.
 ///
 /// This is intentionally small because macros currently support a small fixed set of permissions.
