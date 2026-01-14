@@ -941,6 +941,29 @@ pub fn build_shared_formula_ptgarray_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2` where:
+/// - the shared formula definition (`SHRFMLA`) includes a `PtgArray` constant stored in trailing
+///   `rgcb` bytes, and
+/// - the follower cell (`B2`) uses a **wide** non-standard `PtgExp` payload layout (row u32 + col
+///   u16, 6 bytes).
+///
+/// This exercises the `.xls` importer's wide-payload `PtgExp` recovery path
+/// (`worksheet_formulas::parse_biff8_worksheet_ptgexp_formulas`) and ensures it preserves and uses
+/// `rgcb` so array constants decode to `{...}` literals rather than `#UNKNOWN!`.
+pub fn build_shared_formula_ptgarray_wide_ptgexp_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgarray_wide_ptgexp_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared formula where a follower cell uses a
 /// non-standard `PtgExp` payload layout (row u32 + col u16, 6 bytes).
 ///
@@ -8100,6 +8123,14 @@ fn build_shared_formula_ptgarray_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("SharedArray", &sheet_stream, 1252)
 }
 
+fn build_shared_formula_ptgarray_wide_ptgexp_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_ptgarray_wide_ptgexp_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedArrayWide", &sheet_stream, 1252)
+}
+
 fn build_shared_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Shared formula range B1:B2.
     //
@@ -8174,6 +8205,79 @@ fn build_shared_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell_with_grbit(1, 1, xf_cell, 0.0, grbit_shared, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgarray_wide_ptgexp_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Like `build_shared_formula_ptgarray_sheet_stream`, but the follower cell `B2` stores a
+    // non-standard wide `PtgExp` payload width (row u32 + col u16).
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in A1/A2 so the references are within the sheet's used range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Set FORMULA.grbit.fShrFmla (0x0008) so parsers recognize the shared-formula membership.
+    let grbit_shared: u16 = 0x0008;
+
+    // B1 formula: canonical PtgExp pointing to itself (rw=0,col=1).
+    let base_ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(0, 1, xf_cell, 0.0, grbit_shared, &base_ptgexp),
+    );
+
+    // Shared formula body stored in SHRFMLA: `A(row)+SUM({1,2;3,4})`.
+    let rgce_shared = {
+        let mut v = Vec::new();
+        // PtgRefN: row_off=0, col_off=-1 relative to the formula cell.
+        v.push(0x2C);
+        v.extend_from_slice(&0u16.to_le_bytes()); // row_off = 0
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off = -1 (14-bit), row+col relative
+
+        // PtgArray (array constant; data stored in rgcb).
+        v.push(0x20);
+        v.extend_from_slice(&[0u8; 7]); // reserved
+
+        // PtgFuncVar: SUM(argc=1).
+        v.push(0x22);
+        v.push(1);
+        v.extend_from_slice(&4u16.to_le_bytes());
+
+        // PtgAdd.
+        v.push(0x03);
+        v
+    };
+
+    let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record_with_rgcb(0, 1, 1, 1, &rgce_shared, &rgcb),
+    );
+
+    // B2 formula: wide-payload PtgExp pointing to base cell B1 (rw=0,col=1).
+    let follower_ptgexp = ptg_exp_row_u32_col_u16(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, 1, xf_cell, 0.0, grbit_shared, &follower_ptgexp),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);

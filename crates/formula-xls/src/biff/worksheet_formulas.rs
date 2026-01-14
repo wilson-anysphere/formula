@@ -1414,16 +1414,9 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     continue;
                 };
                 let anchor = range.0;
-                match parse_biff8_shrfmla_record(&record) {
-                    Ok(parsed) => {
-                        shrfmla.insert(
-                            anchor,
-                            Biff8ShrFmlaRecord {
-                                range,
-                                rgce: parsed.rgce,
-                                rgcb: parsed.rgcb,
-                            },
-                        );
+                match parse_biff8_shrfmla_record_with_rgcb(&record) {
+                    Ok((rgce, rgcb)) => {
+                        shrfmla.insert(anchor, Biff8ShrFmlaRecord { range, rgce, rgcb });
                     }
                     Err(err) => warn_string(
                         &mut out.warnings,
@@ -1580,22 +1573,38 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base_and_rgcb(
-                        &def.rgce,
-                        &def.rgcb,
-                        ctx,
-                        Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
-                    )
+                    if def.rgcb.is_empty() {
+                        rgce::decode_biff8_rgce_with_base(
+                            &def.rgce,
+                            ctx,
+                            Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
+                        )
+                    } else {
+                        rgce::decode_biff8_rgce_with_base_and_rgcb(
+                            &def.rgce,
+                            &def.rgcb,
+                            ctx,
+                            Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
+                        )
+                    }
                 } else if let Some(def) = array
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base_and_rgcb(
-                        &def.rgce,
-                        &def.rgcb,
-                        ctx,
-                        Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
-                    )
+                    if def.rgcb.is_empty() {
+                        rgce::decode_biff8_rgce_with_base(
+                            &def.rgce,
+                            ctx,
+                            Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
+                        )
+                    } else {
+                        rgce::decode_biff8_rgce_with_base_and_rgcb(
+                            &def.rgce,
+                            &def.rgcb,
+                            ctx,
+                            Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
+                        )
+                    }
                 } else if table
                     .get(&base_cell)
                     .is_some_and(|d| range_contains_cell(d.range, exp.cell))
@@ -1639,22 +1648,38 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base_and_rgcb(
-                        &def.rgce,
-                        &def.rgcb,
-                        ctx,
-                        Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
-                    )
+                    if def.rgcb.is_empty() {
+                        rgce::decode_biff8_rgce_with_base(
+                            &def.rgce,
+                            ctx,
+                            Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
+                        )
+                    } else {
+                        rgce::decode_biff8_rgce_with_base_and_rgcb(
+                            &def.rgce,
+                            &def.rgcb,
+                            ctx,
+                            Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
+                        )
+                    }
                 } else if let Some(def) = array
                     .get(&base_cell)
                     .filter(|d| range_contains_cell(d.range, exp.cell))
                 {
-                    rgce::decode_biff8_rgce_with_base_and_rgcb(
-                        &def.rgce,
-                        &def.rgcb,
-                        ctx,
-                        Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
-                    )
+                    if def.rgcb.is_empty() {
+                        rgce::decode_biff8_rgce_with_base(
+                            &def.rgce,
+                            ctx,
+                            Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
+                        )
+                    } else {
+                        rgce::decode_biff8_rgce_with_base_and_rgcb(
+                            &def.rgce,
+                            &def.rgcb,
+                            ctx,
+                            Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
+                        )
+                    }
                 } else {
                     warn_string(
                         &mut out.warnings,
