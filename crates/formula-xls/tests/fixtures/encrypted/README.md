@@ -61,6 +61,7 @@ Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` fi
 | `biff8_rc4_standard_pw_open_empty_password.xls` | RC4 “standard” | BIFF8 | generated from `basic.xls` (this repo) | `""` |
 | `biff8_rc4_cryptoapi_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above; additionally used by `tests/import_encrypted_rc4_cryptoapi.rs` to validate `import_xls_path_with_password` | `correct horse battery staple` |
 | `biff8_rc4_cryptoapi_unicode_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above | `pässwörd` |
+| `biff8_rc4_cryptoapi_unicode_emoji_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above | `pässwörd🔒` |
 
 ## Regenerating fixtures
 
