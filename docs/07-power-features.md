@@ -977,6 +977,8 @@ Validation + edge cases (Rust behavior):
 - Side effects: Goal Seek mutates spreadsheet state as it searches:
   - `changingCell` is overwritten on every iteration and is left at the final returned `solution` value (even when not converged).
   - The model is recalculated after every update, so `targetCell` and dependents reflect the latest candidate.
+  - Engine-backed note: `GoalSeek` sets the changing cell via `WhatIfModel::set_cell_value(CellValue::Number(...))`.
+    - For `EngineWhatIfModel` / `formula-wasm`, this overwrites the cell as a literal value and clears any existing formula in `changingCell`.
 
 WASM binding validation rules (current `formula-wasm` implementation):
 
@@ -1084,7 +1086,9 @@ Validation + edge cases (Rust behavior):
 - Additional in-tree behavior (useful for bindings / UX):
   - `ScenarioManager::current_scenario()` returns the currently-applied scenario id (or `None` if the base state is active).
   - Deleting the current scenario (`delete_scenario`) clears `current_scenario`.
-  - `ScenarioManager` itself is in-memory and does not implement `Serialize`. If a host wants persistence, it should persist the `Scenario` objects (which are `Serialize`/`Deserialize`) and recreate scenarios on load.
+  - `ScenarioManager` itself is in-memory and does not implement `Serialize`.
+    - If a host wants persistence, it should persist enough data to recreate scenarios via `create_scenario`.
+    - Note: `create_scenario` allocates new ids and timestamps (`createdMs`), so ids/timestamps will not be stable across reload unless the Rust API is extended.
 
 ### Monte Carlo Simulation
 
@@ -1236,6 +1240,7 @@ Validation + edge cases (Rust behavior):
   - Each `inputDistributions[*].cell` is overwritten every iteration and is left set to the *last iteration’s* sampled value.
   - The model is recalculated after each sample batch; outputs reflect the last iteration at the end of the run.
   - If exposed via `formula-wasm`, the binding must keep the JS-facing workbook input state consistent with these mutations (similar to how `goalSeek` updates the `changingCell` input). Otherwise `getCell`/`toJson` may drift from engine state.
+  - Engine-backed note: like Goal Seek, Monte Carlo writes input cells via `set_cell_value(CellValue::Number(...))`, which will clear any existing formulas in those input cells when using `EngineWhatIfModel`.
 
 ---
 
@@ -1403,6 +1408,7 @@ Validation + edge cases (Rust behavior):
     - All methods clamp candidate variables into `VarSpec` bounds.
     - Integer variables are snapped via `round()`; binary variables are snapped to `0`/`1` using a `0.5` threshold.
     - Implication: hosts should treat solver variables as *owned* by the solver during the run (don’t assume they remain exactly the user-entered floating-point values).
+  - Engine-backed note: `EngineSolverModel` updates decision variables via `engine.set_cell_value(...)`, which clears any existing formulas in variable cells.
 - Progress callback frequency (implementation detail, but useful for hosts):
   - `Simplex`: callback is invoked during branch-and-bound node search and once at the end (can be frequent for mixed-integer problems).
   - `GrgNonlinear`: callback is invoked once per iteration.
