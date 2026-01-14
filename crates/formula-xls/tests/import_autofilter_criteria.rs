@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use formula_model::autofilter::{
-    FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison,
+    FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
 };
 use formula_model::Range;
 
@@ -129,6 +129,124 @@ fn import_autofilter_criteria_between_operator_codes() {
                     FilterCriterion::Number(NumberComparison::LessThan(10.0)),
                     FilterCriterion::Number(NumberComparison::GreaterThan(20.0)),
                 ],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+        ],
+        "unexpected filter columns; warnings={:?}",
+        result.warnings
+    );
+
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("failed to fully import `.xls` autofilter criteria")),
+        "unexpected `.xls` autofilter criteria warning; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
+fn import_autofilter_criteria_blanks_and_nonblanks() {
+    let bytes = xls_fixture_builder::build_autofilter_criteria_blanks_fixture_xls();
+    let result = formula_xls::import_xls_bytes(&bytes).expect("import xls bytes");
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilterCriteriaBlanks")
+        .expect("FilterCriteriaBlanks missing");
+    let af = sheet.auto_filter.as_ref().expect("auto_filter missing");
+
+    assert_eq!(af.range, Range::from_a1("A1:D5").unwrap());
+    assert_eq!(
+        af.filter_columns,
+        vec![
+            FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Blanks],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 1,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::NonBlanks],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 2,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Blanks],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 3,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::NonBlanks],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+        ],
+        "unexpected filter columns; warnings={:?}",
+        result.warnings
+    );
+
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("failed to fully import `.xls` autofilter criteria")),
+        "unexpected `.xls` autofilter criteria warning; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
+fn import_autofilter_criteria_text_operators_are_preserved_as_opaque_custom() {
+    let bytes = xls_fixture_builder::build_autofilter_criteria_text_ops_fixture_xls();
+    let result = formula_xls::import_xls_bytes(&bytes).expect("import xls bytes");
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilterCriteriaTextOps")
+        .expect("FilterCriteriaTextOps missing");
+    let af = sheet.auto_filter.as_ref().expect("auto_filter missing");
+
+    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
+    assert_eq!(
+        af.filter_columns,
+        vec![
+            FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                    operator: "contains".to_string(),
+                    value: Some("Al".to_string()),
+                })],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 1,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                    operator: "beginsWith".to_string(),
+                    value: Some("B".to_string()),
+                })],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
+            FilterColumn {
+                col_id: 2,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                    operator: "endsWith".to_string(),
+                    value: Some("z".to_string()),
+                })],
                 values: Vec::new(),
                 raw_xml: Vec::new(),
             },
