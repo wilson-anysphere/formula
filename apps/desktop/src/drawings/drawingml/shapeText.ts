@@ -38,6 +38,78 @@ function mergeStyle(base: RunStyle, patch: RunStyle): RunStyle {
   return out;
 }
 
+function alphaIndex(num: number, upper: boolean): string {
+  if (!Number.isFinite(num) || num <= 0) return "";
+  let n = Math.trunc(num);
+  let out = "";
+  while (n > 0) {
+    n -= 1;
+    const ch = String.fromCharCode((n % 26) + (upper ? 65 : 97));
+    out = ch + out;
+    n = Math.floor(n / 26);
+  }
+  return out;
+}
+
+function romanNumeral(num: number): string {
+  if (!Number.isFinite(num) || num <= 0) return "";
+  let n = Math.trunc(num);
+  if (n > 3999) return String(n);
+  const numerals: Array<[number, string]> = [
+    [1000, "M"],
+    [900, "CM"],
+    [500, "D"],
+    [400, "CD"],
+    [100, "C"],
+    [90, "XC"],
+    [50, "L"],
+    [40, "XL"],
+    [10, "X"],
+    [9, "IX"],
+    [5, "V"],
+    [4, "IV"],
+    [1, "I"],
+  ];
+  let out = "";
+  for (const [value, glyph] of numerals) {
+    while (n >= value) {
+      out += glyph;
+      n -= value;
+    }
+  }
+  return out;
+}
+
+function formatAutoNumber(type: string, num: number): string {
+  const n = Math.max(1, Math.trunc(num));
+  switch (type) {
+    case "arabicPeriod":
+      return `${n}.`;
+    case "arabicParenR":
+      return `${n})`;
+    case "arabicParenBoth":
+      return `(${n})`;
+    case "alphaLcPeriod":
+      return `${alphaIndex(n, false)}.`;
+    case "alphaUcPeriod":
+      return `${alphaIndex(n, true)}.`;
+    case "alphaLcParenR":
+      return `${alphaIndex(n, false)})`;
+    case "alphaUcParenR":
+      return `${alphaIndex(n, true)})`;
+    case "romanLcPeriod":
+      return `${romanNumeral(n).toLowerCase()}.`;
+    case "romanUcPeriod":
+      return `${romanNumeral(n)}.`;
+    case "romanLcParenR":
+      return `${romanNumeral(n).toLowerCase()})`;
+    case "romanUcParenR":
+      return `${romanNumeral(n)})`;
+    default:
+      return `${n}.`;
+  }
+}
+
 function parseBoolAttr(value: string | null): boolean | undefined {
   if (value == null) return undefined;
   const normalized = value.trim().toLowerCase();
@@ -228,6 +300,7 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
 
   const textRuns: ShapeTextRun[] = [];
   let alignment: ShapeTextLayout["alignment"] | undefined;
+  let autoNumber: { type: string; next: number } | null = null;
 
   for (let pi = 0; pi < paragraphs.length; pi += 1) {
     const p = paragraphs[pi];
@@ -246,13 +319,30 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
     // (e.g. SmartArt/shape text) display with readable bullets.
     //
     // Note: DrawingML supports many bullet types (auto-numbering, picture bullets, etc). We only
-    // implement `<a:buChar char="…"/>` for now.
+    // implement `<a:buChar char="…"/>` and `<a:buAutoNum .../>` for now.
     if (pPr && !findFirstByLocalName(pPr, "buNone")) {
-      const buChar = findFirstByLocalName(pPr, "buChar");
-      const bullet = buChar?.getAttribute("char")?.trim();
-      if (bullet) {
-        textRuns.push({ text: `${bullet} `, ...paraDefaultStyle });
+      const buAuto = findFirstByLocalName(pPr, "buAutoNum");
+      if (buAuto) {
+        const type = buAuto.getAttribute("type")?.trim() || "arabicPeriod";
+        const startAtRaw = buAuto.getAttribute("startAt");
+        const parsedStartAt = startAtRaw ? Number.parseInt(startAtRaw, 10) : NaN;
+        const startAt = Number.isFinite(parsedStartAt) && parsedStartAt > 0 ? parsedStartAt : 1;
+        if (!autoNumber || autoNumber.type !== type) {
+          autoNumber = { type, next: startAt };
+        }
+        const prefix = formatAutoNumber(type, autoNumber.next);
+        autoNumber.next += 1;
+        if (prefix) textRuns.push({ text: `${prefix} `, ...paraDefaultStyle });
+      } else {
+        autoNumber = null;
+        const buChar = findFirstByLocalName(pPr, "buChar");
+        const bullet = buChar?.getAttribute("char")?.trim();
+        if (bullet) {
+          textRuns.push({ text: `${bullet} `, ...paraDefaultStyle });
+        }
       }
+    } else {
+      autoNumber = null;
     }
 
     for (const child of Array.from(p.childNodes)) {
@@ -381,6 +471,7 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
   const paragraphsInner = extractAllElementInner(txBodyInner, "p");
   const textRuns: ShapeTextRun[] = [];
   let alignment: ShapeTextLayout["alignment"] | undefined;
+  let autoNumber: { type: string; next: number } | null = null;
 
   for (let pi = 0; pi < paragraphsInner.length; pi += 1) {
     const pInner = paragraphsInner[pi] ?? "";
@@ -399,14 +490,34 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
     const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromXmlSnippet(extractFirstElementXml(pPrXml ?? "", "defRPr")));
     // Best-effort bullet handling (see DOMParser path above).
     if (pPrXml && !extractFirstElementXml(pPrXml, "buNone")) {
-      const buCharXml = extractFirstElementXml(pPrXml, "buChar");
-      const buCharOpen = buCharXml ? /<[^>]+>/.exec(buCharXml)?.[0] ?? buCharXml : "";
-      const bulletRaw = getAttrFromTag(buCharOpen, "char");
-      const bullet = bulletRaw ? decodeXmlEntities(bulletRaw) : "";
-      const trimmedBullet = bullet.trim();
-      if (trimmedBullet) {
-        textRuns.push({ text: `${trimmedBullet} `, ...paraDefaultStyle });
+      const buAutoXml = extractFirstElementXml(pPrXml, "buAutoNum");
+      if (buAutoXml) {
+        const buAutoOpen = /<[^>]+>/.exec(buAutoXml)?.[0] ?? buAutoXml;
+        const type = (getAttrFromTag(buAutoOpen, "type") ?? "").trim() || "arabicPeriod";
+        const startAtRaw = getAttrFromTag(buAutoOpen, "startAt");
+        const parsedStartAt = startAtRaw ? Number.parseInt(startAtRaw, 10) : NaN;
+        const startAt = Number.isFinite(parsedStartAt) && parsedStartAt > 0 ? parsedStartAt : 1;
+        if (!autoNumber || autoNumber.type !== type) {
+          autoNumber = { type, next: startAt };
+        }
+        const prefix = formatAutoNumber(type, autoNumber.next);
+        autoNumber.next += 1;
+        if (prefix) {
+          textRuns.push({ text: `${prefix} `, ...paraDefaultStyle });
+        }
+      } else {
+        autoNumber = null;
+        const buCharXml = extractFirstElementXml(pPrXml, "buChar");
+        const buCharOpen = buCharXml ? /<[^>]+>/.exec(buCharXml)?.[0] ?? buCharXml : "";
+        const bulletRaw = getAttrFromTag(buCharOpen, "char");
+        const bullet = bulletRaw ? decodeXmlEntities(bulletRaw) : "";
+        const trimmedBullet = bullet.trim();
+        if (trimmedBullet) {
+          textRuns.push({ text: `${trimmedBullet} `, ...paraDefaultStyle });
+        }
       }
+    } else {
+      autoNumber = null;
     }
 
     // Walk runs + breaks/tabs in order within the paragraph.
