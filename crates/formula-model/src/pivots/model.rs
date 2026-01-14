@@ -5,9 +5,7 @@ use uuid::Uuid;
 use crate::table::TableIdentifier;
 use crate::{CellRef, DefinedNameId, Range, WorksheetId};
 
-use super::{
-    CalculatedField, CalculatedItem, PivotField, PivotKeyPart, PivotTableId, ValueField,
-};
+use super::{CalculatedField, CalculatedItem, PivotField, PivotKeyPart, PivotTableId, ValueField};
 
 pub type PivotCacheId = Uuid;
 
@@ -26,6 +24,7 @@ impl Default for Layout {
     }
 }
 
+/// Where subtotals appear for a grouped field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SubtotalPosition {
@@ -107,7 +106,6 @@ impl Default for PivotConfig {
         }
     }
 }
-
 /// Identifier for a workbook defined name (named range) when used as a pivot source.
 ///
 /// We prefer stable ids, but allow string references for backward-compat / imported metadata
@@ -136,7 +134,6 @@ impl From<&str> for DefinedNameIdentifier {
         Self::Name(value.to_string())
     }
 }
-
 /// Canonical (IPC/persistence-friendly) pivot table definition stored in a [`crate::Workbook`].
 ///
 /// This is intentionally distinct from the legacy in-memory [`super::PivotTable`] runtime type.
