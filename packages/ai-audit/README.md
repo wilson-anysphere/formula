@@ -92,7 +92,7 @@ bounded way:
 
 ```ts
 import type { AIAuditEntry } from "@formula/ai-audit";
-import { serializeAuditEntries } from "@formula/ai-audit";
+import { serializeAuditEntries } from "@formula/ai-audit/export";
 
 const ndjson = serializeAuditEntries(entries, {
   format: "ndjson",
