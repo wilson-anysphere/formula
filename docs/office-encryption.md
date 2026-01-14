@@ -46,7 +46,8 @@ callers can decide whether to prompt for a password vs report “unsupported enc
     - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit it.
     - Decrypted packages containing `xl/workbook.bin` are routed to the XLSB open path.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-    is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload).
+    is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload;
+    Standard AES may return `Workbook::Model`).
   - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when
     `formula-io/encrypted-workbooks` is enabled (and surfaces `PasswordRequired` when
     `OpenOptions.password` is `None`). Without that feature, encrypted OOXML containers surface

@@ -102,7 +102,7 @@ Notes:
 Example `Cargo.toml` (when using `default-features = false`):
 
 ```toml
-# Enable encrypted OOXML workbook support (`EncryptionInfo` + `EncryptedPackage`) explicitly.
+# Enable encrypted workbook support (OOXML + legacy `.xls`) explicitly.
 formula-io = { version = "*", default-features = false, features = ["encrypted-workbooks"] }
 ```
 
@@ -127,9 +127,10 @@ package via `formula_xlsx::XlsxPackage::from_bytes(&decrypted_zip)`.
 
 Note: encrypted `.xlsb` files also decrypt to a ZIP/OPC package, but the payload contains
 `xl/workbook.bin` instead of `xl/workbook.xml`.
-When using the `formula-io` password APIs, decrypted `.xlsb` packages are routed through the `.xlsb`
-reader and opened as `Workbook::Xlsb` (or converted to a model workbook via
-`open_workbook_model_with_password(..)`).
+
+- `formula-io`’s password-aware open APIs will decrypt and return `Workbook::Xlsb` for these files.
+- If you are working directly with bytes, you can also open them via
+  `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(...)`.
 
 If you already have the input bytes in memory, you can open encrypted `.xlsb` directly via
 `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(...)`.
