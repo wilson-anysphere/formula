@@ -203,12 +203,14 @@ impl Table {
                     });
                 }
 
-                if values.len() != backend.table.row_count() {
+                let expected = backend.table.row_count();
+                let actual = values.len();
+                if actual != expected {
                     return Err(DaxError::ColumnLengthMismatch {
                         table: self.name.clone(),
                         column: name,
-                        expected: backend.table.row_count(),
-                        actual: values.len(),
+                        expected,
+                        actual,
                     });
                 }
 
@@ -222,26 +224,53 @@ impl Table {
                     column_type,
                 };
 
-                // The columnar backend is stored behind an Arc. Using `Arc::make_mut` preserves
-                // immutability semantics for shared tables, while avoiding a clone when the Arc is
-                // uniquely owned.
-                let table = Arc::make_mut(&mut backend.table);
-                let options = table.options();
-                let placeholder = formula_columnar::ColumnarTable::from_encoded(
-                    Vec::new(),
-                    Vec::new(),
-                    0,
-                    options,
-                );
-                let existing = std::mem::replace(table, placeholder);
-                let updated = existing
-                    .with_appended_column(schema, column_values)
-                    .expect("column append should succeed after pre-validation");
-                *table = updated;
+                // The columnar backend is stored behind an `Arc`. Try to unwrap it to avoid a
+                // clone when uniquely owned, then fall back to cloning the table when shared.
+                let options = backend.table.options();
+                let placeholder =
+                    formula_columnar::ColumnarTable::from_encoded(Vec::new(), Vec::new(), 0, options);
+                let table_arc = std::mem::replace(&mut backend.table, Arc::new(placeholder));
+                let table = match Arc::try_unwrap(table_arc) {
+                    Ok(table) => table,
+                    Err(shared) => (*shared).clone(),
+                };
 
-                let idx = backend.columns.len();
-                backend.columns.push(name.clone());
-                backend.column_index.insert(name, idx);
+                let updated = table
+                    .with_appended_column(schema, column_values)
+                    .map_err(|err| match err {
+                        formula_columnar::ColumnAppendError::LengthMismatch { expected, actual } => {
+                            DaxError::ColumnLengthMismatch {
+                                table: self.name.clone(),
+                                column: name.clone(),
+                                expected,
+                                actual,
+                            }
+                        }
+                        formula_columnar::ColumnAppendError::DuplicateColumn { name: column } => {
+                            DaxError::DuplicateColumn {
+                                table: self.name.clone(),
+                                column,
+                            }
+                        }
+                        other => DaxError::Eval(format!(
+                            "failed to append column {}[{}] to columnar table: {other}",
+                            self.name, name
+                        )),
+                    })?;
+
+                backend.table = Arc::new(updated);
+                backend.columns = backend
+                    .table
+                    .schema()
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect();
+                backend.column_index = backend
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, c)| (c.clone(), idx))
+                    .collect();
                 Ok(())
             }
         }
@@ -1866,5 +1895,77 @@ mod tests {
 
         let rel = model.relationships.first().expect("relationship exists");
         assert!(rel.from_index.is_none());
+    }
+
+    #[test]
+    fn columnar_table_add_column_appends_into_storage() {
+        let schema = vec![ColumnSchema {
+            name: "X".to_string(),
+            column_type: ColumnType::Number,
+        }];
+        let options = TableOptions {
+            page_size_rows: 16,
+            cache: PageCacheConfig { max_entries: 2 },
+        };
+
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        builder.append_row(&[formula_columnar::Value::Number(10.0)]);
+        builder.append_row(&[formula_columnar::Value::Number(5.0)]);
+
+        let mut table = Table::from_columnar("T", builder.finalize());
+        assert_eq!(table.columns(), &["X".to_string()]);
+
+        table
+            .add_column("Y", vec![20.0.into(), 10.0.into()])
+            .unwrap();
+        assert_eq!(table.columns(), &["X".to_string(), "Y".to_string()]);
+        assert_eq!(table.value(0, "Y"), Some(20.0.into()));
+        assert_eq!(table.value(1, "Y"), Some(10.0.into()));
+
+        let col_table = table.columnar_table().unwrap();
+        let y_schema = col_table.schema().iter().find(|c| c.name == "Y").unwrap();
+        assert_eq!(y_schema.column_type, ColumnType::Number);
+
+        table
+            .add_column("B", vec![Value::Boolean(true), Value::Blank])
+            .unwrap();
+        let col_table = table.columnar_table().unwrap();
+        let b_schema = col_table.schema().iter().find(|c| c.name == "B").unwrap();
+        assert_eq!(b_schema.column_type, ColumnType::Boolean);
+        assert_eq!(table.value(0, "B"), Some(true.into()));
+        assert_eq!(table.value(1, "B"), Some(Value::Blank));
+
+        table
+            .add_column("AllBlank", vec![Value::Blank, Value::Blank])
+            .unwrap();
+        let col_table = table.columnar_table().unwrap();
+        let blank_schema = col_table
+            .schema()
+            .iter()
+            .find(|c| c.name == "AllBlank")
+            .unwrap();
+        assert_eq!(blank_schema.column_type, ColumnType::Number);
+        assert_eq!(table.value(0, "AllBlank"), Some(Value::Blank));
+        assert_eq!(table.value(1, "AllBlank"), Some(Value::Blank));
+
+        let err = table
+            .add_column("Y", vec![Value::Blank, Value::Blank])
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DaxError::DuplicateColumn { table, column } if table == "T" && column == "Y"
+        ));
+
+        let err = table.add_column("TooShort", vec![Value::Blank]).unwrap_err();
+        assert!(matches!(
+            err,
+            DaxError::ColumnLengthMismatch { table, column, expected, actual }
+                if table == "T" && column == "TooShort" && expected == 2 && actual == 1
+        ));
+
+        let err = table
+            .add_column("Mixed", vec![1.0.into(), Value::from("x")])
+            .unwrap_err();
+        assert!(matches!(err, DaxError::Type(_)));
     }
 }
