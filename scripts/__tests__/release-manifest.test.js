@@ -7,6 +7,9 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+// Note: this file uses the `.test.js` extension so it is picked up by `pnpm test:node`
+// (scripts/run-node-tests.mjs collects `*.test.js` suites).
+
 import crypto from "node:crypto";
 
 import {
