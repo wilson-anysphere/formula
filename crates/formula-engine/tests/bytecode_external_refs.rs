@@ -36,6 +36,38 @@ fn bytecode_external_cell_ref_evaluates_via_provider() {
 }
 
 #[test]
+fn bytecode_external_cell_ref_with_path_qualified_workbook_evaluates_via_provider() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            assert_eq!(sheet, "[C:\\path\\Book.xlsx]Sheet1");
+            assert_eq!(addr, CellAddr { row: 0, col: 0 });
+            Some(Value::Number(41.0))
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"='C:\path\[Book.xlsx]Sheet1'!A1+1"#)
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected path-qualified external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
+}
+
+#[test]
 fn bytecode_missing_external_cell_ref_is_ref_error() {
     struct EmptyProvider;
 
