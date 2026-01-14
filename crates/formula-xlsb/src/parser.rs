@@ -494,18 +494,11 @@ pub(crate) fn parse_workbook<R: Read>(
                 let Some(supbook_index) = current_supbook else {
                     continue;
                 };
-                let Some(mut extern_name) = parse_extern_name(rec.data) else {
+                let Some(extern_name) = parse_extern_name(rec.data) else {
                     continue;
                 };
 
                 current_extern_name_idx = current_extern_name_idx.saturating_add(1);
-                if matches!(
-                    supbooks.get(supbook_index as usize).map(|s| &s.kind),
-                    Some(SupBookKind::AddIn)
-                ) {
-                    extern_name.is_function = true;
-                }
-
                 namex_extern_names.insert((supbook_index, current_extern_name_idx), extern_name);
             }
             id if is_extern_sheet_record(id) => {
@@ -540,14 +533,8 @@ pub(crate) fn parse_workbook<R: Read>(
                         }
                     }
                 } else if let Some(supbook_index) = current_supbook {
-                    if let Some(mut extern_name) = parse_extern_name(rec.data) {
+                    if let Some(extern_name) = parse_extern_name(rec.data) {
                         current_extern_name_idx = current_extern_name_idx.saturating_add(1);
-                        if matches!(
-                            supbooks.get(supbook_index as usize).map(|s| &s.kind),
-                            Some(SupBookKind::AddIn)
-                        ) {
-                            extern_name.is_function = true;
-                        }
                         namex_extern_names
                             .insert((supbook_index, current_extern_name_idx), extern_name);
                     }

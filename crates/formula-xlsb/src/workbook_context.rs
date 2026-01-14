@@ -406,6 +406,40 @@ impl WorkbookContext {
                 }
                 Some(extern_name.name.clone())
             }
+            SupBookKind::AddIn => {
+                // Excel uses a special SupBook marker (`\u{0001}`) for add-ins and encodes both
+                // add-in functions and other extern names via `PtgNameX`.
+                //
+                // Function extern names should render without qualification (handled above). For
+                // *non*-function extern names, include a workbook-like qualifier so the decoded
+                // formula text remains unambiguous and round-trippable.
+                let book = display_addin_supbook_name(&supbook.raw_name);
+
+                if let Some(scope_sheet) = extern_name.scope_sheet {
+                    let sheet_name = self
+                        .namex_supbook_sheets
+                        .get(supbook_index as usize)
+                        .and_then(|sheets| {
+                            sheets.get(scope_sheet as usize).or_else(|| {
+                                scope_sheet
+                                    .checked_sub(1)
+                                    .and_then(|i| sheets.get(i as usize))
+                            })
+                        });
+
+                    if let Some(sheet_name) = sheet_name {
+                        let sheet_token = format!("[{book}]{sheet_name}");
+                        return Some(format!(
+                            "{}!{}",
+                            quote_excel_quoted_ident(&sheet_token),
+                            extern_name.name
+                        ));
+                    }
+                }
+
+                let token = format!("[{book}]{}", extern_name.name);
+                Some(quote_excel_quoted_ident(&token))
+            }
             _ => Some(extern_name.name.clone()),
         }
     }
@@ -515,6 +549,12 @@ impl WorkbookContext {
                 (None, SupBookKind::ExternalWorkbook) => continue,
                 (Some(book), SupBookKind::ExternalWorkbook | SupBookKind::Unknown) => {
                     let display = display_supbook_name(&supbook.raw_name);
+                    if normalize_key(&display) != book {
+                        continue;
+                    }
+                }
+                (Some(book), SupBookKind::AddIn) => {
+                    let display = display_addin_supbook_name(&supbook.raw_name);
                     if normalize_key(&display) != book {
                         continue;
                     }
@@ -778,6 +818,17 @@ pub(crate) fn display_supbook_name(raw: &str) -> String {
     inner = inner.strip_prefix('[').unwrap_or(inner);
     inner = inner.strip_suffix(']').unwrap_or(inner);
     inner.to_string()
+}
+
+fn display_addin_supbook_name(raw: &str) -> String {
+    // BIFF uses a special SupBook name (`\u{0001}`) to represent loaded add-ins (XLL / XLAM).
+    // The actual add-in file name is not available in this marker form. When rendering formula
+    // text for non-function extern names, we still want a stable qualifier so the output is
+    // unambiguous and can be parsed by `formula-engine`.
+    if raw.is_empty() || raw == "\u{0001}" {
+        return "AddIn".to_string();
+    }
+    display_supbook_name(raw)
 }
 
 fn quote_excel_quoted_ident(raw: &str) -> String {
