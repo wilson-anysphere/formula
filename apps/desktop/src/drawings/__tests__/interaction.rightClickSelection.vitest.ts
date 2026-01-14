@@ -35,7 +35,7 @@ function createPointerLikeMouseEvent(
 }
 
 describe("DrawingInteractionController mouse right-click", () => {
-  it("selects the drawing but does not drag/resize or stop propagation", () => {
+  it("selects the drawing but does not drag/resize; does not preventDefault and allows propagation (context click)", () => {
     const canvas = document.createElement("canvas");
     const container = document.createElement("div");
     container.appendChild(canvas);

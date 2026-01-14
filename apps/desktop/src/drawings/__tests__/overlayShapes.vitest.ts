@@ -40,7 +40,10 @@ function createStubCanvas(ctx: CanvasRenderingContext2D): HTMLCanvasElement {
   return canvas as HTMLCanvasElement;
 }
 
-function createShapeObject(raw_xml: string, size: { width: number; height: number } = { width: 20, height: 10 }): DrawingObject {
+function createShapeObject(
+  raw_xml: string,
+  size: { width: number; height: number } = { width: 20, height: 10 },
+): DrawingObject {
   return {
     id: 1,
     kind: { type: "shape", raw_xml },

@@ -133,6 +133,17 @@ function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCom
     .sort();
 }
 
+function extractImplementedCommandIdsFromRibbonCommandHandlersTs(schemaCommandIds: Set<string>): Set<string> {
+  const handlerPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
+  const source = readFileSync(handlerPath, "utf8");
+  const ids = new Set<string>();
+  for (const match of source.matchAll(/case\s+["']([^"']+)["']/g)) {
+    const id = match[1]!;
+    if (schemaCommandIds.has(id)) ids.add(id);
+  }
+  return ids;
+}
+
 function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry): void {
   const layoutController = {
     layout: createDefaultLayout({ primarySheetId: "Sheet1" }),

@@ -3559,16 +3559,16 @@ export class FormulaBarView {
         prevRange.endRow === nextRange.end.row &&
         prevRange.endCol === nextRange.end.col;
 
-      if (this.#lastEmittedHoverText === text && sameRange) {
-        this.#hoverOverrideText = text;
-        this.#hoverOverride = nextRange;
-        if (typeof this.#callbacks.onHoverRangeWithText === "function") {
-          this.#callbacks.onHoverRangeWithText(this.#hoverOverride, this.#hoverOverrideText);
-        } else {
-          this.#callbacks.onHoverRange?.(this.#hoverOverride);
-        }
-        return;
-      }
+       if (this.#lastEmittedHoverText === text && sameRange) {
+         this.#hoverOverrideText = text;
+         this.#hoverOverride = nextRange;
+         if (typeof this.#callbacks.onHoverRangeWithText === "function") {
+           this.#callbacks.onHoverRangeWithText(this.#hoverOverride, this.#hoverOverrideText);
+         } else {
+           this.#callbacks.onHoverRange?.(this.#hoverOverride);
+         }
+         return;
+       }
 
       this.#hoverOverrideText = text;
       this.#hoverOverride = nextRange;

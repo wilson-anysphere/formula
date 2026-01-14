@@ -1694,8 +1694,10 @@ export class SpreadsheetApp {
       /**
        * Enables interactive drawing manipulation (click-to-select + drag/resize).
        *
-       * Defaults to enabled in shared-grid mode (drawings are otherwise not interactable)
-       * and disabled in legacy mode unless explicitly enabled.
+       * Defaults to disabled unless explicitly enabled (or via the drawings demo URL flag).
+       *
+       * Note: shared-grid mode still supports basic click-to-select behavior via a capture
+       * handler when this flag is disabled; this flag primarily enables drag/resize gestures.
        */
       enableDrawingInteractions?: boolean;
     } = {}
@@ -1704,6 +1706,7 @@ export class SpreadsheetApp {
     this.searchWorkbook = new DocumentWorkbookAdapter({ document: this.document, sheetNameResolver: this.sheetNameResolver ?? undefined });
     this.gridMode = resolveDesktopGridMode();
     this.useCanvasCharts = resolveUseCanvasCharts();
+    const enableDrawingInteractions = opts.enableDrawingInteractions ?? resolveEnableDrawingInteractions();
     this.limits =
       opts.limits ??
       (this.gridMode === "shared"
@@ -2795,7 +2798,6 @@ export class SpreadsheetApp {
     );
     this.drawingOverlay.setSelectedId(null);
     this.drawingOverlay.setRequestRender(() => this.refresh("scroll"));
-
     this.workbookImageManager = new WorkbookImageManager({
       images: this.drawingImages,
       bitmapCache: {
@@ -2843,8 +2845,6 @@ export class SpreadsheetApp {
       },
     });
     this.syncWorkbookImageRefCountsFromDocument();
-
-    const enableDrawingInteractions = opts.enableDrawingInteractions ?? resolveEnableDrawingInteractions();
     if (enableDrawingInteractions) {
       // Track the active interaction kind so the legacy `commitObjects` fallback can
       // preserve semantics (e.g. rotate gestures must be able to clear transforms).
@@ -3017,10 +3017,12 @@ export class SpreadsheetApp {
         scrollBy: (dx, dy) => this.scrollByForDrawingInteractions(dx, dy),
       };
       this.drawingInteractionCallbacks = callbacks;
-      const interactionElement = this.root;
-      const controller = new DrawingInteractionController(interactionElement, this.drawingGeom, callbacks, {
+      const controller = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
         capture: this.gridMode === "shared",
       });
+      // Keep the controller's internal selection in sync with SpreadsheetApp's model so pointermove cursor
+      // updates reflect the current drawing selection.
+      controller.setSelectedId(this.selectedDrawingId);
       this.drawingInteractionController = controller;
       this.drawingsInteraction = controller;
     }
@@ -6930,7 +6932,6 @@ export class SpreadsheetApp {
     }
   }
 
-
   private arrangeSelectedDrawing(direction: "forward" | "backward" | "front" | "back"): void {
     const sheetId = this.sheetId;
     const selectedId = this.getSelectedDrawingId();
@@ -7087,7 +7088,6 @@ export class SpreadsheetApp {
     }
     return cached.map.get(id);
   }
-
   private enqueueWasmSync(task: (engine: EngineClient) => Promise<void>): Promise<void> {
     const engine = this.wasmEngine;
     if (!engine) return Promise.resolve();
@@ -7248,6 +7248,9 @@ export class SpreadsheetApp {
 
   private async initWasmEngine(): Promise<void> {
     if (this.wasmEngine) return;
+    const env = (import.meta as any)?.env as Record<string, unknown> | undefined;
+    // Most unit tests run without a `Worker` implementation. Skipping avoids spawning extra
+    // worker threads (and avoids attempting to load the worker TypeScript entrypoint under Node).
     if (typeof Worker === "undefined") return;
     if (this.disposed) return;
 
@@ -7263,7 +7266,6 @@ export class SpreadsheetApp {
         if (this.wasmEngine) return;
         if (this.disposed) return;
 
-        const env = (import.meta as any)?.env as Record<string, unknown> | undefined;
         const wasmModuleUrl =
           typeof env?.VITE_FORMULA_WASM_MODULE_URL === "string" ? env.VITE_FORMULA_WASM_MODULE_URL : undefined;
         const wasmBinaryUrl =
@@ -11385,10 +11387,10 @@ export class SpreadsheetApp {
       scrollBy: (dx, dy) => this.scrollByForDrawingInteractions(dx, dy),
     };
     this.drawingInteractionCallbacks = callbacks;
-    const interactionElement = this.root;
-    const controller = new DrawingInteractionController(interactionElement, this.drawingGeom, callbacks, {
+    const controller = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
       capture: this.gridMode === "shared",
     });
+    controller.setSelectedId(this.selectedDrawingId);
     this.drawingInteractionController = controller;
     this.drawingsInteraction = controller;
     return controller;

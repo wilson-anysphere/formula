@@ -948,10 +948,11 @@ export class DrawingInteractionController {
     this.onPointerUp(e);
   };
 
-  private cancelActiveGesture(): void {
+  private cancelActiveGesture(options?: { revertObjects?: boolean }): void {
     const active = this.dragging ?? this.resizing ?? this.rotating;
     if (!active) return;
 
+    const revertObjects = options?.revertObjects !== false;
     const startObjects = active.startObjects;
     const pointerId = active.pointerId;
     this.stopAutoScroll();
@@ -966,7 +967,9 @@ export class DrawingInteractionController {
 
     // Revert the live in-memory state and cancel the undo batch.
     try {
-      this.callbacks.setObjects(startObjects);
+      if (revertObjects) {
+        this.callbacks.setObjects(startObjects);
+      }
     } finally {
       this.callbacks.cancelBatch?.();
     }
