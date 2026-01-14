@@ -4090,15 +4090,27 @@ impl DaxEngine {
                         accessors.push(GroupAccessor::RelatedColumn { hops, to_col_idx });
                     }
 
-                    let mut base_rows = resolve_table_rows(model, &summarize_filter, &base_table)?;
+                    // Resolve the current filter context once so we can reuse it both for the
+                    // base table scan and for determining whether the relationship-generated blank
+                    // member is visible.
+                    let row_sets = resolve_row_sets(model, &summarize_filter)?;
+
+                    let mut base_rows: Vec<usize> = row_sets
+                        .get(&base_table)
+                        .ok_or_else(|| DaxError::UnknownTable(base_table.clone()))?
+                        .iter_ones()
+                        .collect();
                     if group_tables.len() == 1
                         && blank_row_allowed(&summarize_filter, &base_table)
-                        && virtual_blank_row_exists(model, &summarize_filter, &base_table, None)?
+                        && virtual_blank_row_exists(
+                            model,
+                            &summarize_filter,
+                            &base_table,
+                            Some(&row_sets),
+                        )?
                     {
                         base_rows.push(base_table_ref.row_count());
                     }
-
-                    let row_sets = resolve_row_sets(model, &summarize_filter)?;
 
                     #[derive(Default)]
                     struct PathNode {
