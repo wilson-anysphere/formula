@@ -22,6 +22,19 @@ fn cell_parentheses_requires_balanced_parentheses() {
 }
 
 #[test]
+fn cell_parentheses_ignores_quotes_escapes_and_bracket_tokens() {
+    // Quoted literals must not affect CELL("parentheses") classification.
+    assert_eq!(cell_parentheses_flag(Some(r#"0;"(neg)"0"#)), 0);
+
+    // Escaped characters must not count as literal parentheses.
+    assert_eq!(cell_parentheses_flag(Some(r#"0;\(0\)"#)), 0);
+
+    // Bracket tokens like `[$...-...]` can legally contain parentheses-like characters (e.g. currency
+    // symbols). These must not be interpreted as negative-parentheses formatting.
+    assert_eq!(cell_parentheses_flag(Some(r#"0;[$(USD)-409]0"#)), 0);
+}
+
+#[test]
 fn cell_parentheses_ignores_underscore_and_fill_operands() {
     let options = FormatOptions::default();
 
