@@ -5,6 +5,13 @@
 //! Packaging Convention (ZIP part) layer, so maintaining two implementations
 //! only duplicated logic and features.
 //!
+//! ## Encrypted XLSB support
+//!
+//! Password-protected workbooks that use an OLE `EncryptedPackage` wrapper are
+//! supported by providing a password (via [`DiffInput`] in the library API, or
+//! `--password` / `--password-file` on the CLI). The decrypted OOXML package is
+//! kept in-memory and diffed like a normal ZIP-based workbook.
+//!
 //! This crate is now a thin compatibility wrapper that re-exports the `xlsx-diff`
 //! API so existing internal tooling can continue to compile.
 
