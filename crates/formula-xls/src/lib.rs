@@ -5110,6 +5110,79 @@ mod tests {
         globals
     }
 
+    fn build_minimal_workbook_stream_with_corrupt_name_oob_cce() -> Vec<u8> {
+        // Build a minimal BIFF8 workbook stream containing a malformed NAME record whose `cce`
+        // (formula byte count) claims more bytes than exist in the physical record payload.
+        //
+        // Calamine has historically panicked on such records due to unchecked slicing when it tries
+        // to locate/parse the `rgce` token stream.
+        let mut globals = Vec::<u8>::new();
+
+        push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+        push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+        push_record(&mut globals, RECORD_WINDOW1, &window1());
+        push_record(&mut globals, RECORD_FONT, &font_arial());
+
+        for _ in 0..16 {
+            push_record(&mut globals, RECORD_XF, &xf_record(true));
+        }
+        let xf_general = 16u16;
+        push_record(&mut globals, RECORD_XF, &xf_record(false));
+
+        // Single worksheet.
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, "Sheet1");
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        let boundsheet_offset_pos = boundsheet_start + 4;
+
+        // Malformed NAME record:
+        // - cch=1, provide a valid one-byte name string ("A")
+        // - cce=0xFFFF, but omit any rgce bytes.
+        let mut name_payload = Vec::<u8>::new();
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        name_payload.push(0); // chKey
+        name_payload.push(1); // cch (declared)
+        name_payload.extend_from_slice(&0xFFFFu16.to_le_bytes()); // cce (declared)
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // itab
+        name_payload.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+        name_payload.push(0); // name string flags (compressed)
+        name_payload.push(b'A'); // 1 byte of name data
+        push_record(&mut globals, RECORD_NAME, &name_payload);
+
+        push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+        // -- Sheet substream ----------------------------------------------------
+        let sheet_offset = globals.len();
+        let mut sheet = Vec::<u8>::new();
+        push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+        // DIMENSIONS: rows [0, 1) cols [0, 1)
+        let mut dims = Vec::<u8>::new();
+        dims.extend_from_slice(&0u32.to_le_bytes());
+        dims.extend_from_slice(&1u32.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        dims.extend_from_slice(&1u16.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+        push_record(&mut sheet, RECORD_WINDOW2, &window2());
+        push_record(
+            &mut sheet,
+            RECORD_NUMBER,
+            &number_cell(0, 0, xf_general, 0.0),
+        );
+        push_record(&mut sheet, RECORD_EOF, &[]);
+
+        // Patch BoundSheet offset.
+        globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+            .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+        globals.extend_from_slice(&sheet);
+        globals
+    }
+
     fn build_minimal_workbook_stream_with_continued_builtin_name_header_only() -> Vec<u8> {
         // Build a minimal BIFF8 workbook stream containing a built-in NAME record whose `rgchName`
         // payload (the built-in id byte) is stored entirely in a `CONTINUE` record.
@@ -5353,6 +5426,41 @@ mod tests {
         assert_eq!(sanitized_payload[3], 1, "expected clamped cch=1");
         // And should keep cce patched to 0 so calamine does not attempt to parse a potentially
         // continued/invalid rgce stream.
+        assert_eq!(
+            u16::from_le_bytes([sanitized_payload[4], sanitized_payload[5]]),
+            0,
+            "expected patched cce=0"
+        );
+
+        assert!(
+            calamine_can_open_workbook_stream(&sanitized),
+            "expected calamine to open after sanitizing malformed NAME record"
+        );
+    }
+
+    #[test]
+    fn sanitizes_malformed_name_record_out_of_bounds_cce_for_calamine() {
+        let stream = build_minimal_workbook_stream_with_corrupt_name_oob_cce();
+
+        // Calamine has historically panicked on malformed NAME records due to unchecked slice
+        // indexing. If a newer calamine version becomes resilient to this input, this test should
+        // still pass; the sanitizer exists for compatibility and defense-in-depth.
+        let _ = calamine_can_open_workbook_stream(&stream);
+
+        let payload =
+            first_record_payload(&stream, RECORD_NAME).expect("expected NAME record in fixture");
+        assert_eq!(
+            u16::from_le_bytes([payload[4], payload[5]]),
+            0xFFFF,
+            "expected corrupt cce=0xFFFF"
+        );
+
+        let sanitized =
+            sanitize_biff8_continued_name_records_for_calamine(&stream).expect("expected sanitize");
+
+        let sanitized_payload = first_record_payload(&sanitized, RECORD_NAME)
+            .expect("expected NAME record in sanitized workbook stream");
+        // Sanitizer should patch cce to 0 so calamine does not attempt to slice/parse rgce.
         assert_eq!(
             u16::from_le_bytes([sanitized_payload[4], sanitized_payload[5]]),
             0,
