@@ -1302,8 +1302,8 @@ fn pad_zero(data: &[u8], block_size: usize) -> Vec<u8> {
 pub(crate) mod tests {
     use super::*;
     use crate::crypto::{
-        aes_ecb_encrypt, hash_password, password_to_utf16le, rc4_xor_in_place, HashAlgorithm,
-        StandardKeyDerivation, StandardKeyDeriver,
+        aes_cbc_encrypt, aes_ecb_encrypt, hash_password, password_to_utf16le, rc4_xor_in_place,
+        HashAlgorithm, StandardKeyDerivation, StandardKeyDeriver,
     };
     use crate::util::{ct_eq_call_count, parse_encryption_info_header, reset_ct_eq_calls};
 
@@ -1789,6 +1789,61 @@ pub(crate) mod tests {
             matches!(err, OfficeCryptoError::InvalidPassword),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn verify_password_standard_with_key_rejects_aes_cbc_verifier_mode() {
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [0x42u8; 16];
+        let verifier_plain: [u8; 16] = *b"formula-std-test";
+        let hash_alg = HashAlgorithm::Sha1;
+        let key_bits = 128u32;
+
+        let deriver = StandardKeyDeriver::new(
+            hash_alg,
+            key_bits,
+            &salt,
+            password,
+            StandardKeyDerivation::Aes,
+        );
+        let key0 = deriver.derive_key_for_block(0).expect("derive key0");
+
+        let verifier_hash = hash_alg.digest(&verifier_plain);
+        let mut verifier_hash_padded = verifier_hash.clone();
+        verifier_hash_padded.resize(32, 0);
+
+        let iv = [0u8; 16];
+        let encrypted_verifier =
+            aes_cbc_encrypt(key0.as_slice(), &iv, &verifier_plain).expect("encrypt verifier");
+        let encrypted_verifier_hash = aes_cbc_encrypt(key0.as_slice(), &iv, &verifier_hash_padded)
+            .expect("encrypt verifier hash");
+
+        let header = EncryptionHeader {
+            alg_id: CALG_AES_128,
+            alg_id_hash: 0x0000_8004u32, // CALG_SHA1
+            key_bits,
+            provider_type: 0,
+            csp_name: String::new(),
+        };
+        let verifier = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier,
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash,
+        };
+
+        // The compatibility verifier should accept CBC mode (and return the detected IV).
+        let mode = verify_password_standard_with_key_and_mode(&header, &verifier, hash_alg, &key0)
+            .expect("verify password in CBC mode");
+        assert!(matches!(mode, StandardAesCipherMode::Cbc { iv: got } if got == iv));
+
+        // The spec-only helper should reject CBC-mode verifier encryption.
+        let err = verify_password_standard_with_key(&header, &verifier, hash_alg, &key0)
+            .expect_err("CBC verifier should be rejected by spec-only helper");
+        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+
+        // `verify_password_standard` uses the compatibility verifier and should accept the password.
+        verify_password_standard(&header, &verifier, password).expect("compat verifier should pass");
     }
 
     #[test]
