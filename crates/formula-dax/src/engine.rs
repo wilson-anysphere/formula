@@ -2175,16 +2175,54 @@ impl DaxEngine {
         let mut eval_filter = filter.clone();
 
         // Relationship modifiers affect how other filters propagate.
-        for arg in filter_args {
-            if let Expr::Call { name, args } = arg {
-                if name.eq_ignore_ascii_case("USERELATIONSHIP") {
-                    self.apply_userelationship(model, filter, args)?;
-                    self.apply_userelationship(model, &mut eval_filter, args)?;
-                } else if name.eq_ignore_ascii_case("CROSSFILTER") {
-                    self.apply_crossfilter(model, filter, args)?;
-                    self.apply_crossfilter(model, &mut eval_filter, args)?;
+        fn apply_relationship_modifiers(
+            engine: &DaxEngine,
+            model: &DataModel,
+            expr: &Expr,
+            filter: &mut FilterContext,
+            eval_filter: &mut FilterContext,
+        ) -> DaxResult<()> {
+            match expr {
+                Expr::Let { bindings, body } => {
+                    for (_, binding_expr) in bindings {
+                        apply_relationship_modifiers(engine, model, binding_expr, filter, eval_filter)?;
+                    }
+                    apply_relationship_modifiers(engine, model, body, filter, eval_filter)
                 }
+                Expr::TableLiteral { rows } => {
+                    for row in rows {
+                        for cell in row {
+                            apply_relationship_modifiers(engine, model, cell, filter, eval_filter)?;
+                        }
+                    }
+                    Ok(())
+                }
+                Expr::UnaryOp { expr, .. } => {
+                    apply_relationship_modifiers(engine, model, expr, filter, eval_filter)
+                }
+                Expr::BinaryOp { left, right, .. } => {
+                    apply_relationship_modifiers(engine, model, left, filter, eval_filter)?;
+                    apply_relationship_modifiers(engine, model, right, filter, eval_filter)
+                }
+                Expr::Call { name, args } => {
+                    if name.eq_ignore_ascii_case("USERELATIONSHIP") {
+                        engine.apply_userelationship(model, filter, args)?;
+                        engine.apply_userelationship(model, eval_filter, args)?;
+                    } else if name.eq_ignore_ascii_case("CROSSFILTER") {
+                        engine.apply_crossfilter(model, filter, args)?;
+                        engine.apply_crossfilter(model, eval_filter, args)?;
+                    }
+                    for arg in args {
+                        apply_relationship_modifiers(engine, model, arg, filter, eval_filter)?;
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
             }
+        }
+
+        for arg in filter_args {
+            apply_relationship_modifiers(self, model, arg, filter, &mut eval_filter)?;
         }
 
         let mut clear_tables: HashSet<String> = HashSet::new();

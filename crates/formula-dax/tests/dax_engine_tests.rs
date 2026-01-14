@@ -2869,6 +2869,12 @@ fn userelationship_activates_inactive_relationship_and_overrides_active() {
             "CALCULATE([Sales], USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey]))",
         )
         .unwrap();
+    model
+        .add_measure(
+            "Sales by ShipDate (wrapped)",
+            "CALCULATE([Sales], VAR x = 1 RETURN USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey]))",
+        )
+        .unwrap();
 
     let date2_filter = FilterContext::empty().with_column_equals("Date", "DateKey", 2.into());
     assert_eq!(
@@ -2878,6 +2884,12 @@ fn userelationship_activates_inactive_relationship_and_overrides_active() {
     assert_eq!(
         model
             .evaluate_measure("Sales by ShipDate", &date2_filter)
+            .unwrap(),
+        17.0.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Sales by ShipDate (wrapped)", &date2_filter)
             .unwrap(),
         17.0.into()
     );
@@ -2999,6 +3011,17 @@ fn crossfilter_can_override_relationship_direction_inside_calculate() {
             .evaluate(
                 &model,
                 "CALCULATE(COUNTROWS(Customers), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH))",
+                &filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Customers), VAR x = 1 RETURN CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH))",
                 &filter,
                 &RowContext::default(),
             )
