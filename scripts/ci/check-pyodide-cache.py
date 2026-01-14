@@ -149,6 +149,45 @@ def check_job(
             "(apps/desktop/public/pyodide/ or apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/)"
         )
 
+    # If we cache the entire `apps/desktop/public/pyodide/` tree (instead of just the
+    # versioned `full/` directory), the cache may include tracked repo files like
+    # `README.md` and the versioned `.gitignore`. Restoring an older cache could
+    # overwrite those tracked files and trigger reproducibility guards (`git diff
+    # --exit-code`) or cause confusing dirty-worktree states.
+    #
+    # Require a step that restores the tracked files back to HEAD after the cache is
+    # restored while keeping the untracked downloaded assets intact.
+    caches_whole_pyodide_tree = any(
+        raw.strip().rstrip("/") == "apps/desktop/public/pyodide"
+        for _, line in job_lines
+        if not is_comment(line)
+        for raw in [
+            line.lstrip()[len("path:") :].split("#", 1)[0].strip()
+            if line.lstrip().startswith("path:")
+            else ""
+        ]
+        if raw
+    )
+    if caches_whole_pyodide_tree:
+        restore_tracked_line = next(
+            (
+                ln
+                for ln, line in job_lines
+                if not is_comment(line)
+                and "git restore --source=HEAD -- apps/desktop/public/pyodide" in line
+            ),
+            None,
+        )
+        if restore_tracked_line is None:
+            errors.append(
+                "- Job caches apps/desktop/public/pyodide/ but does not restore tracked files after cache restore "
+                "(expected a `git restore --source=HEAD -- apps/desktop/public/pyodide/` step)"
+            )
+        elif restore_line is not None and restore_tracked_line < restore_line:
+            errors.append(
+                f"- Tracked Pyodide restore step appears before the cache restore step (tracked restore line {restore_tracked_line}, cache restore line {restore_line})"
+            )
+
     if errors:
         header = f"{workflow.as_posix()} job `{job_id}` runs a desktop build but is missing required Pyodide caching:"
         return [header, *errors]
