@@ -92,13 +92,17 @@ exit 1
 }
 
 function runValidator(appImagePath) {
+  return runValidatorWithArgs(appImagePath);
+}
+
+function runValidatorWithArgs(appImagePath, { args = [], env = {} } = {}) {
   const proc = spawnSync(
     "bash",
-    [join(repoRoot, "scripts", "validate-linux-appimage.sh"), "--appimage", appImagePath],
+    [join(repoRoot, "scripts", "validate-linux-appimage.sh"), "--appimage", appImagePath, ...args],
     {
       cwd: repoRoot,
       encoding: "utf8",
-      env: { ...process.env },
+      env: { ...process.env, ...env },
     },
   );
   if (proc.error) throw proc.error;
@@ -123,6 +127,19 @@ test("validate-linux-appimage accepts a structurally valid AppImage", { skip: !h
   writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, appImageVersion: expectedVersion });
 
   const proc = runValidator(appImagePath);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("validate-linux-appimage --exec-check succeeds on a runnable AppRun", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, appImageVersion: expectedVersion });
+
+  const proc = runValidatorWithArgs(appImagePath, {
+    args: ["--exec-check", "--exec-timeout", "2"],
+    // Avoid xvfb-run-safe selection and any dependency on Xvfb for this unit test.
+    env: { CI: "", DISPLAY: ":99" },
+  });
   assert.equal(proc.status, 0, proc.stderr);
 });
 
