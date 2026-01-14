@@ -32,6 +32,10 @@ import {
   parseTauriUpdaterPubkey,
 } from "./tauri-minisign.mjs";
 
+// GitHub Actions sets GITHUB_API_URL for both github.com and GHES. Prefer it over a hard-coded
+// api.github.com base so this script works in enterprise installs.
+const GITHUB_API_BASE = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
+
 /**
  * @param {string} message
  */
@@ -234,7 +238,7 @@ function findJsonFiles(dir) {
  * @param {string} token
  */
 async function fetchRelease(repo, tag, token) {
-  const url = `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`;
+  const url = `${GITHUB_API_BASE}/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`;
   const res = await fetch(url, {
     headers: {
       Accept: "application/vnd.github+json",
@@ -260,7 +264,7 @@ async function fetchAllReleaseAssets(repo, releaseId, token) {
   const perPage = 100;
   let page = 1;
   while (true) {
-    const url = `https://api.github.com/repos/${repo}/releases/${releaseId}/assets?per_page=${perPage}&page=${page}`;
+    const url = `${GITHUB_API_BASE}/repos/${repo}/releases/${releaseId}/assets?per_page=${perPage}&page=${page}`;
     const res = await fetch(url, {
       headers: {
         Accept: "application/vnd.github+json",
@@ -287,7 +291,7 @@ async function fetchAllReleaseAssets(repo, releaseId, token) {
  * @param {string} token
  */
 async function deleteReleaseAsset(repo, assetId, token) {
-  const url = `https://api.github.com/repos/${repo}/releases/assets/${assetId}`;
+  const url = `${GITHUB_API_BASE}/repos/${repo}/releases/assets/${assetId}`;
   const res = await fetch(url, {
     method: "DELETE",
     headers: {
