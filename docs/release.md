@@ -14,8 +14,9 @@ Platform/architecture expectations for a release:
   + `.deb` + `.rpm` (manual installers) for each architecture.
 
 The workflow also uploads updater metadata (`latest.json` + `latest.json.sig`) used by the Tauri
-updater. Note: `latest.json.sig` signs the manifest itself; each platform’s update payload is signed
-via `latest.json.platforms[*].signature` (and the corresponding `<asset>.sig` release assets).
+updater. Note: `latest.json.sig` signs the manifest itself; each platform’s update payload signature
+is carried in `latest.json.platforms[*].signature` and is also uploaded as a detached `<asset>.sig`
+file for offline verification.
 
 CI also runs a lightweight **Linux AppImage smoke test** (no GUI) to catch common packaging issues
 early:
