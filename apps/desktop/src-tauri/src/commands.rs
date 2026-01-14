@@ -8917,6 +8917,27 @@ mod tests {
     }
 
     #[test]
+    fn cell_edit_ipc_value_string_limit_counts_utf8_bytes() {
+        let max = crate::resource_limits::MAX_CELL_VALUE_STRING_BYTES;
+        let emoji = "💩";
+        let bytes_per_emoji = emoji.len();
+        assert!(bytes_per_emoji > 1, "expected multi-byte UTF-8 string");
+
+        let fits = emoji.repeat(max / bytes_per_emoji);
+        let json = format!(r#"{{"value":"{fits}"}}"#);
+        serde_json::from_str::<RangeCellEdit>(&json).expect("expected value at limit to parse");
+
+        let oversized = emoji.repeat(max / bytes_per_emoji + 1);
+        let json = format!(r#"{{"value":"{oversized}"}}"#);
+        let err =
+            serde_json::from_str::<RangeCellEdit>(&json).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains("cell value string") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn cell_edit_ipc_rejects_oversized_formula_strings() {
         let max = crate::resource_limits::MAX_CELL_FORMULA_BYTES;
         let oversized = "x".repeat(max + 1);
