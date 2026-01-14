@@ -4952,6 +4952,12 @@ export class SpreadsheetApp {
     }
 
     this.sharedGrid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
+
+    // `drawingGeom` is stable by reference but reads live shared-grid scroll state.
+    // Row/col size overrides change `cellOriginPx` / `cellSizePx`, so any cached
+    // drawings bounds must be recomputed.
+    const drawingOverlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+    drawingOverlay?.invalidateSpatialIndex();
   }
 
   freezePanes(): void {
