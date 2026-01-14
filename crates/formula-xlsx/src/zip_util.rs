@@ -90,6 +90,11 @@ pub(crate) fn zip_part_names_equivalent(a: &str, b: &str) -> bool {
 mod tests {
     use super::*;
 
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
     #[test]
     fn equivalent_handles_case_separators_and_leading_slashes() {
         assert!(zip_part_names_equivalent("XL\\Workbook.xml", "xl/workbook.xml"));
@@ -111,6 +116,43 @@ mod tests {
             "xl/worksheets/sheet1.xml",
             "%2Fxl%2Fworksheets%2Fsheet1.xml"
         ));
+    }
+
+    fn build_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn read_zip_part_optional_with_limit_allows_within_limit() {
+        let bytes = build_zip(&[("a.txt", b"hello world")]); // 11 bytes
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+
+        let part = read_zip_part_optional_with_limit(&mut archive, "a.txt", 11)
+            .unwrap()
+            .unwrap();
+        assert_eq!(part, b"hello world");
+    }
+
+    #[test]
+    fn read_zip_part_optional_with_limit_errors_when_too_large() {
+        let bytes = build_zip(&[("a.txt", b"hello world")]); // 11 bytes
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+
+        let err = read_zip_part_optional_with_limit(&mut archive, "a.txt", 10).unwrap_err();
+        match err {
+            XlsxError::PartTooLarge { part, .. } => {
+                assert_eq!(part, "a.txt");
+            }
+            other => panic!("expected PartTooLarge, got {other:?}"),
+        }
     }
 }
 
