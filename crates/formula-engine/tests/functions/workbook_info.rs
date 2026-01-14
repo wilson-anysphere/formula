@@ -78,6 +78,85 @@ fn sheets_reports_workbook_sheet_count_and_3d_reference_span() {
 }
 
 #[test]
+fn sheet_uses_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET()")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SHEET()")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet3", "A1", "=SHEET()")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet3", "A1"), Value::Number(3.0));
+
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    engine.recalculate_single_threaded();
+
+    // After reordering, the sheet ids are stable but SHEET() should reflect tab order.
+    assert_eq!(engine.get_cell_value("Sheet3", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(3.0));
+}
+
+#[test]
+fn sheet_3d_span_uses_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SHEET(Sheet1:Sheet3!A1)")
+        .unwrap();
+    // This span does *not* include the reordered Sheet3 tab, so the result is sensitive to
+    // whether we choose `min(sheet_id)` vs `min(tab_index)`.
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SHEET(Sheet1:Sheet2!A1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
+
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+}
+
+#[test]
+fn sheet_string_name_uses_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SHEET(\"Sheet1\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SHEET(\"Sheet3\")")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
+}
+
+#[test]
 fn sheet_reports_external_sheet_number_when_order_available() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_sheet_order(

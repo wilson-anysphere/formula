@@ -1979,16 +1979,16 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         self.ctx.current_cell
     }
 
+    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
+        self.resolver.sheet_order_index(sheet_id)
+    }
+
     fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
         self.resolver.sheet_name(sheet_id)
     }
 
     fn sheet_count(&self) -> usize {
         self.resolver.sheet_count()
-    }
-
-    fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
-        self.resolver.sheet_order_index(sheet_id)
     }
 
     fn info_system(&self) -> Option<&str> {

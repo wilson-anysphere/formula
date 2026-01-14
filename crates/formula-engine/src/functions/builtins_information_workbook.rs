@@ -32,13 +32,13 @@ fn external_sheet_index(ctx: &dyn FunctionContext, sheet_key: &str) -> Option<us
 
 fn sheet_number_value(ctx: &dyn FunctionContext, sheet_id: &SheetId) -> Value {
     match sheet_id {
-        SheetId::External(key) => match external_sheet_index(ctx, key) {
+        SheetId::Local(id) => match ctx.sheet_order_index(*id) {
             Some(idx) => Value::Number((idx + 1) as f64),
             None => Value::Error(ErrorKind::NA),
         },
-        _ => match workbook_info::sheet_number(ctx, sheet_id) {
-            Ok(n) => Value::Number(n),
-            Err(e) => Value::Error(e),
+        SheetId::External(key) => match external_sheet_index(ctx, key) {
+            Some(idx) => Value::Number((idx + 1) as f64),
+            None => Value::Error(ErrorKind::NA),
         },
     }
 }
@@ -97,10 +97,10 @@ fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Re
 
 fn sheet_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if args.is_empty() {
-        let Some(idx) = ctx.sheet_order_index(ctx.current_sheet_id()) else {
-            return Value::Error(ErrorKind::NA);
+        return match ctx.sheet_order_index(ctx.current_sheet_id()) {
+            Some(idx) => Value::Number((idx + 1) as f64),
+            None => Value::Error(ErrorKind::NA),
         };
-        return Value::Number((idx + 1) as f64);
     }
 
     match ctx.eval_arg(&args[0]) {
