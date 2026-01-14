@@ -190,6 +190,11 @@ function Parse-LocalizedFunctionName {
     $s = $s.Substring(6)
   }
 
+  # Some Excel builds use `_xludf.` for user-defined / unknown functions.
+  if ($s.StartsWith("_xludf.")) {
+    $s = $s.Substring(7)
+  }
+
   # Defensive: Excel occasionally emits formulas with a leading '+'.
   if ($s.StartsWith("+")) {
     $s = $s.Substring(1)
