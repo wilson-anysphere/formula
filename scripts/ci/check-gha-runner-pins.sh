@@ -23,9 +23,49 @@ if [ ! -f "$workflow" ]; then
   exit 2
 fi
 
-# Ignore matches that only appear in comments. (We still match `runs-on: ubuntu-latest # ...`.)
-# Use an explicit allowlist of labels rather than regex word boundaries to keep this portable.
-matches="$(grep -nE '^[^#]*(macos-latest|windows-latest|ubuntu-latest)' "$workflow" || true)"
+# Ignore matches that only appear in comments and block scalars (e.g. within a `run: |` script body).
+# We still match `runs-on: ubuntu-latest # ...`.
+matches="$(
+  awk '
+    function indent(s) {
+      match(s, /^[ ]*/);
+      return RLENGTH;
+    }
+
+    BEGIN {
+      in_block = 0;
+      block_indent = 0;
+      re = "(macos-latest|windows-latest|ubuntu-latest)";
+    }
+
+    {
+      raw = $0;
+      ind = indent(raw);
+
+      if (in_block) {
+        if (ind > block_indent) {
+          next;
+        }
+        in_block = 0;
+      }
+
+      # Strip YAML comments (best-effort; avoids tripping on documentation).
+      line = raw;
+      sub(/#.*/, "", line);
+
+      if (line ~ re) {
+        printf "%d:%s\n", NR, raw;
+      }
+
+      # Detect YAML block scalars (e.g. `run: |` / `releaseBody: >-`) so we can skip
+      # their content lines.
+      if (line ~ /:[[:space:]]*[>|][+-]?[0-9]*[[:space:]]*$/) {
+        in_block = 1;
+        block_indent = ind;
+      }
+    }
+  ' "$workflow"
+)"
 if [ -n "$matches" ]; then
   echo "error: ${workflow} uses forbidden GitHub Actions runner '*-latest' labels." >&2
   echo "Pin runner images instead (e.g., macos-14, windows-2022, ubuntu-24.04) to avoid alias drift." >&2
