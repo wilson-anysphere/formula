@@ -133,7 +133,7 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
     expect(input).not.toBeNull();
 
-    const doc = (app as any).document as {
+    const doc = app.getDocument() as any as {
       getCell: (sheetId: string, cell: { row: number; col: number } | string) => { value: unknown; formula: string | null };
     };
 
@@ -182,7 +182,7 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     document.body.appendChild(formulaBar);
 
     const app = new SpreadsheetApp(root, status, { formulaBar });
-    const doc = (app as any).document as {
+    const doc = app.getDocument() as any as {
       getCell: (sheetId: string, cell: { row: number; col: number } | string) => { value: unknown; formula: string | null };
     };
 
@@ -234,7 +234,7 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     document.body.appendChild(formulaBar);
 
     const app = new SpreadsheetApp(root, status, { formulaBar });
-    const doc = (app as any).document as {
+    const doc = app.getDocument() as any as {
       getCell: (sheetId: string, cell: { row: number; col: number } | string) => { value: unknown; formula: string | null };
       setCellValue: (sheetId: string, cell: { row: number; col: number }, value: unknown) => void;
     };
@@ -278,7 +278,7 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     document.body.appendChild(formulaBar);
 
     const app = new SpreadsheetApp(root, status, { formulaBar });
-    const doc = (app as any).document as {
+    const doc = app.getDocument() as any as {
       setCellValue: (sheetId: string, cell: { row: number; col: number }, value: unknown) => void;
       getCell: (sheetId: string, cell: { row: number; col: number } | string) => { value: unknown; formula: string | null };
     };
@@ -290,7 +290,7 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     expect(input).not.toBeNull();
 
     // Begin editing Sheet1!A1.
-    expect((app as any).sheetId).toBe("Sheet1");
+    expect(app.getCurrentSheetId()).toBe("Sheet1");
     expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
     input!.focus();
     input!.value = "1";
@@ -298,14 +298,14 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
 
     // Switch to Sheet2 while still editing (simulates cross-sheet range picking / navigation).
     app.activateCell({ sheetId: "Sheet2", row: 0, col: 0 }, { scrollIntoView: false, focus: false });
-    expect((app as any).sheetId).toBe("Sheet2");
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
 
     // Commit via Tab while the grid is focused. Should apply + navigate relative to Sheet1!A1,
     // restoring the sheet first.
     root.focus();
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
 
-    expect((app as any).sheetId).toBe("Sheet1");
+    expect(app.getCurrentSheetId()).toBe("Sheet1");
     expect(app.getActiveCell()).toEqual({ row: 0, col: 1 });
     expect(cellValueToDisplayString(doc.getCell("Sheet1", { row: 0, col: 0 }).value)).toBe("1");
     expect(cellValueToDisplayString(doc.getCell("Sheet2", { row: 0, col: 0 }).value)).toBe("7");
