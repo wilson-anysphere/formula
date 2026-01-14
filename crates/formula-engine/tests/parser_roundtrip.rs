@@ -205,3 +205,10 @@ fn roundtrip_with_external_3d_sheet_span_with_quoted_sheet_names() {
     let ser = SerializeOptions::default();
     roundtrip("=SUM([Book.xlsx]'Sheet 1':'Sheet 3'!A1)", opts, ser);
 }
+
+#[test]
+fn roundtrip_with_path_qualified_external_3d_sheet_span_with_brackets_in_path_prefix() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=SUM('C:\\[foo]\\[Book.xlsx]Sheet1:Sheet3'!A1)", opts, ser);
+}
