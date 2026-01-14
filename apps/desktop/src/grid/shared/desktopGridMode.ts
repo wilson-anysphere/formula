@@ -45,8 +45,12 @@ export function resolveDesktopGridMode(
   if (typeof env === "boolean") return env ? "shared" : "legacy";
   if (typeof env === "string" && env.trim() !== "") {
     const normalized = env.trim().toLowerCase();
-    if (normalized === "shared" || normalized === "1" || normalized === "true") return "shared";
-    if (normalized === "legacy" || normalized === "0" || normalized === "false") return "legacy";
+    if (normalized === "shared" || normalized === "new" || normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+      return "shared";
+    }
+    if (normalized === "legacy" || normalized === "old" || normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+      return "legacy";
+    }
   }
 
   return "shared";
