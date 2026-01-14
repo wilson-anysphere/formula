@@ -899,6 +899,7 @@ a:visited {
 
 .formula-table-header-cell--styled {
   background: var(--formula-grid-header-bg, var(--grid-header-bg));
+  color: var(--formula-grid-header-text, var(--grid-header-text));
 }
 
 .formula-table-filter-button {
