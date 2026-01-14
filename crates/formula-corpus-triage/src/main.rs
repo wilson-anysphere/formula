@@ -51,6 +51,9 @@ struct Args {
     ///
     /// When unset and `--skip-encrypted` is enabled (default), encrypted XLSX/XLSM/XLSB inputs are
     /// reported as `skipped` instead of `failed`.
+    ///
+    /// Note: this tool currently only triages decrypted XLSX/XLSM payloads. Encrypted XLSB inputs
+    /// are skipped even when a password is provided.
     #[arg(long, conflicts_with = "password_file")]
     password: Option<String>,
 
