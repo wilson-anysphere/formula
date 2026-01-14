@@ -786,6 +786,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: apps/desktop/public/pyodide/
+          enableCrossOsArchive: true
           key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
           restore-keys: |
             pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-
