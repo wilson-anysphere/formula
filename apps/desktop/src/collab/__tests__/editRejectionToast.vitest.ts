@@ -112,4 +112,16 @@ describe("collab edit rejection toast", () => {
     const content = document.querySelector("#toast-root")?.textContent ?? "";
     expect(content).toContain("undo/redo");
   });
+
+  it("shows a row/col visibility toast for rejected hide/unhide actions", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "rowColVisibility",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("hide");
+  });
 });

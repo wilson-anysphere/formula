@@ -2,7 +2,7 @@ import { showToast } from "../extensions/ui.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 
 type RejectionReason = "permission" | "encryption" | "unknown";
-type RejectionKind = "cell" | "format" | "rangeRun" | "drawing" | "chart" | "undoRedo" | "unknown";
+type RejectionKind = "cell" | "format" | "rangeRun" | "drawing" | "chart" | "undoRedo" | "rowColVisibility" | "unknown";
 
 // Editing surfaces may call this helper in response to every key press (e.g. typing into a
 // read-only sheet). To avoid spamming users with identical warnings, throttle repeated toasts.
@@ -46,7 +46,15 @@ function inferRejectionReason(rejected: any[]): RejectionReason {
 function inferRejectionKind(rejected: any[]): RejectionKind {
   for (const delta of rejected) {
     const kind = typeof delta?.rejectionKind === "string" ? delta.rejectionKind : null;
-    if (kind === "cell" || kind === "format" || kind === "rangeRun" || kind === "drawing" || kind === "chart" || kind === "undoRedo")
+    if (
+      kind === "cell" ||
+      kind === "format" ||
+      kind === "rangeRun" ||
+      kind === "drawing" ||
+      kind === "chart" ||
+      kind === "undoRedo" ||
+      kind === "rowColVisibility"
+    )
       return kind;
   }
 
@@ -81,7 +89,7 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
     return rangeToA1({ startRow: first.startRow, startCol: first.col, endRow, endCol: first.col });
   }
 
-  if (kind === "drawing" || kind === "chart" || kind === "undoRedo") {
+  if (kind === "drawing" || kind === "chart" || kind === "undoRedo" || kind === "rowColVisibility") {
     return null;
   }
 
@@ -146,6 +154,10 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
 
     if (kind === "undoRedo") {
       return "Read-only: you don't have permission to undo/redo";
+    }
+
+    if (kind === "rowColVisibility") {
+      return "Read-only: you don't have permission to hide or unhide rows or columns";
     }
 
     // Default to a simple "read-only" message for cell edits.

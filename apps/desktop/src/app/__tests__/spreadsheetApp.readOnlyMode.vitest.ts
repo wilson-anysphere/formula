@@ -253,13 +253,29 @@ describe("SpreadsheetApp read-only collab UX", () => {
     expect(app.getFrozen()).toEqual({ frozenRows: 1, frozenCols: 0 });
 
     // Hide/unhide rows/cols are also sheet-view mutations and must no-op in read-only.
+    vi.mocked(showToast).mockClear();
     const provider = (app as any).usedRangeProvider();
     expect(provider.isRowHidden(0)).toBe(false);
     app.hideRows([0]);
     expect(provider.isRowHidden(0)).toBe(false);
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("hide"), "warning");
     expect(provider.isColHidden(0)).toBe(false);
     app.hideCols([0]);
     expect(provider.isColHidden(0)).toBe(false);
+
+    // Cutting a selected drawing should also be blocked and show a drawing-specific toast.
+    vi.mocked(showToast).mockClear();
+    const drawing: any = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+    app.getDocument().setSheetDrawings(sheetId, [drawing]);
+    app.selectDrawing(drawing.id);
+    app.cut();
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("edit drawings"), "warning");
+    expect(app.getDocument().getSheetDrawings(sheetId)).toHaveLength(1);
 
     // Attempt an in-grid edit (F2).
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));

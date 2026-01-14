@@ -5730,10 +5730,17 @@ export class SpreadsheetApp {
   cut(): void {
     if (this.inlineEditController.isOpen()) return;
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      const rejection = (() => {
+        if (this.selectedChartId != null) {
+          return { rejectionKind: "chart", rejectionReason: "permission" };
+        }
+        if (this.selectedDrawingId != null) {
+          return { rejectionKind: "drawing", rejectionReason: "permission" };
+        }
+        const cell = this.selection.active;
+        return { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" };
+      })();
+      showCollabEditRejectedToast([rejection]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -5813,10 +5820,17 @@ export class SpreadsheetApp {
 
   async clipboardCut(): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      const rejection = (() => {
+        if (this.selectedChartId != null) {
+          return { rejectionKind: "chart", rejectionReason: "permission" };
+        }
+        if (this.selectedDrawingId != null) {
+          return { rejectionKind: "drawing", rejectionReason: "permission" };
+        }
+        const cell = this.selection.active;
+        return { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" };
+      })();
+      showCollabEditRejectedToast([rejection]);
       return;
     }
     await this.cutSelectionToClipboard();
@@ -9994,8 +10008,12 @@ export class SpreadsheetApp {
    * Hide or unhide rows (0-based indices).
    */
   setRowsHidden(rows: number[] | null | undefined, hidden: boolean): void {
-    if (this.isSpreadsheetEditingIncludingSecondary() || this.isReadOnly()) return;
     if (!Array.isArray(rows) || rows.length === 0) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
+    if (this.isReadOnly()) {
+      showCollabEditRejectedToast([{ rejectionKind: "rowColVisibility", rejectionReason: "permission" }]);
+      return;
+    }
 
     const outline = this.getOutlineForSheet(this.sheetId);
     let changed = false;
@@ -10018,8 +10036,12 @@ export class SpreadsheetApp {
    * Hide or unhide columns (0-based indices).
    */
   setColsHidden(cols: number[] | null | undefined, hidden: boolean): void {
-    if (this.isSpreadsheetEditingIncludingSecondary() || this.isReadOnly()) return;
     if (!Array.isArray(cols) || cols.length === 0) return;
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
+    if (this.isReadOnly()) {
+      showCollabEditRejectedToast([{ rejectionKind: "rowColVisibility", rejectionReason: "permission" }]);
+      return;
+    }
 
     const outline = this.getOutlineForSheet(this.sheetId);
     let changed = false;
@@ -22694,10 +22716,17 @@ export class SpreadsheetApp {
   cutToClipboard(): Promise<void> {
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      const rejection = (() => {
+        if (this.selectedChartId != null) {
+          return { rejectionKind: "chart", rejectionReason: "permission" };
+        }
+        if (this.selectedDrawingId != null) {
+          return { rejectionKind: "drawing", rejectionReason: "permission" };
+        }
+        const cell = this.selection.active;
+        return { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" };
+      })();
+      showCollabEditRejectedToast([rejection]);
       return Promise.resolve();
     }
     const sheetId = this.sheetId;
@@ -24148,10 +24177,17 @@ export class SpreadsheetApp {
 
   private async cutSelectionToClipboard(): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      const rejection = (() => {
+        if (this.selectedChartId != null) {
+          return { rejectionKind: "chart", rejectionReason: "permission" };
+        }
+        if (this.selectedDrawingId != null) {
+          return { rejectionKind: "drawing", rejectionReason: "permission" };
+        }
+        const cell = this.selection.active;
+        return { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" };
+      })();
+      showCollabEditRejectedToast([rejection]);
       return;
     }
     try {
