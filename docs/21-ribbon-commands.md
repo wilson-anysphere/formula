@@ -161,6 +161,8 @@ The ribbon UI merges:
 
 - `pressedById`: drives toggle buttons (Bold/Italic/Underline/Wrap/etc.)
 - `labelById`: drives dynamic labels for both top-level ribbon buttons and dropdown menu items (by command id)
+  - Special-case: `labelById["<commandId>.ariaLabel"]` can be used to override a ribbon button's `aria-label` and tooltip title
+    (and the dropdown menu `aria-label` for dropdown buttons) without changing the static ribbon schema.
 - `disabledById`: disables controls based on editing/runtime state (including dropdown menu items; overrides take precedence over schema `disabled`)
 - `shortcutById` / `ariaKeyShortcutsById`: keyboard shortcut hints for tooltips and `aria-keyshortcuts` (applies to both buttons and dropdown menu items)
 
