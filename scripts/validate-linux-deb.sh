@@ -594,22 +594,52 @@ validate_container() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends /deb/*.deb
-    test -x /usr/bin/'"${EXPECTED_MAIN_BINARY}"'
-    test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/LICENSE
-    test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/NOTICE
+    bin="'"${EXPECTED_MAIN_BINARY}"'"
+    doc_pkg="'"${EXPECTED_DEB_NAME}"'"
+    binary_path="/usr/bin/${bin}"
+    test -x "${binary_path}"
+    test -f "/usr/share/doc/${doc_pkg}/LICENSE"
+    test -f "/usr/share/doc/${doc_pkg}/NOTICE"
+
+    # Validate that installer-time MIME integration ran successfully.
+    #
+    # Many distros do not ship a Parquet glob by default, so the package ships a
+    # shared-mime-info definition under /usr/share/mime/packages and relies on
+    # shared-mime-info triggers to rebuild /usr/share/mime/globs2.
     test -f /usr/share/mime/packages/app.formula.desktop.xml
     grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2
-    ldd_out="$(ldd /usr/bin/'"${EXPECTED_MAIN_BINARY}"' 2>&1 || true)"
+
+    # Validate desktop integration metadata is present in the installed .desktop entry.
+    desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*${bin}" /usr/share/applications 2>/dev/null | head -n 1 || true)"
+    if [ -z "${desktop_file}" ]; then
+      echo "No installed .desktop file found with Exec referencing ${bin} under /usr/share/applications" >&2
+      ls -lah /usr/share/applications || true
+      exit 1
+    fi
+    echo "Installed desktop entry: ${desktop_file}"
+    grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
+    grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
+    grep -qi "x-scheme-handler/formula" "${desktop_file}"
+    grep -qi "application/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet" "${desktop_file}"
+    grep -qi "application/vnd\\.apache\\.parquet" "${desktop_file}"
+
+    # Ensure shared library dependencies are present.
+    set +e
+    ldd_out="$(ldd "${binary_path}" 2>&1)"
+    ldd_status=$?
+    set -e
     echo "${ldd_out}"
     if echo "${ldd_out}" | grep -q "not found"; then
       echo "Missing shared libraries detected:" >&2
       echo "${ldd_out}" | grep "not found" >&2 || true
       exit 1
     fi
-    # Ensure deep link scheme handler is advertised.
-    grep -R "x-scheme-handler/formula" /usr/share/applications/*.desktop
-    test -f /usr/share/mime/packages/app.formula.desktop.xml
-    grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
+    # ldd returns non-zero for static binaries ("not a dynamic executable"). Treat that as OK
+    # as long as we did not detect missing shared libraries.
+    if [ "${ldd_status}" -ne 0 ] && ! echo "${ldd_out}" | grep -q "not a dynamic executable" && ! echo "${ldd_out}" | grep -q "statically linked"; then
+      echo "ldd exited with status ${ldd_status}" >&2
+      exit 1
+    fi
   '
 
   rm -rf "${mount_dir}" >/dev/null 2>&1 || true
