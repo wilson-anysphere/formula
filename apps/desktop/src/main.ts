@@ -8124,6 +8124,14 @@ const ribbonActions = createRibbonActionsFromCommands({
     "file.options.close": async () => {
       await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
     },
+    "pageLayout.arrange.bringForward": async () => {
+      app.bringSelectedDrawingForward();
+      app.focus();
+    },
+    "pageLayout.arrange.sendBackward": async () => {
+      app.sendSelectedDrawingBackward();
+      app.focus();
+    },
   },
   onBeforeExecuteCommand: async (_commandId, source) => {
     if (source.kind !== "extension") return;

@@ -2156,6 +2156,7 @@ export class SpreadsheetApp {
           if (selectedId != null && this.selectedChartId != null) {
             this.setSelectedChartId(null);
           }
+          this.drawingOverlay.setSelectedId(selectedId);
           this.renderDrawings();
         },
       };
@@ -4817,6 +4818,114 @@ export class SpreadsheetApp {
 
         docAny.insertDrawing(this.sheetId, drawing);
       }
+      this.document.endBatch();
+    } catch (err) {
+      this.document.cancelBatch();
+      throw err;
+    }
+  }
+
+  bringSelectedDrawingForward(): void {
+    this.arrangeSelectedDrawing("forward");
+  }
+
+  sendSelectedDrawingBackward(): void {
+    this.arrangeSelectedDrawing("backward");
+  }
+
+  // Future menu items (not currently wired).
+  bringSelectedDrawingToFront(): void {
+    this.arrangeSelectedDrawing("front");
+  }
+
+  // Future menu items (not currently wired).
+  sendSelectedDrawingToBack(): void {
+    this.arrangeSelectedDrawing("back");
+  }
+
+  private arrangeSelectedDrawing(direction: "forward" | "backward" | "front" | "back"): void {
+    const sheetId = this.sheetId;
+    const selectedId = this.selectedDrawingId;
+    if (selectedId == null) return;
+
+    const docAny = this.document as any;
+    if (typeof docAny.getSheetDrawings !== "function" || typeof docAny.setSheetDrawings !== "function") {
+      return;
+    }
+
+    let drawingsRaw: unknown = null;
+    try {
+      drawingsRaw = docAny.getSheetDrawings(sheetId);
+    } catch {
+      drawingsRaw = null;
+    }
+    const drawings = Array.isArray(drawingsRaw) ? drawingsRaw : [];
+    if (drawings.length < 2) return;
+
+    const ordered = drawings
+      .map((drawing, idx) => ({
+        drawing,
+        idx,
+        z: Number((drawing as any)?.zOrder ?? (drawing as any)?.z_order ?? idx),
+        idKey: String((drawing as any)?.id ?? ""),
+      }))
+      .sort((a, b) => {
+        const diff = a.z - b.z;
+        if (diff !== 0) return diff;
+        return a.idx - b.idx;
+      });
+
+    const selectedKey = String(selectedId);
+    const index = ordered.findIndex((entry) => entry.idKey === selectedKey);
+    if (index === -1) return;
+
+    let nextOrder = ordered;
+    if (direction === "forward") {
+      if (index >= ordered.length - 1) return;
+      nextOrder = ordered.slice();
+      const tmp = nextOrder[index]!;
+      nextOrder[index] = nextOrder[index + 1]!;
+      nextOrder[index + 1] = tmp;
+    } else if (direction === "backward") {
+      if (index <= 0) return;
+      nextOrder = ordered.slice();
+      const tmp = nextOrder[index]!;
+      nextOrder[index] = nextOrder[index - 1]!;
+      nextOrder[index - 1] = tmp;
+    } else if (direction === "front") {
+      if (index >= ordered.length - 1) return;
+      nextOrder = ordered.slice();
+      const [entry] = nextOrder.splice(index, 1);
+      if (!entry) return;
+      nextOrder.push(entry);
+    } else {
+      if (index <= 0) return;
+      nextOrder = ordered.slice();
+      const [entry] = nextOrder.splice(index, 1);
+      if (!entry) return;
+      nextOrder.unshift(entry);
+    }
+
+    // Renormalize zOrder to match render order (0..n-1) and keep the stored array ordered
+    // by zOrder so the overlay/hit-test layers can avoid per-frame sorting.
+    const next = nextOrder.map(({ drawing }, zOrder) => {
+      const cloned = { ...(drawing as any), zOrder } as any;
+      if ("z_order" in cloned) delete cloned.z_order;
+      return cloned;
+    });
+
+    const label =
+      direction === "forward"
+        ? "Bring Forward"
+        : direction === "backward"
+          ? "Send Backward"
+          : direction === "front"
+            ? "Bring To Front"
+            : "Send To Back";
+
+    this.document.beginBatch({ label });
+    try {
+      docAny.setSheetDrawings(sheetId, next);
       this.document.endBatch();
     } catch (err) {
       this.document.cancelBatch();
