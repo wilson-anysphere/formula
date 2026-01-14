@@ -153,3 +153,17 @@ fn serializes_degenerate_external_3d_sheet_spans_as_single_sheet() {
     let ast = parse_formula("=[Book.xlsx]Sheet1:Sheet1!A1", opts).unwrap();
     assert_eq!(ast.to_string(ser).unwrap(), "=[Book.xlsx]Sheet1!A1");
 }
+
+#[test]
+fn roundtrip_with_external_3d_sheet_span() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=SUM([Book.xlsx]Sheet1:Sheet3!A1)", opts, ser);
+}
+
+#[test]
+fn roundtrip_with_external_3d_sheet_span_with_quoted_sheet_names() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=SUM([Book.xlsx]'Sheet 1':'Sheet 3'!A1)", opts, ser);
+}
